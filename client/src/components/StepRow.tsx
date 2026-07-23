@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Step } from "../types.ts";
 import { fmtCost, fmtDuration, fmtTokens, typeBadge } from "../lib/format.ts";
-import { StepDetail } from "./StepDetail.tsx";
 import { useTraceStore } from "../store/traceStore.ts";
 
 export function StepRow({ step }: { step: Step }) {
@@ -50,7 +49,6 @@ export function StepRow({ step }: { step: Step }) {
           {step.error && <span className="text-err ml-2">ERROR</span>}
         </span>
       </div>
-      {open && <StepDetail step={step} />}
     </div>
   );
 }

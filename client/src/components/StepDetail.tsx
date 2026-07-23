@@ -97,7 +97,7 @@ export function StepDetail({ step }: { step: Step }) {
   const hasState = step.state_before != null || step.state_after != null;
 
   return (
-    <div className="mt-2 ml-9 pr-4 pb-1">
+    <div className="pb-1">
       {step.error && (
         <div className="mt-3 first:mt-0">
           <div className="text-err uppercase tracking-wide text-[11px] mb-1">error</div>

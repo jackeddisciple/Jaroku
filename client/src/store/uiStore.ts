@@ -38,6 +38,11 @@ interface UiState {
   model: string;
   setProvider: (id: string) => void;
   setModel: (m: string) => void;
+
+  // Code is an on-demand overlay (doc §4.1), not a permanent tab — opened from a diff-card
+  // file row or Cmd+P, dismissed with Escape / close.
+  codeOverlayOpen: boolean;
+  setCodeOverlay: (v: boolean) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -62,4 +67,7 @@ export const useUiStore = create<UiState>((set) => ({
       model: RUN_PROVIDERS.find((p) => p.id === id)?.models[0] ?? "",
     }),
   setModel: (model) => set({ model }),
+
+  codeOverlayOpen: false,
+  setCodeOverlay: (codeOverlayOpen) => set({ codeOverlayOpen }),
 }));

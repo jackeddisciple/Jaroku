@@ -117,7 +117,7 @@ export function CommandPalette() {
           {mode === "files" ? (
             <Command.Group heading="Files" className="mb-1">
               {fileOrder.map((path) => (
-                <Item key={path} onSelect={run(() => { openInCode(path); setRightTab("code"); })}>
+                <Item key={path} onSelect={run(() => openInCode(path))}>
                   <span className="truncate">{path}</span>
                 </Item>
               ))}

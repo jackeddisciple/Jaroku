@@ -6,6 +6,8 @@ import { RightPanel } from "./components/RightPanel.tsx";
 import { RunTrigger } from "./components/RunTrigger.tsx";
 import { StatusBar } from "./components/StatusBar.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
+import { TopBar } from "./components/TopBar.tsx";
+import { CodeOverlay } from "./components/CodeOverlay.tsx";
 import { sendLoadAgentFiles, startSocket } from "./lib/socket.ts";
 import { useBuildStore } from "./store/buildStore.ts";
 import { useTraceStore } from "./store/traceStore.ts";
@@ -27,11 +29,7 @@ export function App() {
   return (
     <div className="flex h-full flex-col">
       {/* top bar */}
-      <div className="flex items-center gap-2 px-4 h-10 shrink-0 bg-panel">
-        <span className="text-ink font-semibold">Jaroku</span>
-        <span className="text-faint">·</span>
-        <span className="text-muted text-[12px]">build · trace</span>
-      </div>
+      <TopBar />
 
       {/* three-column body (doc §4): agents+runs · build · trace/code */}
       <PanelGroup direction="horizontal" autoSaveId="jaroku-layout-v3" className="flex-1 min-h-0">
@@ -54,6 +52,8 @@ export function App() {
 
       {/* command palette (Cmd+K) + global keyboard nav — mounted once, renders in a portal */}
       <CommandPalette />
+      {/* code opens on demand (diff card / Cmd+P), overlaying the conversation */}
+      <CodeOverlay />
     </div>
   );
 }
