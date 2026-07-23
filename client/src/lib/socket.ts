@@ -5,6 +5,7 @@
 import { useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useChatStore } from "../store/chatStore.ts";
+import { useGraphStore } from "../store/graphStore.ts";
 import type { ClientCommand, ServerMessage } from "../types.ts";
 
 const WS_URL = import.meta.env.VITE_JAROKU_WS ?? `ws://localhost:4317`;
@@ -33,6 +34,9 @@ function dispatch(msg: ServerMessage): void {
       break;
     case "agentFiles":
       useBuildStore.getState().setAgentFiles(msg.agentId, msg.files);
+      break;
+    case "graph":
+      useGraphStore.getState().setGraph(msg.agentId, msg.graph);
       break;
     case "gen": {
       // Generation is routed to its own store — it never touches trace state.
@@ -148,4 +152,9 @@ export function sendDiscardEdit(proposalId: string): void {
 
 export function sendLoadAgentFiles(agentId: string): void {
   send({ cmd: "loadAgentFiles", agentId });
+}
+
+export function sendLoadAgentGraph(agentId: string): void {
+  useGraphStore.getState().markLoading(agentId);
+  send({ cmd: "loadAgentGraph", agentId });
 }

@@ -16,6 +16,7 @@ import { Editor, editCount } from "./editor.ts";
 import { listAgents } from "./agents.ts";
 import { loadConnectors } from "./connectors.ts";
 import { isSafeAgentId, listProjectFiles } from "./projectFs.ts";
+import { introspectGraph, type GraphResult } from "./graphIntrospect.ts";
 import { loadRuntimeEnv } from "./env.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -68,6 +69,21 @@ function agentProjectFiles(agentId: string): unknown[] {
   return listProjectFiles(dir, files);
 }
 
+// Graph topology is derived by spawning the isolated `jaroku_runner.graph` entrypoint. It is
+// pure w.r.t. an agent's on-disk code, so it's cached per agent and invalidated on apply/undo.
+const graphCache = new Map<string, Promise<GraphResult>>();
+function agentGraph(agentId: string): Promise<GraphResult> {
+  if (!isSafeAgentId(agentId)) return Promise.resolve({ agent_id: agentId, error: "invalid agent id" });
+  let pending = graphCache.get(agentId);
+  if (!pending) {
+    pending = introspectGraph(RUNTIME_DIR, agentId);
+    // Don't cache a failure — let a later request retry (e.g. after a transient import error).
+    pending.then((r) => { if (r.error) graphCache.delete(agentId); });
+    graphCache.set(agentId, pending);
+  }
+  return pending;
+}
+
 const relay = new WsRelay({
   port: PORT,
   store,
@@ -78,6 +94,7 @@ const relay = new WsRelay({
       edit_count: editCount(RUNTIME_DIR, a.agent_id),
     })),
   listAgentFiles: agentProjectFiles,
+  getAgentGraph: agentGraph,
   onCommand: (cmd: ForwardedCommand) => {
     if (cmd.cmd === "run") runAgent(cmd.input, cmd.provider, cmd.model, cmd.agentId);
     else if (cmd.cmd === "generate") generateAgent(cmd);
@@ -202,6 +219,9 @@ editor.on("applied", (e) => {
   relay.broadcastEdit({ type: "applied", ...e });
   relay.broadcastAgents();
   relay.broadcastAgentFiles(e.agentId);
+  // An edit may have changed the graph structure — invalidate and re-push.
+  graphCache.delete(e.agentId);
+  void relay.broadcastAgentGraph(e.agentId);
 });
 
 editor.on("undone", (e) => {
@@ -209,6 +229,8 @@ editor.on("undone", (e) => {
   relay.broadcastEdit({ type: "undone", ...e });
   relay.broadcastAgents();
   relay.broadcastAgentFiles(e.agentId);
+  graphCache.delete(e.agentId);
+  void relay.broadcastAgentGraph(e.agentId);
 });
 
 editor.on("discarded", (e) => relay.broadcastEdit({ type: "discarded", ...e }));

@@ -34,9 +34,15 @@ export default {
           "0%": { opacity: "0", transform: "translateY(6px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
+        // The executing graph node glows — a subtle amber pulse, not a flash (doc §4.6).
+        "pulse-node": {
+          "0%, 100%": { boxShadow: "0 0 0 3px rgba(245,158,11,0.28)" },
+          "50%": { boxShadow: "0 0 0 6px rgba(245,158,11,0.10)" },
+        },
       },
       animation: {
         "slide-in": "slide-in 120ms ease-out",
+        "pulse-node": "pulse-node 1.4s ease-in-out infinite",
       },
     },
   },

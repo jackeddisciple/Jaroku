@@ -103,6 +103,31 @@ export interface AgentFile {
   readOnly: boolean;
 }
 
+// --- graph view ---
+// Static LangGraph topology, derived server-side by introspecting the compiled graph
+// (jaroku_runner.graph). Its own channel — never part of the frozen trace schema.
+
+export type GraphNodeType = "start" | "end" | "tool" | "agent";
+
+export interface GraphNode {
+  id: string;
+  type: GraphNodeType | string;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  conditional: boolean;
+  label: string | null;
+}
+
+export interface AgentGraph {
+  agent_id: string;
+  nodes?: GraphNode[];
+  edges?: GraphEdge[];
+  error?: string;
+}
+
 export type EditMessage =
   | { channel: "edit"; type: "started"; agentId: string; instruction: string }
   | { channel: "edit"; type: "file_start"; path: string }
@@ -123,6 +148,7 @@ export type ServerMessage =
   | { channel: "log"; level: "stderr" | "parseError"; text: string }
   | { channel: "agents"; agents: AgentSummary[] }
   | { channel: "agentFiles"; agentId: string; files: AgentFile[] }
+  | { channel: "graph"; agentId: string; graph: AgentGraph | null }
   | GenMessage
   | EditMessage;
 
@@ -137,4 +163,5 @@ export type ClientCommand =
   | { cmd: "applyEdit"; proposalId: string }
   | { cmd: "undoEdit"; agentId: string }
   | { cmd: "discardEdit"; proposalId: string }
-  | { cmd: "loadAgentFiles"; agentId: string };
+  | { cmd: "loadAgentFiles"; agentId: string }
+  | { cmd: "loadAgentGraph"; agentId: string };

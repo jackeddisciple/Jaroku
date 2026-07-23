@@ -29,6 +29,9 @@ export type ApplyEditCommand = { cmd: "applyEdit"; proposalId: string };
 export type UndoEditCommand = { cmd: "undoEdit"; agentId: string };
 export type DiscardEditCommand = { cmd: "discardEdit"; proposalId: string };
 export type LoadAgentFilesCommand = { cmd: "loadAgentFiles"; agentId: string };
+// Graph View (Week 5): request the agent's static LangGraph topology. Answered locally by
+// spawning the isolated `jaroku_runner.graph` entrypoint — never touches the trace stream.
+export type LoadAgentGraphCommand = { cmd: "loadAgentGraph"; agentId: string };
 export type ClientCommand =
   | RunCommand
   | LoadRunCommand
@@ -38,7 +41,8 @@ export type ClientCommand =
   | ApplyEditCommand
   | UndoEditCommand
   | DiscardEditCommand
-  | LoadAgentFilesCommand;
+  | LoadAgentFilesCommand
+  | LoadAgentGraphCommand;
 
 /** Commands the relay forwards to the app rather than answering locally. */
 export type ForwardedCommand =
@@ -76,10 +80,12 @@ export interface RelayOptions {
   port: number;
   store: TraceStore;
   clientHtmlPath: string;
-  // "loadRun", "listAgents" and "loadAgentFiles" are answered locally; the rest are forwarded.
+  // "loadRun", "listAgents", "loadAgentFiles" and "loadAgentGraph" are answered locally; the
+  // rest are forwarded.
   onCommand?: (cmd: ForwardedCommand) => void;
   listAgents?: () => unknown[];
   listAgentFiles?: (agentId: string) => unknown[];
+  getAgentGraph?: (agentId: string) => Promise<unknown>;
 }
 
 export class WsRelay {
@@ -123,6 +129,18 @@ export class WsRelay {
               agentId: msg.agentId,
               files: this.opts.listAgentFiles?.(msg.agentId) ?? [],
             });
+          } else if (msg.cmd === "loadAgentGraph" && typeof msg.agentId === "string") {
+            // Async: spawn introspection, then answer only the requesting client.
+            const agentId = msg.agentId;
+            void Promise.resolve(this.opts.getAgentGraph?.(agentId))
+              .then((graph) => this.sendTo(ws, { channel: "graph", agentId, graph: graph ?? null }))
+              .catch((err) =>
+                this.sendTo(ws, {
+                  channel: "graph",
+                  agentId,
+                  graph: { agent_id: agentId, error: String((err as Error)?.message ?? err) },
+                }),
+              );
           } else if (msg.cmd === "listAgents") {
             this.sendTo(ws, { channel: "agents", agents: this.opts.listAgents?.() ?? [] });
           } else if (msg.cmd === "loadRun" && typeof msg.runId === "string") {
@@ -204,6 +222,16 @@ export class WsRelay {
       agentId,
       files: this.opts.listAgentFiles?.(agentId) ?? [],
     });
+    for (const ws of this.clients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+    }
+  }
+
+  // Push a refreshed graph to everyone (after an apply/undo, whose edit may have changed the
+  // agent's topology). Recomputes via the same introspection path.
+  async broadcastAgentGraph(agentId: string): Promise<void> {
+    const graph = (await this.opts.getAgentGraph?.(agentId)) ?? null;
+    const msg = JSON.stringify({ channel: "graph", agentId, graph });
     for (const ws of this.clients) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
     }

@@ -11,8 +11,9 @@ import { useBuildStore } from "../store/buildStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { TraceTimeline } from "./TraceTimeline.tsx";
 import { CodeViewer } from "./CodeViewer.tsx";
+import { GraphView } from "./GraphView.tsx";
 
-type Tab = "trace" | "code";
+type Tab = "graph" | "trace" | "code";
 
 export function RightPanel() {
   const [tab, setTab] = useState<Tab>("trace");
@@ -45,6 +46,9 @@ export function RightPanel() {
   return (
     <div className="flex h-full flex-col bg-bg">
       <div className="flex items-center gap-1 px-4 py-2 shrink-0">
+        <button className={tabClass("graph")} onClick={() => setTab("graph")}>
+          Graph
+        </button>
         <button className={tabClass("trace")} onClick={() => setTab("trace")}>
           Trace
         </button>
@@ -52,7 +56,9 @@ export function RightPanel() {
           Code
         </button>
       </div>
-      <div className="flex-1 min-h-0">{tab === "trace" ? <TraceTimeline /> : <CodeViewer />}</div>
+      <div className="flex-1 min-h-0">
+        {tab === "graph" ? <GraphView /> : tab === "trace" ? <TraceTimeline /> : <CodeViewer />}
+      </div>
     </div>
   );
 }
