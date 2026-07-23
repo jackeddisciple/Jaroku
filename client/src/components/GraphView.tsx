@@ -23,6 +23,13 @@ import { useBuildStore, type GenFile } from "../store/buildStore.ts";
 import { useGraphStore } from "../store/graphStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { sendLoadAgentGraph } from "../lib/socket.ts";
+import {
+  activeEdge,
+  activeNodeId,
+  latestStepForNode,
+  stepEdge,
+  stepNodeId,
+} from "../lib/traceGraphMap.ts";
 import type { AgentGraph, GraphNode as GNode } from "../types.ts";
 
 const NODE_W = 168;
@@ -195,12 +202,53 @@ export function GraphView() {
   const loading = useGraphStore((s) => (activeAgentId ? s.loading[activeAgentId] : undefined));
   const [selected, setSelected] = useState<{ id: string; type: string } | null>(null);
 
+  // Live trace state overlaid onto the static graph (execution glow + selection sync).
+  const activeRunId = useTraceStore((s) => s.activeRunId);
+  const bucket = useTraceStore((s) => (activeRunId ? s.stepsByRun[activeRunId] : undefined));
+  const running = useTraceStore((s) => (activeRunId ? s.runs[activeRunId]?.status === "running" : false));
+  const selectedStepId = useTraceStore((s) => s.selectedStepId);
+  const selectStep = useTraceStore((s) => s.selectStep);
+
   // Fetch the topology the first time an agent's Graph tab is shown (or after it's cleared).
   useEffect(() => {
     if (activeAgentId && !graph && !loading) sendLoadAgentGraph(activeAgentId);
   }, [activeAgentId, graph, loading]);
 
-  const { nodes, edges } = useMemo(() => (graph?.nodes ? layout(graph) : { nodes: [], edges: [] }), [graph]);
+  const base = useMemo(() => (graph?.nodes ? layout(graph) : { nodes: [], edges: [] }), [graph]);
+
+  // The glowing node (only while running) and the node of the currently-selected step.
+  const activeNode = useMemo(() => (running ? activeNodeId(bucket) : undefined), [running, bucket]);
+  const selectedNode = useMemo(() => {
+    const step = selectedStepId && bucket ? bucket[selectedStepId] : undefined;
+    return step ? stepNodeId(step, bucket!) : undefined;
+  }, [selectedStepId, bucket]);
+  // Edge highlight: a selected step lights an edge only when that step IS a router (its own
+  // branch), never a stale global one. With no selection, a running run glows its latest router.
+  const hotEdge = useMemo(() => {
+    if (selectedStepId && bucket) {
+      const step = bucket[selectedStepId];
+      return step ? stepEdge(step, bucket) : undefined;
+    }
+    return running ? activeEdge(bucket) : undefined;
+  }, [running, selectedStepId, bucket]);
+
+  const nodes = useMemo(
+    () =>
+      base.nodes.map((n) => ({
+        ...n,
+        data: { ...(n.data as FlowData), active: n.id === activeNode, selected: n.id === selectedNode },
+      })),
+    [base, activeNode, selectedNode],
+  );
+  const edges = useMemo(
+    () =>
+      base.edges.map((e) =>
+        hotEdge && e.source === hotEdge.source && e.target === hotEdge.target
+          ? { ...e, animated: true, style: { ...e.style, stroke: "#f59e0b", strokeDasharray: undefined } }
+          : e,
+      ),
+    [base, hotEdge],
+  );
 
   if (!activeAgentId) {
     return <Empty text="Select an agent to see its graph." />;
@@ -226,7 +274,12 @@ export function GraphView() {
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable
-        onNodeClick={(_, n) => setSelected({ id: n.id, type: (n.data as FlowData).ntype })}
+        onNodeClick={(_, n) => {
+          setSelected({ id: n.id, type: (n.data as FlowData).ntype });
+          // Clicking a node selects its latest corresponding trace step (graph → trace sync).
+          const step = latestStepForNode(n.id, bucket);
+          selectStep(step ? step.id : null);
+        }}
         onPaneClick={() => setSelected(null)}
       >
         <Background color="#26262b" gap={20} />

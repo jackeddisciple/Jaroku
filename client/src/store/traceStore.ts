@@ -17,6 +17,9 @@ interface TraceState {
   stepsByRun: Record<string, Record<string, Step>>; // runId -> (stepId -> Step)
   loaded: Record<string, true>; // runIds whose steps are fully in memory
   activeRunId: string | null;
+  // The step the user is focused on — drives trace↔graph sync (a clicked step lights its
+  // graph node, and clicking a node selects a step here). Cleared when the active run changes.
+  selectedStepId: string | null;
   connection: ConnectionState;
   logs: LogLine[];
 
@@ -24,6 +27,7 @@ interface TraceState {
   applyEvent: (event: TraceEvent) => void;
   applyRunSteps: (runId: string, steps: Step[]) => void;
   selectRun: (id: string) => void;
+  selectStep: (id: string | null) => void;
   needsLoad: (id: string) => boolean;
   addLog: (line: LogLine) => void;
   setConnection: (c: ConnectionState) => void;
@@ -42,6 +46,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   stepsByRun: {},
   loaded: {},
   activeRunId: null,
+  selectedStepId: null,
   connection: "connecting",
   logs: [],
 
@@ -62,6 +67,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
           stepsByRun: { ...state.stepsByRun, [run.id]: state.stepsByRun[run.id] ?? {} },
           loaded: { ...state.loaded, [run.id]: true },
           activeRunId: run.id, // auto-focus the run that just started
+          selectedStepId: null, // a new run's steps don't exist yet — drop stale selection
         };
       }
       if (event.kind === "run_end") {
@@ -87,7 +93,9 @@ export const useTraceStore = create<TraceState>((set, get) => ({
       loaded: { ...state.loaded, [runId]: true },
     })),
 
-  selectRun: (id) => set({ activeRunId: id }),
+  selectRun: (id) => set({ activeRunId: id, selectedStepId: null }),
+
+  selectStep: (id) => set({ selectedStepId: id }),
 
   needsLoad: (id) => !get().loaded[id],
 
