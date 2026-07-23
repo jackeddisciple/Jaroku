@@ -42,4 +42,35 @@
     color: #52525b;
     padding: 6px 12px 2px;
   }
+
+  /* React Flow chrome — recolour the built-in controls/minimap to the dark system and slow the
+     animated edge dash to a subtle, premium flow. */
+  .react-flow__controls-button {
+    background: #18181b;
+    border: none;
+    border-bottom: 1px solid #26262b;
+    color: #a1a1aa;
+  }
+  .react-flow__controls-button:hover {
+    background: #1e1e22;
+    color: #e4e4e7;
+  }
+  .react-flow__controls-button svg {
+    fill: currentColor;
+  }
+  .react-flow__minimap-mask {
+    fill: rgba(13, 13, 15, 0.72);
+  }
+  .react-flow__edge.animated .react-flow__edge-path {
+    stroke-dasharray: 6 5;
+    animation: jaroku-dashflow 0.9s linear infinite;
+  }
+  @keyframes jaroku-dashflow {
+    to {
+      stroke-dashoffset: -11;
+    }
+  }
+  .react-flow__attribution {
+    display: none;
+  }
 }

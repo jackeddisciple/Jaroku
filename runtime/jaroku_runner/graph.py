@@ -56,6 +56,24 @@ def _node_type(name: str, builder) -> str:
     return "agent"
 
 
+def _branch_labels(builder) -> dict[tuple[str, str], str]:
+    """Map each conditional (source, target) edge to its branch condition, read from the graph
+    builder's ``branches``. add_conditional_edges("agent", fn, {"tools": "tools", END: END})
+    records ends = {cond: target}; we invert it so the edge can show the condition that took it.
+    Never raises — labels are decoration, topology is authoritative."""
+    out: dict[tuple[str, str], str] = {}
+    try:
+        branches = getattr(builder, "branches", {}) or {}
+        for source, specs in branches.items():
+            for spec in specs.values():
+                ends = getattr(spec, "ends", None) or {}
+                for cond, target in ends.items():
+                    out[(str(source), str(target))] = str(cond)
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
 def introspect(agent_id: str) -> dict:
     """Build the agent's graph with the dry-run model and return its topology.
 
@@ -72,13 +90,18 @@ def introspect(agent_id: str) -> dict:
 
     nodes = [{"id": nid, "type": _node_type(nid, builder)} for nid in drawable.nodes]
 
+    labels = _branch_labels(builder)
     edges = []
     for edge in drawable.edges:
+        conditional = bool(getattr(edge, "conditional", False))
+        # Prefer LangGraph's own edge label; fall back to the branch condition for conditionals.
         label = getattr(edge, "data", None)
+        if label is None and conditional:
+            label = labels.get((edge.source, edge.target))
         edges.append({
             "source": edge.source,
             "target": edge.target,
-            "conditional": bool(getattr(edge, "conditional", False)),
+            "conditional": conditional,
             "label": str(label) if label is not None else None,
         })
 
