@@ -33,4 +33,13 @@
   ::-webkit-scrollbar-track {
     background: transparent;
   }
+  /* Command palette group headings — style only the heading, so the label's text-transform
+     never cascades onto the item rows. */
+  [cmdk-group-heading] {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #52525b;
+    padding: 6px 12px 2px;
+  }
 }

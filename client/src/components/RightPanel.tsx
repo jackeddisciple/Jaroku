@@ -6,17 +6,21 @@
 // land, and a run switches back to Trace. Manual selection is respected until the other
 // kind of activity starts.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
+import { useUiStore, type RightTab } from "../store/uiStore.ts";
 import { TraceTimeline } from "./TraceTimeline.tsx";
 import { CodeViewer } from "./CodeViewer.tsx";
 import { GraphView } from "./GraphView.tsx";
 
-type Tab = "graph" | "trace" | "code";
+type Tab = RightTab;
 
 export function RightPanel() {
-  const [tab, setTab] = useState<Tab>("trace");
+  // Tab lives in uiStore so the command palette / shortcuts can switch it; the auto-follow
+  // effects below still drive it for generation and new runs.
+  const tab = useUiStore((s) => s.rightTab);
+  const setTab = useUiStore((s) => s.setRightTab);
   const genStatus = useBuildStore((s) => s.status);
   const codeFocus = useBuildStore((s) => s.codeFocus);
   const activeRunId = useTraceStore((s) => s.activeRunId);

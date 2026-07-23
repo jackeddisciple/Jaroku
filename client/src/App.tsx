@@ -5,6 +5,7 @@ import { BuildPane } from "./components/BuildPane.tsx";
 import { RightPanel } from "./components/RightPanel.tsx";
 import { RunTrigger } from "./components/RunTrigger.tsx";
 import { StatusBar } from "./components/StatusBar.tsx";
+import { CommandPalette } from "./components/CommandPalette.tsx";
 import { sendLoadAgentFiles, startSocket } from "./lib/socket.ts";
 import { useBuildStore } from "./store/buildStore.ts";
 import { useTraceStore } from "./store/traceStore.ts";
@@ -50,6 +51,9 @@ export function App() {
       {/* run bar spans the app so it stays reachable from any tab */}
       <RunTrigger />
       <StatusBar />
+
+      {/* command palette (Cmd+K) + global keyboard nav — mounted once, renders in a portal */}
+      <CommandPalette />
     </div>
   );
 }

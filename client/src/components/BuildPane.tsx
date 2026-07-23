@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { orderedFiles, useBuildStore } from "../store/buildStore.ts";
 import { threadFor, useChatStore, type ChatTurn, type GenTurn } from "../store/chatStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
+import { useUiStore } from "../store/uiStore.ts";
 import { sendEdit, sendGenerate } from "../lib/socket.ts";
 import { DiffCard } from "./DiffCard.tsx";
 
@@ -108,6 +109,13 @@ export function BuildPane() {
   const [name, setName] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const focusChatNonce = useUiStore((s) => s.focusChatNonce);
+
+  // Cmd+/ (and the palette) focus the composer.
+  useEffect(() => {
+    if (focusChatNonce > 0) composerRef.current?.focus();
+  }, [focusChatNonce]);
 
   const connected = useTraceStore((s) => s.connection === "open");
   const genStatus = useBuildStore((s) => s.status);
@@ -207,6 +215,7 @@ export function BuildPane() {
 
         <div className="flex items-end gap-2">
           <textarea
+            ref={composerRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {

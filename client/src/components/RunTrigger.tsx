@@ -10,22 +10,22 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
+import { RUN_PROVIDERS, useUiStore } from "../store/uiStore.ts";
 import { sendRun } from "../lib/socket.ts";
 
 // Test-input persistence (doc §4.7.6): the fix loop means re-running 10–20 times per
 // session — the last input per agent is remembered, and R re-runs it instantly.
-const inputKey = (agentId: string | null) => `jaroku.input.${agentId ?? "_"}`;
+export const inputKey = (agentId: string | null) => `jaroku.input.${agentId ?? "_"}`;
 
-const PROVIDERS = [
-  { id: "fake", label: "Dry run (free)", models: ["fake-dry-run"] },
-  { id: "anthropic", label: "Claude", models: ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8"] },
-  { id: "openai", label: "OpenAI", models: ["gpt-4o-mini", "gpt-4o"] },
-];
+const PROVIDERS = RUN_PROVIDERS;
 
 export function RunTrigger() {
   const [input, setInput] = useState("");
-  const [provider, setProvider] = useState("fake");
-  const [model, setModel] = useState("fake-dry-run");
+  // Provider/model live in uiStore so the command palette can run and switch provider too.
+  const provider = useUiStore((s) => s.provider);
+  const model = useUiStore((s) => s.model);
+  const setProvider = useUiStore((s) => s.setProvider);
+  const setModel = useUiStore((s) => s.setModel);
   const connected = useTraceStore((s) => s.connection === "open");
   const agents = useBuildStore((s) => s.agents);
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
@@ -35,10 +35,7 @@ export function RunTrigger() {
   const agent = agents.find((a) => a.agent_id === activeAgentId);
   const canRun = connected && Boolean(activeAgentId) && (agent?.runnable ?? false);
 
-  const onProvider = (id: string) => {
-    setProvider(id);
-    setModel(PROVIDERS.find((p) => p.id === id)?.models[0] ?? "");
-  };
+  const onProvider = (id: string) => setProvider(id);
 
   // Restore the remembered input when the agent selection changes.
   useEffect(() => {

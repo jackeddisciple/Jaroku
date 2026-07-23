@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { Step } from "../types.ts";
 import { fmtCost, fmtDuration, fmtTokens, typeBadge } from "../lib/format.ts";
 import { StepDetail } from "./StepDetail.tsx";
 import { useTraceStore } from "../store/traceStore.ts";
 
 export function StepRow({ step }: { step: Step }) {
-  const [open, setOpen] = useState(false);
+  const open = useTraceStore((s) => s.expandedStepId === step.id);
   const selected = useTraceStore((s) => s.selectedStepId === step.id);
   const selectStep = useTraceStore((s) => s.selectStep);
+  const setExpandedStep = useTraceStore((s) => s.setExpandedStep);
   const rowRef = useRef<HTMLDivElement>(null);
 
   // When selected from elsewhere (a graph-node click), bring the row into view.
@@ -36,7 +37,7 @@ export function StepRow({ step }: { step: Step }) {
         }`}
         onClick={() => {
           selectStep(step.id);
-          setOpen((v) => !v);
+          setExpandedStep(open ? null : step.id);
         }}
       >
         <span className="text-faint w-9 shrink-0 tabular-nums">#{step.seq}</span>

@@ -20,6 +20,9 @@ interface TraceState {
   // The step the user is focused on — drives trace↔graph sync (a clicked step lights its
   // graph node, and clicking a node selects a step here). Cleared when the active run changes.
   selectedStepId: string | null;
+  // The expanded (detail-open) step. Shared so keyboard nav (Enter) can expand the selection,
+  // not just a mouse click. Cleared when the active run changes.
+  expandedStepId: string | null;
   connection: ConnectionState;
   logs: LogLine[];
 
@@ -28,6 +31,7 @@ interface TraceState {
   applyRunSteps: (runId: string, steps: Step[]) => void;
   selectRun: (id: string) => void;
   selectStep: (id: string | null) => void;
+  setExpandedStep: (id: string | null) => void;
   needsLoad: (id: string) => boolean;
   addLog: (line: LogLine) => void;
   setConnection: (c: ConnectionState) => void;
@@ -47,6 +51,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   loaded: {},
   activeRunId: null,
   selectedStepId: null,
+  expandedStepId: null,
   connection: "connecting",
   logs: [],
 
@@ -68,6 +73,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
           loaded: { ...state.loaded, [run.id]: true },
           activeRunId: run.id, // auto-focus the run that just started
           selectedStepId: null, // a new run's steps don't exist yet — drop stale selection
+          expandedStepId: null,
         };
       }
       if (event.kind === "run_end") {
@@ -93,9 +99,11 @@ export const useTraceStore = create<TraceState>((set, get) => ({
       loaded: { ...state.loaded, [runId]: true },
     })),
 
-  selectRun: (id) => set({ activeRunId: id, selectedStepId: null }),
+  selectRun: (id) => set({ activeRunId: id, selectedStepId: null, expandedStepId: null }),
 
   selectStep: (id) => set({ selectedStepId: id }),
+
+  setExpandedStep: (id) => set({ expandedStepId: id }),
 
   needsLoad: (id) => !get().loaded[id],
 
