@@ -27,6 +27,12 @@ interface UiState {
   focusChatNonce: number;
   focusChat: () => void;
 
+  // One-Click Fix: pre-fill the composer with error + code context, then let the user send it
+  // through the normal edit/fix loop. The nonce fires the effect even for identical text.
+  chatPrefill: string;
+  chatPrefillNonce: number;
+  prefillChat: (text: string) => void;
+
   // Run config, lifted from RunTrigger so the palette can run and switch provider.
   provider: string;
   model: string;
@@ -43,6 +49,10 @@ export const useUiStore = create<UiState>((set) => ({
 
   focusChatNonce: 0,
   focusChat: () => set((s) => ({ focusChatNonce: s.focusChatNonce + 1 })),
+
+  chatPrefill: "",
+  chatPrefillNonce: 0,
+  prefillChat: (text) => set((s) => ({ chatPrefill: text, chatPrefillNonce: s.chatPrefillNonce + 1 })),
 
   provider: "fake",
   model: "fake-dry-run",

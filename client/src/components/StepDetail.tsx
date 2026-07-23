@@ -2,6 +2,51 @@ import { useState } from "react";
 import type { Step } from "../types.ts";
 import { jsonPretty } from "../lib/format.ts";
 import { StateDiff, canDiff } from "./StateDiff.tsx";
+import { useTraceStore } from "../store/traceStore.ts";
+import { useBuildStore } from "../store/buildStore.ts";
+import { useUiStore } from "../store/uiStore.ts";
+
+/** Build the fix prompt for One-Click Fix (doc §4.7.1): the failing step + its error, plus a
+ *  little input context, framed as an edit instruction. The editor already sees every file, so
+ *  we give it the failure, not the whole codebase. */
+function fixPrompt(step: Step): string {
+  const lines = [
+    `The trace step "${step.name}" (${step.type}) failed with this error:`,
+    "",
+    (step.error ?? "").trim(),
+  ];
+  const input = jsonPretty(step.input);
+  if (input && input.length <= 600) {
+    lines.push("", "It was called with:", input);
+  }
+  lines.push("", "Please fix the agent's code so this step succeeds.");
+  return lines.join("\n");
+}
+
+/** "Ask Jaroku to fix this step" — routes an error into the existing edit/fix loop by selecting
+ *  the run's agent and pre-filling the composer. Reuses the edit pipeline; builds no parallel one. */
+function FixButton({ step }: { step: Step }) {
+  const run = useTraceStore((s) => s.runs[step.run_id]);
+  const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === run?.agent_id));
+  const selectAgent = useBuildStore((s) => s.selectAgent);
+  const prefillChat = useUiStore((s) => s.prefillChat);
+
+  // Only offer it when the failing run belongs to an editable (generated) agent.
+  if (!agent || agent.hand_written) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        selectAgent(agent.agent_id);
+        prefillChat(fixPrompt(step));
+      }}
+      className="mt-3 inline-flex items-center gap-1.5 text-[12px] text-run hover:text-ink transition-colors"
+    >
+      <span aria-hidden>✧</span> Ask Jaroku to fix this step
+    </button>
+  );
+}
 
 function Section({ label, value }: { label: string; value: unknown }) {
   const text = jsonPretty(value);
@@ -59,6 +104,7 @@ export function StepDetail({ step }: { step: Step }) {
           <pre className="whitespace-pre-wrap break-words text-[12px] text-err leading-relaxed">
             {step.error}
           </pre>
+          <FixButton step={step} />
         </div>
       )}
       <Section label="input" value={step.input} />

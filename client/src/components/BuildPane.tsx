@@ -111,11 +111,20 @@ export function BuildPane() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusChatNonce = useUiStore((s) => s.focusChatNonce);
+  const chatPrefillNonce = useUiStore((s) => s.chatPrefillNonce);
 
   // Cmd+/ (and the palette) focus the composer.
   useEffect(() => {
     if (focusChatNonce > 0) composerRef.current?.focus();
   }, [focusChatNonce]);
+
+  // One-Click Fix pre-fills the composer, then focuses it so the user can review and send.
+  useEffect(() => {
+    if (chatPrefillNonce > 0) {
+      setText(useUiStore.getState().chatPrefill);
+      composerRef.current?.focus();
+    }
+  }, [chatPrefillNonce]);
 
   const connected = useTraceStore((s) => s.connection === "open");
   const genStatus = useBuildStore((s) => s.status);
