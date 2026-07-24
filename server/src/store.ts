@@ -1,7 +1,8 @@
 // SQLite persistence for runs + steps (doc §5.2 trace store: SQLite -> Postgres later).
 // Uses Node's built-in node:sqlite (no native build). JSON payload fields are stored as TEXT.
 
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { randomUUID } from "node:crypto";
 import type { Run, Step } from "./types.ts";
 
 // A run plus a cheap derived step count, for the sidebar history list. The frozen Run
@@ -168,6 +169,67 @@ export class TraceStore {
          WHERE run_id = ? AND seq <= ? AND checkpoint_id IS NULL`,
       )
       .run(checkpointId, runId, uptoSeq);
+  }
+
+  // The node boundary a step belongs to: its checkpoint id (the durable checkpoint AFTER that
+  // node) + the boundary's highest seq. Branching forks at a boundary, never mid-node, so a
+  // branch's copied prefix always contains whole nodes. Returns null if the step isn't stamped.
+  boundaryForStep(runId: string, seq: number): { checkpointId: string; seqHigh: number } | null {
+    const row = this.db
+      .prepare(`SELECT checkpoint_id FROM steps WHERE run_id = ? AND seq = ?`)
+      .get(runId, seq) as { checkpoint_id: string | null } | undefined;
+    if (!row?.checkpoint_id) return null;
+    const hi = this.db
+      .prepare(`SELECT MAX(seq) AS m FROM steps WHERE run_id = ? AND checkpoint_id = ?`)
+      .get(runId, row.checkpoint_id) as { m: number };
+    return { checkpointId: row.checkpoint_id, seqHigh: hi.m };
+  }
+
+  // Fork a run's history into a new branch run: copy the run row (new id, parentage, status
+  // 'running') and steps 0..uptoSeq VERBATIM (payload TEXT copied as-is — no re-serialize),
+  // minting fresh step ids and remapping parent_step_id so the branch's own step graph is intact.
+  // The parent's rows are only read — the original stays byte-for-byte inspectable.
+  copyRunPrefix(parentRunId: string, newRunId: string, uptoSeq: number, branchFromSeq: number): void {
+    const parent = this.db.prepare(`SELECT * FROM runs WHERE id = ?`).get(parentRunId) as
+      | Record<string, unknown>
+      | undefined;
+    if (!parent) throw new Error(`copyRunPrefix: unknown parent run ${parentRunId}`);
+    this.db
+      .prepare(
+        `INSERT INTO runs (id, agent_id, provider, model, status, started_at, ended_at, cost,
+           tokens, error, parent_run_id, branch_from_seq)
+         VALUES (?, ?, ?, ?, 'running', ?, NULL, 0, 0, NULL, ?, ?)`,
+      )
+      .run(
+        ...([newRunId, parent["agent_id"], parent["provider"], parent["model"],
+          new Date().toISOString(), parentRunId, branchFromSeq] as SQLInputValue[]),
+      );
+
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM steps WHERE run_id = ? AND seq <= ? ORDER BY seq ASC`,
+      )
+      .all(parentRunId, uptoSeq) as Record<string, unknown>[];
+
+    const idMap = new Map<string, string>();
+    for (const r of rows) idMap.set(r["id"] as string, randomUUID());
+
+    const ins = this.db.prepare(
+      `INSERT INTO steps
+         (id, run_id, seq, type, name, input, output, state_before, state_after,
+          tokens, cost, latency_ms, error, parent_step_id, started_at, checkpoint_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const r of rows) {
+      const oldParent = r["parent_step_id"] as string | null;
+      const newParent = oldParent ? idMap.get(oldParent) ?? null : null;
+      ins.run(
+        ...([idMap.get(r["id"] as string)!, newRunId, r["seq"], r["type"], r["name"],
+          r["input"], r["output"], r["state_before"], r["state_after"],
+          r["tokens"], r["cost"], r["latency_ms"], r["error"], newParent,
+          r["started_at"], r["checkpoint_id"]] as SQLInputValue[]),
+      );
+    }
   }
 
   stepsForRun(runId: string): Step[] {

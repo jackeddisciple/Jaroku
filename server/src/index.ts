@@ -5,7 +5,7 @@
 // Run:  npm run dev        (in server/)
 // Then open http://localhost:4317 to watch traces live.
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -124,6 +124,7 @@ const relay = new WsRelay({
     else if (cmd.cmd === "discardEdit") editor.discard(cmd.proposalId);
     else if (cmd.cmd === "pauseRun") pauseRun(cmd.runId);
     else if (cmd.cmd === "resumeRun") resumeRun(cmd.runId);
+    else if (cmd.cmd === "branchRun") branchRun(cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState);
   },
 });
 
@@ -361,6 +362,68 @@ function resumeRun(runId: string): void {
   pausedRunId = null;
   relay.broadcastDebug({ type: "resumed", runId, seqOffset });
   manager.start({ runtimeDir: RUNTIME_DIR, agentId: run.agent_id, env });
+}
+
+// Fork a NEW run from a parent run's checkpoint at a step's node boundary, optionally with a
+// validated domain-field edit. The parent is only read: its checkpoint db is copied (never
+// written), and its step rows are copied verbatim into the branch — both stay fully inspectable.
+function branchRun(
+  fromRunId: string,
+  atSeq: number,
+  editNode?: string,
+  editedState?: Record<string, unknown>,
+): void {
+  if (manager.running) {
+    relay.broadcastDebug({ type: "error", runId: fromRunId, message: "a run is active — stop it before branching" });
+    return;
+  }
+  const parent = store.getRun(fromRunId);
+  if (!parent) {
+    relay.broadcastDebug({ type: "error", runId: fromRunId, message: "unknown run to branch from" });
+    return;
+  }
+  // Resolve the node boundary containing `atSeq` — we fork at a whole-node boundary, never mid-node.
+  const boundary = store.boundaryForStep(fromRunId, atSeq);
+  const parentDb = join(CHECKPOINT_DIR, `${fromRunId}.sqlite`);
+  if (!boundary || !existsSync(parentDb)) {
+    relay.broadcastDebug({ type: "error", runId: fromRunId, message: "no durable checkpoint for that step (branching needs a checkpointed run)" });
+    return;
+  }
+
+  const branchId = randomUUID();
+  const { checkpointId, seqHigh } = boundary;
+  try {
+    // Copy the parent's step prefix (0..boundary) + a physical copy of its checkpoint db, so the
+    // parent is never mutated and the branch is self-contained + independently inspectable.
+    store.copyRunPrefix(fromRunId, branchId, seqHigh, seqHigh);
+    copyFileSync(parentDb, join(CHECKPOINT_DIR, `${branchId}.sqlite`));
+  } catch (err) {
+    relay.broadcastDebug({ type: "error", runId: fromRunId, message: `branch prep failed: ${(err as Error).message}` });
+    return;
+  }
+
+  const env: NodeJS.ProcessEnv = {
+    JAROKU_RUN_ID: branchId,
+    JAROKU_BRANCH_THREAD_ID: fromRunId, // the checkpoint thread lives under the parent's id
+    JAROKU_BRANCH_CHECKPOINT_ID: checkpointId,
+    JAROKU_SEQ_OFFSET: String(seqHigh + 1),
+    JAROKU_PROVIDER: parent.provider,
+    JAROKU_MODEL: parent.model,
+  };
+  if (editedState && Object.keys(editedState).length) {
+    const editFile = join(CHECKPOINT_DIR, `${branchId}.edit.json`);
+    writeFileSync(editFile, JSON.stringify(editedState));
+    env.JAROKU_BRANCH_EDIT_FILE = editFile;
+    if (editNode) env.JAROKU_BRANCH_EDIT_NODE = editNode;
+  }
+
+  runActive = true;
+  activeRunId = branchId;
+  pausedRunId = null;
+  console.log(`[debug] branching ${fromRunId} @seq ${seqHigh} -> ${branchId} (agent ${parent.agent_id})`);
+  relay.broadcastHistory(); // surface the new branch run in history immediately
+  relay.broadcastDebug({ type: "branched", parentRunId: fromRunId, branchId, fromSeq: seqHigh });
+  manager.start({ runtimeDir: RUNTIME_DIR, agentId: parent.agent_id, env });
 }
 
 // Kick off one run on startup unless suppressed (set JAROKU_NO_AUTORUN=1 to just serve).

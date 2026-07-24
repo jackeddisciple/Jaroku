@@ -37,6 +37,15 @@ export type LoadAgentGraphCommand = { cmd: "loadAgentGraph"; agentId: string };
 // frozen trace stream).
 export type PauseRunCommand = { cmd: "pauseRun"; runId: string };
 export type ResumeRunCommand = { cmd: "resumeRun"; runId: string };
+// Fork a new run from `fromRunId` at step `atSeq` (its node boundary), optionally with a
+// validated domain-field edit applied to the state before continuing. Original run is untouched.
+export type BranchRunCommand = {
+  cmd: "branchRun";
+  fromRunId: string;
+  atSeq: number;
+  editNode?: string;
+  editedState?: Record<string, unknown>;
+};
 export type ClientCommand =
   | RunCommand
   | LoadRunCommand
@@ -49,7 +58,8 @@ export type ClientCommand =
   | LoadAgentFilesCommand
   | LoadAgentGraphCommand
   | PauseRunCommand
-  | ResumeRunCommand;
+  | ResumeRunCommand
+  | BranchRunCommand;
 
 /** Commands the relay forwards to the app rather than answering locally. */
 export type ForwardedCommand =
@@ -60,7 +70,8 @@ export type ForwardedCommand =
   | UndoEditCommand
   | DiscardEditCommand
   | PauseRunCommand
-  | ResumeRunCommand;
+  | ResumeRunCommand
+  | BranchRunCommand;
 
 // Generation rides its own channel, deliberately parallel to "trace". It never enters the
 // trace store or the event schema — schema/events.md v1 stays frozen.
@@ -92,6 +103,7 @@ export type DebugEvent =
   | { type: "paused"; runId: string; seq: number }
   | { type: "resumed"; runId: string; seqOffset: number }
   | { type: "boundary"; runId: string; seq: number; next: string[] }
+  | { type: "branched"; parentRunId: string; branchId: string; fromSeq: number }
   | { type: "error"; runId?: string; message: string };
 
 export interface RelayOptions {
@@ -162,6 +174,8 @@ export class WsRelay {
           } else if (msg.cmd === "pauseRun" && typeof msg.runId === "string") {
             this.onCommand?.(msg);
           } else if (msg.cmd === "resumeRun" && typeof msg.runId === "string") {
+            this.onCommand?.(msg);
+          } else if (msg.cmd === "branchRun" && typeof msg.fromRunId === "string" && typeof msg.atSeq === "number") {
             this.onCommand?.(msg);
           } else if (msg.cmd === "listAgents") {
             this.sendTo(ws, { channel: "agents", agents: this.opts.listAgents?.() ?? [] });
@@ -236,10 +250,19 @@ export class WsRelay {
     }
   }
 
-  // Broadcast a debug-depth control event (pause/resume/boundary). Separate channel by design —
-  // the run's steps still arrive as normal schema-v1 events on "trace".
+  // Broadcast a debug-depth control event (pause/resume/boundary/branched). Separate channel by
+  // design — the run's steps still arrive as normal schema-v1 events on "trace".
   broadcastDebug(event: DebugEvent): void {
     const msg = JSON.stringify({ channel: "debug", ...event });
+    for (const ws of this.clients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+    }
+  }
+
+  // Push a refreshed run-history snapshot to everyone (e.g. after a branch is created, so the new
+  // branch run appears in history without needing a run_start event of its own).
+  broadcastHistory(): void {
+    const msg = JSON.stringify({ channel: "history", runs: this.store.listRuns() });
     for (const ws of this.clients) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
     }
