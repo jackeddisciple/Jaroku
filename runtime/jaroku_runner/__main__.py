@@ -60,12 +60,26 @@ def main(argv: list[str]) -> int:
         provider = "fake"
     model_name = resolve_model_name(provider, os.environ.get("JAROKU_MODEL"))
 
-    run = Run(id=str(uuid.uuid4()), agent_id=agent_id,
-              provider=provider, model=model_name)
+    # Debug-depth control (all optional / additive):
+    #  * JAROKU_RESUME_RUN_ID — resume an existing run's durable checkpoint (continue, don't restart).
+    #  * JAROKU_RUN_ID        — server-minted id so it can address the run (e.g. to pause) before
+    #                           run_start races; falls back to a locally-minted uuid otherwise.
+    #  * JAROKU_SEQ_OFFSET    — the run's current max seq + 1, so a resumed segment's steps continue
+    #                           the SAME run's ascending seq instead of restarting at 0.
+    resume_run_id = os.environ.get("JAROKU_RESUME_RUN_ID") or None
+    run_id = resume_run_id or os.environ.get("JAROKU_RUN_ID") or str(uuid.uuid4())
+    seq_offset = int(os.environ.get("JAROKU_SEQ_OFFSET", "0") or "0")
+    resuming = resume_run_id is not None
 
-    log(f"[jaroku] run {run.id} agent={agent_id} provider={provider} model={model_name}")
-    emit_run_start(run)
+    run = Run(id=run_id, agent_id=agent_id, provider=provider, model=model_name)
 
+    log(f"[jaroku] {'resume' if resuming else 'run'} {run.id} agent={agent_id} "
+        f"provider={provider} model={model_name} seq_offset={seq_offset}")
+    # A resumed run already exists in the store with its run_start; re-emitting it would duplicate.
+    if not resuming:
+        emit_run_start(run)
+
+    paused = False
     try:
         module = load_agent(agent_id)
         tools = tools_of(module)
@@ -73,18 +87,22 @@ def main(argv: list[str]) -> int:
         run.provider, run.model = provider, model_name
 
         app = module.build_graph(llm)
-        initial_state = module.build_initial_state(user_input)
+        # Resume ignores the initial state (it continues from the checkpoint); a fresh run seeds it.
+        initial_state = None if resuming else module.build_initial_state(user_input)
 
         # Passing the compiled graph lets the tracer identify conditional edges exactly
         # (graph.builder.branches) instead of inferring them.
-        tracer = JarokuTracer(run, graph=app)
+        tracer = JarokuTracer(run, graph=app, seq_start=seq_offset)
         # Recompile a checkpointed twin and drive it node-by-node. The emitted trace is identical
         # to the old app.invoke(...) — same nodes/callbacks/seq — but every node boundary now
-        # leaves a durable checkpoint that pause/resume/branch build on (checkpoints are
-        # control-plane, never on the frozen stdout trace stream).
-        run_with_checkpoints(app, initial_state,
-                             run_id=run.id, thread_id=run.id, tracer=tracer)
-        run.status = "completed"
+        # leaves a durable checkpoint that pause/resume/branch build on.
+        outcome = run_with_checkpoints(app, initial_state,
+                                       run_id=run.id, thread_id=run.id, tracer=tracer,
+                                       resume=resuming)
+        if outcome == "paused":
+            paused = True
+        else:
+            run.status = "completed"
     except ContractError as exc:
         run.status = "error"
         run.error = f"ContractError: {exc}"
@@ -94,11 +112,15 @@ def main(argv: list[str]) -> int:
         run.error = f"{type(exc).__name__}: {exc}"
         log(f"[jaroku] run errored: {run.error}")
     finally:
-        run.ended_at = now_iso()
-        emit_run_end(run)
+        # A paused run is NOT finished — no run_end, so the run stays open (the server marks it
+        # 'paused' from the control event) and a later resume continues its seq/timeline.
+        if not paused:
+            run.ended_at = now_iso()
+            emit_run_end(run)
 
-    log(f"[jaroku] run {run.id} {run.status} tokens={run.tokens} cost={run.cost}")
-    return 0 if run.status == "completed" else 1
+    status = "paused" if paused else run.status
+    log(f"[jaroku] run {run.id} {status} tokens={run.tokens} cost={run.cost}")
+    return 0 if status in ("completed", "paused") else 1
 
 
 if __name__ == "__main__":

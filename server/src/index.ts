@@ -5,7 +5,8 @@
 // Run:  npm run dev        (in server/)
 // Then open http://localhost:4317 to watch traces live.
 
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { ProcessManager } from "./processManager.ts";
@@ -45,6 +46,25 @@ const generator = new Generator();
 // window is a race the user would hit by clicking right after a run finishes. Once
 // run_end is emitted the graph is done and the project files are no longer being read.
 let runActive = false;
+
+// Debug depth (Week 6). The server mints each run's id up front so it can address a live run
+// (e.g. to pause it) before run_start races back. `activeRunId` is the current subprocess's run;
+// `pausedRunId` remembers a run that halted at a boundary so exit-handling leaves it 'paused'
+// rather than clobbering the status. Both are control-plane only.
+let activeRunId: string | null = null;
+let pausedRunId: string | null = null;
+
+const CHECKPOINT_DIR = join(RUNTIME_DIR, ".checkpoints");
+const controlFile = (runId: string): string => join(CHECKPOINT_DIR, `${runId}.control`);
+/** Ask the runner to pause: it reads this file at its next node boundary. */
+function requestPause(runId: string): void {
+  mkdirSync(CHECKPOINT_DIR, { recursive: true });
+  writeFileSync(controlFile(runId), "pause");
+}
+/** Clear any stale pause request (before a fresh run of, or a resume of, this run id). */
+function clearControl(runId: string): void {
+  rmSync(controlFile(runId), { force: true });
+}
 
 const editor = new Editor({
   runtimeDir: RUNTIME_DIR,
@@ -102,6 +122,8 @@ const relay = new WsRelay({
     else if (cmd.cmd === "applyEdit") editor.apply(cmd.proposalId);
     else if (cmd.cmd === "undoEdit") editor.undo(cmd.agentId);
     else if (cmd.cmd === "discardEdit") editor.discard(cmd.proposalId);
+    else if (cmd.cmd === "pauseRun") pauseRun(cmd.runId);
+    else if (cmd.cmd === "resumeRun") resumeRun(cmd.runId);
   },
 });
 
@@ -131,13 +153,40 @@ manager.on("stderr", (line) => {
   relay.broadcastLog("stderr", line);
 });
 
+// Debug-depth control events (off the trace stream). A `boundary` correlates the durable
+// checkpoint to the steps it covers (for later branching); a `paused` flips the run to the
+// store-only 'paused' status so history shows it as resumable, without any run_end.
+manager.on("control", (ctrl) => {
+  const runId = typeof ctrl.run_id === "string" ? ctrl.run_id : null;
+  if (!runId) return;
+  const seqHigh = typeof ctrl.seq_high === "number" ? ctrl.seq_high : -1;
+  const checkpointId = typeof ctrl.checkpoint_id === "string" ? ctrl.checkpoint_id : null;
+  const next = Array.isArray(ctrl.next) ? (ctrl.next as string[]) : [];
+  try {
+    if (ctrl.ctrl === "boundary") {
+      if (checkpointId && seqHigh >= 0) store.setCheckpointUpto(runId, seqHigh, checkpointId);
+      relay.broadcastDebug({ type: "boundary", runId, seq: seqHigh, next });
+    } else if (ctrl.ctrl === "paused") {
+      pausedRunId = runId;
+      store.setRunStatus(runId, "paused");
+      relay.broadcastDebug({ type: "paused", runId, seq: seqHigh });
+    }
+  } catch (err) {
+    console.error("[debug] control handling failed:", (err as Error).message);
+  }
+});
+
 manager.on("spawnError", (err) => {
   runActive = false;
+  activeRunId = null;
   console.error("[manager] spawn error:", err.message);
 });
 
 manager.on("exit", ({ code, signal }) => {
   runActive = false; // covers a crash before run_end ever arrived
+  // A run that halted at a boundary keeps its 'paused' status (set from the control event); a
+  // normal completion already updated the run via run_end. Either way this subprocess is gone.
+  activeRunId = null;
   console.log(`[manager] agent exited (code=${code} signal=${signal})`);
 });
 
@@ -253,19 +302,65 @@ function runAgent(input?: string, provider?: string, model?: string, agentId?: s
     console.log("[manager] agent already running; ignoring run request");
     return;
   }
-  console.log(`[manager] starting ${agentId ?? "test_agent"}${input ? ` — "${input}"` : ""}`);
+  // Mint the run id server-side so we can address the run (e.g. pause it) before run_start races
+  // back. The runner uses JAROKU_RUN_ID when present, else mints its own — back-compatible.
+  const runId = randomUUID();
+  clearControl(runId); // no stale pause request from a prior life
+  console.log(`[manager] starting ${agentId ?? "test_agent"}${input ? ` — "${input}"` : ""} (run ${runId})`);
   // Model is forwarded explicitly so a real-provider run can't silently fall back to
   // the agent's expensive default; unset means the agent picks its own default.
-  const env: NodeJS.ProcessEnv = {};
+  const env: NodeJS.ProcessEnv = { JAROKU_RUN_ID: runId };
   if (provider) env.JAROKU_PROVIDER = provider;
   if (model) env.JAROKU_MODEL = model;
   runActive = true;
-  manager.start({
-    runtimeDir: RUNTIME_DIR,
-    input,
-    agentId,
-    env: Object.keys(env).length ? env : undefined,
-  });
+  activeRunId = runId;
+  pausedRunId = null;
+  manager.start({ runtimeDir: RUNTIME_DIR, input, agentId, env });
+}
+
+// Pause the live run at its next node boundary (the runner honours the control file there).
+function pauseRun(runId: string): void {
+  if (!runActive || activeRunId !== runId) {
+    console.log(`[debug] pauseRun ignored — ${runId} is not the active run`);
+    return;
+  }
+  console.log(`[debug] pause requested for run ${runId}`);
+  requestPause(runId);
+}
+
+// Resume a paused run from its durable checkpoint: a fresh subprocess continues the SAME run id,
+// its seq starting where the paused segment left off (no run_start, no re-run of done nodes).
+function resumeRun(runId: string): void {
+  if (manager.running) {
+    console.log("[debug] resumeRun ignored — a run is already active");
+    return;
+  }
+  const run = store.getRun(runId);
+  if (!run) {
+    relay.broadcastDebug({ type: "error", runId, message: "unknown run" });
+    return;
+  }
+  // 'paused' is a store-only status (never an emitted event), so it's outside the frozen
+  // RunStatus mirror — compare as a plain string rather than widening that type.
+  if ((run.status as string) !== "paused") {
+    relay.broadcastDebug({ type: "error", runId, message: `run is ${run.status}, not paused` });
+    return;
+  }
+  const seqOffset = store.maxSeqForRun(runId) + 1;
+  clearControl(runId); // drop the pause request so it doesn't immediately re-pause
+  store.setRunStatus(runId, "running");
+  console.log(`[debug] resuming run ${runId} from seq ${seqOffset} (agent ${run.agent_id})`);
+  const env: NodeJS.ProcessEnv = {
+    JAROKU_RESUME_RUN_ID: runId,
+    JAROKU_SEQ_OFFSET: String(seqOffset),
+    JAROKU_PROVIDER: run.provider,
+    JAROKU_MODEL: run.model,
+  };
+  runActive = true;
+  activeRunId = runId;
+  pausedRunId = null;
+  relay.broadcastDebug({ type: "resumed", runId, seqOffset });
+  manager.start({ runtimeDir: RUNTIME_DIR, agentId: run.agent_id, env });
 }
 
 // Kick off one run on startup unless suppressed (set JAROKU_NO_AUTORUN=1 to just serve).

@@ -32,6 +32,11 @@ export type LoadAgentFilesCommand = { cmd: "loadAgentFiles"; agentId: string };
 // Graph View (Week 5): request the agent's static LangGraph topology. Answered locally by
 // spawning the isolated `jaroku_runner.graph` entrypoint — never touches the trace stream.
 export type LoadAgentGraphCommand = { cmd: "loadAgentGraph"; agentId: string };
+// Debug depth (Week 6): pause a running run at its next node boundary, or resume a paused run
+// from its durable checkpoint. Both are forwarded to the app (control-plane, never touch the
+// frozen trace stream).
+export type PauseRunCommand = { cmd: "pauseRun"; runId: string };
+export type ResumeRunCommand = { cmd: "resumeRun"; runId: string };
 export type ClientCommand =
   | RunCommand
   | LoadRunCommand
@@ -42,7 +47,9 @@ export type ClientCommand =
   | UndoEditCommand
   | DiscardEditCommand
   | LoadAgentFilesCommand
-  | LoadAgentGraphCommand;
+  | LoadAgentGraphCommand
+  | PauseRunCommand
+  | ResumeRunCommand;
 
 /** Commands the relay forwards to the app rather than answering locally. */
 export type ForwardedCommand =
@@ -51,7 +58,9 @@ export type ForwardedCommand =
   | EditCommand
   | ApplyEditCommand
   | UndoEditCommand
-  | DiscardEditCommand;
+  | DiscardEditCommand
+  | PauseRunCommand
+  | ResumeRunCommand;
 
 // Generation rides its own channel, deliberately parallel to "trace". It never enters the
 // trace store or the event schema — schema/events.md v1 stays frozen.
@@ -75,6 +84,15 @@ export type EditEvent =
   | { type: "undone"; agentId: string; version: number; summary: string }
   | { type: "discarded"; proposalId: string; agentId: string }
   | { type: "error"; message: string; problems?: string[]; agentId?: string; proposalId?: string };
+
+// Debug depth rides its own channel too, parallel to "trace"/"gen"/"edit". It carries only
+// control-plane facts (a run paused / resumed / a boundary reached / a control error); the run's
+// own steps still flow as normal schema-v1 trace events on the "trace" channel.
+export type DebugEvent =
+  | { type: "paused"; runId: string; seq: number }
+  | { type: "resumed"; runId: string; seqOffset: number }
+  | { type: "boundary"; runId: string; seq: number; next: string[] }
+  | { type: "error"; runId?: string; message: string };
 
 export interface RelayOptions {
   port: number;
@@ -141,6 +159,10 @@ export class WsRelay {
                   graph: { agent_id: agentId, error: String((err as Error)?.message ?? err) },
                 }),
               );
+          } else if (msg.cmd === "pauseRun" && typeof msg.runId === "string") {
+            this.onCommand?.(msg);
+          } else if (msg.cmd === "resumeRun" && typeof msg.runId === "string") {
+            this.onCommand?.(msg);
           } else if (msg.cmd === "listAgents") {
             this.sendTo(ws, { channel: "agents", agents: this.opts.listAgents?.() ?? [] });
           } else if (msg.cmd === "loadRun" && typeof msg.runId === "string") {
@@ -209,6 +231,15 @@ export class WsRelay {
   // Broadcast an edit-flow event. Separate channel from "trace" and "gen" by design.
   broadcastEdit(event: EditEvent): void {
     const msg = JSON.stringify({ channel: "edit", ...event });
+    for (const ws of this.clients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+    }
+  }
+
+  // Broadcast a debug-depth control event (pause/resume/boundary). Separate channel by design —
+  // the run's steps still arrive as normal schema-v1 events on "trace".
+  broadcastDebug(event: DebugEvent): void {
+    const msg = JSON.stringify({ channel: "debug", ...event });
     for (const ws of this.clients) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
     }

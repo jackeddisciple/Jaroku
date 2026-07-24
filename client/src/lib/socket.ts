@@ -71,6 +71,14 @@ function dispatch(msg: ServerMessage): void {
       }
       break;
     }
+    case "debug": {
+      // Debug depth control plane: reflect pause/resume on the run's status. The run's steps
+      // still arrive as normal "trace" events; "boundary" is informational (no state change).
+      if (msg.type === "paused") s.setRunStatus(msg.runId, "paused");
+      else if (msg.type === "resumed") s.setRunStatus(msg.runId, "running");
+      else if (msg.type === "error") s.addLog({ level: "stderr", text: `debug: ${msg.message}` });
+      break;
+    }
   }
 }
 
@@ -157,4 +165,13 @@ export function sendLoadAgentFiles(agentId: string): void {
 export function sendLoadAgentGraph(agentId: string): void {
   useGraphStore.getState().markLoading(agentId);
   send({ cmd: "loadAgentGraph", agentId });
+}
+
+// Debug depth: pause the live run at its next node boundary, or resume a paused run from its
+// durable checkpoint. The server answers on the "debug" channel (status) + "trace" (new steps).
+export function sendPauseRun(runId: string): void {
+  send({ cmd: "pauseRun", runId });
+}
+export function sendResumeRun(runId: string): void {
+  send({ cmd: "resumeRun", runId });
 }

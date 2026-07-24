@@ -47,10 +47,25 @@ export class TraceStore {
         error          TEXT,
         parent_step_id TEXT,
         started_at     TEXT NOT NULL,
+        checkpoint_id  TEXT,
         FOREIGN KEY (run_id) REFERENCES runs(id)
       );
       CREATE INDEX IF NOT EXISTS idx_steps_run_seq ON steps(run_id, seq);
     `);
+    // Additive migrations for existing DBs (debug depth — control-plane columns only; the frozen
+    // event schema is untouched). `runs.parent_run_id` / `runs.branch_from_seq` land with
+    // branching; `steps.checkpoint_id` correlates a step to the durable checkpoint after its node.
+    this.ensureColumn("steps", "checkpoint_id", "TEXT");
+    this.ensureColumn("runs", "parent_run_id", "TEXT");
+    this.ensureColumn("runs", "branch_from_seq", "INTEGER");
+  }
+
+  // Idempotent ADD COLUMN — CREATE TABLE IF NOT EXISTS never alters an existing table.
+  private ensureColumn(table: string, column: string, decl: string): void {
+    const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === column)) {
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
+    }
   }
 
   private static j(v: unknown): string | null {
@@ -121,6 +136,38 @@ export class TraceStore {
          FROM runs r ORDER BY r.started_at DESC LIMIT ?`,
       )
       .all(limit) as unknown as RunSummary[];
+  }
+
+  getRun(runId: string): Run | undefined {
+    const row = this.db.prepare(`SELECT * FROM runs WHERE id = ?`).get(runId) as
+      | Record<string, unknown>
+      | undefined;
+    return row as Run | undefined;
+  }
+
+  // Store-only status flip (e.g. 'running' -> 'paused' when a run halts at a boundary, or back to
+  // 'running' on resume). NOT a frozen-event change — no run_end/run_start is emitted for a pause.
+  setRunStatus(runId: string, status: string): void {
+    this.db.prepare(`UPDATE runs SET status = ? WHERE id = ?`).run(status, runId);
+  }
+
+  // The run's current highest seq — the offset a resumed subprocess continues its timeline from.
+  maxSeqForRun(runId: string): number {
+    const row = this.db
+      .prepare(`SELECT MAX(seq) AS m FROM steps WHERE run_id = ?`)
+      .get(runId) as { m: number | null };
+    return row.m ?? -1;
+  }
+
+  // Correlate a boundary's checkpoint to the steps it covers (seq <= uptoSeq, not yet stamped),
+  // so branching can later resume from the checkpoint that follows a chosen step's node.
+  setCheckpointUpto(runId: string, uptoSeq: number, checkpointId: string): void {
+    this.db
+      .prepare(
+        `UPDATE steps SET checkpoint_id = ?
+         WHERE run_id = ? AND seq <= ? AND checkpoint_id IS NULL`,
+      )
+      .run(checkpointId, runId, uptoSeq);
   }
 
   stepsForRun(runId: string): Step[] {
