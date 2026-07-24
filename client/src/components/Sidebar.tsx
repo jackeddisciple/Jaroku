@@ -37,14 +37,19 @@ function RunRow({ run }: { run: RunSummary }) {
       className={`relative w-full text-left px-4 py-2 transition-colors ${active ? "bg-active" : "hover:bg-active/40"}`}
     >
       {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-ink" />}
-      <div className="flex items-center gap-2">
+      {/* Branches (debug depth) are indented under the run they forked from, with a ⑂ marker. */}
+      <div className={`flex items-center gap-2 ${run.parent_run_id ? "pl-3" : ""}`}>
+        {run.parent_run_id && <span className="text-faint text-[11px]" title="branch">⑂</span>}
         <StatusGlyph status={run.status} />
         <span className="text-ink truncate text-[12px]">{run.agent_id}</span>
         <span className="ml-auto text-faint text-[11px] shrink-0">{relTime(run.started_at)}</span>
       </div>
-      <div className="mt-0.5 pl-5 text-[11px] text-muted flex items-center gap-1.5">
+      <div className={`mt-0.5 text-[11px] text-muted flex items-center gap-1.5 ${run.parent_run_id ? "pl-8" : "pl-5"}`}>
         <span className="text-faint">{run.provider}</span>
         {run.step_count != null && <><span className="text-faint">·</span><span>{run.step_count} steps</span></>}
+        {run.parent_run_id != null && run.branch_from_seq != null && (
+          <><span className="text-faint">·</span><span className="text-faint">branch @{run.branch_from_seq}</span></>
+        )}
       </div>
     </button>
   );

@@ -7,6 +7,7 @@ import { useEffect } from "react";
 import { useTraceStore } from "../store/traceStore.ts";
 import { fmtCost, fmtDuration, fmtTokens, typeBadge } from "../lib/format.ts";
 import { StepDetail } from "./StepDetail.tsx";
+import { StateBranchEditor } from "./StateBranchEditor.tsx";
 
 function glyphForType(type: string): string {
   switch (type) {
@@ -93,6 +94,7 @@ export function StepDetailPanel() {
             <div className="mt-3">
               <StepDetail step={step} />
             </div>
+            <StateBranchEditor step={step} />
           </div>
         </>
       )}
