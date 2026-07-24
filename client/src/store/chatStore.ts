@@ -68,7 +68,18 @@ export interface InfoTurn {
   tone: "muted" | "error";
 }
 
-export type ChatTurn = UserTurn | GenTurn | ProposalTurn | InfoTurn;
+/** A conversational answer with no code change — the unified composer's "explain" intent.
+ *  Streams token-by-token like generation, but produces prose, not files. */
+export interface ReplyTurn {
+  id: string;
+  role: "jaroku";
+  kind: "reply";
+  status: "streaming" | "done" | "error";
+  agentId: string;
+  text: string;
+}
+
+export type ChatTurn = UserTurn | GenTurn | ProposalTurn | InfoTurn | ReplyTurn;
 
 interface ChatState {
   /** Conversation per agent. */
@@ -93,6 +104,12 @@ interface ChatState {
   undone: (agentId: string, version: number, summary: string) => void;
   discarded: (proposalId: string, agentId: string) => void;
   editError: (e: { message: string; problems?: string[]; agentId?: string; proposalId?: string }) => void;
+
+  // --- explain (unified composer): a streaming prose reply, no code change ---
+  replyStarted: (agentId: string, question: string) => void;
+  replyDelta: (agentId: string, text: string) => void;
+  replyDone: (agentId: string) => void;
+  replyError: (agentId: string, message: string) => void;
 }
 
 function lastGenTurn(turns: ChatTurn[]): GenTurn | undefined {
@@ -267,7 +284,64 @@ export const useChatStore = create<ChatState>((set) => ({
       const note: InfoTurn = { id: turnId(), role: "jaroku", kind: "info", tone: "error", text: message };
       return { streamingAgentId: null, pending: [...s.pending, note] };
     }),
+
+  // --- explain (streaming prose reply, no code change) -------------------
+
+  replyStarted: (agentId, question) =>
+    set((s) => ({
+      streamingAgentId: agentId,
+      threads: {
+        ...s.threads,
+        [agentId]: [
+          ...(s.threads[agentId] ?? []),
+          { id: turnId(), role: "user", text: question },
+          { id: turnId(), role: "jaroku", kind: "reply", status: "streaming", agentId, text: "" },
+        ],
+      },
+    })),
+
+  replyDelta: (agentId, text) =>
+    set((s) => {
+      const turns = s.threads[agentId] ?? [];
+      const open = findReply(turns, agentId);
+      if (!open) return {};
+      return {
+        threads: { ...s.threads, [agentId]: replaceTurn(turns, open.id, { ...open, text: open.text + text }) },
+      };
+    }),
+
+  replyDone: (agentId) =>
+    set((s) => {
+      const turns = s.threads[agentId] ?? [];
+      const open = findReply(turns, agentId);
+      if (!open) return { streamingAgentId: null };
+      return {
+        streamingAgentId: null,
+        threads: { ...s.threads, [agentId]: replaceTurn(turns, open.id, { ...open, status: "done" }) },
+      };
+    }),
+
+  replyError: (agentId, message) =>
+    set((s) => {
+      const turns = s.threads[agentId] ?? [];
+      const open = findReply(turns, agentId);
+      const next = open
+        ? replaceTurn(turns, open.id, { ...open, status: "error" as const, text: open.text || message })
+        : [...turns, { id: turnId(), role: "jaroku" as const, kind: "info" as const, tone: "error" as const, text: message }];
+      return { streamingAgentId: null, threads: { ...s.threads, [agentId]: next } };
+    }),
 }));
+
+/** The streaming reply turn currently open on an agent's thread, if any. */
+function findReply(turns: ChatTurn[], agentId: string): ReplyTurn | undefined {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const t = turns[i];
+    if (t && t.role === "jaroku" && t.kind === "reply" && t.agentId === agentId && t.status === "streaming") {
+      return t;
+    }
+  }
+  return undefined;
+}
 
 function findStreaming(turns: ChatTurn[], agentId: string): ProposalTurn | undefined {
   for (let i = turns.length - 1; i >= 0; i--) {

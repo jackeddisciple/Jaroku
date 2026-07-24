@@ -6,7 +6,7 @@ import { useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useChatStore } from "../store/chatStore.ts";
 import { useGraphStore } from "../store/graphStore.ts";
-import type { ClientCommand, ServerMessage } from "../types.ts";
+import type { ClientCommand, ExplainSubject, ServerMessage } from "../types.ts";
 
 const WS_URL = import.meta.env.VITE_JAROKU_WS ?? `ws://localhost:4317`;
 const RECONNECT_MS = 1000;
@@ -81,6 +81,15 @@ function dispatch(msg: ServerMessage): void {
         s.selectRun(msg.branchId);
         sendLoadRun(msg.branchId);
       } else if (msg.type === "error") s.addLog({ level: "stderr", text: `debug: ${msg.message}` });
+      break;
+    }
+    case "reply": {
+      // Unified composer "explain": a streaming prose answer in the conversation (chatStore).
+      const c = useChatStore.getState();
+      if (msg.type === "started") c.replyStarted(msg.agentId, msg.question);
+      else if (msg.type === "delta") c.replyDelta(msg.agentId, msg.text);
+      else if (msg.type === "done") c.replyDone(msg.agentId);
+      else if (msg.type === "error") c.replyError(msg.agentId, msg.message);
       break;
     }
   }
@@ -188,4 +197,9 @@ export function sendBranchRun(
   editedState?: Record<string, unknown>,
 ): void {
   send({ cmd: "branchRun", fromRunId, atSeq, editNode, editedState });
+}
+// Unified composer "explain": ask for a prose answer about a step / node / the agent, built from
+// in-context data. Answered on the "reply" channel (chatStore), never a code change.
+export function sendExplain(agentId: string, question: string, subject: ExplainSubject): void {
+  send({ cmd: "explain", agentId, question, subject });
 }
