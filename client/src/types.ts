@@ -41,7 +41,13 @@ export interface Step {
 }
 
 // A run plus the derived step count the relay's history snapshot includes (read-side only).
-export type RunSummary = Run & { step_count?: number };
+// Debug depth: a run may be a branch of another. `parent_run_id`/`branch_from_seq` are store-only
+// (control-plane) columns, never part of a frozen event — present on history rows for the tree.
+export type RunSummary = Run & {
+  step_count?: number;
+  parent_run_id?: string | null;
+  branch_from_seq?: number | null;
+};
 
 export type TraceEvent =
   | { kind: "run_start"; schema_version: number; run: Run }
@@ -155,6 +161,7 @@ export type ServerMessage =
   | { channel: "debug"; type: "paused"; runId: string; seq: number }
   | { channel: "debug"; type: "resumed"; runId: string; seqOffset: number }
   | { channel: "debug"; type: "boundary"; runId: string; seq: number; next: string[] }
+  | { channel: "debug"; type: "branched"; parentRunId: string; branchId: string; fromSeq: number }
   | { channel: "debug"; type: "error"; runId?: string; message: string }
   | GenMessage
   | EditMessage;
@@ -173,4 +180,5 @@ export type ClientCommand =
   | { cmd: "loadAgentFiles"; agentId: string }
   | { cmd: "loadAgentGraph"; agentId: string }
   | { cmd: "pauseRun"; runId: string }
-  | { cmd: "resumeRun"; runId: string };
+  | { cmd: "resumeRun"; runId: string }
+  | { cmd: "branchRun"; fromRunId: string; atSeq: number; editNode?: string; editedState?: Record<string, unknown> };

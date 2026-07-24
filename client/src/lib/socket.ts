@@ -76,7 +76,11 @@ function dispatch(msg: ServerMessage): void {
       // still arrive as normal "trace" events; "boundary" is informational (no state change).
       if (msg.type === "paused") s.setRunStatus(msg.runId, "paused");
       else if (msg.type === "resumed") s.setRunStatus(msg.runId, "running");
-      else if (msg.type === "error") s.addLog({ level: "stderr", text: `debug: ${msg.message}` });
+      else if (msg.type === "branched") {
+        // The new branch run is in the refreshed history; focus it and load its (copied) prefix.
+        s.selectRun(msg.branchId);
+        sendLoadRun(msg.branchId);
+      } else if (msg.type === "error") s.addLog({ level: "stderr", text: `debug: ${msg.message}` });
       break;
     }
   }
@@ -174,4 +178,14 @@ export function sendPauseRun(runId: string): void {
 }
 export function sendResumeRun(runId: string): void {
   send({ cmd: "resumeRun", runId });
+}
+// Fork a new run from `fromRunId` at step `atSeq` (its node boundary), optionally applying a
+// validated domain-field edit (editedState) attributed to editNode before continuing.
+export function sendBranchRun(
+  fromRunId: string,
+  atSeq: number,
+  editNode?: string,
+  editedState?: Record<string, unknown>,
+): void {
+  send({ cmd: "branchRun", fromRunId, atSeq, editNode, editedState });
 }
