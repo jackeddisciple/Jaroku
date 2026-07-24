@@ -34,15 +34,31 @@ export default {
           "0%": { opacity: "0", transform: "translateY(6px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
-        // The executing graph node glows — a subtle amber pulse, not a flash (doc §4.6).
+        // Idle "breathing" — the graph feels alive at rest. A ~1.8% scale over a slow loop;
+        // per-node delay (set inline) desyncs the field so it never reads as one mechanical pulse.
+        breathe: {
+          "0%, 100%": { transform: "scale(1)" },
+          "50%": { transform: "scale(1.018)" },
+        },
+        // The executing graph node glows — a real, layered amber glow (tight ring + soft spread)
+        // that swells and settles, over the persistent depth shadow. Not a flash (doc §4.6).
         "pulse-node": {
-          "0%, 100%": { boxShadow: "0 0 0 3px rgba(245,158,11,0.28)" },
-          "50%": { boxShadow: "0 0 0 6px rgba(245,158,11,0.10)" },
+          "0%, 100%": {
+            boxShadow:
+              "0 1px 2px rgba(0,0,0,0.6), 0 12px 30px -8px rgba(0,0,0,0.65), " +
+              "0 0 0 1px rgba(245,158,11,0.55), 0 0 16px 1px rgba(245,158,11,0.42), 0 0 44px 6px rgba(245,158,11,0.16)",
+          },
+          "50%": {
+            boxShadow:
+              "0 1px 2px rgba(0,0,0,0.6), 0 12px 30px -8px rgba(0,0,0,0.65), " +
+              "0 0 0 1px rgba(245,158,11,0.8), 0 0 24px 3px rgba(245,158,11,0.58), 0 0 64px 13px rgba(245,158,11,0.3)",
+          },
         },
       },
       animation: {
         "slide-in": "slide-in 120ms ease-out",
-        "pulse-node": "pulse-node 1.4s ease-in-out infinite",
+        breathe: "breathe 4.2s ease-in-out infinite",
+        "pulse-node": "pulse-node 2.4s ease-in-out infinite",
       },
     },
   },

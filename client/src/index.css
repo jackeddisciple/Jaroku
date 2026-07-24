@@ -43,8 +43,27 @@
     padding: 6px 12px 2px;
   }
 
-  /* React Flow chrome — recolour the built-in controls/minimap to the dark system and slow the
-     animated edge dash to a subtle, premium flow. */
+  /* ── Graph View canvas ──────────────────────────────────────────────────────
+     n8n-style: flat, near-black, with a faint dot grid (drawn by React Flow's Background).
+     Restraint plus precise organization reads as premium — no glow, no gradient, no grain. */
+  .graph-canvas {
+    position: relative;
+    /* deepest layer, darker than the panel-coloured nodes so solid cards separate cleanly */
+    background: #0e0e12;
+  }
+  .graph-canvas .react-flow,
+  .graph-canvas .react-flow__renderer,
+  .graph-canvas .react-flow__pane {
+    background: transparent;
+  }
+  /* Force the app's mono typeface on every graph label (React Flow otherwise falls back to a
+     system font that reads as inconsistent next to the rest of the app). */
+  .graph-canvas .react-flow__node,
+  .graph-canvas .react-flow__edgelabel-renderer {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  /* React Flow chrome — recolour the built-in controls/minimap to the dark system. */
   .react-flow__controls-button {
     background: #18181b;
     border: none;
