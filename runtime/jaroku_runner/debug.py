@@ -73,6 +73,9 @@ def run_with_checkpoints(
     tracer: Any,
     recursion_limit: int = 25,
     resume: bool = False,
+    fork_from_checkpoint: str | None = None,
+    edit_values: dict | None = None,
+    edit_node: str | None = None,
 ) -> str:
     """Drive a checkpointed twin of ``app`` one node at a time.
 
@@ -80,14 +83,19 @@ def run_with_checkpoints(
     and honoured at a node boundary (the checkpoint is durable; the caller must NOT emit run_end).
     Any agent exception propagates to the caller (recorded as the run's error).
 
-    ``resume=True`` continues an existing thread from its last durable checkpoint (input is None);
-    ``thread_id`` selects the checkpoint thread (== ``run_id`` for a fresh run or a resume of it).
+    Modes (mutually exclusive seeding):
+      * fresh (default) — seed with ``initial_state``.
+      * ``resume=True`` — continue an existing thread from its last durable checkpoint.
+      * ``fork_from_checkpoint`` — a branch: re-enter at that specific checkpoint. With
+        ``edit_values`` (a validated domain-field edit) applied via ``update_state`` first, the
+        branch diverges from the parent; without it, it re-runs forward unchanged. The caller runs
+        this against a COPY of the parent's checkpoint db (``run_id`` names the copy), so the
+        parent's checkpoints are never touched. ``thread_id`` stays the parent's thread.
     """
     builder = getattr(app, "builder", None)
     if builder is None:
-        # Exotic graph with no exposed builder — fall back to the original non-checkpointed path.
-        if resume:
-            raise RuntimeError("cannot resume: graph exposes no builder/checkpointer")
+        if resume or fork_from_checkpoint:
+            raise RuntimeError("cannot resume/branch: graph exposes no builder/checkpointer")
         _log("[jaroku] no graph.builder — running without checkpoints (pause/branch disabled)")
         app.invoke(initial_state, config={"callbacks": [tracer], "recursion_limit": recursion_limit})
         return "completed"
@@ -109,12 +117,35 @@ def run_with_checkpoints(
         # Off by default; purely a debug aid, like test_agent's JAROKU_DELAY_MS.
         step_delay_s = float(os.environ.get("JAROKU_STEP_DELAY_MS", "0") or "0") / 1000.0
 
-        # Fresh run seeds the graph with the initial state; a resume continues from the checkpoint.
-        graph_input: Any = None if resume else initial_state
+        # Seed the first stream call per mode. A no-edit fork re-enters AT the chosen checkpoint;
+        # an edited fork applies the validated edit (a new forked checkpoint) then continues from
+        # the thread head; fresh seeds initial_state; resume continues from the last checkpoint.
+        graph_input: Any = None if (resume or fork_from_checkpoint) else initial_state
+        first_config = config
+        if fork_from_checkpoint:
+            # Pinning a specific checkpoint requires the checkpoint namespace alongside the id
+            # (default ""); LangGraph reads configurable["checkpoint_ns"] on this path.
+            fork_cfg = {
+                "configurable": {
+                    "thread_id": thread_id,
+                    "checkpoint_ns": "",
+                    "checkpoint_id": fork_from_checkpoint,
+                },
+            }
+            if edit_values:
+                # Apply the validated edit as a fork descending from the chosen checkpoint, then
+                # continue from the resulting head (the returned config points at the new fork).
+                updated = graph.update_state(fork_cfg, edit_values, as_node=edit_node)
+                first_config = {**config, "configurable": {**updated["configurable"], "checkpoint_ns": ""}}
+            else:
+                first_config = {**config, **fork_cfg}
+
+        stream_config = first_config
         while True:
-            for _ in graph.stream(graph_input, config, stream_mode="updates"):
+            for _ in graph.stream(graph_input, stream_config, stream_mode="updates"):
                 pass
             graph_input = None  # subsequent iterations resume from the checkpoint
+            stream_config = config  # after the first call, always continue from the thread head
             if step_delay_s:
                 time.sleep(step_delay_s)
 

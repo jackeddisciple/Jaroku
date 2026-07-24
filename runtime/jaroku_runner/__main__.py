@@ -21,6 +21,7 @@ graph all surface as a run with `status: "error"` rather than as silence.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import uuid
@@ -64,19 +65,43 @@ def main(argv: list[str]) -> int:
     #  * JAROKU_RESUME_RUN_ID — resume an existing run's durable checkpoint (continue, don't restart).
     #  * JAROKU_RUN_ID        — server-minted id so it can address the run (e.g. to pause) before
     #                           run_start races; falls back to a locally-minted uuid otherwise.
-    #  * JAROKU_SEQ_OFFSET    — the run's current max seq + 1, so a resumed segment's steps continue
-    #                           the SAME run's ascending seq instead of restarting at 0.
+    #  * JAROKU_SEQ_OFFSET    — the run's current max seq + 1, so a resumed/branched segment's steps
+    #                           continue an ascending seq instead of restarting at 0.
+    #  * JAROKU_BRANCH_* — fork a NEW run from a parent's checkpoint (run against a copy of the
+    #    parent's checkpoint db, so the parent is never touched): CHECKPOINT_ID (fork point),
+    #    THREAD_ID (the parent's checkpoint thread), EDIT_FILE (validated domain-field edit, JSON),
+    #    EDIT_NODE (as_node for the update). JAROKU_RUN_ID is the new branch id.
     resume_run_id = os.environ.get("JAROKU_RESUME_RUN_ID") or None
-    run_id = resume_run_id or os.environ.get("JAROKU_RUN_ID") or str(uuid.uuid4())
-    seq_offset = int(os.environ.get("JAROKU_SEQ_OFFSET", "0") or "0")
+    branch_checkpoint = os.environ.get("JAROKU_BRANCH_CHECKPOINT_ID") or None
+    branch_thread = os.environ.get("JAROKU_BRANCH_THREAD_ID") or None
+    branching = branch_checkpoint is not None
     resuming = resume_run_id is not None
+
+    run_id = resume_run_id or os.environ.get("JAROKU_RUN_ID") or str(uuid.uuid4())
+    # The checkpoint thread: a branch continues the PARENT's thread (inside its copied db); a fresh
+    # run or resume uses its own run id as the thread.
+    thread_id = branch_thread if branching else run_id
+    seq_offset = int(os.environ.get("JAROKU_SEQ_OFFSET", "0") or "0")
+    # Both resume and branch continue a run that already exists in the store — no new run_start.
+    is_continuation = resuming or branching
+
+    edit_values: dict | None = None
+    edit_node: str | None = None
+    if branching:
+        edit_file = os.environ.get("JAROKU_BRANCH_EDIT_FILE")
+        if edit_file:
+            with open(edit_file, encoding="utf-8") as fh:
+                edit_values = json.load(fh)
+            edit_node = os.environ.get("JAROKU_BRANCH_EDIT_NODE") or None
 
     run = Run(id=run_id, agent_id=agent_id, provider=provider, model=model_name)
 
-    log(f"[jaroku] {'resume' if resuming else 'run'} {run.id} agent={agent_id} "
-        f"provider={provider} model={model_name} seq_offset={seq_offset}")
-    # A resumed run already exists in the store with its run_start; re-emitting it would duplicate.
-    if not resuming:
+    mode = "branch" if branching else "resume" if resuming else "run"
+    log(f"[jaroku] {mode} {run.id} agent={agent_id} provider={provider} model={model_name} "
+        f"seq_offset={seq_offset}")
+    # A resumed/branched run already exists in the store (with its run_start / copied prefix);
+    # re-emitting run_start would duplicate it.
+    if not is_continuation:
         emit_run_start(run)
 
     paused = False
@@ -87,8 +112,8 @@ def main(argv: list[str]) -> int:
         run.provider, run.model = provider, model_name
 
         app = module.build_graph(llm)
-        # Resume ignores the initial state (it continues from the checkpoint); a fresh run seeds it.
-        initial_state = None if resuming else module.build_initial_state(user_input)
+        # A continuation ignores the initial state (it continues from a checkpoint); fresh seeds it.
+        initial_state = None if is_continuation else module.build_initial_state(user_input)
 
         # Passing the compiled graph lets the tracer identify conditional edges exactly
         # (graph.builder.branches) instead of inferring them.
@@ -97,8 +122,10 @@ def main(argv: list[str]) -> int:
         # to the old app.invoke(...) — same nodes/callbacks/seq — but every node boundary now
         # leaves a durable checkpoint that pause/resume/branch build on.
         outcome = run_with_checkpoints(app, initial_state,
-                                       run_id=run.id, thread_id=run.id, tracer=tracer,
-                                       resume=resuming)
+                                       run_id=run.id, thread_id=thread_id, tracer=tracer,
+                                       resume=resuming,
+                                       fork_from_checkpoint=branch_checkpoint,
+                                       edit_values=edit_values, edit_node=edit_node)
         if outcome == "paused":
             paused = True
         else:
