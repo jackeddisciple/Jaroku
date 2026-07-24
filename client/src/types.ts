@@ -3,7 +3,10 @@
 
 export const SCHEMA_VERSION = 1;
 
-export type RunStatus = "running" | "completed" | "error";
+// "paused" is a store-only status (debug depth) the client displays; it is never carried by a
+// frozen trace event (a paused run simply has no run_end yet). The three event statuses mirror
+// schema/events.md; "paused" is control-plane, added here for rendering run history.
+export type RunStatus = "running" | "completed" | "error" | "paused";
 export type StepType = "llm_call" | "tool_call" | "state_update" | "router";
 
 export interface Run {
@@ -149,6 +152,10 @@ export type ServerMessage =
   | { channel: "agents"; agents: AgentSummary[] }
   | { channel: "agentFiles"; agentId: string; files: AgentFile[] }
   | { channel: "graph"; agentId: string; graph: AgentGraph | null }
+  | { channel: "debug"; type: "paused"; runId: string; seq: number }
+  | { channel: "debug"; type: "resumed"; runId: string; seqOffset: number }
+  | { channel: "debug"; type: "boundary"; runId: string; seq: number; next: string[] }
+  | { channel: "debug"; type: "error"; runId?: string; message: string }
   | GenMessage
   | EditMessage;
 
@@ -164,4 +171,6 @@ export type ClientCommand =
   | { cmd: "undoEdit"; agentId: string }
   | { cmd: "discardEdit"; proposalId: string }
   | { cmd: "loadAgentFiles"; agentId: string }
-  | { cmd: "loadAgentGraph"; agentId: string };
+  | { cmd: "loadAgentGraph"; agentId: string }
+  | { cmd: "pauseRun"; runId: string }
+  | { cmd: "resumeRun"; runId: string };

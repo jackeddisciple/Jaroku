@@ -3,6 +3,7 @@ import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import type { Step } from "../types.ts";
 import { fmtCost, fmtDuration, fmtTokens } from "../lib/format.ts";
 import { StepRow } from "./StepRow.tsx";
+import { PauseResumeControls } from "./PauseResumeControls.tsx";
 
 /** Re-render on an interval while `active` (drives the live "Working Xs" ticker). */
 function useTick(active: boolean, ms = 200): number {
@@ -54,8 +55,11 @@ export function TraceTimeline() {
               {run.provider}/{run.model} · {run.id.slice(0, 8)}
             </span>
             <span className="ml-auto flex items-center gap-4 text-[12px] tabular-nums">
+              <PauseResumeControls />
               {running ? (
                 <span className="text-run">Working {fmtDuration(elapsed)}</span>
+              ) : run.status === "paused" ? (
+                <span className="text-run">Paused</span>
               ) : (
                 <span className="text-muted">Ran in {fmtDuration(elapsed)}</span>
               )}

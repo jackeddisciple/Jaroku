@@ -6,6 +6,11 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { isTraceEvent, type TraceEvent } from "./types.ts";
 
+// Debug-depth control plane: the runner writes one `@@JAROKU_CTRL@@ {json}` line per node
+// boundary (and on pause) to STDERR — deliberately off stdout so the frozen NDJSON trace stream
+// stays pure. Must match jaroku_runner/debug.py:CTRL_SENTINEL.
+const CTRL_SENTINEL = "@@JAROKU_CTRL@@ ";
+
 export interface AgentRunOptions {
   runtimeDir: string; // cwd containing the uv project (runtime/)
   input?: string; // user input passed to the agent
@@ -20,6 +25,7 @@ export interface ProcessManagerEvents {
   event: [TraceEvent]; // a well-formed trace event
   parseError: [{ line: string; error: string }]; // a stdout line that wasn't valid JSON/event
   stderr: [string]; // human logs from the agent
+  control: [Record<string, unknown>]; // debug-depth boundary/paused control event (off stdout)
   exit: [{ code: number | null; signal: NodeJS.Signals | null }];
   spawnError: [Error];
 }
@@ -107,7 +113,18 @@ export class ProcessManager extends EventEmitter<ProcessManagerEvents> {
     const lines = this.stderrBuf.split("\n");
     this.stderrBuf = lines.pop() ?? "";
     for (const line of lines) {
-      if (line.trim()) this.emit("stderr", line);
+      if (!line.trim()) continue;
+      // Split the debug-depth control plane out of ordinary logs. A control line is JSON after
+      // the sentinel; a malformed one falls through to stderr rather than being lost.
+      if (line.startsWith(CTRL_SENTINEL)) {
+        try {
+          this.emit("control", JSON.parse(line.slice(CTRL_SENTINEL.length)) as Record<string, unknown>);
+          continue;
+        } catch {
+          /* fall through to stderr */
+        }
+      }
+      this.emit("stderr", line);
     }
   }
 
