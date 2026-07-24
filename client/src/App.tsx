@@ -3,7 +3,6 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { BuildPane } from "./components/BuildPane.tsx";
 import { RightPanel } from "./components/RightPanel.tsx";
-import { RunTrigger } from "./components/RunTrigger.tsx";
 import { StatusBar } from "./components/StatusBar.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { TopBar } from "./components/TopBar.tsx";
@@ -46,8 +45,7 @@ export function App() {
         </Panel>
       </PanelGroup>
 
-      {/* run bar spans the app so it stays reachable from any tab */}
-      <RunTrigger />
+      {/* the run control now lives inside the single composer (BuildPane) via its Chat/Test toggle */}
       <StatusBar />
 
       {/* command palette (Cmd+K) + global keyboard nav — mounted once, renders in a portal */}

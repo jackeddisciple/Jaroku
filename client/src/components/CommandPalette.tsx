@@ -11,7 +11,7 @@ import { Command } from "cmdk";
 import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { RUN_PROVIDERS, useUiStore } from "../store/uiStore.ts";
-import { inputKey } from "./RunTrigger.tsx";
+import { inputKey } from "../store/uiStore.ts";
 import { sendRun } from "../lib/socket.ts";
 
 function isTypingTarget(el: EventTarget | null): boolean {
