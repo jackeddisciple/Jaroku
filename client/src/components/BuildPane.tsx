@@ -10,10 +10,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { orderedFiles, useBuildStore } from "../store/buildStore.ts";
-import { threadFor, useChatStore, type ChatTurn, type GenTurn } from "../store/chatStore.ts";
+import { threadFor, useChatStore, type ChatTurn, type GenTurn, type ReplyTurn } from "../store/chatStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
-import { sendEdit, sendGenerate } from "../lib/socket.ts";
+import { sendBranchRun, sendEdit, sendExplain, sendGenerate } from "../lib/socket.ts";
+import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
 import { DiffCard } from "./DiffCard.tsx";
 
 // Mirrors runtime/tool_templates/catalog.json. The server validates the ids it receives
@@ -86,6 +87,16 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
   );
 }
 
+// "explain" answer — streaming prose with a caret while live (doc §4.3: everything streams).
+function ReplyTurnView({ turn }: { turn: ReplyTurn }) {
+  return (
+    <div className={`text-[13px] whitespace-pre-wrap break-words leading-relaxed ${turn.status === "error" ? "text-err" : "text-ink"}`}>
+      {turn.text}
+      {turn.status === "streaming" && <span className="text-faint animate-pulse">▋</span>}
+    </div>
+  );
+}
+
 function Turn({ turn, isLastGen }: { turn: ChatTurn; isLastGen: boolean }) {
   if (turn.role === "user") {
     return (
@@ -97,6 +108,7 @@ function Turn({ turn, isLastGen }: { turn: ChatTurn; isLastGen: boolean }) {
   }
   if (turn.kind === "gen") return <div className="pl-4"><GenTurnView turn={turn} isLive={isLastGen} /></div>;
   if (turn.kind === "proposal") return <div className="pl-4"><DiffCard turn={turn} /></div>;
+  if (turn.kind === "reply") return <div className="pl-4"><ReplyTurnView turn={turn} /></div>;
   return (
     <div className={`pl-4 text-[12px] ${turn.tone === "error" ? "text-err" : "text-faint"}`}>
       {turn.text}
@@ -139,6 +151,29 @@ export function BuildPane() {
   const busy = genStatus === "generating" || streamingAgentId !== null;
   const turns = threadFor({ threads, pending: pendingThread }, activeAgentId);
 
+  // Unified-composer context: what the user last selected. A graph node takes precedence for
+  // "explain"; otherwise the selected trace step is the context.
+  const selectedNodeId = useUiStore((s) => s.selectedNodeId);
+  const selectedStepId = useTraceStore((s) => s.selectedStepId);
+  const activeRunId = useTraceStore((s) => s.activeRunId);
+  const selectedStep = useTraceStore((s) =>
+    selectedStepId && activeRunId ? s.stepsByRun[activeRunId]?.[selectedStepId] : undefined,
+  );
+  const clearContext = () => {
+    useTraceStore.getState().selectStep(null);
+    useUiStore.getState().setSelectedNodeId(null);
+  };
+
+  // Route the CURRENT text by (intent + context) — recomputed live so the composer can show where
+  // ⌘↵ will send it. Pure heuristics; no per-keystroke network/LLM cost.
+  const intent = classifyIntent(text, { agentId: activeAgentId, step: selectedStep, nodeId: selectedNodeId });
+  const contextLabel = selectedNodeId
+    ? `node: ${selectedNodeId}`
+    : selectedStep
+      ? `step #${selectedStep.seq} · ${selectedStep.type}${selectedStep.error ? " · error" : ""}`
+      : null;
+  const routeVerb = { generate: "Generate", edit: "Propose", fix: "Fix", rerun: "Re-run", explain: "Explain" }[intent.kind];
+
   // Keep the newest turn in view — the conversation scrolls up like a terminal.
   useEffect(() => {
     const el = scrollRef.current;
@@ -148,13 +183,37 @@ export function BuildPane() {
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
+  // One dispatch point: route the message by (selection context + intent) into the EXISTING
+  // mechanisms. Only "explain" is a new path; edit/fix reuse sendEdit, rerun reuses branchRun.
   const submit = () => {
     const trimmed = text.trim();
     if (!connected || busy || !trimmed) return;
-    if (mode === "generate") {
-      sendGenerate(trimmed, selected, name.trim() || undefined);
-    } else if (activeAgentId) {
-      sendEdit(activeAgentId, trimmed);
+    switch (intent.kind) {
+      case "generate":
+        sendGenerate(trimmed, selected, name.trim() || undefined);
+        break;
+      case "edit":
+        if (activeAgentId) sendEdit(activeAgentId, trimmed);
+        break;
+      case "fix":
+        // The old One-Click Fix, now reached by typing "fix this" with a failed step selected.
+        if (activeAgentId) sendEdit(activeAgentId, `${fixPrompt(intent.step)}\n\nAlso from the developer: ${trimmed}`);
+        break;
+      case "rerun":
+        sendBranchRun(intent.step.run_id, intent.step.seq);
+        break;
+      case "explain": {
+        if (!activeAgentId) break;
+        const s = intent.subject;
+        sendExplain(
+          activeAgentId,
+          trimmed,
+          s.kind === "step"
+            ? { kind: "step", step: { name: s.step.name, type: s.step.type, seq: s.step.seq, error: s.step.error, input: s.step.input, output: s.step.output } }
+            : s,
+        );
+        break;
+      }
     }
     setText("");
   };
@@ -222,6 +281,22 @@ export function BuildPane() {
           </div>
         )}
 
+        {/* context chip (what's selected) + live routing hint — so the one composer is transparent */}
+        {(contextLabel || (text.trim() && activeAgentId)) && (
+          <div className="mb-2 flex items-center gap-2 text-[11px]">
+            {contextLabel && (
+              <span className="inline-flex items-center gap-1 bg-active rounded px-2 py-0.5 text-muted">
+                <span className="text-faint">▸</span>
+                {contextLabel}
+                <button onClick={clearContext} className="text-faint hover:text-ink ml-0.5" title="Clear context">
+                  ×
+                </button>
+              </span>
+            )}
+            {text.trim() && <span className="text-faint ml-auto">⌘↵ will {routeLabel(intent)}</span>}
+          </div>
+        )}
+
         <div className="flex items-end gap-2">
           <textarea
             ref={composerRef}
@@ -235,7 +310,9 @@ export function BuildPane() {
             placeholder={
               mode === "generate"
                 ? "Describe the agent you want — e.g. “a support agent that reads Gmail, looks up orders in Postgres, and drafts replies”"
-                : `Describe a change to ${agent?.name ?? "this agent"} — ⌘↵ to send`
+                : contextLabel
+                  ? "Ask about or act on the selection — e.g. “why did this fail?”, “fix this”, “re-run from here”"
+                  : `Describe a change to ${agent?.name ?? "this agent"} — ⌘↵ to send`
             }
             className="flex-1 resize-none bg-panel text-ink placeholder:text-faint rounded px-3 py-2.5 outline-none focus:ring-1 focus:ring-[#2a2a2e] disabled:opacity-50"
           />
@@ -244,7 +321,7 @@ export function BuildPane() {
             disabled={!connected || busy || !text.trim()}
             className="rounded px-4 py-2.5 bg-panel text-ink hover:bg-active disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            {busy ? "Working…" : mode === "generate" ? "Generate" : "Propose"}
+            {busy ? "Working…" : routeVerb}
           </button>
         </div>
       </div>

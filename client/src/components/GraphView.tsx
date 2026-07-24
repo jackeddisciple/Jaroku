@@ -38,6 +38,7 @@ import Dagre from "@dagrejs/dagre";
 import { useBuildStore, type GenFile } from "../store/buildStore.ts";
 import { useGraphStore } from "../store/graphStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
+import { useUiStore } from "../store/uiStore.ts";
 import { sendLoadAgentGraph } from "../lib/socket.ts";
 import { activeEdge, activeNodeId, latestStepForNode, stepEdge, stepNodeId, traversedEdges } from "../lib/traceGraphMap.ts";
 import type { AgentGraph, GraphNode as GNode, Step } from "../types.ts";
@@ -703,17 +704,23 @@ export function GraphView() {
         onNodeClick={(_, n) => {
           if (n.type === "resource") {
             // resource circles describe the agent — open the agent's inspector, no trace step.
-            setSelected({ id: (n.data as ResourceData).parent, type: "agent" });
+            const parent = (n.data as ResourceData).parent;
+            setSelected({ id: parent, type: "agent" });
+            useUiStore.getState().setSelectedNodeId(parent); // composer context: the agent node
             return;
           }
           const d = n.data as FlowData;
           const ntype = d.kind === "trigger" ? "start" : d.kind === "terminal" ? "end" : d.kind === "tool" ? "tool" : "agent";
           setSelected({ id: n.id, type: ntype });
+          useUiStore.getState().setSelectedNodeId(n.id); // composer context: this graph node
           triggerPulse(n.id); // transient connected-edge highlight + directional particle
           const step = latestStepForNode(n.id, bucket);
           selectStep(step ? step.id : null);
         }}
-        onPaneClick={() => setSelected(null)}
+        onPaneClick={() => {
+          setSelected(null);
+          useUiStore.getState().setSelectedNodeId(null);
+        }}
       >
         <Background variant={BackgroundVariant.Dots} gap={28} size={1} color="#242429" />
         <Controls showInteractive={false} className="!bg-panel/80 !backdrop-blur !border-0 !rounded-lg !shadow-lg" />

@@ -46,6 +46,13 @@ export type BranchRunCommand = {
   editNode?: string;
   editedState?: Record<string, unknown>;
 };
+// Unified composer "explain": a prose answer about a step / node / the agent, built from
+// in-context data — the one genuinely-new composer intent (no code change).
+export type ExplainSubject =
+  | { kind: "step"; step: { name: string; type: string; seq: number; error: string | null; input: unknown; output: unknown } }
+  | { kind: "node"; nodeId: string }
+  | { kind: "agent" };
+export type ExplainCommand = { cmd: "explain"; agentId: string; question: string; subject: ExplainSubject };
 export type ClientCommand =
   | RunCommand
   | LoadRunCommand
@@ -59,7 +66,8 @@ export type ClientCommand =
   | LoadAgentGraphCommand
   | PauseRunCommand
   | ResumeRunCommand
-  | BranchRunCommand;
+  | BranchRunCommand
+  | ExplainCommand;
 
 /** Commands the relay forwards to the app rather than answering locally. */
 export type ForwardedCommand =
@@ -71,7 +79,8 @@ export type ForwardedCommand =
   | DiscardEditCommand
   | PauseRunCommand
   | ResumeRunCommand
-  | BranchRunCommand;
+  | BranchRunCommand
+  | ExplainCommand;
 
 // Generation rides its own channel, deliberately parallel to "trace". It never enters the
 // trace store or the event schema — schema/events.md v1 stays frozen.
@@ -99,6 +108,14 @@ export type EditEvent =
 // Debug depth rides its own channel too, parallel to "trace"/"gen"/"edit". It carries only
 // control-plane facts (a run paused / resumed / a boundary reached / a control error); the run's
 // own steps still flow as normal schema-v1 trace events on the "trace" channel.
+// The "explain" reply rides its own channel too, parallel to trace/gen/edit/debug — a streaming
+// prose answer that never touches the trace store or the frozen event schema.
+export type ReplyEvent =
+  | { type: "started"; agentId: string; question: string }
+  | { type: "delta"; agentId: string; text: string }
+  | { type: "done"; agentId: string }
+  | { type: "error"; agentId: string; message: string };
+
 export type DebugEvent =
   | { type: "paused"; runId: string; seq: number }
   | { type: "resumed"; runId: string; seqOffset: number }
@@ -177,6 +194,8 @@ export class WsRelay {
             this.onCommand?.(msg);
           } else if (msg.cmd === "branchRun" && typeof msg.fromRunId === "string" && typeof msg.atSeq === "number") {
             this.onCommand?.(msg);
+          } else if (msg.cmd === "explain" && typeof msg.agentId === "string" && typeof msg.question === "string") {
+            this.onCommand?.(msg);
           } else if (msg.cmd === "listAgents") {
             this.sendTo(ws, { channel: "agents", agents: this.opts.listAgents?.() ?? [] });
           } else if (msg.cmd === "loadRun" && typeof msg.runId === "string") {
@@ -254,6 +273,15 @@ export class WsRelay {
   // design — the run's steps still arrive as normal schema-v1 events on "trace".
   broadcastDebug(event: DebugEvent): void {
     const msg = JSON.stringify({ channel: "debug", ...event });
+    for (const ws of this.clients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+    }
+  }
+
+  // Broadcast an "explain" reply event (unified composer). Separate channel by design — it never
+  // enters the trace store or the frozen event schema.
+  broadcastReply(event: ReplyEvent): void {
+    const msg = JSON.stringify({ channel: "reply", ...event });
     for (const ws of this.clients) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
     }

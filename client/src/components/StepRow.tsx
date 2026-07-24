@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { Step } from "../types.ts";
 import { fmtCost, fmtDuration, fmtTokens, typeBadge } from "../lib/format.ts";
 import { useTraceStore } from "../store/traceStore.ts";
+import { useUiStore } from "../store/uiStore.ts";
 
 export function StepRow({ step }: { step: Step }) {
   const open = useTraceStore((s) => s.expandedStepId === step.id);
@@ -37,6 +38,7 @@ export function StepRow({ step }: { step: Step }) {
         onClick={() => {
           selectStep(step.id);
           setExpandedStep(open ? null : step.id);
+          useUiStore.getState().setSelectedNodeId(null); // composer context is now this step
         }}
       >
         <span className="text-faint w-9 shrink-0 tabular-nums">#{step.seq}</span>

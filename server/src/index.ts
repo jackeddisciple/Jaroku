@@ -18,6 +18,8 @@ import { listAgents } from "./agents.ts";
 import { loadConnectors } from "./connectors.ts";
 import { isSafeAgentId, listProjectFiles } from "./projectFs.ts";
 import { introspectGraph, type GraphResult } from "./graphIntrospect.ts";
+import { streamExplain } from "./explainer.ts";
+import type { ExplainCommand } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -125,6 +127,7 @@ const relay = new WsRelay({
     else if (cmd.cmd === "pauseRun") pauseRun(cmd.runId);
     else if (cmd.cmd === "resumeRun") resumeRun(cmd.runId);
     else if (cmd.cmd === "branchRun") branchRun(cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState);
+    else if (cmd.cmd === "explain") explainAgent(cmd);
   },
 });
 
@@ -424,6 +427,60 @@ function branchRun(
   relay.broadcastHistory(); // surface the new branch run in history immediately
   relay.broadcastDebug({ type: "branched", parentRunId: fromRunId, branchId, fromSeq: seqHigh });
   manager.start({ runtimeDir: RUNTIME_DIR, agentId: parent.agent_id, env });
+}
+
+// --- explain (unified composer) --------------------------------------------
+// A prose answer about a step / node / the agent, streamed to the conversation. Reuses only
+// already-available context (the step the client selected, the agent's on-disk prompt/tools);
+// never a code change, never on the trace stream.
+let explaining = false;
+
+function truncateJson(v: unknown, cap = 800): string {
+  let s: string;
+  try {
+    s = JSON.stringify(v, null, 2) ?? String(v);
+  } catch {
+    s = String(v);
+  }
+  return s.length > cap ? `${s.slice(0, cap)}\n…(truncated)` : s;
+}
+
+function buildExplainContext(cmd: ExplainCommand): string {
+  const { agentId, subject } = cmd;
+  if (subject.kind === "step") {
+    const st = subject.step;
+    const parts = [
+      `Agent: ${agentId}`,
+      `Trace step #${st.seq}: "${st.name}" (${st.type}), status: ${st.error ? "FAILED" : "ok"}.`,
+    ];
+    if (st.error) parts.push(`Error:\n${st.error}`);
+    parts.push(`Input:\n${truncateJson(st.input)}`, `Output:\n${truncateJson(st.output)}`);
+    return parts.join("\n\n");
+  }
+  // node / agent — ground in the agent's on-disk prompt + tools (already served to the client too).
+  const files = agentProjectFiles(agentId) as { path: string; content: string }[];
+  const prompt = files.find((f) => /prompt/i.test(f.path) && f.path.endsWith(".md"))?.content ?? "(no system prompt file)";
+  const toolFiles = files.filter((f) => /(^|\/)tools\//.test(f.path) && f.path.endsWith(".py") && !f.path.endsWith("__init__.py"));
+  const tools = toolFiles.length
+    ? toolFiles.map((f) => `- ${f.path}:\n${f.content.slice(0, 500)}`).join("\n")
+    : "(no bespoke tools)";
+  const head = subject.kind === "node" ? `Graph node: "${subject.nodeId}" of agent ${agentId}.` : `Agent: ${agentId}.`;
+  return [head, `System prompt:\n${prompt.slice(0, 1500)}`, `Tools:\n${tools}`].join("\n\n");
+}
+
+function explainAgent(cmd: ExplainCommand): void {
+  if (explaining) {
+    relay.broadcastReply({ type: "error", agentId: cmd.agentId, message: "already answering — one at a time" });
+    return;
+  }
+  explaining = true;
+  relay.broadcastReply({ type: "started", agentId: cmd.agentId, question: cmd.question });
+  const context = buildExplainContext(cmd);
+  void streamExplain(context, cmd.question, {
+    onDelta: (text) => relay.broadcastReply({ type: "delta", agentId: cmd.agentId, text }),
+    onDone: () => { explaining = false; relay.broadcastReply({ type: "done", agentId: cmd.agentId }); },
+    onError: (message) => { explaining = false; relay.broadcastReply({ type: "error", agentId: cmd.agentId, message }); },
+  });
 }
 
 // Kick off one run on startup unless suppressed (set JAROKU_NO_AUTORUN=1 to just serve).

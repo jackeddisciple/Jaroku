@@ -163,6 +163,10 @@ export type ServerMessage =
   | { channel: "debug"; type: "boundary"; runId: string; seq: number; next: string[] }
   | { channel: "debug"; type: "branched"; parentRunId: string; branchId: string; fromSeq: number }
   | { channel: "debug"; type: "error"; runId?: string; message: string }
+  | { channel: "reply"; type: "started"; agentId: string; question: string }
+  | { channel: "reply"; type: "delta"; agentId: string; text: string }
+  | { channel: "reply"; type: "done"; agentId: string }
+  | { channel: "reply"; type: "error"; agentId: string; message: string }
   | GenMessage
   | EditMessage;
 
@@ -181,4 +185,12 @@ export type ClientCommand =
   | { cmd: "loadAgentGraph"; agentId: string }
   | { cmd: "pauseRun"; runId: string }
   | { cmd: "resumeRun"; runId: string }
-  | { cmd: "branchRun"; fromRunId: string; atSeq: number; editNode?: string; editedState?: Record<string, unknown> };
+  | { cmd: "branchRun"; fromRunId: string; atSeq: number; editNode?: string; editedState?: Record<string, unknown> }
+  | { cmd: "explain"; agentId: string; question: string; subject: ExplainSubject };
+
+// Unified composer "explain" subject — what the question is about, built from already-in-memory
+// context (a trace step, a graph node, or the agent generally). No new data is fetched.
+export type ExplainSubject =
+  | { kind: "step"; step: { name: string; type: string; seq: number; error: string | null; input: unknown; output: unknown } }
+  | { kind: "node"; nodeId: string }
+  | { kind: "agent" };

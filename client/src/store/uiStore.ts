@@ -33,6 +33,12 @@ interface UiState {
   chatPrefillNonce: number;
   prefillChat: (text: string) => void;
 
+  // Unified composer context: the graph node the user last clicked (trace-step selection already
+  // lives globally in traceStore). Lifted here so the one composer can route "explain this" to the
+  // selected node. Cleared on a pane click or when a trace step becomes the active context.
+  selectedNodeId: string | null;
+  setSelectedNodeId: (id: string | null) => void;
+
   // Run config, lifted from RunTrigger so the palette can run and switch provider.
   provider: string;
   model: string;
@@ -58,6 +64,9 @@ export const useUiStore = create<UiState>((set) => ({
   chatPrefill: "",
   chatPrefillNonce: 0,
   prefillChat: (text) => set((s) => ({ chatPrefill: text, chatPrefillNonce: s.chatPrefillNonce + 1 })),
+
+  selectedNodeId: null,
+  setSelectedNodeId: (selectedNodeId) => set({ selectedNodeId }),
 
   provider: "fake",
   model: "fake-dry-run",
