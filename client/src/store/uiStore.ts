@@ -7,6 +7,16 @@ import { create } from "zustand";
 
 export type RightTab = "graph" | "trace" | "evals" | "code";
 
+// The single composer has two send modes: "chat" talks to Jaroku (generate/edit/explain/…),
+// "test" sends the agent's runtime input (a Run). Lifted here so it survives re-renders and the
+// R-rerun / palette paths can read it.
+export type ComposerMode = "chat" | "test";
+
+// Test-input persistence (doc §4.7.6): the last input per agent is remembered so R re-runs it
+// instantly and the palette's re-run reads it. Keyed by agent, in localStorage — the single
+// source of truth for "the last input sent in Test mode" (no component owns it).
+export const inputKey = (agentId: string | null): string => `jaroku.input.${agentId ?? "_"}`;
+
 export const RUN_PROVIDERS = [
   { id: "fake", label: "Dry run (free)", models: ["fake-dry-run"] },
   { id: "anthropic", label: "Claude", models: ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8"] },
@@ -32,6 +42,10 @@ interface UiState {
   chatPrefill: string;
   chatPrefillNonce: number;
   prefillChat: (text: string) => void;
+
+  // Which send mode the single composer is in.
+  composerMode: ComposerMode;
+  setComposerMode: (m: ComposerMode) => void;
 
   // Unified composer context: the graph node the user last clicked (trace-step selection already
   // lives globally in traceStore). Lifted here so the one composer can route "explain this" to the
@@ -64,6 +78,9 @@ export const useUiStore = create<UiState>((set) => ({
   chatPrefill: "",
   chatPrefillNonce: 0,
   prefillChat: (text) => set((s) => ({ chatPrefill: text, chatPrefillNonce: s.chatPrefillNonce + 1 })),
+
+  composerMode: "chat",
+  setComposerMode: (composerMode) => set({ composerMode }),
 
   selectedNodeId: null,
   setSelectedNodeId: (selectedNodeId) => set({ selectedNodeId }),

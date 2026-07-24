@@ -8,14 +8,16 @@
 // prompt: the reviewed templates are copied in verbatim, so which ones are included is a
 // decision the user makes, not a guess the generation re-rolls each time.
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { orderedFiles, useBuildStore } from "../store/buildStore.ts";
 import { threadFor, useChatStore, type ChatTurn, type GenTurn, type ReplyTurn } from "../store/chatStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
-import { useUiStore } from "../store/uiStore.ts";
-import { sendBranchRun, sendEdit, sendExplain, sendGenerate } from "../lib/socket.ts";
+import { inputKey, RUN_PROVIDERS, useUiStore } from "../store/uiStore.ts";
+import { sendBranchRun, sendEdit, sendExplain, sendGenerate, sendRun } from "../lib/socket.ts";
 import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
 import { DiffCard } from "./DiffCard.tsx";
+import { ArrowUpIcon, ChevronDownIcon, MicIcon } from "./composerIcons.tsx";
+import { useVoiceInput } from "../lib/useVoiceInput.ts";
 
 // Mirrors runtime/tool_templates/catalog.json. The server validates the ids it receives
 // against the catalog, so a stale entry here can never inject an unreviewed connector.
@@ -116,8 +118,84 @@ function Turn({ turn, isLastGen }: { turn: ChatTurn; isLastGen: boolean }) {
   );
 }
 
+// Bare model-selector: just a label + chevron, opening a small popover of RUN_PROVIDERS → models.
+// It sets the run provider/model (Test mode / the palette); no border or background of its own.
+function ModelSelector({
+  provider,
+  model,
+  setProvider,
+  setModel,
+}: {
+  provider: string;
+  model: string;
+  setProvider: (id: string) => void;
+  setModel: (m: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const label = provider === "fake" ? "Dry run (free)" : model;
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        title="Run model"
+        className="flex items-center gap-1 text-[12px] text-muted hover:text-ink transition-colors"
+      >
+        {label}
+        <ChevronDownIcon size={13} />
+      </button>
+      {open && (
+        <div className="absolute bottom-full mb-2 left-0 z-30 min-w-[190px] rounded-lg bg-panel border border-[#2a2a30] shadow-2xl py-1">
+          {RUN_PROVIDERS.map((p) => (
+            <div key={p.id}>
+              <div className="px-3 pt-1.5 pb-0.5 text-[10px] uppercase tracking-wide text-faint">{p.label}</div>
+              {p.models.map((m) => {
+                const active = provider === p.id && model === m;
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => {
+                      setProvider(p.id); // resets model to the provider's default…
+                      setModel(m); // …then pin the chosen one
+                      setOpen(false);
+                    }}
+                    className={`w-full text-left px-3 py-1 text-[12px] transition-colors ${
+                      active ? "text-ink bg-active" : "text-muted hover:text-ink hover:bg-active/40"
+                    }`}
+                  >
+                    {m}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function BuildPane() {
-  const [text, setText] = useState("");
+  // One composer, two send modes. Each mode keeps its OWN draft so toggling never clobbers text
+  // (a half-typed chat message can't be sent as agent input, and vice-versa). `text`/`setText`
+  // are the active mode's draft, so the rest of the component is unchanged.
+  const composerMode = useUiStore((s) => s.composerMode);
+  const setComposerMode = useUiStore((s) => s.setComposerMode);
+  const [chatDraft, setChatDraft] = useState("");
+  const [testDraft, setTestDraft] = useState("");
+  const text = composerMode === "test" ? testDraft : chatDraft;
+  const setText = composerMode === "test" ? setTestDraft : setChatDraft;
+
   const [name, setName] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -125,18 +203,25 @@ export function BuildPane() {
   const focusChatNonce = useUiStore((s) => s.focusChatNonce);
   const chatPrefillNonce = useUiStore((s) => s.chatPrefillNonce);
 
+  // Run config (Test mode) — lives in uiStore so the palette shares it.
+  const provider = useUiStore((s) => s.provider);
+  const model = useUiStore((s) => s.model);
+  const setProvider = useUiStore((s) => s.setProvider);
+  const setModel = useUiStore((s) => s.setModel);
+
   // Cmd+/ (and the palette) focus the composer.
   useEffect(() => {
     if (focusChatNonce > 0) composerRef.current?.focus();
   }, [focusChatNonce]);
 
-  // One-Click Fix pre-fills the composer, then focuses it so the user can review and send.
+  // One-Click Fix pre-fills the composer (Chat mode), then focuses it so the user reviews and sends.
   useEffect(() => {
     if (chatPrefillNonce > 0) {
-      setText(useUiStore.getState().chatPrefill);
+      setComposerMode("chat");
+      setChatDraft(useUiStore.getState().chatPrefill);
       composerRef.current?.focus();
     }
-  }, [chatPrefillNonce]);
+  }, [chatPrefillNonce, setComposerMode]);
 
   const connected = useTraceStore((s) => s.connection === "open");
   const genStatus = useBuildStore((s) => s.status);
@@ -172,7 +257,6 @@ export function BuildPane() {
     : selectedStep
       ? `step #${selectedStep.seq} · ${selectedStep.type}${selectedStep.error ? " · error" : ""}`
       : null;
-  const routeVerb = { generate: "Generate", edit: "Propose", fix: "Fix", rerun: "Re-run", explain: "Explain" }[intent.kind];
 
   // Keep the newest turn in view — the conversation scrolls up like a terminal.
   useEffect(() => {
@@ -183,11 +267,72 @@ export function BuildPane() {
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
+  // --- Test mode (runs) + voice, folded in from the old run-bar ------------------
+  const canRun = connected && Boolean(activeAgentId) && (agent?.runnable ?? false);
+
+  // Restore the remembered test input when the agent changes (the persisted last-test-input).
+  useEffect(() => {
+    setTestDraft(localStorage.getItem(inputKey(activeAgentId)) ?? "");
+  }, [activeAgentId]);
+
+  // R re-runs the last test input (doc §4.5) when focus isn't in a field — reads localStorage, so
+  // it's independent of the composer's live draft and works from any mode.
+  const rerunLast = useCallback(() => {
+    if (!canRun) return;
+    const last = localStorage.getItem(inputKey(activeAgentId)) ?? "";
+    sendRun(last.trim(), provider, model, activeAgentId ?? undefined);
+  }, [canRun, activeAgentId, provider, model]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "r" && e.key !== "R") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      e.preventDefault();
+      rerunLast();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [rerunLast]);
+
+  // Voice input → append the transcript at the caret of the active draft (never wipes typed text).
+  const voiceBase = useRef<{ base: string; caret: number }>({ base: "", caret: 0 });
+  const voice = useVoiceInput({
+    onStart: () => {
+      const el = composerRef.current;
+      voiceBase.current = { base: text, caret: el?.selectionStart ?? text.length };
+    },
+    onTranscript: (t) => {
+      const { base, caret } = voiceBase.current;
+      setText(base.slice(0, caret) + t + base.slice(caret));
+    },
+  });
+
+  // Auto-grow the textarea with content (min ~2 lines; generous cap then scroll — never clips).
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, [text]);
+
   // One dispatch point: route the message by (selection context + intent) into the EXISTING
   // mechanisms. Only "explain" is a new path; edit/fix reuse sendEdit, rerun reuses branchRun.
   const submit = () => {
     const trimmed = text.trim();
-    if (!connected || busy || !trimmed) return;
+    if (!connected || !trimmed) return;
+
+    // Test mode: the text is the agent's runtime input (a Run), NOT an instruction to Jaroku.
+    // Persist it as the last-test-input (what R re-run / eval promotion read) and keep the draft.
+    if (composerMode === "test") {
+      if (!canRun) return;
+      localStorage.setItem(inputKey(activeAgentId), testDraft);
+      sendRun(trimmed, provider, model, activeAgentId ?? undefined);
+      return;
+    }
+
+    // Chat mode: talk to Jaroku — route by intent + context.
+    if (busy) return;
     switch (intent.kind) {
       case "generate":
         sendGenerate(trimmed, selected, name.trim() || undefined);
@@ -215,7 +360,7 @@ export function BuildPane() {
         break;
       }
     }
-    setText("");
+    setChatDraft("");
   };
 
   const lastGenId = [...turns].reverse().find((t) => t.role === "jaroku" && t.kind === "gen")?.id;
@@ -249,9 +394,10 @@ export function BuildPane() {
         ))}
       </div>
 
-      {/* composer */}
+      {/* composer — ONE input; the Chat/Test toggle folds in what used to be the run-bar */}
       <div className="px-6 pb-4 pt-2 shrink-0">
-        {mode === "generate" && (
+        {/* connectors + name — new-agent generation only (Chat mode, no agent selected) */}
+        {composerMode === "chat" && mode === "generate" && (
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <span className="text-[11px] text-faint mr-1">Connectors</span>
             {CONNECTORS.map((c) => {
@@ -281,8 +427,8 @@ export function BuildPane() {
           </div>
         )}
 
-        {/* context chip (what's selected) + live routing hint — so the one composer is transparent */}
-        {(contextLabel || (text.trim() && activeAgentId)) && (
+        {/* context chip + live routing hint (Chat mode) — so the one composer stays transparent */}
+        {composerMode === "chat" && (contextLabel || (text.trim() && activeAgentId)) && (
           <div className="mb-2 flex items-center gap-2 text-[11px]">
             {contextLabel && (
               <span className="inline-flex items-center gap-1 bg-active rounded px-2 py-0.5 text-muted">
@@ -297,32 +443,85 @@ export function BuildPane() {
           </div>
         )}
 
-        <div className="flex items-end gap-2">
+        {/* the card — textarea sits directly in it; only the toggle + send read as solid elements */}
+        <div className="rounded-2xl bg-panel border border-[#2a2a30]" style={{ padding: "14px 16px 12px" }}>
           <textarea
             ref={composerRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                submit();
+              }
             }}
-            disabled={busy}
-            rows={3}
+            rows={2}
             placeholder={
-              mode === "generate"
-                ? "Describe the agent you want — e.g. “a support agent that reads Gmail, looks up orders in Postgres, and drafts replies”"
-                : contextLabel
-                  ? "Ask about or act on the selection — e.g. “why did this fail?”, “fix this”, “re-run from here”"
-                  : `Describe a change to ${agent?.name ?? "this agent"} — ⌘↵ to send`
+              composerMode === "test"
+                ? `Run ${agent?.name ?? "the agent"} on… — ⌘↵ to run`
+                : mode === "generate"
+                  ? "Describe the agent you want — e.g. “a support agent that reads Gmail, looks up orders in Postgres, and drafts replies”"
+                  : contextLabel
+                    ? "Ask about or act on the selection — e.g. “why did this fail?”, “fix this”, “re-run from here”"
+                    : `Describe a change to ${agent?.name ?? "this agent"} — ⌘↵ to send`
             }
-            className="flex-1 resize-none bg-panel text-ink placeholder:text-faint rounded px-3 py-2.5 outline-none focus:ring-1 focus:ring-[#2a2a2e] disabled:opacity-50"
+            className="w-full resize-none bg-transparent text-ink placeholder:text-muted outline-none leading-[1.5]"
+            style={{ fontSize: "14.5px", minHeight: "44px", maxHeight: "200px", overflowY: "auto" }}
           />
-          <button
-            onClick={submit}
-            disabled={!connected || busy || !text.trim()}
-            className="rounded px-4 py-2.5 bg-panel text-ink hover:bg-active disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            {busy ? "Working…" : routeVerb}
-          </button>
+
+          <div className="mt-3 flex items-center justify-between">
+            {/* left — bare mic + model selector, no boxes */}
+            <div className="flex items-center gap-3.5">
+              <button
+                type="button"
+                onClick={voice.toggle}
+                disabled={!voice.supported}
+                title={
+                  voice.supported
+                    ? voice.listening
+                      ? "Stop voice input"
+                      : "Voice input"
+                    : "Voice input isn't supported in this browser"
+                }
+                className={`transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                  voice.listening ? "text-ink animate-pulse" : "text-muted hover:text-ink"
+                }`}
+              >
+                <MicIcon size={17} />
+              </button>
+              <ModelSelector provider={provider} model={model} setProvider={setProvider} setModel={setModel} />
+            </div>
+
+            {/* right — the only two solid elements: mode toggle + send circle */}
+            <div className="flex items-center gap-2.5">
+              <div className="flex items-center rounded-[20px] bg-active p-0.5">
+                {(["chat", "test"] as const).map((m) => {
+                  const active = composerMode === m;
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setComposerMode(m)}
+                      className={`rounded-[16px] text-[12px] transition-colors ${active ? "" : "text-muted hover:text-ink"}`}
+                      style={{ padding: "5px 11px", background: active ? "#e4e4e7" : "transparent", color: active ? "#0d0d0f" : undefined }}
+                    >
+                      {m === "chat" ? "Chat" : "Test"}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                onClick={submit}
+                disabled={!connected || !text.trim() || (composerMode === "test" ? !canRun : busy)}
+                title={composerMode === "test" ? "Run the agent on this input" : "Send"}
+                className="flex items-center justify-center rounded-full transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
+                style={{ width: 30, height: 30, background: "#e4e4e7", color: "#0d0d0f" }}
+              >
+                <ArrowUpIcon size={15} />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
