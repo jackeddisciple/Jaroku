@@ -8,6 +8,7 @@ dependencies = [
     "langchain-core>=0.3.0",
     "langchain-anthropic>=0.3.0",
     "langchain-openai>=0.2.0",
+    "langgraph-checkpoint-sqlite>=2.0.0",
 ]
 
 # Connector SDKs. Kept out of the base install so the trace pipeline and the dry-run path

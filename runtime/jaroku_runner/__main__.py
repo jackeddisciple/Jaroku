@@ -29,6 +29,7 @@ from jaroku_interceptor import JarokuTracer, Run, load_env
 from jaroku_interceptor.schema import emit_run_end, emit_run_start, now_iso
 
 from .contract import ContractError, load_agent, tools_of
+from .debug import run_with_checkpoints
 from .guard import install_stdout_guard
 from .models import build_model, resolve_model_name
 
@@ -77,8 +78,12 @@ def main(argv: list[str]) -> int:
         # Passing the compiled graph lets the tracer identify conditional edges exactly
         # (graph.builder.branches) instead of inferring them.
         tracer = JarokuTracer(run, graph=app)
-        app.invoke(initial_state,
-                   config={"callbacks": [tracer], "recursion_limit": 25})
+        # Recompile a checkpointed twin and drive it node-by-node. The emitted trace is identical
+        # to the old app.invoke(...) — same nodes/callbacks/seq — but every node boundary now
+        # leaves a durable checkpoint that pause/resume/branch build on (checkpoints are
+        # control-plane, never on the frozen stdout trace stream).
+        run_with_checkpoints(app, initial_state,
+                             run_id=run.id, thread_id=run.id, tracer=tracer)
         run.status = "completed"
     except ContractError as exc:
         run.status = "error"

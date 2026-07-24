@@ -32,3 +32,6 @@ runtime/agents/*
 
 # Private product documentation — kept local, not published
 jaroku-product-documentation*.md
+
+# Debug-depth checkpoints (durable LangGraph checkpoints per run; control-plane, not tracked)
+runtime/.checkpoints/

@@ -102,9 +102,14 @@ def _branch_index(graph: Any) -> Optional[dict[tuple[str, str], dict]]:
 
 
 class JarokuTracer(BaseCallbackHandler):
-    def __init__(self, run: Run, graph: Any = None):
+    def __init__(self, run: Run, graph: Any = None, seq_start: int = 0):
         self.run = run
-        self._seq = 0
+        # `seq` is monotonic per run starting at 0 for a fresh run. A resumed/branched run is a
+        # NEW subprocess (new tracer) continuing the SAME run's timeline, so it must start where
+        # the prior segment left off — the server passes the run's current max seq + 1. The
+        # emitted Step shape is unchanged; only the starting integer differs, preserving the
+        # frozen schema's "seq ascending 0..N per run" guarantee across a pause/resume boundary.
+        self._seq = seq_start
         self._pending: dict[UUID, _Pending] = {}
         self._runid_to_stepid: dict[UUID, str] = {}
         # None => no graph supplied; fall back to the heuristic + end-time validation.
