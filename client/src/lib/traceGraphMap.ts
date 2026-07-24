@@ -86,6 +86,36 @@ export function activeEdge(byId: ById | undefined): { source: string; target: st
   return undefined;
 }
 
+/** The distinct graph edges the run ACTUALLY traversed, in first-seen order. Built purely from
+ *  the existing mapping primitives — no new direction logic:
+ *    • router steps contribute their taken branch (stepEdge), which is the only way the →__end__
+ *      hop is observable (END has no step of its own), and
+ *    • consecutive steps whose enclosing node differs contribute that source→target hop.
+ *  Used to drive the click micro-interaction's directional pulse (source→target is the real
+ *  direction data flowed along each edge). Empty when nothing has executed. */
+export function traversedEdges(byId: ById | undefined): Array<{ source: string; target: string }> {
+  if (!byId) return [];
+  const steps = bySeq(byId);
+  const seen = new Set<string>();
+  const out: Array<{ source: string; target: string }> = [];
+  const add = (source: string, target: string) => {
+    const key = `${source}->${target}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ source, target });
+  };
+  let prev: string | undefined;
+  for (const s of steps) {
+    const re = stepEdge(s, byId); // router branch taken (captures →__end__)
+    if (re) add(re.source, re.target);
+    const node = stepNodeId(s, byId);
+    if (!node) continue;
+    if (prev && prev !== node) add(prev, node);
+    prev = node;
+  }
+  return out;
+}
+
 /** The latest (highest-seq) step attributed to a given node — used when clicking a node to
  *  select its corresponding trace step. */
 export function latestStepForNode(nodeId: string, byId: ById | undefined): Step | undefined {
