@@ -18,6 +18,7 @@ import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
 import { DiffCard } from "./DiffCard.tsx";
 import { ArrowUpIcon, ChevronDownIcon, MicIcon } from "./composerIcons.tsx";
 import { useVoiceInput } from "../lib/useVoiceInput.ts";
+import { VoiceWaveform } from "./VoiceWaveform.tsx";
 
 // Mirrors runtime/tool_templates/catalog.json. The server validates the ids it receives
 // against the catalog, so a stale entry here can never inject an unreviewed connector.
@@ -296,17 +297,25 @@ export function BuildPane() {
   }, [rerunLast]);
 
   // Voice input → append the transcript at the caret of the active draft (never wipes typed text).
+  // While recording, the input slot shows a live waveform + a caption preview of the transcript;
+  // `recordHeight` pins that view to the textarea's height at record-start so nothing jumps.
+  const [liveTranscript, setLiveTranscript] = useState("");
+  const [recordHeight, setRecordHeight] = useState(48);
   const voiceBase = useRef<{ base: string; caret: number }>({ base: "", caret: 0 });
   const voice = useVoiceInput({
     onStart: () => {
       const el = composerRef.current;
       voiceBase.current = { base: text, caret: el?.selectionStart ?? text.length };
+      setRecordHeight(el?.offsetHeight ?? 48);
+      setLiveTranscript("");
     },
     onTranscript: (t) => {
       const { base, caret } = voiceBase.current;
       setText(base.slice(0, caret) + t + base.slice(caret));
+      setLiveTranscript(t);
     },
   });
+  const showWave = voice.listening && voice.hasAnalyser;
 
   // Auto-grow the textarea with content (min ~2 lines; generous cap then scroll — never clips).
   useEffect(() => {
@@ -445,29 +454,54 @@ export function BuildPane() {
 
         {/* the card — textarea sits directly in it; only the toggle + send read as solid elements */}
         <div className="rounded-2xl bg-panel border border-[#2a2a30]" style={{ padding: "14px 16px 12px" }}>
-          <textarea
-            ref={composerRef}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                submit();
+          {/* input slot: the textarea and the live waveform crossfade in place (~200ms) so the
+              transition from typing to recording is smooth and the card doesn't jump. */}
+          <div className="relative" style={{ height: showWave ? recordHeight : undefined }}>
+            <textarea
+              ref={composerRef}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              rows={2}
+              placeholder={
+                composerMode === "test"
+                  ? `Run ${agent?.name ?? "the agent"} on… — ⌘↵ to run`
+                  : mode === "generate"
+                    ? "Describe the agent you want — e.g. “a support agent that reads Gmail, looks up orders in Postgres, and drafts replies”"
+                    : contextLabel
+                      ? "Ask about or act on the selection — e.g. “why did this fail?”, “fix this”, “re-run from here”"
+                      : `Describe a change to ${agent?.name ?? "this agent"} — ⌘↵ to send`
               }
-            }}
-            rows={2}
-            placeholder={
-              composerMode === "test"
-                ? `Run ${agent?.name ?? "the agent"} on… — ⌘↵ to run`
-                : mode === "generate"
-                  ? "Describe the agent you want — e.g. “a support agent that reads Gmail, looks up orders in Postgres, and drafts replies”"
-                  : contextLabel
-                    ? "Ask about or act on the selection — e.g. “why did this fail?”, “fix this”, “re-run from here”"
-                    : `Describe a change to ${agent?.name ?? "this agent"} — ⌘↵ to send`
-            }
-            className="w-full resize-none bg-transparent text-ink placeholder:text-muted outline-none leading-[1.5]"
-            style={{ fontSize: "14.5px", minHeight: "44px", maxHeight: "200px", overflowY: "auto" }}
-          />
+              className="w-full resize-none bg-transparent text-ink placeholder:text-muted outline-none leading-[1.5] transition-opacity duration-200"
+              style={{
+                fontSize: "14.5px",
+                minHeight: "44px",
+                maxHeight: "200px",
+                overflowY: "auto",
+                opacity: showWave ? 0 : 1,
+                pointerEvents: showWave ? "none" : "auto",
+                position: showWave ? "absolute" : "relative",
+                inset: showWave ? 0 : undefined,
+              }}
+            />
+            <div
+              className="absolute inset-0 transition-opacity duration-200"
+              style={{ opacity: showWave ? 1 : 0, pointerEvents: "none" }}
+              aria-hidden={!showWave}
+            >
+              <VoiceWaveform
+                analyserRef={voice.analyserRef}
+                active={showWave}
+                transcript={liveTranscript}
+                height={recordHeight}
+              />
+            </div>
+          </div>
 
           <div className="mt-3 flex items-center justify-between">
             {/* left — bare mic + model selector, no boxes */}
@@ -484,7 +518,7 @@ export function BuildPane() {
                     : "Voice input isn't supported in this browser"
                 }
                 className={`transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
-                  voice.listening ? "text-ink animate-pulse" : "text-muted hover:text-ink"
+                  voice.listening ? "text-run animate-pulse" : "text-muted hover:text-ink"
                 }`}
               >
                 <MicIcon size={17} />
