@@ -22,12 +22,17 @@ interface EvalState {
   selectedDatasetId: string | null;
   /** Last control-plane error, surfaced inline rather than swallowed. */
   error: string | null;
+  /** Transient confirmation for a one-click promotion — the composer shows it briefly so
+   *  the user knows WHERE the input landed (and whether it was already there). */
+  promoted: { datasetName: string; duplicate: boolean; at: number } | null;
 
   setDatasets: (datasets: Dataset[]) => void;
   setExamples: (datasetId: string, examples: DatasetExample[]) => void;
   removeDataset: (datasetId: string) => void;
   selectDataset: (id: string | null) => void;
   setError: (message: string | null) => void;
+  setPromoted: (datasetName: string, duplicate: boolean) => void;
+  clearPromoted: () => void;
 }
 
 export const useEvalStore = create<EvalState>((set) => ({
@@ -35,6 +40,7 @@ export const useEvalStore = create<EvalState>((set) => ({
   examplesByDataset: {},
   selectedDatasetId: null,
   error: null,
+  promoted: null,
 
   setDatasets: (datasets) =>
     set((s) => ({
@@ -64,6 +70,9 @@ export const useEvalStore = create<EvalState>((set) => ({
   selectDataset: (selectedDatasetId) => set({ selectedDatasetId, error: null }),
 
   setError: (error) => set({ error }),
+
+  setPromoted: (datasetName, duplicate) => set({ promoted: { datasetName, duplicate, at: Date.now() } }),
+  clearPromoted: () => set({ promoted: null }),
 }));
 
 /** Examples of a dataset in position order. `[]` when not loaded yet. */

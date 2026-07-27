@@ -218,6 +218,25 @@ function handleEvalCommand(cmd: ForwardedCommand): void {
         broadcastDatasets(evalStore.getDataset(cmd.datasetId)?.agent_id ?? null);
         return;
       }
+      case "promoteTestInput": {
+        const input = (cmd.input ?? "").trim();
+        if (!input) {
+          relay.broadcastEval({ type: "error", message: "nothing to promote — the test input is empty" });
+          return;
+        }
+        const ds = evalStore.defaultDatasetFor(cmd.agentId, cmd.agentName);
+        // Adding the same input twice silently doubles what an eval over this dataset
+        // costs, for zero extra signal. Report it instead.
+        const duplicate = evalStore.hasExampleWithInput(ds.id, input);
+        if (!duplicate) evalStore.addExample(ds.id, input, cmd.expected ?? null, null);
+        console.log(
+          `[eval] promote → "${ds.name}"${duplicate ? " (already present)" : ""}: ${input.slice(0, 60)}`,
+        );
+        relay.broadcastEval({ type: "promoted", datasetId: ds.id, datasetName: ds.name, duplicate });
+        broadcastDatasets(cmd.agentId);
+        broadcastDataset(ds.id);
+        return;
+      }
     }
   } catch (err) {
     const message = (err as Error).message;

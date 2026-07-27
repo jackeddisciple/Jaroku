@@ -179,6 +179,7 @@ export type EvalMessage =
   | { channel: "eval"; type: "datasets"; agentId: string | null; datasets: Dataset[] }
   | { channel: "eval"; type: "dataset"; datasetId: string; examples: DatasetExample[] }
   | { channel: "eval"; type: "datasetDeleted"; datasetId: string }
+  | { channel: "eval"; type: "promoted"; datasetId: string; datasetName: string; duplicate: boolean }
   | { channel: "eval"; type: "error"; message: string; datasetId?: string };
 
 // --- server → client channel messages (see server/src/wsRelay.ts) ---
@@ -230,7 +231,8 @@ export type ClientCommand =
   | { cmd: "loadDataset"; datasetId: string }
   | { cmd: "addExample"; datasetId: string; input: string; expected?: string | null; notes?: string | null }
   | { cmd: "updateExample"; datasetId: string; exampleId: string; input?: string; expected?: string | null; notes?: string | null }
-  | { cmd: "deleteExample"; datasetId: string; exampleId: string };
+  | { cmd: "deleteExample"; datasetId: string; exampleId: string }
+  | { cmd: "promoteTestInput"; agentId: string; agentName?: string; input: string; expected?: string | null };
 
 // Unified composer "explain" subject — what the question is about, built from already-in-memory
 // context (a trace step, a graph node, or the agent generally). No new data is fetched.

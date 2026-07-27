@@ -71,6 +71,17 @@ export type UpdateExampleCommand = {
   notes?: string | null;
 };
 export type DeleteExampleCommand = { cmd: "deleteExample"; datasetId: string; exampleId: string };
+// One-click "promote this test input into the eval dataset" (doc §4.7.6). It resolves the
+// target dataset server-side (agent's most recent, or a new default) so promotion is a
+// single round trip and lands in the SAME dataset_examples table the builder writes —
+// there is deliberately no second way to create an eval example.
+export type PromoteTestInputCommand = {
+  cmd: "promoteTestInput";
+  agentId: string;
+  agentName?: string;
+  input: string;
+  expected?: string | null;
+};
 
 // Unified composer "explain": a prose answer about a step / node / the agent, built from
 // in-context data — the one genuinely-new composer intent (no code change).
@@ -105,11 +116,12 @@ export type EvalCommand =
   | LoadDatasetCommand
   | AddExampleCommand
   | UpdateExampleCommand
-  | DeleteExampleCommand;
+  | DeleteExampleCommand
+  | PromoteTestInputCommand;
 
 const EVAL_COMMANDS = new Set([
   "createDataset", "renameDataset", "deleteDataset", "listDatasets",
-  "loadDataset", "addExample", "updateExample", "deleteExample",
+  "loadDataset", "addExample", "updateExample", "deleteExample", "promoteTestInput",
 ]);
 
 /** Commands the relay forwards to the app rather than answering locally. */
@@ -171,6 +183,9 @@ export type EvalEvent =
   | { type: "datasets"; agentId: string | null; datasets: unknown[] }
   | { type: "dataset"; datasetId: string; examples: unknown[] }
   | { type: "datasetDeleted"; datasetId: string }
+  // Answer to a one-click promotion, so the composer can confirm where the input landed.
+  // `duplicate` means the dataset already had that exact input and nothing was added.
+  | { type: "promoted"; datasetId: string; datasetName: string; duplicate: boolean }
   | { type: "error"; message: string; datasetId?: string };
 
 export type DebugEvent =

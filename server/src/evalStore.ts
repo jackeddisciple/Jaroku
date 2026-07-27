@@ -330,6 +330,25 @@ export class EvalStore {
     this.db.prepare(`DELETE FROM dataset_examples WHERE id = ?`).run(exampleId);
   }
 
+  /** Whether this exact input is already in the dataset. Promotion uses it to avoid
+   *  silently doubling the cost of an eval by adding the same case twice. */
+  hasExampleWithInput(datasetId: string, input: string): boolean {
+    const row = this.db
+      .prepare(`SELECT 1 AS x FROM dataset_examples WHERE dataset_id = ? AND input = ? LIMIT 1`)
+      .get(datasetId, input) as { x: number } | undefined;
+    return row !== undefined;
+  }
+
+  /** The dataset a one-click promotion should land in: the agent's most recently touched
+   *  one, or a new default. Server-side so promotion stays a single round trip — a client
+   *  can't create-then-add without waiting to learn the new id. */
+  defaultDatasetFor(agentId: string, agentName?: string): Dataset {
+    const row = this.db
+      .prepare(`SELECT * FROM datasets WHERE agent_id = ? ORDER BY updated_at DESC LIMIT 1`)
+      .get(agentId) as Dataset | undefined;
+    return row ?? this.createDataset(agentId, `${agentName ?? agentId} tests`);
+  }
+
   listExamples(datasetId: string): DatasetExample[] {
     return this.db
       .prepare(`SELECT * FROM dataset_examples WHERE dataset_id = ? ORDER BY position ASC`)

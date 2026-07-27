@@ -13,10 +13,11 @@ import { orderedFiles, useBuildStore } from "../store/buildStore.ts";
 import { threadFor, useChatStore, type ChatTurn, type GenTurn, type ReplyTurn } from "../store/chatStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { inputKey, RUN_PROVIDERS, useUiStore } from "../store/uiStore.ts";
-import { sendBranchRun, sendEdit, sendExplain, sendGenerate, sendRun } from "../lib/socket.ts";
+import { sendBranchRun, sendEdit, sendExplain, sendGenerate, sendPromoteTestInput, sendRun } from "../lib/socket.ts";
+import { useEvalStore } from "../store/evalStore.ts";
 import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
 import { DiffCard } from "./DiffCard.tsx";
-import { ArrowUpIcon, ChevronDownIcon, MicIcon } from "./composerIcons.tsx";
+import { ArrowUpIcon, ChevronDownIcon, MicIcon, SaveToDatasetIcon } from "./composerIcons.tsx";
 import { useVoiceInput } from "../lib/useVoiceInput.ts";
 import { VoiceWaveform } from "./VoiceWaveform.tsx";
 
@@ -271,6 +272,24 @@ export function BuildPane() {
   // --- Test mode (runs) + voice, folded in from the old run-bar ------------------
   const canRun = connected && Boolean(activeAgentId) && (agent?.runnable ?? false);
 
+  // Promote the current test input into the eval dataset (doc §4.7.6, "one click"). The
+  // draft is the subject when there is one, otherwise the remembered last input — so this
+  // works both before running and right after, which is when a case proves worth keeping.
+  // The server picks/creates the dataset, so this stays a single round trip.
+  const promoted = useEvalStore((s) => s.promoted);
+  const clearPromoted = useEvalStore((s) => s.clearPromoted);
+  const promotable = (testDraft.trim() || (localStorage.getItem(inputKey(activeAgentId)) ?? "").trim());
+  const promote = () => {
+    if (!activeAgentId || !promotable) return;
+    sendPromoteTestInput(activeAgentId, promotable, agent?.name);
+  };
+  // The confirmation is a transient acknowledgement, not state — clear it after a beat.
+  useEffect(() => {
+    if (!promoted) return;
+    const t = setTimeout(clearPromoted, 2600);
+    return () => clearTimeout(t);
+  }, [promoted, clearPromoted]);
+
   // Restore the remembered test input when the agent changes (the persisted last-test-input).
   useEffect(() => {
     setTestDraft(localStorage.getItem(inputKey(activeAgentId)) ?? "");
@@ -524,6 +543,30 @@ export function BuildPane() {
                 <MicIcon size={17} />
               </button>
               <ModelSelector provider={provider} model={model} setProvider={setProvider} setModel={setModel} />
+              {/* Test mode only: the input IS an eval example, so promotion belongs here
+                  rather than in the Evals tab — that's where a case earns its place. */}
+              {composerMode === "test" && activeAgentId && (
+                <button
+                  type="button"
+                  onClick={promote}
+                  disabled={!connected || !promotable}
+                  title={
+                    promotable
+                      ? "Save this test input to the eval dataset"
+                      : "Type or run a test input first"
+                  }
+                  className="text-muted hover:text-ink transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <SaveToDatasetIcon size={16} />
+                </button>
+              )}
+              {promoted && (
+                <span className={`text-[11px] ${promoted.duplicate ? "text-muted" : "text-ok"}`}>
+                  {promoted.duplicate
+                    ? `already in ${promoted.datasetName}`
+                    : `saved to ${promoted.datasetName}`}
+                </span>
+              )}
             </div>
 
             {/* right — the only two solid elements: mode toggle + send circle */}

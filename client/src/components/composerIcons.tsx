@@ -45,3 +45,15 @@ export function ArrowUpIcon({ size = 15 }: P) {
 export function ChevronDownIcon({ size = 13 }: P) {
   return svg(size, <path d="M6 9l6 6l6 -6" />);
 }
+
+/** ti-bookmark-plus — "save this test input into the eval dataset". */
+export function SaveToDatasetIcon({ size = 16 }: P) {
+  return svg(
+    size,
+    <>
+      <path d="M12 17l-6 4v-14a2 2 0 0 1 2 -2h6a2 2 0 0 1 2 2v6" />
+      <path d="M16 19h6" />
+      <path d="M19 16v6" />
+    </>,
+  );
+}

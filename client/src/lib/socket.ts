@@ -92,6 +92,7 @@ function dispatch(msg: ServerMessage): void {
       if (msg.type === "datasets") e.setDatasets(msg.datasets);
       else if (msg.type === "dataset") e.setExamples(msg.datasetId, msg.examples);
       else if (msg.type === "datasetDeleted") e.removeDataset(msg.datasetId);
+      else if (msg.type === "promoted") e.setPromoted(msg.datasetName, msg.duplicate);
       else if (msg.type === "error") e.setError(msg.message);
       break;
     }
@@ -252,4 +253,16 @@ export function sendUpdateExample(
 }
 export function sendDeleteExample(datasetId: string, exampleId: string): void {
   send({ cmd: "deleteExample", datasetId, exampleId });
+}
+
+/** One-click "save this test input to the eval dataset" (doc §4.7.6). The target dataset
+ *  is resolved server-side — the agent's most recent, or a new default — so this is one
+ *  round trip and lands in the same table the dataset builder writes to. */
+export function sendPromoteTestInput(
+  agentId: string,
+  input: string,
+  agentName?: string,
+  expected?: string | null,
+): void {
+  send({ cmd: "promoteTestInput", agentId, agentName, input, expected });
 }
