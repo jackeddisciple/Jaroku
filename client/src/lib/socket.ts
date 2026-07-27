@@ -6,6 +6,7 @@ import { useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useChatStore } from "../store/chatStore.ts";
 import { useGraphStore } from "../store/graphStore.ts";
+import { useEvalStore } from "../store/evalStore.ts";
 import type { ClientCommand, ExplainSubject, ServerMessage } from "../types.ts";
 
 const WS_URL = import.meta.env.VITE_JAROKU_WS ?? `ws://localhost:4317`;
@@ -81,6 +82,17 @@ function dispatch(msg: ServerMessage): void {
         s.selectRun(msg.branchId);
         sendLoadRun(msg.branchId);
       } else if (msg.type === "error") s.addLog({ level: "stderr", text: `debug: ${msg.message}` });
+      break;
+    }
+    case "eval": {
+      // Eval control plane. Every message is a full snapshot of what it names, so these
+      // are replaces, not merges. Nothing here touches trace state — an eval's runs are
+      // ordinary runs, loaded on demand through the normal loadRun path.
+      const e = useEvalStore.getState();
+      if (msg.type === "datasets") e.setDatasets(msg.datasets);
+      else if (msg.type === "dataset") e.setExamples(msg.datasetId, msg.examples);
+      else if (msg.type === "datasetDeleted") e.removeDataset(msg.datasetId);
+      else if (msg.type === "error") e.setError(msg.message);
       break;
     }
     case "reply": {
@@ -202,4 +214,42 @@ export function sendBranchRun(
 // in-context data. Answered on the "reply" channel (chatStore), never a code change.
 export function sendExplain(agentId: string, question: string, subject: ExplainSubject): void {
   send({ cmd: "explain", agentId, question, subject });
+}
+
+// --- eval: dataset CRUD ----------------------------------------------------
+// Each of these is answered on the "eval" channel with a fresh snapshot of whatever it
+// changed, so callers never have to optimistically patch local state.
+
+export function sendListDatasets(agentId?: string): void {
+  send({ cmd: "listDatasets", agentId });
+}
+export function sendLoadDataset(datasetId: string): void {
+  send({ cmd: "loadDataset", datasetId });
+}
+export function sendCreateDataset(agentId: string, name: string): void {
+  send({ cmd: "createDataset", agentId, name });
+}
+export function sendRenameDataset(datasetId: string, name: string): void {
+  send({ cmd: "renameDataset", datasetId, name });
+}
+export function sendDeleteDataset(datasetId: string, agentId: string): void {
+  send({ cmd: "deleteDataset", datasetId, agentId });
+}
+export function sendAddExample(
+  datasetId: string,
+  input: string,
+  expected?: string | null,
+  notes?: string | null,
+): void {
+  send({ cmd: "addExample", datasetId, input, expected, notes });
+}
+export function sendUpdateExample(
+  datasetId: string,
+  exampleId: string,
+  patch: { input?: string; expected?: string | null; notes?: string | null },
+): void {
+  send({ cmd: "updateExample", datasetId, exampleId, ...patch });
+}
+export function sendDeleteExample(datasetId: string, exampleId: string): void {
+  send({ cmd: "deleteExample", datasetId, exampleId });
 }

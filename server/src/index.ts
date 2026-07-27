@@ -142,8 +142,89 @@ const relay = new WsRelay({
     else if (cmd.cmd === "resumeRun") resumeRun(cmd.runId);
     else if (cmd.cmd === "branchRun") branchRun(cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState);
     else if (cmd.cmd === "explain") explainAgent(cmd);
+    else handleEvalCommand(cmd);
   },
 });
+
+// --- eval: dataset CRUD -----------------------------------------------------
+// Control-plane only. Every mutation answers by re-broadcasting the affected snapshot on
+// the "eval" channel, the same shape a fresh `listDatasets` would return — so a client
+// never has to reconcile a partial update against local state.
+
+function broadcastDatasets(agentId: string | null): void {
+  relay.broadcastEval({
+    type: "datasets",
+    agentId,
+    datasets: evalStore.listDatasets(agentId ?? undefined),
+  });
+}
+
+function broadcastDataset(datasetId: string): void {
+  relay.broadcastEval({ type: "dataset", datasetId, examples: evalStore.listExamples(datasetId) });
+}
+
+function handleEvalCommand(cmd: ForwardedCommand): void {
+  try {
+    switch (cmd.cmd) {
+      case "listDatasets":
+        broadcastDatasets(cmd.agentId ?? null);
+        return;
+      case "loadDataset":
+        broadcastDataset(cmd.datasetId);
+        return;
+      case "createDataset": {
+        const ds = evalStore.createDataset(cmd.agentId, cmd.name);
+        console.log(`[eval] dataset "${ds.name}" created for ${cmd.agentId}`);
+        broadcastDatasets(cmd.agentId);
+        broadcastDataset(ds.id);
+        return;
+      }
+      case "renameDataset": {
+        evalStore.renameDataset(cmd.datasetId, cmd.name);
+        broadcastDatasets(evalStore.getDataset(cmd.datasetId)?.agent_id ?? null);
+        return;
+      }
+      case "deleteDataset": {
+        evalStore.deleteDataset(cmd.datasetId);
+        relay.broadcastEval({ type: "datasetDeleted", datasetId: cmd.datasetId });
+        broadcastDatasets(cmd.agentId);
+        return;
+      }
+      case "addExample": {
+        // An empty input would be a run with nothing to do — reject it here rather than
+        // let it become a job that burns a real API call on whitespace.
+        const input = (cmd.input ?? "").trim();
+        if (!input) {
+          relay.broadcastEval({ type: "error", datasetId: cmd.datasetId, message: "an example needs an input" });
+          return;
+        }
+        evalStore.addExample(cmd.datasetId, input, cmd.expected ?? null, cmd.notes ?? null);
+        broadcastDataset(cmd.datasetId);
+        broadcastDatasets(evalStore.getDataset(cmd.datasetId)?.agent_id ?? null);
+        return;
+      }
+      case "updateExample": {
+        evalStore.updateExample(cmd.exampleId, {
+          ...(cmd.input !== undefined ? { input: cmd.input } : {}),
+          ...(cmd.expected !== undefined ? { expected: cmd.expected } : {}),
+          ...(cmd.notes !== undefined ? { notes: cmd.notes } : {}),
+        });
+        broadcastDataset(cmd.datasetId);
+        return;
+      }
+      case "deleteExample": {
+        evalStore.deleteExample(cmd.exampleId);
+        broadcastDataset(cmd.datasetId);
+        broadcastDatasets(evalStore.getDataset(cmd.datasetId)?.agent_id ?? null);
+        return;
+      }
+    }
+  } catch (err) {
+    const message = (err as Error).message;
+    console.error(`[eval] ${cmd.cmd} failed:`, message);
+    relay.broadcastEval({ type: "error", message: `${cmd.cmd} failed: ${message}` });
+  }
+}
 
 // --- pipeline ---------------------------------------------------------------
 manager.on("event", (event) => {

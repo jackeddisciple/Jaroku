@@ -46,6 +46,32 @@ export type BranchRunCommand = {
   editNode?: string;
   editedState?: Record<string, unknown>;
 };
+// Eval Engine (Week 7): dataset CRUD. These are control-plane commands like pause/resume —
+// they mutate the eval tables and never touch the frozen trace stream. They're forwarded
+// to the app rather than answered here so the relay stays a transport and doesn't grow a
+// second store dependency; the app answers by broadcasting on the "eval" channel.
+export type CreateDatasetCommand = { cmd: "createDataset"; agentId: string; name: string };
+export type RenameDatasetCommand = { cmd: "renameDataset"; datasetId: string; name: string };
+export type DeleteDatasetCommand = { cmd: "deleteDataset"; datasetId: string; agentId: string };
+export type ListDatasetsCommand = { cmd: "listDatasets"; agentId?: string };
+export type LoadDatasetCommand = { cmd: "loadDataset"; datasetId: string };
+export type AddExampleCommand = {
+  cmd: "addExample";
+  datasetId: string;
+  input: string;
+  expected?: string | null;
+  notes?: string | null;
+};
+export type UpdateExampleCommand = {
+  cmd: "updateExample";
+  datasetId: string;
+  exampleId: string;
+  input?: string;
+  expected?: string | null;
+  notes?: string | null;
+};
+export type DeleteExampleCommand = { cmd: "deleteExample"; datasetId: string; exampleId: string };
+
 // Unified composer "explain": a prose answer about a step / node / the agent, built from
 // in-context data — the one genuinely-new composer intent (no code change).
 export type ExplainSubject =
@@ -67,7 +93,24 @@ export type ClientCommand =
   | PauseRunCommand
   | ResumeRunCommand
   | BranchRunCommand
-  | ExplainCommand;
+  | ExplainCommand
+  | EvalCommand;
+
+/** Eval-channel commands, grouped so the forwarding switch stays readable. */
+export type EvalCommand =
+  | CreateDatasetCommand
+  | RenameDatasetCommand
+  | DeleteDatasetCommand
+  | ListDatasetsCommand
+  | LoadDatasetCommand
+  | AddExampleCommand
+  | UpdateExampleCommand
+  | DeleteExampleCommand;
+
+const EVAL_COMMANDS = new Set([
+  "createDataset", "renameDataset", "deleteDataset", "listDatasets",
+  "loadDataset", "addExample", "updateExample", "deleteExample",
+]);
 
 /** Commands the relay forwards to the app rather than answering locally. */
 export type ForwardedCommand =
@@ -80,7 +123,8 @@ export type ForwardedCommand =
   | PauseRunCommand
   | ResumeRunCommand
   | BranchRunCommand
-  | ExplainCommand;
+  | ExplainCommand
+  | EvalCommand;
 
 // Generation rides its own channel, deliberately parallel to "trace". It never enters the
 // trace store or the event schema — schema/events.md v1 stays frozen.
@@ -115,6 +159,19 @@ export type ReplyEvent =
   | { type: "delta"; agentId: string; text: string }
   | { type: "done"; agentId: string }
   | { type: "error"; agentId: string; message: string };
+
+// Eval rides its own channel too, parallel to trace/gen/edit/debug/reply.
+//
+// This channel deliberately carries NO step traffic. An eval's individual runs still
+// persist as ordinary Run/Step rows and are still read back through the existing
+// `loadRun` path — but their live events must not go out on "trace", because
+// traceStore.applyEvent focuses activeRunId on every run_start, and twenty parallel eval
+// runs would thrash the timeline out from under whatever the user was reading.
+export type EvalEvent =
+  | { type: "datasets"; agentId: string | null; datasets: unknown[] }
+  | { type: "dataset"; datasetId: string; examples: unknown[] }
+  | { type: "datasetDeleted"; datasetId: string }
+  | { type: "error"; message: string; datasetId?: string };
 
 export type DebugEvent =
   | { type: "paused"; runId: string; seq: number }
@@ -196,6 +253,10 @@ export class WsRelay {
             this.onCommand?.(msg);
           } else if (msg.cmd === "explain" && typeof msg.agentId === "string" && typeof msg.question === "string") {
             this.onCommand?.(msg);
+          } else if (EVAL_COMMANDS.has(msg.cmd)) {
+            // Shape-checked in the app, which owns the eval store and can answer with a
+            // precise error on the "eval" channel rather than dropping the message here.
+            this.onCommand?.(msg as EvalCommand);
           } else if (msg.cmd === "listAgents") {
             this.sendTo(ws, { channel: "agents", agents: this.opts.listAgents?.() ?? [] });
           } else if (msg.cmd === "loadRun" && typeof msg.runId === "string") {
@@ -282,6 +343,16 @@ export class WsRelay {
   // enters the trace store or the frozen event schema.
   broadcastReply(event: ReplyEvent): void {
     const msg = JSON.stringify({ channel: "reply", ...event });
+    for (const ws of this.clients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+    }
+  }
+
+  // Broadcast an eval-channel event (datasets, and later eval progress/results). Separate
+  // channel by design — it never carries trace steps, so a running eval can't steal the
+  // Trace timeline's focus.
+  broadcastEval(event: EvalEvent): void {
+    const msg = JSON.stringify({ channel: "eval", ...event });
     for (const ws of this.clients) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
     }

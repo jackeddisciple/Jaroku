@@ -148,6 +148,39 @@ export type EditMessage =
   | { channel: "edit"; type: "discarded"; proposalId: string; agentId: string }
   | { channel: "edit"; type: "error"; message: string; problems?: string[]; agentId?: string; proposalId?: string };
 
+// --- eval ---
+// Its own channel, like gen/edit/debug — never part of the frozen event schema. An eval's
+// individual runs still produce ordinary Run/Step rows and are read back through the
+// normal `loadRun` path; this channel carries only control-plane facts about the eval
+// itself, so a running eval never steals the Trace timeline's focus.
+
+export interface Dataset {
+  id: string;
+  agent_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  example_count?: number;
+}
+
+export interface DatasetExample {
+  id: string;
+  dataset_id: string;
+  /** The agent's runtime input — exactly what Test mode would send. */
+  input: string;
+  /** Optional ground truth, given to the judge as reference when present. */
+  expected: string | null;
+  notes: string | null;
+  position: number;
+  created_at: string;
+}
+
+export type EvalMessage =
+  | { channel: "eval"; type: "datasets"; agentId: string | null; datasets: Dataset[] }
+  | { channel: "eval"; type: "dataset"; datasetId: string; examples: DatasetExample[] }
+  | { channel: "eval"; type: "datasetDeleted"; datasetId: string }
+  | { channel: "eval"; type: "error"; message: string; datasetId?: string };
+
 // --- server → client channel messages (see server/src/wsRelay.ts) ---
 
 export type ServerMessage =
@@ -168,7 +201,8 @@ export type ServerMessage =
   | { channel: "reply"; type: "done"; agentId: string }
   | { channel: "reply"; type: "error"; agentId: string; message: string }
   | GenMessage
-  | EditMessage;
+  | EditMessage
+  | EvalMessage;
 
 // --- client → server commands ---
 
@@ -186,7 +220,17 @@ export type ClientCommand =
   | { cmd: "pauseRun"; runId: string }
   | { cmd: "resumeRun"; runId: string }
   | { cmd: "branchRun"; fromRunId: string; atSeq: number; editNode?: string; editedState?: Record<string, unknown> }
-  | { cmd: "explain"; agentId: string; question: string; subject: ExplainSubject };
+  | { cmd: "explain"; agentId: string; question: string; subject: ExplainSubject }
+  // Eval: dataset CRUD. Every mutation is answered with a fresh snapshot on the "eval"
+  // channel, so the client never reconciles a partial update against local state.
+  | { cmd: "createDataset"; agentId: string; name: string }
+  | { cmd: "renameDataset"; datasetId: string; name: string }
+  | { cmd: "deleteDataset"; datasetId: string; agentId: string }
+  | { cmd: "listDatasets"; agentId?: string }
+  | { cmd: "loadDataset"; datasetId: string }
+  | { cmd: "addExample"; datasetId: string; input: string; expected?: string | null; notes?: string | null }
+  | { cmd: "updateExample"; datasetId: string; exampleId: string; input?: string; expected?: string | null; notes?: string | null }
+  | { cmd: "deleteExample"; datasetId: string; exampleId: string };
 
 // Unified composer "explain" subject — what the question is about, built from already-in-memory
 // context (a trace step, a graph node, or the agent generally). No new data is fetched.
