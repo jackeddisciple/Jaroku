@@ -3,6 +3,7 @@
 // by index.ts) and never logged, echoed to a client, or written anywhere.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { costFor } from "./pricing.ts";
 
 export interface UsageSummary {
   input_tokens: number;
@@ -12,9 +13,10 @@ export interface UsageSummary {
   cost_usd: number;
 }
 
-// claude-haiku-4-5 list price, USD per token. Cache reads ~0.1x, writes ~1.25x.
-export const PRICE_IN = 1e-6;
-export const PRICE_OUT = 5e-6;
+// The model generation/editing bills against. Its rates — and the cache multipliers —
+// come from the shared runtime/pricing.json, not from constants here: a second copy of a
+// price is a copy that drifts.
+export const GENERATION_MODEL = "claude-haiku-4-5";
 
 let client: Anthropic | null = null;
 
@@ -33,16 +35,22 @@ export function summarizeUsage(u: {
   cache_read_input_tokens?: number | null;
   cache_creation_input_tokens?: number | null;
 }): UsageSummary {
+  const cacheRead = u.cache_read_input_tokens ?? 0;
+  const cacheWrite = u.cache_creation_input_tokens ?? 0;
   return {
     input_tokens: u.input_tokens,
     output_tokens: u.output_tokens,
-    cache_read_input_tokens: u.cache_read_input_tokens ?? 0,
-    cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0,
+    cache_read_input_tokens: cacheRead,
+    cache_creation_input_tokens: cacheWrite,
+    // The Anthropic SDK already reports `input_tokens` EXCLUSIVE of the cached counts
+    // (unlike LangChain, which folds them in), so it maps straight onto the uncached slot.
     cost_usd:
-      u.input_tokens * PRICE_IN +
-      u.output_tokens * PRICE_OUT +
-      (u.cache_read_input_tokens ?? 0) * PRICE_IN * 0.1 +
-      (u.cache_creation_input_tokens ?? 0) * PRICE_IN * 1.25,
+      costFor(GENERATION_MODEL, {
+        inputTokens: u.input_tokens,
+        outputTokens: u.output_tokens,
+        cacheReadTokens: cacheRead,
+        cacheWriteTokens: cacheWrite,
+      }) ?? 0,
   };
 }
 

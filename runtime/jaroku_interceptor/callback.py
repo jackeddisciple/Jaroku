@@ -40,27 +40,32 @@ from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
 
+from .pricing import cost_for
 from .schema import Run, Step, emit_step
 
-# Rough per-token USD pricing (input, output) for cost estimation. Extend as providers grow.
-# Numbers are per single token (i.e. per-million-price / 1_000_000).
-_PRICING = {
-    # Anthropic list prices, USD per 1M tokens / 1e6. Verified 2026-07-21.
-    "claude-opus-4-8": (5e-6, 25e-6),
-    "claude-opus-4-7": (5e-6, 25e-6),
-    "claude-sonnet-5": (3e-6, 15e-6),
-    "claude-sonnet-4-6": (3e-6, 15e-6),
-    "claude-haiku-4-5": (1e-6, 5e-6),
-    "gpt-4o": (2.5e-6, 10e-6),
-    "gpt-4o-mini": (0.15e-6, 0.6e-6),
-}
 
+class Usage:
+    """One LLM call's token breakdown, split the way pricing needs it.
 
-def _price_for(model: str) -> Optional[tuple[float, float]]:
-    for key, price in _PRICING.items():
-        if key in model:
-            return price
-    return None
+    ``input`` here is the **uncached** input. Providers report a single combined input
+    figure with the cached portions folded in; keeping them separate is what lets cache
+    reads be billed at their own (much cheaper) rate instead of the full input rate.
+
+    ``total`` is what the frozen schema's ``Step.tokens`` carries — every token the call
+    consumed, cached or not. That definition is unchanged.
+    """
+
+    __slots__ = ("input", "output", "cache_read", "cache_write")
+
+    def __init__(self, input_: int, output: int, cache_read: int = 0, cache_write: int = 0):
+        self.input = input_
+        self.output = output
+        self.cache_read = cache_read
+        self.cache_write = cache_write
+
+    @property
+    def total(self) -> int:
+        return self.input + self.output + self.cache_read + self.cache_write
 
 
 class _Pending:
@@ -178,8 +183,15 @@ class JarokuTracer(BaseCallbackHandler):
         self._begin(run_id, parent_run_id, "llm_call", name, input_=prompts)
 
     def on_llm_end(self, response, *, run_id, **kwargs) -> None:
-        tokens = self._extract_tokens(response)
-        cost = self._estimate_cost(tokens_pair=self._extract_token_pair(response))
+        usage = self._extract_usage(response)
+        tokens = None if usage is None else usage.total
+        cost = None if usage is None else cost_for(
+            self.run.model,
+            input_tokens=usage.input,
+            output_tokens=usage.output,
+            cache_read_tokens=usage.cache_read,
+            cache_write_tokens=usage.cache_write,
+        )
         if tokens is not None:
             self.run.tokens += tokens
         if cost is not None:
@@ -305,44 +317,61 @@ class JarokuTracer(BaseCallbackHandler):
             return None
 
     @staticmethod
-    def _extract_token_pair(response) -> Optional[tuple[int, int]]:
-        """Return (input_tokens, output_tokens) if discoverable, else None."""
-        # 1) llm_output.token_usage / usage
+    def _first_int(d: dict, *keys) -> Optional[int]:
+        """First key present with a non-None value, as an int.
+
+        Deliberately not ``d.get(a) or d.get(b)``: a genuine ``0`` is falsy, so the ``or``
+        form silently skips a real zero and reads the wrong provider's key instead.
+        """
+        for k in keys:
+            v = d.get(k)
+            if v is not None:
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    @classmethod
+    def _extract_usage(cls, response) -> Optional[Usage]:
+        """Token breakdown for one LLM call, or None if the provider reported nothing.
+
+        Both sources report a combined input figure that INCLUDES cached tokens, so the
+        cached portions are subtracted back out here — leaving ``Usage.input`` as the
+        uncached input the full rate actually applies to.
+        """
+        # 1) message.usage_metadata (langchain-core's normalized shape; the only one that
+        #    carries the cache breakdown, so it is tried first).
         try:
-            llm_out = response.llm_output or {}
-            usage = llm_out.get("token_usage") or llm_out.get("usage") or {}
-            it = usage.get("prompt_tokens") or usage.get("input_tokens")
-            ot = usage.get("completion_tokens") or usage.get("output_tokens")
-            if it is not None or ot is not None:
-                return int(it or 0), int(ot or 0)
-        except Exception:
-            pass
-        # 2) message.usage_metadata (Anthropic/OpenAI via langchain-core)
-        try:
-            it = ot = 0
+            inp = out = c_read = c_write = 0
             found = False
             for batch in response.generations:
                 for g in batch:
                     um = getattr(getattr(g, "message", None), "usage_metadata", None)
-                    if um:
-                        it += int(um.get("input_tokens", 0))
-                        ot += int(um.get("output_tokens", 0))
-                        found = True
+                    if not um:
+                        continue
+                    found = True
+                    inp += int(um.get("input_tokens") or 0)
+                    out += int(um.get("output_tokens") or 0)
+                    details = um.get("input_token_details") or {}
+                    c_read += int(details.get("cache_read") or 0)
+                    c_write += int(details.get("cache_creation") or 0)
             if found:
-                return it, ot
+                # input_tokens is the total input incl. cache; recover the uncached part.
+                # clamp at 0 — a provider that reports these independently must not push
+                # the uncached figure negative.
+                return Usage(max(inp - c_read - c_write, 0), out, c_read, c_write)
+        except Exception:
+            pass
+        # 2) llm_output.token_usage / usage (raw provider shape; no cache breakdown, so
+        #    everything counts as uncached input — the conservative direction).
+        try:
+            llm_out = response.llm_output or {}
+            raw = llm_out.get("token_usage") or llm_out.get("usage") or {}
+            it = cls._first_int(raw, "prompt_tokens", "input_tokens")
+            ot = cls._first_int(raw, "completion_tokens", "output_tokens")
+            if it is not None or ot is not None:
+                return Usage(it or 0, ot or 0)
         except Exception:
             pass
         return None
-
-    def _extract_tokens(self, response) -> Optional[int]:
-        pair = self._extract_token_pair(response)
-        return None if pair is None else pair[0] + pair[1]
-
-    def _estimate_cost(self, tokens_pair: Optional[tuple[int, int]]) -> Optional[float]:
-        if tokens_pair is None:
-            return None
-        price = _price_for(self.run.model)
-        if price is None:
-            return None
-        in_tok, out_tok = tokens_pair
-        return round(in_tok * price[0] + out_tok * price[1], 8)
