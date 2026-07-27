@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { ProcessManager } from "./processManager.ts";
 import { TraceStore } from "./store.ts";
+import { EvalStore } from "./evalStore.ts";
 import { WsRelay, type ForwardedCommand, type GenerateCommand } from "./wsRelay.ts";
 import { Generator } from "./generator.ts";
 import { Editor, editCount } from "./editor.ts";
@@ -40,8 +41,21 @@ if (loadedKeys.length) {
 rmSync(join(RUNTIME_DIR, "agents", ".staging"), { recursive: true, force: true });
 
 const store = new TraceStore(DB_PATH);
+// Eval's control-plane tables live in the same database file, on the same connection
+// (single writer; aggregation JOINs eval_jobs against the frozen `steps` table). Nothing
+// here touches schema/events.md — an eval is a batch of ordinary runs.
+const evalStore = new EvalStore(store.connection());
 const manager = new ProcessManager();
 const generator = new Generator();
+
+// An eval left 'running' by a shutdown has no orchestrator behind it any more. Mark those
+// interrupted at startup rather than leaving rows that claim to be in flight forever —
+// the jobs and whatever they spent stay on record and remain inspectable.
+for (const stale of evalStore.unfinishedEvalRuns()) {
+  const cancelled = evalStore.cancelQueuedJobs(stale.id, "server restarted before this job ran");
+  evalStore.setEvalStatus(stale.id, "cancelled", "interrupted by a server restart");
+  console.log(`[eval] ${stale.id} was interrupted by a restart — ${cancelled} queued job(s) cancelled`);
+}
 
 // True from spawn until run_end (or exit). Deliberately NOT manager.running: the process
 // outlives its run_end by a beat while it tears down, and refusing an apply/undo in that

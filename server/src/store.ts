@@ -232,6 +232,18 @@ export class TraceStore {
     }
   }
 
+  // The underlying handle, for sibling stores that live in the SAME database file.
+  //
+  // EvalStore is the only caller. It needs one connection, not two: its aggregation
+  // JOINs eval_jobs against `steps` (an eval job's cost is SUM over the steps of its run),
+  // and a second DatabaseSync on the same file would mean two writers racing for the
+  // write lock. Sharing the handle keeps that a single-writer problem. It does NOT make
+  // eval part of the trace store — the eval tables are a separate, additive control plane
+  // that only ever reads the frozen ones.
+  connection(): DatabaseSync {
+    return this.db;
+  }
+
   stepsForRun(runId: string): Step[] {
     const rows = this.db
       .prepare(`SELECT * FROM steps WHERE run_id = ? ORDER BY seq ASC`)
