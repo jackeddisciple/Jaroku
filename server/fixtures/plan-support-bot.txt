@@ -1,18 +1,16 @@
 <<<PLAN section="tools">>>
-- gmail_search — reviewed connector template (gmail)
-- gmail_create_draft — reviewed connector template (gmail)
-- order_lookup — bespoke; looks up an order's status and line items by order id
+- pg_query — reviewed connector template (postgres)
+- summarize_issue — bespoke; condenses a support issue into a short summary for the reply
 <<<ENDPLAN>>>
 <<<PLAN section="state">>>
-- messages: MessagesState — the support conversation
-- order: dict | None — the order currently under discussion
+- messages: MessagesState — the support conversation; no extra domain state is needed
 <<<ENDPLAN>>>
 <<<PLAN section="graph">>>
 - agent (llm) reads the thread and either answers or calls a tool
-- tools runs the requested tool, then record_order stores any order it returned
-- record_order returns to agent; agent ends the run when it has an answer
+- tools runs the requested tool and returns to agent
+- agent ends the run once it has an answer
 <<<ENDPLAN>>>
 <<<PLAN section="notes">>>
-- Drafts replies but never sends them — the gmail connector grants no send scope.
-- Order lookup needs DATABASE_URL, which the postgres connector would provide; without it selected the tool will be written by hand against psycopg.
+- pg_query is read-only and takes a static SQL string; order filters are passed as arguments, not interpolated.
+- Nothing is emailed — this agent answers in the conversation only.
 <<<ENDPLAN>>>

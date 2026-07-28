@@ -584,12 +584,45 @@ let generating = false;
 
 function generateAgent(cmd: GenerateCommand): void {
   if (generating) {
-    relay.broadcastGen({ type: "error", message: "a generation is already in progress" });
+    // On the planned path this must NOT be the plain "error" member: that one paints the
+    // build pane as a failed generation, and the pending plan is still perfectly good. The
+    // check also comes before take(), so a refused click doesn't spend the plan.
+    if (cmd.planId) {
+      relay.broadcastGen({
+        type: "plan_error",
+        message: "a generation is already in progress — this plan is still here when it finishes",
+      });
+    } else {
+      relay.broadcastGen({ type: "error", message: "a generation is already in progress" });
+    }
     return;
   }
+
+  // The confirmed plan, if there is one. Everything downstream comes from the RECORD, not
+  // from this command: the composer draft and the plan card's Generate button are separate
+  // entry points that can disagree (the user can retype the prompt or toggle a connector chip
+  // after planning). Building what was approved is the whole point of the gate.
+  let plan: string | undefined;
+  let { prompt, connectors, name } = cmd;
+  if (cmd.planId) {
+    const rec = planner.take(cmd.planId);
+    if (!rec) {
+      // Never fall through to an unplanned generation here. The user approved a specific
+      // plan; quietly building something they never reviewed is the exact failure this gate
+      // exists to prevent.
+      relay.broadcastGen({
+        type: "plan_error",
+        message: "that plan is no longer available — describe the agent again",
+      });
+      return;
+    }
+    ({ prompt, connectors, name } = rec);
+    plan = rec.plan.raw;
+  }
+
   generating = true;
-  console.log(`[gen] generating — "${cmd.prompt.slice(0, 80)}"`);
-  relay.broadcastGen({ type: "started", prompt: cmd.prompt });
+  console.log(`[gen] generating${plan ? " from an approved plan" : ""} — "${prompt.slice(0, 80)}"`);
+  relay.broadcastGen({ type: "started", prompt });
 
   const onStart = (e: { path: string }) => relay.broadcastGen({ type: "file_start", ...e });
   const onDelta = (e: { path: string; text: string }) => relay.broadcastGen({ type: "file_delta", ...e });
@@ -628,12 +661,7 @@ function generateAgent(cmd: GenerateCommand): void {
   generator.once("done", onDone);
   generator.once("error", onError);
 
-  void generator.generate({
-    runtimeDir: RUNTIME_DIR,
-    prompt: cmd.prompt,
-    connectors: cmd.connectors,
-    name: cmd.name,
-  });
+  void generator.generate({ runtimeDir: RUNTIME_DIR, prompt, connectors, name, plan });
 }
 
 // --- editing (fix loop) -----------------------------------------------------

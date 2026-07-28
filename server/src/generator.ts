@@ -35,6 +35,9 @@ export interface GenerateOptions {
   prompt: string;
   connectors?: string[];
   name?: string;
+  /** The plan the user confirmed at the pre-generation gate, verbatim (planner.ts). Absent =
+   *  an unplanned generation, whose prompt stays byte-identical to the pre-gate one. */
+  plan?: string;
 }
 
 export interface GeneratorEvents {
@@ -126,7 +129,7 @@ export class Generator extends EventEmitter<GeneratorEvents> {
         await replayFixture(fixture, (chunk) => parser.push(chunk));
       } else {
         const raw = await this.streamGeneration(all, {
-          prompt: opts.prompt, agentId, agentName: name, connectors: selected,
+          prompt: opts.prompt, agentId, agentName: name, connectors: selected, plan: opts.plan,
         }, (chunk) => parser.push(chunk), (u) => (usage = u));
         if (fixture) writeFileSync(fixture, raw, "utf8"); // record for future free runs
       }
@@ -164,7 +167,7 @@ export class Generator extends EventEmitter<GeneratorEvents> {
 
   private async streamGeneration(
     allConnectors: Connector[],
-    req: { prompt: string; agentId: string; agentName: string; connectors: Connector[] },
+    req: { prompt: string; agentId: string; agentName: string; connectors: Connector[]; plan?: string },
     onChunk: (text: string) => void,
     onUsage: (u: UsageSummary) => void,
   ): Promise<string> {

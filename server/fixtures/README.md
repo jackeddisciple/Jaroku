@@ -16,4 +16,4 @@ somebody else's plan. The planner logs a loud warning for exactly this reason.
 |---|---|
 | `support_bot.txt` | A known-good generation. Should always pass validation. |
 | `rejected-tool-call-and-sql.txt` | A real `claude-haiku-4-5` response that shipped two genuine defects: it called the `pg_query` tool directly (a `StructuredTool` is not callable) and built SQL with an f-string. Should always be **rejected** — it is the regression test for prompt rules 9 and 10. |
-| `plan-support-bot.txt` | A known-good plan for the support-bot prompt with the `gmail` connector selected. Pairs with `support_bot.txt` to exercise the whole gate — plan, card, confirm, generate — for free. |
+| `plan-support-bot.txt` | A known-good plan describing exactly what `support_bot.txt` generates, so the two pair up to exercise the whole gate — plan, card, confirm, generate — for free. Select the **postgres** connector: the generation fixture imports `tools/postgres.py`, and with a different selection the staged project fails its import check. |
