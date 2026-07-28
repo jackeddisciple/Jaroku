@@ -91,6 +91,15 @@ export type StartEvalCommand = {
   budgetUsd?: number | null;
 };
 export type CancelEvalCommand = { cmd: "cancelEval"; evalId: string };
+// The rubric is product surface, not a constant — "correct" for a refund bot is not
+// "correct" for a SQL agent. Saving one for a dataset overrides the shared default.
+export type LoadRubricCommand = { cmd: "loadRubric"; datasetId: string };
+export type SaveRubricCommand = {
+  cmd: "saveRubric";
+  datasetId: string;
+  name?: string;
+  criteria: { id: string; label: string; description: string; weight: number }[];
+};
 
 // Unified composer "explain": a prose answer about a step / node / the agent, built from
 // in-context data — the one genuinely-new composer intent (no code change).
@@ -128,12 +137,14 @@ export type EvalCommand =
   | DeleteExampleCommand
   | PromoteTestInputCommand
   | StartEvalCommand
-  | CancelEvalCommand;
+  | CancelEvalCommand
+  | LoadRubricCommand
+  | SaveRubricCommand;
 
 const EVAL_COMMANDS = new Set([
   "createDataset", "renameDataset", "deleteDataset", "listDatasets",
   "loadDataset", "addExample", "updateExample", "deleteExample", "promoteTestInput",
-  "startEval", "cancelEval",
+  "startEval", "cancelEval", "loadRubric", "saveRubric",
 ]);
 
 /** Commands the relay forwards to the app rather than answering locally. */
@@ -210,6 +221,7 @@ export type EvalEvent =
     }
   | { type: "evalProgress"; evalId: string; total: number; done: number; running: number; queued: number; failed: number }
   | { type: "evalFinished"; evalId: string; status: string; error?: string }
+  | { type: "rubric"; datasetId: string; rubric: unknown; isDefault: boolean }
   | { type: "error"; message: string; datasetId?: string };
 
 export type DebugEvent =

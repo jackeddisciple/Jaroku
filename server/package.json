@@ -12,7 +12,8 @@
     "test:pricing": "tsx src/pricing.test.ts",
     "test:pool": "tsx src/runPool.test.ts",
     "test:aggregate": "tsx src/evalAggregate.test.ts",
-    "test:retry": "tsx src/evalRetry.test.ts"
+    "test:retry": "tsx src/evalRetry.test.ts",
+    "test:judge": "tsx src/judge/rubric.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",

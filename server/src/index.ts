@@ -14,8 +14,9 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { RunPool } from "./runPool.ts";
 import { TraceStore } from "./store.ts";
-import { EvalStore } from "./evalStore.ts";
+import { EvalStore, type Rubric, type RubricCriterion } from "./evalStore.ts";
 import { EvalRunner } from "./evalRunner.ts";
+import { DEFAULT_CRITERIA } from "./judge/rubric.ts";
 import { WsRelay, type ForwardedCommand, type GenerateCommand } from "./wsRelay.ts";
 import { Generator } from "./generator.ts";
 import { Editor, editCount } from "./editor.ts";
@@ -67,19 +68,26 @@ const isEvalRun = (runId: string): boolean => evalRunIds.has(runId);
 // declared here and assigned below.
 let evalRunner: EvalRunner;
 
-// The shared built-in rubric every dataset falls back to. Its criteria are filled in with
-// the judge (a later commit); an eval only needs to record WHICH rubric it was scored
-// against, so that a score is always attributable to a specific set of criteria.
+// The shared built-in rubric every dataset falls back to until it customizes one. Seeded
+// from DEFAULT_CRITERIA but stored as ordinary data — the doc calls for an EDITABLE rubric,
+// and "correct" for a refund bot is not "correct" for a SQL agent.
 const DEFAULT_RUBRIC_ID = "rubric-default";
 
 /** The rubric a dataset scores against: its own if customized, else the built-in default. */
-function rubricIdFor(datasetId: string): string {
-  const own = evalStore.rubricForDataset(datasetId);
-  if (own) return own.id;
+function defaultRubric(): Rubric {
   const shared = evalStore.getRubric(DEFAULT_RUBRIC_ID);
-  if (shared) return shared.id;
-  return evalStore.putRubric({ id: DEFAULT_RUBRIC_ID, dataset_id: null, name: "Default", criteria: [] }).id;
+  if (shared) return shared;
+  return evalStore.putRubric({
+    id: DEFAULT_RUBRIC_ID,
+    dataset_id: null,
+    name: "Default",
+    criteria: DEFAULT_CRITERIA,
+  });
 }
+function rubricFor(datasetId: string): Rubric {
+  return evalStore.rubricForDataset(datasetId) ?? defaultRubric();
+}
+const rubricIdFor = (datasetId: string): string => rubricFor(datasetId).id;
 
 // An eval left 'running' by a shutdown has no orchestrator behind it any more. Mark those
 // interrupted at startup rather than leaving rows that claim to be in flight forever —
@@ -299,6 +307,39 @@ function handleEvalCommand(cmd: ForwardedCommand): void {
       }
       case "cancelEval": {
         evalRunner.cancel(cmd.evalId);
+        return;
+      }
+      case "loadRubric": {
+        const r = rubricFor(cmd.datasetId);
+        relay.broadcastEval({
+          type: "rubric", datasetId: cmd.datasetId, rubric: r, isDefault: r.dataset_id === null,
+        });
+        return;
+      }
+      case "saveRubric": {
+        // Validated here rather than trusted: a rubric with no criteria, or with all-zero
+        // weights, produces scores that look real and mean nothing.
+        const criteria = (cmd.criteria ?? []).filter(
+          (c): c is RubricCriterion =>
+            typeof c?.id === "string" && c.id.trim() !== "" && typeof c.description === "string",
+        );
+        if (!criteria.length) {
+          relay.broadcastEval({ type: "error", message: "a rubric needs at least one criterion" });
+          return;
+        }
+        if (!criteria.some((c) => c.weight > 0)) {
+          relay.broadcastEval({ type: "error", message: "a rubric needs at least one criterion with weight above zero" });
+          return;
+        }
+        const existing = evalStore.rubricForDataset(cmd.datasetId);
+        const saved = evalStore.putRubric({
+          id: existing?.id,
+          dataset_id: cmd.datasetId, // dataset-scoped: never overwrites the shared default
+          name: cmd.name ?? existing?.name ?? "Custom",
+          criteria,
+        });
+        console.log(`[eval] rubric saved for dataset ${cmd.datasetId} — ${criteria.length} criteria`);
+        relay.broadcastEval({ type: "rubric", datasetId: cmd.datasetId, rubric: saved, isDefault: false });
         return;
       }
       case "promoteTestInput": {
