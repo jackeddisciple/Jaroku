@@ -43,6 +43,46 @@ function providerLimit(provider: string): number {
 /** Wall-clock deadline per job. A wedged subprocess must not hold a slot forever. */
 const DEFAULT_JOB_TIMEOUT_MS = Number(process.env.JAROKU_JOB_TIMEOUT_MS ?? 180_000);
 
+/** Total attempts per job, including the first. Bounded: every retry costs money again. */
+const MAX_ATTEMPTS = Math.max(1, Number(process.env.JAROKU_JOB_ATTEMPTS ?? 3));
+const RETRY_BASE_MS = Number(process.env.JAROKU_RETRY_BASE_MS ?? 2_000);
+
+/**
+ * Is this failure worth paying to retry?
+ *
+ * The distinction is the whole point of bounding retries. A rate limit or a dropped
+ * connection is luck, and retrying converts it into a result. A ContractError, a missing
+ * module, or an unset API key is a property of the agent or the configuration — it will
+ * fail identically every time, and retrying just multiplies the bill by the attempt count
+ * while making the eval slower and the failure less legible.
+ *
+ * Unrecognized failures are treated as DETERMINISTIC. Getting this backwards means silently
+ * paying 3x for every broken agent, so the default has to be the cheap one.
+ */
+export function isTransientFailure(error: string | null, timedOut: boolean): boolean {
+  if (timedOut) return true; // a wedged call is the canonical retryable case
+  if (!error) return false;
+  const e = error.toLowerCase();
+
+  // Deterministic markers win: an import error inside a retry-shaped message is still an
+  // import error.
+  const deterministic = [
+    "contracterror", "modulenotfounderror", "importerror", "syntaxerror",
+    "attributeerror", "typeerror", "nameerror", "indentationerror",
+    "api key", "api_key", "authentication", "unauthorized", "permission",
+    "not_found_error", "invalid_request_error", "does not exist",
+  ];
+  if (deterministic.some((m) => e.includes(m))) return false;
+
+  const transient = [
+    "rate limit", "rate_limit", "429", "overloaded", "529",
+    "timeout", "timed out", "econnreset", "econnrefused", "etimedout", "enotfound",
+    "connection error", "connection reset", "temporarily unavailable",
+    "503", "502", "504", "internal server error", "apiconnectionerror",
+  ];
+  return transient.some((m) => e.includes(m));
+}
+
 export interface EvalProgress {
   evalId: string;
   total: number;
@@ -82,6 +122,8 @@ interface Live {
   /** provider -> currently running count, for the per-provider cap. */
   inFlight: Map<string, number>;
   cancelled: boolean;
+  /** Single timer for the earliest backing-off retry. See scheduleRetryWake. */
+  retryTimer: NodeJS.Timeout | null;
 }
 
 export class EvalRunner {
@@ -140,6 +182,7 @@ export class EvalRunner {
       runToJob: new Map(),
       inFlight: new Map(),
       cancelled: false,
+      retryTimer: null,
     });
 
     console.log(
@@ -161,6 +204,7 @@ export class EvalRunner {
     const live = this.live.get(evalId);
     if (!live) return;
     live.cancelled = true;
+    if (live.retryTimer) { clearTimeout(live.retryTimer); live.retryTimer = null; }
     this.deps.evalStore.cancelQueuedJobs(evalId, "cancelled");
     for (const runId of live.runToJob.keys()) this.deps.pool.stop(runId);
     console.log(`[eval] ${evalId} cancelled`);
@@ -178,10 +222,34 @@ export class EvalRunner {
     const live = this.live.get(evalId);
     if (!live) return;
 
+    // THE BUDGET CEILING. Checked before dispatching anything, against TRUE spend (every
+    // attempt plus judge cost) — never the comparison figure, which excludes failures and
+    // would let a retry storm spend straight past the limit.
+    //
+    // It bounds what is STARTED, not what is spent: a job already in flight runs to
+    // completion, so the final total can exceed the ceiling by at most the cost of the
+    // runs already going. Stopping mid-run would spend the money and throw away the result.
+    if (!live.cancelled && this.overBudget(evalId)) {
+      const cancelled = this.deps.evalStore.cancelQueuedJobs(evalId, "budget ceiling reached");
+      live.cancelled = true;
+      this.deps.evalStore.setEvalStatus(
+        evalId,
+        "aborted_over_budget",
+        `stopped after $${this.deps.evalStore.trueSpend(evalId).toFixed(4)} of a $${
+          this.deps.evalStore.getEvalRun(evalId)?.budget_usd?.toFixed(4)
+        } budget`,
+      );
+      console.log(`[eval] ${evalId} hit its budget ceiling — ${cancelled} queued job(s) cancelled`);
+    }
+
     const jobs = this.deps.evalStore.jobsForEval(evalId);
     if (!live.cancelled) {
+      const now = Date.now();
       for (const job of jobs) {
         if (job.status !== "queued") continue;
+        // A backing-off retry isn't eligible yet. Skipping (not breaking) lets other jobs
+        // through — one provider's rate limit must not stall the whole eval.
+        if (job.retry_not_before && Date.parse(job.retry_not_before) > now) continue;
         if (this.deps.pool.freeSlots <= 0) break; // pool saturated — try again on the next exit
         const running = live.inFlight.get(job.provider) ?? 0;
         if (running >= providerLimit(job.provider)) continue; // this provider is at its cap
@@ -190,6 +258,44 @@ export class EvalRunner {
     }
     this.reportProgress(evalId);
     this.finishIfDone(evalId);
+    this.scheduleRetryWake(evalId);
+  }
+
+  /** True when this eval has spent at or past its ceiling. No ceiling => never true. */
+  private overBudget(evalId: string): boolean {
+    const budget = this.deps.evalStore.getEvalRun(evalId)?.budget_usd;
+    if (budget === null || budget === undefined) return false;
+    return this.deps.evalStore.trueSpend(evalId) >= budget;
+  }
+
+  /**
+   * Wake once when the earliest backing-off retry comes due.
+   *
+   * Needed because pump() is otherwise driven purely by job exits, and a job waiting on a
+   * backoff has no exit coming — without this the eval would sit forever with queued work
+   * and idle slots. One timer for the earliest deadline, replaced each pump, so backoffs
+   * never accumulate timers or spin.
+   */
+  private scheduleRetryWake(evalId: string): void {
+    const live = this.live.get(evalId);
+    if (!live) return;
+    if (live.retryTimer) { clearTimeout(live.retryTimer); live.retryTimer = null; }
+    if (live.cancelled) return;
+
+    const now = Date.now();
+    const waiting = this.deps.evalStore
+      .jobsForEval(evalId)
+      .filter((j) => j.status === "queued" && j.retry_not_before)
+      .map((j) => Date.parse(j.retry_not_before!))
+      .filter((t) => t > now);
+    if (!waiting.length) return;
+
+    const wakeIn = Math.max(50, Math.min(...waiting) - now);
+    live.retryTimer = setTimeout(() => {
+      const l = this.live.get(evalId);
+      if (l) l.retryTimer = null;
+      this.pump(evalId);
+    }, wakeIn);
   }
 
   private dispatch(live: Live, job: EvalJob): void {
@@ -276,8 +382,29 @@ export class EvalRunner {
       latency_ms: metrics.latency_ms,
       cost_complete: metrics.cost_complete,
     });
-    const finished = this.deps.evalStore.getJob(jobId);
-    if (finished) this.deps.onJobFinished?.(finished);
+
+    // Retry only what's worth paying to retry, and only while attempts remain. `finishJob`
+    // above has already folded this attempt's spend into spent_usd, so the retry is
+    // accounted for even though the job goes back on the queue.
+    const attempt = (job?.attempt ?? 0) + 1;
+    const retryable =
+      status !== "succeeded" &&
+      !live.cancelled &&
+      attempt < MAX_ATTEMPTS &&
+      isTransientFailure(error, timedOut) &&
+      !this.overBudget(live.evalId); // never spend past the ceiling to retry
+
+    if (retryable) {
+      // Exponential backoff: a rate limit retried immediately is a rate limit again.
+      const delay = RETRY_BASE_MS * 2 ** (attempt - 1);
+      this.deps.evalStore.retryJob(jobId, attempt, new Date(Date.now() + delay));
+      console.log(
+        `[eval] job ${jobId.slice(0, 8)} attempt ${attempt}/${MAX_ATTEMPTS} in ${delay}ms — ${error}`,
+      );
+    } else {
+      const finished = this.deps.evalStore.getJob(jobId);
+      if (finished) this.deps.onJobFinished?.(finished);
+    }
 
     // One failed job is one failed cell — keep draining.
     this.pump(live.evalId);
@@ -308,9 +435,14 @@ export class EvalRunner {
     const c = this.counts(evalId);
     if (c.done < c.total) return;
 
+    if (live.retryTimer) { clearTimeout(live.retryTimer); live.retryTimer = null; }
     this.live.delete(evalId);
-    const status = live.cancelled ? "cancelled" : "completed";
-    this.deps.evalStore.setEvalStatus(evalId, status);
+    // A budget abort already recorded its own status and reason; don't overwrite it with
+    // the generic "cancelled", which would lose why the eval stopped.
+    const current = this.deps.evalStore.getEvalRun(evalId)?.status;
+    const status =
+      current === "aborted_over_budget" ? current : live.cancelled ? "cancelled" : "completed";
+    if (current !== "aborted_over_budget") this.deps.evalStore.setEvalStatus(evalId, status);
     console.log(
       `[eval] ${evalId} ${status} — ${c.total - c.failed}/${c.total} succeeded, ${c.failed} failed`,
     );

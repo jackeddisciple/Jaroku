@@ -11,7 +11,8 @@
     "test:protocol": "tsx src/fileProtocol.test.ts",
     "test:pricing": "tsx src/pricing.test.ts",
     "test:pool": "tsx src/runPool.test.ts",
-    "test:aggregate": "tsx src/evalAggregate.test.ts"
+    "test:aggregate": "tsx src/evalAggregate.test.ts",
+    "test:retry": "tsx src/evalRetry.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",

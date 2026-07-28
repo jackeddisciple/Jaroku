@@ -121,8 +121,10 @@ export interface EvalJob {
   attempt: number;
   /** FK -> runs.id. Null until dispatched. This is the whole integration with the trace. */
   run_id: string | null;
-  /** SUM(steps.cost) for the run — null when the model is unpriced ("cost unknown"). */
+  /** The FINAL attempt's cost — the like-for-like comparison figure. Null when unpriced. */
   cost_usd: number | null;
+  /** CUMULATIVE cost across every attempt. What the bill and the budget ceiling see. */
+  spent_usd: number;
   tokens: number | null;
   latency_ms: number | null;
   /** 0 when some llm_call step had tokens but no cost — the total is an UNDERCOUNT. */
@@ -130,6 +132,8 @@ export interface EvalJob {
   error: string | null;
   started_at: string | null;
   ended_at: string | null;
+  /** ISO time before which a backing-off retry must not be dispatched. */
+  retry_not_before?: string | null;
 }
 
 export interface EvalScore {
@@ -234,6 +238,27 @@ export class EvalStore {
       CREATE INDEX IF NOT EXISTS idx_jobs_run         ON eval_jobs(run_id);
       CREATE INDEX IF NOT EXISTS idx_rubrics_dataset  ON rubrics(dataset_id);
     `);
+    // Additive migration for DBs created before retry landed. A retried job must not be
+    // re-dispatched immediately — backing off is the entire point when the failure was a
+    // rate limit.
+    this.ensureColumn("eval_jobs", "retry_not_before", "TEXT");
+    // CUMULATIVE spend across every attempt of this job.
+    //
+    // `cost_usd` is the FINAL attempt's cost — the like-for-like number a provider is
+    // compared on. On a retry it is overwritten, which is correct for comparison and
+    // WRONG for the bill: attempt 1 already charged for the tokens it burned before
+    // failing. Without a separate cumulative column that money silently vanishes from
+    // true spend, and the budget ceiling under-counts exactly when retries are firing —
+    // i.e. precisely when it most needs to be accurate.
+    this.ensureColumn("eval_jobs", "spent_usd", "REAL NOT NULL DEFAULT 0");
+  }
+
+  /** Idempotent ADD COLUMN — CREATE TABLE IF NOT EXISTS never alters an existing table. */
+  private ensureColumn(table: string, column: string, decl: string): void {
+    const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === column)) {
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
+    }
   }
 
   private static parseJson<T>(v: unknown, fallback: T): T {
@@ -497,7 +522,7 @@ export class EvalStore {
         ins.run(id, evalId, j.example_id, j.provider, j.model);
         out.push({
           id, eval_id: evalId, example_id: j.example_id, provider: j.provider, model: j.model,
-          status: "queued", attempt: 0, run_id: null, cost_usd: null, tokens: null,
+          status: "queued", attempt: 0, run_id: null, cost_usd: null, spent_usd: 0, tokens: null,
           latency_ms: null, cost_complete: 1, error: null, started_at: null, ended_at: null,
         });
       }
@@ -517,6 +542,13 @@ export class EvalStore {
   }
 
   /** Terminal update for a job, including whatever it managed to spend. */
+  /**
+   * Terminal update for one ATTEMPT of a job.
+   *
+   * `cost_usd` is replaced (it describes this attempt — the comparison figure), while
+   * `spent_usd` ACCUMULATES (it describes the bill). A job retried twice therefore
+   * compares on its final attempt and bills for all three.
+   */
   finishJob(
     jobId: string,
     status: Exclude<EvalJobStatus, "queued" | "running">,
@@ -530,12 +562,13 @@ export class EvalStore {
   ): void {
     this.db
       .prepare(
-        `UPDATE eval_jobs SET status = ?, cost_usd = ?, tokens = ?, latency_ms = ?,
-           cost_complete = ?, error = ?, ended_at = ? WHERE id = ?`,
+        `UPDATE eval_jobs SET status = ?, cost_usd = ?, spent_usd = COALESCE(spent_usd, 0) + ?,
+           tokens = ?, latency_ms = ?, cost_complete = ?, error = ?, ended_at = ? WHERE id = ?`,
       )
       .run(
         status,
         result.cost_usd ?? null,
+        result.cost_usd ?? 0, // an unpriced attempt adds nothing knowable to the bill
         result.tokens ?? null,
         result.latency_ms ?? null,
         result.cost_complete === false ? 0 : 1,
@@ -553,6 +586,23 @@ export class EvalStore {
       .prepare(`UPDATE eval_jobs SET status = 'queued', run_id = NULL, started_at = NULL WHERE id = ?`)
       .run(jobId);
   }
+
+  /**
+   * Queue a job for another attempt after `notBefore`.
+   *
+   * Consumes an attempt (unlike `requeueJob`) because the previous one really ran and
+   * really spent. Its `cost_usd` is deliberately LEFT IN PLACE: a failed attempt's spend
+   * still counts toward true spend and the budget ceiling.
+   */
+  retryJob(jobId: string, attempt: number, notBefore: Date): void {
+    this.db
+      .prepare(
+        `UPDATE eval_jobs SET status = 'queued', attempt = ?, retry_not_before = ?,
+           run_id = NULL, started_at = NULL, ended_at = NULL WHERE id = ?`,
+      )
+      .run(attempt, notBefore.toISOString(), jobId);
+  }
+
 
   /** Cancel everything still queued — how a budget abort stops the bleeding. */
   cancelQueuedJobs(evalId: string, reason: string): number {
@@ -585,8 +635,9 @@ export class EvalStore {
    * would let a rate-limit storm spend past it without ever tripping.
    */
   trueSpend(evalId: string): number {
+    // spent_usd, not cost_usd: the cumulative column is the one that survives retries.
     const jobs = this.db
-      .prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS c FROM eval_jobs WHERE eval_id = ?`)
+      .prepare(`SELECT COALESCE(SUM(spent_usd), 0) AS c FROM eval_jobs WHERE eval_id = ?`)
       .get(evalId) as { c: number };
     const run = this.db
       .prepare(`SELECT COALESCE(judge_cost_usd, 0) AS j FROM eval_runs WHERE id = ?`)
