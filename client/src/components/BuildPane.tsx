@@ -10,10 +10,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { orderedFiles, useBuildStore } from "../store/buildStore.ts";
-import { threadFor, useChatStore, type ChatTurn, type GenTurn, type ReplyTurn } from "../store/chatStore.ts";
+import {
+  isPlanning, pendingPlanId, threadFor, useChatStore,
+  type ChatTurn, type GenTurn, type ReplyTurn,
+} from "../store/chatStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { inputKey, RUN_PROVIDERS, useUiStore } from "../store/uiStore.ts";
-import { sendBranchRun, sendEdit, sendExplain, sendGenerate, sendPromoteTestInput, sendRun } from "../lib/socket.ts";
+import { sendBranchRun, sendEdit, sendExplain, sendPlanAgent, sendPromoteTestInput, sendRun } from "../lib/socket.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
 import { DiffCard } from "./DiffCard.tsx";
@@ -237,7 +240,10 @@ export function BuildPane() {
 
   const agent = agents.find((a) => a.agent_id === activeAgentId);
   const mode: "generate" | "edit" = activeAgentId ? "edit" : "generate";
-  const busy = genStatus === "generating" || streamingAgentId !== null;
+  // A plan on screen awaiting a decision. It routes a typed message to a revision and, when
+  // the connector selection changes, is what gets invalidated.
+  const planId = pendingPlanId({ pending: pendingThread });
+  const busy = genStatus === "generating" || streamingAgentId !== null || isPlanning({ pending: pendingThread });
   const turns = threadFor({ threads, pending: pendingThread }, activeAgentId);
 
   // Unified-composer context: what the user last selected. A graph node takes precedence for
@@ -255,7 +261,9 @@ export function BuildPane() {
 
   // Route the CURRENT text by (intent + context) — recomputed live so the composer can show where
   // ⌘↵ will send it. Pure heuristics; no per-keystroke network/LLM cost.
-  const intent = classifyIntent(text, { agentId: activeAgentId, step: selectedStep, nodeId: selectedNodeId });
+  const intent = classifyIntent(text, {
+    agentId: activeAgentId, pendingPlanId: planId, step: selectedStep, nodeId: selectedNodeId,
+  });
   const contextLabel = selectedNodeId
     ? `node: ${selectedNodeId}`
     : selectedStep
@@ -365,7 +373,12 @@ export function BuildPane() {
     if (busy) return;
     switch (intent.kind) {
       case "generate":
-        sendGenerate(trimmed, selected, name.trim() || undefined);
+        // Never straight to generation: the plan gate is the only way in, so nothing gets
+        // built that the user hasn't seen described first.
+        sendPlanAgent(trimmed, selected, name.trim() || undefined);
+        break;
+      case "replan":
+        sendPlanAgent(trimmed, selected, name.trim() || undefined, intent.planId);
         break;
       case "edit":
         if (activeAgentId) sendEdit(activeAgentId, trimmed);
@@ -409,7 +422,10 @@ export function BuildPane() {
         {turns.length === 0 && (
           <div className="text-[12px] text-muted pt-4">
             {mode === "generate" ? (
-              <>Describe the agent you want and it will be generated as a real LangGraph project.</>
+              <>
+                Describe the agent you want. You’ll get a short plan first — its tools, state and
+                graph — to approve or correct; nothing is generated until you do.
+              </>
             ) : (
               <>
                 Describe a change to this agent — e.g. “add Redis conversation memory” or

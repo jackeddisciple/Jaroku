@@ -14,6 +14,7 @@ export type ExplainSubject =
 
 export type Intent =
   | { kind: "generate" }
+  | { kind: "replan"; planId: string }
   | { kind: "edit" }
   | { kind: "fix"; step: Step }
   | { kind: "rerun"; step: Step }
@@ -21,6 +22,9 @@ export type Intent =
 
 export type ComposerContext = {
   agentId: string | null;
+  /** A plan awaiting the user's decision. While one is up, a typed message is feedback on
+   *  THAT plan, not a request for a new one — the only way to abandon it is Discard. */
+  pendingPlanId?: string | null;
   step?: Step; // the selected trace step, if any
   nodeId?: string | null; // the selected graph node, if any (takes precedence for "explain")
 };
@@ -31,10 +35,13 @@ const RE_FIX = /\b(fix|repair|resolve|debug|correct|patch|make (it|this|that) (w
 
 /** Decide where a composer message goes, given what's selected in the UI. Precedence:
  *  explain (question phrasing) → rerun (needs a step) → fix (needs a failed step) → edit. With no
- *  agent selected there's nothing to edit/explain, so it's a new-agent generation. */
+ *  agent selected there's nothing to edit/explain, so it's a plan for a new agent — or, if one
+ *  is already on screen awaiting a decision, a revision of it. */
 export function classifyIntent(text: string, ctx: ComposerContext): Intent {
   const t = text.trim();
-  if (!ctx.agentId) return { kind: "generate" };
+  if (!ctx.agentId) {
+    return ctx.pendingPlanId ? { kind: "replan", planId: ctx.pendingPlanId } : { kind: "generate" };
+  }
 
   const step = ctx.step;
   const nodeId = ctx.nodeId ?? undefined;
@@ -53,7 +60,8 @@ export function classifyIntent(text: string, ctx: ComposerContext): Intent {
  *  routing is transparent and teachable. */
 export function routeLabel(intent: Intent): string {
   switch (intent.kind) {
-    case "generate": return "create a new agent";
+    case "generate": return "plan a new agent";
+    case "replan": return "revise the plan";
     case "edit": return "edit this agent";
     case "fix": return `fix step #${intent.step.seq}`;
     case "rerun": return `re-run from step #${intent.step.seq}`;

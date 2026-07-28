@@ -470,6 +470,15 @@ function livePlan(turns: ChatTurn[]): PlanTurn | undefined {
   return undefined;
 }
 
+/** True while a plan is streaming. Folded into the composer's `busy` so the disabled Send
+ *  button — the affordance already in place for a generation or an edit — also gates a second
+ *  plan, rather than relying on a server refusal the user only sees after clicking. */
+export function isPlanning(state: { pending: ChatTurn[] }): boolean {
+  return state.pending.some(
+    (t) => t.role === "jaroku" && t.kind === "plan" && t.status === "streaming",
+  );
+}
+
 /** The id of the plan awaiting a decision. The composer reads this to route a typed message
  *  as a revision rather than a fresh plan, and to invalidate on a connector change. */
 export function pendingPlanId(state: { pending: ChatTurn[] }): string | null {

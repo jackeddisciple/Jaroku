@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "test:plan-flow": "../server/node_modules/.bin/tsx src/store/planFlow.test.ts",
     "test:export": "../server/node_modules/.bin/tsx src/lib/evalExport.test.ts",
     "test:csv": "../server/node_modules/.bin/tsx src/lib/csv.test.ts"
   },
