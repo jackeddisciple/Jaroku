@@ -26,7 +26,14 @@ export interface UserTurn {
  *  conversation still shows which plan produced which agent rather than a card frozen
  *  mid-decision. "stale" means the connector selection changed underneath it — the plan is
  *  still readable, but it no longer describes what would be built. */
-export type PlanStatus = "streaming" | "pending" | "accepted" | "stale" | "discarded" | "error";
+export type PlanStatus =
+  | "streaming"
+  | "pending"
+  | "accepted"
+  | "stale"
+  | "superseded" // a newer plan replaced it; the server already spent its id
+  | "discarded"
+  | "error";
 
 export interface PlanTurn {
   id: string;
@@ -175,16 +182,25 @@ export const useChatStore = create<ChatState>((set) => ({
   // so an agent's conversation opens with the plan that authorised it.
 
   planStarted: (input, revision) =>
-    set((s) => ({
+    set((s) => {
+      // Starting a plan consumes any plan still awaiting a decision — a revision takes its
+      // predecessor's slot server-side. Marking it superseded is what stops the old card
+      // sitting there with a Generate button whose id can now only be refused.
+      const previous = livePlan(s.pending);
+      const base = previous
+        ? replaceTurn(s.pending, previous.id, { ...previous, status: "superseded" as const })
+        : s.pending;
+      return {
       pending: [
-        ...s.pending,
+        ...base,
         { id: turnId(), role: "user", text: input },
         {
           id: turnId(), role: "jaroku", kind: "plan", status: "streaming",
           planId: null, revision, prompt: input, raw: "", plan: null, warnings: [], usage: null,
         },
       ],
-    })),
+      };
+    }),
 
   planDelta: (text) =>
     set((s) => {

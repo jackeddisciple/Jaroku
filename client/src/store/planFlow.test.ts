@@ -79,6 +79,17 @@ const userTexts = () => store().pending.filter((t) => t.role === "user").map((t)
   check("explain still reachable with a plan pending", i.kind === "explain", i);
 }
 
+// 4b — the composer must be able to state where a message will go on the new-agent path.
+//      Both of these route with agentId === null, which is exactly the case the composer's
+//      routing hint used to skip, so the label was unreachable in the UI.
+{
+  const fresh = classifyIntent("a support agent", { agentId: null });
+  const revise = classifyIntent("drop the summariser", { agentId: null, pendingPlanId: "p1" });
+  check("both new-agent intents produce a distinct, showable label",
+    routeLabel(fresh) !== routeLabel(revise) && routeLabel(fresh).length > 0 && routeLabel(revise).length > 0,
+    [routeLabel(fresh), routeLabel(revise)]);
+}
+
 // --- turn lifecycle -------------------------------------------------------------------
 
 // 5 — a plan streams, settles, and is takeable.
@@ -149,6 +160,22 @@ const userTexts = () => store().pending.filter((t) => t.role === "user").map((t)
   store().genStarted("y");
   store().planDiscarded("p2");
   check("an accepted plan cannot be un-accepted by a late discard", planTurns()[1]?.status === "accepted", planTurns()[1]?.status);
+}
+
+// 9b — a revision supersedes its predecessor. The server takes the old plan's slot when it
+//      re-plans, so a card left showing Generate would hold an id that can only be refused.
+//      Found in the browser: the old card sat there looking perfectly clickable.
+{
+  reset();
+  store().planStarted("a support agent", 1);
+  store().planReady({ planId: "p1", prompt: "a support agent", plan: PLAN, warnings: [], usage: USAGE, revision: 1 });
+  store().planStarted("drop the summariser", 2);
+  check("predecessor marked superseded", planTurns()[0]?.status === "superseded", planTurns()[0]?.status);
+  check("superseded plan is not actionable", pendingPlanId({ pending: store().pending }) === null);
+
+  store().planReady({ planId: "p2", prompt: "a support agent", plan: PLAN, warnings: [], usage: USAGE, revision: 2 });
+  check("only the revision is actionable", pendingPlanId({ pending: store().pending }) === "p2");
+  check("revision number carried", planTurns()[1]?.revision === 2);
 }
 
 // 10 — staleness greys the plan without destroying it. A stale cost estimate gets blanked;

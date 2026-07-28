@@ -12,6 +12,7 @@
 
 import type { PlanTurn } from "../store/chatStore.ts";
 import { sendDiscardPlan, sendGenerate } from "../lib/socket.ts";
+import { useUiStore } from "../store/uiStore.ts";
 
 const btn =
   "rounded px-3 py-1.5 text-[12px] bg-panel text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
@@ -30,6 +31,17 @@ function Line({ children }: { children: React.ReactNode }) {
 }
 
 export function PlanCard({ turn }: { turn: PlanTurn }) {
+  const prefillChat = useUiStore((s) => s.prefillChat);
+
+  // Discarding is "not this — something else", not "never mind". Handing the brief back to the
+  // composer (the same prefill One-Click Fix uses) means redirecting is an edit to what you
+  // already wrote rather than retyping it from memory.
+  const discard = () => {
+    if (!turn.planId) return;
+    sendDiscardPlan(turn.planId);
+    prefillChat(turn.prompt);
+  };
+
   // Streaming: raw prose with a caret, in the same container the settled card uses, so the
   // structured render settles in place instead of jumping (doc §4.3 — everything streams).
   if (turn.status === "streaming") {
@@ -69,6 +81,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
         <span className="text-ink">Here’s the plan</span>
         {turn.revision > 1 && <span className="text-faint text-[11px]">revision {turn.revision}</span>}
         {turn.status === "accepted" && <span className="text-ok text-[11px]">approved</span>}
+        {turn.status === "superseded" && <span className="text-faint text-[11px]">superseded</span>}
         {turn.status === "discarded" && <span className="text-faint text-[11px]">discarded</span>}
         {turn.status === "stale" && <span className="text-run text-[11px]">out of date</span>}
       </div>
@@ -162,7 +175,8 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
 
       {turn.status === "stale" && (
         <div className="mt-2 text-[11px] text-muted">
-          The connectors changed after this was written — send a message to re-plan.
+          The connectors changed after this was written — say what you want and it will be
+          re-planned against the new selection.
         </div>
       )}
 
@@ -186,7 +200,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
           </button>
           <button
             className="rounded px-3 py-1.5 text-[12px] text-muted hover:text-ink transition-colors"
-            onClick={() => turn.planId && sendDiscardPlan(turn.planId)}
+            onClick={discard}
           >
             Discard
           </button>

@@ -606,8 +606,11 @@ function generateAgent(cmd: GenerateCommand): void {
   let planUsage: UsageSummary | undefined;
   let { prompt, connectors, name } = cmd;
   if (cmd.planId) {
-    const rec = planner.take(cmd.planId);
-    if (!rec) {
+    // Everything that can refuse this generation is checked against peek() FIRST, so a
+    // refusal never burns the plan. take() happens only once the build is certain to start —
+    // a user told "no" should still have their plan on screen to revise.
+    const rec = planner.peek();
+    if (!rec || rec.planId !== cmd.planId) {
       // Never fall through to an unplanned generation here. The user approved a specific
       // plan; quietly building something they never reviewed is the exact failure this gate
       // exists to prevent.
@@ -617,6 +620,25 @@ function generateAgent(cmd: GenerateCommand): void {
       });
       return;
     }
+    // resolveSelected() silently drops ids that aren't in the catalog. That is the right
+    // behaviour for a client's unvalidated list, but not here: the plan NAMED these connectors
+    // and the user approved that. Dropping one quietly would build an agent missing a tool the
+    // plan promised — a plan that turned into a lie. Catalog drift between planning and
+    // confirming is rare, and this refusal is loud on purpose. The plan survives it, so the
+    // next message re-plans against the catalog as it now stands.
+    const known = new Set(loadConnectors(RUNTIME_DIR).map((c) => c.id));
+    const missing = (rec.connectors ?? []).filter((id) => !known.has(id));
+    if (missing.length) {
+      relay.broadcastGen({
+        type: "plan_error",
+        message:
+          `the plan uses ${missing.join(", ")}, which ${missing.length > 1 ? "are" : "is"} no ` +
+          `longer in the connector catalog — say what you want and it will be re-planned`,
+      });
+      return;
+    }
+
+    planner.take(cmd.planId); // spend it: this generation is now certain to start
     ({ prompt, connectors, name } = rec);
     plan = rec.plan.raw;
     planUsage = rec.usage;

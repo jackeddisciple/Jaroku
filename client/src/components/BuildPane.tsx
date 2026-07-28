@@ -288,6 +288,20 @@ export function BuildPane() {
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
+  // A plan describes the connectors that were ticked when it was written. Change them and it
+  // no longer describes what would be built, so it loses its Generate button.
+  //
+  // Deliberately NOT sent to the server as a discard, which is what a stale cost estimate
+  // gets. The record holds the original brief, and a revision re-plans that brief against the
+  // CURRENT selection — so keeping it means ticking Postgres and saying "use it for the
+  // lookup" continues the conversation instead of making the user retype what they wanted.
+  const connectorKey = selected.join(",");
+  const planStale = useChatStore((s) => s.planStale);
+  useEffect(() => {
+    planStale();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectorKey, name]);
+
   // --- Test mode (runs) + voice, folded in from the old run-bar ------------------
   const canRun = connected && Boolean(activeAgentId) && (agent?.runnable ?? false);
 
@@ -483,7 +497,7 @@ export function BuildPane() {
         )}
 
         {/* context chip + live routing hint (Chat mode) — so the one composer stays transparent */}
-        {composerMode === "chat" && (contextLabel || (text.trim() && activeAgentId)) && (
+        {composerMode === "chat" && (contextLabel || text.trim()) && (
           <div className="mb-2 flex items-center gap-2 text-[11px]">
             {contextLabel && (
               <span className="inline-flex items-center gap-1 bg-active rounded px-2 py-0.5 text-muted">
