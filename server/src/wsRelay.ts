@@ -98,6 +98,13 @@ export type LoadRubricCommand = { cmd: "loadRubric"; datasetId: string };
 export type LoadEvalResultsCommand = { cmd: "loadEvalResults"; evalId: string };
 /** Past evals for a dataset (or all), so a finished comparison stays reachable. */
 export type ListEvalsCommand = { cmd: "listEvals"; datasetId?: string };
+/** What a real-provider eval will roughly cost, BEFORE committing to it. */
+export type EstimateEvalCommand = {
+  cmd: "estimateEval";
+  datasetId: string;
+  agentId: string;
+  targets: { provider: string; model: string }[];
+};
 export type SaveRubricCommand = {
   cmd: "saveRubric";
   datasetId: string;
@@ -145,13 +152,14 @@ export type EvalCommand =
   | LoadRubricCommand
   | SaveRubricCommand
   | LoadEvalResultsCommand
-  | ListEvalsCommand;
+  | ListEvalsCommand
+  | EstimateEvalCommand;
 
 const EVAL_COMMANDS = new Set([
   "createDataset", "renameDataset", "deleteDataset", "listDatasets",
   "loadDataset", "addExample", "updateExample", "deleteExample", "promoteTestInput",
   "startEval", "cancelEval", "loadRubric", "saveRubric",
-  "loadEvalResults", "listEvals",
+  "loadEvalResults", "listEvals", "estimateEval",
 ]);
 
 /** Commands the relay forwards to the app rather than answering locally. */
@@ -235,6 +243,7 @@ export type EvalEvent =
   | { type: "scoringFinished"; evalId: string; scored: number; unscored: number }
   | { type: "evalResults"; evalId: string; results: unknown }
   | { type: "evals"; evals: unknown[] }
+  | { type: "estimate"; estimate: unknown }
   | { type: "error"; message: string; datasetId?: string };
 
 export type DebugEvent =

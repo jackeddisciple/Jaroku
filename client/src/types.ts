@@ -278,6 +278,33 @@ export interface Rubric {
   criteria: RubricCriterion[];
 }
 
+export type EstimateBasis = "measured" | "other-model" | "default";
+
+export interface TargetEstimate {
+  provider: string;
+  model: string;
+  runs: number;
+  /** null when the model has no pricing entry — unknown, not free. */
+  lowUsd: number | null;
+  highUsd: number | null;
+  basis: EstimateBasis;
+  sampleSize: number;
+  priced: boolean;
+}
+
+export interface EvalEstimate {
+  examples: number;
+  targets: number;
+  totalRuns: number;
+  perTarget: TargetEstimate[];
+  judgeLowUsd: number;
+  judgeHighUsd: number;
+  totalLowUsd: number;
+  totalHighUsd: number;
+  hasUnpricedTarget: boolean;
+  notes: string[];
+}
+
 export type EvalMessage =
   | { channel: "eval"; type: "datasets"; agentId: string | null; datasets: Dataset[] }
   | { channel: "eval"; type: "dataset"; datasetId: string; examples: DatasetExample[] }
@@ -290,6 +317,7 @@ export type EvalMessage =
   | { channel: "eval"; type: "scoringFinished"; evalId: string; scored: number; unscored: number }
   | { channel: "eval"; type: "evalResults"; evalId: string; results: EvalResults }
   | { channel: "eval"; type: "evals"; evals: EvalRunSummary[] }
+  | { channel: "eval"; type: "estimate"; estimate: EvalEstimate }
   | { channel: "eval"; type: "rubric"; datasetId: string; rubric: Rubric; isDefault: boolean }
   | { channel: "eval"; type: "error"; message: string; datasetId?: string };
 
@@ -348,6 +376,7 @@ export type ClientCommand =
   | { cmd: "cancelEval"; evalId: string }
   | { cmd: "loadEvalResults"; evalId: string }
   | { cmd: "listEvals"; datasetId?: string }
+  | { cmd: "estimateEval"; datasetId: string; agentId: string; targets: EvalTarget[] }
   | { cmd: "loadRubric"; datasetId: string }
   | { cmd: "saveRubric"; datasetId: string; name?: string; criteria: RubricCriterion[] };
 

@@ -112,6 +112,7 @@ function dispatch(msg: ServerMessage): void {
       } else if (msg.type === "evalResults") e.setResults(msg.evalId, msg.results);
       else if (msg.type === "evals") e.setEvals(msg.evals);
       else if (msg.type === "rubric") e.setRubric(msg.rubric, msg.isDefault);
+      else if (msg.type === "estimate") e.setEstimate(msg.estimate);
       else if (msg.type === "error") e.setError(msg.message);
       break;
     }
@@ -305,6 +306,10 @@ export function sendLoadEvalResults(evalId: string): void {
 }
 export function sendListEvals(datasetId?: string): void {
   send({ cmd: "listEvals", datasetId });
+}
+/** Ask what a real-provider eval would roughly cost, BEFORE committing to it. */
+export function sendEstimateEval(datasetId: string, agentId: string, targets: EvalTarget[]): void {
+  send({ cmd: "estimateEval", datasetId, agentId, targets });
 }
 export function sendLoadRubric(datasetId: string): void {
   send({ cmd: "loadRubric", datasetId });

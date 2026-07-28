@@ -11,7 +11,7 @@
 // replace, never a merge — there is no partial state to reconcile.
 
 import { create } from "zustand";
-import type { Dataset, DatasetExample, EvalResults, EvalRunSummary, Rubric } from "../types.ts";
+import type { Dataset, DatasetExample, EvalEstimate, EvalResults, EvalRunSummary, Rubric } from "../types.ts";
 
 /** Live counters while an eval drains. Counts only — no step traffic on this channel. */
 export interface EvalProgress {
@@ -66,6 +66,10 @@ interface EvalState {
   setProgress: (p: EvalProgress | null) => void;
   patchProgress: (patch: Partial<EvalProgress>) => void;
   setRubric: (rubric: Rubric, isDefault: boolean) => void;
+
+  /** Pre-run cost estimate for the currently selected targets, once requested. */
+  estimate: EvalEstimate | null;
+  setEstimate: (e: EvalEstimate | null) => void;
 }
 
 export const useEvalStore = create<EvalState>((set) => ({
@@ -135,6 +139,9 @@ export const useEvalStore = create<EvalState>((set) => ({
     set((s) => (s.progress ? { progress: { ...s.progress, ...patch } } : {})),
 
   setRubric: (rubric, rubricIsDefault) => set({ rubric, rubricIsDefault }),
+
+  estimate: null,
+  setEstimate: (estimate) => set({ estimate }),
 }));
 
 /** Examples of a dataset in position order. `[]` when not loaded yet. */

@@ -19,6 +19,7 @@ import { EvalRunner } from "./evalRunner.ts";
 import { DEFAULT_CRITERIA } from "./judge/rubric.ts";
 import { JudgeScorer } from "./judge/score.ts";
 import { aggregateEval } from "./evalAggregate.ts";
+import { estimateEval } from "./evalEstimate.ts";
 import { WsRelay, type ForwardedCommand, type GenerateCommand } from "./wsRelay.ts";
 import { Generator } from "./generator.ts";
 import { Editor, editCount } from "./editor.ts";
@@ -327,6 +328,18 @@ function handleEvalCommand(cmd: ForwardedCommand): void {
       }
       case "cancelEval": {
         evalRunner.cancel(cmd.evalId);
+        return;
+      }
+      case "estimateEval": {
+        relay.broadcastEval({
+          type: "estimate",
+          estimate: estimateEval(store, evalStore, {
+            datasetId: cmd.datasetId,
+            agentId: cmd.agentId,
+            targets: cmd.targets ?? [],
+            judgeEnabled: JudgeScorer.available(),
+          }),
+        });
         return;
       }
       case "loadEvalResults": {
