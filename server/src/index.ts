@@ -1,6 +1,9 @@
-// Wires the pipeline: ProcessManager (Python agent) -> TraceStore (SQLite) -> WsRelay (browser).
+// Wires the pipeline: RunPool (Python agents) -> TraceStore (SQLite) -> WsRelay (browser).
 //
-//   uv-spawned agent  --stdout JSON-->  ProcessManager  --event-->  { persist + broadcast }
+//   uv-spawned agent  --stdout JSON-->  RunPool slot  --event-->  { persist + broadcast }
+//
+// The pool reserves slot 0 for the interactive run — the one the user drives, and the only
+// one pause/resume/branch address — and lends the rest to the eval fan-out.
 //
 // Run:  npm run dev        (in server/)
 // Then open http://localhost:4317 to watch traces live.
@@ -9,7 +12,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSyn
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import { ProcessManager } from "./processManager.ts";
+import { RunPool } from "./runPool.ts";
 import { TraceStore } from "./store.ts";
 import { EvalStore } from "./evalStore.ts";
 import { WsRelay, type ForwardedCommand, type GenerateCommand } from "./wsRelay.ts";
@@ -45,8 +48,19 @@ const store = new TraceStore(DB_PATH);
 // (single writer; aggregation JOINs eval_jobs against the frozen `steps` table). Nothing
 // here touches schema/events.md — an eval is a batch of ordinary runs.
 const evalStore = new EvalStore(store.connection());
-const manager = new ProcessManager();
+// Slot 0 is the interactive run; the rest are the eval fan-out's. Modest by default —
+// each slot is a Python subprocess with a LangGraph import, and oversubscribing the machine
+// inflates every run's latency, which the comparison dashboard then reports as if it were
+// the provider's.
+const EVAL_CONCURRENCY = Math.max(1, Number(process.env.JAROKU_EVAL_CONCURRENCY ?? 4));
+const pool = new RunPool(EVAL_CONCURRENCY);
 const generator = new Generator();
+
+// Run ids belonging to an in-flight eval job. Their events persist normally but are kept
+// OFF the "trace" channel, so a fan-out can't steal the timeline's focus (traceStore
+// focuses activeRunId on every run_start). Populated by the orchestrator.
+const evalRunIds = new Set<string>();
+const isEvalRun = (runId: string): boolean => evalRunIds.has(runId);
 
 // An eval left 'running' by a shutdown has no orchestrator behind it any more. Mark those
 // interrupted at startup rather than leaving rows that claim to be in flight forever —
@@ -57,10 +71,11 @@ for (const stale of evalStore.unfinishedEvalRuns()) {
   console.log(`[eval] ${stale.id} was interrupted by a restart — ${cancelled} queued job(s) cancelled`);
 }
 
-// True from spawn until run_end (or exit). Deliberately NOT manager.running: the process
-// outlives its run_end by a beat while it tears down, and refusing an apply/undo in that
-// window is a race the user would hit by clicking right after a run finishes. Once
-// run_end is emitted the graph is done and the project files are no longer being read.
+// True from spawn until run_end (or exit) of the INTERACTIVE run. Deliberately NOT
+// pool.interactiveRunning: the process outlives its run_end by a beat while it tears down,
+// and refusing an apply/undo in that window is a race the user would hit by clicking right
+// after a run finishes. Once run_end is emitted the graph is done and the project files are
+// no longer being read.
 let runActive = false;
 
 // Debug depth (Week 6). The server mints each run's id up front so it can address a live run
@@ -84,7 +99,11 @@ function clearControl(runId: string): void {
 
 const editor = new Editor({
   runtimeDir: RUNTIME_DIR,
-  canMutate: () => (runActive ? "cannot modify the agent while a run is in progress" : null),
+  // Pool-aware, not just interactive-aware: an eval job is reading the agent's files from
+  // a subprocess right now, and rewriting them mid-flight would make the trace describe
+  // code that never ran. `pool.busy` covers every slot.
+  canMutate: () =>
+    runActive || pool.busy ? "cannot modify the agent while a run is in progress" : null,
 });
 
 /** Current on-disk files of an agent project, connector files flagged read-only. */
@@ -246,8 +265,16 @@ function handleEvalCommand(cmd: ForwardedCommand): void {
 }
 
 // --- pipeline ---------------------------------------------------------------
-manager.on("event", (event) => {
-  if (event.kind === "run_end") runActive = false;
+// Every run in the pool — interactive or eval job — persists identically. Persisting is
+// unconditional and un-special-cased on purpose: an eval job IS an ordinary run, and its
+// trace has to be as complete and as inspectable as one the user triggered by hand.
+//
+// What differs is only the LIVE broadcast. An eval job's events are not put on the "trace"
+// channel, because traceStore.applyEvent focuses activeRunId on every run_start and a
+// fan-out would yank the timeline away from whatever the user is reading. Drill-down loads
+// those runs on demand through the existing loadRun path.
+pool.on("event", ({ runId, event }) => {
+  if (runId === activeRunId && event.kind === "run_end") runActive = false;
   // Persist first (source of truth), then broadcast to live clients.
   try {
     if (event.kind === "run_start" || event.kind === "run_end") {
@@ -258,23 +285,23 @@ manager.on("event", (event) => {
   } catch (err) {
     console.error("[store] failed to persist event:", (err as Error).message);
   }
-  relay.broadcast(event);
+  if (!isEvalRun(runId)) relay.broadcast(event);
 });
 
-manager.on("parseError", ({ line, error }) => {
+pool.on("parseError", ({ runId, line, error }) => {
   console.error(`[manager] non-event stdout line (${error}):`, line.slice(0, 200));
-  relay.broadcastLog("parseError", `${error}: ${line.slice(0, 200)}`);
+  if (!isEvalRun(runId)) relay.broadcastLog("parseError", `${error}: ${line.slice(0, 200)}`);
 });
 
-manager.on("stderr", (line) => {
+pool.on("stderr", ({ runId, line }) => {
   console.error("[agent]", line);
-  relay.broadcastLog("stderr", line);
+  if (!isEvalRun(runId)) relay.broadcastLog("stderr", line);
 });
 
 // Debug-depth control events (off the trace stream). A `boundary` correlates the durable
 // checkpoint to the steps it covers (for later branching); a `paused` flips the run to the
 // store-only 'paused' status so history shows it as resumable, without any run_end.
-manager.on("control", (ctrl) => {
+pool.on("control", ({ ctrl }) => {
   const runId = typeof ctrl.run_id === "string" ? ctrl.run_id : null;
   if (!runId) return;
   const seqHigh = typeof ctrl.seq_high === "number" ? ctrl.seq_high : -1;
@@ -294,18 +321,27 @@ manager.on("control", (ctrl) => {
   }
 });
 
-manager.on("spawnError", (err) => {
-  runActive = false;
-  activeRunId = null;
-  console.error("[manager] spawn error:", err.message);
+pool.on("spawnError", ({ runId, error }) => {
+  if (runId === activeRunId) {
+    runActive = false;
+    activeRunId = null;
+  }
+  console.error(`[manager] spawn error (run ${runId}):`, error.message);
 });
 
-manager.on("exit", ({ code, signal }) => {
-  runActive = false; // covers a crash before run_end ever arrived
-  // A run that halted at a boundary keeps its 'paused' status (set from the control event); a
-  // normal completion already updated the run via run_end. Either way this subprocess is gone.
-  activeRunId = null;
-  console.log(`[manager] agent exited (code=${code} signal=${signal})`);
+pool.on("exit", ({ runId, code, signal, timedOut }) => {
+  // Only the interactive run owns the interactive flags; an eval job finishing must not
+  // clear them out from under a run the user is driving.
+  if (runId === activeRunId) {
+    runActive = false; // covers a crash before run_end ever arrived
+    // A run that halted at a boundary keeps its 'paused' status (set from the control
+    // event); a normal completion already updated the run via run_end. Either way this
+    // subprocess is gone.
+    activeRunId = null;
+  }
+  console.log(
+    `[manager] agent exited (run=${runId} code=${code} signal=${signal}${timedOut ? " TIMED OUT" : ""})`,
+  );
 });
 
 // --- generation -------------------------------------------------------------
@@ -416,7 +452,7 @@ function editAgent(agentId: string, instruction: string): void {
 
 // --- run trigger ------------------------------------------------------------
 function runAgent(input?: string, provider?: string, model?: string, agentId?: string): void {
-  if (manager.running) {
+  if (pool.interactiveRunning) {
     console.log("[manager] agent already running; ignoring run request");
     return;
   }
@@ -433,7 +469,7 @@ function runAgent(input?: string, provider?: string, model?: string, agentId?: s
   runActive = true;
   activeRunId = runId;
   pausedRunId = null;
-  manager.start({ runtimeDir: RUNTIME_DIR, input, agentId, env });
+  pool.startInteractive({ runId, runtimeDir: RUNTIME_DIR, input, agentId, env });
 }
 
 // Pause the live run at its next node boundary (the runner honours the control file there).
@@ -449,7 +485,7 @@ function pauseRun(runId: string): void {
 // Resume a paused run from its durable checkpoint: a fresh subprocess continues the SAME run id,
 // its seq starting where the paused segment left off (no run_start, no re-run of done nodes).
 function resumeRun(runId: string): void {
-  if (manager.running) {
+  if (pool.interactiveRunning) {
     console.log("[debug] resumeRun ignored — a run is already active");
     return;
   }
@@ -478,7 +514,7 @@ function resumeRun(runId: string): void {
   activeRunId = runId;
   pausedRunId = null;
   relay.broadcastDebug({ type: "resumed", runId, seqOffset });
-  manager.start({ runtimeDir: RUNTIME_DIR, agentId: run.agent_id, env });
+  pool.startInteractive({ runId, runtimeDir: RUNTIME_DIR, agentId: run.agent_id, env });
 }
 
 // Fork a NEW run from a parent run's checkpoint at a step's node boundary, optionally with a
@@ -490,7 +526,7 @@ function branchRun(
   editNode?: string,
   editedState?: Record<string, unknown>,
 ): void {
-  if (manager.running) {
+  if (pool.interactiveRunning) {
     relay.broadcastDebug({ type: "error", runId: fromRunId, message: "a run is active — stop it before branching" });
     return;
   }
@@ -540,7 +576,7 @@ function branchRun(
   console.log(`[debug] branching ${fromRunId} @seq ${seqHigh} -> ${branchId} (agent ${parent.agent_id})`);
   relay.broadcastHistory(); // surface the new branch run in history immediately
   relay.broadcastDebug({ type: "branched", parentRunId: fromRunId, branchId, fromSeq: seqHigh });
-  manager.start({ runtimeDir: RUNTIME_DIR, agentId: parent.agent_id, env });
+  pool.startInteractive({ runId: branchId, runtimeDir: RUNTIME_DIR, agentId: parent.agent_id, env });
 }
 
 // --- explain (unified composer) --------------------------------------------
@@ -606,7 +642,7 @@ if (process.env.JAROKU_NO_AUTORUN !== "1") {
 // --- graceful shutdown ------------------------------------------------------
 function shutdown(): void {
   console.log("\n[server] shutting down…");
-  manager.stop();
+  pool.stopAll();
   store.close();
   process.exit(0);
 }
