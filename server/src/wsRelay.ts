@@ -82,6 +82,15 @@ export type PromoteTestInputCommand = {
   input: string;
   expected?: string | null;
 };
+/** Fan a dataset out across providers. `budgetUsd` is a hard ceiling on TRUE spend. */
+export type StartEvalCommand = {
+  cmd: "startEval";
+  datasetId: string;
+  agentId: string;
+  targets: { provider: string; model: string }[];
+  budgetUsd?: number | null;
+};
+export type CancelEvalCommand = { cmd: "cancelEval"; evalId: string };
 
 // Unified composer "explain": a prose answer about a step / node / the agent, built from
 // in-context data — the one genuinely-new composer intent (no code change).
@@ -117,11 +126,14 @@ export type EvalCommand =
   | AddExampleCommand
   | UpdateExampleCommand
   | DeleteExampleCommand
-  | PromoteTestInputCommand;
+  | PromoteTestInputCommand
+  | StartEvalCommand
+  | CancelEvalCommand;
 
 const EVAL_COMMANDS = new Set([
   "createDataset", "renameDataset", "deleteDataset", "listDatasets",
   "loadDataset", "addExample", "updateExample", "deleteExample", "promoteTestInput",
+  "startEval", "cancelEval",
 ]);
 
 /** Commands the relay forwards to the app rather than answering locally. */
@@ -186,6 +198,18 @@ export type EvalEvent =
   // Answer to a one-click promotion, so the composer can confirm where the input landed.
   // `duplicate` means the dataset already had that exact input and nothing was added.
   | { type: "promoted"; datasetId: string; datasetName: string; duplicate: boolean }
+  // Eval lifecycle. Progress is counts only — the individual runs' steps stay off this
+  // channel (and off "trace") so a fan-out never disturbs the timeline.
+  | {
+      type: "evalStarted";
+      evalId: string;
+      datasetId: string;
+      agentId: string;
+      total: number;
+      targets: { provider: string; model: string }[];
+    }
+  | { type: "evalProgress"; evalId: string; total: number; done: number; running: number; queued: number; failed: number }
+  | { type: "evalFinished"; evalId: string; status: string; error?: string }
   | { type: "error"; message: string; datasetId?: string };
 
 export type DebugEvent =

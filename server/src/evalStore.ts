@@ -355,6 +355,12 @@ export class EvalStore {
       .all(datasetId) as unknown as DatasetExample[];
   }
 
+  getExample(exampleId: string): DatasetExample | undefined {
+    return this.db.prepare(`SELECT * FROM dataset_examples WHERE id = ?`).get(exampleId) as
+      | DatasetExample
+      | undefined;
+  }
+
   // --- rubrics ---------------------------------------------------------------
 
   private static hydrateRubric(row: Record<string, unknown>): Rubric {
@@ -537,6 +543,15 @@ export class EvalStore {
         nowIso(),
         jobId,
       );
+  }
+
+  /** Put a job back on the queue without consuming an attempt. For the case where the
+   *  pool refuses a dispatch the caps said should fit — the work is still owed, and
+   *  leaving the row in 'running' would strand it. */
+  requeueJob(jobId: string): void {
+    this.db
+      .prepare(`UPDATE eval_jobs SET status = 'queued', run_id = NULL, started_at = NULL WHERE id = ?`)
+      .run(jobId);
   }
 
   /** Cancel everything still queued — how a budget abort stops the bleeding. */

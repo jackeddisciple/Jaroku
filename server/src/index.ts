@@ -15,6 +15,7 @@ import { dirname, join, resolve } from "node:path";
 import { RunPool } from "./runPool.ts";
 import { TraceStore } from "./store.ts";
 import { EvalStore } from "./evalStore.ts";
+import { EvalRunner } from "./evalRunner.ts";
 import { WsRelay, type ForwardedCommand, type GenerateCommand } from "./wsRelay.ts";
 import { Generator } from "./generator.ts";
 import { Editor, editCount } from "./editor.ts";
@@ -61,6 +62,24 @@ const generator = new Generator();
 // focuses activeRunId on every run_start). Populated by the orchestrator.
 const evalRunIds = new Set<string>();
 const isEvalRun = (runId: string): boolean => evalRunIds.has(runId);
+
+// The orchestrator. Constructed after the relay exists (it broadcasts progress), so it's
+// declared here and assigned below.
+let evalRunner: EvalRunner;
+
+// The shared built-in rubric every dataset falls back to. Its criteria are filled in with
+// the judge (a later commit); an eval only needs to record WHICH rubric it was scored
+// against, so that a score is always attributable to a specific set of criteria.
+const DEFAULT_RUBRIC_ID = "rubric-default";
+
+/** The rubric a dataset scores against: its own if customized, else the built-in default. */
+function rubricIdFor(datasetId: string): string {
+  const own = evalStore.rubricForDataset(datasetId);
+  if (own) return own.id;
+  const shared = evalStore.getRubric(DEFAULT_RUBRIC_ID);
+  if (shared) return shared.id;
+  return evalStore.putRubric({ id: DEFAULT_RUBRIC_ID, dataset_id: null, name: "Default", criteria: [] }).id;
+}
 
 // An eval left 'running' by a shutdown has no orchestrator behind it any more. Mark those
 // interrupted at startup rather than leaving rows that claim to be in flight forever —
@@ -165,6 +184,29 @@ const relay = new WsRelay({
   },
 });
 
+// The orchestrator: expands (examples × providers) into persisted jobs and drains them
+// through the pool under per-provider caps. Every job runs the ordinary path — there is no
+// second way to execute an agent.
+evalRunner = new EvalRunner({
+  pool,
+  store,
+  evalStore,
+  runtimeDir: RUNTIME_DIR,
+  // An eval job's run persists like any other but stays off the live "trace" channel.
+  markEvalRun: (runId, isEval) => {
+    if (isEval) evalRunIds.add(runId);
+    else evalRunIds.delete(runId);
+  },
+  onStarted: (e) => relay.broadcastEval({ type: "evalStarted", ...e }),
+  onProgress: (p) => relay.broadcastEval({ type: "evalProgress", ...p }),
+  onFinished: (e) => {
+    relay.broadcastEval({ type: "evalFinished", ...e });
+    // The eval's runs are now in history like any other; refresh so drill-down can reach
+    // them without a reconnect.
+    relay.broadcastHistory();
+  },
+});
+
 // --- eval: dataset CRUD -----------------------------------------------------
 // Control-plane only. Every mutation answers by re-broadcasting the affected snapshot on
 // the "eval" channel, the same shape a fresh `listDatasets` would return — so a client
@@ -235,6 +277,28 @@ function handleEvalCommand(cmd: ForwardedCommand): void {
         evalStore.deleteExample(cmd.exampleId);
         broadcastDataset(cmd.datasetId);
         broadcastDatasets(evalStore.getDataset(cmd.datasetId)?.agent_id ?? null);
+        return;
+      }
+      case "startEval": {
+        // One eval at a time. Two concurrent fan-outs would contend for the same pool
+        // slots and each would report latency inflated by the other — a comparison the
+        // numbers can't support.
+        if (evalRunner.active) {
+          relay.broadcastEval({ type: "error", message: "an eval is already running" });
+          return;
+        }
+        const started = evalRunner.start({
+          datasetId: cmd.datasetId,
+          agentId: cmd.agentId,
+          rubricId: rubricIdFor(cmd.datasetId),
+          targets: cmd.targets ?? [],
+          budgetUsd: cmd.budgetUsd ?? null,
+        });
+        if ("error" in started) relay.broadcastEval({ type: "error", message: started.error });
+        return;
+      }
+      case "cancelEval": {
+        evalRunner.cancel(cmd.evalId);
         return;
       }
       case "promoteTestInput": {
