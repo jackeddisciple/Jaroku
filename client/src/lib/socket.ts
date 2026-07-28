@@ -52,6 +52,18 @@ function dispatch(msg: ServerMessage): void {
         case "file_end": b.fileEnd(msg.path); break;
         case "done": b.finish(msg.agentId, msg.usage); c.genDone(msg.agentId, msg.files, msg.usage); break;
         case "error": b.fail(msg.message, msg.problems); c.genError(msg.message, msg.problems); break;
+        // The pre-generation gate. NOTE that none of these touch buildStore: a plan writes no
+        // files, so the build pane has nothing to show and — crucially — nothing to mark as
+        // failed. plan_error goes to the conversation, never to b.fail().
+        case "plan_started": c.planStarted(msg.input, msg.revision); break;
+        case "plan_delta": c.planDelta(msg.text); break;
+        case "plan": c.planReady(msg); break;
+        case "plan_discarded": c.planDiscarded(msg.planId); break;
+        case "plan_error": c.planError(msg.message); break;
+        default:
+          // This switch used to drop anything it didn't know silently, so a server running
+          // ahead of the client showed nothing at all rather than saying so.
+          console.warn("[gen] unknown event type", (msg as { type?: string }).type);
       }
       break;
     }
@@ -178,8 +190,29 @@ export function sendLoadRun(runId: string): void {
   send({ cmd: "loadRun", runId });
 }
 
-export function sendGenerate(prompt: string, connectors: string[], name?: string): void {
-  send({ cmd: "generate", prompt, connectors, name });
+/** Confirm a plan. `planId` is what makes the server build the plan the user approved rather
+ *  than whatever the composer says now — see planner.take(). */
+export function sendGenerate(
+  prompt: string,
+  connectors: string[],
+  name?: string,
+  planId?: string,
+): void {
+  send({ cmd: "generate", prompt, connectors, name, planId });
+}
+
+/** Ask for a plan. With `revisePlanId`, `prompt` is feedback on that plan, not a fresh brief. */
+export function sendPlanAgent(
+  prompt: string,
+  connectors: string[],
+  name?: string,
+  revisePlanId?: string,
+): void {
+  send({ cmd: "planAgent", prompt, connectors, name, revisePlanId });
+}
+
+export function sendDiscardPlan(planId: string): void {
+  send({ cmd: "discardPlan", planId });
 }
 
 export function sendListAgents(): void {

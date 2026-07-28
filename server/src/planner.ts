@@ -58,7 +58,11 @@ export interface PendingPlan {
 }
 
 export interface PlannerEvents {
-  started: [{ prompt: string; revision: number }];
+  // `prompt` is the effective brief; `input` is what the user actually typed this turn —
+  // the brief on the first plan, the feedback on a revision. The conversation renders
+  // `input`, because echoing the original brief back on every revision would be a lie about
+  // what was said.
+  started: [{ prompt: string; input: string; revision: number }];
   delta: [{ text: string }];
   plan: [
     {
@@ -135,7 +139,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
       const prompt = previous?.prompt ?? opts.prompt;
       const name = previous?.name ?? opts.name;
 
-      this.emit("started", { prompt, revision });
+      this.emit("started", { prompt, input: opts.prompt, revision });
 
       let raw = "";
       let usage = emptyUsage();

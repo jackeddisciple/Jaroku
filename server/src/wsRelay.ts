@@ -209,7 +209,7 @@ export type GenEvent =
   // buildStore.fail() on the client, which paints the build pane as a FAILED GENERATION. A
   // plan refusal happens when no generation is running, so reusing it would report a failure
   // that never occurred.
-  | { type: "plan_started"; prompt: string; revision: number }
+  | { type: "plan_started"; prompt: string; input: string; revision: number }
   | { type: "plan_delta"; text: string }
   | {
       type: "plan";

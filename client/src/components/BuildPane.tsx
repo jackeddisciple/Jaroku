@@ -17,6 +17,7 @@ import { sendBranchRun, sendEdit, sendExplain, sendGenerate, sendPromoteTestInpu
 import { useEvalStore } from "../store/evalStore.ts";
 import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
 import { DiffCard } from "./DiffCard.tsx";
+import { PlanCard } from "./PlanCard.tsx";
 import { ArrowUpIcon, ChevronDownIcon, MicIcon, SaveToDatasetIcon } from "./composerIcons.tsx";
 import { useVoiceInput } from "../lib/useVoiceInput.ts";
 import { VoiceWaveform } from "./VoiceWaveform.tsx";
@@ -110,6 +111,7 @@ function Turn({ turn, isLastGen }: { turn: ChatTurn; isLastGen: boolean }) {
       </div>
     );
   }
+  if (turn.kind === "plan") return <div className="pl-4"><PlanCard turn={turn} /></div>;
   if (turn.kind === "gen") return <div className="pl-4"><GenTurnView turn={turn} isLive={isLastGen} /></div>;
   if (turn.kind === "proposal") return <div className="pl-4"><DiffCard turn={turn} /></div>;
   if (turn.kind === "reply") return <div className="pl-4"><ReplyTurnView turn={turn} /></div>;

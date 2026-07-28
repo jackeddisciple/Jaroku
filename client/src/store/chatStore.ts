@@ -9,7 +9,7 @@
 // are on disk and remain undoable via the agent's history).
 
 import { create } from "zustand";
-import type { FileDiff, GenUsage } from "../types.ts";
+import type { AgentPlan, FileDiff, GenUsage } from "../types.ts";
 
 let nextId = 0;
 const turnId = () => `t${++nextId}`;
@@ -18,6 +18,32 @@ export interface UserTurn {
   id: string;
   role: "user";
   text: string;
+}
+
+/** The pre-generation plan (server/src/planProtocol.ts) awaiting the user's decision.
+ *
+ *  "accepted" is set when the generation the plan authorised starts, so a finished
+ *  conversation still shows which plan produced which agent rather than a card frozen
+ *  mid-decision. "stale" means the connector selection changed underneath it — the plan is
+ *  still readable, but it no longer describes what would be built. */
+export type PlanStatus = "streaming" | "pending" | "accepted" | "stale" | "discarded" | "error";
+
+export interface PlanTurn {
+  id: string;
+  role: "jaroku";
+  kind: "plan";
+  status: PlanStatus;
+  planId: string | null;
+  revision: number;
+  /** The brief this plan was written for — not necessarily what the composer says now. */
+  prompt: string;
+  /** Streamed text while live, then the settled raw plan. Always renderable, so a plan the
+   *  parser could make nothing of is still shown rather than swallowed. */
+  raw: string;
+  plan: AgentPlan | null;
+  warnings: string[];
+  usage: GenUsage | null;
+  error?: string;
 }
 
 /** A generation in flight / finished. Live file streaming stays in buildStore; this turn
@@ -79,7 +105,7 @@ export interface ReplyTurn {
   text: string;
 }
 
-export type ChatTurn = UserTurn | GenTurn | ProposalTurn | InfoTurn | ReplyTurn;
+export type ChatTurn = UserTurn | PlanTurn | GenTurn | ProposalTurn | InfoTurn | ReplyTurn;
 
 interface ChatState {
   /** Conversation per agent. */
@@ -88,6 +114,16 @@ interface ChatState {
   pending: ChatTurn[];
   /** Agent whose edit is currently streaming (file events carry no agentId). */
   streamingAgentId: string | null;
+
+  planStarted: (input: string, revision: number) => void;
+  planDelta: (text: string) => void;
+  planReady: (p: {
+    planId: string; prompt: string; plan: AgentPlan; warnings: string[]; usage: GenUsage;
+    revision: number;
+  }) => void;
+  planDiscarded: (planId: string) => void;
+  planStale: () => void;
+  planError: (message: string) => void;
 
   genStarted: (prompt: string) => void;
   genDone: (agentId: string, files: string[], usage: GenUsage) => void;
@@ -130,16 +166,98 @@ export const useChatStore = create<ChatState>((set) => ({
   pending: [],
   streamingAgentId: null,
 
-  // --- generation --------------------------------------------------------
+  // --- planning (the pre-generation gate) --------------------------------
+  // Plan turns live in `pending` like generation turns: there is no agent id yet, and on a
+  // confirmed plan genDone moves the whole pending thread into the new agent's own thread —
+  // so an agent's conversation opens with the plan that authorised it.
 
-  genStarted: (prompt) =>
+  planStarted: (input, revision) =>
     set((s) => ({
       pending: [
         ...s.pending,
-        { id: turnId(), role: "user", text: prompt },
-        { id: turnId(), role: "jaroku", kind: "gen", status: "generating", agentId: null, files: [], usage: null },
+        { id: turnId(), role: "user", text: input },
+        {
+          id: turnId(), role: "jaroku", kind: "plan", status: "streaming",
+          planId: null, revision, prompt: input, raw: "", plan: null, warnings: [], usage: null,
+        },
       ],
     })),
+
+  planDelta: (text) =>
+    set((s) => {
+      const open = openPlan(s.pending);
+      if (!open) return {};
+      return { pending: replaceTurn(s.pending, open.id, { ...open, raw: open.raw + text }) };
+    }),
+
+  planReady: ({ planId, prompt, plan, warnings, usage, revision }) =>
+    set((s) => {
+      const open = openPlan(s.pending);
+      const settled: PlanTurn = {
+        id: open?.id ?? turnId(),
+        role: "jaroku", kind: "plan", status: "pending",
+        planId, revision, prompt, raw: plan.raw, plan, warnings, usage,
+      };
+      return {
+        pending: open ? replaceTurn(s.pending, open.id, settled) : [...s.pending, settled],
+      };
+    }),
+
+  planDiscarded: (planId) =>
+    set((s) => {
+      const turn = s.pending.find(
+        (t): t is PlanTurn => t.role === "jaroku" && t.kind === "plan" && t.planId === planId,
+      );
+      // Only a plan still awaiting a decision can be discarded — never rewrite the history of
+      // one already accepted.
+      if (!turn || (turn.status !== "pending" && turn.status !== "stale")) return {};
+      return { pending: replaceTurn(s.pending, turn.id, { ...turn, status: "discarded" }) };
+    }),
+
+  // The connector selection changed after the plan was written, so it no longer describes
+  // what would be built. Deliberately NOT a blanking (which is what a stale cost estimate
+  // gets): a plan is prose the user may be mid-read, so it stays legible and only loses its
+  // Generate button.
+  planStale: () =>
+    set((s) => {
+      const turn = livePlan(s.pending);
+      if (!turn || turn.status !== "pending") return {};
+      return { pending: replaceTurn(s.pending, turn.id, { ...turn, status: "stale" }) };
+    }),
+
+  planError: (message) =>
+    set((s) => {
+      const open = openPlan(s.pending);
+      if (open) {
+        return {
+          pending: replaceTurn(s.pending, open.id, {
+            ...open, status: "error" as const, error: message,
+          }),
+        };
+      }
+      // No plan was streaming — a refused confirm, or a stale card in another tab. It belongs
+      // in the conversation as a note, not as a failed generation.
+      const note: InfoTurn = { id: turnId(), role: "jaroku", kind: "info", tone: "error", text: message };
+      return { pending: [...s.pending, note] };
+    }),
+
+  // --- generation --------------------------------------------------------
+
+  genStarted: (prompt) =>
+    set((s) => {
+      // A confirmed plan already put the user's request in the conversation and is the thing
+      // that authorised this generation — mark it accepted and don't echo the prompt again.
+      const plan = livePlan(s.pending);
+      const base = plan
+        ? replaceTurn(s.pending, plan.id, { ...plan, status: "accepted" as const })
+        : [...s.pending, { id: turnId(), role: "user" as const, text: prompt }];
+      return {
+        pending: [
+          ...base,
+          { id: turnId(), role: "jaroku", kind: "gen", status: "generating", agentId: null, files: [], usage: null },
+        ],
+      };
+    }),
 
   genDone: (agentId, files, usage) =>
     set((s) => {
@@ -331,6 +449,32 @@ export const useChatStore = create<ChatState>((set) => ({
       return { streamingAgentId: null, threads: { ...s.threads, [agentId]: next } };
     }),
 }));
+
+/** The plan turn currently streaming, if any. */
+function openPlan(turns: ChatTurn[]): PlanTurn | undefined {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const t = turns[i];
+    if (t && t.role === "jaroku" && t.kind === "plan" && t.status === "streaming") return t;
+  }
+  return undefined;
+}
+
+/** The plan turn still awaiting a decision (pending or gone stale), if any. */
+function livePlan(turns: ChatTurn[]): PlanTurn | undefined {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const t = turns[i];
+    if (t && t.role === "jaroku" && t.kind === "plan" && (t.status === "pending" || t.status === "stale")) {
+      return t;
+    }
+  }
+  return undefined;
+}
+
+/** The id of the plan awaiting a decision. The composer reads this to route a typed message
+ *  as a revision rather than a fresh plan, and to invalidate on a connector change. */
+export function pendingPlanId(state: { pending: ChatTurn[] }): string | null {
+  return livePlan(state.pending)?.planId ?? null;
+}
 
 /** The streaming reply turn currently open on an agent's thread, if any. */
 function findReply(turns: ChatTurn[], agentId: string): ReplyTurn | undefined {

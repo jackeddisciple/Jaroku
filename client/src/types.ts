@@ -112,7 +112,27 @@ export type GenMessage =
   | { channel: "gen"; type: "file_delta"; path: string; text: string }
   | { channel: "gen"; type: "file_end"; path: string }
   | { channel: "gen"; type: "done"; agentId: string; name: string; files: string[]; usage: GenUsage }
-  | { channel: "gen"; type: "error"; message: string; problems?: string[] };
+  | { channel: "gen"; type: "error"; message: string; problems?: string[] }
+  // The pre-generation plan gate. On "gen" rather than a channel of its own because a plan is
+  // an earlier phase of the same generation. plan_error is separate from "error" above: that
+  // one drives buildStore.fail(), which reports a FAILED GENERATION — and a plan refusal
+  // happens when no generation is running.
+  | { channel: "gen"; type: "plan_started"; prompt: string; input: string; revision: number }
+  | { channel: "gen"; type: "plan_delta"; text: string }
+  | {
+      channel: "gen";
+      type: "plan";
+      planId: string;
+      prompt: string;
+      connectors: string[];
+      name?: string;
+      plan: AgentPlan;
+      warnings: string[];
+      usage: GenUsage;
+      revision: number;
+    }
+  | { channel: "gen"; type: "plan_discarded"; planId: string }
+  | { channel: "gen"; type: "plan_error"; message: string };
 
 // --- editing (fix loop) ---
 // Like generation: its own channel, never part of the frozen event schema.
@@ -376,7 +396,9 @@ export type ServerMessage =
 export type ClientCommand =
   | { cmd: "run"; input?: string; provider?: string; model?: string; agentId?: string }
   | { cmd: "loadRun"; runId: string }
-  | { cmd: "generate"; prompt: string; connectors?: string[]; name?: string }
+  | { cmd: "generate"; prompt: string; connectors?: string[]; name?: string; planId?: string }
+  | { cmd: "planAgent"; prompt: string; connectors?: string[]; name?: string; revisePlanId?: string }
+  | { cmd: "discardPlan"; planId: string }
   | { cmd: "listAgents" }
   | { cmd: "edit"; agentId: string; instruction: string }
   | { cmd: "applyEdit"; proposalId: string }
