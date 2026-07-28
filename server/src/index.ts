@@ -20,6 +20,7 @@ import { DEFAULT_CRITERIA } from "./judge/rubric.ts";
 import { JudgeScorer } from "./judge/score.ts";
 import { aggregateEval } from "./evalAggregate.ts";
 import { estimateEval } from "./evalEstimate.ts";
+import { fmtBytes, sweepEvalArtifacts, sweepOrphanedEvalArtifacts } from "./evalCleanup.ts";
 import { WsRelay, type ForwardedCommand, type GenerateCommand } from "./wsRelay.ts";
 import { Generator } from "./generator.ts";
 import { Editor, editCount } from "./editor.ts";
@@ -99,6 +100,18 @@ for (const stale of evalStore.unfinishedEvalRuns()) {
   const cancelled = evalStore.cancelQueuedJobs(stale.id, "server restarted before this job ran");
   evalStore.setEvalStatus(stale.id, "cancelled", "interrupted by a server restart");
   console.log(`[eval] ${stale.id} was interrupted by a restart — ${cancelled} queued job(s) cancelled`);
+}
+
+// Catch checkpoint blobs from evals whose per-eval sweep never ran (a crash, a restart).
+// Only runs belonging to FINISHED eval jobs are touched — an interactive run's checkpoint
+// is exactly the thing a user might come back to branch from, and is never swept.
+{
+  const swept = sweepOrphanedEvalArtifacts(evalStore, join(RUNTIME_DIR, ".checkpoints"));
+  if (swept.removed) {
+    console.log(
+      `[eval] swept ${swept.removed} orphaned checkpoint artifact(s) from earlier evals, ${fmtBytes(swept.bytesFreed)} freed`,
+    );
+  }
 }
 
 // True from spawn until run_end (or exit) of the INTERACTIVE run. Deliberately NOT
@@ -233,6 +246,15 @@ evalRunner = new EvalRunner({
     relay.broadcastHistory();
     // No more jobs are coming: the judge reports done once its own queue drains.
     judge.seal(e.evalId);
+    // Sweep the resumable-checkpoint blobs these runs left behind. The traces stay —
+    // only the pause/resume machinery goes, and nobody resumes a finished eval job.
+    const swept = sweepEvalArtifacts(evalStore, CHECKPOINT_DIR, e.evalId);
+    if (swept.removed) {
+      console.log(
+        `[eval] ${e.evalId} swept ${swept.removed} checkpoint artifact(s), ${fmtBytes(swept.bytesFreed)} freed` +
+          (swept.failed ? ` (${swept.failed} could not be removed)` : ""),
+      );
+    }
   },
 });
 
