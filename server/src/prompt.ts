@@ -24,6 +24,9 @@ export interface GenerationRequest {
   agentId: string;
   agentName: string;
   connectors: Connector[];
+  /** The plan the user confirmed, verbatim. Absent = an unplanned generation, whose prompt
+   *  must stay byte-identical to what it was before the plan gate existed. */
+  plan?: string;
 }
 
 const WORKED_EXAMPLE = `<<<FILE path="agent.py">>>
@@ -211,6 +214,136 @@ WORKED EXAMPLE — a complete, valid response for "an agent that can tell me the
 ${WORKED_EXAMPLE}`;
 }
 
+// --- planning (the pre-generation gate) -------------------------------------------------
+//
+// An earlier phase of the same generation call, not a second LLM pathway: same model, same
+// module, same shared CONTRACT_SYMBOLS and connector reference, same byte-stable-system /
+// volatile-user split. The plan exists so the user can catch a wrong direction while it still
+// costs ~600 output tokens instead of 16,000 and a project on disk.
+//
+// It is deliberately NOT a design document. Everything in it is a fact the user can disagree
+// with — which tools exist, where each one comes from, what state is carried, how the graph is
+// shaped. Rationale and prose are what make a plan unreadable and therefore unread.
+
+export interface PlanRequest {
+  prompt: string;
+  agentName: string;
+  connectors: Connector[];
+  /** Set when the user asked for a change to a plan they were shown. */
+  previousPlan?: string;
+  feedback?: string;
+}
+
+const PLAN_EXAMPLE = `<<<PLAN section="tools">>>
+- gmail_search — reviewed connector template (gmail)
+- order_lookup — bespoke; looks up an order's status by id
+<<<ENDPLAN>>>
+<<<PLAN section="state">>>
+- messages: MessagesState — the conversation
+- order: dict | None — the order currently under discussion
+<<<ENDPLAN>>>
+<<<PLAN section="graph">>>
+- agent (llm) decides whether to call a tool, or answers and ends
+- tools runs the requested tool, then record_order stores the result in state
+- record_order returns to agent
+<<<ENDPLAN>>>
+<<<PLAN section="notes">>>
+- Drafts replies but never sends — sending needs a Gmail scope the connector doesn't grant.
+<<<ENDPLAN>>>`;
+
+/**
+ * The stable, cacheable prefix for planning. Like buildSystemPrompt it must not vary between
+ * requests — all connectors always rendered, in catalog order, no request-specific content.
+ */
+export function buildPlanSystemPrompt(allConnectors: Connector[]): string {
+  return `You plan LangGraph agent projects before they are generated. You output a short, concrete
+plan for the developer to approve or correct. You write NO code.
+
+OUTPUT FORMAT — exact, no deviation, these four sections in this order:
+<<<PLAN section="tools">>>
+- <tool_name> — reviewed connector template (<connector id>)
+- <tool_name> — bespoke; <what it does, one clause>
+<<<ENDPLAN>>>
+<<<PLAN section="state">>>
+- <field>: <type> — <what it holds>
+<<<ENDPLAN>>>
+<<<PLAN section="graph">>>
+- <node> <what it does and where it goes next, in plain language>
+<<<ENDPLAN>>>
+<<<PLAN section="notes">>>
+- <anything the developer should push back on: a limitation, an assumption, a missing credential>
+<<<ENDPLAN>>>
+No prose, no markdown fences, no commentary before, between, or after the sections.
+
+LENGTH: about 200 words total. One line per tool, per state field, per node. This is a thing
+to scan in fifteen seconds, not a design document. Omit rationale entirely.
+
+EVERY TOOL MUST BE LABELLED. "reviewed connector template" means one of the connectors listed
+below, which is audited code copied into the project verbatim and never written by you.
+"bespoke" means code that will be generated for this agent. This distinction is the single
+most decision-relevant fact in the plan: it tells the developer which parts are trusted and
+which are about to be invented.
+
+Use ONLY the connectors the developer selected. If the agent would genuinely be better with
+one they did not select, do not assume it — plan the bespoke alternative and say so in notes,
+so they can enable it and re-plan.
+
+THE CONTRACT the generated project will satisfy — plan within it:
+${CONTRACT_SYMBOLS}
+
+STATE: use MessagesState when the agent is just chat + tools, and say so. When the task has
+real domain state (fetched records, a draft, a counter), name the fields and their types — the
+host renders before/after state diffs and empty diffs are useless.
+
+SHAPE: prefer one llm node + one ToolNode + one conditional edge. Add nodes only when the task
+genuinely needs them. Every conditional path must reach END.
+
+AVAILABLE CONNECTORS (reviewed, copied in verbatim when selected):
+
+${renderConnectorReference(allConnectors)}
+
+WORKED EXAMPLE — a complete, valid plan for "a support agent that reads Gmail and looks up
+orders", with the gmail connector selected:
+
+${PLAN_EXAMPLE}`;
+}
+
+/** The volatile half of a plan request, after the cache breakpoint. */
+export function buildPlanUserPrompt(req: PlanRequest): string {
+  const selected = req.connectors.length
+    ? req.connectors
+        .map((c) => `  - ${c.id}: provides ${c.tools.map((t) => t.name).join(", ")}`)
+        .join("\n")
+    : "  (none — every tool this agent needs will be bespoke)";
+
+  // A revision shows the model what it said and what the developer objected to. The original
+  // request stays in view: feedback is usually a correction to one part of the plan, not a
+  // replacement for the whole brief.
+  const revision = req.previousPlan
+    ? `\nYOU PREVIOUSLY PLANNED:
+
+${req.previousPlan.trim()}
+
+THE DEVELOPER ASKED FOR THIS CHANGE:
+
+${(req.feedback ?? "").trim()}
+
+Re-plan the whole agent with that change applied. Keep everything they did not object to.
+`
+    : "";
+
+  return `Plan this agent:
+
+${req.prompt}
+
+Human-readable name: ${req.agentName}
+
+Selected connectors:
+${selected}
+${revision}
+Output the four plan sections now. No code, no commentary.`;
+}
+
 // --- editing (the fix loop, doc §8 Week 4) ----------------------------------------------
 //
 // Same discipline as generation: a byte-stable system prompt (own cache breakpoint, all
@@ -393,6 +526,20 @@ export function buildUserPrompt(req: GenerationRequest): string {
     ? `\nThese connector env keys must appear in .env.example: ${env.join(", ")}`
     : "";
 
+  // The user reviewed and confirmed this plan before any code existed. Following it is the
+  // whole point of the gate — a generation that quietly builds something else makes the
+  // confirmation a lie. Absent (an unplanned generation), this block contributes nothing and
+  // the prompt is byte-identical to what it was before the gate existed.
+  const plan = req.plan?.trim()
+    ? `\nAPPROVED PLAN — the user reviewed and confirmed this before generation. Build exactly
+this. If some detail is under-specified, choose the option most consistent with the plan;
+never substitute a different set of tools, a different state shape, or a different graph
+structure than the one described here.
+
+${req.plan.trim()}
+`
+    : "";
+
   return `Build this agent:
 
 ${req.prompt}
@@ -402,6 +549,6 @@ Human-readable name: ${req.agentName}
 
 Selected connectors:
 ${selected}${envNote}
-
+${plan}
 Emit the files now, starting with agent.py. Output files only — no commentary.`;
 }
