@@ -21,8 +21,14 @@ import { JudgeScorer } from "./judge/score.ts";
 import { aggregateEval } from "./evalAggregate.ts";
 import { estimateEval } from "./evalEstimate.ts";
 import { fmtBytes, sweepEvalArtifacts, sweepOrphanedEvalArtifacts } from "./evalCleanup.ts";
-import { WsRelay, type ForwardedCommand, type GenerateCommand } from "./wsRelay.ts";
+import {
+  WsRelay,
+  type ForwardedCommand,
+  type GenerateCommand,
+  type PlanAgentCommand,
+} from "./wsRelay.ts";
 import { Generator } from "./generator.ts";
+import { Planner } from "./planner.ts";
 import { Editor, editCount } from "./editor.ts";
 import { listAgents } from "./agents.ts";
 import { loadConnectors } from "./connectors.ts";
@@ -61,6 +67,7 @@ const evalStore = new EvalStore(store.connection());
 const EVAL_CONCURRENCY = Math.max(1, Number(process.env.JAROKU_EVAL_CONCURRENCY ?? 4));
 const pool = new RunPool(EVAL_CONCURRENCY);
 const generator = new Generator();
+const planner = new Planner();
 
 // Run ids belonging to an in-flight eval job. Their events persist normally but are kept
 // OFF the "trace" channel, so a fan-out can't steal the timeline's focus (traceStore
@@ -196,6 +203,8 @@ const relay = new WsRelay({
   onCommand: (cmd: ForwardedCommand) => {
     if (cmd.cmd === "run") runAgent(cmd.input, cmd.provider, cmd.model, cmd.agentId);
     else if (cmd.cmd === "generate") generateAgent(cmd);
+    else if (cmd.cmd === "planAgent") planAgent(cmd);
+    else if (cmd.cmd === "discardPlan") planner.discard(cmd.planId);
     else if (cmd.cmd === "edit") editAgent(cmd.agentId, cmd.instruction);
     else if (cmd.cmd === "applyEdit") editor.apply(cmd.proposalId);
     else if (cmd.cmd === "undoEdit") editor.undo(cmd.agentId);
@@ -520,6 +529,53 @@ pool.on("exit", ({ runId, code, signal, timedOut }) => {
     `[manager] agent exited (run=${runId} code=${code} signal=${signal}${timedOut ? " TIMED OUT" : ""})`,
   );
 });
+
+// --- planning (the pre-generation gate) --------------------------------------
+// Rides the "gen" channel too: a plan is an earlier phase of the same generation, not a
+// separate feature. Listeners are permanent — a plan has no agent id to scope them to, and
+// the planner holds a single pending slot, so there is nothing per-request to clean up.
+//
+// Every failure here goes out as plan_error, never as the gen channel's plain "error". That
+// one is wired to buildStore.fail() on the client and paints the build pane as a failed
+// generation — which, at plan time, would be reporting a failure that never happened.
+planner.on("started", (e) => relay.broadcastGen({ type: "plan_started", ...e }));
+planner.on("delta", (e) => relay.broadcastGen({ type: "plan_delta", ...e }));
+planner.on("discarded", (e) => relay.broadcastGen({ type: "plan_discarded", ...e }));
+
+planner.on("plan", (e) => {
+  const usage = e.usage as { cost_usd?: number; output_tokens?: number };
+  console.log(
+    `[plan] ${e.planId} (rev ${e.revision}) — ${e.plan.tools.length} tool(s), ` +
+      `${e.warnings.length} warning(s), ${usage?.output_tokens ?? 0} output tokens, ` +
+      `$${(usage?.cost_usd ?? 0).toFixed(5)}`,
+  );
+  for (const w of e.warnings) console.log(`  ! ${w}`);
+  relay.broadcastGen({ type: "plan", ...e });
+});
+
+planner.on("error", (e) => {
+  console.error(`[plan] failed: ${e.message}`);
+  relay.broadcastGen({ type: "plan_error", message: e.message });
+});
+
+function planAgent(cmd: PlanAgentCommand): void {
+  // A generation in flight owns the pipeline; planning the next agent mid-build would put two
+  // plans and one generation on the same single-slot state.
+  if (generating) {
+    relay.broadcastGen({ type: "plan_error", message: "a generation is already in progress" });
+    return;
+  }
+  console.log(
+    `[plan] planning${cmd.revisePlanId ? " (revision)" : ""} — "${cmd.prompt.slice(0, 80)}"`,
+  );
+  void planner.plan({
+    runtimeDir: RUNTIME_DIR,
+    prompt: cmd.prompt,
+    connectors: cmd.connectors,
+    name: cmd.name,
+    revisePlanId: cmd.revisePlanId,
+  });
+}
 
 // --- generation -------------------------------------------------------------
 // Streams into the "gen" channel. Nothing here touches the trace store or the frozen

@@ -21,7 +21,20 @@ export type GenerateCommand = {
   prompt: string;
   connectors?: string[];
   name?: string;
+  /** A plan the user confirmed. The server builds what that plan describes, not what this
+   *  command's other fields say — see planner.take(). */
+  planId?: string;
 };
+// The pre-generation gate: describe the agent, see a plan, confirm. `revisePlanId` turns
+// `prompt` into feedback on the plan with that id rather than a fresh brief.
+export type PlanAgentCommand = {
+  cmd: "planAgent";
+  prompt: string;
+  connectors?: string[];
+  name?: string;
+  revisePlanId?: string;
+};
+export type DiscardPlanCommand = { cmd: "discardPlan"; planId: string };
 export type ListAgentsCommand = { cmd: "listAgents" };
 // The fix loop (doc §8 Week 4): every mutation is proposal -> explicit apply/undo.
 export type EditCommand = { cmd: "edit"; agentId: string; instruction: string };
@@ -123,6 +136,8 @@ export type ClientCommand =
   | RunCommand
   | LoadRunCommand
   | GenerateCommand
+  | PlanAgentCommand
+  | DiscardPlanCommand
   | ListAgentsCommand
   | EditCommand
   | ApplyEditCommand
@@ -166,6 +181,8 @@ const EVAL_COMMANDS = new Set([
 export type ForwardedCommand =
   | RunCommand
   | GenerateCommand
+  | PlanAgentCommand
+  | DiscardPlanCommand
   | EditCommand
   | ApplyEditCommand
   | UndoEditCommand
@@ -184,7 +201,29 @@ export type GenEvent =
   | { type: "file_end"; path: string }
   | { type: "started"; prompt: string }
   | { type: "done"; agentId: string; name: string; files: string[]; usage: unknown }
-  | { type: "error"; message: string; problems?: string[] };
+  | { type: "error"; message: string; problems?: string[] }
+  // The pre-generation plan gate. These ride "gen" rather than a channel of their own because
+  // a plan is an earlier phase of the same generation, not a separate feature.
+  //
+  // plan_error is deliberately NOT the "error" member above: that one is wired to
+  // buildStore.fail() on the client, which paints the build pane as a FAILED GENERATION. A
+  // plan refusal happens when no generation is running, so reusing it would report a failure
+  // that never occurred.
+  | { type: "plan_started"; prompt: string; revision: number }
+  | { type: "plan_delta"; text: string }
+  | {
+      type: "plan";
+      planId: string;
+      prompt: string;
+      connectors: string[];
+      name?: string;
+      plan: unknown;
+      warnings: string[];
+      usage: unknown;
+      revision: number;
+    }
+  | { type: "plan_discarded"; planId: string }
+  | { type: "plan_error"; message: string };
 
 // Editing rides its own channel too, parallel to "gen" — it never enters the trace store
 // or the frozen event schema either. Payload shapes are owned by editor.ts.
@@ -291,6 +330,10 @@ export class WsRelay {
           if (msg.cmd === "run") {
             this.onCommand?.(msg);
           } else if (msg.cmd === "generate" && typeof msg.prompt === "string") {
+            this.onCommand?.(msg);
+          } else if (msg.cmd === "planAgent" && typeof msg.prompt === "string") {
+            this.onCommand?.(msg);
+          } else if (msg.cmd === "discardPlan" && typeof msg.planId === "string") {
             this.onCommand?.(msg);
           } else if (msg.cmd === "edit" && typeof msg.agentId === "string" && typeof msg.instruction === "string") {
             this.onCommand?.(msg);
