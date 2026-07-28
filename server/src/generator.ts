@@ -20,6 +20,7 @@ import { dirname, isAbsolute, join, normalize, relative } from "node:path";
 import { anthropicClient, emptyUsage, summarizeUsage, type UsageSummary } from "./claude.ts";
 import { loadConnectors, requiredEnv, resolveSelected, templatesDir, type Connector } from "./connectors.ts";
 import { FileProtocolParser, type ProtocolEvent } from "./fileProtocol.ts";
+import { round8 } from "./pricing.ts";
 import { atomicSwap } from "./projectFs.ts";
 import { buildSystemPrompt, buildUserPrompt } from "./prompt.ts";
 import { validateProject } from "./validator.ts";
@@ -38,13 +39,16 @@ export interface GenerateOptions {
   /** The plan the user confirmed at the pre-generation gate, verbatim (planner.ts). Absent =
    *  an unplanned generation, whose prompt stays byte-identical to the pre-gate one. */
   plan?: string;
+  /** What the plan itself cost. Part of what creating this agent cost, so it is reported and
+   *  recorded alongside the generation rather than quietly absorbed. */
+  planUsage?: UsageSummary;
 }
 
 export interface GeneratorEvents {
   file_start: [{ path: string }];
   file_delta: [{ path: string; text: string }];
   file_end: [{ path: string }];
-  done: [{ agentId: string; name: string; files: string[]; usage: UsageSummary }];
+  done: [{ agentId: string; name: string; files: string[]; usage: UsageSummary; planUsage: UsageSummary }];
   error: [{ message: string; problems?: string[] }];
 }
 
@@ -139,7 +143,12 @@ export class Generator extends EventEmitter<GeneratorEvents> {
 
       // Host-owned files. Written after the model's, so the model cannot shadow them.
       const connectorFiles = this.installConnectors(staging, selected, runtimeDir);
-      this.writeHostFiles(staging, { agentId, name, description: opts.prompt, selected });
+      this.writeHostFiles(staging, {
+        agentId, name, description: opts.prompt, selected,
+        planned: Boolean(opts.plan),
+        planCost: opts.planUsage?.cost_usd ?? 0,
+        generationCost: usage.cost_usd,
+      });
 
       const result = await validateProject(staging, {
         runtimeDir,
@@ -158,7 +167,9 @@ export class Generator extends EventEmitter<GeneratorEvents> {
       }
 
       atomicSwap(staging, join(agentsDir(runtimeDir), agentId));
-      this.emit("done", { agentId, name, files: parser.files, usage });
+      this.emit("done", {
+        agentId, name, files: parser.files, usage, planUsage: opts.planUsage ?? emptyUsage(),
+      });
     } catch (err) {
       rmSync(staging, { recursive: true, force: true });
       this.emit("error", { message: (err as Error).message });
@@ -216,7 +227,10 @@ export class Generator extends EventEmitter<GeneratorEvents> {
 
   private writeHostFiles(
     staging: string,
-    meta: { agentId: string; name: string; description: string; selected: Connector[] },
+    meta: {
+      agentId: string; name: string; description: string; selected: Connector[];
+      planned: boolean; planCost: number; generationCost: number;
+    },
   ): void {
     const env = requiredEnv(meta.selected);
 
@@ -233,6 +247,17 @@ export class Generator extends EventEmitter<GeneratorEvents> {
           required_env: env,
           default_provider: "fake",
           created_at: new Date().toISOString(),
+          // What this agent cost to bring into existence. Additive to schema_version 1:
+          // contract.py never reads this file, and listAgents() parses it as a partial and
+          // ignores keys it doesn't know. Recorded because the conversation that showed these
+          // numbers is in-memory and gone on reload, and "what did this cost me" is a question
+          // asked long after.
+          creation: {
+            planned: meta.planned,
+            plan_cost_usd: round8(meta.planCost),
+            generation_cost_usd: round8(meta.generationCost),
+            total_cost_usd: round8(meta.planCost + meta.generationCost),
+          },
         },
         null,
         2,

@@ -111,7 +111,7 @@ export type GenMessage =
   | { channel: "gen"; type: "file_start"; path: string }
   | { channel: "gen"; type: "file_delta"; path: string; text: string }
   | { channel: "gen"; type: "file_end"; path: string }
-  | { channel: "gen"; type: "done"; agentId: string; name: string; files: string[]; usage: GenUsage }
+  | { channel: "gen"; type: "done"; agentId: string; name: string; files: string[]; usage: GenUsage; planUsage: GenUsage }
   | { channel: "gen"; type: "error"; message: string; problems?: string[] }
   // The pre-generation plan gate. On "gen" rather than a channel of its own because a plan is
   // an earlier phase of the same generation. plan_error is separate from "error" above: that

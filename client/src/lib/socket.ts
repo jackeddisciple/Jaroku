@@ -50,7 +50,7 @@ function dispatch(msg: ServerMessage): void {
         case "file_start": b.fileStart(msg.path); break;
         case "file_delta": b.fileDelta(msg.path, msg.text); break;
         case "file_end": b.fileEnd(msg.path); break;
-        case "done": b.finish(msg.agentId, msg.usage); c.genDone(msg.agentId, msg.files, msg.usage); break;
+        case "done": b.finish(msg.agentId, msg.usage); c.genDone(msg.agentId, msg.files, msg.usage, msg.planUsage); break;
         case "error": b.fail(msg.message, msg.problems); c.genError(msg.message, msg.problems); break;
         // The pre-generation gate. NOTE that none of these touch buildStore: a plan writes no
         // files, so the build pane has nothing to show and — crucially — nothing to mark as

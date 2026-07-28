@@ -27,7 +27,7 @@ import {
   type GenerateCommand,
   type PlanAgentCommand,
 } from "./wsRelay.ts";
-import { Generator } from "./generator.ts";
+import { Generator, type UsageSummary } from "./generator.ts";
 import { Planner } from "./planner.ts";
 import { Editor, editCount } from "./editor.ts";
 import { listAgents } from "./agents.ts";
@@ -603,6 +603,7 @@ function generateAgent(cmd: GenerateCommand): void {
   // entry points that can disagree (the user can retype the prompt or toggle a connector chip
   // after planning). Building what was approved is the whole point of the gate.
   let plan: string | undefined;
+  let planUsage: UsageSummary | undefined;
   let { prompt, connectors, name } = cmd;
   if (cmd.planId) {
     const rec = planner.take(cmd.planId);
@@ -618,6 +619,7 @@ function generateAgent(cmd: GenerateCommand): void {
     }
     ({ prompt, connectors, name } = rec);
     plan = rec.plan.raw;
+    planUsage = rec.usage;
   }
 
   generating = true;
@@ -637,11 +639,17 @@ function generateAgent(cmd: GenerateCommand): void {
     generator.off("error", onError);
   };
 
-  const onDone = (e: { agentId: string; name: string; files: string[]; usage: unknown }) => {
+  const onDone = (e: {
+    agentId: string; name: string; files: string[]; usage: unknown; planUsage: unknown;
+  }) => {
     const usage = e.usage as { cost_usd?: number; output_tokens?: number };
+    const planCost = (e.planUsage as { cost_usd?: number })?.cost_usd ?? 0;
     console.log(
       `[gen] ${e.agentId} ready — ${e.files.length} file(s), ` +
-        `${usage?.output_tokens ?? 0} output tokens, $${(usage?.cost_usd ?? 0).toFixed(5)}`,
+        `${usage?.output_tokens ?? 0} output tokens, $${(usage?.cost_usd ?? 0).toFixed(5)}` +
+        // The plan is part of what this agent cost. Reporting only the generation would
+        // understate it every single time.
+        (planCost ? ` + $${planCost.toFixed(5)} plan = $${(planCost + (usage?.cost_usd ?? 0)).toFixed(5)}` : ""),
     );
     relay.broadcastGen({ type: "done", ...e });
     relay.broadcastAgents();
@@ -661,7 +669,7 @@ function generateAgent(cmd: GenerateCommand): void {
   generator.once("done", onDone);
   generator.once("error", onError);
 
-  void generator.generate({ runtimeDir: RUNTIME_DIR, prompt, connectors, name, plan });
+  void generator.generate({ runtimeDir: RUNTIME_DIR, prompt, connectors, name, plan, planUsage });
 }
 
 // --- editing (fix loop) -----------------------------------------------------

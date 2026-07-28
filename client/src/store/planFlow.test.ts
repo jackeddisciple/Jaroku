@@ -39,6 +39,12 @@ const USAGE: GenUsage = {
   cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0.0027,
 };
 
+/** A plan costs a fraction of a generation — that ratio is the point of the gate. */
+const PLAN_USAGE: GenUsage = {
+  input_tokens: 1410, output_tokens: 480,
+  cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0.0038,
+};
+
 const store = () => useChatStore.getState();
 const reset = () => useChatStore.setState({ threads: {}, pending: [], streamingAgentId: null });
 const planTurns = () => store().pending.filter((t): t is PlanTurn => t.role === "jaroku" && t.kind === "plan");
@@ -109,8 +115,14 @@ const userTexts = () => store().pending.filter((t) => t.role === "user").map((t)
 // 7 — the plan travels with the agent: genDone moves the whole pending thread, so the new
 //     agent's conversation opens with the plan that authorised it.
 {
-  store().genDone("support_bot", ["agent.py"], USAGE);
+  store().genDone("support_bot", ["agent.py"], USAGE, PLAN_USAGE);
   check("pending thread drained", store().pending.length === 0);
+  const gen = (store().threads["support_bot"] ?? []).find(
+    (t) => t.role === "jaroku" && t.kind === "gen",
+  ) as { usage: GenUsage | null; planUsage: GenUsage | null } | undefined;
+  check("both halves of the cost survive on the turn",
+    gen?.usage?.cost_usd === USAGE.cost_usd && gen?.planUsage?.cost_usd === PLAN_USAGE.cost_usd,
+    { usage: gen?.usage?.cost_usd, plan: gen?.planUsage?.cost_usd });
   const thread = store().threads["support_bot"] ?? [];
   check("plan landed in the agent's thread", thread.some((t) => t.role === "jaroku" && t.kind === "plan"), thread.map((t) => (t.role === "user" ? "user" : t.kind)));
 }

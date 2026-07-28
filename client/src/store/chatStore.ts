@@ -56,6 +56,9 @@ export interface GenTurn {
   agentId: string | null;
   files: string[];
   usage: GenUsage | null;
+  /** What the plan that authorised this generation cost, if there was one. Kept separate
+   *  from `usage` so the card can show both halves rather than one opaque number. */
+  planUsage: GenUsage | null;
   error?: string;
   problems?: string[];
 }
@@ -126,7 +129,7 @@ interface ChatState {
   planError: (message: string) => void;
 
   genStarted: (prompt: string) => void;
-  genDone: (agentId: string, files: string[], usage: GenUsage) => void;
+  genDone: (agentId: string, files: string[], usage: GenUsage, planUsage: GenUsage) => void;
   genError: (message: string, problems?: string[]) => void;
 
   editStarted: (agentId: string, instruction: string) => void;
@@ -254,16 +257,19 @@ export const useChatStore = create<ChatState>((set) => ({
       return {
         pending: [
           ...base,
-          { id: turnId(), role: "jaroku", kind: "gen", status: "generating", agentId: null, files: [], usage: null },
+          {
+            id: turnId(), role: "jaroku", kind: "gen", status: "generating",
+            agentId: null, files: [], usage: null, planUsage: null,
+          },
         ],
       };
     }),
 
-  genDone: (agentId, files, usage) =>
+  genDone: (agentId, files, usage, planUsage) =>
     set((s) => {
       const gen = lastGenTurn(s.pending);
       const finished = s.pending.map((t) =>
-        gen && t.id === gen.id ? { ...gen, status: "done" as const, agentId, files, usage } : t,
+        gen && t.id === gen.id ? { ...gen, status: "done" as const, agentId, files, usage, planUsage } : t,
       );
       // The new agent's conversation begins with its own creation.
       return {

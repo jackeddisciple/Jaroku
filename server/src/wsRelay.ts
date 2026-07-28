@@ -200,7 +200,7 @@ export type GenEvent =
   | { type: "file_delta"; path: string; text: string }
   | { type: "file_end"; path: string }
   | { type: "started"; prompt: string }
-  | { type: "done"; agentId: string; name: string; files: string[]; usage: unknown }
+  | { type: "done"; agentId: string; name: string; files: string[]; usage: unknown; planUsage: unknown }
   | { type: "error"; message: string; problems?: string[] }
   // The pre-generation plan gate. These ride "gen" rather than a channel of their own because
   // a plan is an earlier phase of the same generation, not a separate feature.

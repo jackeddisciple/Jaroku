@@ -76,7 +76,10 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
     );
   }
 
-  // Finished (or a generation from earlier in the session).
+  // Finished (or a generation from earlier in the session). The plan is part of what this
+  // agent cost, so it's shown as its own term rather than folded in silently — the gate has to
+  // be able to justify its own price.
+  const planCost = turn.planUsage?.cost_usd ?? 0;
   return (
     <div className="text-[12px]">
       <span className="text-ok">Generated</span>{" "}
@@ -87,6 +90,12 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
             {" · "}
             {turn.usage.output_tokens.toLocaleString()} output tokens · $
             {turn.usage.cost_usd.toFixed(4)}
+            {planCost > 0 && (
+              <span className="text-faint">
+                {" + $"}
+                {planCost.toFixed(4)} plan = ${(turn.usage.cost_usd + planCost).toFixed(4)}
+              </span>
+            )}
             {turn.usage.cache_read_input_tokens > 0 && <span className="text-faint"> · cache hit</span>}
           </>
         )}
