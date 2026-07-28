@@ -12,6 +12,13 @@
 //     answer different questions: "which is cheaper per run" and "what did this cost me".
 
 import { fmtCost, fmtLatency, fmtPercent } from "../lib/format.ts";
+import {
+  download,
+  exportStem,
+  resultsToCsv,
+  resultsToJson,
+  summaryToCsv,
+} from "../lib/evalExport.ts";
 import type { EvalResults, ProviderMetrics } from "../types.ts";
 
 /** Cost cell. The three states — known, unknown, floor — must stay visually distinct. */
@@ -161,6 +168,30 @@ export function ComparisonTable({
         {results.providers.some((p) => p.costIncomplete) && (
           <span className="text-run">≥ some steps could not be priced</span>
         )}
+
+        {/* Export. Every caveat above survives the trip — unknown cost is an empty cell
+            with a cost_known flag beside it, never a 0 a spreadsheet would happily sum. */}
+        <span className="ml-auto flex items-center gap-2">
+          <span className="text-faint uppercase tracking-wide text-[10px]">Export</span>
+          <button
+            onClick={() => download(`${exportStem(results)}-summary.csv`, summaryToCsv(results), "text/csv")}
+            className="text-faint hover:text-ink transition-colors"
+          >
+            summary.csv
+          </button>
+          <button
+            onClick={() => download(`${exportStem(results)}-examples.csv`, resultsToCsv(results), "text/csv")}
+            className="text-faint hover:text-ink transition-colors"
+          >
+            examples.csv
+          </button>
+          <button
+            onClick={() => download(`${exportStem(results)}.json`, resultsToJson(results), "application/json")}
+            className="text-faint hover:text-ink transition-colors"
+          >
+            json
+          </button>
+        </span>
       </div>
     </div>
   );
