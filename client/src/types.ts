@@ -79,6 +79,33 @@ export interface GenUsage {
   cost_usd: number;
 }
 
+// The pre-generation plan (server/src/planProtocol.ts). Hand-mirrored like every other
+// cross-boundary type here. `raw` is always populated and is what the plan card renders when
+// the structure came back empty — confirming a plan is never blocked on a successful parse.
+export type ToolOrigin = "connector" | "bespoke";
+
+export interface PlannedTool {
+  name: string;
+  origin: ToolOrigin;
+  connectorId?: string;
+  summary: string;
+}
+
+export interface PlannedStateField {
+  name: string;
+  type: string;
+  purpose: string;
+}
+
+export interface AgentPlan {
+  tools: PlannedTool[];
+  state: PlannedStateField[];
+  graph: string[];
+  notes: string[];
+  raw: string;
+  complete: boolean;
+}
+
 export type GenMessage =
   | { channel: "gen"; type: "started"; prompt: string }
   | { channel: "gen"; type: "file_start"; path: string }
