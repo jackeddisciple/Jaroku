@@ -28,6 +28,7 @@ import { randomUUID } from "node:crypto";
 import type { RunPool } from "./runPool.ts";
 import type { TraceStore } from "./store.ts";
 import type { EvalStore, EvalJob, EvalTarget } from "./evalStore.ts";
+import { aggregateJob } from "./evalAggregate.ts";
 
 /** Per-provider ceiling on simultaneous runs. */
 function providerLimit(provider: string): number {
@@ -262,7 +263,19 @@ export class EvalRunner {
       ? `timed out after ${DEFAULT_JOB_TIMEOUT_MS}ms`
       : (spawnError ?? run?.error ?? (run ? null : "the run produced no trace"));
 
-    this.deps.evalStore.finishJob(jobId, status as "succeeded" | "failed" | "timed_out", { error });
+    // Metrics come from the run's STEPS, not runs.cost — a run that died mid-graph never
+    // emitted run_end, so its row reads 0 while its steps record what it really spent.
+    // Recorded for failed and timed-out jobs too: partial spend is still spend, and the
+    // budget ceiling has to see it.
+    const metrics = aggregateJob(this.deps.store, runId, job?.model ?? run?.model ?? "");
+
+    this.deps.evalStore.finishJob(jobId, status as "succeeded" | "failed" | "timed_out", {
+      error,
+      cost_usd: metrics.cost_usd,
+      tokens: metrics.tokens,
+      latency_ms: metrics.latency_ms,
+      cost_complete: metrics.cost_complete,
+    });
     const finished = this.deps.evalStore.getJob(jobId);
     if (finished) this.deps.onJobFinished?.(finished);
 
