@@ -222,6 +222,10 @@ export type EvalEvent =
   | { type: "evalProgress"; evalId: string; total: number; done: number; running: number; queued: number; failed: number }
   | { type: "evalFinished"; evalId: string; status: string; error?: string }
   | { type: "rubric"; datasetId: string; rubric: unknown; isDefault: boolean }
+  // Scoring runs after the runs finish, so quality lands after the rest of the row. A null
+  // score is UNSCORED (with a reason), never a zero.
+  | { type: "scored"; evalId: string; jobId: string; score: number | null; error?: string | null }
+  | { type: "scoringFinished"; evalId: string; scored: number; unscored: number }
   | { type: "error"; message: string; datasetId?: string };
 
 export type DebugEvent =

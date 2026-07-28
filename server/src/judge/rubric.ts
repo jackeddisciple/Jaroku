@@ -107,14 +107,24 @@ function renderCriteria(criteria: RubricCriterion[]): string {
     .join("\n\n");
 }
 
-/** JSON Schema for the verdict: one integer per criterion, plus a short rationale. */
+/** The allowed score values, as an explicit set. */
+const SCALE_VALUES = Array.from({ length: SCALE_MAX + 1 }, (_, i) => i);
+
+/**
+ * JSON Schema for the verdict: one score per criterion, plus a short rationale.
+ *
+ * The scale is expressed as an `enum`, not `minimum`/`maximum` — structured outputs reject
+ * numeric range constraints (the API returns "For 'integer' type, properties maximum,
+ * minimum are not supported"). An enum is the better fit anyway: the scale is a small set
+ * of anchored levels, and enumerating them makes an out-of-range score impossible rather
+ * than merely discouraged.
+ */
 export function verdictSchema(criteria: RubricCriterion[]): Record<string, unknown> {
   const scores: Record<string, unknown> = {};
   for (const c of criteria) {
     scores[c.id] = {
       type: "integer",
-      minimum: 0,
-      maximum: SCALE_MAX,
+      enum: SCALE_VALUES,
       description: `${c.label}: ${c.description}`,
     };
   }

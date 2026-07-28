@@ -17,6 +17,7 @@ import { TraceStore } from "./store.ts";
 import { EvalStore, type Rubric, type RubricCriterion } from "./evalStore.ts";
 import { EvalRunner } from "./evalRunner.ts";
 import { DEFAULT_CRITERIA } from "./judge/rubric.ts";
+import { JudgeScorer } from "./judge/score.ts";
 import { WsRelay, type ForwardedCommand, type GenerateCommand } from "./wsRelay.ts";
 import { Generator } from "./generator.ts";
 import { Editor, editCount } from "./editor.ts";
@@ -195,6 +196,19 @@ const relay = new WsRelay({
 // The orchestrator: expands (examples × providers) into persisted jobs and drains them
 // through the pool under per-provider caps. Every job runs the ordinary path — there is no
 // second way to execute an agent.
+// The judge. Scoring is a SEPARATE phase from execution: a job is scored once its run is
+// already terminal and recorded, so a broken judge costs the quality column and nothing
+// else. Its cost accrues to the eval, never to a provider.
+const judge = new JudgeScorer({
+  store,
+  evalStore,
+  onScored: (e) => relay.broadcastEval({ type: "scored", ...e }),
+  onScoringFinished: (e) => {
+    console.log(`[eval] ${e.evalId} scoring done — ${e.scored} scored, ${e.unscored} unscored`);
+    relay.broadcastEval({ type: "scoringFinished", ...e });
+  },
+});
+
 evalRunner = new EvalRunner({
   pool,
   store,
@@ -207,11 +221,16 @@ evalRunner = new EvalRunner({
   },
   onStarted: (e) => relay.broadcastEval({ type: "evalStarted", ...e }),
   onProgress: (p) => relay.broadcastEval({ type: "evalProgress", ...p }),
+  // Score as results land rather than in a batch at the end, so the quality column fills in
+  // alongside the rest of the row instead of appearing all at once minutes later.
+  onJobFinished: (job) => judge.enqueue(job.eval_id, job),
   onFinished: (e) => {
     relay.broadcastEval({ type: "evalFinished", ...e });
     // The eval's runs are now in history like any other; refresh so drill-down can reach
     // them without a reconnect.
     relay.broadcastHistory();
+    // No more jobs are coming: the judge reports done once its own queue drains.
+    judge.seal(e.evalId);
   },
 });
 
