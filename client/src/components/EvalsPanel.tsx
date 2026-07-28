@@ -12,6 +12,7 @@ import { useTraceStore } from "../store/traceStore.ts";
 import { sendListEvals, sendLoadEvalResults } from "../lib/socket.ts";
 import { DatasetBuilder } from "./DatasetBuilder.tsx";
 import { ComparisonTable } from "./EvalDashboard.tsx";
+import { ExampleDrillDown } from "./EvalDrillDown.tsx";
 import { EvalRunBar } from "./EvalRunBar.tsx";
 import { relTime } from "../lib/format.ts";
 
@@ -118,7 +119,10 @@ export function EvalsPanel() {
           )}
 
           {results ? (
-            <ComparisonTable results={results} />
+            <>
+              <ComparisonTable results={results} />
+              <ExampleDrillDown results={results} />
+            </>
           ) : (
             <div className="text-[12px] text-muted pt-6">
               No results yet. Pick providers below the dataset and run it.
