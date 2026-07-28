@@ -175,11 +175,122 @@ export interface DatasetExample {
   created_at: string;
 }
 
+export interface EvalTarget {
+  provider: string;
+  model: string;
+}
+
+export interface EvalRunSummary {
+  id: string;
+  dataset_id: string;
+  agent_id: string;
+  status: string;
+  targets: EvalTarget[];
+  budget_usd: number | null;
+  judge_cost_usd: number;
+  started_at: string;
+  ended_at: string | null;
+  error: string | null;
+}
+
+/** One (provider, model) leg of the comparison. */
+export interface ProviderMetrics {
+  provider: string;
+  model: string;
+  total: number;
+  succeeded: number;
+  failed: number;
+  successRate: number;
+  /** Succeeded runs only — the like-for-like figure. null when the model is unpriced. */
+  comparisonCostUsd: number | null;
+  costPerRunUsd: number | null;
+  /** Every attempt on this leg, succeeded or not. */
+  spentUsd: number;
+  tokens: number;
+  latencyP50Ms: number | null;
+  latencyP95Ms: number | null;
+  /** No pricing entry — cost is UNKNOWN, not zero. Must never render as $0.00. */
+  costUnknown: boolean;
+  /** Some steps couldn't be priced; the figure shown is a floor. */
+  costIncomplete: boolean;
+  /** Mean judge score over scored runs. null when nothing was scored. */
+  qualityScore: number | null;
+  scored: number;
+  unscored: number;
+}
+
+export interface EvalTotals {
+  trueSpendUsd: number;
+  judgeCostUsd: number;
+  agentSpendUsd: number;
+  budgetUsd: number | null;
+}
+
+/** One cell of the grid: what one provider did with one example. */
+export interface ExampleCell {
+  jobId: string;
+  provider: string;
+  model: string;
+  status: string;
+  /** The ordinary run this produced — the handle for opening the full trace. */
+  runId: string | null;
+  costUsd: number | null;
+  latencyMs: number | null;
+  attempt: number;
+  error: string | null;
+  /** null = unscored, with scoreError saying why. Never treat as zero. */
+  score: number | null;
+  scoreError: string | null;
+  perCriterion: Record<string, number> | null;
+  rationale: string | null;
+}
+
+export interface ExampleRow {
+  exampleId: string;
+  input: string;
+  expected: string | null;
+  cells: ExampleCell[];
+}
+
+export interface EvalResults {
+  evalId: string;
+  datasetId: string;
+  agentId: string;
+  status: string;
+  startedAt: string;
+  endedAt: string | null;
+  providers: ProviderMetrics[];
+  totals: EvalTotals;
+  rows: ExampleRow[];
+}
+
+export interface RubricCriterion {
+  id: string;
+  label: string;
+  description: string;
+  weight: number;
+}
+
+export interface Rubric {
+  id: string;
+  dataset_id: string | null;
+  name: string;
+  criteria: RubricCriterion[];
+}
+
 export type EvalMessage =
   | { channel: "eval"; type: "datasets"; agentId: string | null; datasets: Dataset[] }
   | { channel: "eval"; type: "dataset"; datasetId: string; examples: DatasetExample[] }
   | { channel: "eval"; type: "datasetDeleted"; datasetId: string }
   | { channel: "eval"; type: "promoted"; datasetId: string; datasetName: string; duplicate: boolean }
+  | { channel: "eval"; type: "evalStarted"; evalId: string; datasetId: string; agentId: string; total: number; targets: EvalTarget[] }
+  | { channel: "eval"; type: "evalProgress"; evalId: string; total: number; done: number; running: number; queued: number; failed: number }
+  | { channel: "eval"; type: "evalFinished"; evalId: string; status: string; error?: string }
+  | { channel: "eval"; type: "scored"; evalId: string; jobId: string; score: number | null; error?: string | null }
+  | { channel: "eval"; type: "scoringFinished"; evalId: string; scored: number; unscored: number }
+  | { channel: "eval"; type: "evalResults"; evalId: string; results: EvalResults }
+  | { channel: "eval"; type: "evals"; evals: EvalRunSummary[] }
+  | { channel: "eval"; type: "rubric"; datasetId: string; rubric: Rubric; isDefault: boolean }
   | { channel: "eval"; type: "error"; message: string; datasetId?: string };
 
 // --- server → client channel messages (see server/src/wsRelay.ts) ---
@@ -232,7 +343,13 @@ export type ClientCommand =
   | { cmd: "addExample"; datasetId: string; input: string; expected?: string | null; notes?: string | null }
   | { cmd: "updateExample"; datasetId: string; exampleId: string; input?: string; expected?: string | null; notes?: string | null }
   | { cmd: "deleteExample"; datasetId: string; exampleId: string }
-  | { cmd: "promoteTestInput"; agentId: string; agentName?: string; input: string; expected?: string | null };
+  | { cmd: "promoteTestInput"; agentId: string; agentName?: string; input: string; expected?: string | null }
+  | { cmd: "startEval"; datasetId: string; agentId: string; targets: EvalTarget[]; budgetUsd?: number | null }
+  | { cmd: "cancelEval"; evalId: string }
+  | { cmd: "loadEvalResults"; evalId: string }
+  | { cmd: "listEvals"; datasetId?: string }
+  | { cmd: "loadRubric"; datasetId: string }
+  | { cmd: "saveRubric"; datasetId: string; name?: string; criteria: RubricCriterion[] };
 
 // Unified composer "explain" subject — what the question is about, built from already-in-memory
 // context (a trace step, a graph node, or the agent generally). No new data is fetched.

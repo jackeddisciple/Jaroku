@@ -8,7 +8,7 @@ import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore, type RightTab } from "../store/uiStore.ts";
 import { TraceTimeline } from "./TraceTimeline.tsx";
 import { GraphView } from "./GraphView.tsx";
-import { DatasetBuilder } from "./DatasetBuilder.tsx";
+import { EvalsPanel } from "./EvalsPanel.tsx";
 import { StepDetailPanel } from "./StepDetailPanel.tsx";
 
 const TABS: { id: RightTab; label: string }[] = [
@@ -44,7 +44,7 @@ export function RightPanel() {
         ))}
       </div>
       <div className="flex-1 min-h-0">
-        {tab === "graph" ? <GraphView /> : tab === "evals" ? <DatasetBuilder /> : <TraceTimeline />}
+        {tab === "graph" ? <GraphView /> : tab === "evals" ? <EvalsPanel /> : <TraceTimeline />}
       </div>
 
       {/* Step Details slides in over this panel when a step is expanded. */}

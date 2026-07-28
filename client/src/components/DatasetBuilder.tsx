@@ -116,7 +116,6 @@ function ExampleRow({
 
 export function DatasetBuilder() {
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
-  const agents = useBuildStore((s) => s.agents);
   const connected = useTraceStore((s) => s.connection === "open");
 
   const datasets = useEvalStore((s) => s.datasets);
@@ -129,7 +128,6 @@ export function DatasetBuilder() {
   const [newInput, setNewInput] = useState("");
   const [importNote, setImportNote] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const agent = agents.find((a) => a.agent_id === activeAgentId);
   const examples = examplesOf(examplesByDataset, selectedDatasetId);
   const selected = datasets.find((d) => d.id === selectedDatasetId);
 
@@ -142,6 +140,12 @@ export function DatasetBuilder() {
   useEffect(() => {
     if (connected && selectedDatasetId) sendLoadDataset(selectedDatasetId);
   }, [connected, selectedDatasetId]);
+
+  // Agent names are generated from prompts and run long ("a support agent that looks up
+  // orders in Postgres and checks…"), so a name derived from one overflows every chip it
+  // appears in. Number them instead; the agent is already established by the sidebar.
+  const nextDatasetName = () =>
+    datasets.length === 0 ? "Test set" : `Test set ${datasets.length + 1}`;
 
   const addExample = () => {
     const input = newInput.trim();
@@ -180,18 +184,21 @@ export function DatasetBuilder() {
           <button
             key={d.id}
             onClick={() => selectDataset(d.id)}
-            className={`rounded px-2.5 py-1 text-[12px] transition-colors ${
+            title={d.name}
+            // Names come from agent names, which are generated from prompts and can be long.
+            // Truncate so one dataset can't push the row into a second line.
+            className={`flex items-center gap-1.5 max-w-[220px] rounded px-2.5 py-1 text-[12px] transition-colors ${
               d.id === selectedDatasetId ? "bg-active text-ink" : "text-muted hover:text-ink"
             }`}
           >
-            {d.name}
-            <span className="ml-1.5 text-faint tabular-nums">{d.example_count ?? 0}</span>
+            <span className="truncate">{d.name}</span>
+            <span className="text-faint tabular-nums shrink-0">{d.example_count ?? 0}</span>
           </button>
         ))}
         <button
-          onClick={() => sendCreateDataset(activeAgentId, `${agent?.name ?? activeAgentId} tests`)}
+          onClick={() => sendCreateDataset(activeAgentId, nextDatasetName())}
           disabled={!connected}
-          className="rounded px-2.5 py-1 text-[12px] text-faint hover:text-ink transition-colors disabled:opacity-40"
+          className="rounded px-2.5 py-1 text-[12px] text-faint hover:text-ink transition-colors disabled:opacity-40 shrink-0"
         >
           + New dataset
         </button>

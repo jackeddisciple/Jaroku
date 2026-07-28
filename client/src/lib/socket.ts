@@ -7,7 +7,7 @@ import { useBuildStore } from "../store/buildStore.ts";
 import { useChatStore } from "../store/chatStore.ts";
 import { useGraphStore } from "../store/graphStore.ts";
 import { useEvalStore } from "../store/evalStore.ts";
-import type { ClientCommand, ExplainSubject, ServerMessage } from "../types.ts";
+import type { ClientCommand, EvalTarget, ExplainSubject, RubricCriterion, ServerMessage } from "../types.ts";
 
 const WS_URL = import.meta.env.VITE_JAROKU_WS ?? `ws://localhost:4317`;
 const RECONNECT_MS = 1000;
@@ -93,6 +93,25 @@ function dispatch(msg: ServerMessage): void {
       else if (msg.type === "dataset") e.setExamples(msg.datasetId, msg.examples);
       else if (msg.type === "datasetDeleted") e.removeDataset(msg.datasetId);
       else if (msg.type === "promoted") e.setPromoted(msg.datasetName, msg.duplicate);
+      else if (msg.type === "evalStarted") {
+        e.setProgress({ evalId: msg.evalId, total: msg.total, done: 0, running: 0, queued: msg.total, failed: 0 });
+        e.selectEval(msg.evalId);
+      } else if (msg.type === "evalProgress") e.setProgress({ ...msg });
+      else if (msg.type === "evalFinished") {
+        // Runs are done; scoring may still be in flight, so the panel says so rather than
+        // showing a quality column that's about to fill in.
+        e.patchProgress({ status: msg.status, scoring: true });
+        sendLoadEvalResults(msg.evalId);
+        sendListEvals();
+      } else if (msg.type === "scored") {
+        // Refresh the aggregate so the quality column fills in as verdicts land.
+        sendLoadEvalResults(msg.evalId);
+      } else if (msg.type === "scoringFinished") {
+        e.patchProgress({ scoring: false });
+        sendLoadEvalResults(msg.evalId);
+      } else if (msg.type === "evalResults") e.setResults(msg.evalId, msg.results);
+      else if (msg.type === "evals") e.setEvals(msg.evals);
+      else if (msg.type === "rubric") e.setRubric(msg.rubric, msg.isDefault);
       else if (msg.type === "error") e.setError(msg.message);
       break;
     }
@@ -265,4 +284,31 @@ export function sendPromoteTestInput(
   expected?: string | null,
 ): void {
   send({ cmd: "promoteTestInput", agentId, agentName, input, expected });
+}
+
+// --- eval runs -------------------------------------------------------------
+
+/** Fan a dataset out across providers. `budgetUsd` is a hard ceiling on TRUE spend. */
+export function sendStartEval(
+  datasetId: string,
+  agentId: string,
+  targets: EvalTarget[],
+  budgetUsd?: number | null,
+): void {
+  send({ cmd: "startEval", datasetId, agentId, targets, budgetUsd });
+}
+export function sendCancelEval(evalId: string): void {
+  send({ cmd: "cancelEval", evalId });
+}
+export function sendLoadEvalResults(evalId: string): void {
+  send({ cmd: "loadEvalResults", evalId });
+}
+export function sendListEvals(datasetId?: string): void {
+  send({ cmd: "listEvals", datasetId });
+}
+export function sendLoadRubric(datasetId: string): void {
+  send({ cmd: "loadRubric", datasetId });
+}
+export function sendSaveRubric(datasetId: string, criteria: RubricCriterion[], name?: string): void {
+  send({ cmd: "saveRubric", datasetId, criteria, name });
 }

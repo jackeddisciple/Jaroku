@@ -36,6 +36,18 @@ export function fmtTokens(tokens: number | null | undefined): string {
   return `${tokens.toLocaleString()} tok`;
 }
 
+/** Latency in ms, or an em dash when there isn't one. Null is "no measurement", not 0. */
+export function fmtLatency(ms: number | null | undefined): string {
+  if (ms == null) return "—";
+  return fmtDuration(ms);
+}
+
+/** 0..1 → "67%". */
+export function fmtPercent(ratio: number | null | undefined): string {
+  if (ratio == null) return "—";
+  return `${Math.round(ratio * 100)}%`;
+}
+
 export function jsonPretty(v: unknown): string {
   if (v == null) return "";
   if (typeof v === "string") return v;

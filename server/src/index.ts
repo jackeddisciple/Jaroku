@@ -18,6 +18,7 @@ import { EvalStore, type Rubric, type RubricCriterion } from "./evalStore.ts";
 import { EvalRunner } from "./evalRunner.ts";
 import { DEFAULT_CRITERIA } from "./judge/rubric.ts";
 import { JudgeScorer } from "./judge/score.ts";
+import { aggregateEval } from "./evalAggregate.ts";
 import { WsRelay, type ForwardedCommand, type GenerateCommand } from "./wsRelay.ts";
 import { Generator } from "./generator.ts";
 import { Editor, editCount } from "./editor.ts";
@@ -326,6 +327,23 @@ function handleEvalCommand(cmd: ForwardedCommand): void {
       }
       case "cancelEval": {
         evalRunner.cancel(cmd.evalId);
+        return;
+      }
+      case "loadEvalResults": {
+        const results = aggregateEval(evalStore, cmd.evalId);
+        if (!results) {
+          relay.broadcastEval({ type: "error", message: "unknown eval" });
+          return;
+        }
+        relay.broadcastEval({ type: "evalResults", evalId: cmd.evalId, results });
+        return;
+      }
+      case "listEvals": {
+        const all = evalStore.listEvalRuns();
+        relay.broadcastEval({
+          type: "evals",
+          evals: cmd.datasetId ? all.filter((e) => e.dataset_id === cmd.datasetId) : all,
+        });
         return;
       }
       case "loadRubric": {

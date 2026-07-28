@@ -94,6 +94,10 @@ export type CancelEvalCommand = { cmd: "cancelEval"; evalId: string };
 // The rubric is product surface, not a constant — "correct" for a refund bot is not
 // "correct" for a SQL agent. Saving one for a dataset overrides the shared default.
 export type LoadRubricCommand = { cmd: "loadRubric"; datasetId: string };
+/** The comparison dashboard's data: per-provider rollups plus per-example rows. */
+export type LoadEvalResultsCommand = { cmd: "loadEvalResults"; evalId: string };
+/** Past evals for a dataset (or all), so a finished comparison stays reachable. */
+export type ListEvalsCommand = { cmd: "listEvals"; datasetId?: string };
 export type SaveRubricCommand = {
   cmd: "saveRubric";
   datasetId: string;
@@ -139,12 +143,15 @@ export type EvalCommand =
   | StartEvalCommand
   | CancelEvalCommand
   | LoadRubricCommand
-  | SaveRubricCommand;
+  | SaveRubricCommand
+  | LoadEvalResultsCommand
+  | ListEvalsCommand;
 
 const EVAL_COMMANDS = new Set([
   "createDataset", "renameDataset", "deleteDataset", "listDatasets",
   "loadDataset", "addExample", "updateExample", "deleteExample", "promoteTestInput",
   "startEval", "cancelEval", "loadRubric", "saveRubric",
+  "loadEvalResults", "listEvals",
 ]);
 
 /** Commands the relay forwards to the app rather than answering locally. */
@@ -226,6 +233,8 @@ export type EvalEvent =
   // score is UNSCORED (with a reason), never a zero.
   | { type: "scored"; evalId: string; jobId: string; score: number | null; error?: string | null }
   | { type: "scoringFinished"; evalId: string; scored: number; unscored: number }
+  | { type: "evalResults"; evalId: string; results: unknown }
+  | { type: "evals"; evals: unknown[] }
   | { type: "error"; message: string; datasetId?: string };
 
 export type DebugEvent =

@@ -11,7 +11,20 @@
 // replace, never a merge — there is no partial state to reconcile.
 
 import { create } from "zustand";
-import type { Dataset, DatasetExample } from "../types.ts";
+import type { Dataset, DatasetExample, EvalResults, EvalRunSummary, Rubric } from "../types.ts";
+
+/** Live counters while an eval drains. Counts only — no step traffic on this channel. */
+export interface EvalProgress {
+  evalId: string;
+  total: number;
+  done: number;
+  running: number;
+  queued: number;
+  failed: number;
+  /** Set once the runs finish; scoring may still be in flight. */
+  status?: string;
+  scoring?: boolean;
+}
 
 interface EvalState {
   /** Datasets for the agent last listed, newest first. */
@@ -33,6 +46,26 @@ interface EvalState {
   setError: (message: string | null) => void;
   setPromoted: (datasetName: string, duplicate: boolean) => void;
   clearPromoted: () => void;
+
+  // --- eval runs ---
+  /** Past evals for the selected dataset, newest first. */
+  evals: EvalRunSummary[];
+  /** The eval whose results the dashboard is showing. */
+  selectedEvalId: string | null;
+  /** evalId -> full results (provider rollups + per-example rows). */
+  resultsByEval: Record<string, EvalResults>;
+  /** Live counters for the eval currently draining, if any. */
+  progress: EvalProgress | null;
+  /** The dataset's rubric, once loaded. */
+  rubric: Rubric | null;
+  rubricIsDefault: boolean;
+
+  setEvals: (evals: EvalRunSummary[]) => void;
+  selectEval: (evalId: string | null) => void;
+  setResults: (evalId: string, results: EvalResults) => void;
+  setProgress: (p: EvalProgress | null) => void;
+  patchProgress: (patch: Partial<EvalProgress>) => void;
+  setRubric: (rubric: Rubric, isDefault: boolean) => void;
 }
 
 export const useEvalStore = create<EvalState>((set) => ({
@@ -73,6 +106,35 @@ export const useEvalStore = create<EvalState>((set) => ({
 
   setPromoted: (datasetName, duplicate) => set({ promoted: { datasetName, duplicate, at: Date.now() } }),
   clearPromoted: () => set({ promoted: null }),
+
+  evals: [],
+  selectedEvalId: null,
+  resultsByEval: {},
+  progress: null,
+  rubric: null,
+  rubricIsDefault: true,
+
+  setEvals: (evals) =>
+    set((s) => ({
+      evals,
+      // Default to the newest eval so finishing one lands you on its results.
+      selectedEvalId:
+        s.selectedEvalId && evals.some((e) => e.id === s.selectedEvalId)
+          ? s.selectedEvalId
+          : (evals[0]?.id ?? null),
+    })),
+
+  selectEval: (selectedEvalId) => set({ selectedEvalId }),
+
+  setResults: (evalId, results) =>
+    set((s) => ({ resultsByEval: { ...s.resultsByEval, [evalId]: results } })),
+
+  setProgress: (progress) => set({ progress }),
+
+  patchProgress: (patch) =>
+    set((s) => (s.progress ? { progress: { ...s.progress, ...patch } } : {})),
+
+  setRubric: (rubric, rubricIsDefault) => set({ rubric, rubricIsDefault }),
 }));
 
 /** Examples of a dataset in position order. `[]` when not loaded yet. */
