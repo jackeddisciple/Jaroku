@@ -8,8 +8,10 @@ import type { FileDiff } from "../types.ts";
 import type { ProposalTurn } from "../store/chatStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { sendApplyEdit, sendDiscardEdit, sendUndoEdit } from "../lib/socket.ts";
+import { StreamingFileRow } from "./FileList.tsx";
+import { iconForPath } from "./fileIcons.tsx";
 import { Prose } from "./InlineCode.tsx";
-import { StatusBadge, StatusDot } from "./StatusBadge.tsx";
+import { StatusBadge } from "./StatusBadge.tsx";
 import { STAT_ICON } from "./StatRow.tsx";
 import { FileIcon } from "./panelIcons.tsx";
 
@@ -47,6 +49,7 @@ function HunkLines({ file }: { file: FileDiff }) {
 function FileRow({ file, defaultOpen }: { file: FileDiff; defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   const openInCode = useBuildStore((s) => s.openInCode);
+  const TypeIcon = iconForPath(file.path);
 
   return (
     <div className="mt-2 first:mt-0">
@@ -54,6 +57,11 @@ function FileRow({ file, defaultOpen }: { file: FileDiff; defaultOpen: boolean }
         <button onClick={() => setOpen((o) => !o)} className="text-faint hover:text-ink w-3 shrink-0">
           {open ? "▾" : "▸"}
         </button>
+        {/* Between the disclosure and the path, so the type is the first thing on the row that is
+            about the file itself. Faint: it classifies the row, it doesn't compete with the name. */}
+        <span className="shrink-0 flex items-center text-faint" aria-hidden>
+          <TypeIcon size={STAT_ICON} />
+        </span>
         <button
           onClick={() => openInCode(file.path)}
           className="font-mono text-ink truncate hover:underline underline-offset-2"
@@ -85,17 +93,13 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
         <div className="text-run">Proposing changes…</div>
         <div className="mt-2 space-y-1">
           {turn.streaming.map((f) => (
-            <div key={f.path} className="flex items-center gap-2 animate-slide-in">
-              <StatusDot
-                state={f.done ? "ok" : "pending"}
-                pulse={!f.done}
-                title={f.done ? "Rewritten" : "Still rewriting"}
-              />
-              <span className="font-mono text-muted truncate">{f.path}</span>
-              <span className="ml-auto font-mono text-faint text-[11px] tabular-nums">
-                {f.done ? `${f.bytes} B` : "rewriting…"}
-              </span>
-            </div>
+            <StreamingFileRow
+              key={f.path}
+              path={f.path}
+              done={f.done}
+              figure={f.done ? `${f.bytes} B` : "rewriting…"}
+              title={f.done ? "Rewritten" : "Still rewriting"}
+            />
           ))}
         </div>
       </div>

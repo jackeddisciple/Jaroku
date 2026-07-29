@@ -21,6 +21,7 @@ import { useEvalStore } from "../store/evalStore.ts";
 import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
 import { DiffCard } from "./DiffCard.tsx";
 import { Prose } from "./InlineCode.tsx";
+import { StreamingFileRow } from "./FileList.tsx";
 import { PlanCard } from "./PlanCard.tsx";
 import { ArrowUpIcon, ChevronDownIcon, MicIcon, SaveToDatasetIcon } from "./composerIcons.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
@@ -66,17 +67,13 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
         <div className="text-run">Generating…</div>
         <div className="mt-2 space-y-1">
           {list.map((f) => (
-            <div key={f.path} className="flex items-center gap-2 animate-slide-in">
-              <StatusDot
-                state={f.complete ? "ok" : "pending"}
-                pulse={!f.complete}
-                title={f.complete ? "Written" : "Still writing"}
-              />
-              <span className="font-mono text-muted truncate">{f.path}</span>
-              <span className="ml-auto font-mono text-faint text-[11px] tabular-nums">
-                {f.path === streamingFile ? "writing…" : `${f.content.length} B`}
-              </span>
-            </div>
+            <StreamingFileRow
+              key={f.path}
+              path={f.path}
+              done={f.complete}
+              figure={f.path === streamingFile ? "writing…" : `${f.content.length} B`}
+              title={f.complete ? "Written" : "Still writing"}
+            />
           ))}
         </div>
       </div>
