@@ -110,8 +110,14 @@ export function ComparisonTable({
                 onClick={() => onSelectProvider?.(p)}
                 className={`${onSelectProvider ? "cursor-pointer hover:bg-active/40" : ""} transition-colors`}
               >
+                {/* A model id is an identifier, so it breaks as a unit or not at all. While the
+                    judge is still scoring, the quality column carries an extra "· N unscored" and
+                    squeezes this one — which was enough to wrap "claude-haiku-4-5" after the
+                    hyphen, leaving a row headed "claude-haiku-4-" over a lone "5". The name of the
+                    thing being compared is the last text in a comparison table that should be
+                    guessable. */}
                 <td className="py-1.5 pr-3">
-                  <span className="text-ink">{p.model}</span>
+                  <span className="text-ink whitespace-nowrap">{p.model}</span>
                   <span className="text-faint ml-1.5 text-[10px]">{p.provider}</span>
                 </td>
                 <td className="py-1.5 px-2 text-right">
