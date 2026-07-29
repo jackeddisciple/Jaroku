@@ -21,7 +21,12 @@ type P = {
   className?: string;
 };
 
-const svg = (
+/**
+ * The one place SVG attributes are decided for the whole panel. Exported so composerIcons.tsx
+ * draws through it too — two factories with two different stroke weights is how a pane ends up
+ * with icons that are subtly different weights depending on which file they came from.
+ */
+export const svg = (
   { size = ICON.sm, strokeWidth = ICON.strokeWidth, className }: P,
   children: React.ReactNode,
 ) => (

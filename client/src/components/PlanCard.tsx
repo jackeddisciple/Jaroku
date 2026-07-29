@@ -50,12 +50,19 @@ function Section({
   label,
   note,
   accent,
+  count,
   children,
 }: {
   icon: React.ReactNode;
   label: string;
   note?: string;
   accent?: string;
+  /**
+   * How many rows follow. Shown because "how much of this plan is invented code?" is the question
+   * the gate exists to answer, and counting rows to find out is work the heading can do. It also
+   * gives a long list a size before the user starts scrolling it.
+   */
+  count?: number;
   children: React.ReactNode;
 }) {
   return (
@@ -65,6 +72,9 @@ function Section({
           {icon}
         </span>
         <span className="text-[11px] font-medium uppercase tracking-wider text-muted">{label}</span>
+        {count !== undefined && count > 1 && (
+          <span className="font-mono text-[11px] text-faint tabular-nums">{count}</span>
+        )}
       </div>
       {note && <div className="mt-1 text-[11px] text-faint">{note}</div>}
       <div className="mt-2.5">{children}</div>
@@ -108,10 +118,16 @@ function ConnectorChip({ id }: { id: string }) {
  * This gives every tool the same four slots in the same order — icon, name, description, status —
  * so the eye can track down a column instead of re-reading each line.
  *
- * Sizing is the part that matters. The name is shrink-0 so an identifier is never broken across
- * lines (a wrapped tool name reads as two tools), and the description is min-w-0 so it is the
- * thing that gives when space runs out. The icon and status slots are fixed width, which is what
- * keeps the name column aligned whether or not a row has a status.
+ * Sizing is the part that matters, and the naive version of it is wrong. Making the name shrink-0
+ * and the description min-w-0 protects the name, but a 60-character tool name then squeezes the
+ * description to zero width and it disappears entirely — the row silently loses information rather
+ * than running out of room.
+ *
+ * So name and description share one flowing container instead of competing for the row. The
+ * description wraps under a long name rather than vanishing, and the name only breaks internally
+ * when it genuinely cannot fit on a line by itself (overflow-wrap: anywhere), which beats
+ * overflowing the card. Icon and status stay fixed-width outside the flow, so the status column
+ * stays aligned no matter how tall a row grows.
  */
 function ToolRow({
   icon,
@@ -127,19 +143,17 @@ function ToolRow({
   status?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-baseline gap-2 py-1">
-      <span
-        className="shrink-0 flex items-center self-center"
-        style={{ color: accent }}
-        aria-hidden
-      >
+    <div className="flex items-start gap-2 py-1">
+      <span className="shrink-0 flex items-center h-[19px]" style={{ color: accent }} aria-hidden>
         {icon}
       </span>
-      <span className="shrink-0 font-mono text-[12px] font-medium text-ink">{name}</span>
-      {description && (
-        <span className="min-w-0 text-[12px] text-muted">{description}</span>
+      <span className="min-w-0 flex-1 text-[12px]">
+        <span className="font-mono font-medium text-ink [overflow-wrap:anywhere]">{name}</span>
+        {description && <span className="ml-2 text-muted">{description}</span>}
+      </span>
+      {status && (
+        <span className="shrink-0 flex items-center h-[19px] pl-1">{status}</span>
       )}
-      {status && <span className="ml-auto shrink-0 self-center flex items-center">{status}</span>}
     </div>
   );
 }
@@ -256,6 +270,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                 label="Reviewed tools"
                 note="Audited connector templates, copied in as-is."
                 accent={ACCENT.reviewed}
+                count={connectorTools.length}
               >
                 {connectorTools.map((t) => (
                   <ToolRow
@@ -282,6 +297,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                 label="Bespoke tools"
                 note="Will be written by the model for this agent."
                 accent={ACCENT.bespoke}
+                count={bespokeTools.length}
               >
                 {bespokeTools.map((t) => (
                   <ToolRow
@@ -308,19 +324,25 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             )}
 
             {plan.state.length > 0 && (
-              <Section icon={<DatabaseIcon />} label="State" accent={ACCENT.state}>
+              <Section icon={<DatabaseIcon />} label="State" accent={ACCENT.state} count={plan.state.length}>
+                {/* Same flowing shape as a tool row, for the same reason: a long field name must
+                    not be able to squeeze the purpose out of existence. */}
                 {plan.state.map((f) => (
-                  <Line key={f.name}>
-                    <span className="font-mono text-ink shrink-0">{f.name}</span>
-                    {f.type && <span className="font-mono text-stateful shrink-0">{f.type}</span>}
-                    <span className="text-muted min-w-0">{f.purpose}</span>
-                  </Line>
+                  <div key={f.name} className="py-1 text-[12px]">
+                    <span className="font-mono text-ink [overflow-wrap:anywhere]">{f.name}</span>
+                    {f.type && (
+                      <span className="ml-2 font-mono text-stateful [overflow-wrap:anywhere]">
+                        {f.type}
+                      </span>
+                    )}
+                    {f.purpose && <span className="ml-2 text-muted">{f.purpose}</span>}
+                  </div>
                 ))}
               </Section>
             )}
 
             {plan.graph.length > 0 && (
-              <Section icon={<GitBranchIcon />} label="Graph">
+              <Section icon={<GitBranchIcon />} label="Graph" count={plan.graph.length}>
                 {plan.graph.map((g, i) => (
                   <Line key={i}>
                     <span className="text-faint shrink-0">·</span>
@@ -331,7 +353,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             )}
 
             {plan.notes.length > 0 && (
-              <Section icon={<LightbulbIcon />} label="Worth knowing">
+              <Section icon={<LightbulbIcon />} label="Worth knowing" count={plan.notes.length}>
                 {plan.notes.map((n, i) => (
                   <Line key={i}>
                     <span className="text-faint shrink-0">·</span>
