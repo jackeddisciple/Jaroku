@@ -9,6 +9,8 @@ import type { ProposalTurn } from "../store/chatStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { sendApplyEdit, sendDiscardEdit, sendUndoEdit } from "../lib/socket.ts";
 import { StatusBadge, StatusDot } from "./StatusBadge.tsx";
+import { STAT_ICON } from "./StatRow.tsx";
+import { FileIcon } from "./panelIcons.tsx";
 
 function HunkLines({ file }: { file: FileDiff }) {
   return (
@@ -131,12 +133,20 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
     <div className="text-[12px] animate-slide-in">
       <div className="text-ink">{turn.summary}</div>
 
-      <div className="mt-1.5 flex items-center gap-2 text-[11px] text-muted">
-        <span>
-          Edited <span className="font-mono tabular-nums">{nFiles}</span>{" "}
-          {nFiles === 1 ? "file" : "files"},{" "}
-          <span className="font-mono tabular-nums text-ok">+{totals.add}</span>{" "}
-          <span className="font-mono tabular-nums text-err">−{totals.del}</span>
+      <div className="mt-2 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[11px] text-muted">
+        {/* The same shape as the generation stat row: a glyph to jump to, a tabular figure to
+            read. Adds and removes stay a single paired stat — they are one fact about the diff,
+            not two, and splitting them would imply they can be compared separately. */}
+        <span className="inline-flex items-center gap-1.5">
+          <span className="shrink-0 flex items-center opacity-70" aria-hidden>
+            <FileIcon size={STAT_ICON} />
+          </span>
+          <span className="font-mono tabular-nums">{nFiles}</span>
+          <span>{nFiles === 1 ? "file" : "files"}</span>
+        </span>
+        <span className="inline-flex items-center gap-1.5 font-mono tabular-nums">
+          <span className="text-ok">+{totals.add}</span>
+          <span className="text-err">−{totals.del}</span>
         </span>
         {turn.status === "applied" && (
           <StatusBadge

@@ -23,6 +23,8 @@ import { DiffCard } from "./DiffCard.tsx";
 import { PlanCard } from "./PlanCard.tsx";
 import { ArrowUpIcon, ChevronDownIcon, MicIcon, SaveToDatasetIcon } from "./composerIcons.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
+import { StatRow, STAT_ICON, type Stat } from "./StatRow.tsx";
+import { DollarSignIcon, FileIcon, HashIcon, ZapIcon } from "./panelIcons.tsx";
 import { ACCENT } from "../lib/tokens.ts";
 import { useVoiceInput } from "../lib/useVoiceInput.ts";
 import { VoiceWaveform } from "./VoiceWaveform.tsx";
@@ -84,33 +86,42 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
   // agent cost, so it's shown as its own term rather than folded in silently — the gate has to
   // be able to justify its own price.
   const planCost = turn.planUsage?.cost_usd ?? 0;
+  const stats: Stat[] = [
+    {
+      icon: <FileIcon size={STAT_ICON} />,
+      value: String(turn.files.length),
+      label: turn.files.length === 1 ? "file" : "files",
+    },
+  ];
+  if (turn.usage) {
+    stats.push({
+      icon: <HashIcon size={STAT_ICON} />,
+      value: turn.usage.output_tokens.toLocaleString(),
+      label: "output tokens",
+    });
+    // The cost shown is the total the user actually paid — planning included. Leading with the
+    // generation's own figure and appending the plan as a correction made the honest number the
+    // hardest one to read.
+    stats.push({
+      icon: <DollarSignIcon size={STAT_ICON} />,
+      value: (turn.usage.cost_usd + planCost).toFixed(4),
+      title:
+        planCost > 0
+          ? `$${turn.usage.cost_usd.toFixed(4)} to generate + $${planCost.toFixed(4)} to plan`
+          : undefined,
+    });
+    if (turn.usage.cache_read_input_tokens > 0) {
+      stats.push({
+        icon: <ZapIcon size={STAT_ICON} />,
+        value: turn.usage.cache_read_input_tokens.toLocaleString(),
+        label: "cached",
+        title: "Prompt prefix was reused — these input tokens were not charged at full rate",
+        dim: true,
+      });
+    }
+  }
   return (
-    <div className="text-[12px]">
-      <span className="text-ok">Generated</span>{" "}
-      <span className="text-muted">
-        <span className="font-mono tabular-nums">{turn.files.length}</span> files
-        {turn.usage && (
-          <>
-            {" · "}
-            <span className="font-mono tabular-nums">
-              {turn.usage.output_tokens.toLocaleString()}
-            </span>{" "}
-            output tokens ·{" "}
-            <span className="font-mono tabular-nums">${turn.usage.cost_usd.toFixed(4)}</span>
-            {planCost > 0 && (
-              <span className="text-faint">
-                {" + "}
-                <span className="font-mono tabular-nums">${planCost.toFixed(4)}</span> plan ={" "}
-                <span className="font-mono tabular-nums">
-                  ${(turn.usage.cost_usd + planCost).toFixed(4)}
-                </span>
-              </span>
-            )}
-            {turn.usage.cache_read_input_tokens > 0 && <span className="text-faint"> · cache hit</span>}
-          </>
-        )}
-      </span>
-    </div>
+    <StatRow leading={<span className="text-ok text-[12px]">Generated</span>} stats={stats} />
   );
 }
 
