@@ -40,6 +40,26 @@ const btn =
   "rounded px-3 py-1.5 text-[12px] bg-panel text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
 /**
+ * Which sections the user has folded away, for as long as the panel is open.
+ *
+ * A section's open state is a fact about the reader, not about the plan, and it was living in the
+ * component — so it evaporated every time the card unmounted. Switching to another agent and back
+ * re-expanded everything you had just put away, which makes the control feel like it didn't work.
+ *
+ * Module-level rather than in uiStore on purpose. Nothing outside this file needs to know or ask,
+ * nothing re-renders when it changes, and this pass is not supposed to add anything to a store. It
+ * lives as long as the tab does and no longer, which is exactly the promised lifetime: a reload
+ * starts fresh, because a plan you come back to tomorrow should show you all of itself.
+ *
+ * Keyed per plan, not per label, so folding "reviewed tools" on one plan doesn't hide the reviewed
+ * tools of the next one — the section a gate exists to show should never arrive pre-hidden.
+ *
+ * Only non-default state is stored: an open section deletes its key rather than writing `false`, so
+ * a long session doesn't accumulate an entry per section per plan.
+ */
+const foldedSections = new Map<string, true>();
+
+/**
  * A titled block of the plan.
  *
  * The label was a 10px uppercase grey run-on that carried its own explanation inside it
@@ -57,12 +77,15 @@ function Section({
   note,
   accent,
   count,
+  scope,
   children,
 }: {
   icon: React.ReactNode;
   label: string;
   note?: string;
   accent?: string;
+  /** Identifies the plan this section belongs to, so folds are remembered per plan. */
+  scope: string;
   /**
    * How many rows follow. Shown because "how much of this plan is invented code?" is the question
    * the gate exists to answer, and counting rows to find out is work the heading can do. It also
@@ -71,14 +94,21 @@ function Section({
   count?: number;
   children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(true);
+  const key = `${scope}:${label}`;
+  const [open, setOpen] = useState(() => !foldedSections.has(key));
+  const toggle = () =>
+    setOpen((wasOpen) => {
+      if (wasOpen) foldedSections.set(key, true);
+      else foldedSections.delete(key);
+      return !wasOpen;
+    });
   return (
     <div className="mt-5 first:mt-0">
       {/* The whole header is the control, not just the chevron — a 12px target for a thing you
           will hit repeatedly is a target you miss. */}
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
         aria-expanded={open}
         className="group flex w-full items-center gap-1.5 text-left"
         title={open ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
@@ -321,6 +351,10 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
   const degraded = !plan || (plan.tools.length === 0 && plan.state.length === 0 && plan.graph.length === 0);
   const decided = turn.status !== "pending" && turn.status !== "stale";
 
+  // Folds are remembered against the plan, not the turn, so a revision that supersedes this one
+  // does not inherit what the reader hid on a plan they were still deciding about.
+  const scope = turn.planId ?? turn.id;
+
   // What this plan calls things. Every prose slot below is tokenized against it, so a tool named in
   // a note is recognised rather than guessed at — see lib/inlineCode.ts.
   const vocabulary = [
@@ -371,6 +405,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
           <>
             {connectorTools.length > 0 && (
               <Section
+                scope={scope}
                 icon={<ShieldCheckIcon />}
                 label="Reviewed tools"
                 note="Audited connector templates, copied in as-is."
@@ -398,6 +433,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
 
             {bespokeTools.length > 0 && (
               <Section
+                scope={scope}
                 icon={<SparklesIcon />}
                 label="Bespoke tools"
                 note="Will be written by the model for this agent."
@@ -434,7 +470,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             )}
 
             {plan.state.length > 0 && (
-              <Section icon={<DatabaseIcon />} label="State" accent={ACCENT.state} count={plan.state.length}>
+              <Section scope={scope} icon={<DatabaseIcon />} label="State" accent={ACCENT.state} count={plan.state.length}>
                 {/* Same flowing shape as a tool row, for the same reason: a long field name must
                     not be able to squeeze the purpose out of existence. */}
                 {plan.state.map((f) => (
@@ -456,7 +492,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             )}
 
             {plan.graph.length > 0 && (
-              <Section icon={<GitBranchIcon />} label="Graph" count={plan.graph.length}>
+              <Section scope={scope} icon={<GitBranchIcon />} label="Graph" count={plan.graph.length}>
                 {plan.graph.map((g, i) => (
                   <GraphStep key={i} n={i + 1} last={i === plan.graph.length - 1}>
                     <Prose text={g} vocabulary={vocabulary} />
@@ -466,7 +502,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             )}
 
             {plan.notes.length > 0 && (
-              <Section icon={<LightbulbIcon />} label="Worth knowing" count={plan.notes.length}>
+              <Section scope={scope} icon={<LightbulbIcon />} label="Worth knowing" count={plan.notes.length}>
                 {plan.notes.map((n, i) => (
                   <Note key={i} text={n} vocabulary={vocabulary} />
                 ))}
