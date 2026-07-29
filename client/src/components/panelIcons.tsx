@@ -142,6 +142,20 @@ export function InfoIcon(p: P) {
   );
 }
 
+// ── Speakers ────────────────────────────────────────────────────────────────
+
+/** lucide:circle-user-round — the person. The one who asked for this. */
+export function UserCircleIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <circle cx="12" cy="10" r="3" />
+      <path d="M7 20.7V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.7" />
+    </>,
+  );
+}
+
 // ── Status ──────────────────────────────────────────────────────────────────
 
 /** lucide:check — approved, audited, done. */

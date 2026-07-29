@@ -26,8 +26,8 @@ import { PlanCard } from "./PlanCard.tsx";
 import { ArrowUpIcon, ChevronDownIcon, MicIcon, SaveToDatasetIcon } from "./composerIcons.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { StatRow, STAT_ICON, type Stat } from "./StatRow.tsx";
-import { DollarSignIcon, FileIcon, HashIcon, ZapIcon } from "./panelIcons.tsx";
-import { ACCENT } from "../lib/tokens.ts";
+import { DollarSignIcon, FileIcon, HashIcon, UserCircleIcon, ZapIcon } from "./panelIcons.tsx";
+import { ACCENT, ICON } from "../lib/tokens.ts";
 import { useVoiceInput } from "../lib/useVoiceInput.ts";
 import { VoiceWaveform } from "./VoiceWaveform.tsx";
 
@@ -133,23 +133,52 @@ function ReplyTurnView({ turn }: { turn: ReplyTurn }) {
   );
 }
 
+/**
+ * One turn, with its speaker in the gutter.
+ *
+ * A fix loop is a conversation, and a long one is where this mattered: five change requests and
+ * five answers, told apart by a leading `›` on one and four pixels of indent on the other. Scanning
+ * back for "what did I ask for" meant re-reading the messages themselves, because nothing about
+ * their shape said who was talking.
+ *
+ * Both roles now sit on the same fixed gutter — one column, one mark per row, everything after it
+ * aligned. That alignment is most of the win: a marker that shifts position between turns is a
+ * thing to read rather than a thing to skim past.
+ */
+function TurnRow({ marker, children }: { marker?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="flex gap-2">
+      {/* Fixed width whether or not there is a mark, so the two roles never sit on different
+          left edges. Nudged down to the cap height of the first line rather than its box. */}
+      <span className="w-[18px] shrink-0 flex justify-center pt-[2px]" aria-hidden>
+        {marker}
+      </span>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
 function Turn({ turn, isLastGen }: { turn: ChatTurn; isLastGen: boolean }) {
   if (turn.role === "user") {
     return (
-      <div className="flex gap-2">
-        <span className="text-faint select-none">›</span>
-        <span className="text-ink text-[13px] whitespace-pre-wrap break-words min-w-0">{turn.text}</span>
-      </div>
+      // The `›` it replaces was a prompt character — it said "input", not "you". At the top of a
+      // scrolled-back thread, the question is whose turn this was, and a face answers that faster
+      // than punctuation does.
+      <TurnRow marker={<UserCircleIcon size={ICON.sm} className="text-faint" />}>
+        <span className="text-ink text-[13px] whitespace-pre-wrap break-words">{turn.text}</span>
+      </TurnRow>
     );
   }
-  if (turn.kind === "plan") return <div className="pl-4"><PlanCard turn={turn} /></div>;
-  if (turn.kind === "gen") return <div className="pl-4"><GenTurnView turn={turn} isLive={isLastGen} /></div>;
-  if (turn.kind === "proposal") return <div className="pl-4"><DiffCard turn={turn} /></div>;
-  if (turn.kind === "reply") return <div className="pl-4"><ReplyTurnView turn={turn} /></div>;
+  if (turn.kind === "plan") return <TurnRow><PlanCard turn={turn} /></TurnRow>;
+  if (turn.kind === "gen") return <TurnRow><GenTurnView turn={turn} isLive={isLastGen} /></TurnRow>;
+  if (turn.kind === "proposal") return <TurnRow><DiffCard turn={turn} /></TurnRow>;
+  if (turn.kind === "reply") return <TurnRow><ReplyTurnView turn={turn} /></TurnRow>;
   return (
-    <div className={`pl-4 text-[12px] ${turn.tone === "error" ? "text-err" : "text-faint"}`}>
-      {turn.text}
-    </div>
+    <TurnRow>
+      <div className={`text-[12px] ${turn.tone === "error" ? "text-err" : "text-faint"}`}>
+        {turn.text}
+      </div>
+    </TurnRow>
   );
 }
 
