@@ -620,11 +620,24 @@ export function BuildPane() {
                 </button>
               );
             })}
+            {/* Locked once a plan exists, because by then it does nothing. Generation takes the
+                name from the approved plan record, not from this field (server/src/index.ts —
+                "building what was approved is the whole point of the gate"), and a revision keeps
+                the name the first plan was given. So typing here after planning changed nothing
+                and said nothing — the agent quietly kept its old name.
+
+                Leaving it editable-but-ignored is the worst of the options. Locking it says the
+                name is settled, and the placeholder says how to change your mind. */}
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              disabled={busy}
-              placeholder="name (optional)"
+              disabled={busy || Boolean(planId)}
+              placeholder={planId ? "name (set by the plan)" : "name (optional)"}
+              title={
+                planId
+                  ? "The name is fixed once a plan is on the table — discard the plan to change it"
+                  : "Optional. Otherwise the name is taken from your description."
+              }
               className="ml-auto w-40 bg-panel font-mono text-ink placeholder:text-faint rounded px-2.5 py-1 text-[12px] outline-none focus:ring-1 focus:ring-[#2a2a2e] disabled:opacity-50"
             />
           </div>
