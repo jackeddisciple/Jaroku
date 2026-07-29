@@ -47,13 +47,13 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
       <div className="text-[12px]">
         <div className="text-err">Generation failed — {turn.error}</div>
         {turn.problems && turn.problems.length > 0 && (
-          <ul className="mt-1.5 space-y-0.5 text-muted">
+          <ul className="mt-2 space-y-1 text-muted">
             {turn.problems.map((p, i) => (
               <li key={i} className="pl-3">· {p}</li>
             ))}
           </ul>
         )}
-        <div className="mt-1.5 text-faint">Nothing was written — any previous agent is untouched.</div>
+        <div className="mt-2 text-faint">Nothing was written — any previous agent is untouched.</div>
       </div>
     );
   }
@@ -63,7 +63,7 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
     return (
       <div className="text-[12px]">
         <div className="text-run">Generating…</div>
-        <div className="mt-1 space-y-0.5">
+        <div className="mt-2 space-y-1">
           {list.map((f) => (
             <div key={f.path} className="flex items-center gap-2 animate-slide-in">
               <StatusDot
@@ -470,7 +470,10 @@ export function BuildPane() {
       </div>
 
       {/* conversation */}
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-6 py-2 space-y-4">
+      {/* Turns are distinct moments — a prompt, a plan, a generation. 24px between them, the
+          widest step in the scale, so the thread reads as separate exchanges rather than one
+          continuous document. */}
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-6 py-2 space-y-6">
         {turns.length === 0 && (
           <div className="text-[12px] text-muted pt-4">
             {mode === "generate" ? (

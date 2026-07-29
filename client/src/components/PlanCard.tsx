@@ -66,8 +66,8 @@ function Section({
         </span>
         <span className="text-[11px] font-medium uppercase tracking-wider text-muted">{label}</span>
       </div>
-      {note && <div className="mt-0.5 text-[11px] text-faint">{note}</div>}
-      <div className="mt-2">{children}</div>
+      {note && <div className="mt-1 text-[11px] text-faint">{note}</div>}
+      <div className="mt-2.5">{children}</div>
     </div>
   );
 }
@@ -127,7 +127,7 @@ function ToolRow({
   status?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-baseline gap-2 py-[3px]">
+    <div className="flex items-baseline gap-2 py-1">
       <span
         className="shrink-0 flex items-center self-center"
         style={{ color: accent }}
@@ -183,7 +183,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
       <Card>
         <div className="text-run">{turn.revision > 1 ? "Revising the plan…" : "Planning…"}</div>
         {turn.raw && (
-          <div className="mt-1.5 whitespace-pre-wrap break-words text-muted">
+          <div className="mt-2 whitespace-pre-wrap break-words text-muted">
             {turn.raw}
             <span className="text-faint animate-pulse">▋</span>
           </div>
@@ -196,7 +196,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
     return (
       <Card>
         <div className="text-err">Couldn’t write a plan — {turn.error}</div>
-        <div className="mt-1.5 text-faint">Nothing was generated — no files were written.</div>
+        <div className="mt-2 text-faint">Nothing was generated — no files were written.</div>
       </Card>
     );
   }
@@ -243,7 +243,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
         )}
       </div>
 
-      <div className={`mt-3 ${decided || turn.status === "stale" ? "opacity-60" : ""}`}>
+      <div className={`mt-4 ${decided || turn.status === "stale" ? "opacity-60" : ""}`}>
         {degraded ? (
           <div className="whitespace-pre-wrap break-words text-muted">
             {turn.raw}
@@ -342,7 +342,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             )}
 
             {!plan.complete && (
-              <div className="mt-4 flex gap-2 text-[11px] text-faint">
+              <div className="mt-5 flex gap-2 text-[11px] text-faint">
                 <span className="shrink-0 mt-[3px]">
                   <AlertTriangleIcon size={12} />
                 </span>
@@ -355,7 +355,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
         {/* Mismatches between the plan and the connectors actually ticked. These are the
             wrong-direction warnings the whole gate exists to surface. */}
         {turn.warnings.length > 0 && (
-          <div className="mt-4 space-y-1">
+          <div className="mt-5 space-y-1">
             {turn.warnings.map((w, i) => (
               <div key={i} className="flex gap-2 text-[11px] text-run">
                 <span className="shrink-0 mt-[3px]">
@@ -369,7 +369,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
       </div>
 
       {turn.status === "stale" && (
-        <div className="mt-2 text-[11px] text-muted">
+        <div className="mt-4 text-[11px] text-muted">
           The connectors changed after this was written — say what you want and it will be
           re-planned against the new selection.
         </div>
@@ -378,7 +378,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
       {(turn.status === "pending" || turn.status === "stale") && (
         // The decision is the card's footer, not another line of its body — it sits on a divider
         // for the same reason the title does.
-        <div className="mt-3.5 pt-3 border-t border-hair flex items-center gap-2">
+        <div className="mt-5 pt-3.5 border-t border-hair flex items-center gap-2">
           <button
             className={btn}
             disabled={turn.status === "stale"}

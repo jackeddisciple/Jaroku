@@ -48,7 +48,7 @@ function FileRow({ file, defaultOpen }: { file: FileDiff; defaultOpen: boolean }
   const openInCode = useBuildStore((s) => s.openInCode);
 
   return (
-    <div className="mt-1.5 first:mt-0">
+    <div className="mt-2 first:mt-0">
       <div className="flex items-center gap-2 text-[12px]">
         <button onClick={() => setOpen((o) => !o)} className="text-faint hover:text-ink w-3 shrink-0">
           {open ? "▾" : "▸"}
@@ -82,7 +82,7 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
     return (
       <div className="text-[12px]">
         <div className="text-run">Proposing changes…</div>
-        <div className="mt-1 space-y-0.5">
+        <div className="mt-2 space-y-1">
           {turn.streaming.map((f) => (
             <div key={f.path} className="flex items-center gap-2 animate-slide-in">
               <StatusDot
@@ -106,13 +106,13 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
       <div className="text-[12px]">
         <div className="text-err">Edit failed — {turn.error}</div>
         {turn.problems && turn.problems.length > 0 && (
-          <ul className="mt-1.5 space-y-0.5 text-muted">
+          <ul className="mt-2 space-y-1 text-muted">
             {turn.problems.map((p, i) => (
               <li key={i} className="pl-3">· {p}</li>
             ))}
           </ul>
         )}
-        <div className="mt-1.5 text-faint">Nothing was changed — the project is untouched.</div>
+        <div className="mt-2 text-faint">Nothing was changed — the project is untouched.</div>
       </div>
     );
   }
@@ -165,14 +165,14 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
         )}
       </div>
 
-      <div className={`mt-2 ${turn.status !== "pending" ? "opacity-70" : ""}`}>
+      <div className={`mt-4 ${turn.status !== "pending" ? "opacity-70" : ""}`}>
         {turn.files.map((f) => (
           <FileRow key={f.path} file={f} defaultOpen={turn.status === "pending"} />
         ))}
       </div>
 
       {turn.status === "pending" && (
-        <div className="mt-3 flex items-center gap-2">
+        <div className="mt-5 flex items-center gap-2">
           <button className={btn} onClick={() => turn.proposalId && sendApplyEdit(turn.proposalId)}>
             Apply
           </button>
