@@ -576,8 +576,18 @@ export function BuildPane() {
                   }`}
                 >
                   {/* Ticked means "this agent gets the audited template", so the check is the
-                      reviewed accent — the same colour it will wear in the plan a moment later. */}
-                  {on && <StatusDot state="ok" size={11} color={ACCENT.reviewed} />}
+                      reviewed accent — the same colour it will wear in the plan a moment later.
+
+                      The slot is always there, empty when unticked. Rendering the check only when
+                      on made each button ~14px wider the moment you clicked it, and with three
+                      connectors that was enough to wrap the row onto two lines and shove the whole
+                      composer down mid-click. A control must not resize because you used it. */}
+                  <span
+                    className="inline-flex w-[11px] shrink-0 items-center justify-center"
+                    aria-hidden
+                  >
+                    {on && <StatusDot state="ok" size={11} color={ACCENT.reviewed} />}
+                  </span>
                   {c.label}
                 </button>
               );
