@@ -15,12 +15,14 @@
 // doing. State types moved onto the third accent for the same reason: they were amber, which in
 // this app means "running", and a type annotation is not a state of progress.
 
+import { useState } from "react";
 import type { PlanTurn } from "../store/chatStore.ts";
 import { sendDiscardPlan, sendGenerate } from "../lib/socket.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { ACCENT } from "../lib/tokens.ts";
 import { noteKind } from "../lib/noteKind.ts";
 import { BRAND_COLOR } from "../lib/icons.tsx";
+import { ChevronDownIcon } from "./composerIcons.tsx";
 import { CHIP, Prose } from "./InlineCode.tsx";
 import { StatusBadge, StatusDot } from "./StatusBadge.tsx";
 import {
@@ -69,19 +71,45 @@ function Section({
   count?: number;
   children: React.ReactNode;
 }) {
+  const [open, setOpen] = useState(true);
   return (
     <div className="mt-5 first:mt-0">
-      <div className="flex items-center gap-1.5">
+      {/* The whole header is the control, not just the chevron — a 12px target for a thing you
+          will hit repeatedly is a target you miss. */}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="group flex w-full items-center gap-1.5 text-left"
+        title={open ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
+      >
         <span className="shrink-0 flex items-center" style={accent ? { color: accent } : undefined}>
           {icon}
         </span>
         <span className="text-[11px] font-medium uppercase tracking-wider text-muted">{label}</span>
-        {count !== undefined && count > 1 && (
+        {/* Normally the count is only worth showing for more than one row. Collapsed, it is the
+            only thing left saying how much is behind the header, so it always shows. */}
+        {count !== undefined && (count > 1 || !open) && (
           <span className="font-mono text-[11px] text-faint tabular-nums">{count}</span>
         )}
-      </div>
-      {note && <div className="mt-1 text-[11px] text-faint">{note}</div>}
-      <div className="mt-2.5">{children}</div>
+        {/* Right-aligned rather than leading, so opening a section doesn't shift the icon and
+            label the rest of the card is aligned to. Rotation rather than two glyphs: the same
+            mark turning is what says these are two states of one thing. */}
+        <span
+          className={`ml-auto shrink-0 flex items-center text-faint transition-transform duration-150 group-hover:text-muted ${
+            open ? "" : "-rotate-90"
+          }`}
+          aria-hidden
+        >
+          <ChevronDownIcon size={12} />
+        </span>
+      </button>
+      {open && (
+        <>
+          {note && <div className="mt-1 text-[11px] text-faint">{note}</div>}
+          <div className="mt-2.5">{children}</div>
+        </>
+      )}
     </div>
   );
 }
