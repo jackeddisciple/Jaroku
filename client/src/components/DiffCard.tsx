@@ -14,7 +14,7 @@ import { iconForPath } from "./fileIcons.tsx";
 import { Prose } from "./InlineCode.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { STAT_ICON } from "./StatRow.tsx";
-import { FileIcon, PlusIcon } from "./panelIcons.tsx";
+import { FileIcon, PlusIcon, UndoIcon } from "./panelIcons.tsx";
 
 function HunkLines({ file }: { file: FileDiff }) {
   return (
@@ -113,6 +113,20 @@ function FileRow({
 
 const btn =
   "rounded px-3 py-1.5 text-[12px] bg-panel text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+
+/**
+ * The same button, one step down.
+ *
+ * Undo was wearing `btn` — the exact weight of Apply and Generate — which said it was one of the
+ * decisions this card is asking you to make. It isn't. Apply is a fork in the road; Undo is a way
+ * back from one you already took, and it appears on a card whose decision is over. Same surface,
+ * same radius, same hover, at a smaller size and in muted text until you reach for it.
+ *
+ * It also gets an icon. "Undo" alone is a word in a row of words; an arrow doubling back is the
+ * shape of the action, and it is what makes the control findable on a card you have scrolled past.
+ */
+const secondaryBtn =
+  "inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] bg-panel text-muted hover:text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
 export function DiffCard({ turn }: { turn: ProposalTurn }) {
   const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === turn.agentId));
@@ -245,8 +259,13 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
       )}
 
       {isLatestApplied && (
-        <div className="mt-2">
-          <button className={btn} onClick={() => sendUndoEdit(turn.agentId)}>
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            className={secondaryBtn}
+            onClick={() => sendUndoEdit(turn.agentId)}
+            title="Put the files back the way they were before this change"
+          >
+            <UndoIcon size={STAT_ICON} />
             Undo
           </button>
         </div>
