@@ -21,6 +21,7 @@ import { useUiStore } from "../store/uiStore.ts";
 import { ACCENT } from "../lib/tokens.ts";
 import { noteKind } from "../lib/noteKind.ts";
 import { BRAND_COLOR } from "../lib/icons.tsx";
+import { CHIP, Prose } from "./InlineCode.tsx";
 import { StatusBadge, StatusDot } from "./StatusBadge.tsx";
 import {
   AlertTriangleIcon,
@@ -134,7 +135,9 @@ function GraphStep({
 function ConnectorChip({ id }: { id: string }) {
   const brand = BRAND_COLOR[id];
   return (
-    <span className="inline-flex items-center gap-1.5 rounded bg-active px-1.5 py-[1px] font-mono text-[11px] text-muted align-middle">
+    // Same CHIP as an identifier in a sentence — one declaration, so the two can never drift.
+    // Muted rather than ink because this is a label *about* the tool, not the tool's own name.
+    <span className={`inline-flex items-center gap-1.5 ${CHIP} text-muted`}>
       {brand && (
         <span
           className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
@@ -208,7 +211,7 @@ function ToolRow({
  * rather than taking an accent — the accents mean "what kind of thing is this" for tools and state,
  * and a note is neither. The distinction here is weight, not category.
  */
-function Note({ text }: { text: string }) {
+function Note({ text, vocabulary }: { text: string; vocabulary: readonly string[] }) {
   const constraint = noteKind(text) === "constraint";
   return (
     <div className="flex gap-2 py-1 text-[12px]">
@@ -218,7 +221,9 @@ function Note({ text }: { text: string }) {
       >
         {constraint ? <LockIcon size={12} /> : <InfoIcon size={12} />}
       </span>
-      <span className={`min-w-0 ${constraint ? "text-ink" : "text-muted"}`}>{text}</span>
+      <span className={`min-w-0 ${constraint ? "text-ink" : "text-muted"}`}>
+        <Prose text={text} vocabulary={vocabulary} />
+      </span>
     </div>
   );
 }
@@ -287,6 +292,13 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
   // fall back to the raw text — a plan the user can read is worth more than a tidy blank.
   const degraded = !plan || (plan.tools.length === 0 && plan.state.length === 0 && plan.graph.length === 0);
   const decided = turn.status !== "pending" && turn.status !== "stale";
+
+  // What this plan calls things. Every prose slot below is tokenized against it, so a tool named in
+  // a note is recognised rather than guessed at — see lib/inlineCode.ts.
+  const vocabulary = [
+    ...(plan?.tools.map((t) => t.name) ?? []),
+    ...(plan?.state.map((f) => f.name) ?? []),
+  ];
 
   return (
     <Card>
@@ -370,7 +382,12 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                     icon={<SparklesIcon />}
                     accent={ACCENT.bespoke}
                     name={t.name}
-                    description={t.summary.replace(/^bespoke[;:]?\s*/i, "")}
+                    description={
+                      <Prose
+                        text={t.summary.replace(/^bespoke[;:]?\s*/i, "")}
+                        vocabulary={vocabulary}
+                      />
+                    }
                     // Deliberately not a check. The reviewed rows earn theirs by having been
                     // audited; this code does not exist yet, and a tick here would say the one
                     // thing about a bespoke tool that is never true.
@@ -400,7 +417,11 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                         {f.type}
                       </span>
                     )}
-                    {f.purpose && <span className="ml-2 text-muted">{f.purpose}</span>}
+                    {f.purpose && (
+                      <span className="ml-2 text-muted">
+                        <Prose text={f.purpose} vocabulary={vocabulary} />
+                      </span>
+                    )}
                   </div>
                 ))}
               </Section>
@@ -410,7 +431,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
               <Section icon={<GitBranchIcon />} label="Graph" count={plan.graph.length}>
                 {plan.graph.map((g, i) => (
                   <GraphStep key={i} n={i + 1} last={i === plan.graph.length - 1}>
-                    {g}
+                    <Prose text={g} vocabulary={vocabulary} />
                   </GraphStep>
                 ))}
               </Section>
@@ -419,7 +440,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             {plan.notes.length > 0 && (
               <Section icon={<LightbulbIcon />} label="Worth knowing" count={plan.notes.length}>
                 {plan.notes.map((n, i) => (
-                  <Note key={i} text={n} />
+                  <Note key={i} text={n} vocabulary={vocabulary} />
                 ))}
               </Section>
             )}
@@ -444,7 +465,9 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                 <span className="shrink-0 mt-[3px]">
                   <AlertTriangleIcon size={12} />
                 </span>
-                <span className="min-w-0">{w}</span>
+                <span className="min-w-0">
+                  <Prose text={w} vocabulary={vocabulary} />
+                </span>
               </div>
             ))}
           </div>

@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test:plan-flow": "../server/node_modules/.bin/tsx src/store/planFlow.test.ts",
     "test:note-kind": "../server/node_modules/.bin/tsx src/lib/noteKind.test.ts",
+    "test:inline-code": "../server/node_modules/.bin/tsx src/lib/inlineCode.test.ts",
     "test:export": "../server/node_modules/.bin/tsx src/lib/evalExport.test.ts",
     "test:csv": "../server/node_modules/.bin/tsx src/lib/csv.test.ts"
   },

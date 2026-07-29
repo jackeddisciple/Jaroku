@@ -20,6 +20,7 @@ import { sendBranchRun, sendEdit, sendExplain, sendPlanAgent, sendPromoteTestInp
 import { useEvalStore } from "../store/evalStore.ts";
 import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
 import { DiffCard } from "./DiffCard.tsx";
+import { Prose } from "./InlineCode.tsx";
 import { PlanCard } from "./PlanCard.tsx";
 import { ArrowUpIcon, ChevronDownIcon, MicIcon, SaveToDatasetIcon } from "./composerIcons.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
@@ -49,7 +50,7 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
         {turn.problems && turn.problems.length > 0 && (
           <ul className="mt-2 space-y-1 text-muted">
             {turn.problems.map((p, i) => (
-              <li key={i} className="pl-3">· {p}</li>
+              <li key={i} className="pl-3">· <Prose text={p} /></li>
             ))}
           </ul>
         )}

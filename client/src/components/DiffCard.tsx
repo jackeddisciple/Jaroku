@@ -8,6 +8,7 @@ import type { FileDiff } from "../types.ts";
 import type { ProposalTurn } from "../store/chatStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { sendApplyEdit, sendDiscardEdit, sendUndoEdit } from "../lib/socket.ts";
+import { Prose } from "./InlineCode.tsx";
 import { StatusBadge, StatusDot } from "./StatusBadge.tsx";
 import { STAT_ICON } from "./StatRow.tsx";
 import { FileIcon } from "./panelIcons.tsx";
@@ -108,7 +109,9 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
         {turn.problems && turn.problems.length > 0 && (
           <ul className="mt-2 space-y-1 text-muted">
             {turn.problems.map((p, i) => (
-              <li key={i} className="pl-3">· {p}</li>
+              // Validation problems name the rule and the symbol that broke it — exactly the two
+              // things worth being able to pick out of the sentence.
+              <li key={i} className="pl-3">· <Prose text={p} /></li>
             ))}
           </ul>
         )}
@@ -119,7 +122,11 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
 
   // No-op: the model declined and said why. Renders as a plain reply.
   if (turn.status === "noop") {
-    return <div className="text-[12px] text-ink">{turn.summary}</div>;
+    return (
+      <div className="text-[12px] text-ink">
+        <Prose text={turn.summary ?? ""} />
+      </div>
+    );
   }
 
   const totals = turn.files.reduce(
@@ -133,7 +140,12 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
 
   return (
     <div className="text-[12px] animate-slide-in">
-      <div className="text-ink">{turn.summary}</div>
+      {/* A change summary is mostly about named things — "added a LIMIT clause to pg_query" — so
+          it is the sentence in the panel that most needs its identifiers marked. No vocabulary to
+          pass here: a proposal carries no plan, so shape is all there is to go on. */}
+      <div className="text-ink">
+        <Prose text={turn.summary ?? ""} />
+      </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[11px] text-muted">
         {/* The same shape as the generation stat row: a glyph to jump to, a tabular figure to
