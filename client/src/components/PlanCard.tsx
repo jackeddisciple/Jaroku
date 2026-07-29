@@ -20,8 +20,9 @@ import { sendDiscardPlan, sendGenerate } from "../lib/socket.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { ACCENT } from "../lib/tokens.ts";
 import { BRAND_COLOR } from "../lib/icons.tsx";
+import { StatusBadge, StatusDot } from "./StatusBadge.tsx";
 import {
-  CheckIcon,
+  AlertTriangleIcon,
   DatabaseIcon,
   GitBranchIcon,
   LightbulbIcon,
@@ -217,10 +218,29 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             revision {turn.revision}
           </span>
         )}
-        {turn.status === "accepted" && <span className="text-ok text-[11px]">approved</span>}
-        {turn.status === "superseded" && <span className="text-faint text-[11px]">superseded</span>}
-        {turn.status === "discarded" && <span className="text-faint text-[11px]">discarded</span>}
-        {turn.status === "stale" && <span className="text-run text-[11px]">out of date</span>}
+        {turn.status === "accepted" && (
+          <StatusBadge state="ok" label="approved" title="Generated from this plan" />
+        )}
+        {turn.status === "superseded" && (
+          <StatusBadge
+            state="neutral"
+            label="superseded"
+            title="A newer revision of this plan replaced it"
+          />
+        )}
+        {turn.status === "discarded" && (
+          <StatusBadge state="neutral" label="discarded" title="This plan was not generated" />
+        )}
+        {turn.status === "stale" && (
+          // Amber, not red — nothing failed. The plan simply no longer describes what would be
+          // built, and needs re-planning before it can be spent.
+          <StatusBadge
+            state="pending"
+            icon={AlertTriangleIcon}
+            label="out of date"
+            title="The connectors changed after this plan was written"
+          />
+        )}
       </div>
 
       <div className={`mt-3 ${decided || turn.status === "stale" ? "opacity-60" : ""}`}>
@@ -245,13 +265,11 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                     name={t.name}
                     description={t.connectorId && <ConnectorChip id={t.connectorId} />}
                     status={
-                      <span
-                        className="flex items-center"
-                        style={{ color: ACCENT.reviewed }}
+                      <StatusDot
+                        state="ok"
+                        color={ACCENT.reviewed}
                         title="Audited — this template is copied in unchanged"
-                      >
-                        <CheckIcon size={13} />
-                      </span>
+                      />
                     }
                   />
                 ))}
@@ -324,8 +342,11 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             )}
 
             {!plan.complete && (
-              <div className="mt-2 text-[11px] text-faint">
-                The plan was cut short — it may be missing a section.
+              <div className="mt-4 flex gap-2 text-[11px] text-faint leading-relaxed">
+                <span className="shrink-0 mt-[3px]">
+                  <AlertTriangleIcon size={12} />
+                </span>
+                <span>The plan was cut short — it may be missing a section.</span>
               </div>
             )}
           </>
@@ -334,10 +355,12 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
         {/* Mismatches between the plan and the connectors actually ticked. These are the
             wrong-direction warnings the whole gate exists to surface. */}
         {turn.warnings.length > 0 && (
-          <div className="mt-2.5 space-y-0.5">
+          <div className="mt-4 space-y-1">
             {turn.warnings.map((w, i) => (
               <div key={i} className="flex gap-2 text-[11px] text-run leading-relaxed">
-                <span className="shrink-0">!</span>
+                <span className="shrink-0 mt-[3px]">
+                  <AlertTriangleIcon size={12} />
+                </span>
                 <span className="min-w-0">{w}</span>
               </div>
             ))}

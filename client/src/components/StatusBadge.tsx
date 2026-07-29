@@ -42,13 +42,20 @@ export function StatusBadge({
   state,
   label,
   title,
+  icon,
 }: {
   state: BadgeState;
   label: string;
   title?: string;
+  /**
+   * Override the state's default icon. "Waiting on you" and "needs attention before you can
+   * proceed" are both amber — the same urgency, different asks — and a clock would misdescribe
+   * the second. The colour still carries the state; the icon narrows what kind.
+   */
+  icon?: (p: { size?: number }) => React.ReactElement;
 }) {
   const color = STATUS[state];
-  const Icon = ICON_FOR[state];
+  const Icon = icon ?? ICON_FOR[state];
   return (
     <span
       title={title}

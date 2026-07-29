@@ -22,6 +22,8 @@ import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
 import { DiffCard } from "./DiffCard.tsx";
 import { PlanCard } from "./PlanCard.tsx";
 import { ArrowUpIcon, ChevronDownIcon, MicIcon, SaveToDatasetIcon } from "./composerIcons.tsx";
+import { StatusDot } from "./StatusBadge.tsx";
+import { ACCENT } from "../lib/tokens.ts";
 import { useVoiceInput } from "../lib/useVoiceInput.ts";
 import { VoiceWaveform } from "./VoiceWaveform.tsx";
 
@@ -62,9 +64,11 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
         <div className="mt-1 space-y-0.5">
           {list.map((f) => (
             <div key={f.path} className="flex items-center gap-2 animate-slide-in">
-              <span className={f.complete ? "text-ok" : "text-run animate-pulse"}>
-                {f.complete ? "✓" : "●"}
-              </span>
+              <StatusDot
+                state={f.complete ? "ok" : "pending"}
+                pulse={!f.complete}
+                title={f.complete ? "Written" : "Still writing"}
+              />
               <span className="font-mono text-muted truncate">{f.path}</span>
               <span className="ml-auto font-mono text-faint text-[11px] tabular-nums">
                 {f.path === streamingFile ? "writing…" : `${f.content.length} B`}
@@ -486,11 +490,13 @@ export function BuildPane() {
                   onClick={() => toggle(c.id)}
                   disabled={busy}
                   title={c.hint}
-                  className={`rounded px-2.5 py-1 text-[12px] transition-colors disabled:opacity-50 ${
+                  className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[12px] transition-colors disabled:opacity-50 ${
                     on ? "bg-active text-ink" : "bg-panel text-muted hover:text-ink"
                   }`}
                 >
-                  {on ? "✓ " : ""}
+                  {/* Ticked means "this agent gets the audited template", so the check is the
+                      reviewed accent — the same colour it will wear in the plan a moment later. */}
+                  {on && <StatusDot state="ok" size={11} color={ACCENT.reviewed} />}
                   {c.label}
                 </button>
               );

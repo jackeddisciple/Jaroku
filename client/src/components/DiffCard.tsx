@@ -8,6 +8,7 @@ import type { FileDiff } from "../types.ts";
 import type { ProposalTurn } from "../store/chatStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { sendApplyEdit, sendDiscardEdit, sendUndoEdit } from "../lib/socket.ts";
+import { StatusBadge, StatusDot } from "./StatusBadge.tsx";
 
 function HunkLines({ file }: { file: FileDiff }) {
   return (
@@ -80,7 +81,11 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
         <div className="mt-1 space-y-0.5">
           {turn.streaming.map((f) => (
             <div key={f.path} className="flex items-center gap-2 animate-slide-in">
-              <span className={f.done ? "text-ok" : "text-run animate-pulse"}>{f.done ? "✓" : "●"}</span>
+              <StatusDot
+                state={f.done ? "ok" : "pending"}
+                pulse={!f.done}
+                title={f.done ? "Rewritten" : "Still rewriting"}
+              />
               <span className="font-mono text-muted truncate">{f.path}</span>
               <span className="ml-auto font-mono text-faint text-[11px] tabular-nums">
                 {f.done ? `${f.bytes} B` : "rewriting…"}
@@ -134,12 +139,18 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
           <span className="font-mono tabular-nums text-err">−{totals.del}</span>
         </span>
         {turn.status === "applied" && (
-          <span className="text-ok">
-            applied · <span className="font-mono tabular-nums">v{turn.version}</span>
-          </span>
+          <StatusBadge
+            state="ok"
+            label={`applied · v${turn.version}`}
+            title="These changes are on disk"
+          />
         )}
-        {turn.status === "undone" && <span className="text-faint">undone</span>}
-        {turn.status === "discarded" && <span className="text-faint">discarded</span>}
+        {turn.status === "undone" && (
+          <StatusBadge state="neutral" label="undone" title="These changes were reverted" />
+        )}
+        {turn.status === "discarded" && (
+          <StatusBadge state="neutral" label="discarded" title="These changes were never applied" />
+        )}
       </div>
 
       <div className={`mt-2 ${turn.status !== "pending" ? "opacity-70" : ""}`}>
