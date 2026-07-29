@@ -28,6 +28,7 @@ import { StatusDot } from "./StatusBadge.tsx";
 import { StatRow, STAT_ICON, type Stat } from "./StatRow.tsx";
 import { DollarSignIcon, FileIcon, HashIcon, SparklesIcon, UserCircleIcon, ZapIcon } from "./panelIcons.tsx";
 import { ACCENT, ICON } from "../lib/tokens.ts";
+import { displayTitle, fullTitle } from "../lib/title.ts";
 import { useVoiceInput } from "../lib/useVoiceInput.ts";
 import { VoiceWaveform } from "./VoiceWaveform.tsx";
 
@@ -516,7 +517,18 @@ export function BuildPane() {
         <span className="text-[11px] uppercase tracking-widest text-faint">
           {mode === "generate" ? "New agent" : "Fix"}
         </span>
-        {agent && <span className="font-mono text-[12px] text-muted truncate">{agent.name}</span>}
+        {agent && (
+          // Two truncations, two fixes. The server's 60-char cut already happened and landed
+          // mid-word, so displayTitle() ends it on a whole word; `truncate` handles the narrow-pane
+          // case, and `min-w-0` is what lets it shrink at all inside this flex row. The tooltip
+          // carries the untruncated original, which the client has always had and never shown.
+          <span
+            className="min-w-0 font-mono text-[12px] text-muted truncate"
+            title={fullTitle(agent.name, agent.description)}
+          >
+            {displayTitle(agent.name, agent.description)}
+          </span>
+        )}
       </div>
 
       {/* conversation */}
