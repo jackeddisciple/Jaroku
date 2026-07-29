@@ -19,13 +19,16 @@ import type { PlanTurn } from "../store/chatStore.ts";
 import { sendDiscardPlan, sendGenerate } from "../lib/socket.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { ACCENT } from "../lib/tokens.ts";
+import { noteKind } from "../lib/noteKind.ts";
 import { BRAND_COLOR } from "../lib/icons.tsx";
 import { StatusBadge, StatusDot } from "./StatusBadge.tsx";
 import {
   AlertTriangleIcon,
   DatabaseIcon,
   GitBranchIcon,
+  InfoIcon,
   LightbulbIcon,
+  LockIcon,
   ShieldCheckIcon,
   SparklesIcon,
 } from "./panelIcons.tsx";
@@ -80,10 +83,6 @@ function Section({
       <div className="mt-2.5">{children}</div>
     </div>
   );
-}
-
-function Line({ children }: { children: React.ReactNode }) {
-  return <div className="flex gap-2 text-[12px]">{children}</div>;
 }
 
 /**
@@ -192,6 +191,34 @@ function ToolRow({
       {status && (
         <span className="shrink-0 flex items-center h-[19px] pl-1">{status}</span>
       )}
+    </div>
+  );
+}
+
+/**
+ * One "worth knowing" note.
+ *
+ * The section held two different kinds of statement under one grey bullet. A rule — "drafts replies
+ * only; never sends" — bounds what the agent can do, and missing it is how a user is surprised
+ * later. A description — "current_email is cleared between requests" — is a fact about how it
+ * works. Rendering them identically made the reader classify every line themselves.
+ *
+ * A lock for the rules, an info glyph for the rest (see lib/noteKind.ts for how they're told
+ * apart), and one step of text contrast: constraints in ink, notes in muted. The icons stay grey
+ * rather than taking an accent — the accents mean "what kind of thing is this" for tools and state,
+ * and a note is neither. The distinction here is weight, not category.
+ */
+function Note({ text }: { text: string }) {
+  const constraint = noteKind(text) === "constraint";
+  return (
+    <div className="flex gap-2 py-1 text-[12px]">
+      <span
+        className={`shrink-0 flex items-center h-[19px] ${constraint ? "text-muted" : "text-faint"}`}
+        title={constraint ? "A rule this agent will follow" : "Worth knowing about how it works"}
+      >
+        {constraint ? <LockIcon size={12} /> : <InfoIcon size={12} />}
+      </span>
+      <span className={`min-w-0 ${constraint ? "text-ink" : "text-muted"}`}>{text}</span>
     </div>
   );
 }
@@ -392,10 +419,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             {plan.notes.length > 0 && (
               <Section icon={<LightbulbIcon />} label="Worth knowing" count={plan.notes.length}>
                 {plan.notes.map((n, i) => (
-                  <Line key={i}>
-                    <span className="text-faint shrink-0">·</span>
-                    <span className="text-muted min-w-0">{n}</span>
-                  </Line>
+                  <Note key={i} text={n} />
                 ))}
               </Section>
             )}

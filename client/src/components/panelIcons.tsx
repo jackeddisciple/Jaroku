@@ -119,6 +119,29 @@ export function LightbulbIcon(p: P) {
   );
 }
 
+/** lucide:lock — a hard rule. What the agent will never do, whatever it is asked. */
+export function LockIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </>,
+  );
+}
+
+/** lucide:info — a fact about how the agent works. Worth reading, not a rule. */
+export function InfoIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4" />
+      <path d="M12 8h.01" />
+    </>,
+  );
+}
+
 // ── Status ──────────────────────────────────────────────────────────────────
 
 /** lucide:check — approved, audited, done. */
