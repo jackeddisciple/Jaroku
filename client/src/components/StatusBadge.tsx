@@ -43,6 +43,8 @@ export function StatusBadge({
   label,
   title,
   icon,
+  variant = "fill",
+  color: colorOverride,
 }: {
   state: BadgeState;
   label: string;
@@ -53,14 +55,29 @@ export function StatusBadge({
    * the second. The colour still carries the state; the icon narrows what kind.
    */
   icon?: (p: { size?: number }) => React.ReactElement;
+  /**
+   * `fill` is a status: something happened to this thing. `outline` is a property: something is
+   * true *of* it — a file being new is not an event in its life, it is what it is.
+   *
+   * They share every dimension except the fill, so the two read as the same family at the same
+   * weight, and a property never shouts louder than the status beside it. The border is an inset
+   * shadow rather than a real border so both variants occupy exactly the same box.
+   */
+  variant?: "fill" | "outline";
+  /** For a badge whose colour is not one of the four statuses. Used sparingly. */
+  color?: string;
 }) {
-  const color = STATUS[state];
+  const color = colorOverride ?? STATUS[state];
   const Icon = icon ?? ICON_FOR[state];
   return (
     <span
       title={title}
       className="inline-flex items-center gap-1 rounded px-1.5 py-[2px] text-[10px] font-medium uppercase tracking-wider align-middle"
-      style={{ color, backgroundColor: `${color}1f` }}
+      style={
+        variant === "fill"
+          ? { color, backgroundColor: `${color}1f` }
+          : { color, boxShadow: `inset 0 0 0 1px ${color}59` }
+      }
     >
       <Icon size={10} />
       {label}

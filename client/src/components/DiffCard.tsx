@@ -13,7 +13,7 @@ import { iconForPath } from "./fileIcons.tsx";
 import { Prose } from "./InlineCode.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { STAT_ICON } from "./StatRow.tsx";
-import { FileIcon } from "./panelIcons.tsx";
+import { FileIcon, PlusIcon } from "./panelIcons.tsx";
 
 function HunkLines({ file }: { file: FileDiff }) {
   return (
@@ -69,7 +69,25 @@ function FileRow({ file, defaultOpen }: { file: FileDiff; defaultOpen: boolean }
         >
           {file.path}
         </button>
-        {file.status === "added" && <span className="text-faint text-[11px]">new file</span>}
+        {/* Whether a file is new or edited is the first thing that changes how you read its diff —
+            a +14/−0 on a new file is the whole file, on an existing one it is a change. As faint
+            text it sat below the weight of the applied/undone badges a few pixels above, so the
+            more important fact was the quieter one. Same pill, outlined rather than filled,
+            because this is a property of the file and not something that happened to it.
+
+            Green because a new file is entirely additions, and green already means added in the
+            hunks directly below — not a new colour, the same one one line up. */}
+        {file.status === "added" && (
+          <span className="shrink-0">
+            <StatusBadge
+              state="ok"
+              variant="outline"
+              icon={PlusIcon}
+              label="new file"
+              title="This file did not exist before this change"
+            />
+          </span>
+        )}
         <span className="ml-auto shrink-0 font-mono tabular-nums text-[11px]">
           <span className="text-ok">+{file.additions}</span>{" "}
           <span className="text-err">−{file.deletions}</span>

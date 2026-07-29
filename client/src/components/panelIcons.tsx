@@ -172,6 +172,17 @@ export function AlertTriangleIcon(p: P) {
   );
 }
 
+/** lucide:plus — added. A file that did not exist before this change. */
+export function PlusIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M5 12h14" />
+      <path d="M12 5v14" />
+    </>,
+  );
+}
+
 /** lucide:x — discarded, failed. */
 export function XIcon(p: P) {
   return svg(
