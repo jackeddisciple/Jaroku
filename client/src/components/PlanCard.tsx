@@ -87,6 +87,44 @@ function Line({ children }: { children: React.ReactNode }) {
 }
 
 /**
+ * One step of the graph.
+ *
+ * The graph section is the only ordered list in the plan — "the agent reads the request, the tools
+ * run, the agent loops until it can answer" is a sequence, and the steps are meaningless in any
+ * other order. It rendered with the same faint `·` as the notes section, which says the opposite:
+ * a bulleted list is by definition a set, where order is incidental.
+ *
+ * So the marker carries the ordinal, and a hairline rail joins consecutive steps into one run. The
+ * rail is what makes it read as a flow rather than a numbered list — it says these steps are
+ * connected, not merely counted. It stops after the last step, so the sequence visibly ends.
+ *
+ * The number is mono and tabular so a two-digit step doesn't shift the text column beside it.
+ */
+function GraphStep({
+  n,
+  last,
+  children,
+}: {
+  n: number;
+  last: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex gap-2 text-[12px]">
+      <span className="flex shrink-0 flex-col items-center" aria-hidden>
+        <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-active font-mono text-[10px] leading-none text-muted tabular-nums">
+          {n}
+        </span>
+        {!last && <span className="mt-1 w-px flex-1 bg-hair" />}
+      </span>
+      {/* Padding under every step but the last: the rail needs room to be visible between two
+          markers, and a one-line step would otherwise leave it nothing to draw. */}
+      <span className={`min-w-0 text-muted ${last ? "" : "pb-2.5"}`}>{children}</span>
+    </div>
+  );
+}
+
+/**
  * Which reviewed connector a tool came out of.
  *
  * This is provenance, not description — "gmail" here means "this is the audited Gmail template",
@@ -344,10 +382,9 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             {plan.graph.length > 0 && (
               <Section icon={<GitBranchIcon />} label="Graph" count={plan.graph.length}>
                 {plan.graph.map((g, i) => (
-                  <Line key={i}>
-                    <span className="text-faint shrink-0">·</span>
-                    <span className="text-muted min-w-0">{g}</span>
-                  </Line>
+                  <GraphStep key={i} n={i + 1} last={i === plan.graph.length - 1}>
+                    {g}
+                  </GraphStep>
                 ))}
               </Section>
             )}
