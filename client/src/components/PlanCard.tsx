@@ -19,7 +19,9 @@ import type { PlanTurn } from "../store/chatStore.ts";
 import { sendDiscardPlan, sendGenerate } from "../lib/socket.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { ACCENT } from "../lib/tokens.ts";
+import { BRAND_COLOR } from "../lib/icons.tsx";
 import {
+  CheckIcon,
   DatabaseIcon,
   GitBranchIcon,
   LightbulbIcon,
@@ -71,6 +73,30 @@ function Section({
 
 function Line({ children }: { children: React.ReactNode }) {
   return <div className="flex gap-2 text-[12px] leading-relaxed">{children}</div>;
+}
+
+/**
+ * Which reviewed connector a tool came out of.
+ *
+ * This is provenance, not description — "gmail" here means "this is the audited Gmail template",
+ * which is the whole reason the tool is trustworthy. As flowing faint text it read as an
+ * afterthought trailing the name. A chip makes it a label attached to the tool, and picks up the
+ * connector's own brand colour so it matches the connector buttons in the composer below.
+ */
+function ConnectorChip({ id }: { id: string }) {
+  const brand = BRAND_COLOR[id];
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded bg-active px-1.5 py-[1px] font-mono text-[11px] text-muted align-middle">
+      {brand && (
+        <span
+          className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
+          style={{ background: brand }}
+          aria-hidden
+        />
+      )}
+      {id}
+    </span>
+  );
 }
 
 /**
@@ -217,8 +243,15 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                     icon={<ShieldCheckIcon />}
                     accent={ACCENT.reviewed}
                     name={t.name}
-                    description={
-                      t.connectorId && <span className="font-mono text-faint">{t.connectorId}</span>
+                    description={t.connectorId && <ConnectorChip id={t.connectorId} />}
+                    status={
+                      <span
+                        className="flex items-center"
+                        style={{ color: ACCENT.reviewed }}
+                        title="Audited — this template is copied in unchanged"
+                      >
+                        <CheckIcon size={13} />
+                      </span>
                     }
                   />
                 ))}
