@@ -128,7 +128,7 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
 // "explain" answer — streaming prose with a caret while live (doc §4.3: everything streams).
 function ReplyTurnView({ turn }: { turn: ReplyTurn }) {
   return (
-    <div className={`text-[13px] whitespace-pre-wrap break-words leading-relaxed ${turn.status === "error" ? "text-err" : "text-ink"}`}>
+    <div className={`text-[13px] whitespace-pre-wrap break-words ${turn.status === "error" ? "text-err" : "text-ink"}`}>
       {turn.text}
       {turn.status === "streaming" && <span className="text-faint animate-pulse">▋</span>}
     </div>
@@ -456,7 +456,12 @@ export function BuildPane() {
   return (
     // font-sans is scoped here rather than on body: this pane is the only one migrated onto the
     // prose/code split, and the trace, graph and sidebar stay monospace until they follow.
-    <div className="flex h-full flex-col bg-bg font-sans">
+    //
+    // Line-height is set once here and inherits. Prose was a scatter of `leading-relaxed` (1.625)
+    // on some blocks and the 1.5 body default on others, so two paragraphs of the same size could
+    // sit at different rhythms depending on which component rendered them. 1.55 for everything the
+    // panel reads as prose; code overrides back down where it needs to (diff hunks).
+    <div className="flex h-full flex-col bg-bg font-sans leading-[1.55]">
       <div className="px-6 pt-4 pb-2 shrink-0 flex items-baseline gap-2">
         <span className="text-[11px] uppercase tracking-widest text-faint">
           {mode === "generate" ? "New agent" : "Fix"}

@@ -30,7 +30,9 @@ function HunkLines({ file }: { file: FileDiff }) {
                   ? "bg-err/[0.07] text-err"
                   : "text-muted";
             return (
-              <div key={li} className={`px-2 text-[12px] leading-relaxed whitespace-pre ${cls}`}>
+              // Code wants tighter leading than prose — a diff is read as a block of related
+              // lines, and prose spacing pulls them apart into separate statements.
+              <div key={li} className={`px-2 text-[12px] leading-[1.45] whitespace-pre ${cls}`}>
                 {line || " "}
               </div>
             );

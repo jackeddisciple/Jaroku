@@ -66,14 +66,14 @@ function Section({
         </span>
         <span className="text-[11px] font-medium uppercase tracking-wider text-muted">{label}</span>
       </div>
-      {note && <div className="mt-0.5 text-[11px] text-faint leading-relaxed">{note}</div>}
+      {note && <div className="mt-0.5 text-[11px] text-faint">{note}</div>}
       <div className="mt-2">{children}</div>
     </div>
   );
 }
 
 function Line({ children }: { children: React.ReactNode }) {
-  return <div className="flex gap-2 text-[12px] leading-relaxed">{children}</div>;
+  return <div className="flex gap-2 text-[12px]">{children}</div>;
 }
 
 /**
@@ -137,7 +137,7 @@ function ToolRow({
       </span>
       <span className="shrink-0 font-mono text-[12px] font-medium text-ink">{name}</span>
       {description && (
-        <span className="min-w-0 text-[12px] text-muted leading-relaxed">{description}</span>
+        <span className="min-w-0 text-[12px] text-muted">{description}</span>
       )}
       {status && <span className="ml-auto shrink-0 self-center flex items-center">{status}</span>}
     </div>
@@ -183,7 +183,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
       <Card>
         <div className="text-run">{turn.revision > 1 ? "Revising the plan…" : "Planning…"}</div>
         {turn.raw && (
-          <div className="mt-1.5 whitespace-pre-wrap break-words text-muted leading-relaxed">
+          <div className="mt-1.5 whitespace-pre-wrap break-words text-muted">
             {turn.raw}
             <span className="text-faint animate-pulse">▋</span>
           </div>
@@ -245,7 +245,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
 
       <div className={`mt-3 ${decided || turn.status === "stale" ? "opacity-60" : ""}`}>
         {degraded ? (
-          <div className="whitespace-pre-wrap break-words text-muted leading-relaxed">
+          <div className="whitespace-pre-wrap break-words text-muted">
             {turn.raw}
           </div>
         ) : (
@@ -342,7 +342,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             )}
 
             {!plan.complete && (
-              <div className="mt-4 flex gap-2 text-[11px] text-faint leading-relaxed">
+              <div className="mt-4 flex gap-2 text-[11px] text-faint">
                 <span className="shrink-0 mt-[3px]">
                   <AlertTriangleIcon size={12} />
                 </span>
@@ -357,7 +357,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
         {turn.warnings.length > 0 && (
           <div className="mt-4 space-y-1">
             {turn.warnings.map((w, i) => (
-              <div key={i} className="flex gap-2 text-[11px] text-run leading-relaxed">
+              <div key={i} className="flex gap-2 text-[11px] text-run">
                 <span className="shrink-0 mt-[3px]">
                   <AlertTriangleIcon size={12} />
                 </span>
