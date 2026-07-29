@@ -3,18 +3,19 @@
 // Apply / Discard / Undo. Borderless-first: the card sits on the background, separated by
 // spacing and the same +/− visual language as the state diff (StateDiff.tsx).
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FileDiff } from "../types.ts";
 import type { ProposalTurn } from "../store/chatStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { sendApplyEdit, sendDiscardEdit, sendUndoEdit } from "../lib/socket.ts";
+import { ChevronDownIcon } from "./composerIcons.tsx";
 import { DiffBar } from "./DiffBar.tsx";
 import { StreamingFileRow } from "./FileList.tsx";
 import { iconForPath } from "./fileIcons.tsx";
 import { Prose } from "./InlineCode.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { STAT_ICON } from "./StatRow.tsx";
-import { FileIcon, PlusIcon, UndoIcon } from "./panelIcons.tsx";
+import { CheckIcon, FileIcon, PlusIcon, UndoIcon } from "./panelIcons.tsx";
 
 function HunkLines({ file }: { file: FileDiff }) {
   return (
@@ -127,6 +128,73 @@ const btn =
  */
 const secondaryBtn =
   "inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] bg-panel text-muted hover:text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+
+/**
+ * Which version of the agent is on disk, and what else there is.
+ *
+ * UI ONLY. Nothing here switches anything — the entries are not buttons, and the popover says so
+ * rather than offering a click that does nothing. There is no version-switching path in the store
+ * or on the server yet; when there is, this is where it attaches.
+ *
+ * It still earns its place unbuilt. "APPLIED · V1" tells you where this card sits; it does not tell
+ * you that there are four versions and you are looking at the second. On an agent you have edited
+ * five times, that is the thing you actually want to know before reaching for Undo, and Undo is
+ * exactly what it sits next to.
+ *
+ * Newest first, because that is the one you are standing on.
+ */
+function VersionPicker({ current, count }: { current: number; count: number }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        className={secondaryBtn}
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        title={`Version ${current} of ${count}`}
+      >
+        <span className="font-mono tabular-nums">v{current}</span>
+        <ChevronDownIcon size={12} />
+      </button>
+      {open && (
+        // Opens upward: this sits at the bottom of a card, near the bottom of a scrolling thread.
+        // Same surface as the composer's model popover, which is the only other one in this pane.
+        <div className="absolute bottom-full mb-1 left-0 z-30 min-w-[150px] rounded-lg bg-panel border border-edge shadow-2xl py-1">
+          <div className="px-3 pt-1.5 pb-1 text-[10px] uppercase tracking-wide text-faint">
+            Versions
+          </div>
+          {Array.from({ length: count }, (_, i) => count - i).map((v) => (
+            <div
+              key={v}
+              className={`flex items-center gap-2 px-3 py-1 font-mono text-[12px] ${
+                v === current ? "text-ink" : "text-faint"
+              }`}
+            >
+              <span className="w-3 shrink-0 flex items-center text-ok">
+                {v === current && <CheckIcon size={11} />}
+              </span>
+              v{v}
+            </div>
+          ))}
+          <div className="mt-1 border-t border-hair px-3 pt-1.5 pb-0.5 text-[10px] text-faint">
+            Switching versions isn’t built yet.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function DiffCard({ turn }: { turn: ProposalTurn }) {
   const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === turn.agentId));
@@ -268,6 +336,11 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
             <UndoIcon size={STAT_ICON} />
             Undo
           </button>
+          {/* Only once there is a history to speak of. With a single version there is nothing to
+              compare against, and a picker listing one entry is furniture. */}
+          {(agent?.edit_count ?? 0) > 1 && turn.version !== undefined && (
+            <VersionPicker current={turn.version} count={agent?.edit_count ?? turn.version} />
+          )}
         </div>
       )}
     </div>
