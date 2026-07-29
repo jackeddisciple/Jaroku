@@ -8,6 +8,7 @@ import type { FileDiff } from "../types.ts";
 import type { ProposalTurn } from "../store/chatStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { sendApplyEdit, sendDiscardEdit, sendUndoEdit } from "../lib/socket.ts";
+import { DiffBar } from "./DiffBar.tsx";
 import { StreamingFileRow } from "./FileList.tsx";
 import { iconForPath } from "./fileIcons.tsx";
 import { Prose } from "./InlineCode.tsx";
@@ -46,7 +47,16 @@ function HunkLines({ file }: { file: FileDiff }) {
   );
 }
 
-function FileRow({ file, defaultOpen }: { file: FileDiff; defaultOpen: boolean }) {
+function FileRow({
+  file,
+  defaultOpen,
+  scale,
+}: {
+  file: FileDiff;
+  defaultOpen: boolean;
+  /** The largest change in this card, so every row's bar is drawn on the same axis. */
+  scale: number;
+}) {
   const [open, setOpen] = useState(defaultOpen);
   const openInCode = useBuildStore((s) => s.openInCode);
   const TypeIcon = iconForPath(file.path);
@@ -88,9 +98,12 @@ function FileRow({ file, defaultOpen }: { file: FileDiff; defaultOpen: boolean }
             />
           </span>
         )}
-        <span className="ml-auto shrink-0 font-mono tabular-nums text-[11px]">
-          <span className="text-ok">+{file.additions}</span>{" "}
-          <span className="text-err">−{file.deletions}</span>
+        <span className="ml-auto shrink-0 flex items-center gap-2 font-mono tabular-nums text-[11px]">
+          <span>
+            <span className="text-ok">+{file.additions}</span>{" "}
+            <span className="text-err">−{file.deletions}</span>
+          </span>
+          <DiffBar additions={file.additions} deletions={file.deletions} scale={scale} />
         </span>
       </div>
       {open && <HunkLines file={file} />}
@@ -156,6 +169,9 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
     { add: 0, del: 0 },
   );
   const nFiles = turn.files.length;
+  // Every row's bar is drawn against the biggest file in this card, so the bars can be compared
+  // with each other rather than each being scaled to itself.
+  const largest = turn.files.reduce((m, f) => Math.max(m, f.additions + f.deletions), 0);
   // Undo only reverts the *latest* applied edit — offering it on an older card would
   // revert something else than what the button says.
   const isLatestApplied = turn.status === "applied" && turn.version === agent?.edit_count;
@@ -183,6 +199,9 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
         <span className="inline-flex items-center gap-1.5 font-mono tabular-nums">
           <span className="text-ok">+{totals.add}</span>
           <span className="text-err">−{totals.del}</span>
+          {/* No scale here: the totals bar is the whole change, so it fills. What it carries is
+              the mix — is this card mostly new code, or mostly a deletion. */}
+          <DiffBar additions={totals.add} deletions={totals.del} />
         </span>
         {turn.status === "applied" && (
           <StatusBadge
@@ -201,7 +220,7 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
 
       <div className={`mt-4 ${turn.status !== "pending" ? "opacity-70" : ""}`}>
         {turn.files.map((f) => (
-          <FileRow key={f.path} file={f} defaultOpen={turn.status === "pending"} />
+          <FileRow key={f.path} file={f} defaultOpen={turn.status === "pending"} scale={largest} />
         ))}
       </div>
 
