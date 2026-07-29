@@ -18,15 +18,53 @@
 import type { PlanTurn } from "../store/chatStore.ts";
 import { sendDiscardPlan, sendGenerate } from "../lib/socket.ts";
 import { useUiStore } from "../store/uiStore.ts";
+import { ACCENT } from "../lib/tokens.ts";
+import {
+  DatabaseIcon,
+  GitBranchIcon,
+  LightbulbIcon,
+  ShieldCheckIcon,
+  SparklesIcon,
+} from "./panelIcons.tsx";
 
 const btn =
   "rounded px-3 py-1.5 text-[12px] bg-panel text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * A titled block of the plan.
+ *
+ * The label was a 10px uppercase grey run-on that carried its own explanation inside it
+ * ("Reviewed connector tools — audited, copied in as-is"), which made the heading the longest
+ * line in the section and buried the one word you actually scan for. Now the heading is just the
+ * noun, and the explanation sits under it as a subordinate line — visibly a caption rather than
+ * part of the title.
+ *
+ * `accent` colours the icon only, never the text. The icon is the thing being scanned for; a
+ * coloured heading would compete with the rows underneath it.
+ */
+function Section({
+  icon,
+  label,
+  note,
+  accent,
+  children,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  note?: string;
+  accent?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="mt-2.5">
-      <div className="text-[10px] uppercase tracking-wide text-faint">{label}</div>
-      <div className="mt-1">{children}</div>
+    <div className="mt-5 first:mt-0">
+      <div className="flex items-center gap-1.5">
+        <span className="shrink-0 flex items-center" style={accent ? { color: accent } : undefined}>
+          {icon}
+        </span>
+        <span className="text-[11px] font-medium uppercase tracking-wider text-muted">{label}</span>
+      </div>
+      {note && <div className="mt-0.5 text-[11px] text-faint leading-relaxed">{note}</div>}
+      <div className="mt-2">{children}</div>
     </div>
   );
 }
@@ -99,7 +137,12 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
         ) : (
           <>
             {connectorTools.length > 0 && (
-              <Section label="Reviewed connector tools — audited, copied in as-is">
+              <Section
+                icon={<ShieldCheckIcon />}
+                label="Reviewed tools"
+                note="Audited connector templates, copied in as-is."
+                accent={ACCENT.reviewed}
+              >
                 {connectorTools.map((t) => (
                   <Line key={t.name}>
                     <span className="text-reviewed shrink-0">✓</span>
@@ -111,7 +154,12 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             )}
 
             {bespokeTools.length > 0 && (
-              <Section label="Bespoke tools — will be written for this agent">
+              <Section
+                icon={<SparklesIcon />}
+                label="Bespoke tools"
+                note="Will be written by the model for this agent."
+                accent={ACCENT.bespoke}
+              >
                 {bespokeTools.map((t) => (
                   <Line key={t.name}>
                     <span className="text-bespoke shrink-0">+</span>
@@ -123,7 +171,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             )}
 
             {plan.state.length > 0 && (
-              <Section label="State">
+              <Section icon={<DatabaseIcon />} label="State" accent={ACCENT.state}>
                 {plan.state.map((f) => (
                   <Line key={f.name}>
                     <span className="font-mono text-ink shrink-0">{f.name}</span>
@@ -135,7 +183,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             )}
 
             {plan.graph.length > 0 && (
-              <Section label="Graph">
+              <Section icon={<GitBranchIcon />} label="Graph">
                 {plan.graph.map((g, i) => (
                   <Line key={i}>
                     <span className="text-faint shrink-0">·</span>
@@ -146,7 +194,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             )}
 
             {plan.notes.length > 0 && (
-              <Section label="Worth knowing">
+              <Section icon={<LightbulbIcon />} label="Worth knowing">
                 {plan.notes.map((n, i) => (
                   <Line key={i}>
                     <span className="text-faint shrink-0">·</span>
