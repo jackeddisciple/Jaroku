@@ -28,6 +28,17 @@ export default {
         stateful: "#a5b4fc", // state fields — the agent's shape, not its capabilities
       },
       fontFamily: {
+        // Prose. The body default — plan explanations, notes, descriptions, labels.
+        sans: [
+          "Inter",
+          "ui-sans-serif",
+          "system-ui",
+          "-apple-system",
+          "Segoe UI",
+          "sans-serif",
+        ],
+        // Code. Opted into explicitly, and only for things that are literally identifiers:
+        // file paths, tool names, type annotations, diff hunks, figures.
         mono: [
           "JetBrains Mono",
           "ui-monospace",

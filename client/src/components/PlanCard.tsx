@@ -98,8 +98,8 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                 {connectorTools.map((t) => (
                   <Line key={t.name}>
                     <span className="text-ok shrink-0">✓</span>
-                    <span className="text-ink">{t.name}</span>
-                    {t.connectorId && <span className="text-faint">{t.connectorId}</span>}
+                    <span className="font-mono text-ink">{t.name}</span>
+                    {t.connectorId && <span className="font-mono text-faint">{t.connectorId}</span>}
                   </Line>
                 ))}
               </Section>
@@ -110,7 +110,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                 {bespokeTools.map((t) => (
                   <Line key={t.name}>
                     <span className="text-faint shrink-0">+</span>
-                    <span className="text-ink shrink-0">{t.name}</span>
+                    <span className="font-mono text-ink shrink-0">{t.name}</span>
                     <span className="text-muted min-w-0">{t.summary.replace(/^bespoke[;:]?\s*/i, "")}</span>
                   </Line>
                 ))}
@@ -121,8 +121,8 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
               <Section label="State">
                 {plan.state.map((f) => (
                   <Line key={f.name}>
-                    <span className="text-ink shrink-0">{f.name}</span>
-                    {f.type && <span className="text-run shrink-0">{f.type}</span>}
+                    <span className="font-mono text-ink shrink-0">{f.name}</span>
+                    {f.type && <span className="font-mono text-run shrink-0">{f.type}</span>}
                     <span className="text-muted min-w-0">{f.purpose}</span>
                   </Line>
                 ))}
@@ -206,7 +206,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
           </button>
           <span className="text-faint text-[11px]">or say what to change</span>
           {turn.usage && (
-            <span className="ml-auto text-faint text-[11px] tabular-nums">
+            <span className="ml-auto font-mono text-faint text-[11px] tabular-nums">
               ${turn.usage.cost_usd.toFixed(4)}
             </span>
           )}

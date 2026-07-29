@@ -11,7 +11,8 @@ import { sendApplyEdit, sendDiscardEdit, sendUndoEdit } from "../lib/socket.ts";
 
 function HunkLines({ file }: { file: FileDiff }) {
   return (
-    <div className="mt-1 overflow-x-auto">
+    // Diff bodies are the most literally-code thing in the pane — mono, always.
+    <div className="mt-1 overflow-x-auto font-mono">
       {file.hunks.map((h, hi) => (
         <div key={hi} className={hi > 0 ? "mt-2" : ""}>
           <div className="px-2 text-[11px] text-faint tabular-nums select-none">
@@ -49,13 +50,13 @@ function FileRow({ file, defaultOpen }: { file: FileDiff; defaultOpen: boolean }
         </button>
         <button
           onClick={() => openInCode(file.path)}
-          className="text-ink truncate hover:underline underline-offset-2"
+          className="font-mono text-ink truncate hover:underline underline-offset-2"
           title="Open in Code tab"
         >
           {file.path}
         </button>
         {file.status === "added" && <span className="text-faint text-[11px]">new file</span>}
-        <span className="ml-auto shrink-0 tabular-nums text-[11px]">
+        <span className="ml-auto shrink-0 font-mono tabular-nums text-[11px]">
           <span className="text-ok">+{file.additions}</span>{" "}
           <span className="text-err">−{file.deletions}</span>
         </span>
@@ -80,8 +81,8 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
           {turn.streaming.map((f) => (
             <div key={f.path} className="flex items-center gap-2 animate-slide-in">
               <span className={f.done ? "text-ok" : "text-run animate-pulse"}>{f.done ? "✓" : "●"}</span>
-              <span className="text-muted truncate">{f.path}</span>
-              <span className="ml-auto text-faint text-[11px] tabular-nums">
+              <span className="font-mono text-muted truncate">{f.path}</span>
+              <span className="ml-auto font-mono text-faint text-[11px] tabular-nums">
                 {f.done ? `${f.bytes} B` : "rewriting…"}
               </span>
             </div>
@@ -127,11 +128,15 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
 
       <div className="mt-1.5 flex items-center gap-2 text-[11px] text-muted">
         <span>
-          Edited {nFiles} {nFiles === 1 ? "file" : "files"},{" "}
-          <span className="text-ok">+{totals.add}</span> <span className="text-err">−{totals.del}</span>
+          Edited <span className="font-mono tabular-nums">{nFiles}</span>{" "}
+          {nFiles === 1 ? "file" : "files"},{" "}
+          <span className="font-mono tabular-nums text-ok">+{totals.add}</span>{" "}
+          <span className="font-mono tabular-nums text-err">−{totals.del}</span>
         </span>
         {turn.status === "applied" && (
-          <span className="text-ok">applied · v{turn.version}</span>
+          <span className="text-ok">
+            applied · <span className="font-mono tabular-nums">v{turn.version}</span>
+          </span>
         )}
         {turn.status === "undone" && <span className="text-faint">undone</span>}
         {turn.status === "discarded" && <span className="text-faint">discarded</span>}

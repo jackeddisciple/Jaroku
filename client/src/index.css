@@ -1,3 +1,9 @@
+/* Two families, one job each. Inter carries prose — plan explanations, notes, descriptions.
+   JetBrains Mono is reserved for things that are literally code: file paths, tool names, type
+   annotations, figures. Same three weights in both so the ladder matches across a switch. */
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
 @import "@fontsource/jetbrains-mono/400.css";
 @import "@fontsource/jetbrains-mono/500.css";
 @import "@fontsource/jetbrains-mono/600.css";
@@ -15,6 +21,9 @@
   #root {
     height: 100%;
   }
+  /* The app default stays monospace — the trace, graph and sidebar are all built on it and are
+     not part of this pass. The prose/code split is scoped to the generation panel, which opts in
+     with font-sans on its root and marks its identifiers font-mono from there. */
   body {
     @apply bg-bg text-ink font-mono;
     font-size: 13px;

@@ -65,8 +65,8 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
               <span className={f.complete ? "text-ok" : "text-run animate-pulse"}>
                 {f.complete ? "✓" : "●"}
               </span>
-              <span className="text-muted truncate">{f.path}</span>
-              <span className="ml-auto text-faint text-[11px] tabular-nums">
+              <span className="font-mono text-muted truncate">{f.path}</span>
+              <span className="ml-auto font-mono text-faint text-[11px] tabular-nums">
                 {f.path === streamingFile ? "writing…" : `${f.content.length} B`}
               </span>
             </div>
@@ -84,16 +84,22 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
     <div className="text-[12px]">
       <span className="text-ok">Generated</span>{" "}
       <span className="text-muted">
-        {turn.files.length} files
+        <span className="font-mono tabular-nums">{turn.files.length}</span> files
         {turn.usage && (
           <>
             {" · "}
-            {turn.usage.output_tokens.toLocaleString()} output tokens · $
-            {turn.usage.cost_usd.toFixed(4)}
+            <span className="font-mono tabular-nums">
+              {turn.usage.output_tokens.toLocaleString()}
+            </span>{" "}
+            output tokens ·{" "}
+            <span className="font-mono tabular-nums">${turn.usage.cost_usd.toFixed(4)}</span>
             {planCost > 0 && (
               <span className="text-faint">
-                {" + $"}
-                {planCost.toFixed(4)} plan = ${(turn.usage.cost_usd + planCost).toFixed(4)}
+                {" + "}
+                <span className="font-mono tabular-nums">${planCost.toFixed(4)}</span> plan ={" "}
+                <span className="font-mono tabular-nums">
+                  ${(turn.usage.cost_usd + planCost).toFixed(4)}
+                </span>
               </span>
             )}
             {turn.usage.cache_read_input_tokens > 0 && <span className="text-faint"> · cache hit</span>}
@@ -166,7 +172,8 @@ function ModelSelector({
         title="Run model"
         className="flex items-center gap-1 text-[12px] text-muted hover:text-ink transition-colors"
       >
-        {label}
+        {/* "Dry run (free)" is prose; a model id is an identifier. Only the latter gets mono. */}
+        <span className={provider === "fake" ? undefined : "font-mono"}>{label}</span>
         <ChevronDownIcon size={13} />
       </button>
       {open && (
@@ -185,7 +192,7 @@ function ModelSelector({
                       setModel(m); // …then pin the chosen one
                       setOpen(false);
                     }}
-                    className={`w-full text-left px-3 py-1 text-[12px] transition-colors ${
+                    className={`w-full text-left px-3 py-1 font-mono text-[12px] transition-colors ${
                       active ? "text-ink bg-active" : "text-muted hover:text-ink hover:bg-active/40"
                     }`}
                   >
@@ -432,12 +439,14 @@ export function BuildPane() {
   const lastGenId = [...turns].reverse().find((t) => t.role === "jaroku" && t.kind === "gen")?.id;
 
   return (
-    <div className="flex h-full flex-col bg-bg">
+    // font-sans is scoped here rather than on body: this pane is the only one migrated onto the
+    // prose/code split, and the trace, graph and sidebar stay monospace until they follow.
+    <div className="flex h-full flex-col bg-bg font-sans">
       <div className="px-6 pt-4 pb-2 shrink-0 flex items-baseline gap-2">
         <span className="text-[11px] uppercase tracking-widest text-faint">
           {mode === "generate" ? "New agent" : "Fix"}
         </span>
-        {agent && <span className="text-[12px] text-muted truncate">{agent.name}</span>}
+        {agent && <span className="font-mono text-[12px] text-muted truncate">{agent.name}</span>}
       </div>
 
       {/* conversation */}
@@ -491,7 +500,7 @@ export function BuildPane() {
               onChange={(e) => setName(e.target.value)}
               disabled={busy}
               placeholder="name (optional)"
-              className="ml-auto w-40 bg-panel text-ink placeholder:text-faint rounded px-2.5 py-1 text-[12px] outline-none focus:ring-1 focus:ring-[#2a2a2e] disabled:opacity-50"
+              className="ml-auto w-40 bg-panel font-mono text-ink placeholder:text-faint rounded px-2.5 py-1 text-[12px] outline-none focus:ring-1 focus:ring-[#2a2a2e] disabled:opacity-50"
             />
           </div>
         )}
@@ -500,7 +509,7 @@ export function BuildPane() {
         {composerMode === "chat" && (contextLabel || text.trim()) && (
           <div className="mb-2 flex items-center gap-2 text-[11px]">
             {contextLabel && (
-              <span className="inline-flex items-center gap-1 bg-active rounded px-2 py-0.5 text-muted">
+              <span className="inline-flex items-center gap-1 bg-active rounded px-2 py-0.5 font-mono text-muted">
                 <span className="text-faint">▸</span>
                 {contextLabel}
                 <button onClick={clearContext} className="text-faint hover:text-ink ml-0.5" title="Clear context">
