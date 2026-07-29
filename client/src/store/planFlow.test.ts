@@ -184,10 +184,19 @@ const userTexts = () => store().pending.filter((t) => t.role === "user").map((t)
   reset();
   store().planStarted("x", 1);
   store().planReady({ planId: "p1", prompt: "x", plan: PLAN, warnings: [], usage: USAGE, revision: 1 });
-  store().planStale();
+  store().planStale(true);
   check("stale status set", planTurns()[0]?.status === "stale");
   check("stale plan keeps its content", planTurns()[0]?.plan?.tools.length === 1);
   check("stale plan still resolves an id (so it can be re-planned)", pendingPlanId({ pending: store().pending }) === "p1");
+
+  // Putting the selection back must undo it. Staleness is a comparison, not a latch: the fix for
+  // a mis-clicked connector must not cost another plan.
+  store().planStale(false);
+  check("restoring the selection un-stales the plan", planTurns()[0]?.status === "pending");
+  check("un-staled plan keeps its content", planTurns()[0]?.plan?.tools.length === 1);
+
+  // A decided plan is finished; the connector selection has no opinion about it any more.
+
 }
 
 // 11 — a plan error lands on the streaming turn, not as a generation failure.

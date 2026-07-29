@@ -132,7 +132,7 @@ interface ChatState {
     revision: number;
   }) => void;
   planDiscarded: (planId: string) => void;
-  planStale: () => void;
+  planStale: (stale: boolean) => void;
   planError: (message: string) => void;
 
   genStarted: (prompt: string) => void;
@@ -237,11 +237,22 @@ export const useChatStore = create<ChatState>((set) => ({
   // what would be built. Deliberately NOT a blanking (which is what a stale cost estimate
   // gets): a plan is prose the user may be mid-read, so it stays legible and only loses its
   // Generate button.
-  planStale: () =>
+  //
+  // It takes a boolean because staleness is a comparison, not an event — the selection either
+  // matches what the plan was written against or it doesn't. It used to be one-way: any change
+  // marked the plan stale forever, so putting a mis-clicked connector back left the plan
+  // unusable and the only way out was paying for another one. Ticking Slack and unticking it
+  // is not a decision the user should have to buy their way out of.
+  planStale: (stale) =>
     set((s) => {
       const turn = livePlan(s.pending);
-      if (!turn || turn.status !== "pending") return {};
-      return { pending: replaceTurn(s.pending, turn.id, { ...turn, status: "stale" }) };
+      if (!turn) return {};
+      const next = stale ? "stale" : "pending";
+      // Only these two statuses convert into each other. A plan that was generated, discarded or
+      // superseded is finished, and the connector selection has no opinion about it any more.
+      if (turn.status !== "pending" && turn.status !== "stale") return {};
+      if (turn.status === next) return {};
+      return { pending: replaceTurn(s.pending, turn.id, { ...turn, status: next }) };
     }),
 
   planError: (message) =>

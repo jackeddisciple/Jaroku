@@ -385,12 +385,20 @@ export function BuildPane() {
   // gets. The record holds the original brief, and a revision re-plans that brief against the
   // CURRENT selection — so keeping it means ticking Postgres and saying "use it for the
   // lookup" continues the conversation instead of making the user retype what they wanted.
+  //
+  // Staleness is a comparison against the selection the plan was written with, not a latch on
+  // "something changed". Latching meant putting a mis-clicked connector back left the plan stale
+  // anyway, with no way out but paying for another plan — the fix for a mis-click cost the same as
+  // the mistake. `plannedConnectors` is set when a plan is requested, so the answer is always
+  // whether the two selections match right now.
   const connectorKey = selected.join(",");
+  const plannedConnectors = useRef<string | null>(null);
   const planStale = useChatStore((s) => s.planStale);
   useEffect(() => {
-    planStale();
+    if (plannedConnectors.current === null) return;
+    planStale(connectorKey !== plannedConnectors.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectorKey, name]);
+  }, [connectorKey]);
 
   // --- Test mode (runs) + voice, folded in from the old run-bar ------------------
   const canRun = connected && Boolean(activeAgentId) && (agent?.runnable ?? false);
@@ -488,9 +496,12 @@ export function BuildPane() {
       case "generate":
         // Never straight to generation: the plan gate is the only way in, so nothing gets
         // built that the user hasn't seen described first.
+        plannedConnectors.current = connectorKey;
         sendPlanAgent(trimmed, selected, name.trim() || undefined);
         break;
       case "replan":
+        // A revision is planned against the CURRENT selection, so that becomes the new baseline.
+        plannedConnectors.current = connectorKey;
         sendPlanAgent(trimmed, selected, name.trim() || undefined, intent.planId);
         break;
       case "edit":
