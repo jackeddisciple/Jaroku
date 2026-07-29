@@ -1,0 +1,201 @@
+// Icons for the generation panel — Lucide geometry, drawn inline.
+//
+// Same idiom as composerIcons.tsx and graphIcons.tsx: no icon dependency, one shared factory that
+// locks the SVG attributes so nothing can drift. The shapes are Lucide's (24px grid, round caps and
+// joins), because that family reads correctly next to Inter and is what the rest of the industry's
+// tooling uses — but only the dozen this panel actually needs are here, rather than a library.
+//
+// Stroke is 1.75, not Lucide's default 2. At 14px next to 12px text, 2 reads noticeably heavier than
+// the type around it; 1.75 sits level. It comes from ICON.strokeWidth so there is one place to
+// change it, and every icon in the panel moves together.
+//
+// Colour is always currentColor. An icon never decides its own colour — the row it sits in does,
+// which is what lets the same check mean "audited" in teal and "approved" in green.
+
+import { ICON } from "../lib/tokens.ts";
+
+type P = {
+  size?: number;
+  /** Only for the rare case an icon sits against much larger type. Prefer leaving it alone. */
+  strokeWidth?: number;
+  className?: string;
+};
+
+const svg = (
+  { size = ICON.sm, strokeWidth = ICON.strokeWidth, className }: P,
+  children: React.ReactNode,
+) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={strokeWidth}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    aria-hidden
+  >
+    {children}
+  </svg>
+);
+
+// ── Tool categories ─────────────────────────────────────────────────────────
+// The two icons that carry the distinction the whole plan gate exists for.
+
+/** lucide:shield-check — a reviewed connector tool. Audited, copied in verbatim, read-only. */
+export function ShieldCheckIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+      <path d="m9 12 2 2 4-4" />
+    </>,
+  );
+}
+
+/** lucide:sparkles — a bespoke tool. About to be written by a model, for this agent only. */
+export function SparklesIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+      <path d="M20 3v4" />
+      <path d="M22 5h-4" />
+    </>,
+  );
+}
+
+// ── Section headers ─────────────────────────────────────────────────────────
+
+/** lucide:wrench — the tools sections. */
+export function WrenchIcon(p: P) {
+  return svg(
+    p,
+    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />,
+  );
+}
+
+/** lucide:database — the state section. State is the agent's shape, its stored fields. */
+export function DatabaseIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <ellipse cx="12" cy="5" rx="9" ry="3" />
+      <path d="M3 5V19A9 3 0 0 0 21 19V5" />
+      <path d="M3 12A9 3 0 0 0 21 12" />
+    </>,
+  );
+}
+
+/** lucide:git-branch — the graph section. Nodes and the edges between them. */
+export function GitBranchIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <line x1="6" x2="6" y1="3" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </>,
+  );
+}
+
+/** lucide:lightbulb — "worth knowing". Caveats and things the plan wants you to notice. */
+export function LightbulbIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5" />
+      <path d="M9 18h6" />
+      <path d="M10 22h4" />
+    </>,
+  );
+}
+
+// ── Status ──────────────────────────────────────────────────────────────────
+
+/** lucide:check — approved, audited, done. */
+export function CheckIcon(p: P) {
+  return svg(p, <path d="M20 6 9 17l-5-5" />);
+}
+
+/** lucide:clock — pending, waiting on a decision. */
+export function ClockIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </>,
+  );
+}
+
+/** lucide:alert-triangle — needs attention. Warnings, staleness, mismatches. */
+export function AlertTriangleIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
+      <path d="M12 9v4" />
+      <path d="M12 17h.01" />
+    </>,
+  );
+}
+
+/** lucide:x — discarded, failed. */
+export function XIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </>,
+  );
+}
+
+// ── Stats ───────────────────────────────────────────────────────────────────
+
+/** lucide:file — a written file. */
+export function FileIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z" />
+      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+    </>,
+  );
+}
+
+/** lucide:hash — a token count. */
+export function HashIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <line x1="4" x2="20" y1="9" y2="9" />
+      <line x1="4" x2="20" y1="15" y2="15" />
+      <line x1="10" x2="8" y1="3" y2="21" />
+      <line x1="16" x2="14" y1="3" y2="21" />
+    </>,
+  );
+}
+
+/** lucide:dollar-sign — what it cost. */
+export function DollarSignIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <line x1="12" x2="12" y1="2" y2="22" />
+      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+    </>,
+  );
+}
+
+/** lucide:zap — a cache hit: the same work, without paying for it twice. */
+export function ZapIcon(p: P) {
+  return svg(
+    p,
+    <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" />,
+  );
+}
