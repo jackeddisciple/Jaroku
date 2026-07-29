@@ -73,6 +73,26 @@ function Line({ children }: { children: React.ReactNode }) {
   return <div className="flex gap-2 text-[12px] leading-relaxed">{children}</div>;
 }
 
+/**
+ * The card the plan lives in — every status, including streaming and error.
+ *
+ * A proposal and its execution are two different moments, and they were rendering as one
+ * continuous column: the plan ran straight into "Generated 7 files" with nothing between them.
+ * This bounds the proposal so the eye can tell where the opinion ends and the thing that actually
+ * happened begins.
+ *
+ * A hairline and one step of elevation, per doc §4.2 — enough to bound the block, not enough to
+ * read as a box. Every branch shares it so the card settles in place as it streams rather than
+ * changing shape underneath the text (doc §4.3).
+ */
+function Card({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-[10px] border border-hair bg-panel/40 px-3.5 py-3 text-[12px]">
+      {children}
+    </div>
+  );
+}
+
 export function PlanCard({ turn }: { turn: PlanTurn }) {
   const prefillChat = useUiStore((s) => s.prefillChat);
 
@@ -89,7 +109,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
   // structured render settles in place instead of jumping (doc §4.3 — everything streams).
   if (turn.status === "streaming") {
     return (
-      <div className="text-[12px]">
+      <Card>
         <div className="text-run">{turn.revision > 1 ? "Revising the plan…" : "Planning…"}</div>
         {turn.raw && (
           <div className="mt-1.5 whitespace-pre-wrap break-words text-muted leading-relaxed">
@@ -97,16 +117,16 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             <span className="text-faint animate-pulse">▋</span>
           </div>
         )}
-      </div>
+      </Card>
     );
   }
 
   if (turn.status === "error") {
     return (
-      <div className="text-[12px]">
+      <Card>
         <div className="text-err">Couldn’t write a plan — {turn.error}</div>
         <div className="mt-1.5 text-faint">Nothing was generated — no files were written.</div>
-      </div>
+      </Card>
     );
   }
 
@@ -119,19 +139,23 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
   const decided = turn.status !== "pending" && turn.status !== "stale";
 
   return (
-    <div className="text-[12px] animate-slide-in">
-      <div className="flex items-center gap-2">
-        <span className="text-ink">Here’s the plan</span>
-        {turn.revision > 1 && <span className="text-faint text-[11px]">revision {turn.revision}</span>}
+    <Card>
+      <div className="flex items-center gap-2 pb-2.5 border-b border-hair animate-slide-in">
+        <span className="text-ink font-medium">Here’s the plan</span>
+        {turn.revision > 1 && (
+          <span className="font-mono text-faint text-[11px] tabular-nums">
+            revision {turn.revision}
+          </span>
+        )}
         {turn.status === "accepted" && <span className="text-ok text-[11px]">approved</span>}
         {turn.status === "superseded" && <span className="text-faint text-[11px]">superseded</span>}
         {turn.status === "discarded" && <span className="text-faint text-[11px]">discarded</span>}
         {turn.status === "stale" && <span className="text-run text-[11px]">out of date</span>}
       </div>
 
-      <div className={decided || turn.status === "stale" ? "opacity-60" : ""}>
+      <div className={`mt-3 ${decided || turn.status === "stale" ? "opacity-60" : ""}`}>
         {degraded ? (
-          <div className="mt-2 whitespace-pre-wrap break-words text-muted leading-relaxed">
+          <div className="whitespace-pre-wrap break-words text-muted leading-relaxed">
             {turn.raw}
           </div>
         ) : (
@@ -234,7 +258,9 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
       )}
 
       {(turn.status === "pending" || turn.status === "stale") && (
-        <div className="mt-3 flex items-center gap-2">
+        // The decision is the card's footer, not another line of its body — it sits on a divider
+        // for the same reason the title does.
+        <div className="mt-3.5 pt-3 border-t border-hair flex items-center gap-2">
           <button
             className={btn}
             disabled={turn.status === "stale"}
@@ -265,6 +291,6 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
           )}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
