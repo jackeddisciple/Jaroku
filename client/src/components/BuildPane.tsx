@@ -125,10 +125,16 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
 }
 
 // "explain" answer — streaming prose with a caret while live (doc §4.3: everything streams).
+//
+// The one prose slot in the panel that was never tokenized, and the one where it mattered most: an
+// explanation is *about* named things, and the model writes them in backticks. Untouched, those
+// backticks reached the screen as literal characters — so a reply reading "the `gmail_search` tool
+// needs `GMAIL_CLIENT_ID`" sat directly below a diff-card summary where the same kind of name was a
+// proper chip. Two Jaroku answers in one thread, two different typographic languages.
 function ReplyTurnView({ turn }: { turn: ReplyTurn }) {
   return (
     <div className={`text-[13px] whitespace-pre-wrap break-words ${turn.status === "error" ? "text-err" : "text-ink"}`}>
-      {turn.text}
+      <Prose text={turn.text} />
       {turn.status === "streaming" && <span className="text-faint animate-pulse">▋</span>}
     </div>
   );
