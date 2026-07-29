@@ -62,6 +62,9 @@ const RANKSEP = 250; // horizontal gap between columns (generous, balanced)
 const NODESEP = 190; // vertical gap between branch siblings
 const RES_DROP = 178; // vertical distance from agent bottom to resource circles
 const RES_GAP = 148; // horizontal spacing between resource circles
+// Closest two resource circles may sit, centre to centre: their own width plus a gap wide enough
+// that neither one's label can reach the other. The floor the model/tool row layout is held to.
+const RES_MIN_SEP = RES_D + 24;
 
 // ── palette (flat, n8n-ish) ───────────────────────────────────────────────────
 // Solid, opaque cards on the design-system panel colour; a slightly lighter fill marks the
@@ -476,11 +479,22 @@ function buildResources(
   });
 
   // tool circles spread under the right ("Tool") port
+  //
+  // The model sits at a fixed x under its own port; the tool row is centred under the tool port and
+  // grows outward in both directions. Those two facts collide: at three tools the row's left end
+  // reached back past the model circle and sat almost exactly on top of it, so "Dry-run" and
+  // "Gmail" were drawn over each other into an unreadable smear. Three tools is an ordinary agent,
+  // so this was the common case, not an edge one.
+  //
+  // The row still centres under its port whenever there is room; it just cannot start left of the
+  // model any more. Nothing overlaps at any tool count.
   const toolPortX = agentBox.x + AGENT_W * 0.74;
   const n = tools.length;
+  const modelCx = modelPortX;
+  const firstCx = Math.max(toolPortX - ((n - 1) * RES_GAP) / 2, modelCx + RES_MIN_SEP);
   tools.forEach((f, i) => {
     const { label, Icon } = toolResource(f.path);
-    const cx = toolPortX - ((n - 1) * RES_GAP) / 2 + i * RES_GAP;
+    const cx = firstCx + i * RES_GAP;
     const id = `res:tool:${i}`;
     nodes.push({
       id,
