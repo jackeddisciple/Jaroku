@@ -272,6 +272,18 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                     accent={ACCENT.bespoke}
                     name={t.name}
                     description={t.summary.replace(/^bespoke[;:]?\s*/i, "")}
+                    // Deliberately not a check. The reviewed rows earn theirs by having been
+                    // audited; this code does not exist yet, and a tick here would say the one
+                    // thing about a bespoke tool that is never true.
+                    status={
+                      <span
+                        className="text-[10px] uppercase tracking-wider"
+                        style={{ color: ACCENT.bespoke }}
+                        title="Not yet written — this tool will be generated, and is worth reading"
+                      >
+                        new
+                      </span>
+                    }
                   />
                 ))}
               </Section>
