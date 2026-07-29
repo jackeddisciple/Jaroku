@@ -14,10 +14,18 @@ export default {
         muted: "#71717a", // secondary
         faint: "#52525b", // tertiary (seq numbers, etc.)
         hair: "#1e1e22", // hairline dividers / connector line
+        // Chrome. Both were hardcoded in several places before they were named.
+        edge: "#2a2a30", // card border — raised without reading as a visible box
+        chrome: "#26262b", // scrollbar thumbs, control dividers
         // Status colors — reserved exclusively for meaning, never decoration.
         ok: "#22c55e",
         err: "#ef4444",
         run: "#f59e0b",
+        // Category accents (see src/lib/tokens.ts for why these three and not others).
+        // These say what *kind* of thing something is; the status colors above say how it's doing.
+        reviewed: "#5eead4", // audited connector template, copied in verbatim
+        bespoke: "#c084fc", // written by a model for this agent only
+        stateful: "#a5b4fc", // state fields — the agent's shape, not its capabilities
       },
       fontFamily: {
         mono: [
