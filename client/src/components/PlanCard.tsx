@@ -9,6 +9,11 @@
 // Reviewed templates are audited code copied in verbatim and read-only; bespoke tools are
 // about to be invented by a model. A user deciding whether to spend a generation is really
 // deciding whether they trust that second list, so it is never mixed into the first.
+//
+// That distinction now carries a colour: teal for reviewed, violet for bespoke (see lib/tokens.ts).
+// They are category accents, not status — they say what kind of thing a tool is, never how it is
+// doing. State types moved onto the third accent for the same reason: they were amber, which in
+// this app means "running", and a type annotation is not a state of progress.
 
 import type { PlanTurn } from "../store/chatStore.ts";
 import { sendDiscardPlan, sendGenerate } from "../lib/socket.ts";
@@ -97,7 +102,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
               <Section label="Reviewed connector tools — audited, copied in as-is">
                 {connectorTools.map((t) => (
                   <Line key={t.name}>
-                    <span className="text-ok shrink-0">✓</span>
+                    <span className="text-reviewed shrink-0">✓</span>
                     <span className="font-mono text-ink">{t.name}</span>
                     {t.connectorId && <span className="font-mono text-faint">{t.connectorId}</span>}
                   </Line>
@@ -109,7 +114,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
               <Section label="Bespoke tools — will be written for this agent">
                 {bespokeTools.map((t) => (
                   <Line key={t.name}>
-                    <span className="text-faint shrink-0">+</span>
+                    <span className="text-bespoke shrink-0">+</span>
                     <span className="font-mono text-ink shrink-0">{t.name}</span>
                     <span className="text-muted min-w-0">{t.summary.replace(/^bespoke[;:]?\s*/i, "")}</span>
                   </Line>
@@ -122,7 +127,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                 {plan.state.map((f) => (
                   <Line key={f.name}>
                     <span className="font-mono text-ink shrink-0">{f.name}</span>
-                    {f.type && <span className="font-mono text-run shrink-0">{f.type}</span>}
+                    {f.type && <span className="font-mono text-stateful shrink-0">{f.type}</span>}
                     <span className="text-muted min-w-0">{f.purpose}</span>
                   </Line>
                 ))}
