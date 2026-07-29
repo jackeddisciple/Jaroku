@@ -26,7 +26,7 @@ import { PlanCard } from "./PlanCard.tsx";
 import { ArrowUpIcon, ChevronDownIcon, MicIcon, SaveToDatasetIcon } from "./composerIcons.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { StatRow, STAT_ICON, type Stat } from "./StatRow.tsx";
-import { DollarSignIcon, FileIcon, HashIcon, UserCircleIcon, ZapIcon } from "./panelIcons.tsx";
+import { DollarSignIcon, FileIcon, HashIcon, SparklesIcon, UserCircleIcon, ZapIcon } from "./panelIcons.tsx";
 import { ACCENT, ICON } from "../lib/tokens.ts";
 import { useVoiceInput } from "../lib/useVoiceInput.ts";
 import { VoiceWaveform } from "./VoiceWaveform.tsx";
@@ -158,6 +158,27 @@ function TurnRow({ marker, children }: { marker?: React.ReactNode; children: Rea
   );
 }
 
+/**
+ * Jaroku's mark.
+ *
+ * There is no Jaroku glyph anywhere in the app — only the wordmark in the top bar — so rather than
+ * invent one, this reuses the sparkle the plan card already uses for bespoke tools. In that card it
+ * means "a model wrote this", which is exactly what it means here; the panel gets a second use of
+ * one idea instead of a second idea.
+ *
+ * Grey in a filled ring, not violet. Violet is the bespoke-tool accent and lives inside the card;
+ * this sits outside it, saying who is speaking rather than what kind of thing something is. The
+ * ring is what gives it the visual mass to answer a 14px face across the gutter — a bare sparkle
+ * at that size reads as a speck.
+ */
+function JarokuMark() {
+  return (
+    <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-active text-muted">
+      <SparklesIcon size={10} />
+    </span>
+  );
+}
+
 function Turn({ turn, isLastGen }: { turn: ChatTurn; isLastGen: boolean }) {
   if (turn.role === "user") {
     return (
@@ -169,10 +190,12 @@ function Turn({ turn, isLastGen }: { turn: ChatTurn; isLastGen: boolean }) {
       </TurnRow>
     );
   }
-  if (turn.kind === "plan") return <TurnRow><PlanCard turn={turn} /></TurnRow>;
-  if (turn.kind === "gen") return <TurnRow><GenTurnView turn={turn} isLive={isLastGen} /></TurnRow>;
-  if (turn.kind === "proposal") return <TurnRow><DiffCard turn={turn} /></TurnRow>;
-  if (turn.kind === "reply") return <TurnRow><ReplyTurnView turn={turn} /></TurnRow>;
+  if (turn.kind === "plan") return <TurnRow marker={<JarokuMark />}><PlanCard turn={turn} /></TurnRow>;
+  if (turn.kind === "gen") return <TurnRow marker={<JarokuMark />}><GenTurnView turn={turn} isLive={isLastGen} /></TurnRow>;
+  if (turn.kind === "proposal") return <TurnRow marker={<JarokuMark />}><DiffCard turn={turn} /></TurnRow>;
+  if (turn.kind === "reply") return <TurnRow marker={<JarokuMark />}><ReplyTurnView turn={turn} /></TurnRow>;
+  // Info notes are the app narrating itself ("connectors changed"), not Jaroku answering — no
+  // mark, so the gutter stays a record of who spoke.
   return (
     <TurnRow>
       <div className={`text-[12px] ${turn.tone === "error" ? "text-err" : "text-faint"}`}>
