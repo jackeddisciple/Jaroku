@@ -352,11 +352,22 @@ export function BuildPane() {
       ? `step #${selectedStep.seq} · ${selectedStep.type}${selectedStep.error ? " · error" : ""}`
       : null;
 
+  // How many files generation has started writing. Subscribed to purely so the scroll effect
+  // below has something that changes while they stream — see there for why.
+  const genFileCount = useBuildStore((s) => s.fileOrder.length);
+
   // Keep the newest turn in view — the conversation scrolls up like a terminal.
+  //
+  // `genFileCount` is in the deps because generation is the one thing that grows the thread
+  // without changing a turn. Files stream into buildStore, GenTurnView re-renders on its own, and
+  // BuildPane — which owns the scroll container — never hears about it. So the list grew downward
+  // past the fold: you watched the first file land and then nothing, until generation finished and
+  // the turn changed, at which point the view jumped to a finished list you never saw appear.
+  // Everything streams (doc §4.3) is only true if you can see it stream.
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [turns, genStatus]);
+  }, [turns, genStatus, genFileCount]);
 
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
