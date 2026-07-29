@@ -90,6 +90,13 @@ export const SPACE_CLASS = {
 // 24px grid at stroke 2; scaled down to 14px that reads heavy next to 12px text, hence 1.75.
 
 export const ICON = {
+  /**
+   * Subordinate to a line of text — a note's lock, a disclosure chevron, a file's type, a stat's
+   * glyph. These qualify what is beside them rather than anchoring it, and at `sm` they compete
+   * with the thing they are qualifying. The number was being written out by hand at half a dozen
+   * call sites before it was named.
+   */
+  xs: 12,
   /** Inline with body text — section headers, tool rows, stats. */
   sm: 14,
   /** Standalone controls. */

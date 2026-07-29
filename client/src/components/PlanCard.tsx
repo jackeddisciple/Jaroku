@@ -19,9 +19,10 @@ import { useState } from "react";
 import type { PlanTurn } from "../store/chatStore.ts";
 import { sendDiscardPlan, sendGenerate } from "../lib/socket.ts";
 import { useUiStore } from "../store/uiStore.ts";
-import { ACCENT } from "../lib/tokens.ts";
+import { ACCENT, ICON } from "../lib/tokens.ts";
 import { noteKind } from "../lib/noteKind.ts";
 import { BRAND_COLOR } from "../lib/icons.tsx";
+import { primaryBtn, quietBtn } from "./buttons.ts";
 import { ChevronDownIcon } from "./composerIcons.tsx";
 import { CHIP, Prose } from "./InlineCode.tsx";
 import { StatusBadge, StatusDot } from "./StatusBadge.tsx";
@@ -35,9 +36,6 @@ import {
   ShieldCheckIcon,
   SparklesIcon,
 } from "./panelIcons.tsx";
-
-const btn =
-  "rounded px-3 py-1.5 text-[12px] bg-panel text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
 /**
  * Which sections the user has folded away, for as long as the panel is open.
@@ -70,6 +68,12 @@ const foldedSections = new Map<string, true>();
  *
  * `accent` colours the icon only, never the text. The icon is the thing being scanned for; a
  * coloured heading would compete with the rows underneath it.
+ *
+ * The fold behaviour here is local to the plan card, but it is the generic thing: a labelled block
+ * with a count that can be put away. The step-detail panel has the same problem with a long tool
+ * output, and the graph view's node inspector will. Lifting this into a shared component is the
+ * obvious next step whenever a second caller appears — it is not lifted now because one caller does
+ * not tell you which parts are general.
  */
 function Section({
   icon,
@@ -131,7 +135,7 @@ function Section({
           }`}
           aria-hidden
         >
-          <ChevronDownIcon size={12} />
+          <ChevronDownIcon size={ICON.xs} />
         </span>
       </button>
       {open && (
@@ -277,7 +281,7 @@ function Note({ text, vocabulary }: { text: string; vocabulary: readonly string[
         className={`shrink-0 flex items-center h-[19px] ${constraint ? "text-muted" : "text-faint"}`}
         title={constraint ? "A rule this agent will follow" : "Worth knowing about how it works"}
       >
-        {constraint ? <LockIcon size={12} /> : <InfoIcon size={12} />}
+        {constraint ? <LockIcon size={ICON.xs} /> : <InfoIcon size={ICON.xs} />}
       </span>
       <span className={`min-w-0 ${constraint ? "text-ink" : "text-muted"}`}>
         <Prose text={text} vocabulary={vocabulary} />
@@ -512,7 +516,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             {!plan.complete && (
               <div className="mt-5 flex gap-2 text-[11px] text-faint">
                 <span className="shrink-0 mt-[3px]">
-                  <AlertTriangleIcon size={12} />
+                  <AlertTriangleIcon size={ICON.xs} />
                 </span>
                 <span>The plan was cut short — it may be missing a section.</span>
               </div>
@@ -527,7 +531,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             {turn.warnings.map((w, i) => (
               <div key={i} className="flex gap-2 text-[11px] text-run">
                 <span className="shrink-0 mt-[3px]">
-                  <AlertTriangleIcon size={12} />
+                  <AlertTriangleIcon size={ICON.xs} />
                 </span>
                 <span className="min-w-0">
                   <Prose text={w} vocabulary={vocabulary} />
@@ -550,7 +554,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
         // for the same reason the title does.
         <div className="mt-5 pt-3.5 border-t border-hair flex items-center gap-2">
           <button
-            className={btn}
+            className={primaryBtn}
             disabled={turn.status === "stale"}
             title={
               turn.status === "stale"
@@ -566,7 +570,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             Generate
           </button>
           <button
-            className="rounded px-3 py-1.5 text-[12px] text-muted hover:text-ink transition-colors"
+            className={quietBtn}
             onClick={discard}
           >
             Discard

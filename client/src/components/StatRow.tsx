@@ -50,4 +50,4 @@ export function StatRow({ leading, stats }: { leading?: React.ReactNode; stats: 
 }
 
 /** The icon size stats use. Exported so callers do not re-pick it per call site. */
-export const STAT_ICON = ICON.sm - 2;
+export const STAT_ICON = ICON.xs;

@@ -8,6 +8,7 @@ import type { FileDiff } from "../types.ts";
 import type { ProposalTurn } from "../store/chatStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { sendApplyEdit, sendDiscardEdit, sendUndoEdit } from "../lib/socket.ts";
+import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { ChevronDownIcon } from "./composerIcons.tsx";
 import { DiffBar } from "./DiffBar.tsx";
 import { StreamingFileRow } from "./FileList.tsx";
@@ -15,6 +16,7 @@ import { iconForPath } from "./fileIcons.tsx";
 import { Prose } from "./InlineCode.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { STAT_ICON } from "./StatRow.tsx";
+import { ICON } from "../lib/tokens.ts";
 import { CheckIcon, FileIcon, PlusIcon, UndoIcon } from "./panelIcons.tsx";
 
 function HunkLines({ file }: { file: FileDiff }) {
@@ -112,23 +114,6 @@ function FileRow({
   );
 }
 
-const btn =
-  "rounded px-3 py-1.5 text-[12px] bg-panel text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
-
-/**
- * The same button, one step down.
- *
- * Undo was wearing `btn` — the exact weight of Apply and Generate — which said it was one of the
- * decisions this card is asking you to make. It isn't. Apply is a fork in the road; Undo is a way
- * back from one you already took, and it appears on a card whose decision is over. Same surface,
- * same radius, same hover, at a smaller size and in muted text until you reach for it.
- *
- * It also gets an icon. "Undo" alone is a word in a row of words; an arrow doubling back is the
- * shape of the action, and it is what makes the control findable on a card you have scrolled past.
- */
-const secondaryBtn =
-  "inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] bg-panel text-muted hover:text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
-
 /**
  * Which version of the agent is on disk, and what else there is.
  *
@@ -165,7 +150,7 @@ function VersionPicker({ current, count }: { current: number; count: number }) {
         title={`Version ${current} of ${count}`}
       >
         <span className="font-mono tabular-nums">v{current}</span>
-        <ChevronDownIcon size={12} />
+        <ChevronDownIcon size={ICON.xs} />
       </button>
       {open && (
         // Opens upward: this sits at the bottom of a card, near the bottom of a scrolling thread.
@@ -182,7 +167,7 @@ function VersionPicker({ current, count }: { current: number; count: number }) {
               }`}
             >
               <span className="w-3 shrink-0 flex items-center text-ok">
-                {v === current && <CheckIcon size={11} />}
+                {v === current && <CheckIcon size={ICON.xs} />}
               </span>
               v{v}
             </div>
@@ -308,11 +293,11 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
 
       {turn.status === "pending" && (
         <div className="mt-5 flex items-center gap-2">
-          <button className={btn} onClick={() => turn.proposalId && sendApplyEdit(turn.proposalId)}>
+          <button className={primaryBtn} onClick={() => turn.proposalId && sendApplyEdit(turn.proposalId)}>
             Apply
           </button>
           <button
-            className="rounded px-3 py-1.5 text-[12px] text-muted hover:text-ink transition-colors"
+            className={quietBtn}
             onClick={() => turn.proposalId && sendDiscardEdit(turn.proposalId)}
           >
             Discard

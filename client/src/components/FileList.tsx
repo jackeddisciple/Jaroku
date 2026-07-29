@@ -5,6 +5,10 @@
 // until it does. Two copies of the same row in two files is how they end up subtly different, so
 // this is the one copy.
 //
+// The trace panel shows file paths too — a tool that read or wrote one — and would read better with
+// the same type glyph in the same slot. Not wired there in this pass; iconForPath is the reusable
+// half and this row is the panel-specific half.
+//
 // The leading slot is the file's type rather than its status. Type is what you scan a list of seven
 // files for; status is what you glance at, and it now sits beside the figure it qualifies — the dot
 // and "writing…" say the same thing, so they belong together rather than at opposite ends of the
