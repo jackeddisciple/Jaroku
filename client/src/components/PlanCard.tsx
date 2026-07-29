@@ -74,6 +74,50 @@ function Line({ children }: { children: React.ReactNode }) {
 }
 
 /**
+ * One tool in the plan.
+ *
+ * Both lists were inline text: a glyph, a name and a description flowing together in one flex
+ * line, so a tool and its explanation were the same object and neither had a fixed place to look.
+ * This gives every tool the same four slots in the same order — icon, name, description, status —
+ * so the eye can track down a column instead of re-reading each line.
+ *
+ * Sizing is the part that matters. The name is shrink-0 so an identifier is never broken across
+ * lines (a wrapped tool name reads as two tools), and the description is min-w-0 so it is the
+ * thing that gives when space runs out. The icon and status slots are fixed width, which is what
+ * keeps the name column aligned whether or not a row has a status.
+ */
+function ToolRow({
+  icon,
+  accent,
+  name,
+  description,
+  status,
+}: {
+  icon: React.ReactNode;
+  accent: string;
+  name: string;
+  description?: React.ReactNode;
+  status?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-baseline gap-2 py-[3px]">
+      <span
+        className="shrink-0 flex items-center self-center"
+        style={{ color: accent }}
+        aria-hidden
+      >
+        {icon}
+      </span>
+      <span className="shrink-0 font-mono text-[12px] font-medium text-ink">{name}</span>
+      {description && (
+        <span className="min-w-0 text-[12px] text-muted leading-relaxed">{description}</span>
+      )}
+      {status && <span className="ml-auto shrink-0 self-center flex items-center">{status}</span>}
+    </div>
+  );
+}
+
+/**
  * The card the plan lives in — every status, including streaming and error.
  *
  * A proposal and its execution are two different moments, and they were rendering as one
@@ -168,11 +212,15 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                 accent={ACCENT.reviewed}
               >
                 {connectorTools.map((t) => (
-                  <Line key={t.name}>
-                    <span className="text-reviewed shrink-0">✓</span>
-                    <span className="font-mono text-ink">{t.name}</span>
-                    {t.connectorId && <span className="font-mono text-faint">{t.connectorId}</span>}
-                  </Line>
+                  <ToolRow
+                    key={t.name}
+                    icon={<ShieldCheckIcon />}
+                    accent={ACCENT.reviewed}
+                    name={t.name}
+                    description={
+                      t.connectorId && <span className="font-mono text-faint">{t.connectorId}</span>
+                    }
+                  />
                 ))}
               </Section>
             )}
@@ -185,11 +233,13 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                 accent={ACCENT.bespoke}
               >
                 {bespokeTools.map((t) => (
-                  <Line key={t.name}>
-                    <span className="text-bespoke shrink-0">+</span>
-                    <span className="font-mono text-ink shrink-0">{t.name}</span>
-                    <span className="text-muted min-w-0">{t.summary.replace(/^bespoke[;:]?\s*/i, "")}</span>
-                  </Line>
+                  <ToolRow
+                    key={t.name}
+                    icon={<SparklesIcon />}
+                    accent={ACCENT.bespoke}
+                    name={t.name}
+                    description={t.summary.replace(/^bespoke[;:]?\s*/i, "")}
+                  />
                 ))}
               </Section>
             )}
