@@ -47,6 +47,7 @@ import asyncio
 import json
 import os
 import queue
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,24 @@ MANIFEST_PATH = Path(__file__).resolve().parent.parent / "mcp_tools.json"
 # under the eval job deadline (JAROKU_JOB_TIMEOUT_MS, 180s) so a hanging third-party server
 # produces a failed STEP the trace can show, rather than a killed run that explains nothing.
 CALL_TIMEOUT_S = float(os.environ.get("JAROKU_MCP_CALL_TIMEOUT_S", "60"))
+
+# Ceiling on what one call may hand back.
+#
+# This bounds what reaches the MODEL and the TRACE, not what the transport reads — an HTTP
+# client has already buffered the response by the time we see it. That is still the boundary
+# that matters: jaroku_interceptor._json_safe faithfully records whatever a tool returns, so
+# an unbounded return is a 10MB step in the trace store, a 10MB line on the event stream, and
+# a context window spent on one hostile answer. Truncation is announced rather than silent,
+# because a quietly cut result reads to the model as a complete one.
+MAX_RESULT_CHARS = int(os.environ.get("JAROKU_MCP_MAX_RESULT_CHARS", "20000"))
+
+# Control characters worth removing: the C0 set except tab and newline, plus DEL and the C1
+# range. They serve no purpose in a tool result and they corrupt the things that render it —
+# a NUL truncates C-string consumers, \r overwrites a terminal line, and an ANSI escape can
+# repaint a whole screen. stdout is already protected by the runner's guard; this protects
+# everything downstream of the trace.
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 _MISSING_DEPS = (
     "The MCP bridge needs the 'mcp' package. Install the connector extras: "
@@ -210,24 +229,82 @@ def describe_exception(exc: BaseException) -> str:
     return "; ".join(seen) if seen else f"{type(exc).__name__}: {exc}"
 
 
-def _result_text(result: Any) -> str:
-    """Flatten an MCP CallToolResult into text for the model."""
-    if getattr(result, "isError", False):
-        raise RuntimeError(f"the server reported an error: {_content_text(result)}")
-    return _content_text(result)
+def sanitize(text: str) -> str:
+    """Make a third-party string safe to put in a trace and hand to a model.
+
+    Strips ANSI escapes and control characters, then caps the length with an explicit note.
+    Never raises: this runs on the return path of every MCP call, and a sanitizer that threw
+    would turn a merely-rude response into a failed step for the wrong reason.
+    """
+    try:
+        cleaned = _ANSI_ESCAPE.sub("", text)
+        cleaned = _CONTROL_CHARS.sub("", cleaned)
+        if len(cleaned) > MAX_RESULT_CHARS:
+            dropped = len(cleaned) - MAX_RESULT_CHARS
+            cleaned = (
+                cleaned[:MAX_RESULT_CHARS]
+                + f"\n\n[truncated by Jaroku: {dropped} more characters were returned]"
+            )
+        return cleaned
+    except Exception:  # noqa: BLE001 - a sanitizer must not be the thing that fails
+        return "[Jaroku could not read this server's response]"
+
+
+def _reported_error(result: Any) -> bool:
+    """Did the server flag its own call as failed?
+
+    Both spellings are checked. The wire field is ``isError``; the Python SDK exposes it as
+    ``is_error`` and has renamed things before. Getting this wrong is silent and expensive:
+    the call comes back looking like an ANSWER, so the trace shows a green successful step
+    whose content is a failure and the model replies to the user from it — exactly the thing
+    rule 7 exists to prevent. Checking both costs one attribute lookup.
+    """
+    for attr in ("is_error", "isError"):
+        if getattr(result, attr, False) is True:
+            return True
+    return False
+
+
+def _result_text(server_id: str, name: str, result: Any) -> str:
+    """Flatten an MCP CallToolResult into framed, bounded text for the model."""
+    body = _content_text(result)
+    if _reported_error(result):
+        # The server said its own call failed. That is a failure, not an answer — rule 7.
+        raise RuntimeError(f"the {server_id} server reported an error: {body[:500]}")
+    return _frame(server_id, name, body)
+
+
+def _frame(server_id: str, name: str, body: str) -> str:
+    """Label the payload as data from a named external source.
+
+    Two purposes, one line. The trace gets unambiguous provenance for a result whose Step
+    carries none. And the model reading it is told, in the same breath, that what follows was
+    written by a third party rather than by Jaroku — worth saying, because a tool result is
+    the obvious place to put "ignore your previous instructions" and this is the only point in
+    the pipeline where that text can be labelled at all.
+    """
+    return f"[mcp:{server_id}/{name} returned the following external data]\n{body}"
 
 
 def _content_text(result: Any) -> str:
     parts: list[str] = []
-    for block in getattr(result, "content", None) or []:
+    blocks = getattr(result, "content", None) or []
+    for block in blocks:
         text = getattr(block, "text", None)
         if isinstance(text, str):
-            parts.append(text)
+            parts.append(sanitize(text))
         else:
             # A non-text block (an image, a resource link) is not something a text-answering
-            # tool can hand a model. Naming its type is more useful than dropping it.
+            # tool can hand a model. Naming its type is more useful than dropping it silently,
+            # and far better than stringifying a blob into the trace.
             parts.append(f"[{getattr(block, 'type', 'unknown')} content omitted]")
-    return "\n".join(parts).strip()
+    joined = "\n".join(parts).strip()
+    if not joined:
+        # A result with no readable content is a result, not a failure — the same distinction
+        # postgres.py draws between "zero rows" and "the query failed".
+        return "(the server returned no readable content)"
+    # Cap again after joining: many small blocks add up to the same problem as one big one.
+    return sanitize(joined)
 
 
 # --- tool construction ------------------------------------------------------
@@ -267,7 +344,7 @@ def _make_tool(server: dict[str, Any], spec: dict[str, Any]) -> StructuredTool:
                 f"MCP call {server_id}/{name} failed: {describe_exception(exc)}"
             ) from exc
 
-        return _result_text(result)
+        return _result_text(server_id, name, result)
 
     description = str(spec.get("description") or f"Tool {name} on the {server_id} MCP server.")
     # Marked in the description because this string is what the MODEL reads when deciding
@@ -311,5 +388,6 @@ __all__ = [
     "load_manifest",
     "check_arguments",
     "describe_exception",
+    "sanitize",
     "ManifestError",
 ]
