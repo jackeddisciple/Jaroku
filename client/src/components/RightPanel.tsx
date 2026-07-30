@@ -1,4 +1,5 @@
-// Tabbed right panel (doc §4.1): Graph · Trace · Evals — one visible at a time, never stacked.
+// Tabbed right panel (doc §4.1): Graph · Trace · Evals · MCP — one visible at a time, never
+// stacked.
 // Trace is the hero and the default. Code is NOT a tab here; it opens as an on-demand overlay
 // (CodeOverlay) from a diff-card row or Cmd+P. Clicking a trace step slides in Step Details
 // over this panel.
@@ -9,12 +10,14 @@ import { useUiStore, type RightTab } from "../store/uiStore.ts";
 import { TraceTimeline } from "./TraceTimeline.tsx";
 import { GraphView } from "./GraphView.tsx";
 import { EvalsPanel } from "./EvalsPanel.tsx";
+import { McpPanel } from "./McpPanel.tsx";
 import { StepDetailPanel } from "./StepDetailPanel.tsx";
 
 const TABS: { id: RightTab; label: string }[] = [
   { id: "graph", label: "Graph" },
   { id: "trace", label: "Trace" },
   { id: "evals", label: "Evals" },
+  { id: "mcp", label: "MCP" },
 ];
 
 export function RightPanel() {
@@ -44,7 +47,10 @@ export function RightPanel() {
         ))}
       </div>
       <div className="flex-1 min-h-0">
-        {tab === "graph" ? <GraphView /> : tab === "evals" ? <EvalsPanel /> : <TraceTimeline />}
+        {tab === "graph" ? <GraphView />
+          : tab === "evals" ? <EvalsPanel />
+          : tab === "mcp" ? <McpPanel />
+          : <TraceTimeline />}
       </div>
 
       {/* Step Details slides in over this panel when a step is expanded. */}

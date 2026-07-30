@@ -60,6 +60,66 @@ export function ShieldCheckIcon(p: P) {
   );
 }
 
+/** lucide:plug — an MCP tool. Discovered from a server nobody here has reviewed. */
+export function PlugIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M12 22v-5" />
+      <path d="M9 8V2" />
+      <path d="M15 8V2" />
+      <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8z" />
+    </>,
+  );
+}
+
+/** lucide:shield-alert — a high-impact tool, gated behind an explicit confirmation. */
+export function ShieldAlertIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+      <path d="M12 8v4" />
+      <path d="M12 16h.01" />
+    </>,
+  );
+}
+
+/** lucide:eye — a read-only tool. Lower friction by design. */
+export function EyeIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+      <circle cx="12" cy="12" r="3" />
+    </>,
+  );
+}
+
+/** lucide:refresh-cw — re-run a server's capability handshake. */
+export function RefreshIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+      <path d="M8 16H3v5" />
+    </>,
+  );
+}
+
+/** lucide:key-round — a stored credential. Presence only; never the value. */
+export function KeyIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" />
+      <circle cx="16.5" cy="7.5" r=".5" fill="currentColor" />
+    </>,
+  );
+}
+
 /** lucide:sparkles — a bespoke tool. About to be written by a model, for this agent only. */
 export function SparklesIcon(p: P) {
   return svg(

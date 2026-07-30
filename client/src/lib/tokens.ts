@@ -27,6 +27,15 @@ export const ACCENT = {
   /** State fields — the agent's shape rather than its capabilities.
    *  Periwinkle; already GraphView's KIND_ACCENT.action. */
   state: "#a5b4fc",
+  /** MCP tools — discovered from a third-party server nobody here has reviewed.
+   *
+   *  Rose, chosen because it is unlike every other accent AND unlike every STATUS colour and
+   *  every GraphView KIND_ACCENT. That distance is the point: this badge's whole job is to
+   *  be unmistakable at a glance, and an accent a user could confuse with "reviewed" teal or
+   *  "pending" amber would fail at exactly the moment it matters. It is deliberately not red
+   *  either — MCP is not an error, and crying wolf on every external tool would teach people
+   *  to stop looking. */
+  mcp: "#f472b6",
 } as const;
 
 export type AccentName = keyof typeof ACCENT;
