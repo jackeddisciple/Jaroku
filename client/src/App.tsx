@@ -7,6 +7,7 @@ import { StatusBar } from "./components/StatusBar.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { TopBar } from "./components/TopBar.tsx";
 import { CodeOverlay } from "./components/CodeOverlay.tsx";
+import { McpConfirmModal } from "./components/McpConfirmModal.tsx";
 import { sendLoadAgentFiles, startSocket } from "./lib/socket.ts";
 import { useBuildStore } from "./store/buildStore.ts";
 import { useTraceStore } from "./store/traceStore.ts";
@@ -52,6 +53,9 @@ export function App() {
       <CommandPalette />
       {/* code opens on demand (diff card / Cmd+P), overlaying the conversation */}
       <CodeOverlay />
+      {/* Mounted last so it sits above everything. A run is halted mid-graph waiting for
+          this answer, on a timer, and nothing else on screen can be more important. */}
+      <McpConfirmModal />
     </div>
   );
 }

@@ -12,7 +12,7 @@
 // is exactly the state a confirmation prompt must never be rendered from.
 
 import { create } from "zustand";
-import type { McpImpact, McpServer, McpTool } from "../types.ts";
+import type { McpConfirmRequest, McpImpact, McpServer, McpTool } from "../types.ts";
 
 /** A tool plus the server it came from, for the flat lists the selection UI needs. */
 export interface McpToolRef extends McpTool {
@@ -30,7 +30,18 @@ interface McpState {
   error: string | null;
   notice: string | null;
 
+  /**
+   * Confirmations a run is blocked on, oldest first.
+   *
+   * A queue rather than a single slot: a graph node can fire several tool calls in one turn,
+   * and each high-impact one blocks independently. Answering them one at a time is the point
+   * — a combined "approve all of these" prompt is a prompt nobody reads.
+   */
+  confirms: McpConfirmRequest[];
+
   setServers: (servers: McpServer[]) => void;
+  addConfirm: (req: McpConfirmRequest) => void;
+  resolveConfirm: (runId: string, nonce: string) => void;
   setDiscovering: (serverId: string | null, endpoint: string) => void;
   setError: (message: string | null) => void;
   setNotice: (message: string | null) => void;
@@ -38,6 +49,7 @@ interface McpState {
 
 export const useMcpStore = create<McpState>((set) => ({
   servers: [],
+  confirms: [],
   discovering: {},
   addingEndpoint: null,
   error: null,
@@ -55,6 +67,16 @@ export const useMcpStore = create<McpState>((set) => ({
         ? { addingEndpoint: endpoint }
         : { discovering: { ...s.discovering, [serverId]: true } },
     ),
+
+  addConfirm: (req) =>
+    set((s) =>
+      // Deduplicated by nonce: a reconnecting client re-reads what it may already hold, and
+      // showing the same question twice would let one of them be answered into a void.
+      s.confirms.some((c) => c.nonce === req.nonce) ? s : { confirms: [...s.confirms, req] },
+    ),
+
+  resolveConfirm: (runId, nonce) =>
+    set((s) => ({ confirms: s.confirms.filter((c) => !(c.runId === runId && c.nonce === nonce)) })),
 
   setError: (error) => set({ error }),
   setNotice: (notice) => set({ notice }),

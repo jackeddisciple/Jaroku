@@ -427,11 +427,35 @@ export interface McpServer {
   tools: McpTool[];
 }
 
+/**
+ * A run has HALTED before a high-impact MCP tool's first call and is waiting for an answer.
+ *
+ * The only message on any channel that describes a blocked process, which is why the client
+ * renders it as a modal rather than a notification.
+ */
+export interface McpConfirmRequest {
+  runId: string;
+  nonce: string;
+  server: string;
+  tool: string;
+  /** Why the tool was classified high-impact — so the ask can be argued with, not just obeyed. */
+  impactReason: string;
+  /** The arguments the model produced, as JSON text. Already capped by the bridge. */
+  args: string;
+  /** Seconds the runner waits before denying. It never allows on timeout. */
+  timeoutS: number;
+  requestedAt: string;
+}
+
+export type McpConfirmVerdict = "once" | "run" | "deny";
+
 export type McpMessage =
   | { channel: "mcp"; type: "servers"; servers: McpServer[] }
   | { channel: "mcp"; type: "discovering"; serverId: string | null; endpoint: string }
   | { channel: "mcp"; type: "error"; message: string; serverId?: string }
-  | { channel: "mcp"; type: "notice"; message: string; serverId?: string };
+  | { channel: "mcp"; type: "notice"; message: string; serverId?: string }
+  | ({ channel: "mcp"; type: "confirmRequest" } & McpConfirmRequest)
+  | { channel: "mcp"; type: "confirmResolved"; runId: string; nonce: string; verdict: string };
 
 // --- server → client channel messages (see server/src/wsRelay.ts) ---
 
@@ -505,7 +529,8 @@ export type ClientCommand =
   | { cmd: "removeMcpServer"; serverId: string }
   | { cmd: "rediscoverMcpServer"; serverId: string }
   | { cmd: "setMcpServerAuth"; serverId: string; token: string | null }
-  | { cmd: "setMcpToolImpact"; serverId: string; toolName: string; impact: McpImpact | null };
+  | { cmd: "setMcpToolImpact"; serverId: string; toolName: string; impact: McpImpact | null }
+  | { cmd: "resolveMcpConfirm"; runId: string; nonce: string; verdict: McpConfirmVerdict };
 
 // Unified composer "explain" subject — what the question is about, built from already-in-memory
 // context (a trace step, a graph node, or the agent generally). No new data is fetched.

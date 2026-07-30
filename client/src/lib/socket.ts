@@ -9,7 +9,8 @@ import { useGraphStore } from "../store/graphStore.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { useMcpStore } from "../store/mcpStore.ts";
 import type {
-  ClientCommand, EvalTarget, ExplainSubject, McpImpact, RubricCriterion, ServerMessage,
+  ClientCommand, EvalTarget, ExplainSubject, McpConfirmVerdict, McpImpact, RubricCriterion,
+  ServerMessage,
 } from "../types.ts";
 
 const WS_URL = import.meta.env.VITE_JAROKU_WS ?? `ws://localhost:4317`;
@@ -140,6 +141,8 @@ function dispatch(msg: ServerMessage): void {
       else if (msg.type === "discovering") m.setDiscovering(msg.serverId, msg.endpoint);
       else if (msg.type === "error") m.setError(msg.message);
       else if (msg.type === "notice") m.setNotice(msg.message);
+      else if (msg.type === "confirmRequest") m.addConfirm(msg);
+      else if (msg.type === "confirmResolved") m.resolveConfirm(msg.runId, msg.nonce);
       break;
     }
     case "reply": {
@@ -308,6 +311,16 @@ export function sendRediscoverMcpServer(serverId: string): void {
 export function sendSetMcpServerAuth(serverId: string, token: string | null): void {
   send({ cmd: "setMcpServerAuth", serverId, token });
 }
+/**
+ * Answer a pending confirmation. The run is blocked until this lands.
+ *
+ * "once" allows this call, "run" allows this tool for the rest of this run and nothing
+ * beyond it, "deny" refuses — and a refusal becomes a red step, never silence.
+ */
+export function sendResolveMcpConfirm(runId: string, nonce: string, verdict: McpConfirmVerdict): void {
+  send({ cmd: "resolveMcpConfirm", runId, nonce, verdict });
+}
+
 /** Override the impact classification for one tool. `null` restores the classifier's call. */
 export function sendSetMcpToolImpact(serverId: string, toolName: string, impact: McpImpact | null): void {
   send({ cmd: "setMcpToolImpact", serverId, toolName, impact });
