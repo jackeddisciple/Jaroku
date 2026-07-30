@@ -18,6 +18,7 @@
     "test:cleanup": "tsx src/evalCleanup.test.ts",
     "test:mcp-impact": "tsx src/mcpImpact.test.ts",
     "test:mcp-client": "tsx src/mcpClient.test.ts",
+    "test:mcp-registry": "tsx src/mcpRegistry.test.ts",
     "mock:mcp": "tsx fixtures/mcp/mockServer.ts"
   },
   "dependencies": {
