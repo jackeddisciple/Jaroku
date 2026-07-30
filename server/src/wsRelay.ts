@@ -125,6 +125,39 @@ export type SaveRubricCommand = {
   criteria: { id: string; label: string; description: string; weight: number }[];
 };
 
+// MCP server management. Control-plane commands like the eval set: they mutate the MCP
+// registry tables and never touch the frozen trace stream. Forwarded to the app rather than
+// answered here because connecting is a network round trip against an unreviewed third
+// party — it can take seconds, fail in four different ways, and the app owns the registry
+// that knows which. `listMcpServers` is the exception and is answered locally, like
+// `listAgents`, because it is a pure read of state already in memory.
+export type AddMcpServerCommand = { cmd: "addMcpServer"; endpoint: string; label?: string };
+export type RemoveMcpServerCommand = { cmd: "removeMcpServer"; serverId: string };
+/** Re-run the handshake. On failure the previously discovered tools are kept. */
+export type RediscoverMcpServerCommand = { cmd: "rediscoverMcpServer"; serverId: string };
+export type ListMcpServersCommand = { cmd: "listMcpServers" };
+/**
+ * A user's explicit override of the impact classification. `impact: null` clears it and
+ * returns the tool to whatever the classifier says.
+ */
+export type SetMcpToolImpactCommand = {
+  cmd: "setMcpToolImpact";
+  serverId: string;
+  toolName: string;
+  impact: "high" | "low" | null;
+};
+
+/** MCP-channel commands, grouped so the forwarding switch stays readable. */
+export type McpCommand =
+  | AddMcpServerCommand
+  | RemoveMcpServerCommand
+  | RediscoverMcpServerCommand
+  | SetMcpToolImpactCommand;
+
+const MCP_COMMANDS = new Set([
+  "addMcpServer", "removeMcpServer", "rediscoverMcpServer", "setMcpToolImpact",
+]);
+
 // Unified composer "explain": a prose answer about a step / node / the agent, built from
 // in-context data — the one genuinely-new composer intent (no code change).
 export type ExplainSubject =
@@ -149,7 +182,9 @@ export type ClientCommand =
   | ResumeRunCommand
   | BranchRunCommand
   | ExplainCommand
-  | EvalCommand;
+  | EvalCommand
+  | McpCommand
+  | ListMcpServersCommand;
 
 /** Eval-channel commands, grouped so the forwarding switch stays readable. */
 export type EvalCommand =
@@ -191,7 +226,8 @@ export type ForwardedCommand =
   | ResumeRunCommand
   | BranchRunCommand
   | ExplainCommand
-  | EvalCommand;
+  | EvalCommand
+  | McpCommand;
 
 // Generation rides its own channel, deliberately parallel to "trace". It never enters the
 // trace store or the event schema — schema/events.md v1 stays frozen.
@@ -285,6 +321,27 @@ export type EvalEvent =
   | { type: "estimate"; estimate: unknown }
   | { type: "error"; message: string; datasetId?: string };
 
+// MCP rides its own channel too, parallel to trace/gen/edit/debug/reply/eval.
+//
+// Like the eval channel it deliberately carries no step traffic: an agent's MCP tool call
+// is an ORDINARY tool_call Step and arrives on "trace" with everything else. What travels
+// here is registry state — which servers are connected, what they advertise, and how each
+// tool was classified.
+//
+// Every mutation answers with a full `servers` snapshot rather than a delta, the same
+// discipline as the eval channel: the client replaces rather than merges, so it can never
+// hold a half-applied view of what a third-party server said.
+//
+// Nothing on this channel ever carries a credential. `configured` says a key is set.
+export type McpEvent =
+  | { type: "servers"; servers: unknown[] }
+  // A handshake is a network round trip against someone else's server; the UI needs to be
+  // able to say it is waiting rather than appear to have ignored the click.
+  | { type: "discovering"; serverId: string | null; endpoint: string }
+  | { type: "error"; message: string; serverId?: string }
+  // A discovery that succeeded but is worth a word anyway (e.g. a truncated tool list).
+  | { type: "notice"; message: string; serverId?: string };
+
 export type DebugEvent =
   | { type: "paused"; runId: string; seq: number }
   | { type: "resumed"; runId: string; seqOffset: number }
@@ -296,12 +353,13 @@ export interface RelayOptions {
   port: number;
   store: TraceStore;
   clientHtmlPath: string;
-  // "loadRun", "listAgents", "loadAgentFiles" and "loadAgentGraph" are answered locally; the
-  // rest are forwarded.
+  // "loadRun", "listAgents", "loadAgentFiles", "loadAgentGraph" and "listMcpServers" are
+  // answered locally; the rest are forwarded.
   onCommand?: (cmd: ForwardedCommand) => void;
   listAgents?: () => unknown[];
   listAgentFiles?: (agentId: string) => unknown[];
   getAgentGraph?: (agentId: string) => Promise<unknown>;
+  listMcpServers?: () => unknown[];
 }
 
 export class WsRelay {
@@ -322,6 +380,7 @@ export class WsRelay {
       // Snapshot: recent runs + the agent list so a reconnecting client isn't blank.
       this.sendTo(ws, { channel: "history", runs: this.store.listRuns() });
       this.sendTo(ws, { channel: "agents", agents: this.opts.listAgents?.() ?? [] });
+      this.sendTo(ws, { channel: "mcp", type: "servers", servers: this.opts.listMcpServers?.() ?? [] });
 
       ws.on("message", (data) => {
         try {
@@ -369,6 +428,12 @@ export class WsRelay {
             this.onCommand?.(msg);
           } else if (msg.cmd === "explain" && typeof msg.agentId === "string" && typeof msg.question === "string") {
             this.onCommand?.(msg);
+          } else if (msg.cmd === "listMcpServers") {
+            this.sendTo(ws, { channel: "mcp", type: "servers", servers: this.opts.listMcpServers?.() ?? [] });
+          } else if (MCP_COMMANDS.has(msg.cmd)) {
+            // Shape-checked in the app, which owns the registry and can answer with a
+            // precise error on the "mcp" channel rather than dropping the message here.
+            this.onCommand?.(msg as McpCommand);
           } else if (EVAL_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the eval store and can answer with a
             // precise error on the "eval" channel rather than dropping the message here.
@@ -469,6 +534,15 @@ export class WsRelay {
   // Trace timeline's focus.
   broadcastEval(event: EvalEvent): void {
     const msg = JSON.stringify({ channel: "eval", ...event });
+    for (const ws of this.clients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+    }
+  }
+
+  // Broadcast an MCP registry event. Separate channel by design — an MCP tool call itself
+  // is an ordinary tool_call Step and still arrives on "trace" like any other.
+  broadcastMcp(event: McpEvent): void {
+    const msg = JSON.stringify({ channel: "mcp", ...event });
     for (const ws of this.clients) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
     }

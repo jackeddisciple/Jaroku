@@ -25,6 +25,7 @@ import {
   WsRelay,
   type ForwardedCommand,
   type GenerateCommand,
+  type McpCommand,
   type PlanAgentCommand,
 } from "./wsRelay.ts";
 import { Generator, type UsageSummary } from "./generator.ts";
@@ -37,6 +38,8 @@ import { introspectGraph, type GraphResult } from "./graphIntrospect.ts";
 import { streamExplain } from "./explainer.ts";
 import type { ExplainCommand } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
+import { McpStore } from "./mcpStore.ts";
+import { McpRegistry } from "./mcpRegistry.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = resolve(__dirname, "..");
@@ -60,6 +63,10 @@ const store = new TraceStore(DB_PATH);
 // (single writer; aggregation JOINs eval_jobs against the frozen `steps` table). Nothing
 // here touches schema/events.md — an eval is a batch of ordinary runs.
 const evalStore = new EvalStore(store.connection());
+// The MCP registry shares the same file and connection for the same reason: additive
+// control-plane tables beside the frozen schema, one writer. An MCP tool call is still an
+// ordinary tool_call Step and still goes through the trace store like everything else.
+const mcpRegistry = new McpRegistry(new McpStore(store.connection()));
 // Slot 0 is the interactive run; the rest are the eval fan-out's. Modest by default —
 // each slot is a Python subprocess with a LangGraph import, and oversubscribing the machine
 // inflates every run's latency, which the comparison dashboard then reports as if it were
@@ -200,6 +207,7 @@ const relay = new WsRelay({
     })),
   listAgentFiles: agentProjectFiles,
   getAgentGraph: agentGraph,
+  listMcpServers: () => mcpRegistry.list(),
   onCommand: (cmd: ForwardedCommand) => {
     if (cmd.cmd === "run") runAgent(cmd.input, cmd.provider, cmd.model, cmd.agentId);
     else if (cmd.cmd === "generate") generateAgent(cmd);
@@ -213,6 +221,7 @@ const relay = new WsRelay({
     else if (cmd.cmd === "resumeRun") resumeRun(cmd.runId);
     else if (cmd.cmd === "branchRun") branchRun(cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState);
     else if (cmd.cmd === "explain") explainAgent(cmd);
+    else if (MCP_COMMAND_NAMES.has(cmd.cmd)) void handleMcpCommand(cmd as McpCommand);
     else handleEvalCommand(cmd);
   },
 });
@@ -266,6 +275,105 @@ evalRunner = new EvalRunner({
     }
   },
 });
+
+// --- MCP: server registry ---------------------------------------------------
+// Control-plane only, on its own channel. Every mutation answers by re-broadcasting the
+// whole server list — the same shape a fresh `listMcpServers` returns — so a client never
+// merges a delta into a view of what an unreviewed third party said.
+//
+// Nothing broadcast here carries a credential: a server reports `configured: true/false`,
+// which is the name of a key being set, and never the value behind it.
+
+const MCP_COMMAND_NAMES = new Set([
+  "addMcpServer", "removeMcpServer", "rediscoverMcpServer", "setMcpToolImpact",
+]);
+
+function broadcastMcpServers(): void {
+  relay.broadcastMcp({ type: "servers", servers: mcpRegistry.list() });
+}
+
+async function handleMcpCommand(cmd: McpCommand): Promise<void> {
+  try {
+    switch (cmd.cmd) {
+      case "addMcpServer": {
+        if (typeof cmd.endpoint !== "string" || !cmd.endpoint.trim()) {
+          relay.broadcastMcp({ type: "error", message: "an endpoint is required" });
+          return;
+        }
+        // A handshake against someone else's server takes as long as it takes. Saying so
+        // is the difference between "connecting" and "the button did nothing".
+        relay.broadcastMcp({ type: "discovering", serverId: null, endpoint: cmd.endpoint });
+        const added = await mcpRegistry.addServer({ endpoint: cmd.endpoint, label: cmd.label });
+        // The endpoint may carry a path or query a user would not want echoed, and the
+        // server's own name is a claim; log the id we assigned and what happened to it.
+        console.log(
+          `[mcp] add ${added.server?.id ?? "?"} — ${added.ok ? `connected, ${added.server?.tools.length ?? 0} tool(s)` : `failed: ${added.server?.status}`}`,
+        );
+        broadcastMcpServers();
+        if (!added.ok && added.message) {
+          relay.broadcastMcp({ type: "error", message: added.message, ...(added.server ? { serverId: added.server.id } : {}) });
+        } else if (added.message && added.server) {
+          relay.broadcastMcp({ type: "notice", message: added.message, serverId: added.server.id });
+        }
+        return;
+      }
+
+      case "rediscoverMcpServer": {
+        if (typeof cmd.serverId !== "string") return;
+        relay.broadcastMcp({
+          type: "discovering",
+          serverId: cmd.serverId,
+          endpoint: mcpRegistry.get(cmd.serverId)?.endpoint ?? "",
+        });
+        const res = await mcpRegistry.rediscover(cmd.serverId);
+        console.log(
+          `[mcp] rediscover ${cmd.serverId} — ${res.ok ? `${res.server?.tools.length ?? 0} tool(s)` : `failed: ${res.server?.status ?? "unknown"}`}`,
+        );
+        broadcastMcpServers();
+        if (!res.ok && res.message) {
+          relay.broadcastMcp({ type: "error", message: res.message, serverId: cmd.serverId });
+        } else if (res.message) {
+          relay.broadcastMcp({ type: "notice", message: res.message, serverId: cmd.serverId });
+        }
+        return;
+      }
+
+      case "removeMcpServer": {
+        if (typeof cmd.serverId !== "string") return;
+        const removed = mcpRegistry.removeServer(cmd.serverId);
+        if (removed) console.log(`[mcp] removed ${cmd.serverId}`);
+        broadcastMcpServers();
+        if (!removed) {
+          relay.broadcastMcp({ type: "error", message: `no server called "${cmd.serverId}"` });
+        }
+        return;
+      }
+
+      case "setMcpToolImpact": {
+        if (typeof cmd.serverId !== "string" || typeof cmd.toolName !== "string") return;
+        const impact = cmd.impact === "high" || cmd.impact === "low" ? cmd.impact : null;
+        const updated = mcpRegistry.setToolImpact(cmd.serverId, cmd.toolName, impact);
+        if (!updated) {
+          relay.broadcastMcp({
+            type: "error",
+            message: `no tool "${cmd.toolName}" on "${cmd.serverId}"`,
+            serverId: cmd.serverId,
+          });
+          return;
+        }
+        console.log(
+          `[mcp] ${cmd.serverId}/${cmd.toolName} impact ${impact ? `overridden to ${impact}` : "override cleared"} (classifier says ${updated.computed_impact})`,
+        );
+        broadcastMcpServers();
+        return;
+      }
+    }
+  } catch (err) {
+    const message = (err as Error)?.message ?? String(err);
+    console.error(`[mcp] ${cmd.cmd} failed: ${message}`);
+    relay.broadcastMcp({ type: "error", message: `${cmd.cmd} failed: ${message}` });
+  }
+}
 
 // --- eval: dataset CRUD -----------------------------------------------------
 // Control-plane only. Every mutation answers by re-broadcasting the affected snapshot on
