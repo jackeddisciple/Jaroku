@@ -9,7 +9,12 @@
 
 import { existsSync, readFileSync } from "node:fs";
 
-function parseLine(line: string): [string, string] | null {
+/**
+ * Exported so envWriter can prove a line it is about to write reads back identically —
+ * against THIS parser rather than a copy of it, which could drift. Note there is no escape
+ * handling here, deliberately: this mirrors env.py, and the two must agree.
+ */
+export function parseLine(line: string): [string, string] | null {
   let text = line.trim();
   if (!text || text.startsWith("#")) return null;
   if (text.startsWith("export ")) text = text.slice("export ".length).trimStart();

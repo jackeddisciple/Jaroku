@@ -16,6 +16,7 @@
     "test:retry": "tsx src/evalRetry.test.ts",
     "test:judge": "tsx src/judge/rubric.test.ts",
     "test:cleanup": "tsx src/evalCleanup.test.ts",
+    "test:env-writer": "tsx src/envWriter.test.ts",
     "test:mcp-impact": "tsx src/mcpImpact.test.ts",
     "test:mcp-client": "tsx src/mcpClient.test.ts",
     "test:mcp-registry": "tsx src/mcpRegistry.test.ts",

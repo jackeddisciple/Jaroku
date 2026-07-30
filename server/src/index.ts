@@ -40,6 +40,7 @@ import type { ExplainCommand } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { McpStore } from "./mcpStore.ts";
 import { McpRegistry } from "./mcpRegistry.ts";
+import { fileCredentialWriter } from "./envWriter.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = resolve(__dirname, "..");
@@ -66,7 +67,13 @@ const evalStore = new EvalStore(store.connection());
 // The MCP registry shares the same file and connection for the same reason: additive
 // control-plane tables beside the frozen schema, one writer. An MCP tool call is still an
 // ordinary tool_call Step and still goes through the trace store like everything else.
-const mcpRegistry = new McpRegistry(new McpStore(store.connection()));
+//
+// The credential writer is the only thing in the process that writes runtime/.env. It logs
+// key names, never values, exactly as loadRuntimeEnv does when reading them back.
+const mcpRegistry = new McpRegistry(
+  new McpStore(store.connection()),
+  fileCredentialWriter(join(RUNTIME_DIR, ".env")),
+);
 // Slot 0 is the interactive run; the rest are the eval fan-out's. Modest by default —
 // each slot is a Python subprocess with a LangGraph import, and oversubscribing the machine
 // inflates every run's latency, which the comparison dashboard then reports as if it were
@@ -286,6 +293,7 @@ evalRunner = new EvalRunner({
 
 const MCP_COMMAND_NAMES = new Set([
   "addMcpServer", "removeMcpServer", "rediscoverMcpServer", "setMcpToolImpact",
+  "setMcpServerAuth",
 ]);
 
 function broadcastMcpServers(): void {
@@ -303,7 +311,11 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         // A handshake against someone else's server takes as long as it takes. Saying so
         // is the difference between "connecting" and "the button did nothing".
         relay.broadcastMcp({ type: "discovering", serverId: null, endpoint: cmd.endpoint });
-        const added = await mcpRegistry.addServer({ endpoint: cmd.endpoint, label: cmd.label });
+        const added = await mcpRegistry.addServer({
+          endpoint: cmd.endpoint,
+          label: cmd.label,
+          token: cmd.token,
+        });
         // The endpoint may carry a path or query a user would not want echoed, and the
         // server's own name is a claim; log the id we assigned and what happened to it.
         console.log(
@@ -345,6 +357,28 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         broadcastMcpServers();
         if (!removed) {
           relay.broadcastMcp({ type: "error", message: `no server called "${cmd.serverId}"` });
+        }
+        return;
+      }
+
+      case "setMcpServerAuth": {
+        if (typeof cmd.serverId !== "string") return;
+        const token = typeof cmd.token === "string" && cmd.token.length ? cmd.token : null;
+        const { result, warning } = mcpRegistry.setCredential(cmd.serverId, token);
+        if (!result.ok) {
+          relay.broadcastMcp({ type: "error", message: result.message ?? "could not store the credential", serverId: cmd.serverId });
+          return;
+        }
+        // Log that a credential changed, never which value it changed to.
+        console.log(`[mcp] ${cmd.serverId} credential ${token ? "set" : "cleared"}`);
+        // A stored credential is only useful if it works, so prove it immediately rather
+        // than leaving the server sitting in auth_required until someone clicks refresh.
+        relay.broadcastMcp({ type: "discovering", serverId: cmd.serverId, endpoint: result.server?.endpoint ?? "" });
+        const retried = await mcpRegistry.rediscover(cmd.serverId);
+        broadcastMcpServers();
+        if (warning) relay.broadcastMcp({ type: "notice", message: warning, serverId: cmd.serverId });
+        if (!retried.ok && retried.message) {
+          relay.broadcastMcp({ type: "error", message: retried.message, serverId: cmd.serverId });
         }
         return;
       }

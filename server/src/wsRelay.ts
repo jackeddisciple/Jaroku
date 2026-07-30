@@ -131,7 +131,20 @@ export type SaveRubricCommand = {
 // party — it can take seconds, fail in four different ways, and the app owns the registry
 // that knows which. `listMcpServers` is the exception and is answered locally, like
 // `listAgents`, because it is a pure read of state already in memory.
-export type AddMcpServerCommand = { cmd: "addMcpServer"; endpoint: string; label?: string };
+export type AddMcpServerCommand = {
+  cmd: "addMcpServer";
+  endpoint: string;
+  label?: string;
+  /**
+   * A bearer token or API key, if the server needs one.
+   *
+   * This is the only field on any command in this file that carries a secret. It travels
+   * one way — browser to server, over the loopback socket the whole product runs on — and
+   * is written to runtime/.env and forgotten. Nothing ever sends it back: a server reports
+   * `configured: true`, never its credential. See envWriter.ts.
+   */
+  token?: string;
+};
 export type RemoveMcpServerCommand = { cmd: "removeMcpServer"; serverId: string };
 /** Re-run the handshake. On failure the previously discovered tools are kept. */
 export type RediscoverMcpServerCommand = { cmd: "rediscoverMcpServer"; serverId: string };
@@ -147,15 +160,24 @@ export type SetMcpToolImpactCommand = {
   impact: "high" | "low" | null;
 };
 
+/** Set or clear a server's credential. `token: null` removes the key entirely. */
+export type SetMcpServerAuthCommand = {
+  cmd: "setMcpServerAuth";
+  serverId: string;
+  token: string | null;
+};
+
 /** MCP-channel commands, grouped so the forwarding switch stays readable. */
 export type McpCommand =
   | AddMcpServerCommand
   | RemoveMcpServerCommand
   | RediscoverMcpServerCommand
-  | SetMcpToolImpactCommand;
+  | SetMcpToolImpactCommand
+  | SetMcpServerAuthCommand;
 
 const MCP_COMMANDS = new Set([
   "addMcpServer", "removeMcpServer", "rediscoverMcpServer", "setMcpToolImpact",
+  "setMcpServerAuth",
 ]);
 
 // Unified composer "explain": a prose answer about a step / node / the agent, built from

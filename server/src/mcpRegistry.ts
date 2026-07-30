@@ -8,10 +8,11 @@
 //
 // What this module deliberately does NOT do:
 //
-//   * It never reads a credential VALUE into any structure that leaves it. Tokens are
-//     fetched from the environment at the moment a request is made, handed to the client as
-//     an argument, and never stored, logged, returned or serialised. The registry knows
-//     only whether a key is set — `configured: true` — which is the most a UI ever needs.
+//   * It never reads a credential VALUE into any structure that leaves it. A token the user
+//     enters is handed straight to the credential writer; from then on it is fetched from
+//     the environment at the moment a request is made, passed as an argument, and never
+//     stored, logged, returned or serialised. The registry knows only whether a key is set —
+//     `configured` — which is the most a UI ever needs.
 //
 //   * It never lets a failed refresh destroy a working tool list. See rediscover().
 //
@@ -20,6 +21,7 @@
 //     still stops for a confirmation.
 
 import { discover, type DiscoveryResult } from "./mcpClient.ts";
+import { authEnvKeyFor, type CredentialWriter } from "./envWriter.ts";
 import { classify } from "./mcpImpact.ts";
 import {
   McpStore,
@@ -55,8 +57,9 @@ export interface McpToolView {
 
 export interface McpServerView extends McpServer {
   /**
-   * Whether this server's credential is present in the environment. NEVER the value — the
-   * client is told that a key is set and nothing more.
+   * Whether a credential is STORED for this server — that a named environment variable is
+   * set, never what is in it. False also means "none stored", which for a public server is
+   * perfectly fine; `status` is what says whether the server is usable.
    */
   configured: boolean;
   tools: McpToolView[];
@@ -107,21 +110,39 @@ export interface AddServerOptions {
   id?: string;
   /** The NAME of the env var holding this server's credential. Never a value. */
   authEnvKey?: string | null;
+  /**
+   * A bearer token or API key the user just entered.
+   *
+   * Used once, to write the env var and to make the first handshake, then forgotten. It is
+   * never stored on the server row, never returned, and never logged — see envWriter.ts.
+   */
+  token?: string | null;
 }
 
 export class McpRegistry {
-  constructor(private store: McpStore) {}
+  /**
+   * The credential writer is injected rather than imported so this module never decides
+   * where secrets live, and so a test can register a server without touching a real .env.
+   * When it is absent, a server needing a credential can still be registered — it will
+   * simply report `configured: false` until the key is set some other way.
+   */
+  constructor(private store: McpStore, private credentials?: CredentialWriter) {}
 
   // --- reads -----------------------------------------------------------------
 
   /**
-   * Credential presence, by name only.
+   * Whether a credential is stored for this server. By name only — never the value.
+   *
+   * Deliberately NOT "this server is fine": a server with no credential and no need for one
+   * reports false, and reads as fine because its status is `connected`. Conflating the two
+   * would have a server sitting in `auth_required` also claiming to be configured, which is
+   * precisely the state a user is trying to get out of.
    *
    * runtime/.env is loaded into process.env at startup by the same loader every other key
    * goes through (env.ts), so this is a presence check and never a file read.
    */
   private configured(server: McpServer): boolean {
-    if (!server.auth_env_key) return true; // needs none
+    if (!server.auth_env_key) return false;
     return Boolean(process.env[server.auth_env_key]);
   }
 
@@ -200,7 +221,22 @@ export class McpRegistry {
     }
     const id = opts.id ?? uniqueServerId(this.store, requested);
     const label = opts.label?.trim() || id;
-    const authEnvKey = opts.authEnvKey ?? null;
+
+    // A token the user just typed is written to runtime/.env under a derived name, then
+    // forgotten. From here on the value is only ever read back out of the environment, so
+    // there is exactly one place in the codebase holding it and it is not this one.
+    let authEnvKey = opts.authEnvKey ?? null;
+    let credentialWarning: string | null = null;
+    if (opts.token) {
+      authEnvKey = authEnvKey ?? authEnvKeyFor(id);
+      if (this.credentials) {
+        const written = this.credentials.set(authEnvKey, opts.token);
+        if (!written.ok) {
+          return { ok: false, server: null, message: written.warning ?? "could not store the credential" };
+        }
+        credentialWarning = written.warning;
+      }
+    }
 
     const result = await discover({
       endpoint,
@@ -225,7 +261,7 @@ export class McpRegistry {
         last_error: result.error,
         discovered_at: null,
       });
-      return { ok: false, server: this.get(id), message: result.error };
+      return { ok: false, server: this.get(id), message: joinMessages(credentialWarning, result.error) };
     }
 
     this.store.upsertServer({
@@ -239,7 +275,7 @@ export class McpRegistry {
     });
     this.store.replaceTools(id, this.classifyAll(result));
 
-    return { ok: true, server: this.get(id), message: truncationNote(result) };
+    return { ok: true, server: this.get(id), message: joinMessages(credentialWarning, truncationNote(result)) };
   }
 
   /**
@@ -284,11 +320,36 @@ export class McpRegistry {
     return updated ? this.viewTool(updated) : null;
   }
 
-  /** Records the env var NAME for a server. See envWriter.ts for the value. */
-  setAuthEnvKey(id: string, envKey: string | null): McpServerView | null {
-    if (!this.store.getServer(id)) return null;
-    this.store.setServerAuthEnvKey(id, envKey);
-    return this.get(id);
+  /**
+   * Store (or clear) a server's credential.
+   *
+   * The value goes straight to the credential writer and is not retained here; the registry
+   * records only the NAME of the key it went under. Passing null removes the key from
+   * runtime/.env and from this process, so "disconnect this credential" is a real action
+   * rather than an orphaned line in a file.
+   */
+  setCredential(id: string, token: string | null): { result: RegistrationResult; warning: string | null } {
+    const server = this.store.getServer(id);
+    if (!server) {
+      return { result: { ok: false, server: null, message: `no server called "${id}"` }, warning: null };
+    }
+    const key = server.auth_env_key ?? authEnvKeyFor(id);
+
+    if (token === null) {
+      this.credentials?.clear(key);
+      this.store.setServerAuthEnvKey(id, null);
+      return { result: { ok: true, server: this.get(id), message: null }, warning: null };
+    }
+
+    const written = this.credentials?.set(key, token) ?? { ok: true, warning: null };
+    if (!written.ok) {
+      return {
+        result: { ok: false, server: this.get(id), message: written.warning ?? "could not store the credential" },
+        warning: null,
+      };
+    }
+    this.store.setServerAuthEnvKey(id, key);
+    return { result: { ok: true, server: this.get(id), message: null }, warning: written.warning };
   }
 
   private classifyAll(result: Extract<DiscoveryResult, { ok: true }>): DiscoveredTool[] {
@@ -308,6 +369,12 @@ export class McpRegistry {
       };
     });
   }
+}
+
+/** Two things can be worth saying at once; neither should hide the other. */
+function joinMessages(...parts: (string | null)[]): string | null {
+  const kept = parts.filter((p): p is string => Boolean(p));
+  return kept.length ? kept.join(" ") : null;
 }
 
 /** A successful discovery that lost tools to a cap is still worth saying out loud. */

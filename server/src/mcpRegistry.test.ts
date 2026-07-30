@@ -46,7 +46,11 @@ const registry = new McpRegistry(new McpStore(trace.connection()));
   check("status is connected", server.status === "connected");
   check("the whole discovered list is stored", server.tools.length === 8, `${server.tools.length}`);
   check("discovery is timestamped", server.discovered_at !== null);
-  check("a server needing no credential counts as configured", server.configured === true);
+  // `configured` reports whether a credential is STORED, not whether the server is happy.
+  // A public server has none and is still connected; conflating the two would leave a
+  // server in auth_required also claiming to be configured.
+  check("a server with no stored credential reports configured: false", server.configured === false);
+  check("...and is usable anyway, which is what status says", server.status === "connected");
 
   // The discovered list is what the user reviews, so it has to carry the classification
   // AND the argument for it — a bare "high" is not something anyone can disagree with.
