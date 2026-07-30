@@ -150,6 +150,11 @@ export class Editor extends EventEmitter<EditorEvents> {
       // model can never introduce a file masquerading as a reviewed template.
       const blocked = readOnlyPaths(all.map((c) => `tools/${c.file}`));
 
+      // Read before the model touches anything: whether THIS agent already survives a raising tool.
+      const hadToolErrorHandling = /handle_tool_errors\s*=\s*True/.test(
+        readFileSync(join(target, "agent.py"), "utf8"),
+      );
+
       copyProject(target, staging);
 
       const editable = listProjectFiles(target, installedFiles).filter((f) => !f.readOnly);
@@ -230,6 +235,10 @@ export class Editor extends EventEmitter<EditorEvents> {
         runtimeDir,
         connectorFiles: installedFiles,
         connectorToolNames: installed.flatMap((c) => c.tools.map((t) => t.name)),
+        // Don't-regress, not a new requirement: only demanded of an agent that already had it.
+        // Agents generated before the connector templates started raising carry swallowing copies
+        // of those templates, are internally consistent, and must stay editable.
+        requireToolErrorHandling: hadToolErrorHandling,
       });
       if (!result.ok) {
         rmSync(staging, { recursive: true, force: true });

@@ -19,6 +19,21 @@ Environment:
     GMAIL_CLIENT_ID
     GMAIL_CLIENT_SECRET
     GMAIL_REFRESH_TOKEN
+
+A tool that could not do its job raises. It does not return the reason as if it were an answer.
+
+That distinction is the whole point of the trace: LangChain records a returned string as a
+successful tool call, so a template that caught "not configured" and returned the message produced
+a green, successful-looking step whose content happened to be an error — and the model, seeing a
+normal tool result, treated the text as data and answered the user from it. The failure was
+invisible in exactly the place built to make failures visible.
+
+Raising instead means the callback layer sees on_tool_error (the step goes red) and LangGraph's
+ToolNode, configured with handle_tool_errors=True, still hands the message to the model as an
+error-flagged ToolMessage. Nothing is hidden from the model and nothing is hidden from the trace.
+
+Returning is still right for "the tool ran and the answer is empty" — no messages matched, zero
+rows. That is a result, not a failure.
 """
 
 from __future__ import annotations
@@ -116,10 +131,10 @@ def gmail_search(query: str, max_results: int = 10) -> str:
                 f"  snippet: {msg.get('snippet', '')}"
             )
         return f"{len(lines)} message(s) matching {query!r}:\n" + "\n".join(lines)
-    except RuntimeError as exc:
-        return str(exc)
+    except RuntimeError:
+        raise  # not configured, or a missing dependency — a failure, not an answer
     except Exception as exc:
-        return f"Gmail search failed: {type(exc).__name__}: {exc}"
+        raise RuntimeError(f"Gmail search failed: {type(exc).__name__}: {exc}") from exc
 
 
 @tool
@@ -162,10 +177,10 @@ def gmail_create_draft(to: str, subject: str, body: str, reply_to_message_id: st
             f"Draft created (id={draft.get('id')}) to {to} with subject {subject!r}. "
             "It has NOT been sent — review and send it from Gmail."
         )
-    except RuntimeError as exc:
-        return str(exc)
+    except RuntimeError:
+        raise  # not configured, or a missing dependency — a failure, not an answer
     except Exception as exc:
-        return f"Creating the draft failed: {type(exc).__name__}: {exc}"
+        raise RuntimeError(f"Creating the draft failed: {type(exc).__name__}: {exc}") from exc
 
 
 TEMPLATE_TOOLS = [gmail_search, gmail_create_draft]

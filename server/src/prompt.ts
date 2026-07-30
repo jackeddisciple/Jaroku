@@ -67,7 +67,9 @@ def build_graph(llm):
 
     graph = StateGraph(AgentState)
     graph.add_node("agent", call_model)
-    graph.add_node("tools", ToolNode(TOOLS))
+    # handle_tool_errors=True is required (rule 7): a tool that raises is reported to the model
+    # as an error-flagged result and traced as a failed step, instead of ending the run.
+    graph.add_node("tools", ToolNode(TOOLS, handle_tool_errors=True))
     graph.add_node("record_note", record_note)
     graph.add_edge(START, "agent")
     graph.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
@@ -138,9 +140,14 @@ const HARD_RULES = `HARD RULES:
 5. The graph MUST terminate. Every conditional edge needs a path to END.
 6. Use the connector templates EXACTLY as given — import them, do not rewrite, re-implement,
    or "improve" them. Their files are placed into the project for you; do NOT emit them.
-7. Tools return strings. On an expected failure (bad input, API 4xx, empty result) RETURN a
-   clear error string; do not raise. Let genuine programming errors raise — they become
-   traced errors.
+7. Tools return strings, and the string is an ANSWER. If the tool could not do its job — not
+   configured, dependency missing, API error, request rejected — RAISE RuntimeError with an
+   actionable message. Do NOT return the reason as if it were a result: a returned string is
+   recorded as a SUCCESSFUL tool call, so the trace shows a green step whose content is an
+   error and the model answers the user from it. Return normally only when the tool ran and the
+   answer is genuinely empty ("no rows", "no messages matched"). Build the tool node as
+   ToolNode(TOOLS, handle_tool_errors=True) so a raise is reported to the model as an error
+   instead of ending the run.
 8. Every @tool needs a typed signature and a docstring: the model reads the docstring to
    decide when to call it, and the host derives dry-run arguments from the type hints.
 9. NEVER call one @tool from inside another. A decorated tool is a StructuredTool object,

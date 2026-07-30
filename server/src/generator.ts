@@ -156,6 +156,8 @@ export class Generator extends EventEmitter<GeneratorEvents> {
         // Connector tools are real tool objects too — calling one directly crashes the
         // same way, so they must be part of the "do not call directly" set.
         connectorToolNames: selected.flatMap((c) => c.tools.map((t) => t.name)),
+        // Fresh project: the connector templates raise, so the tool node has to survive a raise.
+        requireToolErrorHandling: true,
       });
       if (!result.ok) {
         rmSync(staging, { recursive: true, force: true });

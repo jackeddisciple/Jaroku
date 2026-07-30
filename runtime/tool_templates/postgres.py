@@ -18,6 +18,21 @@ on. Grant the connection's role SELECT-only privileges for a third layer.
 
 Environment:
     DATABASE_URL   postgresql://user:pass@host:5432/dbname
+
+A tool that could not do its job raises. It does not return the reason as if it were an answer.
+
+That distinction is the whole point of the trace: LangChain records a returned string as a
+successful tool call, so a template that caught "not configured" and returned the message produced
+a green, successful-looking step whose content happened to be an error — and the model, seeing a
+normal tool result, treated the text as data and answered the user from it. The failure was
+invisible in exactly the place built to make failures visible.
+
+Raising instead means the callback layer sees on_tool_error (the step goes red) and LangGraph's
+ToolNode, configured with handle_tool_errors=True, still hands the message to the model as an
+error-flagged ToolMessage. Nothing is hidden from the model and nothing is hidden from the trace.
+
+Returning is still right for "the tool ran and the answer is empty" — no messages matched, zero
+rows. That is a result, not a failure.
 """
 
 from __future__ import annotations
@@ -80,20 +95,22 @@ def pg_query(sql: str) -> str:
     """
     url = os.environ.get("DATABASE_URL")
     if not url:
-        return "Postgres is not configured: DATABASE_URL is not set in the environment."
+        raise RuntimeError("Postgres is not configured: DATABASE_URL is not set in the environment.")
 
     try:
         cleaned = assert_read_only(sql)
     except UnsafeQuery as exc:
-        return f"Query rejected: {exc}"
+        # The guard doing its job is still a call that produced no rows, and a blocked write is
+        # the single most worth-seeing event in a trace. It goes red.
+        raise RuntimeError(f"Query rejected: {exc}") from exc
 
     try:
         import psycopg
-    except ImportError:
-        return (
+    except ImportError as exc:
+        raise RuntimeError(
             "The Postgres connector needs the 'psycopg' package. Install the connector "
             "extras: uv sync --extra connectors"
-        )
+        ) from exc
 
     try:
         with psycopg.connect(url, connect_timeout=10) as conn:
@@ -107,8 +124,8 @@ def pg_query(sql: str) -> str:
                 columns = [d[0] for d in cur.description]
                 rows = cur.fetchmany(MAX_ROWS)
     except Exception as exc:
-        # Connection refused, bad SQL, timeout, permission denied — all actionable.
-        return f"Query failed: {type(exc).__name__}: {exc}"
+        # Connection refused, bad SQL, timeout, permission denied — all actionable, all failures.
+        raise RuntimeError(f"Query failed: {type(exc).__name__}: {exc}") from exc
 
     if not rows:
         return "Query returned 0 rows."

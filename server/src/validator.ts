@@ -25,6 +25,9 @@ const CONTRACT_CHECKS: Array<{ re: RegExp; missing: string }> = [
 const BARE_PRINT = /(^|[^.\w])print\s*\((?![^)]*\bfile\s*=)/;
 const JAROKU_IMPORT = /^\s*(from|import)\s+jaroku/m;
 const MODEL_IMPORT = /^\s*from\s+langchain_(anthropic|openai)\s+import/m;
+// ToolNode(...) anywhere, and whether it was given handle_tool_errors.
+const TOOL_NODE = /ToolNode\s*\(/;
+const TOOL_ERRORS_HANDLED = /ToolNode\s*\([^)]*handle_tool_errors\s*=\s*True/s;
 const ENV_KEY = /os\.environ(?:\.get)?\s*[[(]\s*["']([A-Z0-9_]+)["']/g;
 
 function pythonFiles(dir: string, base = dir): string[] {
@@ -248,7 +251,25 @@ print(json.dumps(problems))
 
 export async function validateProject(
   projectDir: string,
-  opts: { runtimeDir: string; connectorFiles: string[]; connectorToolNames?: string[] },
+  opts: {
+    runtimeDir: string;
+    connectorFiles: string[];
+    connectorToolNames?: string[];
+    /**
+     * Require ToolNode(..., handle_tool_errors=True) (rule 7).
+     *
+     * The connector templates raise when they cannot do their job, so the trace can show a failed
+     * step instead of a green one containing an error. Without this argument on the tool node, that
+     * raise ends the whole run — so the two halves have to ship together, and this is the half a
+     * model could forget.
+     *
+     * Set on generation, where the project is being written fresh. On an edit it is set only when
+     * the agent ALREADY had it, which makes this a don't-regress check: agents generated before
+     * the templates started raising still have swallowing copies of those templates, are
+     * internally consistent, and must stay editable.
+     */
+    requireToolErrorHandling?: boolean;
+  },
 ): Promise<ValidationResult> {
   const problems: string[] = [];
 
@@ -261,6 +282,12 @@ export async function validateProject(
   // --- the contract ---------------------------------------------------------
   for (const { re, missing } of CONTRACT_CHECKS) {
     if (!re.test(agentSrc)) problems.push(`agent.py is missing ${missing}`);
+  }
+  if (opts.requireToolErrorHandling && TOOL_NODE.test(agentSrc) && !TOOL_ERRORS_HANDLED.test(agentSrc)) {
+    problems.push(
+      "agent.py builds ToolNode without handle_tool_errors=True — a tool that raises would end " +
+        "the run instead of being reported to the model as a failed call (rule 7)",
+    );
   }
   // TOOLS may be imported from .tools rather than defined inline.
   if (!/\bTOOLS\b/.test(agentSrc)) problems.push("agent.py never references TOOLS");

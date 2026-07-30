@@ -59,4 +59,55 @@ def check_catalog() -> list[str]:
     return problems
 
 
-__all__ = ["CATALOG", "CONNECTORS", "required_env", "check_catalog"]
+def check_failures_raise() -> list[str]:
+    """Verify every template tool RAISES when its connector is not configured.
+
+    This is the check for the defect that made a misconfigured agent look like a working one. A
+    template that *returned* "Gmail is not configured" produced a successful tool call: the trace
+    drew a green step, and the model — handed a normal-looking tool result — answered the user out
+    of the error text. The one thing the trace exists to show was the one thing it hid.
+
+    Returns a list of problems (empty = good). Runs with the connector variables stripped from the
+    environment, so it is safe to call on a configured machine.
+    """
+    import importlib
+    import os
+
+    problems: list[str] = []
+    stripped = {k: os.environ.pop(k, None) for k in required_env(list(CONNECTORS))}
+    try:
+        for cid, entry in CONNECTORS.items():
+            module = importlib.import_module(f"{__name__}.{entry['module']}")
+            for t in getattr(module, "TEMPLATE_TOOLS", []):
+                try:
+                    result = t.invoke(_sample_args(t))
+                except Exception:
+                    continue  # raised, which is the point
+                problems.append(
+                    f"{cid}.{t.name} returned {result!r} while unconfigured — it must raise, "
+                    "or the trace records a failed call as a successful one"
+                )
+    finally:
+        for k, v in stripped.items():
+            if v is not None:
+                os.environ[k] = v
+    return problems
+
+
+def _sample_args(tool) -> dict:
+    """Minimal valid-looking arguments for a template tool, from its own schema."""
+    schema = tool.args
+    out: dict = {}
+    for name, spec in schema.items():
+        kind = spec.get("type")
+        out[name] = 1 if kind == "integer" else ("SELECT 1" if name == "sql" else "x")
+    return out
+
+
+__all__ = [
+    "CATALOG",
+    "CONNECTORS",
+    "required_env",
+    "check_catalog",
+    "check_failures_raise",
+]
