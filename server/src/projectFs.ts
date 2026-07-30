@@ -27,7 +27,19 @@ export interface ProjectFile {
 
 // Files the edit model may never rewrite: host-owned metadata and the package marker.
 // Connector files are read-only too, but are resolved per-project (see readOnlyPaths).
-const HOST_OWNED = new Set(["jaroku.json", "__init__.py"]);
+//
+// mcp_tools.json and tools/mcp_bridge.py are here unconditionally rather than per-project,
+// on purpose. The manifest is the entire grant for an agent's MCP access, and the bridge is
+// the reviewed code that honours it — an edit that could rewrite either could widen the
+// agent's reach into a third-party system without anyone approving it. Listing them always,
+// installed or not, also means the model cannot introduce a file masquerading as one, the
+// same reason the connector block list covers every catalogue filename.
+const HOST_OWNED = new Set([
+  "jaroku.json",
+  "__init__.py",
+  "mcp_tools.json",
+  join("tools", "mcp_bridge.py"),
+]);
 
 // What counts as project text worth showing/editing. Everything else (pyc, caches) is noise.
 const TEXT_EXTENSIONS = new Set([".py", ".md", ".json", ".toml", ".txt"]);

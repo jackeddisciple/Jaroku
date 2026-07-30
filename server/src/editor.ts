@@ -24,6 +24,7 @@ import { FileProtocolParser, type ProtocolEvent } from "./fileProtocol.ts";
 import { agentsDir, replayFixture, safeRelativePath } from "./generator.ts";
 import { atomicSwap, copyProject, isSafeAgentId, listProjectFiles, readOnlyPaths } from "./projectFs.ts";
 import { buildEditSystemPrompt, buildEditUserPrompt } from "./prompt.ts";
+import type { McpToolView } from "./mcpRegistry.ts";
 import { validateProject } from "./validator.ts";
 
 export const EDIT_MODEL = process.env.JAROKU_EDIT_MODEL ?? "claude-haiku-4-5";
@@ -82,6 +83,13 @@ export interface EditorOptions {
   /** Returns a refusal message when the project must not be mutated right now (e.g. a run
    *  of it is in flight), or null when mutation is fine. */
   canMutate?: () => string | null;
+  /**
+   * The MCP tools an agent is scoped to, for the edit prompt.
+   *
+   * Injected rather than read here, so this module keeps its single dependency on the
+   * connector catalogue and does not grow one on the MCP registry.
+   */
+  mcpTools?: (agentId: string) => McpToolView[];
 }
 
 function historyDir(runtimeDir: string, agentId: string): string {
@@ -148,6 +156,9 @@ export class Editor extends EventEmitter<EditorEvents> {
       const installedFiles = installed.map((c) => `tools/${c.file}`);
       // The emit-block covers every catalog connector filename, installed or not, so the
       // model can never introduce a file masquerading as a reviewed template.
+      // readOnlyPaths also covers mcp_tools.json and tools/mcp_bridge.py unconditionally
+      // (projectFs.ts) — the manifest is this agent's entire MCP grant, and an edit able to
+      // rewrite it could widen the agent's reach with nobody approving it.
       const blocked = readOnlyPaths(all.map((c) => `tools/${c.file}`));
 
       // Read before the model touches anything: whether THIS agent already survives a raising tool.
@@ -168,11 +179,20 @@ export class Editor extends EventEmitter<EditorEvents> {
           const safe = safeRelativePath(staging, event.path);
           if (!safe) throw new Error(`refusing unsafe path: ${event.path}`);
           if (blocked.has(safe)) {
+            // Each message names the right next move rather than just refusing. The MCP
+            // pair gets its own, because "ask for a wrapper" is the wrong advice for a
+            // manifest — the fix there is to change the agent's scope, which is a decision
+            // the user makes in the MCP panel, not one an edit should be able to make.
+            const isMcp = safe === "mcp_tools.json" || safe === "tools/mcp_bridge.py";
             throw new Error(
-              safe.startsWith("tools/")
-                ? `${safe} is a reviewed connector template and cannot be edited — ` +
-                  `ask for a wrapper tool that adapts its results instead`
-                : `${safe} is host-owned and read-only`,
+              isMcp
+                ? `${safe} is host-owned and read-only — it is what scopes this agent's ` +
+                  `access to third-party MCP servers. Change the selection in the MCP panel ` +
+                  `and re-generate to give it different tools.`
+                : safe.startsWith("tools/")
+                  ? `${safe} is a reviewed connector template and cannot be edited — ` +
+                    `ask for a wrapper tool that adapts its results instead`
+                  : `${safe} is host-owned and read-only`,
             );
           }
           buffers.set(event.path, "");
@@ -205,7 +225,13 @@ export class Editor extends EventEmitter<EditorEvents> {
       } else {
         const raw = await this.streamEdit(
           all,
-          { agentId, instruction, files: editable, connectors: installed, history: recent },
+          {
+            agentId, instruction, files: editable, connectors: installed,
+            // The scoped set, so an edit can wire an existing MCP tool into a new wrapper
+            // without being able to reach for one this agent was never granted.
+            mcpTools: this.opts.mcpTools?.(agentId) ?? [],
+            history: recent,
+          },
           (chunk) => parser.push(chunk),
           (u) => (usage = u),
         );
@@ -417,6 +443,7 @@ export class Editor extends EventEmitter<EditorEvents> {
       instruction: string;
       files: { path: string; content: string }[];
       connectors: Connector[];
+      mcpTools: McpToolView[];
       history: { instruction: string; summary: string }[];
     },
     onChunk: (text: string) => void,

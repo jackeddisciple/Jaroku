@@ -12,6 +12,14 @@ export interface AgentSummary {
   name: string;
   description: string;
   connectors: string[];
+  /**
+   * `"server/tool"` refs this agent is scoped to, from its manifest.
+   *
+   * Carried to the client so an MCP-sourced tool can be marked in the plan card, the graph
+   * and the trace. The frozen Step schema has no provenance field and must not grow one, so
+   * a trace badge is derived by joining this against the step's tool name.
+   */
+  mcp_tools: string[];
   required_env: string[];
   default_provider: string;
   created_at: string | null;
@@ -44,6 +52,7 @@ export function listAgents(runtimeDir: string): AgentSummary[] {
       name: meta.name ?? entry,
       description: meta.description ?? "",
       connectors: meta.connectors ?? [],
+      mcp_tools: meta.mcp_tools ?? [],
       required_env: meta.required_env ?? [],
       default_provider: meta.default_provider ?? "fake",
       created_at: meta.created_at ?? null,

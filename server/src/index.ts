@@ -750,6 +750,7 @@ function generateAgent(cmd: GenerateCommand): void {
   // after planning). Building what was approved is the whole point of the gate.
   let plan: string | undefined;
   let planUsage: UsageSummary | undefined;
+  let mcpRefs: string[] = cmd.mcpTools ?? [];
   let { prompt, connectors, name } = cmd;
   if (cmd.planId) {
     // Everything that can refuse this generation is checked against peek() FIRST, so a
@@ -784,8 +785,27 @@ function generateAgent(cmd: GenerateCommand): void {
       return;
     }
 
+    // The same refusal, for the MCP side. A tool the plan named that has since been
+    // disconnected — or that the server stopped advertising — cannot be quietly dropped:
+    // the manifest IS the agent's grant, and building with a smaller one than the user
+    // approved produces an agent that silently cannot do what its plan promised.
+    const approvedRefs = rec.mcpTools ?? [];
+    const stillThere = new Set(mcpRegistry.resolve(approvedRefs).map((t) => `${t.server_id}/${t.name}`));
+    const goneMcp = approvedRefs.filter((r) => !stillThere.has(r));
+    if (goneMcp.length) {
+      relay.broadcastGen({
+        type: "plan_error",
+        message:
+          `the plan uses the MCP tool${goneMcp.length > 1 ? "s" : ""} ${goneMcp.join(", ")}, which ` +
+          `${goneMcp.length > 1 ? "are" : "is"} no longer available — reconnect the server, or ` +
+          `say what you want and it will be re-planned`,
+      });
+      return;
+    }
+
     planner.take(cmd.planId); // spend it: this generation is now certain to start
     ({ prompt, connectors, name } = rec);
+    mcpRefs = approvedRefs;
     plan = rec.plan.raw;
     planUsage = rec.usage;
   }
@@ -837,7 +857,13 @@ function generateAgent(cmd: GenerateCommand): void {
   generator.once("done", onDone);
   generator.once("error", onError);
 
-  void generator.generate({ runtimeDir: RUNTIME_DIR, prompt, connectors, name, plan, planUsage });
+  // Resolved fresh at build time, so the manifest carries the schemas and impact ratings as
+  // they stand now rather than as they stood when the plan was written.
+  const mcpTools = mcpRegistry.resolve(mcpRefs);
+  const mcpServers = mcpRegistry.list();
+  void generator.generate({
+    runtimeDir: RUNTIME_DIR, prompt, connectors, mcpTools, mcpServers, name, plan, planUsage,
+  });
 }
 
 // --- editing (fix loop) -----------------------------------------------------

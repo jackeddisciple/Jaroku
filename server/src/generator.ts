@@ -23,6 +23,11 @@ import { FileProtocolParser, type ProtocolEvent } from "./fileProtocol.ts";
 import { round8 } from "./pricing.ts";
 import { atomicSwap } from "./projectFs.ts";
 import { buildSystemPrompt, buildUserPrompt } from "./prompt.ts";
+import {
+  BRIDGE_FILE, BRIDGE_TEMPLATE, buildManifest, manifestEnv, manifestRefs, writeManifest,
+  type Manifest,
+} from "./mcpManifest.ts";
+import type { McpServerView, McpToolView } from "./mcpRegistry.ts";
 import { validateProject } from "./validator.ts";
 
 export type { UsageSummary } from "./claude.ts";
@@ -35,6 +40,15 @@ export interface GenerateOptions {
   runtimeDir: string;
   prompt: string;
   connectors?: string[];
+  /**
+   * The MCP tools this agent is scoped to, resolved from the APPROVED plan record.
+   *
+   * These become mcp_tools.json, and mcp_tools.json is the entire grant — the bridge builds
+   * these tools and offers no path to any other.
+   */
+  mcpTools?: McpToolView[];
+  /** The servers those tools came from, for their endpoints and credential key names. */
+  mcpServers?: McpServerView[];
   name?: string;
   /** The plan the user confirmed at the pre-generation gate, verbatim (planner.ts). Absent =
    *  an unplanned generation, whose prompt stays byte-identical to the pre-gate one. */
@@ -143,8 +157,10 @@ export class Generator extends EventEmitter<GeneratorEvents> {
 
       // Host-owned files. Written after the model's, so the model cannot shadow them.
       const connectorFiles = this.installConnectors(staging, selected, runtimeDir);
+      const manifest = buildManifest(opts.mcpTools ?? [], opts.mcpServers ?? []);
+      const mcpFiles = this.installMcpBridge(staging, manifest, runtimeDir);
       this.writeHostFiles(staging, {
-        agentId, name, description: opts.prompt, selected,
+        agentId, name, description: opts.prompt, selected, manifest,
         planned: Boolean(opts.plan),
         planCost: opts.planUsage?.cost_usd ?? 0,
         generationCost: usage.cost_usd,
@@ -152,7 +168,9 @@ export class Generator extends EventEmitter<GeneratorEvents> {
 
       const result = await validateProject(staging, {
         runtimeDir,
-        connectorFiles,
+        // The bridge is reviewed code copied in verbatim, exactly like a connector template,
+        // so it is excluded from the model-output lints for the same reason.
+        connectorFiles: [...connectorFiles, ...mcpFiles],
         // Connector tools are real tool objects too — calling one directly crashes the
         // same way, so they must be part of the "do not call directly" set.
         connectorToolNames: selected.flatMap((c) => c.tools.map((t) => t.name)),
@@ -227,14 +245,35 @@ export class Generator extends EventEmitter<GeneratorEvents> {
     return written;
   }
 
+  /**
+   * Copy the reviewed MCP bridge and write the manifest beside it.
+   *
+   * Both are host-owned, both are written after the model's files, and neither exists when
+   * the agent has no MCP tools — a project that was never granted any carries no MCP
+   * machinery at all. Returns their project-relative paths.
+   */
+  private installMcpBridge(staging: string, manifest: Manifest, runtimeDir: string): string[] {
+    if (!manifest.servers.length) return [];
+    const toolsDir = join(staging, "tools");
+    mkdirSync(toolsDir, { recursive: true });
+    const src = join(templatesDir(runtimeDir), BRIDGE_TEMPLATE);
+    if (!existsSync(src)) return [];
+    copyFileSync(src, join(toolsDir, BRIDGE_TEMPLATE)); // byte-for-byte; never re-rendered
+    writeManifest(staging, manifest);
+    return [BRIDGE_FILE];
+  }
+
   private writeHostFiles(
     staging: string,
     meta: {
       agentId: string; name: string; description: string; selected: Connector[];
+      manifest: Manifest;
       planned: boolean; planCost: number; generationCost: number;
     },
   ): void {
-    const env = requiredEnv(meta.selected);
+    // Connector env and MCP credential keys land in the same list: both are things this
+    // agent cannot run without, and .env.example exists to tell a user what those are.
+    const env = [...requiredEnv(meta.selected), ...manifestEnv(meta.manifest)];
 
     writeFileSync(
       join(staging, "jaroku.json"),
@@ -246,6 +285,11 @@ export class Generator extends EventEmitter<GeneratorEvents> {
           entry: "agent",
           schema_version: 1,
           connectors: meta.selected.map((c) => c.id),
+          // Recorded so the client can mark this agent's MCP-sourced tools everywhere they
+          // appear — the frozen Step schema carries no provenance and must not learn one,
+          // so a trace badge is derived by joining agent metadata on the tool name.
+          mcp_servers: meta.manifest.servers.map((s) => s.id),
+          mcp_tools: manifestRefs(meta.manifest),
           required_env: env,
           default_provider: "fake",
           created_at: new Date().toISOString(),
@@ -273,7 +317,7 @@ export class Generator extends EventEmitter<GeneratorEvents> {
     const existing = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
     const missing = env.filter((k) => !existing.includes(k));
     if (missing.length) {
-      const block = ["", "# Required by the connectors this agent uses:", ...missing.map((k) => `${k}=`), ""].join("\n");
+      const block = ["", "# Required by the connectors and MCP servers this agent uses:", ...missing.map((k) => `${k}=`), ""].join("\n");
       writeFileSync(envPath, `${existing.trimEnd()}\n${block}`, "utf8");
     } else if (!existing) {
       writeFileSync(envPath, "# This agent needs no credentials.\n", "utf8");

@@ -63,6 +63,14 @@ export interface AgentSummary {
   name: string;
   description: string;
   connectors: string[];
+  /**
+   * `"server/tool"` refs this agent is scoped to, from its manifest.
+   *
+   * The only way the client knows a trace step came from MCP: the frozen Step schema has no
+   * provenance field and must not grow one, so the badge is derived by joining this against
+   * the step's tool name.
+   */
+  mcp_tools?: string[];
   required_env: string[];
   default_provider: string;
   created_at: string | null;
