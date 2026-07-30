@@ -185,6 +185,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
             prompt,
             agentName: (name?.trim() || prompt.trim().split("\n")[0] || "agent").slice(0, 60),
             connectors: selected,
+            mcpTools,
             previousPlan: previous?.plan.raw,
             feedback: previous ? opts.prompt : undefined,
           },

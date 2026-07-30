@@ -16,14 +16,24 @@
 // CACHING: buildSystemPrompt() must be byte-identical across generations or the cache never
 // hits. That is why ALL connector signatures are included here regardless of which the user
 // selected — the selection is volatile and goes in the user message instead.
+//
+// MCP tools follow the same rule and land on the far side of it. Connector signatures CAN
+// live in the system prompt because the catalogue is fixed at build time; discovered MCP
+// tools cannot, because they differ per user, per server, and change whenever a third party
+// redeploys. So the system prompt carries only the static RULE about them (rule 12) and
+// every signature goes in the user message. Putting them in the prefix would silently cost
+// a cache miss on every single generation.
 
 import type { Connector } from "./connectors.ts";
+import type { McpToolView } from "./mcpRegistry.ts";
 
 export interface GenerationRequest {
   prompt: string;
   agentId: string;
   agentName: string;
   connectors: Connector[];
+  /** MCP tools this agent is scoped to. Volatile, so they ride in the user message. */
+  mcpTools?: McpToolView[];
   /** The plan the user confirmed, verbatim. Absent = an unplanned generation, whose prompt
    *  must stay byte-identical to what it was before the plan gate existed. */
   plan?: string;
@@ -162,7 +172,15 @@ const HARD_RULES = `HARD RULES:
    construct in a file (e.g. deriving a base class from StateGraph.__bases__). If you
    change approach midway, rewrite the file cleanly instead of leaving the abandoned
    attempt. The project is imported during validation; code that fails at import is
-   rejected.`;
+   rejected.
+12. MCP tools come READY-MADE. If the user scoped this agent to any, the host writes
+   tools/mcp_bridge.py and mcp_tools.json into the project and you import the tools from
+   there: \`from .tools.mcp_bridge import MCP_TOOLS\` and include MCP_TOOLS in TOOLS. Do NOT
+   emit either file, do NOT write an MCP client, do NOT import the mcp package, and do NOT
+   invent a tool name that is not in the list you were given. Those tools call a third-party
+   server nobody has reviewed, so the wiring around them is host-owned and audited; a
+   model-written version of it would be the one unreviewed thing in the path that nobody
+   agreed to.`;
 
 function renderConnectorReference(connectors: Connector[]): string {
   return connectors
@@ -178,6 +196,44 @@ function renderConnectorReference(connectors: Connector[]): string {
         tools,
       ].join("\n");
     })
+    .join("\n\n");
+}
+
+/**
+ * Discovered MCP tools, rendered for the USER message.
+ *
+ * Deliberately not shaped like renderConnectorReference. A connector reference tells the
+ * model how to import a file; this tells it that a ready-made tool object already exists and
+ * that its job is to wire it in and nothing else. The real JSON Schema goes in because it is
+ * what the model must respect when calling the tool, and because it is what the validator
+ * will check the call against — showing anything less would be setting the model up to fail
+ * a check it was never given the information to pass.
+ *
+ * Impact is stated because it changes what the generated agent should do around the call: a
+ * tool that stops for a human confirmation is not one to put in a retry loop.
+ */
+export function renderMcpReference(tools: McpToolView[]): string {
+  if (!tools.length) return "  (none)";
+  const byServer = new Map<string, McpToolView[]>();
+  for (const t of tools) {
+    const list = byServer.get(t.server_id) ?? [];
+    list.push(t);
+    byServer.set(t.server_id, list);
+  }
+  return [...byServer.entries()]
+    .map(([server, group]) =>
+      [
+        `  ${server}  (third-party MCP server — NOT reviewed by Jaroku)`,
+        ...group.map((t) =>
+          [
+            `    ${t.name}${t.impact === "high" ? "   [HIGH IMPACT — the user is asked to confirm before its first call]" : ""}`,
+            `        ${t.description ?? "(the server gave no description)"}`,
+            `        arguments (JSON Schema, exactly as the server declared them):`,
+            `        ${JSON.stringify(t.input_schema)}`,
+          ].join("\n"),
+        ),
+      ].join("\n"),
+    )
     .join("\n\n");
 }
 
@@ -236,6 +292,8 @@ export interface PlanRequest {
   prompt: string;
   agentName: string;
   connectors: Connector[];
+  /** MCP tools the user scoped this agent to, so the plan can name the real ones. */
+  mcpTools?: McpToolView[];
   /** Set when the user asked for a change to a plan they were shown. */
   previousPlan?: string;
   feedback?: string;
@@ -270,6 +328,7 @@ OUTPUT FORMAT — exact, no deviation, these four sections in this order:
 <<<PLAN section="tools">>>
 - <tool_name> — reviewed connector template (<connector id>)
 - <tool_name> — bespoke; <what it does, one clause>
+- <tool_name> — mcp: <server id>/<tool_name>; <what it does, one clause>
 <<<ENDPLAN>>>
 <<<PLAN section="state">>>
 - <field>: <type> — <what it holds>
@@ -285,11 +344,18 @@ No prose, no markdown fences, no commentary before, between, or after the sectio
 LENGTH: about 200 words total. One line per tool, per state field, per node. This is a thing
 to scan in fifteen seconds, not a design document. Omit rationale entirely.
 
-EVERY TOOL MUST BE LABELLED. "reviewed connector template" means one of the connectors listed
-below, which is audited code copied into the project verbatim and never written by you.
-"bespoke" means code that will be generated for this agent. This distinction is the single
-most decision-relevant fact in the plan: it tells the developer which parts are trusted and
-which are about to be invented.
+EVERY TOOL MUST BE LABELLED, with one of exactly three labels:
+
+  "reviewed connector template"  audited code, copied into the project verbatim, never
+                                 written by you
+  "bespoke"                      code that will be generated for this agent
+  "mcp: <server>/<tool>"         a call into a third-party MCP server that NOBODY has
+                                 reviewed — not you, not Jaroku, not the developer
+
+This distinction is the single most decision-relevant fact in the plan: it tells the developer
+which parts are trusted, which are about to be invented, and which reach into somebody else's
+system. Never describe an MCP tool as reviewed or as a connector — that would tell the
+developer the opposite of the truth about what is about to run for them.
 
 Use ONLY the connectors the developer selected. If the agent would genuinely be better with
 one they did not select, do not assume it — plan the bespoke alternative and say so in notes,
@@ -339,6 +405,21 @@ Re-plan the whole agent with that change applied. Keep everything they did not o
 `
     : "";
 
+  // Only what the developer scoped. A plan naming a tool outside this list is reconciled
+  // into a warning (planProtocol.reconcileWithSelection) rather than silently honoured.
+  const mcp = req.mcpTools?.length
+    ? `
+Selected MCP tools — third-party, UNREVIEWED. Use these exact names, and no others:
+${req.mcpTools
+  .map(
+    (t) =>
+      `  - ${t.server_id}/${t.name}${t.impact === "high" ? " [high impact — the developer is asked to confirm before its first call]" : ""}` +
+      (t.description ? `: ${t.description}` : ""),
+  )
+  .join("\n")}
+`
+    : "";
+
   return `Plan this agent:
 
 ${req.prompt}
@@ -347,7 +428,7 @@ Human-readable name: ${req.agentName}
 
 Selected connectors:
 ${selected}
-${revision}
+${mcp}${revision}
 Output the four plan sections now. No code, no commentary.`;
 }
 
@@ -367,6 +448,8 @@ export interface EditRequest {
   files: { path: string; content: string }[];
   /** Connectors installed in this project (their files exist and are read-only). */
   connectors: Connector[];
+  /** MCP tools this project is scoped to. Its bridge and manifest are read-only. */
+  mcpTools?: McpToolView[];
   /** Recent applied edits, oldest first, for follow-up context ("no, make it 50"). */
   history: { instruction: string; summary: string }[];
 }
@@ -460,13 +543,17 @@ ${CONTRACT_SYMBOLS}
 ${HARD_RULES}
 
 EDIT RULES:
-E1. READ-ONLY FILES — never emit: jaroku.json, the top-level __init__.py, or any connector
-    file (the tools/<file> paths listed under AVAILABLE CONNECTORS). Connectors are reviewed
-    code. If the request requires different connector behavior, write a bespoke wrapper tool
-    that uses the connector's tool and adapts the result — connector tools are StructuredTool
-    objects, so invoke them: pg_query.invoke({"sql": "..."}), never pg_query(...) (rule 9).
-    If the request cannot be satisfied without editing a read-only file, say so in the
-    summary and emit no files. (tools/__init__.py and prompts/__init__.py are editable.)
+E1. READ-ONLY FILES — never emit: jaroku.json, the top-level __init__.py, mcp_tools.json,
+    tools/mcp_bridge.py, or any connector file (the tools/<file> paths listed under AVAILABLE
+    CONNECTORS). Connectors are reviewed code; the MCP bridge and manifest are host-owned and
+    are what keeps a third-party server's tools scoped to what was agreed. If the request
+    requires different behavior from any of them, write a bespoke wrapper tool that uses the
+    existing tool and adapts the result — these are StructuredTool objects, so invoke them:
+    pg_query.invoke({"sql": "..."}), never pg_query(...) (rule 9). Never add an MCP tool
+    name that is not already in the project's manifest; there is no way to reach one that
+    was not granted. If the request cannot be satisfied without editing a read-only file, say
+    so in the summary and emit no files. (tools/__init__.py and prompts/__init__.py are
+    editable.)
 E2. MINIMAL CHANGE. Touch the fewest files that correctly implement the request. Do not
     reformat, rename, or "improve" code the request does not concern.
 E3. If you add or remove an os.environ key, emit the updated .env.example in this response.
@@ -499,11 +586,23 @@ export function buildEditUserPrompt(req: EditRequest): string {
         .join("\n")}\n`
     : "";
 
+  // The scoped set, so an edit can wire an existing MCP tool into a new wrapper without
+  // being able to reach for one the agent was never granted.
+  const mcp = req.mcpTools?.length
+    ? `
+MCP TOOLS this agent already has — third-party, UNREVIEWED, available as MCP_TOOLS from
+tools/mcp_bridge.py (read-only, do not emit). This is the complete set; no other tool on
+those servers is reachable:
+
+${renderMcpReference(req.mcpTools)}
+`
+    : "";
+
   return `Edit this agent.
 
 Agent package: ${req.agentId}
 Installed connector files: ${connectorLine}
-
+${mcp}
 CURRENT PROJECT FILES:
 
 ${files}
@@ -533,6 +632,25 @@ export function buildUserPrompt(req: GenerationRequest): string {
     ? `\nThese connector env keys must appear in .env.example: ${env.join(", ")}`
     : "";
 
+  // Every signature the model is allowed to call, and nothing else. The list IS the grant:
+  // the host writes a manifest containing exactly these, so a tool invented here would not
+  // exist at runtime — and the validator rejects the project before it gets that far.
+  const mcp = req.mcpTools?.length
+    ? `
+MCP TOOLS this agent is scoped to — third-party, UNREVIEWED, already built for you:
+
+${renderMcpReference(req.mcpTools)}
+
+Import them and wire them in, exactly like this, and write no other MCP code:
+
+  from .tools.mcp_bridge import MCP_TOOLS
+  TOOLS = MCP_TOOLS + [your_own_tool]
+
+Do NOT emit tools/mcp_bridge.py or mcp_tools.json — the host writes both. The list above is
+the complete set this agent has; there is no way to reach any other tool on those servers.
+`
+    : "";
+
   // The user reviewed and confirmed this plan before any code existed. Following it is the
   // whole point of the gate — a generation that quietly builds something else makes the
   // confirmation a lie. Absent (an unplanned generation), this block contributes nothing and
@@ -556,6 +674,6 @@ Human-readable name: ${req.agentName}
 
 Selected connectors:
 ${selected}${envNote}
-${plan}
+${mcp}${plan}
 Emit the files now, starting with agent.py. Output files only — no commentary.`;
 }
