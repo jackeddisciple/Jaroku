@@ -21,14 +21,25 @@
 // the structure is a bonus that buys grouped rendering and the connector cross-check below.
 
 import type { Connector } from "./connectors.ts";
+import type { McpToolView } from "./mcpRegistry.ts";
 
-export type ToolOrigin = "connector" | "bespoke";
+/**
+ * Where a planned tool comes from. Three genuinely different provenances, and the plan card
+ * renders each differently because the difference is what a reader needs:
+ *
+ *   connector  an audited template, copied in byte-for-byte
+ *   bespoke    about to be written by a model, for this agent
+ *   mcp        a call into a third-party server nobody here has reviewed
+ */
+export type ToolOrigin = "connector" | "bespoke" | "mcp";
 
 export interface PlannedTool {
   name: string;
   origin: ToolOrigin;
   /** Catalog id, when the plan named one (e.g. "gmail"). Absent means "unresolved". */
   connectorId?: string;
+  /** MCP server id, when origin is "mcp" and the plan named one. */
+  mcpServerId?: string;
   summary: string;
 }
 
@@ -61,6 +72,9 @@ const HEADING_RE = /^\s*(?:#{1,6}\s*)?(?:\*\*)?(tools|state|graph|nodes|edges|no
 const QUALIFIERS = new Set([
   "reviewed", "template", "the", "a", "an", "existing", "selected", "installed", "provided",
   "this", "that", "its", "our", "your",
+  // For the MCP forms: "the external MCP server" must not resolve to a server called
+  // "external", and "an MCP server" must not resolve to one called "an".
+  "external", "third", "party", "connected", "remote", "mcp", "tool", "tools", "server",
 ]);
 
 const BULLET_RE = /^\s*(?:[-*•‣]|\d+[.)])\s+/;
@@ -100,6 +114,28 @@ function parseTool(line: string): PlannedTool | null {
   if (!name) return null;
 
   const tail = rest || head.slice(name.length);
+
+  // MCP is tested FIRST, before the connector test. A model writing "MCP connector" means
+  // the third-party one, and letting the connector branch claim that line would label
+  // unreviewed code as audited — the one mislabelling with real consequences.
+  const isMcp = /\bmcp\b|\bexternal\s+(server|tool)\b/i.test(tail);
+  if (isMcp) {
+    // "mcp: linear/create_issue" / "(mcp: linear)" / "from the linear MCP server".
+    const serverId = [
+      /\bmcp[:\s]+([a-z][a-z0-9_]*)\s*\//i.exec(tail)?.[1],
+      /\(\s*mcp[:\s]*([a-z][a-z0-9_]*)\s*\)/i.exec(tail)?.[1],
+      /\b([a-z][a-z0-9_]*)\s+mcp\s+server\b/i.exec(tail)?.[1],
+      // Colon required. Whitespace alone would let "MCP server tool" name a server "tool";
+      // "MCP server: linear" is someone actually saying which one.
+      /\bmcp\s+server:\s*([a-z][a-z0-9_]*)/i.exec(tail)?.[1],
+    ]
+      .map((c) => c?.toLowerCase())
+      .find((c): c is string => Boolean(c) && !QUALIFIERS.has(c!));
+    const tool: PlannedTool = { name, origin: "mcp", summary: tail.trim() };
+    if (serverId) tool.mcpServerId = serverId;
+    return tool;
+  }
+
   const isConnector = /\b(reviewed|connector|template)\b/i.test(tail);
   // "(gmail)" / "connector: gmail" / "the gmail connector". The last form needs the qualifier
   // guard: "reviewed connector template" would otherwise yield a connector named "reviewed".
@@ -234,16 +270,69 @@ export function isDegraded(plan: AgentPlan): boolean {
  * explicit UI (BuildPane), so a mismatch here is exactly the class of mistake this gate
  * exists to surface BEFORE any code is generated.
  */
-export function reconcileWithSelection(plan: AgentPlan, selected: Connector[]): string[] {
+export function reconcileWithSelection(
+  plan: AgentPlan,
+  selected: Connector[],
+  /** The MCP tools the user scoped this agent to. Empty when none were selected. */
+  mcpSelected: McpToolView[] = [],
+): string[] {
   const warnings: string[] = [];
   const byId = new Map(selected.map((c) => [c.id, c]));
   const ownerOfTool = new Map<string, Connector>();
   for (const c of selected) for (const t of c.tools) ownerOfTool.set(t.name, c);
 
+  // Scoped MCP tools, by name. Note what this reconciliation deliberately does NOT do: it
+  // does not decide which tools the agent receives. That is the user's explicit per-tool
+  // selection, full stop.
+  //
+  // The tempting alternative — intersect the selection with what the plan text mentions —
+  // would hang a security boundary off a parser this very file documents as degrading
+  // rather than failing. A plan the model wrote in prose instead of the delimiters would
+  // silently strip every tool the user ticked, and a generation would come out broken for
+  // reasons nobody could see. Warnings below; never a silent revocation.
+  const mcpByName = new Map<string, McpToolView>();
+  for (const t of mcpSelected) mcpByName.set(t.name, t);
+  const mcpUsed = new Set<string>();
   const used = new Set<string>();
 
   for (const tool of plan.tools) {
     const owner = ownerOfTool.get(tool.name);
+    const mcp = mcpByName.get(tool.name);
+
+    if (tool.origin === "mcp") {
+      if (mcp) {
+        mcpUsed.add(mcp.name);
+        // A plan naming a different server than the one the tool actually came from is
+        // worth saying out loud: two servers can advertise the same tool name.
+        if (tool.mcpServerId && tool.mcpServerId !== mcp.server_id) {
+          warnings.push(
+            `the plan attributes ${tool.name} to the ${tool.mcpServerId} MCP server, but the ` +
+              `tool you selected with that name comes from ${mcp.server_id}. The selected one will be used.`,
+          );
+        }
+      } else {
+        warnings.push(
+          `the plan calls ${tool.name} an MCP tool, but it isn't one of the MCP tools you ` +
+            `selected — it will be written as bespoke code instead. Select it and re-plan to ` +
+            `call the real one.`,
+        );
+      }
+      continue;
+    }
+
+    // Marked connector or bespoke, but a scoped MCP tool has that exact name. The MCP tool
+    // is what the agent will actually be given, so the plan is describing the wrong thing —
+    // and describing unreviewed third-party code as either audited or model-written is the
+    // mislabelling that matters most here.
+    if (mcp) {
+      mcpUsed.add(mcp.name);
+      warnings.push(
+        `the plan lists ${tool.name} as ${tool.origin === "connector" ? "a reviewed connector tool" : "bespoke"}, ` +
+          `but it is an MCP tool from ${mcp.server_id} — third-party code Jaroku has not reviewed. ` +
+          `That is what the agent will call.`,
+      );
+      continue;
+    }
 
     if (tool.origin === "connector") {
       const id = tool.connectorId ?? owner?.id;
@@ -280,6 +369,19 @@ export function reconcileWithSelection(plan: AgentPlan, selected: Connector[]): 
     warnings.push(
       `${c.id} is selected and will be copied into the project, but the plan doesn't use any ` +
         `of its tools.`,
+    );
+  }
+
+  // A scoped MCP tool the plan never mentions. Worth more than the connector version of this
+  // warning: the agent WILL be handed it, and being handed a reach into someone else's system
+  // that nothing in the plan asked for is exactly the over-grant least privilege is about.
+  // Untick it and re-plan, or leave it — but knowingly.
+  for (const t of mcpSelected) {
+    if (mcpUsed.has(t.name)) continue;
+    if (plan.tools.length === 0) continue;
+    warnings.push(
+      `you selected the MCP tool ${t.server_id}/${t.name}, but the plan doesn't use it. The ` +
+        `agent will still be given it — untick it and re-plan if it isn't needed.`,
     );
   }
 

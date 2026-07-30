@@ -205,7 +205,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
         mcpTools: mcpTools.map((t) => `${t.server_id}/${t.name}`),
         name,
         plan,
-        warnings: reconcileWithSelection(plan, selected),
+        warnings: reconcileWithSelection(plan, selected, mcpTools),
         usage,
         revision,
         createdAt: Date.now(),

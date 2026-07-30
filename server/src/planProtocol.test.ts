@@ -241,5 +241,128 @@ const POSTGRES: Connector = {
   check("connector resolved via tool name when id is absent", reconcileWithSelection(p, [GMAIL]).length === 0, reconcileWithSelection(p, [GMAIL]));
 }
 
+
+// --- MCP: a third provenance, and the ways a plan can misattribute it ------------------
+//
+// Mislabelling matters more here than anywhere else in this file. Calling an audited
+// connector "bespoke" is untidy; calling unreviewed third-party code "reviewed" tells a user
+// the opposite of the truth about what is about to run.
+
+/** A scoped MCP tool, shaped as McpToolView (mcpRegistry.ts). */
+const mcpTool = (server: string, name: string) => ({
+  server_id: server,
+  name,
+  description: null,
+  input_schema: {},
+  schema_hash: "h",
+  impact: "high" as const,
+  computed_impact: "high" as const,
+  impact_reason: "test",
+  overridden: false,
+  override_voided: false,
+  annotations: null,
+});
+const CREATE_ISSUE = mcpTool("linear", "create_issue");
+const SEARCH_DOCS = mcpTool("notion", "search_docs");
+
+// 20 — the forms a model actually writes for an MCP tool.
+{
+  const lines = [
+    "- create_issue — MCP tool from the linear MCP server",
+    "- create_issue — mcp: linear/create_issue",
+    "- create_issue — external server tool (mcp: linear)",
+    "- create_issue — MCP server: linear; files an issue",
+  ];
+  for (const line of lines) {
+    const p = parsePlan(`<<<PLAN section="tools">>>\n${line}\n<<<ENDPLAN>>>`);
+    const t = p.tools[0]!;
+    check(`parses as mcp: ${line.slice(17, 52)}`, t.origin === "mcp", t.origin);
+    check(`...and names the server`, t.mcpServerId === "linear", t.mcpServerId);
+  }
+}
+
+// 21 — "MCP connector" must be mcp, not connector. A model reaching for the wrong noun must
+// not get unreviewed code labelled audited.
+{
+  const p = parsePlan(`<<<PLAN section="tools">>>\n- create_issue — MCP connector (linear)\n<<<ENDPLAN>>>`);
+  check("'MCP connector' resolves to mcp, not connector", p.tools[0]!.origin === "mcp", p.tools[0]!.origin);
+}
+
+// 22 — adjectives are not server names.
+{
+  const p = parsePlan(`<<<PLAN section="tools">>>\n- do_thing — an external MCP server tool\n<<<ENDPLAN>>>`);
+  check("'external' is not read as a server id", p.tools[0]!.mcpServerId === undefined, p.tools[0]!.mcpServerId);
+}
+
+// 23 — plan and selection agree: no noise.
+{
+  const p = parsePlan(`<<<PLAN section="tools">>>\n- create_issue — mcp: linear/create_issue\n<<<ENDPLAN>>>`);
+  check("no warnings when the MCP plan matches the selection",
+    reconcileWithSelection(p, [], [CREATE_ISSUE]).length === 0,
+    reconcileWithSelection(p, [], [CREATE_ISSUE]));
+}
+
+// 24 — the plan claims an MCP tool nobody selected.
+{
+  const p = parsePlan(`<<<PLAN section="tools">>>\n- delete_all — mcp: linear/delete_all\n<<<ENDPLAN>>>`);
+  const w = reconcileWithSelection(p, [], [CREATE_ISSUE]);
+  check("warns: MCP tool not selected", w.some((x) => x.includes("isn't one of the MCP tools you")), w);
+}
+
+// 25 — the plan calls a scoped MCP tool something safer than it is. This is the important one.
+{
+  const asConnector = parsePlan(`<<<PLAN section="tools">>>\n- create_issue — reviewed connector template\n<<<ENDPLAN>>>`);
+  const w1 = reconcileWithSelection(asConnector, [], [CREATE_ISSUE]);
+  check("warns when unreviewed MCP code is described as a reviewed connector",
+    w1.some((x) => x.includes("has not reviewed")), w1);
+
+  const asBespoke = parsePlan(`<<<PLAN section="tools">>>\n- create_issue — bespoke; files an issue\n<<<ENDPLAN>>>`);
+  const w2 = reconcileWithSelection(asBespoke, [], [CREATE_ISSUE]);
+  check("warns when unreviewed MCP code is described as bespoke",
+    w2.some((x) => x.includes("has not reviewed")), w2);
+}
+
+// 26 — the plan attributes a tool to the wrong server. Two servers can advertise one name.
+{
+  const p = parsePlan(`<<<PLAN section="tools">>>\n- create_issue — mcp: jira/create_issue\n<<<ENDPLAN>>>`);
+  const w = reconcileWithSelection(p, [], [CREATE_ISSUE]);
+  check("warns on a server mismatch", w.some((x) => x.includes("attributes create_issue to the jira")), w);
+}
+
+// 27 — a selected tool the plan never uses. The agent still gets it; the user is told.
+{
+  const p = parsePlan(`<<<PLAN section="tools">>>\n- create_issue — mcp: linear/create_issue\n<<<ENDPLAN>>>`);
+  const w = reconcileWithSelection(p, [], [CREATE_ISSUE, SEARCH_DOCS]);
+  check("warns about an unused MCP selection", w.some((x) => x.includes("notion/search_docs")), w);
+  check("...and says the agent still gets it", w.some((x) => x.includes("will still be given it")), w);
+}
+
+// 28 — a degraded plan must not silently revoke a selection.
+//
+// The manifest is the user's explicit per-tool choice, never the intersection with what this
+// parser managed to read. Hanging a grant off a parser documented as degrading would let a
+// plan written in prose strip every tool the user ticked, and the generation would come out
+// broken for reasons nobody could see.
+{
+  const p = parsePlan("prose only, no sections at all");
+  check("degraded plan produces no MCP reconcile noise",
+    reconcileWithSelection(p, [], [CREATE_ISSUE]).length === 0,
+    reconcileWithSelection(p, [], [CREATE_ISSUE]));
+}
+
+// 29 — connectors and MCP tools coexist without interfering.
+{
+  const p = parsePlan(
+    `<<<PLAN section="tools">>>\n- gmail_search — reviewed connector template (gmail)\n` +
+      `- create_issue — mcp: linear/create_issue\n- summarize — bespoke; condenses a thread\n<<<ENDPLAN>>>`,
+  );
+  check("three provenances parse side by side",
+    p.tools.map((t) => t.origin).join(",") === "connector,mcp,bespoke",
+    p.tools.map((t) => t.origin).join(","));
+  check("no warnings when all three line up",
+    reconcileWithSelection(p, [GMAIL], [CREATE_ISSUE]).length === 0,
+    reconcileWithSelection(p, [GMAIL], [CREATE_ISSUE]));
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);
