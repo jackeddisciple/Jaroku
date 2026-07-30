@@ -20,6 +20,14 @@ export type GenerateCommand = {
   cmd: "generate";
   prompt: string;
   connectors?: string[];
+  /**
+   * The MCP tools this agent is scoped to, as `"server/tool"` refs.
+   *
+   * Per-TOOL rather than per-server, and that is the least-privilege rule in one field: a
+   * connected server's whole catalogue is never handed to an agent because the server
+   * happens to be connected. Only what was selected here can reach the manifest.
+   */
+  mcpTools?: string[];
   name?: string;
   /** A plan the user confirmed. The server builds what that plan describes, not what this
    *  command's other fields say — see planner.take(). */
@@ -31,6 +39,8 @@ export type PlanAgentCommand = {
   cmd: "planAgent";
   prompt: string;
   connectors?: string[];
+  /** Scoped MCP tools, as `"server/tool"` refs. See GenerateCommand.mcpTools. */
+  mcpTools?: string[];
   name?: string;
   revisePlanId?: string;
 };

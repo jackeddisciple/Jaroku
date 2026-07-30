@@ -8,7 +8,7 @@
 // prompt: the reviewed templates are copied in verbatim, so which ones are included is a
 // decision the user makes, not a guess the generation re-rolls each time.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { orderedFiles, useBuildStore } from "../store/buildStore.ts";
 import {
   isPlanning, pendingPlanId, threadFor, useChatStore,
@@ -26,8 +26,11 @@ import { PlanCard } from "./PlanCard.tsx";
 import { ArrowUpIcon, ChevronDownIcon, MicIcon, SaveToDatasetIcon } from "./composerIcons.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { StatRow, STAT_ICON, type Stat } from "./StatRow.tsx";
-import { DollarSignIcon, FileIcon, HashIcon, SparklesIcon, UserCircleIcon, ZapIcon } from "./panelIcons.tsx";
-import { ACCENT, ICON } from "../lib/tokens.ts";
+import {
+  DollarSignIcon, FileIcon, HashIcon, PlugIcon, SparklesIcon, UserCircleIcon, ZapIcon,
+} from "./panelIcons.tsx";
+import { useMcpStore, allMcpTools } from "../store/mcpStore.ts";
+import { ACCENT, ICON, STATUS } from "../lib/tokens.ts";
 import { displayTitle, fullTitle } from "../lib/title.ts";
 import { useVoiceInput } from "../lib/useVoiceInput.ts";
 import { VoiceWaveform } from "./VoiceWaveform.tsx";
@@ -293,6 +296,11 @@ export function BuildPane() {
 
   const [name, setName] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
+  // MCP tools are selected per TOOL, not per server. Connecting a server makes its tools
+  // available to choose from; it grants an agent nothing on its own.
+  const [selectedMcp, setSelectedMcp] = useState<string[]>([]);
+  const [mcpOpen, setMcpOpen] = useState(false);
+  const mcpServers = useMcpStore((s) => s.servers);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusChatNonce = useUiStore((s) => s.focusChatNonce);
@@ -377,6 +385,9 @@ export function BuildPane() {
 
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  const mcpTools = useMemo(() => allMcpTools(mcpServers), [mcpServers]);
+  const toggleMcp = (ref: string) =>
+    setSelectedMcp((s) => (s.includes(ref) ? s.filter((x) => x !== ref) : [...s, ref]));
 
   // A plan describes the connectors that were ticked when it was written. Change them and it
   // no longer describes what would be built, so it loses its Generate button.
@@ -391,7 +402,9 @@ export function BuildPane() {
   // anyway, with no way out but paying for another plan — the fix for a mis-click cost the same as
   // the mistake. `plannedConnectors` is set when a plan is requested, so the answer is always
   // whether the two selections match right now.
-  const connectorKey = selected.join(",");
+  // The MCP selection belongs in this key for exactly the reason the connectors do: a plan
+  // written against three external tools does not describe a build with a fourth in it.
+  const connectorKey = `${selected.join(",")}|${[...selectedMcp].sort().join(",")}`;
   const plannedConnectors = useRef<string | null>(null);
   const planStale = useChatStore((s) => s.planStale);
   useEffect(() => {
@@ -497,12 +510,12 @@ export function BuildPane() {
         // Never straight to generation: the plan gate is the only way in, so nothing gets
         // built that the user hasn't seen described first.
         plannedConnectors.current = connectorKey;
-        sendPlanAgent(trimmed, selected, name.trim() || undefined);
+        sendPlanAgent(trimmed, selected, name.trim() || undefined, undefined, selectedMcp);
         break;
       case "replan":
         // A revision is planned against the CURRENT selection, so that becomes the new baseline.
         plannedConnectors.current = connectorKey;
-        sendPlanAgent(trimmed, selected, name.trim() || undefined, intent.planId);
+        sendPlanAgent(trimmed, selected, name.trim() || undefined, intent.planId, selectedMcp);
         break;
       case "edit":
         if (activeAgentId) sendEdit(activeAgentId, trimmed);
@@ -640,6 +653,72 @@ export function BuildPane() {
               }
               className="ml-auto w-40 bg-panel font-mono text-ink placeholder:text-faint rounded px-2.5 py-1 text-[12px] outline-none focus:ring-1 focus:ring-[#2a2a2e] disabled:opacity-50"
             />
+          </div>
+        )}
+
+        {/* MCP tools — new-agent generation only, and only when a server is connected.
+            Deliberately a separate row from the connectors above rather than more chips in
+            the same one. They are not the same kind of thing: ticking Postgres asks for an
+            audited template, ticking an MCP tool asks for a call into code nobody here has
+            read, and a row that mixed them would quietly say those decisions are equivalent.
+
+            Per-tool rather than per-server, which is the least-privilege rule made
+            clickable: a connected server's whole catalogue is never handed over because the
+            server happens to be connected. */}
+        {composerMode === "chat" && mode === "generate" && mcpTools.length > 0 && (
+          <div className="mb-2">
+            <button
+              onClick={() => setMcpOpen((v) => !v)}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 text-[11px] text-faint hover:text-muted transition-colors disabled:opacity-50"
+            >
+              <span style={{ color: ACCENT.mcp }}>
+                <PlugIcon size={ICON.xs} />
+              </span>
+              MCP tools
+              {selectedMcp.length > 0 && (
+                <span className="tabular-nums" style={{ color: ACCENT.mcp }}>
+                  {selectedMcp.length} selected
+                </span>
+              )}
+              <span className="text-faint">{mcpOpen ? "hide" : "choose"}</span>
+            </button>
+
+            {mcpOpen && (
+              <div className="mt-1.5 max-h-40 overflow-y-auto rounded bg-panel p-1.5">
+                {mcpTools.map((t) => {
+                  const on = selectedMcp.includes(t.ref);
+                  const high = t.impact === "high";
+                  return (
+                    <button
+                      key={t.ref}
+                      onClick={() => toggleMcp(t.ref)}
+                      disabled={busy}
+                      title={`${t.serverLabel} — ${t.impact_reason}`}
+                      className={`flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[12px] transition-colors disabled:opacity-50 ${
+                        on ? "bg-active text-ink" : "text-muted hover:text-ink"
+                      }`}
+                    >
+                      {/* Fixed-width slot so a control never resizes because you used it —
+                          the same reason the connector chips reserve theirs. */}
+                      <span className="inline-flex w-[11px] shrink-0 items-center justify-center" aria-hidden>
+                        {on && <StatusDot state="ok" size={11} color={ACCENT.mcp} />}
+                      </span>
+                      <span className="font-mono truncate">{t.name}</span>
+                      {/* Which server it came from is not decoration: two servers can
+                          advertise the same tool name and mean different things. */}
+                      <span className="text-faint truncate">{t.serverLabel}</span>
+                      {high && (
+                        <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide"
+                          style={{ color: STATUS.pending }} title="Asks before it runs the first time">
+                          confirms
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 

@@ -714,6 +714,10 @@ function planAgent(cmd: PlanAgentCommand): void {
     runtimeDir: RUNTIME_DIR,
     prompt: cmd.prompt,
     connectors: cmd.connectors,
+    // Resolved here rather than in the planner, so the planner keeps its single dependency
+    // on the connector catalogue. Refs naming a server or tool that has since gone away
+    // resolve to nothing rather than to a guess — the same posture as resolveSelected.
+    mcpTools: mcpRegistry.resolve(cmd.mcpTools ?? []),
     name: cmd.name,
     revisePlanId: cmd.revisePlanId,
   });

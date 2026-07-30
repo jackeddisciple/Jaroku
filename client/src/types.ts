@@ -125,6 +125,8 @@ export type GenMessage =
       planId: string;
       prompt: string;
       connectors: string[];
+      /** The MCP tools this plan was written against, as `"server/tool"` refs. */
+      mcpTools?: string[];
       name?: string;
       plan: AgentPlan;
       warnings: string[];
@@ -452,8 +454,10 @@ export type ServerMessage =
 export type ClientCommand =
   | { cmd: "run"; input?: string; provider?: string; model?: string; agentId?: string }
   | { cmd: "loadRun"; runId: string }
-  | { cmd: "generate"; prompt: string; connectors?: string[]; name?: string; planId?: string }
-  | { cmd: "planAgent"; prompt: string; connectors?: string[]; name?: string; revisePlanId?: string }
+  // `mcpTools` is per-TOOL (`"server/tool"` refs), never per-server: a connected server's
+  // whole catalogue is never handed to an agent just because the server is connected.
+  | { cmd: "generate"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; planId?: string }
+  | { cmd: "planAgent"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; revisePlanId?: string }
   | { cmd: "discardPlan"; planId: string }
   | { cmd: "listAgents" }
   | { cmd: "edit"; agentId: string; instruction: string }

@@ -22,6 +22,7 @@ import { anthropicClient, emptyUsage, summarizeUsage, type UsageSummary } from "
 import { loadConnectors, resolveSelected, type Connector } from "./connectors.ts";
 import { parsePlan, planProblem, reconcileWithSelection, type AgentPlan } from "./planProtocol.ts";
 import { buildPlanSystemPrompt, buildPlanUserPrompt } from "./prompt.ts";
+import type { McpToolView } from "./mcpRegistry.ts";
 
 // Falls through JAROKU_GEN_MODEL so that pointing generation at a different model moves the
 // plan with it — the two phases describing the same build should not disagree about who is
@@ -37,6 +38,12 @@ export interface PlanOptions {
   runtimeDir: string;
   prompt: string;
   connectors?: string[];
+  /**
+   * MCP tools the user scoped this agent to, already resolved against the registry by the
+   * caller — so this module keeps its single dependency on the connector catalogue and does
+   * not grow a second one on the MCP registry.
+   */
+  mcpTools?: McpToolView[];
   name?: string;
   /** Present when the user asked for a change to the plan they were shown. */
   revisePlanId?: string;
@@ -49,6 +56,14 @@ export interface PendingPlan {
   planId: string;
   prompt: string;
   connectors: string[];
+  /**
+   * The MCP tools this plan was written against, as `"server/tool"` refs.
+   *
+   * Recorded for the same reason `connectors` is: generation builds what was APPROVED, not
+   * what the composer says by the time Generate is pressed. Ticking another third-party tool
+   * after planning must not smuggle it into a build nobody reviewed.
+   */
+  mcpTools: string[];
   name?: string;
   plan: AgentPlan;
   warnings: string[];
@@ -118,6 +133,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
     try {
       const all = loadConnectors(opts.runtimeDir);
       const selected = resolveSelected(all, opts.connectors);
+      const mcpTools = opts.mcpTools ?? [];
 
       // A revision reads the plan it is revising BEFORE the slot is cleared.
       const previous = opts.revisePlanId ? this.take(opts.revisePlanId) : null;
@@ -186,6 +202,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
         planId: randomUUID(),
         prompt,
         connectors: selected.map((c) => c.id),
+        mcpTools: mcpTools.map((t) => `${t.server_id}/${t.name}`),
         name,
         plan,
         warnings: reconcileWithSelection(plan, selected),

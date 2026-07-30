@@ -221,8 +221,10 @@ export function sendPlanAgent(
   connectors: string[],
   name?: string,
   revisePlanId?: string,
+  /** Scoped MCP tools, as `"server/tool"` refs — per tool, never per server. */
+  mcpTools?: string[],
 ): void {
-  send({ cmd: "planAgent", prompt, connectors, name, revisePlanId });
+  send({ cmd: "planAgent", prompt, connectors, mcpTools, name, revisePlanId });
 }
 
 export function sendDiscardPlan(planId: string): void {
