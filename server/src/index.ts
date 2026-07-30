@@ -926,7 +926,10 @@ function runAgent(input?: string, provider?: string, model?: string, agentId?: s
   console.log(`[manager] starting ${agentId ?? "test_agent"}${input ? ` — "${input}"` : ""} (run ${runId})`);
   // Model is forwarded explicitly so a real-provider run can't silently fall back to
   // the agent's expensive default; unset means the agent picks its own default.
-  const env: NodeJS.ProcessEnv = { JAROKU_RUN_ID: runId };
+  // JAROKU_CONTROL_DIR is where tools/mcp_bridge.py exchanges confirmation approvals with
+  // this process. Its ABSENCE is how a copied-out project knows nobody is watching — see the
+  // gate's standalone branch. Set on every interactive run, so the gate always has a route.
+  const env: NodeJS.ProcessEnv = { JAROKU_RUN_ID: runId, JAROKU_CONTROL_DIR: CHECKPOINT_DIR };
   if (provider) env.JAROKU_PROVIDER = provider;
   if (model) env.JAROKU_MODEL = model;
   runActive = true;
@@ -1020,6 +1023,7 @@ function branchRun(
 
   const env: NodeJS.ProcessEnv = {
     JAROKU_RUN_ID: branchId,
+    JAROKU_CONTROL_DIR: CHECKPOINT_DIR,
     JAROKU_BRANCH_THREAD_ID: fromRunId, // the checkpoint thread lives under the parent's id
     JAROKU_BRANCH_CHECKPOINT_ID: checkpointId,
     JAROKU_SEQ_OFFSET: String(seqHigh + 1),

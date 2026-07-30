@@ -32,9 +32,26 @@ validation imports the staged project under a 20-second kill timer, and graph in
 imports it again to read the topology. A module that dialled out at import time would make
 both of those depend on a third party being awake.
 
+THE FIRST-USE CONFIRMATION GATE
+-------------------------------
+A tool the manifest marks ``"impact": "high"`` stops before its FIRST call in a run and asks
+the person watching. The mechanism is the one pause/resume already uses, deliberately: a
+control line on stderr going out, an approval file coming back. stdout is the trace stream
+and nothing else is ever written there.
+
+A denial, or a timeout, RAISES — so a refused action lands as a red tool_call step the model
+still sees as an error, rather than as silence. Timing out denies; it never allows.
+
+Running OUTSIDE Jaroku (no host to ask) is the portability case the README promises, and it
+is handled explicitly rather than by accident. See ``_confirm``.
+
 Environment:
-    JAROKU_MCP_<SERVER>_TOKEN   per-server credential, when the server needs one.
-                                Written by the host into runtime/.env; never logged.
+    JAROKU_MCP_<SERVER>_TOKEN      per-server credential, when the server needs one.
+                                   Written by the host into runtime/.env; never logged.
+    JAROKU_RUN_ID                  set by the host; its absence means nobody is watching.
+    JAROKU_CONTROL_DIR             where approval files are exchanged with the host.
+    JAROKU_MCP_CONFIRM             "require" | "skip". Defaults to require under a host.
+    JAROKU_MCP_CONFIRM_TIMEOUT_S   how long to wait before denying (default 120).
 
 A tool that could not do its job raises. It does not return the reason as if it were an
 answer — see the note in postgres.py, which explains at length why a returned error string is
@@ -48,7 +65,10 @@ import json
 import os
 import queue
 import re
+import sys
 import threading
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -72,6 +92,20 @@ CALL_TIMEOUT_S = float(os.environ.get("JAROKU_MCP_CALL_TIMEOUT_S", "60"))
 # because a quietly cut result reads to the model as a complete one.
 MAX_RESULT_CHARS = int(os.environ.get("JAROKU_MCP_MAX_RESULT_CHARS", "20000"))
 
+# How long to wait for a human before denying. Denying, not allowing: a gate that opens when
+# nobody answers is a gate that opens whenever someone steps away from their desk.
+CONFIRM_TIMEOUT_S = float(os.environ.get("JAROKU_MCP_CONFIRM_TIMEOUT_S", "120"))
+CONFIRM_POLL_S = 0.2
+
+# Arguments travel to the UI so a human can see what they are approving. Capped, because the
+# whole point of showing them is that someone reads them.
+MAX_ARGS_CHARS = 4000
+
+# Must match jaroku_runner/debug.py:CTRL_SENTINEL and processManager.ts:CTRL_SENTINEL.
+# Three copies, because this file is copied into projects that import nothing from Jaroku —
+# a generated agent stays plain LangGraph, and that is worth one duplicated constant.
+CTRL_SENTINEL = "@@JAROKU_CTRL@@ "
+
 # Control characters worth removing: the C0 set except tab and newline, plus DEL and the C1
 # range. They serve no purpose in a tool result and they corrupt the things that render it —
 # a NUL truncates C-string consumers, \r overwrites a terminal line, and an ANSI escape can
@@ -88,6 +122,135 @@ _MISSING_DEPS = (
 
 class ManifestError(RuntimeError):
     """The project's mcp_tools.json is missing or unusable."""
+
+
+class ToolNotApproved(RuntimeError):
+    """A high-impact call the user declined, or did not answer in time."""
+
+
+# Tools granted "for this run". Module-level, so the grant lasts exactly as long as the
+# process does: a new run asks again, which is what "first use in a run" means.
+_run_grants: set[str] = set()
+
+
+# --- the confirmation gate --------------------------------------------------
+
+
+def _host_control_dir() -> Path | None:
+    """Where approval files are exchanged, or None when nothing is listening.
+
+    Both variables are required. A run id without a control directory is a host that cannot
+    answer, and treating that as "a host is present" would hang every high-impact call for
+    the full timeout before denying it.
+    """
+    run_id = os.environ.get("JAROKU_RUN_ID")
+    control_dir = os.environ.get("JAROKU_CONTROL_DIR")
+    if not run_id or not control_dir:
+        return None
+    return Path(control_dir)
+
+
+def _emit_ctrl(obj: dict[str, Any]) -> None:
+    """One control line on stderr. Never stdout — that carries the trace and nothing else."""
+    print(CTRL_SENTINEL + json.dumps(obj), file=sys.stderr, flush=True)
+
+
+def _confirm(server_id: str, name: str, args: dict[str, Any], reason: str) -> None:
+    """Block until a high-impact call is approved, or raise.
+
+    Four situations, and each is decided on purpose rather than by fallthrough:
+
+      * Already granted for this run -> proceed silently. That is what "first use" means.
+
+      * A host is listening -> ask it, and wait. Deny on refusal or on timeout.
+
+      * No host, JAROKU_MCP_CONFIRM=require -> refuse. Somebody asked for the gate in a place
+        that cannot show it, and quietly running anyway would answer their question wrongly.
+
+      * No host, anything else -> proceed, with a warning naming the tool. This is the
+        copied-out project the README promises: a person running the script themselves, on
+        their own machine, IS the authorisation, and a hard denial would mean generated
+        projects are not really portable. The warning exists so it is never a surprise.
+    """
+    key = f"{server_id}/{name}"
+    if key in _run_grants:
+        return
+
+    mode = os.environ.get("JAROKU_MCP_CONFIRM", "").strip().lower()
+    if mode == "skip":
+        return
+
+    control_dir = _host_control_dir()
+    if control_dir is None:
+        if mode == "require":
+            raise ToolNotApproved(
+                f"{key} is a high-impact MCP tool and JAROKU_MCP_CONFIRM=require, but there "
+                f"is no Jaroku session to ask. Run it from Jaroku, or unset the variable."
+            )
+        print(
+            f"[jaroku] WARNING: calling high-impact MCP tool {key} without confirmation "
+            f"(no Jaroku session is watching). {reason}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
+
+    run_id = os.environ["JAROKU_RUN_ID"]
+    nonce = uuid.uuid4().hex[:12]
+    approval = control_dir / f"{run_id}.{nonce}.approval"
+
+    try:
+        payload = json.dumps(args, default=str)
+    except Exception:  # noqa: BLE001 - showing something beats showing nothing
+        payload = repr(args)
+    if len(payload) > MAX_ARGS_CHARS:
+        payload = payload[:MAX_ARGS_CHARS] + " …(truncated)"
+
+    _emit_ctrl(
+        {
+            "ctrl": "tool_confirm",
+            "run_id": run_id,
+            "nonce": nonce,
+            "server": server_id,
+            "tool": name,
+            "impact_reason": reason,
+            "args": payload,
+            "timeout_s": CONFIRM_TIMEOUT_S,
+        }
+    )
+
+    deadline = time.monotonic() + CONFIRM_TIMEOUT_S
+    verdict = ""
+    while time.monotonic() < deadline:
+        try:
+            if approval.exists():
+                verdict = approval.read_text(encoding="utf-8").strip().lower()
+                if verdict:
+                    break
+        except OSError:
+            pass  # a half-written file on the next poll is fine; keep waiting
+        time.sleep(CONFIRM_POLL_S)
+
+    try:
+        approval.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+    if verdict == "run":
+        _run_grants.add(key)
+        return
+    if verdict == "once":
+        return
+
+    # Denied, or nobody answered. Both raise, and the message says which — "you declined
+    # this" and "nobody was there" call for different next steps.
+    _emit_ctrl({"ctrl": "tool_confirm_closed", "run_id": run_id, "nonce": nonce})
+    if verdict == "deny":
+        raise ToolNotApproved(f"{key} was not approved: you declined this call.")
+    raise ToolNotApproved(
+        f"{key} was not approved: nobody confirmed it within {CONFIRM_TIMEOUT_S:.0f}s, so it "
+        f"was declined. High-impact MCP tools are never allowed by default."
+    )
 
 
 # --- manifest ---------------------------------------------------------------
@@ -318,6 +481,11 @@ def _make_tool(server: dict[str, Any], spec: dict[str, Any]) -> StructuredTool:
     schema = spec.get("input_schema")
     if not isinstance(schema, dict) or not schema:
         schema = {"type": "object", "properties": {}}
+    # The impact recorded at generation time, INCLUDING any override the user had set. Read
+    # from the manifest rather than recomputed, so the gate cannot change its mind between
+    # the plan somebody approved and the run that follows it.
+    high_impact = str(spec.get("impact") or "high").lower() == "high"
+    impact_reason = str(spec.get("impact_reason") or "it is classified high-impact")
 
     def _invoke(**kwargs: Any) -> str:
         # 1. Does this call even match what the server said it accepts?
@@ -326,7 +494,13 @@ def _make_tool(server: dict[str, Any], spec: dict[str, Any]) -> StructuredTool:
         except ValueError as exc:
             raise RuntimeError(f"{name}: {exc}") from exc
 
-        # 2. The credential, read at the moment of use and never held anywhere.
+        # 2. Ask, if this is a high-impact tool being called for the first time this run.
+        #    Before the credential is even read: a call nobody approved should not so much as
+        #    look at a secret.
+        if high_impact:
+            _confirm(server_id, name, kwargs, impact_reason)
+
+        # 3. The credential, read at the moment of use and never held anywhere.
         token = os.environ.get(auth_env_key) if auth_env_key else None
         if auth_env_key and not token:
             raise RuntimeError(
@@ -334,7 +508,7 @@ def _make_tool(server: dict[str, Any], spec: dict[str, Any]) -> StructuredTool:
                 f"the environment. Add it to runtime/.env."
             )
 
-        # 3. The call itself. Every failure below is a failure, not an answer.
+        # 4. The call itself. Every failure below is a failure, not an answer.
         try:
             result = _run_call(endpoint, token, name, kwargs)
         except RuntimeError:
@@ -390,4 +564,5 @@ __all__ = [
     "describe_exception",
     "sanitize",
     "ManifestError",
+    "ToolNotApproved",
 ]
