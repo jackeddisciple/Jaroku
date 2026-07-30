@@ -174,6 +174,9 @@ export class Generator extends EventEmitter<GeneratorEvents> {
         // Connector tools are real tool objects too — calling one directly crashes the
         // same way, so they must be part of the "do not call directly" set.
         connectorToolNames: selected.flatMap((c) => c.tools.map((t) => t.name)),
+        // The grant, so a generated call can be checked against the schema the server
+        // actually declared rather than against a guess.
+        mcpTools: manifest,
         // Fresh project: the connector templates raise, so the tool node has to survive a raise.
         requireToolErrorHandling: true,
       });

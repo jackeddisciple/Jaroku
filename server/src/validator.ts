@@ -10,6 +10,7 @@
 import { spawn } from "node:child_process";
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
+import type { Manifest } from "./mcpManifest.ts";
 
 export interface ValidationResult {
   ok: boolean;
@@ -57,6 +58,8 @@ function analyzePython(
   projectDir: string,
   toolNames: string[],
   reviewedFiles: string[],
+  /** name -> { schema, server } for every MCP tool this agent's manifest grants. */
+  mcpTools: Record<string, { schema: Record<string, unknown>; server: string }>,
 ): Promise<string[]> {
   const script = `
 import ast, json, os, sys
@@ -66,6 +69,8 @@ known_tools = set(json.loads(sys.argv[2]))
 # Reviewed connector templates are copied in verbatim. They are audited once, by hand, and
 # are not the model's output — linting them here only produces false positives.
 reviewed = set(json.loads(sys.argv[3]))
+# The agent's MCP grant, from its manifest: {name: {"schema": {...}, "server": "..."}}.
+mcp_tools = json.loads(sys.argv[4])
 problems = []
 trees = {}
 generated = {}
@@ -112,27 +117,33 @@ for rel, tree in trees.items():
 # silently loses a reviewed tool while its metadata, its plan card and its sidebar all still
 # advertise the connector. The audit guarantee has to cover the wiring, not just the source.
 reviewed_names = set(json.loads(sys.argv[2]))
-if reviewed_names:
-    # Names mentioned anywhere in a "TOOLS = <expr>" assignment, following one level of local
-    # variable so "TOOLS = CONNECTOR_TOOLS + [mine]" is understood.
-    wired, aliases = set(), {}
-    for rel, tree in trees.items():
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Assign):
-                for tgt in node.targets:
-                    if isinstance(tgt, ast.Name):
-                        aliases.setdefault(tgt.id, []).append(node.value)
-    def collect(expr, depth=0):
-        for n in ast.walk(expr):
-            if isinstance(n, ast.Name):
-                wired.add(n.id)
-                if depth < 1:
-                    for sub in aliases.get(n.id, []):
-                        if sub is not expr:
-                            collect(sub, depth + 1)
-    for expr in aliases.get("TOOLS", []):
-        collect(expr)
 
+# Names mentioned anywhere in a "TOOLS = <expr>" assignment, following one level of local
+# variable so "TOOLS = CONNECTOR_TOOLS + [mine]" is understood.
+#
+# Computed unconditionally, because this describes what TOOLS binds and has nothing to do
+# with connectors specifically — the MCP checks below need exactly the same answer.
+wired, aliases = set(), {}
+for rel, tree in trees.items():
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for tgt in node.targets:
+                if isinstance(tgt, ast.Name):
+                    aliases.setdefault(tgt.id, []).append(node.value)
+
+def collect(expr, depth=0):
+    for n in ast.walk(expr):
+        if isinstance(n, ast.Name):
+            wired.add(n.id)
+            if depth < 1:
+                for sub in aliases.get(n.id, []):
+                    if sub is not expr:
+                        collect(sub, depth + 1)
+
+for expr in aliases.get("TOOLS", []):
+    collect(expr)
+
+if reviewed_names:
     # A tool defined outside its own reviewed file, under a reviewed name, is a shadow.
     for rel, tree in generated.items():
         for node in ast.walk(tree):
@@ -148,6 +159,80 @@ if reviewed_names:
                 f"'{name}' is a reviewed connector tool for this agent but is no longer in TOOLS "
                 "— the agent advertises the connector and cannot call it (rule 6)"
             )
+
+# --- MCP: the manifest is the grant, and the schema is the contract ------------------
+#
+# Three checks, none of which the connector path needed because a connector's parameters were
+# only ever a display string. A discovered MCP tool carries a real JSON Schema, so a bad call
+# can be caught before the project is written rather than at runtime against someone else's
+# server.
+if mcp_tools:
+    mcp_names = set(mcp_tools)
+
+    # 1. WIRING. The bridge exposes MCP_TOOLS as a list, so unlike a connector there is no
+    #    per-name symbol to look for — the whole grant is wired in or none of it is. An agent
+    #    whose metadata advertises MCP tools it cannot call is the same lie the reviewed-tool
+    #    wiring check exists to prevent.
+    if aliases.get("TOOLS") and "MCP_TOOLS" not in wired:
+        problems.append(
+            "this agent is scoped to MCP tools (" + ", ".join(sorted(mcp_names)) +
+            ") but MCP_TOOLS is not in TOOLS — it advertises them and cannot call them (rule 12)"
+        )
+
+    for rel, tree in generated.items():
+        for node in ast.walk(tree):
+            # 2. SHADOWING. A generated function under a granted tool's name would be bound
+            #    instead of the real one, silently.
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in mcp_names:
+                problems.append(
+                    f"{rel}:{node.lineno} defines '{node.name}', which is the name of an MCP tool "
+                    "this agent is scoped to — the agent would bind this instead of the real one (rule 12)"
+                )
+
+            # 3. ARGUMENTS. Only a literal dict passed to .invoke()/.ainvoke() can be checked
+            #    statically. A dict built at runtime is left to the bridge's own check, which
+            #    runs on every call — this catches the mistake early, it does not replace it.
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in ("invoke", "ainvoke")
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in mcp_names
+                and node.args
+                and isinstance(node.args[0], ast.Dict)
+            ):
+                tool_name = node.func.value.id
+                schema = mcp_tools[tool_name].get("schema") or {}
+                properties = schema.get("properties")
+                required = schema.get("required")
+                keys = []
+                literal_keys = True
+                for k in node.args[0].keys:
+                    if isinstance(k, ast.Constant) and isinstance(k.value, str):
+                        keys.append(k.value)
+                    else:
+                        literal_keys = False
+                if literal_keys:
+                    if isinstance(required, list):
+                        missing = sorted(k for k in required if isinstance(k, str) and k not in keys)
+                        if missing:
+                            problems.append(
+                                f"{rel}:{node.lineno} calls the MCP tool '{tool_name}' without its "
+                                f"required argument(s): {', '.join(missing)} "
+                                f"(the {mcp_tools[tool_name].get('server')} server declares them required)"
+                            )
+                    # Only when the server declared a property list. Silence about parameters
+                    # is not a statement that none are allowed.
+                    if isinstance(properties, dict) and properties:
+                        unknown = sorted(k for k in keys if k not in properties)
+                        if unknown:
+                            problems.append(
+                                f"{rel}:{node.lineno} passes {', '.join(unknown)} to the MCP tool "
+                                f"'{tool_name}', which does not accept "
+                                f"{'them' if len(unknown) > 1 else 'it'}. It accepts: "
+                                f"{', '.join(sorted(properties))}"
+                            )
+
 
 def looks_like_sql(text):
     """Require actual query shape, not just a keyword.
@@ -192,7 +277,13 @@ print(json.dumps(problems))
   return new Promise((resolve) => {
     const child = spawn(
       "uv",
-      ["run", "python", "-c", script, projectDir, JSON.stringify(toolNames), JSON.stringify(reviewedFiles)],
+      [
+        "run", "python", "-c", script,
+        projectDir,
+        JSON.stringify(toolNames),
+        JSON.stringify(reviewedFiles),
+        JSON.stringify(mcpTools),
+      ],
       {
         cwd: runtimeDir,
         env: { ...process.env, PATH: `/opt/homebrew/bin:${process.env.PATH ?? ""}` },
@@ -203,9 +294,21 @@ print(json.dumps(problems))
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (err += d));
     child.on("error", (e) => resolve([`could not run the syntax check: ${e.message}`]));
-    child.on("exit", () => {
+    child.on("exit", (code) => {
+      // Fail CLOSED. This used to read `out.trim() || "[]"`, which turned a crashed analysis
+      // into an empty problem list — so a project whose static checks never ran was reported
+      // as clean, and the import check then executed it. A check that cannot run is not a
+      // check that passed.
+      const text = out.trim();
+      if (!text) {
+        resolve([
+          `the static analysis did not run (exit ${code ?? "?"})` +
+            (err.trim() ? `: ${err.trim().split("\n").slice(-3).join(" ").slice(0, 300)}` : ""),
+        ]);
+        return;
+      }
       try {
-        resolve(JSON.parse(out.trim() || "[]"));
+        resolve(JSON.parse(text) as string[]);
       } catch {
         resolve([`syntax check failed to report: ${err.slice(0, 300)}`]);
       }
@@ -295,12 +398,32 @@ print(json.dumps(problems))
   });
 }
 
+/** The manifest flattened to what the AST pass needs: name -> schema + which server. */
+function mcpToolMap(manifest?: Manifest): Record<string, { schema: Record<string, unknown>; server: string }> {
+  const out: Record<string, { schema: Record<string, unknown>; server: string }> = {};
+  for (const server of manifest?.servers ?? []) {
+    for (const tool of server.tools) {
+      out[tool.name] = { schema: tool.input_schema, server: server.id };
+    }
+  }
+  return out;
+}
+
 export async function validateProject(
   projectDir: string,
   opts: {
     runtimeDir: string;
     connectorFiles: string[];
     connectorToolNames?: string[];
+    /**
+     * The agent's MCP manifest, when it has one.
+     *
+     * Drives three checks a connector never needed, because a connector's parameters are a
+     * display string while a discovered MCP tool carries a real JSON Schema — so a wrong
+     * call can be caught before the project is written rather than at runtime against a
+     * third party's server.
+     */
+    mcpTools?: Manifest;
     /**
      * Require ToolNode(..., handle_tool_errors=True) (rule 7).
      *
@@ -379,6 +502,7 @@ export async function validateProject(
       projectDir,
       opts.connectorToolNames ?? [],
       opts.connectorFiles,
+      mcpToolMap(opts.mcpTools),
     )),
   );
 

@@ -26,6 +26,7 @@ import { atomicSwap, copyProject, isSafeAgentId, listProjectFiles, readOnlyPaths
 import { buildEditSystemPrompt, buildEditUserPrompt } from "./prompt.ts";
 import type { McpToolView } from "./mcpRegistry.ts";
 import { validateProject } from "./validator.ts";
+import { BRIDGE_FILE, MANIFEST_FILE, type Manifest } from "./mcpManifest.ts";
 
 export const EDIT_MODEL = process.env.JAROKU_EDIT_MODEL ?? "claude-haiku-4-5";
 const MAX_TOKENS = 16000;
@@ -90,6 +91,17 @@ export interface EditorOptions {
    * connector catalogue and does not grow one on the MCP registry.
    */
   mcpTools?: (agentId: string) => McpToolView[];
+}
+
+/** An agent's own manifest, or undefined when it was granted no MCP tools. */
+function readProjectManifest(projectDir: string): Manifest | undefined {
+  const path = join(projectDir, MANIFEST_FILE);
+  if (!existsSync(path)) return undefined;
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as Manifest;
+  } catch {
+    return undefined;
+  }
 }
 
 function historyDir(runtimeDir: string, agentId: string): string {
@@ -259,8 +271,13 @@ export class Editor extends EventEmitter<EditorEvents> {
       // fresh generation would be. Failure means the proposal is never applyable.
       const result = await validateProject(staging, {
         runtimeDir,
-        connectorFiles: installedFiles,
+        // The bridge is reviewed code copied in verbatim, so it is excluded from the
+        // model-output lints for the same reason a connector template is.
+        connectorFiles: [...installedFiles, ...(existsSync(join(target, BRIDGE_FILE)) ? [BRIDGE_FILE] : [])],
         connectorToolNames: installed.flatMap((c) => c.tools.map((t) => t.name)),
+        // The agent's existing grant, read from its own manifest rather than from the
+        // registry: an edit is validated against what this project actually has.
+        mcpTools: readProjectManifest(target),
         // Don't-regress, not a new requirement: only demanded of an agent that already had it.
         // Agents generated before the connector templates started raising carry swallowing copies
         // of those templates, are internally consistent, and must stay editable.
