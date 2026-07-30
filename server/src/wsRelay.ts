@@ -170,6 +170,18 @@ export type SetMcpToolImpactCommand = {
   impact: "high" | "low" | null;
 };
 
+/**
+ * Answer a pending confirmation. `verdict` is "once" | "run" | "deny".
+ *
+ * "run" grants for the remainder of THIS run only; nothing persists past it.
+ */
+export type ResolveMcpConfirmCommand = {
+  cmd: "resolveMcpConfirm";
+  runId: string;
+  nonce: string;
+  verdict: "once" | "run" | "deny";
+};
+
 /** Set or clear a server's credential. `token: null` removes the key entirely. */
 export type SetMcpServerAuthCommand = {
   cmd: "setMcpServerAuth";
@@ -183,11 +195,12 @@ export type McpCommand =
   | RemoveMcpServerCommand
   | RediscoverMcpServerCommand
   | SetMcpToolImpactCommand
-  | SetMcpServerAuthCommand;
+  | SetMcpServerAuthCommand
+  | ResolveMcpConfirmCommand;
 
 const MCP_COMMANDS = new Set([
   "addMcpServer", "removeMcpServer", "rediscoverMcpServer", "setMcpToolImpact",
-  "setMcpServerAuth",
+  "setMcpServerAuth", "resolveMcpConfirm",
 ]);
 
 // Unified composer "explain": a prose answer about a step / node / the agent, built from
@@ -372,7 +385,26 @@ export type McpEvent =
   | { type: "discovering"; serverId: string | null; endpoint: string }
   | { type: "error"; message: string; serverId?: string }
   // A discovery that succeeded but is worth a word anyway (e.g. a truncated tool list).
-  | { type: "notice"; message: string; serverId?: string };
+  | { type: "notice"; message: string; serverId?: string }
+  // A run has HALTED before a high-impact MCP tool's first call and is waiting for an
+  // answer. This is the one message on any channel that describes a blocked process, which
+  // is why the client renders it as a modal rather than a notification.
+  | {
+      type: "confirmRequest";
+      runId: string;
+      nonce: string;
+      server: string;
+      tool: string;
+      /** Why the tool was classified high-impact, so the ask can be argued with. */
+      impactReason: string;
+      /** The arguments the model produced, as JSON text. Capped by the bridge. */
+      args: string;
+      /** Seconds the runner will wait before denying. */
+      timeoutS: number;
+      requestedAt: string;
+    }
+  // The request is over: answered, or the run died, or the runner gave up waiting.
+  | { type: "confirmResolved"; runId: string; nonce: string; verdict: string };
 
 export type DebugEvent =
   | { type: "paused"; runId: string; seq: number }

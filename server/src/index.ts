@@ -293,8 +293,51 @@ evalRunner = new EvalRunner({
 
 const MCP_COMMAND_NAMES = new Set([
   "addMcpServer", "removeMcpServer", "rediscoverMcpServer", "setMcpToolImpact",
-  "setMcpServerAuth",
+  "setMcpServerAuth", "resolveMcpConfirm",
 ]);
+
+// Confirmations a run is currently blocked on, keyed `<runId>.<nonce>`.
+//
+// Control-plane only, and in memory only: a pending ask belongs to a live subprocess, and a
+// server restart means that process is gone and its question is moot. Persisting it would
+// resurrect a prompt for a run that no longer exists.
+interface PendingConfirm {
+  runId: string;
+  nonce: string;
+  server: string;
+  tool: string;
+  requestedAt: number;
+}
+const pendingConfirms = new Map<string, PendingConfirm>();
+const confirmKey = (runId: string, nonce: string): string => `${runId}.${nonce}`;
+const approvalFile = (runId: string, nonce: string): string =>
+  join(CHECKPOINT_DIR, `${runId}.${nonce}.approval`);
+
+/**
+ * Answer the runner by writing the file it is polling for — the same file-based direction
+ * pause already uses (requestPause). Nothing is written to the subprocess's stdin, which
+ * stays clear for the same reason stdout does.
+ */
+function writeApproval(runId: string, nonce: string, verdict: string): void {
+  mkdirSync(CHECKPOINT_DIR, { recursive: true });
+  writeFileSync(approvalFile(runId, nonce), verdict, "utf8");
+}
+
+/**
+ * Drop every pending ask for a run, telling clients so their modals close.
+ *
+ * Called when a run ends by any route. Without it a run that crashed while blocked would
+ * leave a modal on screen asking about a process that no longer exists — and answering it
+ * would write an approval file nobody will ever read.
+ */
+function clearConfirms(runId: string, reason: string): void {
+  for (const [key, p] of [...pendingConfirms]) {
+    if (p.runId !== runId) continue;
+    pendingConfirms.delete(key);
+    rmSync(approvalFile(p.runId, p.nonce), { force: true });
+    relay.broadcastMcp({ type: "confirmResolved", runId: p.runId, nonce: p.nonce, verdict: reason });
+  }
+}
 
 function broadcastMcpServers(): void {
   relay.broadcastMcp({ type: "servers", servers: mcpRegistry.list() });
@@ -358,6 +401,27 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         if (!removed) {
           relay.broadcastMcp({ type: "error", message: `no server called "${cmd.serverId}"` });
         }
+        return;
+      }
+
+      case "resolveMcpConfirm": {
+        if (typeof cmd.runId !== "string" || typeof cmd.nonce !== "string") return;
+        const verdict = cmd.verdict === "once" || cmd.verdict === "run" ? cmd.verdict : "deny";
+        const key = confirmKey(cmd.runId, cmd.nonce);
+        const pending = pendingConfirms.get(key);
+        if (!pending) {
+          // Already answered, timed out, or the run died. Saying so beats silence: two
+          // people clicking the same modal should not both think they decided it.
+          relay.broadcastMcp({
+            type: "error",
+            message: "that confirmation is no longer waiting — the run moved on without it",
+          });
+          return;
+        }
+        pendingConfirms.delete(key);
+        writeApproval(cmd.runId, cmd.nonce, verdict);
+        console.log(`[mcp] ${pending.server}/${pending.tool} — ${verdict}`);
+        relay.broadcastMcp({ type: "confirmResolved", runId: cmd.runId, nonce: cmd.nonce, verdict });
         return;
       }
 
@@ -643,6 +707,35 @@ pool.on("control", ({ ctrl }) => {
       pausedRunId = runId;
       store.setRunStatus(runId, "paused");
       relay.broadcastDebug({ type: "paused", runId, seq: seqHigh });
+    } else if (ctrl.ctrl === "tool_confirm") {
+      // A run has stopped before a high-impact MCP tool's first call. It is blocked right
+      // now, on a timer, so this goes out immediately and unconditionally — including for
+      // eval runs, whose ordinary events are kept off the live channels. A silent eval that
+      // stalls for two minutes and then reports a denial explains nothing.
+      const nonce = typeof ctrl.nonce === "string" ? ctrl.nonce : "";
+      if (!nonce) return;
+      const server = String(ctrl.server ?? "unknown");
+      const tool = String(ctrl.tool ?? "unknown");
+      pendingConfirms.set(confirmKey(runId, nonce), {
+        runId, nonce, server, tool, requestedAt: Date.now(),
+      });
+      console.log(`[mcp] ${runId} is waiting for confirmation of ${server}/${tool}`);
+      relay.broadcastMcp({
+        type: "confirmRequest",
+        runId,
+        nonce,
+        server,
+        tool,
+        impactReason: String(ctrl.impact_reason ?? "it is classified high-impact"),
+        args: String(ctrl.args ?? "{}"),
+        timeoutS: typeof ctrl.timeout_s === "number" ? ctrl.timeout_s : 120,
+        requestedAt: new Date().toISOString(),
+      });
+    } else if (ctrl.ctrl === "tool_confirm_closed") {
+      // The runner gave up waiting (or was denied) and has moved on. Close the ask so a
+      // modal cannot linger over a question nobody is listening for any more.
+      const nonce = typeof ctrl.nonce === "string" ? ctrl.nonce : "";
+      if (nonce) clearConfirms(runId, "expired");
     }
   } catch (err) {
     console.error("[debug] control handling failed:", (err as Error).message);
@@ -658,6 +751,10 @@ pool.on("spawnError", ({ runId, error }) => {
 });
 
 pool.on("exit", ({ runId, code, signal, timedOut }) => {
+  // The subprocess is gone, so any question it was waiting on is moot. Left standing, a run
+  // that crashed while blocked would leave a modal asking about a process that no longer
+  // exists, and answering it would write a file nobody will ever read.
+  clearConfirms(runId, "run ended");
   // Only the interactive run owns the interactive flags; an eval job finishing must not
   // clear them out from under a run the user is driving.
   if (runId === activeRunId) {
