@@ -172,9 +172,25 @@ const pretty = (stem: string) =>
   stem.replace(/[_-]+/g, " ").replace(/\.py$/, "").replace(/\b\w/g, (c) => c.toUpperCase()).trim();
 
 /** A tool file path (tools/postgres.py) → a brand mark + label for its resource circle. */
+/** The MCP bridge's mark: the same plug outline the badge uses, in the same rose. */
+function McpBridgeIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#f472b6"
+      strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 22v-5" />
+      <path d="M9 8V2" />
+      <path d="M15 8V2" />
+      <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8z" />
+    </svg>
+  );
+}
+
 export function toolResource(path: string): Brand {
   const stem = (path.split("/").pop() || path).replace(/\.py$/, "");
   const s = stem.toLowerCase();
+  // Checked first: "mcp_bridge" contains none of the patterns below, but a future server
+  // named "mcp_mail" would otherwise be marked as Gmail. Provenance outranks resemblance.
+  if (/^mcp_bridge$/.test(s)) return { label: "MCP", Icon: McpBridgeIcon };
   if (/postgre|(^|_)pg($|_)|psql/.test(s)) return { label: "Postgres", Icon: PostgresIcon };
   if (/gmail|email|mail/.test(s)) return { label: "Gmail", Icon: GmailIcon };
   if (/slack/.test(s)) return { label: "Slack", Icon: SlackIcon };

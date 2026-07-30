@@ -3,8 +3,13 @@ import type { Step } from "../types.ts";
 import { fmtCost, fmtDuration, fmtTokens, typeBadge } from "../lib/format.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
+import { useBuildStore } from "../store/buildStore.ts";
+import { agentMcpToolNames } from "../store/mcpStore.ts";
+import { McpBadge } from "./McpBadge.tsx";
 
 export function StepRow({ step }: { step: Step }) {
+  const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === s.activeAgentId));
+  const mcpNames = agentMcpToolNames(agent?.mcp_tools);
   const open = useTraceStore((s) => s.expandedStepId === step.id);
   const selected = useTraceStore((s) => s.selectedStepId === step.id);
   const selectStep = useTraceStore((s) => s.selectStep);
@@ -46,6 +51,10 @@ export function StepRow({ step }: { step: Step }) {
           {step.type}
         </span>
         <span className="text-ink truncate">{step.name}</span>
+        {/* Derived from the AGENT's manifest, not from the step: the frozen Step schema has
+            no provenance field and must not grow one. Compact, because this row is dense and
+            a word here would push out the name it describes. */}
+        {step.type === "tool_call" && mcpNames.has(step.name) && <McpBadge variant="compact" />}
         <span className="ml-auto text-muted text-[12px] whitespace-nowrap tabular-nums">
           {meta.join(" · ")}
           {step.error && <span className="text-err ml-2">ERROR</span>}

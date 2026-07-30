@@ -36,6 +36,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import Dagre from "@dagrejs/dagre";
 import { useBuildStore, type GenFile } from "../store/buildStore.ts";
+import { agentMcpToolNames } from "../store/mcpStore.ts";
 import { useGraphStore } from "../store/graphStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
@@ -85,6 +86,8 @@ const STATUS_COLOR: Record<NodeStatus, string> = { ok: "#22c55e", error: "#ef444
 
 type FlowKind = "trigger" | "agent" | "tool" | "action" | "terminal";
 type FlowData = {
+  /** True when this tool node calls a third-party MCP server. Drives the rose marker. */
+  mcp?: boolean;
   title: string;
   subtitle: string;
   kind: FlowKind;
@@ -138,6 +141,25 @@ const KIND_ICON: Record<FlowKind, (p: { size?: number }) => ReactElement> = {
   action: ActionIcon,
   terminal: TerminalIcon,
 };
+// Kept in step with ACCENT.mcp in lib/tokens.ts. The graph view has its own palette module
+// (see the note at the top of tokens.ts), so this is a deliberate second reference rather
+// than an oversight — one badge colour across the plan card, the trace and here.
+const ACCENT_MCP = "#f472b6";
+const SURFACE_BG = "#0d0d0f";
+
+/** The same plug outline as panelIcons.PlugIcon, at the size this corner marker needs. */
+function McpPlugGlyph() {
+  return (
+    <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 22v-5" />
+      <path d="M9 8V2" />
+      <path d="M15 8V2" />
+      <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8z" />
+    </svg>
+  );
+}
+
 const KIND_ACCENT: Record<FlowKind, string> = {
   trigger: "#f59e0b",
   agent: "#e4e4e7",
@@ -227,10 +249,28 @@ function FlowNode({ data }: NodeProps) {
         {d.kind === "terminal" && <PlusChip style={{ left: CARD_W + 12, top: CARD_H / 2, transform: "translateY(-50%)" }} />}
       </div>
 
+      {/* The MCP marker, corner-mounted like StatusDot. On the card rather than only in the
+          subtitle, because at this zoom the subtitle is the first thing to become
+          unreadable and this is the one label that must survive it. */}
+      {d.mcp && (
+        <span
+          className="absolute -top-1.5 -left-1.5 flex h-4 w-4 items-center justify-center rounded-full"
+          style={{ background: SURFACE_BG, color: ACCENT_MCP }}
+          title="This tool calls a third-party MCP server Jaroku has not reviewed"
+        >
+          <McpPlugGlyph />
+        </span>
+      )}
+
       {/* label beneath the card */}
       <div className="absolute left-1/2 -translate-x-1/2 text-center" style={{ top: CARD_H + 8, width: 200 }}>
         <div className="text-ink text-[13px] font-medium leading-tight truncate">{d.title}</div>
-        <div className="text-muted text-[11.5px] leading-tight truncate">{d.subtitle}</div>
+        <div
+          className={`text-[11.5px] leading-tight truncate ${d.mcp ? "" : "text-muted"}`}
+          style={d.mcp ? { color: ACCENT_MCP } : undefined}
+        >
+          {d.subtitle}
+        </div>
       </div>
 
       <Handle id="in" type="target" position={Position.Left} className={HANDLE_HIDDEN} />
@@ -602,6 +642,10 @@ function GraphSkeleton() {
 
 export function GraphView() {
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
+  // From the AGENT's manifest, not from the graph: topology is introspected from the
+  // compiled LangGraph object and knows nothing about where a tool's code came from.
+  const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === s.activeAgentId));
+  const mcpNames = useMemo(() => agentMcpToolNames(agent?.mcp_tools), [agent?.mcp_tools]);
   const graph = useGraphStore((s) => (activeAgentId ? s.graphs[activeAgentId] : undefined));
   const loading = useGraphStore((s) => (activeAgentId ? s.loading[activeAgentId] : undefined));
   const files = useBuildStore((s) => s.files);
@@ -677,13 +721,27 @@ export function GraphView() {
     const flow = base.nodes.map((n) => {
       const d = n.data as FlowData;
       const ports = d.kind === "agent" ? { model: resources.hasModel, tool: resources.hasTool } : undefined;
+      // LangGraph gives the whole tool step one node — usually called "tools" — so there is
+      // no per-tool card to mark. What IS true of that node is that it reaches unreviewed
+      // third-party code, and that is what it says. Deliberately not "MCP tool": the same
+      // node also runs the agent's reviewed and bespoke tools, and claiming otherwise would
+      // overstate exactly where the badge must not.
+      const isMcp = d.kind === "tool" && (mcpNames.has(n.id) || mcpNames.size > 0);
       return {
         ...n,
-        data: { ...d, active: n.id === activeNode, selected: n.id === selectedNode, status: nodeStatus[n.id], ports },
+        data: {
+          ...d,
+          subtitle: isMcp ? "Tool node · reaches MCP" : d.subtitle,
+          mcp: isMcp,
+          active: n.id === activeNode,
+          selected: n.id === selectedNode,
+          status: nodeStatus[n.id],
+          ports,
+        },
       };
     });
     return [...flow, ...resources.nodes];
-  }, [base.nodes, resources, activeNode, selectedNode, nodeStatus]);
+  }, [base.nodes, resources, activeNode, selectedNode, nodeStatus, mcpNames]);
 
   const edges = useMemo(() => {
     const flow = base.edges.map((e) => {

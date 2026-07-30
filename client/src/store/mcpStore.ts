@@ -111,6 +111,26 @@ export function mcpToolNames(servers: McpServer[]): Set<string> {
   return new Set(allMcpTools(servers).map((t) => t.name));
 }
 
+/**
+ * The MCP tool names an AGENT was granted, from its own manifest refs.
+ *
+ * This is the join the trace and graph badges rely on. A step carries a tool NAME and
+ * nothing else — the frozen Step schema has no provenance field and must not grow one — so
+ * "did this come from MCP" is answered from the agent's metadata rather than from the event.
+ *
+ * Uses the agent's own refs rather than the live registry, which matters: an agent keeps the
+ * grant it was generated with even if the server has since been disconnected, and its old
+ * traces should still say where those calls went.
+ */
+export function agentMcpToolNames(refs: string[] | undefined): Set<string> {
+  const names = new Set<string>();
+  for (const ref of refs ?? []) {
+    const slash = ref.indexOf("/");
+    if (slash > 0 && slash < ref.length - 1) names.add(ref.slice(slash + 1));
+  }
+  return names;
+}
+
 export const IMPACT_LABEL: Record<McpImpact, string> = {
   high: "high impact",
   low: "read-only",

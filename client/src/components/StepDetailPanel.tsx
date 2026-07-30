@@ -8,6 +8,9 @@ import { useTraceStore } from "../store/traceStore.ts";
 import { fmtCost, fmtDuration, fmtTokens, typeBadge } from "../lib/format.ts";
 import { StepDetail } from "./StepDetail.tsx";
 import { StateBranchEditor } from "./StateBranchEditor.tsx";
+import { McpBadge } from "./McpBadge.tsx";
+import { useBuildStore } from "../store/buildStore.ts";
+import { agentMcpToolNames } from "../store/mcpStore.ts";
 
 function glyphForType(type: string): string {
   switch (type) {
@@ -31,6 +34,10 @@ function Kv({ label, value, tag }: { label: string; value: string; tag?: boolean
 }
 
 export function StepDetailPanel() {
+  // Same join as the timeline row: a step carries a tool NAME, and whether that name came
+  // from MCP is a fact about the AGENT, recorded in its manifest.
+  const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === s.activeAgentId));
+  const mcpNames = agentMcpToolNames(agent?.mcp_tools);
   const expandedStepId = useTraceStore((s) => s.expandedStepId);
   const step = useTraceStore((s) => {
     const id = s.expandedStepId;
@@ -75,6 +82,9 @@ export function StepDetailPanel() {
             <div className="flex items-center gap-2">
               <span className={`text-[13px] ${step.error ? "text-err" : "text-run"}`}>{glyphForType(step.type)}</span>
               <span className="text-ink truncate">{step.name}</span>
+              {/* Room to say the word here, unlike the timeline row. Someone reading a step's
+                  input and output should be told whose code produced them. */}
+              {step.type === "tool_call" && mcpNames.has(step.name) && <McpBadge />}
               <span className={`ml-auto text-[11px] px-1.5 py-px rounded ${typeBadge(step.type)}`}>{step.type}</span>
             </div>
             <div className="mt-1 text-[11px]">

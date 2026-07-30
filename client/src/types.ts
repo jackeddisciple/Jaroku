@@ -90,11 +90,21 @@ export interface GenUsage {
 // The pre-generation plan (server/src/planProtocol.ts). Hand-mirrored like every other
 // cross-boundary type here. `raw` is always populated and is what the plan card renders when
 // the structure came back empty — confirming a plan is never blocked on a successful parse.
-export type ToolOrigin = "connector" | "bespoke";
+/**
+ * Where a planned tool comes from — three genuinely different provenances, rendered
+ * differently because the difference is what a reader needs (see server/src/planProtocol.ts).
+ *
+ *   connector  an audited template, copied in byte-for-byte
+ *   bespoke    about to be written by a model, for this agent
+ *   mcp        a call into a third-party server nobody here has reviewed
+ */
+export type ToolOrigin = "connector" | "bespoke" | "mcp";
 
 export interface PlannedTool {
   name: string;
   origin: ToolOrigin;
+  /** MCP server id, when origin is "mcp" and the plan named one. */
+  mcpServerId?: string;
   connectorId?: string;
   summary: string;
 }

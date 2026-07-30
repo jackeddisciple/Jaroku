@@ -33,9 +33,12 @@ import {
   InfoIcon,
   LightbulbIcon,
   LockIcon,
+  PlugIcon,
   ShieldCheckIcon,
   SparklesIcon,
 } from "./panelIcons.tsx";
+import { HighImpactBadge, McpBadge } from "./McpBadge.tsx";
+import { allMcpTools, useMcpStore } from "../store/mcpStore.ts";
 
 /**
  * Which sections the user has folded away, for as long as the panel is open.
@@ -348,8 +351,15 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
   }
 
   const plan = turn.plan;
+  const mcpServers = useMcpStore((s) => s.servers);
   const connectorTools = plan?.tools.filter((t) => t.origin === "connector") ?? [];
   const bespokeTools = plan?.tools.filter((t) => t.origin === "bespoke") ?? [];
+  const mcpTools = plan?.tools.filter((t) => t.origin === "mcp") ?? [];
+  // The impact classification lives in the registry, not in the plan text — the plan says
+  // WHICH tools, the registry says what each one costs to run.
+  const mcpImpact = new Map(
+    allMcpTools(mcpServers).map((t) => [t.name, t] as const),
+  );
   // The parser makes nothing of a response that ignored the protocol. Rather than hide it,
   // fall back to the raw text — a plan the user can read is worth more than a tidy blank.
   const degraded = !plan || (plan.tools.length === 0 && plan.state.length === 0 && plan.graph.length === 0);
@@ -470,6 +480,53 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                     }
                   />
                 ))}
+              </Section>
+            )}
+
+            {mcpTools.length > 0 && (
+              <Section
+                scope={scope}
+                icon={<PlugIcon />}
+                label="External MCP tools"
+                note="Third-party code Jaroku has not reviewed. Only what you selected is given to this agent."
+                accent={ACCENT.mcp}
+                count={mcpTools.length}
+              >
+                {mcpTools.map((t) => {
+                  const known = mcpImpact.get(t.name);
+                  return (
+                    <ToolRow
+                      key={t.name}
+                      icon={<PlugIcon />}
+                      accent={ACCENT.mcp}
+                      name={t.name}
+                      description={
+                        <span className="inline-flex flex-wrap items-center gap-1.5">
+                          {/* Which server, always. Two servers can advertise one name and
+                              mean entirely different things by it. */}
+                          {(known?.serverLabel ?? t.mcpServerId) && (
+                            <span className="text-muted">{known?.serverLabel ?? t.mcpServerId}</span>
+                          )}
+                          <Prose
+                            text={t.summary.replace(/^mcp[;:]?\s*/i, "")}
+                            vocabulary={vocabulary}
+                          />
+                        </span>
+                      }
+                      // Two marks, answering two questions: where it came from, and whether
+                      // running it will stop and ask. A tool can be external and read-only,
+                      // and one combined mark would make every MCP tool look alarming.
+                      status={
+                        <span className="inline-flex items-center gap-1">
+                          {known?.impact === "high" && (
+                            <HighImpactBadge reason={known.impact_reason} />
+                          )}
+                          <McpBadge />
+                        </span>
+                      }
+                    />
+                  );
+                })}
               </Section>
             )}
 
