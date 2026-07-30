@@ -368,6 +368,61 @@ export type EvalMessage =
   | { channel: "eval"; type: "rubric"; datasetId: string; rubric: Rubric; isDefault: boolean }
   | { channel: "eval"; type: "error"; message: string; datasetId?: string };
 
+// --- MCP (see server/src/mcpRegistry.ts, server/src/mcpStore.ts) ---
+//
+// A connected MCP server is UNREVIEWED THIRD-PARTY CODE. Everything below is a claim it
+// made about itself during the handshake, not a fact anyone verified — which is why an
+// MCP-sourced tool carries a distinct badge everywhere it appears, and why a high-impact
+// one stops for a confirmation before it runs.
+
+export type McpImpact = "high" | "low";
+
+export type McpServerStatus = "connected" | "unreachable" | "auth_required" | "error";
+
+export interface McpTool {
+  server_id: string;
+  name: string;
+  description: string | null;
+  /** The tool's declared JSON Schema, exactly as the server advertised it. */
+  input_schema: Record<string, unknown>;
+  schema_hash: string;
+  /** What the confirmation gate will actually use — an override if one applies, else below. */
+  impact: McpImpact;
+  /** What the classifier decided, before any override. */
+  computed_impact: McpImpact;
+  /** Why, in words. Shown beside the classification and in the confirmation modal. */
+  impact_reason: string;
+  overridden: boolean;
+  /** An override exists but no longer applies: the server changed the tool's schema. */
+  override_voided: boolean;
+  annotations: Record<string, unknown> | null;
+}
+
+export interface McpServer {
+  id: string;
+  label: string;
+  endpoint: string;
+  transport: string;
+  /** The NAME of the env var holding this server's credential. Never a value. */
+  auth_env_key: string | null;
+  server_name: string | null;
+  server_version: string | null;
+  protocol_version: string | null;
+  status: McpServerStatus;
+  last_error: string | null;
+  discovered_at: string | null;
+  created_at: string;
+  /** A credential is stored. Never the credential itself — that never crosses the wire. */
+  configured: boolean;
+  tools: McpTool[];
+}
+
+export type McpMessage =
+  | { channel: "mcp"; type: "servers"; servers: McpServer[] }
+  | { channel: "mcp"; type: "discovering"; serverId: string | null; endpoint: string }
+  | { channel: "mcp"; type: "error"; message: string; serverId?: string }
+  | { channel: "mcp"; type: "notice"; message: string; serverId?: string };
+
 // --- server → client channel messages (see server/src/wsRelay.ts) ---
 
 export type ServerMessage =
@@ -389,7 +444,8 @@ export type ServerMessage =
   | { channel: "reply"; type: "error"; agentId: string; message: string }
   | GenMessage
   | EditMessage
-  | EvalMessage;
+  | EvalMessage
+  | McpMessage;
 
 // --- client → server commands ---
 
@@ -427,7 +483,17 @@ export type ClientCommand =
   | { cmd: "listEvals"; datasetId?: string }
   | { cmd: "estimateEval"; datasetId: string; agentId: string; targets: EvalTarget[] }
   | { cmd: "loadRubric"; datasetId: string }
-  | { cmd: "saveRubric"; datasetId: string; name?: string; criteria: RubricCriterion[] };
+  | { cmd: "saveRubric"; datasetId: string; name?: string; criteria: RubricCriterion[] }
+  // MCP: server registry. Same discipline as the eval commands — every mutation comes back
+  // as a full snapshot on the "mcp" channel.
+  | { cmd: "listMcpServers" }
+  // `token` is the only field in this union that carries a secret. It travels one way, over
+  // the loopback socket, and is never sent back: a server reports `configured`, not its key.
+  | { cmd: "addMcpServer"; endpoint: string; label?: string; token?: string }
+  | { cmd: "removeMcpServer"; serverId: string }
+  | { cmd: "rediscoverMcpServer"; serverId: string }
+  | { cmd: "setMcpServerAuth"; serverId: string; token: string | null }
+  | { cmd: "setMcpToolImpact"; serverId: string; toolName: string; impact: McpImpact | null };
 
 // Unified composer "explain" subject — what the question is about, built from already-in-memory
 // context (a trace step, a graph node, or the agent generally). No new data is fetched.

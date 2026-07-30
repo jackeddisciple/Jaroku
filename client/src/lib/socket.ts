@@ -7,7 +7,10 @@ import { useBuildStore } from "../store/buildStore.ts";
 import { useChatStore } from "../store/chatStore.ts";
 import { useGraphStore } from "../store/graphStore.ts";
 import { useEvalStore } from "../store/evalStore.ts";
-import type { ClientCommand, EvalTarget, ExplainSubject, RubricCriterion, ServerMessage } from "../types.ts";
+import { useMcpStore } from "../store/mcpStore.ts";
+import type {
+  ClientCommand, EvalTarget, ExplainSubject, McpImpact, RubricCriterion, ServerMessage,
+} from "../types.ts";
 
 const WS_URL = import.meta.env.VITE_JAROKU_WS ?? `ws://localhost:4317`;
 const RECONNECT_MS = 1000;
@@ -126,6 +129,17 @@ function dispatch(msg: ServerMessage): void {
       else if (msg.type === "rubric") e.setRubric(msg.rubric, msg.isDefault);
       else if (msg.type === "estimate") e.setEstimate(msg.estimate);
       else if (msg.type === "error") e.setError(msg.message);
+      break;
+    }
+    case "mcp": {
+      // The MCP registry. Every message is a full snapshot of the server list, so this is a
+      // replace and never a merge — see mcpStore. Nothing here touches trace state: an
+      // agent's MCP tool call is an ordinary tool_call Step and arrives on "trace".
+      const m = useMcpStore.getState();
+      if (msg.type === "servers") m.setServers(msg.servers);
+      else if (msg.type === "discovering") m.setDiscovering(msg.serverId, msg.endpoint);
+      else if (msg.type === "error") m.setError(msg.message);
+      else if (msg.type === "notice") m.setNotice(msg.message);
       break;
     }
     case "reply": {
@@ -268,6 +282,33 @@ export function sendBranchRun(
 // in-context data. Answered on the "reply" channel (chatStore), never a code change.
 export function sendExplain(agentId: string, question: string, subject: ExplainSubject): void {
   send({ cmd: "explain", agentId, question, subject });
+}
+
+// --- MCP: server registry --------------------------------------------------
+// Answered on the "mcp" channel with a fresh snapshot of the whole server list, so callers
+// never optimistically patch local state.
+
+export function sendListMcpServers(): void {
+  send({ cmd: "listMcpServers" });
+}
+/** Connect a server. `token` is written to runtime/.env server-side and never comes back. */
+export function sendAddMcpServer(endpoint: string, label?: string, token?: string): void {
+  send({ cmd: "addMcpServer", endpoint, label, token });
+}
+export function sendRemoveMcpServer(serverId: string): void {
+  send({ cmd: "removeMcpServer", serverId });
+}
+/** Re-run the handshake. On failure the previously discovered tools are kept. */
+export function sendRediscoverMcpServer(serverId: string): void {
+  send({ cmd: "rediscoverMcpServer", serverId });
+}
+/** Store or clear a credential. `null` removes the key from runtime/.env entirely. */
+export function sendSetMcpServerAuth(serverId: string, token: string | null): void {
+  send({ cmd: "setMcpServerAuth", serverId, token });
+}
+/** Override the impact classification for one tool. `null` restores the classifier's call. */
+export function sendSetMcpToolImpact(serverId: string, toolName: string, impact: McpImpact | null): void {
+  send({ cmd: "setMcpToolImpact", serverId, toolName, impact });
 }
 
 // --- eval: dataset CRUD ----------------------------------------------------
