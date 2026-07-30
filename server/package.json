@@ -16,10 +16,13 @@
     "test:retry": "tsx src/evalRetry.test.ts",
     "test:judge": "tsx src/judge/rubric.test.ts",
     "test:cleanup": "tsx src/evalCleanup.test.ts",
-    "test:mcp-impact": "tsx src/mcpImpact.test.ts"
+    "test:mcp-impact": "tsx src/mcpImpact.test.ts",
+    "test:mcp-client": "tsx src/mcpClient.test.ts",
+    "mock:mcp": "tsx fixtures/mcp/mockServer.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "diff": "^8.0.4",
     "ws": "^8.18.0"
   },
