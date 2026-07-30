@@ -15,7 +15,8 @@
     "test:aggregate": "tsx src/evalAggregate.test.ts",
     "test:retry": "tsx src/evalRetry.test.ts",
     "test:judge": "tsx src/judge/rubric.test.ts",
-    "test:cleanup": "tsx src/evalCleanup.test.ts"
+    "test:cleanup": "tsx src/evalCleanup.test.ts",
+    "test:mcp-impact": "tsx src/mcpImpact.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",
