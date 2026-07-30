@@ -103,6 +103,52 @@ for rel, tree in trees.items():
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and is_tool_decorated(node):
             known_tools.add(node.name)
 
+# --- the reviewed tools must still be wired in -------------------------------------
+#
+# The connector template FILES are read-only, but the file that decides which tools the agent
+# actually binds is not — it cannot be, because adding a bespoke tool means editing it. So the
+# read-only flag protected the body of pg_query while leaving the line that exports it editable:
+# drop the name from TOOLS, or shadow it with a same-named function elsewhere, and the agent
+# silently loses a reviewed tool while its metadata, its plan card and its sidebar all still
+# advertise the connector. The audit guarantee has to cover the wiring, not just the source.
+reviewed_names = set(json.loads(sys.argv[2]))
+if reviewed_names:
+    # Names mentioned anywhere in a "TOOLS = <expr>" assignment, following one level of local
+    # variable so "TOOLS = CONNECTOR_TOOLS + [mine]" is understood.
+    wired, aliases = set(), {}
+    for rel, tree in trees.items():
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name):
+                        aliases.setdefault(tgt.id, []).append(node.value)
+    def collect(expr, depth=0):
+        for n in ast.walk(expr):
+            if isinstance(n, ast.Name):
+                wired.add(n.id)
+                if depth < 1:
+                    for sub in aliases.get(n.id, []):
+                        if sub is not expr:
+                            collect(sub, depth + 1)
+    for expr in aliases.get("TOOLS", []):
+        collect(expr)
+
+    # A tool defined outside its own reviewed file, under a reviewed name, is a shadow.
+    for rel, tree in generated.items():
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in reviewed_names:
+                problems.append(
+                    f"{rel}:{node.lineno} defines '{node.name}', which is the name of a reviewed "
+                    "connector tool — the agent would bind this instead of the audited one (rule 6)"
+                )
+
+    if aliases.get("TOOLS"):
+        for name in sorted(reviewed_names - wired):
+            problems.append(
+                f"'{name}' is a reviewed connector tool for this agent but is no longer in TOOLS "
+                "— the agent advertises the connector and cannot call it (rule 6)"
+            )
+
 def looks_like_sql(text):
     """Require actual query shape, not just a keyword.
 
