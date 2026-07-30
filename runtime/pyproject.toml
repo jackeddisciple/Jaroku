@@ -20,6 +20,9 @@ connectors = [
     "google-auth>=2.23.0",
     "slack-sdk>=3.26.0",
     "psycopg[binary]>=3.1.0",
+    # The MCP client used by tool_templates/mcp_bridge.py. Same discipline as the others:
+    # lazy-imported, so the base install and the dry-run path never depend on it.
+    "mcp>=1.9.0",
 ]
 
 [build-system]
