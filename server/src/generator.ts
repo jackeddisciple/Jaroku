@@ -22,10 +22,10 @@ import { loadConnectors, requiredEnv, resolveSelected, templatesDir, type Connec
 import { FileProtocolParser, type ProtocolEvent } from "./fileProtocol.ts";
 import { round8 } from "./pricing.ts";
 import { atomicSwap } from "./projectFs.ts";
-import { buildSystemPrompt, buildUserPrompt } from "./prompt.ts";
+import { buildSystemPrompt, buildUserPrompt, type GenerationRequest } from "./prompt.ts";
 import {
-  BRIDGE_FILE, BRIDGE_TEMPLATE, buildManifest, manifestEnv, manifestRefs, writeManifest,
-  type Manifest,
+  BRIDGE_FILE, BRIDGE_TEMPLATE, buildManifest, manifestCollisions, manifestEnv, manifestRefs,
+  manifestToolNames, writeManifest, type Manifest,
 } from "./mcpManifest.ts";
 import type { McpServerView, McpToolView } from "./mcpRegistry.ts";
 import { validateProject } from "./validator.ts";
@@ -98,6 +98,35 @@ export function safeRelativePath(root: string, candidate: string): string | null
   return normalized;
 }
 
+/**
+ * The request the generation prompt is built from.
+ *
+ * A named seam rather than an object literal at the call site, because the call site is where
+ * this went wrong: the model was never told the agent had any MCP tools, while the host wrote
+ * the bridge and the manifest anyway. The result was not a degraded agent but a discarded one —
+ * validation rule 12 rejects a project that advertises MCP tools it never wired in, so every
+ * MCP-scoped generation failed, after being paid for.
+ *
+ * Nothing here is optional-by-omission. What the model is shown and what the manifest grants
+ * come from the same field of the same options object, and mcpHardening.test.ts asserts that
+ * the prompt names every tool the manifest contains.
+ */
+export function generationRequest(
+  opts: GenerateOptions,
+  agentId: string,
+  agentName: string,
+  connectors: Connector[],
+): GenerationRequest {
+  return {
+    prompt: opts.prompt,
+    agentId,
+    agentName,
+    connectors,
+    mcpTools: opts.mcpTools ?? [],
+    plan: opts.plan,
+  };
+}
+
 export class Generator extends EventEmitter<GeneratorEvents> {
   async generate(opts: GenerateOptions): Promise<void> {
     const { runtimeDir } = opts;
@@ -135,7 +164,51 @@ export class Generator extends EventEmitter<GeneratorEvents> {
 
     const parser = new FileProtocolParser(onEvent);
 
+    // The manifest is built BEFORE the model is called, not after, for two reasons that both
+    // come down to it being the agent's MCP grant rather than a by-product of generation.
+    //
+    // It is what the model has to be told about: the prompt lists exactly the tools the
+    // manifest will contain, so a tool named in one and missing from the other is a project
+    // that cannot validate. Building it here makes them one fact instead of two.
+    //
+    // And a grant that cannot be represented has to fail before anything is spent. Nothing in
+    // the model's output can fix two servers advertising one name — see manifestCollisions.
+    const manifest = buildManifest(opts.mcpTools ?? [], opts.mcpServers ?? []);
+
     try {
+      const clash = manifestCollisions(manifest);
+      if (clash.length) {
+        // Named in full, with the servers involved, because the fix is a selection the user
+        // makes in the MCP panel and they need to know which one to change.
+        const detail = clash
+          .map((tool) => {
+            const from = manifest.servers
+              .filter((s) => s.tools.some((t) => t.name === tool))
+              .map((s) => s.id)
+              .join(" and ");
+            return `${tool} (from ${from})`;
+          })
+          .join(", ");
+        throw new Error(
+          `two MCP servers advertise the same tool name: ${detail}. An agent has one tool ` +
+            `per name, so only one of each can be granted — deselect the duplicate in the MCP ` +
+            `panel and generate again.`,
+        );
+      }
+
+      const connectorNames = new Set(selected.flatMap((c) => c.tools.map((t) => t.name)));
+      const shadowed = manifestToolNames(manifest).filter((n) => connectorNames.has(n));
+      if (shadowed.length) {
+        // Same failure, other direction. A reviewed connector and an unreviewed MCP server
+        // sharing a name is worse than two MCP servers doing it: whichever wins, a badge that
+        // says "reviewed" and a tool that is not are one name apart.
+        throw new Error(
+          `${shadowed.join(", ")} ${shadowed.length > 1 ? "are" : "is"} the name of both a ` +
+            `selected connector tool and a selected MCP tool. They cannot both be granted — ` +
+            `drop one of the two in the MCP panel and generate again.`,
+        );
+      }
+
       const fixture = process.env.JAROKU_GEN_FIXTURE;
       if (fixture && existsSync(fixture)) {
         // Same warning as the edit path: replay ignores the prompt entirely, and a
@@ -146,9 +219,12 @@ export class Generator extends EventEmitter<GeneratorEvents> {
         );
         await replayFixture(fixture, (chunk) => parser.push(chunk));
       } else {
-        const raw = await this.streamGeneration(all, {
-          prompt: opts.prompt, agentId, agentName: name, connectors: selected, plan: opts.plan,
-        }, (chunk) => parser.push(chunk), (u) => (usage = u));
+        const raw = await this.streamGeneration(
+          all,
+          generationRequest(opts, agentId, name, selected),
+          (chunk) => parser.push(chunk),
+          (u) => (usage = u),
+        );
         if (fixture) writeFileSync(fixture, raw, "utf8"); // record for future free runs
       }
 
@@ -157,7 +233,6 @@ export class Generator extends EventEmitter<GeneratorEvents> {
 
       // Host-owned files. Written after the model's, so the model cannot shadow them.
       const connectorFiles = this.installConnectors(staging, selected, runtimeDir);
-      const manifest = buildManifest(opts.mcpTools ?? [], opts.mcpServers ?? []);
       const mcpFiles = this.installMcpBridge(staging, manifest, runtimeDir);
       this.writeHostFiles(staging, {
         agentId, name, description: opts.prompt, selected, manifest,
@@ -201,7 +276,10 @@ export class Generator extends EventEmitter<GeneratorEvents> {
 
   private async streamGeneration(
     allConnectors: Connector[],
-    req: { prompt: string; agentId: string; agentName: string; connectors: Connector[]; plan?: string },
+    // GenerationRequest itself, not a narrower structural copy of it. The copy is what let the
+    // MCP tools go missing: buildUserPrompt has always rendered them, and a hand-written
+    // parameter type that omitted the field made passing them a compile error nobody saw.
+    req: GenerationRequest,
     onChunk: (text: string) => void,
     onUsage: (u: UsageSummary) => void,
   ): Promise<string> {
