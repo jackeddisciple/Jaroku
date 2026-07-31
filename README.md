@@ -40,6 +40,7 @@ of the repo and run yourself.
 - [The eval engine](#the-eval-engine)
 - [Cost accounting](#cost-accounting)
 - [Connectors](#connectors)
+- [MCP servers](#mcp-servers)
 - [The React client](#the-react-client)
 - [WebSocket protocol](#websocket-protocol)
 - [Configuration](#configuration)
@@ -79,6 +80,7 @@ a tool you trust and one you don't:
 | **Nothing lands unreviewed** | Generation shows you a plan first. Edits show you a diff first. Both stage to a temp directory and atomic-swap only after validation passes. |
 | **stdout is sacred** | stdout carries trace events and nothing else. The runner `dup2`s fd 1 to stderr before importing any generated code, so a stray `print()` physically cannot corrupt the stream. |
 | **Money asks first** | The free dry-run path is one click. Spending real money requires picking providers, seeing an estimate, and setting a hard budget ceiling the server enforces. |
+| **Unreviewed code is labelled as such** | Connectors are audited and copied in verbatim. An [MCP server](#mcp-servers) is third-party code nobody here has read, so its tools carry a badge everywhere they appear, an agent only gets the specific ones it was granted, and a high-impact one stops for your confirmation before it runs. |
 
 ---
 
@@ -108,7 +110,7 @@ cd jaroku
 ```bash
 cd runtime
 uv sync                      # LangGraph, LangChain, the SQLite checkpointer
-uv sync --extra connectors   # optional: Gmail / Slack / Postgres SDKs
+uv sync --extra connectors   # optional: Gmail / Slack / Postgres SDKs, and the MCP client
 cd ..
 ```
 
@@ -150,6 +152,9 @@ GMAIL_CLIENT_SECRET=
 GMAIL_REFRESH_TOKEN=
 SLACK_BOT_TOKEN=
 DATABASE_URL=postgres://...
+
+# MCP server credentials are written here by the MCP panel, never by hand:
+# JAROKU_MCP_<SERVER>_TOKEN=
 ```
 
 `runtime/.env` is gitignored. Both the Node side (`server/src/env.ts`) and the Python side
@@ -208,6 +213,13 @@ files stream in as they are written. Nothing lands on disk until validation pass
 You get a **diff card** — per-file hunks, additions and deletions — and nothing changes until
 you press **Apply**. **Undo** restores the previous version from a snapshot.
 
+**Give it a third-party tool.** Open the **MCP** tab and connect a server — `npm run mock:mcp`
+in `server/` starts a fixture one at `http://127.0.0.1:8931/mcp` if you don't have a real
+endpoint handy. You'll see exactly what it says it can do, each tool classified as read-only
+or high-impact *with the reason*. Tick the ones an agent should have, plan, generate, and run:
+the read-only tools just run, and the high-impact ones stop and show you the arguments before
+they go anywhere.
+
 **Compare providers.** Go to the **Evals** tab, add a few example inputs to a dataset, pick
 providers, read the estimate, set a ceiling, and run. You get a comparison table of quality,
 cost, latency and token counts per provider, exportable to CSV or JSON.
@@ -244,6 +256,7 @@ jaroku/
 │   ├── tool_templates/        # reviewed connectors, copied verbatim into projects
 │   │   ├── catalog.json       # the registry: ids, env, tool signatures
 │   │   ├── gmail.py  slack.py  postgres.py
+│   │   └── mcp_bridge.py      # calls third-party MCP servers; the manifest is the grant
 │   │
 │   ├── test_agent/            # hand-written 2-tool fixture; traces itself
 │   └── agents/                # generated projects land here
@@ -252,6 +265,7 @@ jaroku/
 ├── server/                    # Node/TypeScript: the control plane
 │   ├── src/                   # (see "The Node server" below)
 │   ├── fixtures/              # recorded model responses for free development
+│   │   └── mcp/mockServer.ts  # a fixture MCP server, so all of it is testable for free
 │   ├── debug-client.html      # dependency-free fallback UI on :4317
 │   └── jaroku.db              # SQLite: traces + eval control plane (gitignored)
 │
@@ -282,7 +296,8 @@ Three processes, one direction of data flow.
 │   Planner → Generator → Validator → atomic swap                          │
 │   Editor  → staged proposal → diff → apply/undo with linear history      │
 │   EvalRunner → persisted job queue → per-provider caps → judge           │
-│   TraceStore + EvalStore  (one SQLite file, one writer)                  │
+│   McpRegistry → handshake → classify → the agent's manifest              │
+│   TraceStore + EvalStore + McpStore  (one SQLite file, one writer)       │
 └───────────────────────────────┬───────────────────────────────────────────┘
                                 │  uv run python -m jaroku_runner <agent>
                                 │  ← NDJSON trace events on stdout
@@ -465,6 +480,12 @@ exists so a fresh checkout has something to run before anything has been generat
 | `editor.ts` | The fix loop: instruction → staged proposal → reviewable diff → apply/undo with linear history. |
 | `projectFs.ts` | `atomicSwap`, path confinement, agent-id validation. Read-every-line territory. |
 | `connectors.ts` / `agents.ts` | Registries over `tool_templates/catalog.json` and `runtime/agents/`. |
+| `mcpStore.ts` | MCP registry tables (`mcp_servers`, `mcp_tools`) beside the frozen schema. Stores env var *names*, never credentials. |
+| `mcpClient.ts` | The capability handshake against a remote server. Every wait and every cursor is bounded. |
+| `mcpImpact.ts` | Classifies a discovered tool `high`/`low`, with its reason. A ratchet: an untrusted signal may only raise. |
+| `mcpRegistry.ts` | Connect / re-discover / remove. A failed refresh never destroys a working tool list. |
+| `mcpManifest.ts` | Builds `mcp_tools.json` — the grant a generated agent's bridge honours. |
+| `envWriter.ts` | The only code that writes `runtime/.env`. Refuses anything it cannot read back identically. |
 | `claude.ts` | One lazy Anthropic client, one usage/cost accounting. The key never leaves the process. |
 | `pricing.ts` | Node reader of the shared `runtime/pricing.json`. |
 | `graphIntrospect.ts` | Spawns `jaroku_runner.graph` to get real topology. Never runs the graph. |
@@ -821,6 +842,234 @@ Adding a connector means: write the template, add its entry to `catalog.json`, a
 
 ---
 
+## MCP servers
+
+Connectors are code we read. **MCP servers are code nobody here has read** — and the whole
+design of this feature follows from taking that seriously rather than treating an MCP server
+as a connector that happens to arrive over HTTP.
+
+| | reviewed connector | MCP server |
+|---|---|---|
+| provenance | hand-audited by us | third-party, unread |
+| tool list | declared in a catalog | **discovered** at runtime, can change |
+| parameters | a display-only signature | a machine-readable JSON Schema |
+| output | trusted — we wrote it | untrusted input |
+
+They therefore get their own registry, their own vocabulary, and a badge that appears
+everywhere one of their tools does. `schema/events.md` v1 is untouched: **an MCP tool call is
+an ordinary `tool_call` Step**, and everything below rides beside the frozen schema in new
+tables and a new channel, exactly as pause/resume and the eval engine did.
+
+### Connecting one
+
+The **MCP** tab lists connected servers. Adding one performs the standard handshake —
+`initialize` → `notifications/initialized` → `tools/list` — and shows you what the server says
+it can do *before* anything is granted to any agent. Nothing is ever assumed about a server's
+capabilities; the list is its own advertisement, re-read on demand and never carried over.
+
+Only **Streamable HTTP** endpoints are supported. stdio is deliberately not: it means running
+a third-party binary on your machine, which is a much larger decision than making a request.
+
+Failure is classified rather than swallowed, because the three cases need different fixes:
+
+| Status | What it means |
+|---|---|
+| `connected` | Handshake succeeded; the tool list is what it advertised |
+| `unreachable` | DNS, refused, reset, timeout. Usually transient — the previously discovered tools are **kept** |
+| `auth_required` | It wants a credential, or rejected the one it has |
+| `error` | It answered, but not with usable MCP |
+
+A failed *refresh* never destroys a working tool list. Wiping it on a network blip would
+silently strip every agent scoped to that server, which is a far worse failure than a status
+line saying unreachable.
+
+### Credentials
+
+A token entered in the UI is written to `runtime/.env` under a derived name
+(`JAROKU_MCP_<SERVER>_TOKEN`), and that is the last time anything holds it. From then on it is
+read from the environment at the moment a request is made. It is never logged, never stored in
+the database, never written into a generated project, and never sent back to the browser —
+what a client learns is `configured: true`, meaning a named variable is set.
+
+Two things worth knowing:
+
+- **A value that cannot round-trip is refused, not mangled.** The `.env` format has no escape
+  sequences, so every candidate line is parsed back with the real loader first. A credential
+  quietly altered on the way to disk produces a 401 with no explanation anywhere.
+- **A variable already exported in your shell wins after a restart**, on both sides, by design
+  (see [Configuration](#configuration)). Writing one that is shadowed warns you, because a
+  token that silently reverts is a baffling thing to debug.
+
+**OAuth is not supported.** A server that answers a handshake with an OAuth challenge says so
+explicitly rather than failing as a generic "unauthorized" — otherwise you would go hunting for
+a key that does not exist.
+
+### Impact classification
+
+Every discovered tool is classified `high` or `low` at discovery, and the classification is
+stored **with its reason**. High-impact tools stop and ask before their first call in a run.
+
+The rule is a **ratchet**: an untrusted or unreliable signal may raise impact, never lower it.
+
+1. **The server's own `ToolAnnotations`.** `destructiveHint: true` is believed.
+   `readOnlyHint: true` is **ignored** — letting a server certify its own tool as safe would
+   make the gate opt-out, defeated by four characters of JSON. When a server tried to lower
+   something and it stayed high, you are told so.
+2. **The tool name**, which by MCP convention leads with its verb. The only signal allowed to
+   decide in both directions, because it is a machine identifier the author chose. A high verb
+   anywhere outranks a low one (`get_or_create_issue` is high), while a leading-position-only
+   lexicon keeps a read's *object* from reading as a verb (`get_message` stays low, while
+   `send_message` does not). Matching is exact rather than stemmed, so `list_deleted_items`
+   is low.
+3. **The description's opening words**, and only as evidence of a write. There is no path from
+   prose to "low": "Returns the newly created issue" opens like a read and describes a write.
+4. **Otherwise high.** This mirrors the eval engine treating unrecognised failures as
+   deterministic — when a heuristic cannot read something, it must fail toward the answer that
+   is expensive rather than the one that is silent. A tool called `frobnicate` gets a prompt,
+   because nobody, including us, knows what it does.
+
+You can **override** any classification in either direction, and the reason is shown beside it
+so the override is a considered disagreement rather than a way to make a warning go away. An
+override is stamped with the schema it was judged against: if the server later changes that
+tool's parameters, the override is **voided and says so**, and the computed classification
+governs again. A server quietly widening a tool it already talked you into trusting is the
+case that defends against.
+
+### Least privilege
+
+MCP tools are selected **per tool**, never per server. Connecting a server makes its tools
+available to choose from; it grants an agent nothing. The selection travels through the
+approved plan into `mcp_tools.json`, and the reviewed bridge builds exactly the tools that
+file lists and offers **no way to reach anything else** — no dynamic discovery, no tool name
+passed in from the agent. If a server grows a `delete_everything` tool tomorrow, an agent
+generated today still cannot call it.
+
+**The honest limit:** the finest grain MCP exposes is the tool. There is no sub-tool scoping in
+the protocol, so if a tool's own schema permits more than your agent needs, nothing here can
+narrow it — the scoping is per tool, and that is as far as it goes.
+
+### The first-use confirmation gate
+
+Before a **high-impact** MCP tool runs for the first time in a run, the run halts and asks:
+
+```
+┌──────────────────────────────────────────────┐
+│  ⚠  A tool is waiting for you                │
+│  [MCP] send_message  on  mock                │
+│  This runs on a third-party server Jaroku    │
+│  has not reviewed. It was classified         │
+│  high-impact because its name begins "send". │
+│                                              │
+│  ARGUMENTS THE AGENT PRODUCED                │
+│  { "channel": "eng", "text": "ship it" }     │
+│                                              │
+│  run 4f15e873      denies in 1:52            │
+│         [Deny] [Allow once] [Allow for run]  │
+└──────────────────────────────────────────────┘
+```
+
+The **arguments are the body of the dialog**, not a detail behind a disclosure. The tool was
+already approved in principle when it was selected during planning; what has never been
+approved is *this* call, with these values, which the model made up a second ago.
+
+- **Denying or timing out raises**, so a refusal lands as a red `tool_call` step the model is
+  told about — never as silence. Timing out **denies**; a gate that opens when nobody answers
+  is a gate that opens whenever someone steps away from their desk.
+- **Escape denies**, and the scrim does not dismiss. The run has already stopped; the only
+  outcomes are allow and refuse.
+- **"Allow for this run" lasts exactly as long as the process.** Nothing persists to the next
+  run, and nothing persists to another agent.
+- The mechanism is the one pause/resume already uses: a `@@JAROKU_CTRL@@` line out on
+  **stderr**, an approval file back. stdout carries the trace and nothing else.
+
+**Outside Jaroku** — the copied-out project this README promises works — there is nobody to
+ask. The bridge proceeds, with a warning on stderr naming the tool, because a person running
+the script themselves on their own machine *is* the authorisation and a hard denial would make
+that promise false. Set `JAROKU_MCP_CONFIRM=require` to refuse instead.
+
+### Output isolation
+
+A tool's result is untrusted input, so before it reaches the model or the trace it is:
+
+- **capped** (`JAROKU_MCP_MAX_RESULT_CHARS`, default 20 000) with the truncation *announced* —
+  a quietly cut answer reads to the model as a complete one;
+- **stripped** of ANSI escapes and control characters, which serve no purpose in a result and
+  corrupt everything that renders one;
+- **coerced** — non-text content blocks are named by type rather than stringified, so an image
+  never arrives as a base64 wall in a step row;
+- **framed** as `[mcp:<server>/<tool> returned the following external data]`. Not a defence
+  against prompt injection — nothing is — but this is the only point in the pipeline where such
+  text *can* be labelled, and a model reading it is at least told who wrote it.
+
+A server flagging its own call as failed becomes a **raise**, not a returned string, for the
+same reason connector templates raise: a returned string is recorded as a *successful* tool
+call, so the trace would show a green step whose content is an error.
+
+Every wait is bounded twice — per request and across the whole operation — because a slow
+server is indistinguishable from a hostile one holding a connection open. Pagination is
+bounded too: `nextCursor` is server-controlled state, so a cursor that never terminates would
+be a trivial denial of service against Jaroku itself.
+
+### What lands in a generated project
+
+```
+runtime/agents/<id>/
+├── mcp_tools.json        ← host-written: the GRANT. Servers, tools, schemas, impact.
+└── tools/
+    └── mcp_bridge.py     ← reviewed template, copied byte-for-byte
+```
+
+Both are **read-only to the edit loop**, unconditionally, alongside `jaroku.json`. The manifest
+is the whole of an agent's MCP access and the bridge is the reviewed code that honours it, so
+an edit able to rewrite either could widen the agent's reach with nobody approving it. Asking
+for a change points you at the MCP panel, because changing an agent's scope is your decision,
+not an edit's.
+
+Importing the bridge does **file reads only, never network** — validation imports the staged
+project under a 20-second kill timer and graph introspection imports it again, and neither may
+depend on a third party being awake. Because it builds each tool from the *real* declared JSON
+Schema, the free dry-run model synthesises arguments for MCP tools too, so every one of them is
+exercised with no server, no credential and no money.
+
+Like a connector template, **the bridge is copied at generation time**: updating the template
+does not retroactively change agents that already exist.
+
+### Validation
+
+A discovered tool carries a real schema, so a wrong call is caught before the project is
+written rather than at runtime against somebody else's server:
+
+- `MCP_TOOLS` must be reachable from `TOOLS` — an agent whose metadata advertises MCP tools it
+  cannot call is the same lie the reviewed-tool wiring check exists to prevent;
+- a generated function **shadowing** a granted tool's name is rejected;
+- a literal `tool.invoke({...})` is checked for missing required keys and keys the tool does not
+  accept, naming the server that declared them.
+
+Two things it deliberately does not claim: a schema declaring no properties accepts anything
+(silence is not a prohibition), and a dict assembled at runtime is left to the bridge's own
+check, which runs on every call.
+
+### Testing without a real server
+
+`server/fixtures/mcp/mockServer.ts` is a fixture MCP server, written against `node:http` and
+raw JSON-RPC rather than the MCP SDK — a fixture has to be able to advertise things a
+well-behaved server never would, and it means the client is tested against something that does
+not share its implementation.
+
+```bash
+cd server
+npm run mock:mcp                        # http://127.0.0.1:8931/mcp
+MOCK_MCP_TOKEN=sekrit npm run mock:mcp  # requires a bearer token
+MOCK_MCP_HOSTILE=1 npm run mock:mcp     # adds the badly-behaved tools
+```
+
+Its default tools span the classifier's decision points (including one that insists in its own
+annotations that it is read-only while being called `purge_cache`). The hostile set returns
+10 MB of text, control characters, non-text-only content, 400-deep nesting, an injection
+attempt, a self-reported error, and one tool that never answers at all.
+
+---
+
 ## The React client
 
 Three resizable columns:
@@ -829,7 +1078,7 @@ Three resizable columns:
 ┌─────────────┬───────────────────────────┬────────────────────────────┐
 │  Sidebar    │  Build pane               │  Right panel               │
 │             │                           │                            │
-│  agents     │  ONE composer             │  [Graph] [Trace] [Evals]   │
+│  agents     │  ONE composer             │  [Graph][Trace][Evals][MCP]│
 │  runs       │  · Chat  → Jaroku         │                            │
 │  history    │  · Test  → the agent      │  Trace is the hero.        │
 │             │                           │  Click a step → detail     │
@@ -898,6 +1147,7 @@ frozen event schema, and everything added since rides beside it.
 | `edit` | Fix-loop lifecycle: `started`, file streaming, `proposal`, `applied`, `undone`, `discarded`, `error` |
 | `debug` | Control plane: `paused`, `resumed`, `boundary`, `branched`, `error` |
 | `eval` | Datasets, examples, rubrics, eval progress, scores, results, estimates |
+| `mcp` | MCP registry snapshots, discovery progress, and the first-use confirmation request |
 | `reply` | Streaming "explain" answers |
 | `log` | stderr lines and parse errors, for visibility |
 
@@ -908,7 +1158,9 @@ frozen event schema, and everything added since rides beside it.
 `resumeRun` · `branchRun` · `explain` · and the eval set: `createDataset` · `renameDataset` ·
 `deleteDataset` · `listDatasets` · `loadDataset` · `addExample` · `updateExample` ·
 `deleteExample` · `promoteTestInput` · `startEval` · `cancelEval` · `estimateEval` ·
-`loadEvalResults` · `listEvals` · `loadRubric` · `saveRubric`
+`loadEvalResults` · `listEvals` · `loadRubric` · `saveRubric` · and the MCP set:
+`listMcpServers` · `addMcpServer` · `removeMcpServer` · `rediscoverMcpServer` ·
+`setMcpServerAuth` · `setMcpToolImpact` · `resolveMcpConfirm`
 
 Reads are answered locally by the relay (only the requesting client); mutations are forwarded
 to the app, which answers by broadcasting the affected snapshot — the same shape a fresh read
@@ -932,6 +1184,8 @@ The client reconnects automatically with a 1-second backoff, and re-requests wha
 | `JAROKU_JOB_TIMEOUT_MS` | `180000` | Per-eval-job wall-clock deadline |
 | `JAROKU_JOB_ATTEMPTS` | `3` | Total attempts per job, including the first |
 | `JAROKU_RETRY_BASE_MS` | `2000` | Base for exponential retry backoff |
+| `JAROKU_MCP_TIMEOUT_MS` | `10000` | Per-request ceiling during MCP discovery |
+| `JAROKU_MCP_DISCOVERY_MS` | `30000` | Whole-discovery ceiling, so slow pages can't stall forever |
 
 ### Models
 
@@ -960,6 +1214,12 @@ should not disagree about who is doing the thinking.
 | `JAROKU_RESUME_RUN_ID` | Resume an existing run from its durable checkpoint |
 | `JAROKU_SEQ_OFFSET` | Where a resumed/branched segment's `seq` continues from |
 | `JAROKU_BRANCH_CHECKPOINT_ID` / `_THREAD_ID` / `_EDIT_FILE` / `_EDIT_NODE` | Branch a new run from a parent's checkpoint, optionally with a state edit |
+| `JAROKU_CONTROL_DIR` | Where the MCP bridge exchanges confirmation approvals. Its **absence** is how a copied-out project knows nobody is watching |
+| `JAROKU_MCP_CONFIRM` | `require` \| `skip`. Defaults to require under a host, skip standalone |
+| `JAROKU_MCP_CONFIRM_TIMEOUT_S` | `120` — how long the gate waits before **denying** |
+| `JAROKU_MCP_CALL_TIMEOUT_S` | `60` — wall-clock ceiling on one MCP tool call |
+| `JAROKU_MCP_MAX_RESULT_CHARS` | `20000` — cap on what one MCP result may hand back |
+| `JAROKU_MCP_<SERVER>_TOKEN` | A server's credential. Written by the UI, never logged |
 
 ### Client
 
@@ -1025,6 +1285,12 @@ npm run test:aggregate   # cost from steps, unknown vs free, partial-pricing fla
 npm run test:retry       # transient vs deterministic failure classification
 npm run test:judge       # rubric prompt construction + verdict parsing
 npm run test:cleanup     # checkpoint sweeping (never touches interactive runs)
+npm run test:env-writer  # .env writes: no clobbering, no injection, exact round trips
+npm run test:mcp-impact  # the impact ratchet, in both directions
+npm run test:mcp-client  # discovery, pagination, auth, failure classification
+npm run test:mcp-registry # override voiding, and a failed refresh keeping its tools
+npm run test:mcp-isolation # a hostile server can't corrupt a trace or hang a run
+npm run test:mcp-validate  # MCP wiring, shadowing, and calls checked against the schema
 ```
 
 ```bash
@@ -1054,6 +1320,10 @@ replayable at zero cost, chunked and paced so the UI behaves exactly as it would
 | `JAROKU_GEN_FIXTURE` | A generation |
 | `JAROKU_PLAN_FIXTURE` | A plan |
 | `JAROKU_EDIT_FIXTURE` | An edit proposal |
+
+MCP has a fixture too, but a live one rather than a recording — see
+[Testing without a real server](#testing-without-a-real-server). `npm run mock:mcp` starts a
+server that speaks real MCP, so the whole path is exercisable with no third party and no spend.
 
 Point one at a path that **does not exist** to *record* a fresh fixture from a real call.
 
@@ -1085,12 +1355,13 @@ plan. The planner logs a loud warning for exactly this reason.
 
 | Path | What | Tracked? |
 |---|---|---|
-| `server/jaroku.db` | Traces (`runs`, `steps`) + eval control plane (`datasets`, `dataset_examples`, `rubrics`, `eval_runs`, `eval_jobs`, `eval_scores`) | No |
+| `server/jaroku.db` | Traces (`runs`, `steps`) + eval control plane (`datasets`, `dataset_examples`, `rubrics`, `eval_runs`, `eval_jobs`, `eval_scores`) + MCP registry (`mcp_servers`, `mcp_tools`) | No |
 | `runtime/agents/<id>/` | A generated agent project — yours, editable, portable | No (except `example_agent`) |
 | `runtime/agents/.staging/` | In-flight generations and edit proposals. Cleared on server start — a proposal interrupted by a shutdown is an orphan | No |
 | `runtime/agents/.history/<id>/` | Per-agent version snapshots + `history.json`, powering Undo across reloads | No |
 | `runtime/.checkpoints/` | Durable LangGraph checkpoints (`<run_id>.sqlite`) and pause control files | No |
-| `runtime/.env` | Provider and connector keys | No |
+| `runtime/.env` | Provider, connector and MCP server keys | No |
+| `runtime/agents/<id>/mcp_tools.json` | An agent's MCP grant: servers, tools, schemas, impact. Host-written, read-only to edits | No (with the project) |
 
 Both SQLite stores share one database file on one connection — a single writer, and
 aggregation can `JOIN` eval jobs against the frozen `steps` table directly.
@@ -1123,6 +1394,13 @@ back to branch from.
 - **The Gmail connector creates drafts only.** It never sends.
 - **The Slack connector can post**, which is irreversible, and both the catalog description
   and the generation prompt say so explicitly.
+- **An MCP server is never trusted.** Its tool list is a claim, its `readOnlyHint` is ignored,
+  its output is capped and stripped before it reaches a model or a trace, and a tool it did
+  not appear in the agent's manifest for cannot be called at all. High-impact calls stop for
+  an explicit confirmation, and timing out denies.
+- **MCP credentials are stored as env var names.** The value lives only in `runtime/.env`,
+  is read at the moment of use, and never reaches the database, a generated project, a log
+  line, or the browser.
 - **The server binds to localhost.** It has no authentication and is not built to be exposed
   to a network. Don't put it on one.
 
