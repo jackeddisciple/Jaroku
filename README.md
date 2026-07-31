@@ -883,6 +883,35 @@ A failed *refresh* never destroys a working tool list. Wiping it on a network bl
 silently strip every agent scoped to that server, which is a far worse failure than a status
 line saying unreachable.
 
+A URL carrying a username or password (`https://user:token@host/mcp`) is **refused before
+anything is sent**, and the error does not quote it back. Such a URL can never connect — the
+HTTP client rejects it outright — and the refusal it produces otherwise puts the password into
+`last_error`, into the database, onto every client's registry snapshot, and into the log. Give
+the plain URL and add the token separately.
+
+### What an advertisement has to satisfy
+
+A server's *description of itself* is untrusted input in exactly the way its results are, and it
+travels further: a name and a description are stored, put on every registry snapshot every
+connected client receives, written into `mcp_tools.json`, and pasted into the generation prompt.
+They are read once and repeated everywhere, so they are bounded at the point they arrive.
+
+- **A tool name must be 1–128 characters of `[A-Za-z0-9_-]`.** Not a style rule — the model API
+  accepts nothing else, so one tool called `my tool` does not produce one broken tool, it
+  produces a 400 on *every* request the agent makes, taking every other tool down with it.
+  `__proto__` is refused too: as a plain-object key it assigns a prototype rather than an entry,
+  and a tool named that vanished silently from the validator's checks.
+- **Descriptions are capped and flattened to one line**, with ANSI escapes and control
+  characters stripped — the same treatment results get. The words are kept verbatim; what a
+  third party does not get is control over the *shape* of a prompt we build around them.
+- **A schema over 64 KB is refused whole**, not truncated: checking arguments against a
+  half-schema the server never declared is worse than not having the tool.
+- **`serverInfo` is bounded and stripped** for the same reasons — it is rendered in the panel
+  and in log lines.
+
+Refusals are **counted and reported**, never silent. A user who cannot find the tool they came
+for is told it was dropped, rather than left to conclude the server does not offer it.
+
 ### Credentials
 
 A token entered in the UI is written to `runtime/.env` under a derived name
@@ -947,6 +976,16 @@ generated today still cannot call it.
 **The honest limit:** the finest grain MCP exposes is the tool. There is no sub-tool scoping in
 the protocol, so if a tool's own schema permits more than your agent needs, nothing here can
 narrow it — the scoping is per tool, and that is as far as it goes.
+
+**One name, one tool.** An agent has a single tool list, and the model picks a tool by name, so
+selecting `create_issue` from two different servers is a grant that cannot be honoured — and it
+is an ordinary thing to try, since plenty of issue trackers use the same names. Generation
+**refuses** it and names both servers, rather than resolving it quietly: whichever entry won,
+the agent would call a server the user did not pick, and if the two differ in impact, a
+high-impact tool's confirmation gate would be replaced by a same-named low-impact one and never
+fire. The same refusal covers an MCP tool sharing a name with a selected connector tool. The
+bridge raises on such a manifest as a backstop, for a project that predates the check or was
+edited by hand.
 
 ### The first-use confirmation gate
 
