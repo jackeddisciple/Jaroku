@@ -130,3 +130,32 @@ export function manifestRefs(manifest: Manifest): string[] {
 export function manifestToolNames(manifest: Manifest): string[] {
   return manifest.servers.flatMap((s) => s.tools.map((t) => t.name));
 }
+
+/**
+ * Tool names granted by more than one server. Empty is the only workable answer.
+ *
+ * An agent has ONE tool list and one name per tool: the model picks a tool by name, LangChain
+ * binds by name, and every consumer of this manifest keys by name. Two servers advertising
+ * `create_issue` is ordinary — plenty of issue trackers do — but there is no way to honour
+ * both, and the failure when nobody checks is not a missing tool. It is a SILENT SUBSTITUTION:
+ * the bridge builds whichever entry it reads first, the validator checks arguments against
+ * whichever it reads last, and if the two differ in impact, a high-impact tool's confirmation
+ * gate is simply gone — replaced by a same-named low-impact one pointing at another company's
+ * server.
+ *
+ * So the collision is surfaced where it can still be acted on: before generation, while it is
+ * still a selection the user can change. Nothing downstream tries to guess.
+ */
+export function manifestCollisions(manifest: Manifest): string[] {
+  const owners = new Map<string, Set<string>>();
+  for (const server of manifest.servers) {
+    for (const tool of server.tools) {
+      const set = owners.get(tool.name) ?? new Set<string>();
+      set.add(server.id);
+      owners.set(tool.name, set);
+    }
+  }
+  // Keyed by server rather than by count: one server listing a tool twice is a duplicate, not
+  // an ambiguity, and the bridge collapsing those two into one is the correct outcome.
+  return [...owners.entries()].filter(([, servers]) => servers.size > 1).map(([name]) => name).sort();
+}

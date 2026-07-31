@@ -247,6 +247,13 @@ def _confirm(server_id: str, name: str, args: dict[str, Any], reason: str) -> No
     _emit_ctrl({"ctrl": "tool_confirm_closed", "run_id": run_id, "nonce": nonce})
     if verdict == "deny":
         raise ToolNotApproved(f"{key} was not approved: you declined this call.")
+    if verdict:
+        # An answer arrived and it was not one of ours. Denying is right; blaming it on a
+        # timeout that did not happen sends someone looking at the wrong thing entirely.
+        raise ToolNotApproved(
+            f"{key} was not approved: the answer was {verdict[:40]!r}, which is not one of "
+            f"run, once or deny. Anything Jaroku cannot read is treated as a refusal."
+        )
     raise ToolNotApproved(
         f"{key} was not approved: nobody confirmed it within {CONFIRM_TIMEOUT_S:.0f}s, so it "
         f"was declined. High-impact MCP tools are never allowed by default."
@@ -534,20 +541,46 @@ def _make_tool(server: dict[str, Any], spec: dict[str, Any]) -> StructuredTool:
 
 
 def build_tools(manifest: dict[str, Any] | None = None) -> list[StructuredTool]:
-    """Build one StructuredTool per manifest entry. Never dials out."""
+    """Build one StructuredTool per manifest entry. Never dials out.
+
+    A name granted by two different servers RAISES rather than resolving to one of them.
+
+    Dropping the second silently — which is what this used to do — is the worst available
+    outcome. The model sees one tool called ``create_issue`` and calls it; the call goes to
+    whichever server happened to be listed first, which may not be the one the user picked. And
+    because impact travels per entry, a high-impact tool with a confirmation gate can be
+    replaced by a same-named low-impact one from somebody else's server, so the gate does not
+    fire and nothing anywhere reports that it did not.
+
+    The host refuses to write a manifest like this (mcpManifest.manifestCollisions), so reaching
+    here means the manifest is wrong, and a manifest this module cannot honour exactly is not
+    one to honour approximately. Same posture as a manifest that will not parse.
+    """
     data = manifest if manifest is not None else load_manifest()
     tools: list[StructuredTool] = []
-    seen: set[str] = set()
+    owners: dict[str, str] = {}
     for server in data.get("servers") or []:
         if not isinstance(server, dict):
             continue
+        server_id = str(server.get("id") or "unknown")
         for spec in server.get("tools") or []:
             if not isinstance(spec, dict):
                 continue
             name = spec.get("name")
-            if not isinstance(name, str) or not name or name in seen:
+            if not isinstance(name, str) or not name:
                 continue
-            seen.add(name)
+            prior = owners.get(name)
+            if prior is not None:
+                # One server listing a tool twice is a duplicate, not an ambiguity: both
+                # entries mean the same call to the same place, so the first one stands.
+                if prior == server_id:
+                    continue
+                raise ManifestError(
+                    f"mcp_tools.json grants the tool {name!r} from two servers ({prior} and "
+                    f"{server_id}). An agent has one tool per name, so this grant is ambiguous "
+                    f"— deselect one of them in the MCP panel and regenerate."
+                )
+            owners[name] = server_id
             tools.append(_make_tool(server, spec))
     return tools
 
