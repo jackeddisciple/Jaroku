@@ -1,6 +1,6 @@
 # Jaroku
 
-**A local-first workbench for building, running, tracing, editing and evaluating LangGraph agents.**
+**A local-first workbench for building, running, tracing, editing and evaluating AI agents.**
 
 You describe an agent in plain English. Jaroku plans it, writes it as a real LangGraph
 project on your disk, runs it, and shows you every LLM call, tool call, routing decision and
