@@ -377,9 +377,23 @@ function joinMessages(...parts: (string | null)[]): string | null {
   return kept.length ? kept.join(" ") : null;
 }
 
-/** A successful discovery that lost tools to a cap is still worth saying out loud. */
+/**
+ * A successful discovery that lost tools is still worth saying out loud.
+ *
+ * Both halves matter to a user staring at a list that does not contain what they came for.
+ * "Truncated" means the server has more than we will take; "refused" means specific tools were
+ * unusable — an illegal name, a schema too large to store — and no amount of reconnecting will
+ * bring them back. Silence on either would read as "that tool does not exist".
+ */
 function truncationNote(result: Extract<DiscoveryResult, { ok: true }>): string | null {
-  return result.truncated
-    ? "this server advertises more tools than Jaroku will accept; the list was truncated"
-    : null;
+  return joinMessages(
+    result.truncated
+      ? "this server advertises more tools than Jaroku will accept; the list was truncated"
+      : null,
+    result.rejected
+      ? `${result.rejected} advertised tool${result.rejected > 1 ? "s were" : " was"} refused as ` +
+        `unusable — a tool name must be 1-128 characters of letters, digits, underscores or ` +
+        `hyphens, and its schema must be under 64KB`
+      : null,
+  );
 }

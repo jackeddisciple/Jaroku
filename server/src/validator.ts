@@ -398,9 +398,19 @@ print(json.dumps(problems))
   });
 }
 
-/** The manifest flattened to what the AST pass needs: name -> schema + which server. */
+/**
+ * The manifest flattened to what the AST pass needs: name -> schema + which server.
+ *
+ * Null-prototype, because the keys are tool names an unreviewed server chose. On a normal
+ * object literal `out["__proto__"] = …` reassigns the prototype and leaves no own property, so
+ * that tool would silently drop out of the argument checks — and if it were the only one, the
+ * serialised map would be `{}` and the Python side's `if mcp_tools:` would skip the wiring
+ * check as well. mcpClient now refuses the name outright; this makes the map safe regardless of
+ * what reaches it.
+ */
 function mcpToolMap(manifest?: Manifest): Record<string, { schema: Record<string, unknown>; server: string }> {
-  const out: Record<string, { schema: Record<string, unknown>; server: string }> = {};
+  const out: Record<string, { schema: Record<string, unknown>; server: string }> =
+    Object.create(null);
   for (const server of manifest?.servers ?? []) {
     for (const tool of server.tools) {
       out[tool.name] = { schema: tool.input_schema, server: server.id };
