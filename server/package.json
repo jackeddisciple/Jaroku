@@ -22,6 +22,7 @@
     "test:mcp-isolation": "tsx src/mcpIsolation.test.ts",
     "test:mcp-validate": "tsx src/mcpValidate.test.ts",
     "test:mcp-registry": "tsx src/mcpRegistry.test.ts",
+    "test:mcp-hardening": "tsx src/mcpHardening.test.ts",
     "mock:mcp": "tsx fixtures/mcp/mockServer.ts"
   },
   "dependencies": {
