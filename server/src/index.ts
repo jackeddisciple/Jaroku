@@ -330,9 +330,14 @@ function writeApproval(runId: string, nonce: string, verdict: string): void {
  * leave a modal on screen asking about a process that no longer exists — and answering it
  * would write an approval file nobody will ever read.
  */
-function clearConfirms(runId: string, reason: string): void {
+function clearConfirms(runId: string, reason: string, nonce?: string): void {
   for (const [key, p] of [...pendingConfirms]) {
     if (p.runId !== runId) continue;
+    // Scoped to one ask when the caller knows which one. A graph node can fire several tool
+    // calls in a turn and each high-impact one blocks independently (the client keeps them as
+    // a queue), so one of them timing out must not close the modals for the others — those
+    // are still being waited on, and answering them still means something.
+    if (nonce !== undefined && p.nonce !== nonce) continue;
     pendingConfirms.delete(key);
     rmSync(approvalFile(p.runId, p.nonce), { force: true });
     relay.broadcastMcp({ type: "confirmResolved", runId: p.runId, nonce: p.nonce, verdict: reason });
@@ -735,7 +740,7 @@ pool.on("control", ({ ctrl }) => {
       // The runner gave up waiting (or was denied) and has moved on. Close the ask so a
       // modal cannot linger over a question nobody is listening for any more.
       const nonce = typeof ctrl.nonce === "string" ? ctrl.nonce : "";
-      if (nonce) clearConfirms(runId, "expired");
+      if (nonce) clearConfirms(runId, "expired", nonce);
     }
   } catch (err) {
     console.error("[debug] control handling failed:", (err as Error).message);
