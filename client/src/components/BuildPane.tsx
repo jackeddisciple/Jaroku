@@ -21,6 +21,7 @@ import {
   sendGenerate, sendPlanAgent, sendPromoteTestInput, sendRun,
 } from "../lib/socket.ts";
 import { useEvalStore } from "../store/evalStore.ts";
+import { composerMoment } from "../lib/composerMoment.ts";
 import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
 import { Chip } from "./Chip.tsx";
 import { ChoiceRow, type Choice } from "./ChoiceRow.tsx";
@@ -35,8 +36,8 @@ import { StatusDot } from "./StatusBadge.tsx";
 import { StatRow, STAT_ICON, type Stat } from "./StatRow.tsx";
 import {
   AlertTriangleIcon, CheckIcon, ChevronRightIcon, DollarSignIcon, FileIcon, HashIcon,
-  LightbulbIcon, PencilIcon, PlugIcon, RefreshIcon, SparklesIcon, UserCircleIcon, WrenchIcon,
-  XIcon, ZapIcon,
+  LightbulbIcon, LoaderIcon, PencilIcon, PlugIcon, RefreshIcon, SparklesIcon, UserCircleIcon,
+  WrenchIcon, XIcon, ZapIcon,
 } from "./panelIcons.tsx";
 import { useMcpStore, allMcpTools } from "../store/mcpStore.ts";
 import { ACCENT, ICON, STATUS, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
@@ -390,6 +391,7 @@ export function BuildPane() {
   const selectedNodeId = useUiStore((s) => s.selectedNodeId);
   const selectedStepId = useTraceStore((s) => s.selectedStepId);
   const activeRunId = useTraceStore((s) => s.activeRunId);
+  const activeRun = useTraceStore((s) => (s.activeRunId ? s.runs[s.activeRunId] : undefined));
   const selectedStep = useTraceStore((s) =>
     selectedStepId && activeRunId ? s.stepsByRun[activeRunId]?.[selectedStepId] : undefined,
   );
@@ -744,6 +746,23 @@ export function BuildPane() {
   }
   const showFork = fork !== null && fork.key !== skippedFork && composerMode === "chat" && !busy;
 
+  // What the composer should say right now. Same inputs the fork above is derived from, plus the
+  // in-flight flags — see lib/composerMoment.ts for the order of precedence.
+  const moment = composerMoment({
+    mode: composerMode,
+    canRun,
+    agentName: agent?.name ?? null,
+    planning: isPlanning({ pending: pendingThread }),
+    generating: genStatus === "generating",
+    answering: streamingAgentId !== null,
+    planPending: openPlan?.status === "pending",
+    planStale: openPlan?.status === "stale",
+    proposalPending: Boolean(openProposal),
+    running: activeRun?.status === "running",
+    failedStepSeq: selectedStep?.error ? selectedStep.seq : null,
+    contextLabel,
+  });
+
   return (
     // The family comes from the body now — every panel is on the prose/code split, and this
     // pane no longer has to declare what it always was.
@@ -931,9 +950,17 @@ export function BuildPane() {
         )}
 
         {/* context chip + live routing hint (Chat mode) — so the one composer stays transparent */}
-        {composerMode === "chat" && (contextLabel || text.trim()) && (
+        {(contextLabel || text.trim() || moment.status) && (
           <div className="mb-2 flex items-center gap-2 text-[11px]">
-            {contextLabel && (
+            {/* What the app is doing. The routing hint on the right says where a message would go;
+                this says what is going on regardless of whether anything has been typed. */}
+            {moment.status && (
+              <span className="inline-flex items-center gap-1.5 text-muted">
+                {busy && <StatusDot state="pending" icon={LoaderIcon} pulse size={ICON.xs} />}
+                {moment.status}
+              </span>
+            )}
+            {composerMode === "chat" && contextLabel && (
               <Chip mono icon={<span className="text-faint"><ChevronRightIcon size={ICON.xs} /></span>}>
                 {contextLabel}
                 <button
@@ -945,7 +972,11 @@ export function BuildPane() {
                 </button>
               </Chip>
             )}
-            {text.trim() && <span className="text-faint ml-auto">⌘↵ will {routeLabel(intent)}</span>}
+            {/* Chat mode only: in Test mode ⌘↵ runs the agent, and the intent router has no say
+                in it — a hint claiming otherwise would be the composer misdescribing itself. */}
+            {composerMode === "chat" && text.trim() && (
+              <span className="ml-auto text-faint">⌘↵ will {routeLabel(intent)}</span>
+            )}
           </div>
         )}
 
@@ -968,15 +999,7 @@ export function BuildPane() {
                 }
               }}
               rows={2}
-              placeholder={
-                composerMode === "test"
-                  ? `Run ${agent?.name ?? "the agent"} on… — ⌘↵ to run`
-                  : mode === "generate"
-                    ? "Describe the agent you want — e.g. “a support agent that reads Gmail, looks up orders in Postgres, and drafts replies”"
-                    : contextLabel
-                      ? "Ask about or act on the selection — e.g. “why did this fail?”, “fix this”, “re-run from here”"
-                      : `Describe a change to ${agent?.name ?? "this agent"} — ⌘↵ to send`
-              }
+              placeholder={moment.placeholder}
               className="w-full resize-none bg-transparent text-ink placeholder:text-muted outline-none leading-[1.5] transition-opacity duration-200"
               style={{
                 // Off the 11/12/13 ladder on purpose, and the only thing in the app that is. This
