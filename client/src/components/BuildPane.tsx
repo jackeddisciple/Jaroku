@@ -326,7 +326,17 @@ function ModelSelector({
   );
 }
 
-export function BuildPane() {
+export function BuildPane({
+  /**
+   * What to show in an empty conversation instead of the default prompt.
+   *
+   * The one seam onboarding needs. Its first-prompt step wants a few real examples where this
+   * pane's "Describe the agent you want" normally sits — the same words, so rendering both
+   * printed the heading twice with a gap between them. A slot rather than a fork: everything
+   * about the composer, the routing and the cards stays the one implementation.
+   */
+  emptySlot,
+}: { emptySlot?: React.ReactNode } = {}) {
   // One composer, two send modes. Each mode keeps its OWN draft so toggling never clobbers text
   // (a half-typed chat message can't be sent as agent input, and vice-versa). `text`/`setText`
   // are the active mode's draft, so the rest of the component is unchanged.
@@ -795,7 +805,8 @@ export function BuildPane() {
           widest step in the scale, so the thread reads as separate exchanges rather than one
           continuous document. */}
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-6 py-2 space-y-6">
-        {turns.length === 0 &&
+        {turns.length === 0 && emptySlot}
+        {turns.length === 0 && !emptySlot &&
           (mode === "generate" ? (
             <EmptyState
               icon={SparklesIcon}

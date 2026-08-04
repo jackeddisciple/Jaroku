@@ -1,13 +1,16 @@
 import { useEffect } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Sidebar } from "./components/Sidebar.tsx";
-import { BuildPane } from "./components/BuildPane.tsx";
 import { RightPanel } from "./components/RightPanel.tsx";
 import { StatusBar } from "./components/StatusBar.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { TopBar } from "./components/TopBar.tsx";
 import { CodeOverlay } from "./components/CodeOverlay.tsx";
 import { McpConfirmModal } from "./components/McpConfirmModal.tsx";
+import { ComposerColumn } from "./components/onboarding/ComposerColumn.tsx";
+import { ConnectProviderStep } from "./components/onboarding/ConnectProviderStep.tsx";
+import { WelcomeStep } from "./components/onboarding/WelcomeStep.tsx";
+import { useOnboarding } from "./components/onboarding/useOnboarding.ts";
 import { sendLoadAgentFiles, startSocket } from "./lib/socket.ts";
 import { useBuildStore } from "./store/buildStore.ts";
 import { useTraceStore } from "./store/traceStore.ts";
@@ -15,6 +18,10 @@ import { useTraceStore } from "./store/traceStore.ts";
 export function App() {
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const connected = useTraceStore((s) => s.connection === "open");
+
+  // First run. Everything below is the normal app once `phase` is "complete", which it is for
+  // every session after the first — see components/onboarding/useOnboarding.ts.
+  const { phase, mountSidebar, mountRightPanel } = useOnboarding();
 
   useEffect(() => {
     startSocket();
@@ -26,6 +33,12 @@ export function App() {
     if (activeAgentId && connected) sendLoadAgentFiles(activeAgentId);
   }, [activeAgentId, connected]);
 
+  // Steps 1 and 2 replace the layout entirely rather than covering it. Neither has anything to
+  // say about an agent, a run or a trace, so mounting three empty columns underneath them
+  // would be paying to render what nobody can see. They own the whole surface.
+  if (phase === "welcome") return <WelcomeStep />;
+  if (phase === "provider") return <ConnectProviderStep />;
+
   return (
     // The app is a panel on a surface, not the surface. A few pixels of inset and one outer
     // shadow, so the three columns read as a lifted object with edges — which is what they are
@@ -36,19 +49,37 @@ export function App() {
         {/* top bar */}
         <TopBar />
 
-        {/* three-column body (doc §4): agents+runs · build · trace/code */}
+        {/* three-column body (doc §4): agents+runs · build · trace/code
+            Steps 3 and 4 are this same layout with columns not yet mounted, not a different
+            screen. ONE PanelGroup for the whole session: completion is only "both flags become
+            true", so there is no remount, no reload and no jump at the moment step 5 promises
+            the user lands exactly where they already were. */}
         <PanelGroup direction="horizontal" autoSaveId="jaroku-layout-v3" className="flex-1 min-h-0">
-          <Panel defaultSize={20} minSize={14} maxSize={34}>
-            <Sidebar />
+          {mountSidebar && (
+            <>
+              <Panel defaultSize={20} minSize={14} maxSize={34} order={1}>
+                <div className="h-full animate-panel-in motion-reduce:animate-none">
+                  <Sidebar />
+                </div>
+              </Panel>
+              <PanelResizeHandle className="w-[3px] bg-hair transition-colors duration-fast hover:bg-[#3a3a3f]" />
+            </>
+          )}
+          <Panel defaultSize={36} minSize={24} order={2}>
+            {/* The composer, alone during step 3 and still the centre of the screen through
+                step 4. Wrapped rather than swapped, so BuildPane is never torn down. */}
+            <ComposerColumn phase={phase} />
           </Panel>
-          <PanelResizeHandle className="w-[3px] bg-hair transition-colors duration-fast hover:bg-[#3a3a3f]" />
-          <Panel defaultSize={36} minSize={24}>
-            <BuildPane />
-          </Panel>
-          <PanelResizeHandle className="w-[3px] bg-hair transition-colors duration-fast hover:bg-[#3a3a3f]" />
-          <Panel defaultSize={44} minSize={26}>
-            <RightPanel />
-          </Panel>
+          {mountRightPanel && (
+            <>
+              <PanelResizeHandle className="w-[3px] bg-hair transition-colors duration-fast hover:bg-[#3a3a3f]" />
+              <Panel defaultSize={44} minSize={26} order={3}>
+                <div className="h-full animate-panel-in motion-reduce:animate-none">
+                  <RightPanel />
+                </div>
+              </Panel>
+            </>
+          )}
         </PanelGroup>
 
         {/* the run control now lives inside the single composer (BuildPane) via its Chat/Test toggle */}
@@ -57,12 +88,15 @@ export function App() {
 
       {/* Outside the shell on purpose: all three are fixed-position and cover the viewport, and
           the shell clips its own overflow so the columns can round their corners. */}
-      {/* command palette (Cmd+K) + global keyboard nav — mounted once, renders in a portal */}
-      <CommandPalette />
+      {/* command palette (Cmd+K) + global keyboard nav — mounted once, renders in a portal.
+          Held back until onboarding is over: its shortcuts jump between panels that are not
+          mounted yet, and a first-run user has nothing to navigate to. */}
+      {phase === "complete" && <CommandPalette />}
       {/* code opens on demand (diff card / Cmd+P), overlaying the conversation */}
       <CodeOverlay />
       {/* Mounted last so it sits above everything. A run is halted mid-graph waiting for
-          this answer, on a timer, and nothing else on screen can be more important. */}
+          this answer, on a timer, and nothing else on screen can be more important — including
+          during onboarding, where a generated agent can reach an MCP tool on its first run. */}
       <McpConfirmModal />
     </div>
   );

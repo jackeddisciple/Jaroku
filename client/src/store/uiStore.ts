@@ -17,6 +17,76 @@ export type ComposerMode = "chat" | "test";
 // source of truth for "the last input sent in Test mode" (no component owns it).
 export const inputKey = (agentId: string | null): string => `jaroku.input.${agentId ?? "_"}`;
 
+// --- first-run onboarding ----------------------------------------------------------------
+//
+// UI-only state, and that is why it lives here rather than anywhere else. Which screen a
+// first-run user is on has no correctness requirement the way traceStore's ordering does —
+// getting it wrong shows the wrong panel, not a trace that lies — so it belongs in the store
+// that owns view intent and nowhere else.
+//
+// Persisted with raw localStorage under a `jaroku.` key, which is the precedent this file
+// already set with `inputKey` above. No persist middleware: the app has no such dependency and
+// three fields do not justify introducing one.
+//
+// All three share ONE key rather than three, so a half-written onboarding state is not
+// representable — you cannot end up "complete but on step 2" because the parts were written
+// separately.
+
+export type OnboardingStep = "welcome" | "provider" | "prompt" | "run";
+
+/** The one-time hints shown so far, by id. A list rather than a boolean per hint, so adding a
+ *  second hint later is data rather than another field. */
+export type HintId = "trace";
+
+const ONBOARDING_KEY = "jaroku.onboarding";
+
+interface OnboardingState {
+  complete: boolean;
+  step: OnboardingStep;
+  hintsShown: string[];
+}
+
+const DEFAULT_ONBOARDING: OnboardingState = { complete: false, step: "welcome", hintsShown: [] };
+
+function readOnboarding(): OnboardingState {
+  try {
+    const raw = localStorage.getItem(ONBOARDING_KEY);
+    if (!raw) return DEFAULT_ONBOARDING;
+    const parsed = JSON.parse(raw) as Partial<OnboardingState>;
+    return {
+      // Field by field, because this is user-editable storage that survives across versions:
+      // a blob written by an older build (or by hand) must degrade to the default rather than
+      // put `undefined` where the app expects a step name.
+      complete: parsed.complete === true,
+      step: parsed.step === "provider" || parsed.step === "prompt" || parsed.step === "run"
+        ? parsed.step
+        : "welcome",
+      hintsShown: Array.isArray(parsed.hintsShown) ? parsed.hintsShown.filter((h) => typeof h === "string") : [],
+    };
+  } catch {
+    // Storage can be unavailable (private mode, a locked-down browser). Onboarding showing
+    // again is a far better failure than the app refusing to start.
+    return DEFAULT_ONBOARDING;
+  }
+}
+
+function writeOnboarding(state: OnboardingState): void {
+  try {
+    localStorage.setItem(ONBOARDING_KEY, JSON.stringify(state));
+  } catch {
+    /* see readOnboarding — an unwritable store must not break the session in progress */
+  }
+}
+
+/** Whether anything has been recorded yet, i.e. this browser has never seen the app. */
+export function hasOnboardingRecord(): boolean {
+  try {
+    return localStorage.getItem(ONBOARDING_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
 export const RUN_PROVIDERS = [
   { id: "fake", label: "Dry run (free)", models: ["fake-dry-run"] },
   { id: "anthropic", label: "Claude", models: ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8"] },
@@ -63,7 +133,26 @@ interface UiState {
   // file row or Cmd+P, dismissed with Escape / close.
   codeOverlayOpen: boolean;
   setCodeOverlay: (v: boolean) => void;
+
+  // The provider-keys panel: where a key is added after onboarding. Lifted here because it has
+  // two openers — the provider chip in the top bar, which is where the current provider is
+  // named, and Settings in the sidebar, which is where a first-run user was told to look. One
+  // panel, two doors; a second copy of it would be a second set of promises about the key.
+  providerPanelOpen: boolean;
+  setProviderPanel: (v: boolean) => void;
+
+  // First run. `onboardingComplete` is the single gate App reads; `onboardingStep` is only
+  // consulted while it is false, and exists so a reload mid-flow resumes where the user was
+  // rather than starting them over at Welcome.
+  onboardingComplete: boolean;
+  onboardingStep: OnboardingStep;
+  onboardingHintsShown: string[];
+  setOnboardingStep: (step: OnboardingStep) => void;
+  completeOnboarding: () => void;
+  markHintShown: (id: HintId) => void;
 }
+
+const onboarding = readOnboarding();
 
 export const useUiStore = create<UiState>((set) => ({
   paletteOpen: false,
@@ -96,4 +185,38 @@ export const useUiStore = create<UiState>((set) => ({
 
   codeOverlayOpen: false,
   setCodeOverlay: (codeOverlayOpen) => set({ codeOverlayOpen }),
+
+  providerPanelOpen: false,
+  setProviderPanel: (providerPanelOpen) => set({ providerPanelOpen }),
+
+  onboardingComplete: onboarding.complete,
+  onboardingStep: onboarding.step,
+  onboardingHintsShown: onboarding.hintsShown,
+
+  // Each setter writes the whole blob back. Cheap (three fields, on a user action), and it
+  // means there is no path where memory and storage disagree about which step you are on.
+  setOnboardingStep: (step) =>
+    set((s) => {
+      if (s.onboardingComplete || s.onboardingStep === step) return {};
+      writeOnboarding({ complete: false, step, hintsShown: s.onboardingHintsShown });
+      return { onboardingStep: step };
+    }),
+
+  completeOnboarding: () =>
+    set((s) => {
+      if (s.onboardingComplete) return {};
+      // The step is kept rather than cleared. It costs nothing and it is the difference
+      // between "finished" and "finished, and here is where they came in" if this ever needs
+      // to be looked at.
+      writeOnboarding({ complete: true, step: s.onboardingStep, hintsShown: s.onboardingHintsShown });
+      return { onboardingComplete: true };
+    }),
+
+  markHintShown: (id) =>
+    set((s) => {
+      if (s.onboardingHintsShown.includes(id)) return {};
+      const hintsShown = [...s.onboardingHintsShown, id];
+      writeOnboarding({ complete: s.onboardingComplete, step: s.onboardingStep, hintsShown });
+      return { onboardingHintsShown: hintsShown };
+    }),
 }));

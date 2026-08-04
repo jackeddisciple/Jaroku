@@ -467,6 +467,37 @@ export type McpMessage =
   | ({ channel: "mcp"; type: "confirmRequest" } & McpConfirmRequest)
   | { channel: "mcp"; type: "confirmResolved"; runId: string; nonce: string; verdict: string };
 
+// --- model providers (see server/src/providers.ts) ---
+//
+// Jaroku is bring-your-own-key: a provider key is the user's, it is written to runtime/.env
+// through the same credential writer MCP tokens go through, and it is read from the
+// environment at the moment of use. Nothing on this channel ever carries the key — the most a
+// client learns is `configured: true`, meaning a NAMED VARIABLE IS SET, exactly as it does for
+// an MCP server's credential.
+
+export type ProviderId = "anthropic" | "openai";
+
+export interface ProviderStatus {
+  id: ProviderId;
+  /** The NAME of the variable holding this provider's key. Never a value. */
+  env_key: string;
+  configured: boolean;
+  /**
+   * Whether Jaroku ITSELF thinks with this provider.
+   *
+   * Planning, generation, the fix loop, explain and the eval judge are Anthropic-only.
+   * Connecting OpenAI lets an AGENT run on GPT and nothing more — reported by the server so
+   * the UI can say so rather than hardcode a rule that would drift.
+   */
+  powers_jaroku: boolean;
+}
+
+export type ProviderMessage =
+  | { channel: "providers"; type: "providers"; providers: ProviderStatus[] }
+  | { channel: "providers"; type: "testResult"; provider: string; ok: boolean; message: string | null }
+  | { channel: "providers"; type: "error"; message: string; provider?: string }
+  | { channel: "providers"; type: "notice"; message: string; provider?: string };
+
 // --- server → client channel messages (see server/src/wsRelay.ts) ---
 
 export type ServerMessage =
@@ -489,7 +520,8 @@ export type ServerMessage =
   | GenMessage
   | EditMessage
   | EvalMessage
-  | McpMessage;
+  | McpMessage
+  | ProviderMessage;
 
 // --- client → server commands ---
 
@@ -540,7 +572,14 @@ export type ClientCommand =
   | { cmd: "rediscoverMcpServer"; serverId: string }
   | { cmd: "setMcpServerAuth"; serverId: string; token: string | null }
   | { cmd: "setMcpToolImpact"; serverId: string; toolName: string; impact: McpImpact | null }
-  | { cmd: "resolveMcpConfirm"; runId: string; nonce: string; verdict: McpConfirmVerdict };
+  | { cmd: "resolveMcpConfirm"; runId: string; nonce: string; verdict: McpConfirmVerdict }
+  // Model providers. `key` is the second field in this union carrying a secret, and it obeys
+  // the same rule as `token` above: one way only, written to runtime/.env server-side, never
+  // echoed back. `testProviderKey` proves a key works and writes nothing — which is why it is
+  // a separate command rather than a flag on the one that stores it.
+  | { cmd: "listProviders" }
+  | { cmd: "setProviderKey"; provider: ProviderId; key: string }
+  | { cmd: "testProviderKey"; provider: ProviderId; key: string };
 
 // Unified composer "explain" subject — what the question is about, built from already-in-memory
 // context (a trace step, a graph node, or the agent generally). No new data is fetched.
