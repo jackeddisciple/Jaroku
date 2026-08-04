@@ -30,11 +30,12 @@ import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { StatRow, STAT_ICON, type Stat } from "./StatRow.tsx";
 import {
-  ChevronRightIcon, DollarSignIcon, FileIcon, HashIcon, PlugIcon, SparklesIcon, UserCircleIcon,
-  WrenchIcon, XIcon, ZapIcon,
+  CheckIcon, ChevronRightIcon, DollarSignIcon, FileIcon, HashIcon, PlugIcon, SparklesIcon,
+  UserCircleIcon, WrenchIcon, XIcon, ZapIcon,
 } from "./panelIcons.tsx";
 import { useMcpStore, allMcpTools } from "../store/mcpStore.ts";
-import { ACCENT, ICON, STATUS, TYPE } from "../lib/tokens.ts";
+import { ACCENT, ICON, STATUS, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
+import { ProviderMark } from "../lib/icons.tsx";
 import { displayTitle, fullTitle } from "../lib/title.ts";
 import { useStreamedText } from "../lib/useStreamedText.ts";
 import { useVoiceInput } from "../lib/useVoiceInput.ts";
@@ -225,8 +226,15 @@ function Turn({ turn, isLastGen }: { turn: ChatTurn; isLastGen: boolean }) {
   );
 }
 
-// Bare model-selector: just a label + chevron, opening a small popover of RUN_PROVIDERS → models.
-// It sets the run provider/model (Test mode / the palette); no border or background of its own.
+// The model selector: which model a Test-mode run goes to.
+//
+// It was a bare label and a chevron with no surface of its own, sitting between the mic and the
+// send button — so the one control in the composer footer that changes what a run COSTS looked
+// like a caption. It is a chip now, with the provider's own mark, which is the same shape the top
+// bar already uses to say the same thing.
+//
+// The open state is the chip's selected state rather than a bespoke one: an open menu is a
+// pressed control, and the app has one way of drawing that.
 function ModelSelector({
   provider,
   model,
@@ -251,21 +259,34 @@ function ModelSelector({
   }, [open]);
   return (
     <div ref={ref} className="relative">
-      <button
-        type="button"
+      <Chip
+        size="lg"
+        selected={open}
         onClick={() => setOpen((o) => !o)}
         title="Run model"
-        className="flex items-center gap-1 text-[12px] text-muted hover:text-ink transition-colors"
+        icon={<ProviderMark provider={provider} size={12} />}
       >
         {/* "Dry run (free)" is prose; a model id is an identifier. Only the latter gets mono. */}
         <span className={provider === "fake" ? undefined : "font-mono"}>{label}</span>
-        <ChevronDownIcon size={13} />
-      </button>
+        {/* Points down at a closed menu and up at an open one — this popover opens upward, and a
+            chevron that keeps pointing down while the list is above it is pointing at nothing. */}
+        <span
+          className={`shrink-0 transition-transform duration-fast ${open ? "rotate-180" : ""}`}
+          aria-hidden
+        >
+          <ChevronDownIcon size={ICON.xs} />
+        </span>
+      </Chip>
       {open && (
-        <div className="absolute bottom-full mb-2 left-0 z-30 min-w-[190px] rounded-card bg-panel border border-edge shadow-floating py-1">
+        <div className="absolute bottom-full mb-2 left-0 z-30 min-w-[190px] rounded-card bg-panel border border-edge shadow-floating p-1">
           {RUN_PROVIDERS.map((p) => (
-            <div key={p.id}>
-              <div className={`px-3 pb-0.5 pt-1.5 ${TYPE.sectionLabel}`}>{p.label}</div>
+            <div key={p.id} className="mt-1 first:mt-0">
+              {/* The provider's own mark on its group, so the menu is scanned by logo the way
+                  the chip that opened it is read by logo. */}
+              <div className={`flex items-center gap-1.5 px-2 pb-1 pt-0.5 ${TYPE.sectionLabel}`}>
+                <ProviderMark provider={p.id} size={10} />
+                {p.label}
+              </div>
               {p.models.map((m) => {
                 const active = provider === p.id && model === m;
                 return (
@@ -277,10 +298,14 @@ function ModelSelector({
                       setModel(m); // …then pin the chosen one
                       setOpen(false);
                     }}
-                    className={`w-full text-left px-3 py-1 font-mono text-[12px] transition-colors ${
-                      active ? "text-ink bg-active" : "text-muted hover:text-ink hover:bg-active/40"
+                    className={`flex w-full items-center gap-1.5 rounded-control px-2 py-1 text-left font-mono text-[12px] transition-colors duration-fast ${
+                      active ? "bg-active text-ink" : "text-muted hover:bg-active/40 hover:text-ink"
                     }`}
                   >
+                    {/* A fixed slot, so choosing a model does not shift the list. */}
+                    <span className="inline-flex w-[11px] shrink-0 items-center justify-center" aria-hidden>
+                      {active && <CheckIcon size={ICON.xs} />}
+                    </span>
                     {m}
                   </button>
                 );
@@ -855,19 +880,31 @@ export function BuildPane() {
 
             {/* right — the only two solid elements: mode toggle + send circle */}
             <div className="flex items-center gap-2.5">
+              {/* Two chips in a track. Same geometry as every other chip in the app, overridden
+                  only where a segmented control genuinely differs from a chip strip: the radius
+                  is a pill because the segments sit inside one, and the selected segment is
+                  ink-on-inverted rather than the usual tinted fill — this control chooses where
+                  ⌘↵ goes, which is the same weight of decision as the send button beside it. */}
               <div className="flex items-center rounded-full bg-active p-0.5">
                 {(["chat", "test"] as const).map((m) => {
                   const active = composerMode === m;
                   return (
-                    <button
+                    <Chip
                       key={m}
-                      type="button"
+                      size="lg"
                       onClick={() => setComposerMode(m)}
-                      className={`rounded-full text-[12px] transition-colors ${active ? "" : "text-muted hover:text-ink"}`}
-                      style={{ padding: "5px 11px", background: active ? "#e4e4e7" : "transparent", color: active ? "#0d0d0f" : undefined }}
+                      variant={active ? "fill" : "bare"}
+                      color={active ? SURFACE.bg : undefined}
+                      background={active ? TEXT.ink : undefined}
+                      className="!rounded-full"
+                      title={
+                        m === "chat"
+                          ? "Talk to Jaroku — plan, edit, explain"
+                          : "Send this as the agent's own input and run it"
+                      }
                     >
                       {m === "chat" ? "Chat" : "Test"}
-                    </button>
+                    </Chip>
                   );
                 })}
               </div>
@@ -877,7 +914,7 @@ export function BuildPane() {
                 disabled={!connected || !text.trim() || (composerMode === "test" ? !canRun : busy)}
                 title={composerMode === "test" ? "Run the agent on this input" : "Send"}
                 className="flex items-center justify-center rounded-full transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
-                style={{ width: 30, height: 30, background: "#e4e4e7", color: "#0d0d0f" }}
+                style={{ width: 30, height: 30, background: TEXT.ink, color: SURFACE.bg }}
               >
                 <ArrowUpIcon size={15} />
               </button>
