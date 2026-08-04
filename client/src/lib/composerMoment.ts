@@ -116,7 +116,11 @@ export function composerMoment(s: ComposerSituation): ComposerMoment {
       status: `Step #${s.failedStepSeq} failed`,
     };
   }
-  if (s.contextLabel) {
+  // Only when there is an agent. A trace step stays selected across an agent change, and with
+  // nothing selected in the sidebar the intent router sends a typed message to "plan a new
+  // agent" — so offering to explain the selection would be the composer promising something it
+  // is about to not do.
+  if (s.contextLabel && s.agentName) {
     return {
       placeholder: "Ask about or act on the selection — e.g. “why did this fail?”",
       status: null,

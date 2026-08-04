@@ -71,6 +71,11 @@ export type ChipProps = {
   figure?: React.ReactNode;
   size?: ChipSize;
   tone?: ChipTone;
+  /**
+   * Left undefined on purpose. A chip in a strip usually wants bare-when-unselected, which is
+   * what `selected` gives it — but a picker whose off state has to look clickable needs to say
+   * so, and an explicit variant has to win over the default that `selected` implies.
+   */
   variant?: ChipVariant;
   /**
    * A category accent or a status colour, for a chip whose meaning is carried by colour: the
@@ -144,7 +149,7 @@ export function Chip({
   figure,
   size = "md",
   tone = "muted",
-  variant = "fill",
+  variant,
   color,
   background,
   mono = false,
@@ -159,7 +164,9 @@ export function Chip({
   const interactive = Boolean(onClick);
   // A selected chip in a strip is a filled, ink chip — that is what selection means everywhere
   // else in the app, and a strip that invented its own selected look would be a third language.
-  const effectiveVariant = selected === true ? "fill" : selected === false ? "bare" : variant;
+  // An explicit `variant` still wins, for a picker whose OFF state has to look clickable.
+  const effectiveVariant: ChipVariant =
+    selected === true ? "fill" : (variant ?? (selected === false ? "bare" : "fill"));
   const effectiveTone = selected === true ? "ink" : tone;
 
   const surface: React.CSSProperties = {};

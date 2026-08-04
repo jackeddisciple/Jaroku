@@ -69,13 +69,17 @@ export function ProviderMark({ provider, active = true, size = 12 }: { provider:
  * A triangle with its left half filled, which is what the character was standing in for. Solid
  * rather than stroked because it is a mark, not an icon — the stroke ladder governs the icon set,
  * and a logo drawn to the same rules as a chevron reads as neither.
+ *
+ * No outline, for a reason that only showed up on screen: an amber triangle WITH a stroked border
+ * is a warning sign, and in an app where amber already means "running" and a real alert triangle
+ * is two panels away, the wordmark cannot be the thing people look at twice. Two solid tones and
+ * no edge reads as a mark.
  */
 export function JarokuGlyph({ size = 15, color = "#f59e0b" }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden fill="none">
-      <path d="M12 3 21 20H3z" fill={color} fillOpacity="0.22" />
-      <path d="M12 3v17H3z" fill={color} />
-      <path d="M12 3 21 20H3z" stroke={color} strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M12 3.5 20.5 20H12z" fill={color} fillOpacity="0.38" />
+      <path d="M12 3.5V20H3.5z" fill={color} />
     </svg>
   );
 }

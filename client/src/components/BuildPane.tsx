@@ -835,6 +835,10 @@ export function BuildPane() {
                   size="lg"
                   onClick={() => toggle(c.id)}
                   selected={on}
+                  // Outlined when off, rather than bare. This is a picker, not a strip of
+                  // entities where one is current: every option has to look clickable before it
+                  // has been clicked, and a bare label reads as a caption.
+                  variant={on ? undefined : "outline"}
                   disabled={busy}
                   title={c.hint}
                   reserveIcon
@@ -962,7 +966,11 @@ export function BuildPane() {
                 {moment.status}
               </span>
             )}
-            {composerMode === "chat" && contextLabel && (
+            {/* Same rule the placeholder follows: a selection is only context when there is an
+                agent to ask about. A step stays selected across an agent change, and with none
+                selected a typed message plans a new agent — so the chip would be naming a
+                context the composer is about to ignore. */}
+            {composerMode === "chat" && contextLabel && activeAgentId && (
               <Chip mono icon={<span className="text-faint"><ChevronRightIcon size={ICON.xs} /></span>}>
                 {contextLabel}
                 <button
