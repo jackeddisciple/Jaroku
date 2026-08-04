@@ -21,6 +21,7 @@ import { sendDiscardPlan, sendGenerate } from "../lib/socket.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { ACCENT, ICON } from "../lib/tokens.ts";
 import { noteKind } from "../lib/noteKind.ts";
+import { useStreamedText } from "../lib/useStreamedText.ts";
 import { BRAND_COLOR } from "../lib/icons.tsx";
 import { actionForToolOrigin } from "../lib/actionIcons.tsx";
 import { ActionRow } from "./ActionRow.tsx";
@@ -330,6 +331,16 @@ function Card({ children }: { children: React.ReactNode }) {
 
 export function PlanCard({ turn }: { turn: PlanTurn }) {
   const prefillChat = useUiStore((s) => s.prefillChat);
+  // The raw plan text while it is still arriving. Same reason as the explain reply: the model
+  // emits it in clause-sized chunks, and a gate whose whole job is to be read should not appear
+  // in blocks. It flushes the moment the plan settles into its structured form below.
+  const streamingRaw = useStreamedText(turn.raw, turn.status === "streaming");
+  // Above the early returns, with the rest of the hooks. It was below them, which meant a plan
+  // rendered one hook while streaming and two once it settled — and settling replaces the turn in
+  // place, keeping its id and therefore its component instance. React throws on a hook count that
+  // grows between renders of the same instance. Adding the cadence hook above would have widened
+  // that gap rather than caused it, so it is moved rather than worked around.
+  const mcpServers = useMcpStore((s) => s.servers);
 
   // Discarding is "not this — something else", not "never mind". Handing the brief back to the
   // composer (the same prefill One-Click Fix uses) means redirecting is an edit to what you
@@ -346,9 +357,9 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
     return (
       <Card>
         <div className="text-run">{turn.revision > 1 ? "Revising the plan…" : "Planning…"}</div>
-        {turn.raw && (
+        {streamingRaw && (
           <div className="mt-2 whitespace-pre-wrap break-words text-muted">
-            {turn.raw}
+            {streamingRaw}
             <span className="text-faint animate-pulse">▋</span>
           </div>
         )}
@@ -366,7 +377,6 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
   }
 
   const plan = turn.plan;
-  const mcpServers = useMcpStore((s) => s.servers);
   const connectorTools = plan?.tools.filter((t) => t.origin === "connector") ?? [];
   const bespokeTools = plan?.tools.filter((t) => t.origin === "bespoke") ?? [];
   const mcpTools = plan?.tools.filter((t) => t.origin === "mcp") ?? [];

@@ -35,6 +35,7 @@ import {
 import { useMcpStore, allMcpTools } from "../store/mcpStore.ts";
 import { ACCENT, ICON, STATUS } from "../lib/tokens.ts";
 import { displayTitle, fullTitle } from "../lib/title.ts";
+import { useStreamedText } from "../lib/useStreamedText.ts";
 import { useVoiceInput } from "../lib/useVoiceInput.ts";
 import { VoiceWaveform } from "./VoiceWaveform.tsx";
 
@@ -139,9 +140,13 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
 // needs `GMAIL_CLIENT_ID`" sat directly below a diff-card summary where the same kind of name was a
 // proper chip. Two Jaroku answers in one thread, two different typographic languages.
 function ReplyTurnView({ turn }: { turn: ReplyTurn }) {
+  // The store has the whole answer as of this frame; this is how much of it is painted. See
+  // lib/useStreamedText.ts — an explanation arrives from the model in clause-sized chunks, and
+  // without this the caret sits still for a second and then a paragraph appears at once.
+  const text = useStreamedText(turn.text, turn.status === "streaming");
   return (
     <div className={`text-[13px] whitespace-pre-wrap break-words ${turn.status === "error" ? "text-err" : "text-ink"}`}>
-      <Prose text={turn.text} />
+      <Prose text={text} />
       {turn.status === "streaming" && <span className="text-faint animate-pulse">▋</span>}
     </div>
   );
