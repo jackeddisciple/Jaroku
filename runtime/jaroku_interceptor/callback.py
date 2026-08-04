@@ -204,9 +204,16 @@ class JarokuTracer(BaseCallbackHandler):
 
     # ---- Tools ---------------------------------------------------------------
     def on_tool_start(self, serialized, input_str, *, run_id, parent_run_id=None,
-                      **kwargs) -> None:
+                      inputs=None, **kwargs) -> None:
         name = (serialized or {}).get("name") or "tool"
-        self._begin(run_id, parent_run_id, "tool_call", name, input_=input_str)
+        # The schema says a tool_call's `input` is its ARGS. LangChain hands us both a
+        # stringified `input_str` (a bare `str(dict)`, so Python repr — single quotes,
+        # `None`/`True`, and no way back to the values) and the structured `inputs` dict
+        # it was built from. Record the dict when there is one: it is the same information
+        # unflattened, so the detail panel, the state diff and the JSON export all read
+        # real args instead of a string that only looks like them.
+        self._begin(run_id, parent_run_id, "tool_call", name,
+                    input_=inputs if isinstance(inputs, dict) else input_str)
 
     def on_tool_end(self, output, *, run_id, **kwargs) -> None:
         self._finish(run_id, output=output)
