@@ -155,8 +155,14 @@ export function EvalRunBar() {
                   inputMode="decimal"
                   className="w-20 bg-active text-ink rounded-control px-2 py-1 text-[11px] tabular-nums outline-none focus:shadow-focusring"
                 />
+                {/* Says what the ceiling actually does. It is checked against real spend
+                    before anything is DISPATCHED, so runs already in flight finish and pay
+                    out — with providers running two at a time, a small eval can dispatch
+                    every cell before the first cost lands and overshoot several times over.
+                    "hard ceiling" alone read as a cap on the bill, which it is not. */}
                 <span className="text-[10px] text-faint">
-                  hard ceiling — checked against real spend, not this estimate
+                  checked against real spend before each dispatch — runs already started
+                  still finish, so the total can overshoot
                 </span>
                 <button
                   onClick={() => { setConfirming(false); setEstimate(null); }}
