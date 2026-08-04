@@ -15,6 +15,7 @@ import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { fmtCost, fmtLatency } from "../lib/format.ts";
 import { ICON } from "../lib/tokens.ts";
+import { Truncate } from "./Truncate.tsx";
 import { Chip } from "./Chip.tsx";
 import { ChevronRightIcon } from "./panelIcons.tsx";
 import type { EvalResults, ExampleCell } from "../types.ts";
@@ -47,7 +48,7 @@ function ScoreChip({ cell, active, onClick }: { cell: ExampleCell; active: boole
       title={`${cell.model}${failed ? ` — ${cell.error ?? cell.status}` : cell.score === null ? ` — ${cell.scoreError ?? "unscored"}` : ""}`}
       figure={<span className={tone}>{label}</span>}
     >
-      <span className="truncate max-w-[110px]">{cell.model}</span>
+      <Truncate className="max-w-[110px]">{cell.model}</Truncate>
     </Chip>
   );
 }

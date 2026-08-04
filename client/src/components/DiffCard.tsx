@@ -19,6 +19,7 @@ import { DiffStat } from "./DiffStat.tsx";
 import { StreamingFileRow } from "./FileList.tsx";
 import { iconForPath } from "./fileIcons.tsx";
 import { Prose } from "./InlineCode.tsx";
+import { Truncate } from "./Truncate.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { STAT_ICON } from "./StatRow.tsx";
 import { ICON } from "../lib/tokens.ts";
@@ -96,10 +97,10 @@ function FileRow({
         </span>
         <button
           onClick={() => openInCode(file.path)}
-          className="font-mono text-ink truncate hover:underline underline-offset-2"
+          className="min-w-0 font-mono text-ink hover:underline underline-offset-2"
           title="Open in Code tab"
         >
-          {file.path}
+          <Truncate>{file.path}</Truncate>
         </button>
         {/* Whether a file is new or edited is the first thing that changes how you read its diff —
             a +14/−0 on a new file is the whole file, on an existing one it is a change. As faint

@@ -24,6 +24,7 @@ import {
 } from "../lib/socket.ts";
 import { ACCENT, ICON, STATUS, TEXT } from "../lib/tokens.ts";
 import { Chip } from "./Chip.tsx";
+import { Truncate } from "./Truncate.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { StatusBadge, StatusDot } from "./StatusBadge.tsx";
@@ -146,7 +147,7 @@ function ServerDetail({ server }: { server: McpServer }) {
             <StatusBadge state="neutral" variant="outline" label="credential stored" icon={KeyIcon}
               title={`Read from ${server.auth_env_key} in runtime/.env. Jaroku never displays it.`} />
           )}
-          <span className="font-mono text-[11px] text-faint truncate">{server.endpoint}</span>
+          <Truncate className="font-mono text-[11px] text-faint" title={server.endpoint}>{server.endpoint}</Truncate>
         </div>
 
         {server.server_name && (
@@ -342,7 +343,7 @@ export function McpPanel() {
               />
             }
           >
-            <span className="truncate">{s.label}</span>
+            <Truncate title={s.label}>{s.label}</Truncate>
           </Chip>
         ))}
         <button className={quietBtn + " shrink-0 inline-flex items-center gap-1"}

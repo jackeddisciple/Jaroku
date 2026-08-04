@@ -43,6 +43,7 @@ import { useUiStore } from "../store/uiStore.ts";
 import { sendLoadAgentGraph } from "../lib/socket.ts";
 import { ICON, RADIUS } from "../lib/tokens.ts";
 import { EmptyState } from "./EmptyState.tsx";
+import { Truncate } from "./Truncate.tsx";
 import { GitBranchIcon, PlusIcon, XIcon } from "./panelIcons.tsx";
 import { activeEdge, activeNodeId, latestStepForNode, stepEdge, stepNodeId, traversedEdges } from "../lib/traceGraphMap.ts";
 import type { AgentGraph, GraphNode as GNode, Step } from "../types.ts";
@@ -211,8 +212,8 @@ function FlowNode({ data }: NodeProps) {
             <Icon size={24} />
           </span>
           <span className="flex flex-col min-w-0 leading-tight gap-1">
-            <span className="text-ink font-semibold text-[15px] truncate">{d.title}</span>
-            <span className="text-muted text-[12px] truncate">{d.subtitle}</span>
+            <Truncate className="text-[15px] font-semibold text-ink">{d.title}</Truncate>
+            <Truncate className="text-[12px] text-muted">{d.subtitle}</Truncate>
           </span>
         </div>
 
@@ -267,13 +268,15 @@ function FlowNode({ data }: NodeProps) {
 
       {/* label beneath the card */}
       <div className="absolute left-1/2 -translate-x-1/2 text-center" style={{ top: CARD_H + 8, width: 200 }}>
-        <div className="text-ink text-[13px] font-medium leading-tight truncate">{d.title}</div>
-        <div
-          className={`text-[11.5px] leading-tight truncate ${d.mcp ? "" : "text-muted"}`}
-          style={d.mcp ? { color: ACCENT_MCP } : undefined}
+        <Truncate fade="both" className="text-[13px] font-medium leading-tight text-ink">
+          {d.title}
+        </Truncate>
+        <Truncate
+          fade="both"
+          className={`text-[11.5px] leading-tight ${d.mcp ? "" : "text-muted"}`}
         >
-          {d.subtitle}
-        </div>
+          <span style={d.mcp ? { color: ACCENT_MCP } : undefined}>{d.subtitle}</span>
+        </Truncate>
       </div>
 
       <Handle id="in" type="target" position={Position.Left} className={HANDLE_HIDDEN} />
@@ -297,7 +300,7 @@ function ResourceNode({ data }: NodeProps) {
         <Icon size={44} />
       </div>
       <div className="absolute left-1/2 -translate-x-1/2 text-center" style={{ top: RES_D + 9, width: 112 }}>
-        <div className="text-ink text-[12.5px] leading-tight truncate">{d.label}</div>
+        <Truncate fade="both" className="text-[12.5px] leading-tight text-ink">{d.label}</Truncate>
       </div>
       <Handle id="in" type="target" position={Position.Top} className={HANDLE_HIDDEN} />
       <Diamond style={{ left: RES_D / 2, top: 0 }} />
@@ -573,7 +576,7 @@ function NodeInspector({ nodeId, ntype, onClose }: { nodeId: string; ntype: stri
   return (
     <div className="absolute top-2 right-2 bottom-2 w-64 bg-panel rounded-card border border-edge p-3 overflow-auto text-[12px] shadow-floating">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-ink truncate">{nodeId}</span>
+        <Truncate className="text-ink" title={nodeId}>{nodeId}</Truncate>
         <button className="text-muted transition-colors duration-fast hover:text-ink" onClick={onClose}>
           <XIcon size={ICON.sm} />
         </button>
@@ -604,7 +607,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between py-1">
       <span className="text-muted">{label}</span>
-      <span className="text-ink truncate ml-2">{value}</span>
+      <Truncate className="ml-2 text-ink" title={value}>{value}</Truncate>
     </div>
   );
 }

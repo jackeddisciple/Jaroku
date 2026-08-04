@@ -26,6 +26,7 @@ import {
 import { csvToExamples } from "../lib/csv.ts";
 import { ICON } from "../lib/tokens.ts";
 import { Chip } from "./Chip.tsx";
+import { Truncate } from "./Truncate.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { DatabaseIcon } from "./panelIcons.tsx";
 import { XIcon } from "./panelIcons.tsx";
@@ -196,7 +197,7 @@ export function DatasetBuilder() {
             className="max-w-[220px]"
             figure={d.example_count ?? 0}
           >
-            <span className="truncate">{d.name}</span>
+            <Truncate>{d.name}</Truncate>
           </Chip>
         ))}
         <button

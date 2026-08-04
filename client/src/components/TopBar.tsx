@@ -7,6 +7,7 @@ import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { agentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark, BRAND_COLOR, JarokuGlyph } from "../lib/icons.tsx";
+import { Truncate } from "./Truncate.tsx";
 import { Chip } from "./Chip.tsx";
 
 function StatusDot({ status }: { status: string }) {
@@ -44,7 +45,7 @@ export function TopBar() {
       {agent && (
         <>
           <span className="text-faint">·</span>
-          <span className="text-ink text-[13px] truncate max-w-[280px]">{agent.name}</span>
+          <Truncate className="max-w-[280px] text-[13px] text-ink" title={agent.name}>{agent.name}</Truncate>
           <StatusDot status={status} />
         </>
       )}

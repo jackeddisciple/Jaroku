@@ -12,6 +12,7 @@ import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { RUN_PROVIDERS, useUiStore } from "../store/uiStore.ts";
 import { inputKey } from "../store/uiStore.ts";
+import { Truncate } from "./Truncate.tsx";
 import { sendRun } from "../lib/socket.ts";
 
 function isTypingTarget(el: EventTarget | null): boolean {
@@ -118,7 +119,7 @@ export function CommandPalette() {
             <Command.Group heading="Files" className="mb-1">
               {fileOrder.map((path) => (
                 <Item key={path} onSelect={run(() => openInCode(path))}>
-                  <span className="truncate">{path}</span>
+                  <Truncate title={path}>{path}</Truncate>
                 </Item>
               ))}
             </Command.Group>

@@ -26,6 +26,7 @@ import { Prose } from "./InlineCode.tsx";
 import { StreamingFileRow } from "./FileList.tsx";
 import { PlanCard } from "./PlanCard.tsx";
 import { ArrowUpIcon, ChevronDownIcon, MicIcon, SaveToDatasetIcon } from "./composerIcons.tsx";
+import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { StatRow, STAT_ICON, type Stat } from "./StatRow.tsx";
 import {
@@ -572,12 +573,12 @@ export function BuildPane() {
           // mid-word, so displayTitle() ends it on a whole word; `truncate` handles the narrow-pane
           // case, and `min-w-0` is what lets it shrink at all inside this flex row. The tooltip
           // carries the untruncated original, which the client has always had and never shown.
-          <span
-            className="min-w-0 font-mono text-[12px] text-muted truncate"
+          <Truncate
+            className="font-mono text-[12px] text-muted"
             title={fullTitle(agent.name, agent.description)}
           >
             {displayTitle(agent.name, agent.description)}
-          </span>
+          </Truncate>
         )}
       </div>
 
@@ -706,10 +707,10 @@ export function BuildPane() {
                       <span className="inline-flex w-[11px] shrink-0 items-center justify-center" aria-hidden>
                         {on && <StatusDot state="ok" size={11} color={ACCENT.mcp} />}
                       </span>
-                      <span className="font-mono truncate">{t.name}</span>
+                      <Truncate className="font-mono">{t.name}</Truncate>
                       {/* Which server it came from is not decoration: two servers can
                           advertise the same tool name and mean different things. */}
-                      <span className="text-faint truncate">{t.serverLabel}</span>
+                      <Truncate className="text-faint">{t.serverLabel}</Truncate>
                       {high && (
                         // The same word, the same colour and now the same chip the plan card and
                         // the MCP panel use for this fact one screen away.

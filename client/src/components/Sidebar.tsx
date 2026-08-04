@@ -13,6 +13,7 @@ import { ProviderMark, ConnectorDot } from "../lib/icons.tsx";
 import { sendLoadRun } from "../lib/socket.ts";
 import { ICON } from "../lib/tokens.ts";
 import { Chip } from "./Chip.tsx";
+import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import {
@@ -58,7 +59,7 @@ function RunRow({ run }: { run: RunSummary }) {
           </span>
         )}
         <StatusGlyph status={run.status} />
-        <span className="text-ink truncate text-[12px]">{run.agent_id}</span>
+        <Truncate className="text-ink text-[12px]" title={run.agent_id}>{run.agent_id}</Truncate>
         <span className="ml-auto text-faint text-[11px] shrink-0">{relTime(run.started_at)}</span>
       </div>
       <div className={`mt-0.5 text-[11px] text-muted flex items-center gap-1.5 ${run.parent_run_id ? "pl-7" : "pl-4"}`}>
@@ -99,7 +100,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
         ) : (
           <StatusDot state="error" icon={XIcon} title="missing agent.py" />
         )}
-        <span className="text-ink truncate">{agent.name}</span>
+        <Truncate className="text-ink" title={agent.name}>{agent.name}</Truncate>
         {last && <span className="ml-auto text-faint text-[11px] shrink-0">{relTime(last.started_at)}</span>}
       </div>
       {/* A provider and a connector are both names of things this agent is wired to — the same

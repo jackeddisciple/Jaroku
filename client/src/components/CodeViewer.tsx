@@ -12,7 +12,9 @@
 import { useEffect, useState } from "react";
 import { orderedFiles, useBuildStore } from "../store/buildStore.ts";
 import { ICON } from "../lib/tokens.ts";
+import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
+import { LockIcon } from "./panelIcons.tsx";
 
 const LANGS = ["python", "json", "markdown", "toml"] as const;
 const THEME = "vitesse-dark"; // muted, close to the app's near-black palette
@@ -59,7 +61,7 @@ function FileRail() {
             key={f.path}
             onClick={() => selectFile(f.path)}
             title={f.readOnly ? `${f.path} (read-only)` : f.path}
-            className={`relative w-full text-left px-3 py-1.5 text-[11px] transition-colors truncate ${
+            className={`relative flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] transition-colors duration-fast ${
               active ? "bg-active text-ink" : "text-muted hover:text-ink"
             }`}
           >
@@ -67,8 +69,13 @@ function FileRail() {
             {f.path === streamingFile && (
               <StatusDot state="pending" pulse size={ICON.xs} title="Still writing" />
             )}
-            {f.path}
-            {f.readOnly && <span className="text-faint"> ⌀</span>}
+            <Truncate className="flex-1">{f.path}</Truncate>
+            {/* Was a `⌀` character. A reviewed template is locked, and the app has a lock. */}
+            {f.readOnly && (
+              <span className="shrink-0 text-faint" title="Read-only — a reviewed template">
+                <LockIcon size={ICON.xs} />
+              </span>
+            )}
           </button>
         );
       })}
@@ -117,7 +124,7 @@ export function CodeViewer() {
       <FileRail />
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center gap-2 px-6 py-2 shrink-0 border-b border-hair">
-          <span className="text-ink text-[12px] truncate">{file.path}</span>
+          <Truncate className="text-[12px] text-ink" title={file.path}>{file.path}</Truncate>
           <span className="text-faint text-[11px] shrink-0">{lang}</span>
           {file.readOnly && <span className="text-faint text-[11px] shrink-0">read-only</span>}
           {!complete && <span className="text-run text-[11px] animate-pulse shrink-0">writing…</span>}
