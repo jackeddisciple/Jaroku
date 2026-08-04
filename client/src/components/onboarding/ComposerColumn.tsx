@@ -29,6 +29,7 @@ import { threadFor, useChatStore } from "../../store/chatStore.ts";
 import { canBuild, useProviderStore } from "../../store/providerStore.ts";
 import { useTraceStore } from "../../store/traceStore.ts";
 import { inputKey, useUiStore } from "../../store/uiStore.ts";
+import { selectAgent } from "../../lib/selection.ts";
 import { sendRun } from "../../lib/socket.ts";
 import { ICON } from "../../lib/tokens.ts";
 import { BuildPane } from "../BuildPane.tsx";
@@ -101,11 +102,11 @@ export function ComposerColumn({ phase }: { phase: OnboardingPhase }) {
     aimed.current = true;
     const ui = useUiStore.getState();
     if (freePath && exampleAgent) {
-      useBuildStore.getState().selectAgent(EXAMPLE_AGENT_ID);
+      selectAgent(EXAMPLE_AGENT_ID);
       ui.setComposerMode("test");
       ui.setProvider("fake");
     } else {
-      useBuildStore.getState().selectAgent(null);
+      selectAgent(null);
       ui.setComposerMode("chat");
     }
   }, [phase, loaded, freePath, exampleAgent]);

@@ -30,6 +30,9 @@ interface TraceState {
   applyEvent: (event: TraceEvent) => void;
   applyRunSteps: (runId: string, steps: Step[]) => void;
   selectRun: (id: string) => void;
+  /** Drop the run and step selection entirely — used when the run on screen no longer
+   *  belongs to the selected agent. See lib/selection.ts for the invariant. */
+  clearRunSelection: () => void;
   setRunStatus: (runId: string, status: RunStatus) => void;
   selectStep: (id: string | null) => void;
   setExpandedStep: (id: string | null) => void;
@@ -101,6 +104,8 @@ export const useTraceStore = create<TraceState>((set, get) => ({
     })),
 
   selectRun: (id) => set({ activeRunId: id, selectedStepId: null, expandedStepId: null }),
+
+  clearRunSelection: () => set({ activeRunId: null, selectedStepId: null, expandedStepId: null }),
 
   // Debug depth: reflect a control-plane status flip (paused / resumed) on the run row. Only the
   // status changes — steps and seq ordering are untouched; a resumed run's new steps still arrive

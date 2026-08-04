@@ -10,6 +10,7 @@ import type { AgentSummary, RunSummary, RunStatus } from "../types.ts";
 import { relTime } from "../lib/format.ts";
 import { agentStatus, type AgentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark, ConnectorDot } from "../lib/icons.tsx";
+import { selectAgent, selectRun } from "../lib/selection.ts";
 import { sendLoadRun } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useUiStore } from "../store/uiStore.ts";
@@ -42,7 +43,6 @@ function AgentDot({ status }: { status: AgentStatus }) {
 
 function RunRow({ run }: { run: RunSummary }) {
   const activeRunId = useTraceStore((s) => s.activeRunId);
-  const selectRun = useTraceStore((s) => s.selectRun);
   const needsLoad = useTraceStore((s) => s.needsLoad);
   const active = run.id === activeRunId;
 
@@ -78,7 +78,6 @@ function RunRow({ run }: { run: RunSummary }) {
 
 function AgentRow({ agent }: { agent: AgentSummary }) {
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
-  const selectAgent = useBuildStore((s) => s.selectAgent);
   const runs = useTraceStore((s) => s.runs);
   const active = agent.agent_id === activeAgentId;
   const status = agentStatus(agent.agent_id, runs);
@@ -131,7 +130,6 @@ export function Sidebar() {
   const runs = useTraceStore((s) => s.runs);
   const agents = useBuildStore((s) => s.agents);
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
-  const selectAgent = useBuildStore((s) => s.selectAgent);
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
 
