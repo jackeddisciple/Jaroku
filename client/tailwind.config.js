@@ -6,6 +6,10 @@ export default {
     extend: {
       colors: {
         // Layered surfaces (deepest → top).
+        // `void` is what the app itself sits ON. Everything above it is inside the shell; this is
+        // the only colour outside it, and it exists so the shell can read as a lifted panel
+        // rather than as the window. One step under `bg`, which used to be the floor.
+        void: "#08080a",
         bg: "#0d0d0f", // near-black background
         panel: "#18181b", // sidebar / panels, one layer up
         active: "#1e1e22", // selected/active row

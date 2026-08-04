@@ -103,7 +103,7 @@ export function CommandPalette() {
       label="Command palette"
       className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh]"
       overlayClassName="fixed inset-0 bg-black/50"
-      contentClassName="relative w-[min(560px,92vw)] bg-panel rounded-modal overflow-hidden shadow-2xl"
+      contentClassName="relative w-[min(560px,92vw)] bg-panel rounded-modal overflow-hidden border border-edge shadow-overlay"
     >
       <Command loop>
         <Command.Input

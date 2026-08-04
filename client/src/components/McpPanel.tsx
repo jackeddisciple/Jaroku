@@ -187,7 +187,7 @@ function ServerDetail({ server }: { server: McpServer }) {
         </div>
 
         {showToken && (
-          <div className="mt-2 rounded-card bg-panel p-2">
+          <div className="mt-2 rounded-card border border-edge bg-panel p-2 shadow-raised">
             <div className="flex items-center gap-2">
               <input
                 type="password"
@@ -354,7 +354,7 @@ export function McpPanel() {
 
       {adding && (
         <div className="shrink-0 px-4 pb-2">
-          <div className="rounded-card bg-panel p-2">
+          <div className="rounded-card border border-edge bg-panel p-2 shadow-raised">
             <input
               autoFocus
               className="w-full rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none placeholder:text-faint"

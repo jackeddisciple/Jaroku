@@ -24,8 +24,10 @@
   /* The app default stays monospace — the trace, graph and sidebar are all built on it and are
      not part of this pass. The prose/code split is scoped to the generation panel, which opts in
      with font-sans on its root and marks its identifiers font-mono from there. */
+  /* The page is the surface the app floats ON, not the app. The shell in App.tsx carries `bg`;
+     everything visible out here is the few pixels of inset around it. */
   body {
-    @apply bg-bg text-ink font-mono;
+    @apply bg-void text-ink font-mono;
     font-size: 13px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;

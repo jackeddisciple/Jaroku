@@ -119,7 +119,7 @@ export function EvalRunBar() {
 
       {/* the estimate — shown only when money is involved, and always as a range */}
       {confirming && (
-        <div className="rounded-card bg-panel px-3 py-2 space-y-1.5">
+        <div className="rounded-card border border-edge bg-panel px-3 py-2 space-y-1.5 shadow-raised">
           {!estimate ? (
             <div className="text-[11px] text-muted">estimating…</div>
           ) : (
@@ -152,7 +152,7 @@ export function EvalRunBar() {
                   value={ceiling}
                   onChange={(e) => setCeiling(e.target.value)}
                   inputMode="decimal"
-                  className="w-20 bg-active text-ink rounded-control px-2 py-1 text-[11px] tabular-nums outline-none focus:ring-1 focus:ring-[#2a2a2e]"
+                  className="w-20 bg-active text-ink rounded-control px-2 py-1 text-[11px] tabular-nums outline-none focus:shadow-focusring"
                 />
                 <span className="text-[10px] text-faint">
                   hard ceiling — checked against real spend, not this estimate

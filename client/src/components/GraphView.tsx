@@ -571,7 +571,7 @@ function NodeInspector({ nodeId, ntype, onClose }: { nodeId: string; ntype: stri
   const toolFiles = findToolFiles(files);
 
   return (
-    <div className="absolute top-2 right-2 bottom-2 w-64 bg-panel rounded-card p-3 overflow-auto text-[12px] shadow-2xl">
+    <div className="absolute top-2 right-2 bottom-2 w-64 bg-panel rounded-card border border-edge p-3 overflow-auto text-[12px] shadow-floating">
       <div className="flex items-center justify-between mb-3">
         <span className="text-ink truncate">{nodeId}</span>
         <button className="text-muted transition-colors duration-fast hover:text-ink" onClick={onClose}>
@@ -800,7 +800,7 @@ export function GraphView() {
         }}
       >
         <Background variant={BackgroundVariant.Dots} gap={28} size={1} color="#242429" />
-        <Controls showInteractive={false} className="!bg-panel/80 !backdrop-blur !border-0 !rounded-card !shadow-lg" />
+        <Controls showInteractive={false} className="!bg-panel/80 !backdrop-blur !border-0 !rounded-card !shadow-floating" />
         <MiniMap
           pannable
           zoomable

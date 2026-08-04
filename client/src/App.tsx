@@ -27,28 +27,36 @@ export function App() {
   }, [activeAgentId, connected]);
 
   return (
-    <div className="flex h-full flex-col">
-      {/* top bar */}
-      <TopBar />
+    // The app is a panel on a surface, not the surface. A few pixels of inset and one outer
+    // shadow, so the three columns read as a lifted object with edges — which is what they are
+    // once this is wrapped as a desktop window, and is worth the eight pixels in a browser tab
+    // too. The layout inside is untouched: same PanelGroup, same sizes, same resize handles.
+    <div className="h-full bg-void p-2">
+      <div className="flex h-full flex-col overflow-hidden rounded-modal border border-edge bg-bg shadow-overlay">
+        {/* top bar */}
+        <TopBar />
 
-      {/* three-column body (doc §4): agents+runs · build · trace/code */}
-      <PanelGroup direction="horizontal" autoSaveId="jaroku-layout-v3" className="flex-1 min-h-0">
-        <Panel defaultSize={20} minSize={14} maxSize={34}>
-          <Sidebar />
-        </Panel>
-        <PanelResizeHandle className="w-[3px] bg-hair hover:bg-[#3a3a3f] transition-colors" />
-        <Panel defaultSize={36} minSize={24}>
-          <BuildPane />
-        </Panel>
-        <PanelResizeHandle className="w-[3px] bg-hair hover:bg-[#3a3a3f] transition-colors" />
-        <Panel defaultSize={44} minSize={26}>
-          <RightPanel />
-        </Panel>
-      </PanelGroup>
+        {/* three-column body (doc §4): agents+runs · build · trace/code */}
+        <PanelGroup direction="horizontal" autoSaveId="jaroku-layout-v3" className="flex-1 min-h-0">
+          <Panel defaultSize={20} minSize={14} maxSize={34}>
+            <Sidebar />
+          </Panel>
+          <PanelResizeHandle className="w-[3px] bg-hair transition-colors duration-fast hover:bg-[#3a3a3f]" />
+          <Panel defaultSize={36} minSize={24}>
+            <BuildPane />
+          </Panel>
+          <PanelResizeHandle className="w-[3px] bg-hair transition-colors duration-fast hover:bg-[#3a3a3f]" />
+          <Panel defaultSize={44} minSize={26}>
+            <RightPanel />
+          </Panel>
+        </PanelGroup>
 
-      {/* the run control now lives inside the single composer (BuildPane) via its Chat/Test toggle */}
-      <StatusBar />
+        {/* the run control now lives inside the single composer (BuildPane) via its Chat/Test toggle */}
+        <StatusBar />
+      </div>
 
+      {/* Outside the shell on purpose: all three are fixed-position and cover the viewport, and
+          the shell clips its own overflow so the columns can round their corners. */}
       {/* command palette (Cmd+K) + global keyboard nav — mounted once, renders in a portal */}
       <CommandPalette />
       {/* code opens on demand (diff card / Cmd+P), overlaying the conversation */}

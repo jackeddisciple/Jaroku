@@ -83,7 +83,7 @@ function ExampleRow({
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commit(); }
         }}
         rows={Math.min(draft.split("\n").length + 1, 6)}
-        className="w-full resize-none bg-active text-ink rounded-control px-2 py-1 text-[12px] outline-none focus:ring-1 focus:ring-[#2a2a2e]"
+        className="w-full resize-none bg-active text-ink rounded-control px-2 py-1 text-[12px] outline-none focus:shadow-focusring"
       />
     ) : (
       <button
@@ -284,7 +284,7 @@ export function DatasetBuilder() {
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addExample(); } }}
             disabled={!connected}
             placeholder="Add an input the agent should handle…"
-            className="flex-1 bg-panel text-ink placeholder:text-faint rounded-control px-2.5 py-1.5 text-[12px] outline-none focus:ring-1 focus:ring-[#2a2a2e] disabled:opacity-50"
+            className="flex-1 bg-panel text-ink placeholder:text-faint rounded-control px-2.5 py-1.5 text-[12px] outline-none focus:shadow-focusring disabled:opacity-50"
           />
           <button
             onClick={addExample}

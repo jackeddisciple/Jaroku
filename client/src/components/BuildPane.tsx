@@ -261,7 +261,7 @@ function ModelSelector({
         <ChevronDownIcon size={13} />
       </button>
       {open && (
-        <div className="absolute bottom-full mb-2 left-0 z-30 min-w-[190px] rounded-card bg-panel border border-edge shadow-2xl py-1">
+        <div className="absolute bottom-full mb-2 left-0 z-30 min-w-[190px] rounded-card bg-panel border border-edge shadow-floating py-1">
           {RUN_PROVIDERS.map((p) => (
             <div key={p.id}>
               <div className="px-3 pt-1.5 pb-0.5 text-[10px] uppercase tracking-wide text-faint">{p.label}</div>
@@ -653,7 +653,7 @@ export function BuildPane() {
                   ? "The name is fixed once a plan is on the table — discard the plan to change it"
                   : "Optional. Otherwise the name is taken from your description."
               }
-              className="ml-auto w-40 bg-panel font-mono text-ink placeholder:text-faint rounded-control px-2.5 py-1 text-[12px] outline-none focus:ring-1 focus:ring-[#2a2a2e] disabled:opacity-50"
+              className="ml-auto w-40 bg-panel font-mono text-ink placeholder:text-faint rounded-control px-2.5 py-1 text-[12px] outline-none focus:shadow-focusring disabled:opacity-50"
             />
           </div>
         )}
@@ -752,7 +752,10 @@ export function BuildPane() {
         )}
 
         {/* the card — textarea sits directly in it; only the toggle + send read as solid elements */}
-        <div className="rounded-modal bg-panel border border-edge" style={{ padding: "14px 16px 12px" }}>
+        <div
+          className="rounded-modal border border-edge bg-panel shadow-raised transition-shadow duration-fast focus-within:shadow-focusring"
+          style={{ padding: "14px 16px 12px" }}
+        >
           {/* input slot: the textarea and the live waveform crossfade in place (~200ms) so the
               transition from typing to recording is smooth and the card doesn't jump. */}
           <div className="relative" style={{ height: showWave ? recordHeight : undefined }}>

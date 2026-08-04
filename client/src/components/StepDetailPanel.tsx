@@ -58,7 +58,7 @@ export function StepDetailPanel() {
   return (
     <div
       className={`absolute top-0 right-0 bottom-0 w-[340px] max-w-[85%] bg-panel z-20 flex flex-col
-        shadow-[-8px_0_24px_rgba(0,0,0,0.35)] transition-transform duration-150 ease-out
+        border-l border-edge shadow-floating transition-transform duration-150 ease-out
         ${open ? "translate-x-0" : "translate-x-full pointer-events-none"}`}
       aria-hidden={!open}
     >
