@@ -39,7 +39,7 @@ export function RightPanel() {
 
   return (
     <div className="relative flex h-full flex-col bg-bg overflow-hidden">
-      <div className="flex items-center gap-1 px-4 py-2 shrink-0">
+      <div className="flex shrink-0 items-center gap-1 border-b border-hair px-4 py-2">
         {TABS.map((t) => (
           <button key={t.id} className={tabClass(t.id)} onClick={() => setTab(t.id)}>
             {t.label}

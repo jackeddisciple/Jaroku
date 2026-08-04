@@ -40,7 +40,7 @@ export function CodeOverlay() {
         className="w-[min(880px,80vw)] bg-bg flex flex-col border-l border-edge shadow-overlay animate-slide-in"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-2 px-4 py-2 shrink-0 bg-panel">
+        <div className="flex shrink-0 items-center gap-2 border-b border-hair px-4 py-2">
           <span className="text-[11px] uppercase tracking-widest text-faint">Code</span>
           <button
             onClick={() => setOpen(false)}

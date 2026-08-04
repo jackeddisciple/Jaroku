@@ -72,7 +72,7 @@ export function EvalsPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-1 px-4 pb-2 shrink-0">
+      <div className="flex shrink-0 items-center gap-1 border-b border-hair px-4 pb-2 pt-1">
         {tab("dataset", "Dataset")}
         {tab("results", "Results")}
         {running && (

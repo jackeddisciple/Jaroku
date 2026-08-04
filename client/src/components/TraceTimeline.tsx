@@ -49,7 +49,7 @@ export function TraceTimeline() {
   return (
     <div className="flex h-full flex-col bg-bg">
       {/* header */}
-      <div className="flex items-center gap-3 px-6 py-3 shrink-0">
+      <div className="flex shrink-0 items-center gap-3 border-b border-hair px-6 py-3">
         <span className="text-[11px] uppercase tracking-widest text-faint">Trace</span>
         {run ? (
           <>

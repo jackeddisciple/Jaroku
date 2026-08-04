@@ -161,7 +161,7 @@ export function Sidebar() {
   );
 
   return (
-    <div className="flex h-full flex-col bg-panel">
+    <div className="flex h-full flex-col bg-bg">
       {/* New Agent */}
       <div className="px-3 pt-3 shrink-0">
         <button
@@ -215,7 +215,7 @@ export function Sidebar() {
       </div>
 
       {/* runs — how you re-open a past trace */}
-      <div className="px-4 py-2 shrink-0 flex items-center">
+      <div className="mt-1 flex shrink-0 items-center border-t border-hair px-4 py-2">
         <span className="text-[11px] uppercase tracking-widest text-faint">Runs</span>
         <span className="ml-auto text-faint text-[11px]">{runList.length}</span>
       </div>
@@ -228,7 +228,7 @@ export function Sidebar() {
       </div>
 
       {/* bottom-anchored: settings + user/plan */}
-      <div className="shrink-0 px-3 py-2.5 space-y-1">
+      <div className="shrink-0 space-y-1 border-t border-hair px-3 py-2.5">
         <button className="w-full flex items-center gap-2 text-[12px] text-muted hover:text-ink transition-colors px-2 py-1.5">
           <SettingsIcon size={ICON.sm} /> Settings
           <span className="ml-auto text-faint"><ChevronRightIcon size={ICON.xs} /></span>

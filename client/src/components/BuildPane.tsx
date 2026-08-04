@@ -563,7 +563,7 @@ export function BuildPane() {
     // sit at different rhythms depending on which component rendered them. 1.55 for everything the
     // panel reads as prose; code overrides back down where it needs to (diff hunks).
     <div className="flex h-full flex-col bg-bg font-sans leading-[1.55]">
-      <div className="px-6 pt-4 pb-2 shrink-0 flex items-baseline gap-2">
+      <div className="flex shrink-0 items-baseline gap-2 border-b border-hair px-6 pb-2 pt-4">
         <span className="text-[11px] uppercase tracking-widest text-faint">
           {mode === "generate" ? "New agent" : "Fix"}
         </span>

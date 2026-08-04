@@ -183,7 +183,7 @@ export function DatasetBuilder() {
   return (
     <div className="flex h-full flex-col">
       {/* datasets */}
-      <div className="px-4 pb-2 shrink-0 flex flex-wrap items-center gap-1.5">
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-hair px-4 pb-2 pt-2">
         {datasets.map((d) => (
           <Chip
             key={d.id}

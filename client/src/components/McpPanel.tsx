@@ -163,7 +163,7 @@ function ServerDetail({ server }: { server: McpServer }) {
         )}
 
         {server.last_error && (
-          <p className="mt-1 rounded-control bg-panel px-2 py-1.5 text-[11px] leading-[1.5] text-err break-words">
+          <p className="mt-1 break-words rounded-control border border-err/30 px-2 py-1.5 text-[11px] leading-[1.5] text-err">
             {server.last_error}
           </p>
         )}
@@ -313,8 +313,8 @@ export function McpPanel() {
 
       {(error || notice) && (
         <div className="shrink-0 px-4 pt-2">
-          <div className={`flex items-start gap-2 rounded-control px-2 py-1.5 text-[11px] leading-[1.5] ${
-            error ? "bg-panel text-err" : "bg-panel text-muted"}`}>
+          <div className={`flex items-start gap-2 rounded-control border px-2 py-1.5 text-[11px] leading-[1.5] ${
+            error ? "border-err/30 text-err" : "border-hair text-muted"}`}>
             <span className="min-w-0 flex-1 break-words">{error ?? notice}</span>
             <button className="shrink-0 text-faint hover:text-ink"
               onClick={() => (error ? setError(null) : setNotice(null))}>
@@ -325,7 +325,7 @@ export function McpPanel() {
       )}
 
       {/* Server chips */}
-      <div className="flex shrink-0 items-center gap-1 overflow-x-auto px-4 py-2">
+      <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-hair px-4 py-2">
         {servers.map((s) => (
           <Chip
             key={s.id}

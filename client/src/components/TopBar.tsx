@@ -35,7 +35,7 @@ export function TopBar() {
   const status = agent ? agentStatus(agent.agent_id, runs) : "draft";
 
   return (
-    <div className="flex items-center gap-3 px-4 h-11 shrink-0 bg-panel">
+    <div className="flex h-11 shrink-0 items-center gap-3 border-b border-hair px-4">
       {/* brand */}
       <JarokuGlyph />
       <span className="text-ink font-semibold">Jaroku</span>
