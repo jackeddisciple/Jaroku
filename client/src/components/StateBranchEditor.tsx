@@ -77,7 +77,13 @@ export function StateBranchEditor({ step }: { step: Step }) {
               <span className="text-[11px] text-muted">{k}</span>
               <textarea
                 value={draft[k]}
-                onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))}
+                onChange={(e) => {
+                  setDraft((d) => ({ ...d, [k]: e.target.value }));
+                  // The complaint below was about the text that was here when Branch was
+                  // pressed. Editing makes it a statement about something that no longer
+                  // exists, so it goes; the next press re-checks what is actually there.
+                  setError(null);
+                }}
                 spellCheck={false}
                 rows={Math.min(6, (draft[k]?.split("\n").length ?? 1) + 1)}
                 className="w-full mt-1 bg-bg text-ink text-[11px] font-mono rounded-control p-2 resize-y
