@@ -470,6 +470,13 @@ function layoutFlow(graph: AgentGraph, model?: string): { nodes: Node[]; edges: 
       id: n.id,
       type: "flow",
       position,
+      // Declared, not left to be measured. These nodes are rebuilt from the introspected
+      // topology on every render, so React Flow's measured size never survives onto the
+      // object it hands the MiniMap — which skips any node whose dimensions it cannot read,
+      // and so drew an empty grey rectangle. dimsFor() is the same size the layout above
+      // centred the node on, so this states what was already true.
+      width: w,
+      height: h,
       data: {
         title: prettify(n.id),
         subtitle: subtitleFor(kind, model),
@@ -510,6 +517,8 @@ function buildResources(
     id: "res:model",
     type: "resource",
     position: { x: modelPortX - RES_D / 2, y },
+    width: RES_D,
+    height: RES_D,
     data: { label: model.label, kind: "model", parent: llmId, Icon: model.Icon } satisfies ResourceData,
     selectable: true,
     draggable: false,
@@ -546,6 +555,8 @@ function buildResources(
       id,
       type: "resource",
       position: { x: cx - RES_D / 2, y },
+      width: RES_D,
+      height: RES_D,
       data: { label, kind: "tool", parent: llmId, Icon } satisfies ResourceData,
       selectable: true,
       draggable: false,
