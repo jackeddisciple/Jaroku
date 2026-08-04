@@ -47,6 +47,12 @@ export type ActionRowProps = {
   kind?: ActionKind;
   /** The action, already resolved — for callers that adjust the descriptor (a file's own icon). */
   action?: ActionDescriptor;
+  /**
+   * A mark that is not from the icon set: an ordinal, an avatar, a spinner. Replaces the
+   * descriptor's icon in the same slot, so a row marked by its position and a row marked by its
+   * kind still put their text in the same column.
+   */
+  icon?: React.ReactNode;
   state?: ActionState;
   /** Override the vocabulary's verb. For a row whose action has no entry worth adding. */
   verb?: string;
@@ -81,6 +87,7 @@ export type ActionRowProps = {
 export function ActionRow({
   kind,
   action,
+  icon,
   state = "done",
   verb,
   hideVerb = false,
@@ -121,7 +128,7 @@ export function ActionRow({
           style={{ color: iconColor }}
           aria-hidden
         >
-          <Icon size={ICON.sm} />
+          {icon ?? <Icon size={ICON.sm} />}
         </span>
 
         <span className="min-w-0 flex-1 text-[12px]">

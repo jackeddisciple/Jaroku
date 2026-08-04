@@ -22,6 +22,8 @@ import { useUiStore } from "../store/uiStore.ts";
 import { ACCENT, ICON } from "../lib/tokens.ts";
 import { noteKind } from "../lib/noteKind.ts";
 import { BRAND_COLOR } from "../lib/icons.tsx";
+import { actionForToolOrigin } from "../lib/actionIcons.tsx";
+import { ActionRow } from "./ActionRow.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
 import { ChevronDownIcon } from "./composerIcons.tsx";
 import { Chip } from "./Chip.tsx";
@@ -176,16 +178,25 @@ function GraphStep({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex gap-2 text-[12px]">
-      <span className="flex shrink-0 flex-col items-center" aria-hidden>
-        <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-active font-mono text-[10px] leading-none text-muted tabular-nums">
-          {n}
-        </span>
-        {!last && <span className="mt-1 w-px flex-1 bg-hair" />}
-      </span>
-      {/* Padding under every step but the last: the rail needs room to be visible between two
-          markers, and a one-line step would otherwise leave it nothing to draw. */}
-      <span className={`min-w-0 text-muted ${last ? "" : "pb-2.5"}`}>{children}</span>
+    // The rail is drawn behind the row rather than inside its marker column, because the marker
+    // now lives in ActionRow's fixed-height icon slot and a rail cannot stretch inside one. Same
+    // line, same place; it just no longer has to be a sibling of the number to get there.
+    <div className="relative">
+      {!last && <span className="absolute left-[9px] top-[21px] bottom-0 w-px bg-hair" aria-hidden />}
+      <ActionRow
+        hideVerb
+        // A step's mark IS its position — that is what makes the list ordered rather than a set,
+        // and a repeated action icon down the column would carry no information at all.
+        icon={
+          <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-active font-mono text-[10px] leading-none text-muted tabular-nums">
+            {n}
+          </span>
+        }
+        object={<span className="text-muted">{children}</span>}
+        // Padding under every step but the last: the rail needs room to be visible between two
+        // markers, and a one-line step would otherwise leave it nothing to draw.
+        className={last ? "" : "pb-2.5"}
+      />
     </div>
   );
 }
@@ -237,31 +248,24 @@ function ConnectorChip({ id }: { id: string }) {
  * stays aligned no matter how tall a row grows.
  */
 function ToolRow({
-  icon,
-  accent,
+  origin,
   name,
   description,
   status,
 }: {
-  icon: React.ReactNode;
-  accent: string;
+  origin: "connector" | "bespoke" | "mcp";
   name: string;
   description?: React.ReactNode;
   status?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-2 py-1">
-      <span className="shrink-0 flex items-center h-[19px]" style={{ color: accent }} aria-hidden>
-        {icon}
-      </span>
-      <span className="min-w-0 flex-1 text-[12px]">
-        <span className="font-mono font-medium text-ink [overflow-wrap:anywhere]">{name}</span>
-        {description && <span className="ml-2 text-muted">{description}</span>}
-      </span>
-      {status && (
-        <span className="shrink-0 flex items-center h-[19px] pl-1">{status}</span>
-      )}
-    </div>
+    <ActionRow
+      action={actionForToolOrigin(origin)}
+      object={<span className="font-mono font-medium text-ink [overflow-wrap:anywhere]">{name}</span>}
+      detail={description}
+      trailing={status}
+      className="py-1"
+    />
   );
 }
 
@@ -281,17 +285,26 @@ function ToolRow({
 function Note({ text, vocabulary }: { text: string; vocabulary: readonly string[] }) {
   const constraint = noteKind(text) === "constraint";
   return (
-    <div className="flex gap-2 py-1 text-[12px]">
-      <span
-        className={`shrink-0 flex items-center h-[19px] ${constraint ? "text-muted" : "text-faint"}`}
-        title={constraint ? "A rule this agent will follow" : "Worth knowing about how it works"}
-      >
-        {constraint ? <LockIcon size={ICON.xs} /> : <InfoIcon size={ICON.xs} />}
-      </span>
-      <span className={`min-w-0 ${constraint ? "text-ink" : "text-muted"}`}>
-        <Prose text={text} vocabulary={vocabulary} />
-      </span>
-    </div>
+    <ActionRow
+      hideVerb
+      // A note is not an action, so it gets no verb and no accent — the distinction here is
+      // weight, not category. It still uses the row so its text sits in the same column as the
+      // tool names above it rather than four pixels off them.
+      icon={
+        <span
+          className={constraint ? "text-muted" : "text-faint"}
+          title={constraint ? "A rule this agent will follow" : "Worth knowing about how it works"}
+        >
+          {constraint ? <LockIcon size={ICON.xs} /> : <InfoIcon size={ICON.xs} />}
+        </span>
+      }
+      object={
+        <span className={constraint ? "text-ink" : "text-muted"}>
+          <Prose text={text} vocabulary={vocabulary} />
+        </span>
+      }
+      className="py-1"
+    />
   );
 }
 
@@ -431,8 +444,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                 {connectorTools.map((t) => (
                   <ToolRow
                     key={t.name}
-                    icon={<ShieldCheckIcon />}
-                    accent={ACCENT.reviewed}
+                    origin="connector"
                     name={t.name}
                     description={t.connectorId && <ConnectorChip id={t.connectorId} />}
                     status={
@@ -459,8 +471,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                 {bespokeTools.map((t) => (
                   <ToolRow
                     key={t.name}
-                    icon={<SparklesIcon />}
-                    accent={ACCENT.bespoke}
+                    origin="bespoke"
                     name={t.name}
                     description={
                       <Prose
@@ -501,8 +512,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                   return (
                     <ToolRow
                       key={t.name}
-                      icon={<PlugIcon />}
-                      accent={ACCENT.mcp}
+                      origin="mcp"
                       name={t.name}
                       description={
                         <span className="inline-flex flex-wrap items-center gap-1.5">
@@ -536,22 +546,34 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
 
             {plan.state.length > 0 && (
               <Section scope={scope} icon={<DatabaseIcon />} label="State" accent={ACCENT.state} count={plan.state.length}>
-                {/* Same flowing shape as a tool row, for the same reason: a long field name must
-                    not be able to squeeze the purpose out of existence. */}
+                {/* The same row as a tool, so a field name and a tool name sit in one column.
+                    A field is not an action, so it takes the section's own mark and no verb —
+                    but a long field name must not be able to squeeze its purpose out of
+                    existence, and that is exactly what the shared row's flow guarantees. */}
                 {plan.state.map((f) => (
-                  <div key={f.name} className="py-1 text-[12px]">
-                    <span className="font-mono text-ink [overflow-wrap:anywhere]">{f.name}</span>
-                    {f.type && (
-                      <span className="ml-2 font-mono text-stateful [overflow-wrap:anywhere]">
-                        {f.type}
+                  <ActionRow
+                    key={f.name}
+                    hideVerb
+                    icon={
+                      <span style={{ color: ACCENT.state }}>
+                        <DatabaseIcon size={ICON.xs} />
                       </span>
-                    )}
-                    {f.purpose && (
-                      <span className="ml-2 text-muted">
-                        <Prose text={f.purpose} vocabulary={vocabulary} />
-                      </span>
-                    )}
-                  </div>
+                    }
+                    object={<span className="font-mono text-ink [overflow-wrap:anywhere]">{f.name}</span>}
+                    detail={
+                      <>
+                        {f.type && (
+                          <span className="font-mono text-stateful [overflow-wrap:anywhere]">{f.type}</span>
+                        )}
+                        {f.purpose && (
+                          <span className={f.type ? "ml-2" : undefined}>
+                            <Prose text={f.purpose} vocabulary={vocabulary} />
+                          </span>
+                        )}
+                      </>
+                    }
+                    className="py-1"
+                  />
                 ))}
               </Section>
             )}

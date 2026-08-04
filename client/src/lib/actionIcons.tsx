@@ -28,6 +28,7 @@ import {
   GitBranchIcon,
   PlugIcon,
   SearchIcon,
+  ShieldCheckIcon,
   SparklesIcon,
   WrenchIcon,
 } from "../components/panelIcons.tsx";
@@ -118,6 +119,26 @@ export function actionForStep(step: Pick<Step, "type">): ActionDescriptor {
 /** Trace step type → action kind, for callers that need the kind rather than the descriptor. */
 export function actionKindForStep(step: Pick<Step, "type">): ActionKind {
   return KIND_FOR_STEP[step.type] ?? "update";
+}
+
+/**
+ * How a tool a plan proposes should narrate itself.
+ *
+ * The three origins planProtocol defines are genuinely different — an audited template copied in
+ * verbatim, code a model is about to invent, and a call into a server nobody here has read — and
+ * the plan card has always drawn that difference with these three marks and these three accents.
+ * What is new is that the verb matches the trace's: a plan says "Calls get_time" and the trace
+ * two minutes later says "Called get_time", which is the same sentence in two tenses rather than
+ * two panels describing one tool in two vocabularies.
+ *
+ * Present tense here because a plan is about a build that has not happened. The descriptor is
+ * data; `verb` means "the settled form", which for a proposal is what it will do.
+ */
+export function actionForToolOrigin(origin: "connector" | "bespoke" | "mcp"): ActionDescriptor {
+  const base = { verb: "Calls", verbing: "Calling" };
+  if (origin === "connector") return { ...base, Icon: ShieldCheckIcon, accent: ACCENT.reviewed };
+  if (origin === "mcp") return { ...base, Icon: PlugIcon, accent: ACCENT.mcp };
+  return { ...base, Icon: SparklesIcon, accent: ACCENT.bespoke };
 }
 
 /**
