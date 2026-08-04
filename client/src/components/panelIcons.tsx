@@ -216,6 +216,17 @@ export function GitForkIcon(p: P) {
   );
 }
 
+/**
+ * lucide:activity — a trace.
+ *
+ * The product's one primitive had no mark of its own. The tab says "Trace" and the timeline is
+ * built out of step rows, so nothing anywhere was a picture of the thing — which only shows when
+ * there is no trace to draw and the panel has to say what it is waiting for.
+ */
+export function ActivityIcon(p: P) {
+  return svg(p, <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />);
+}
+
 // ── Navigation and controls ─────────────────────────────────────────────────
 
 /** lucide:search — the sidebar's agent filter. */

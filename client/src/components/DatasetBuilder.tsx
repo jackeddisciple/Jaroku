@@ -26,6 +26,8 @@ import {
 import { csvToExamples } from "../lib/csv.ts";
 import { ICON } from "../lib/tokens.ts";
 import { Chip } from "./Chip.tsx";
+import { EmptyState } from "./EmptyState.tsx";
+import { DatabaseIcon } from "./panelIcons.tsx";
 import { XIcon } from "./panelIcons.tsx";
 import type { DatasetExample } from "../types.ts";
 
@@ -170,12 +172,11 @@ export function DatasetBuilder() {
 
   if (!activeAgentId) {
     return (
-      <div className="flex h-full items-center justify-center text-center px-6">
-        <div className="text-muted">
-          <div className="text-ink mb-1">Evals</div>
-          <div className="text-[12px]">Select an agent to build a dataset for it.</div>
-        </div>
-      </div>
+      <EmptyState
+        icon={DatabaseIcon}
+        title="No agent selected"
+        hint="Pick one in the sidebar to build it a dataset."
+      />
     );
   }
 
@@ -256,15 +257,17 @@ export function DatasetBuilder() {
       {/* examples */}
       <div className="flex-1 min-h-0 overflow-y-auto px-4">
         {!selected ? (
-          <div className="text-[12px] text-muted pt-6">
-            No dataset yet. Create one here, or press the bookmark in the composer while in
-            Test mode to promote the input you just ran.
-          </div>
+          <EmptyState
+            icon={DatabaseIcon}
+            title="No dataset yet"
+            hint="Create one above, or press the bookmark in the composer while in Test mode to promote the input you just ran."
+          />
         ) : examples.length === 0 ? (
-          <div className="text-[12px] text-muted pt-6">
-            Empty dataset. Add an input below, import a CSV, or promote a test input from the
-            composer.
-          </div>
+          <EmptyState
+            icon={DatabaseIcon}
+            title="Empty dataset"
+            hint="Add an input below, import a CSV, or promote a test input from the composer."
+          />
         ) : (
           examples.map((e, i) => (
             <ExampleRow key={e.id} example={e} index={i} datasetId={selected.id} />

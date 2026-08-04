@@ -3,7 +3,9 @@ import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import type { Step } from "../types.ts";
 import { fmtCost, fmtDuration, fmtTokens } from "../lib/format.ts";
 import { StepRow } from "./StepRow.tsx";
+import { EmptyState } from "./EmptyState.tsx";
 import { PauseResumeControls } from "./PauseResumeControls.tsx";
+import { ActivityIcon } from "./panelIcons.tsx";
 
 /** Re-render on an interval while `active` (drives the live "Working Xs" ticker). */
 function useTick(active: boolean, ms = 200): number {
@@ -75,12 +77,11 @@ export function TraceTimeline() {
       {/* timeline body */}
       <div className="flex-1 overflow-auto px-6 pb-4">
         {steps.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-center">
-            <div className="text-muted">
-              <div className="text-ink mb-1">No trace yet</div>
-              <div className="text-[12px]">Run the agent below to watch its execution stream in.</div>
-            </div>
-          </div>
+          <EmptyState
+            icon={ActivityIcon}
+            title="No trace yet"
+            hint="Run the agent below and every LLM call, tool call and routing decision it makes streams in here."
+          />
         ) : (
           <div className="relative">
             {/* thin vertical connector line — steps float on it, no bordered table */}

@@ -42,7 +42,8 @@ import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { sendLoadAgentGraph } from "../lib/socket.ts";
 import { ICON, RADIUS } from "../lib/tokens.ts";
-import { PlusIcon, XIcon } from "./panelIcons.tsx";
+import { EmptyState } from "./EmptyState.tsx";
+import { GitBranchIcon, PlusIcon, XIcon } from "./panelIcons.tsx";
 import { activeEdge, activeNodeId, latestStepForNode, stepEdge, stepNodeId, traversedEdges } from "../lib/traceGraphMap.ts";
 import type { AgentGraph, GraphNode as GNode, Step } from "../types.ts";
 import {
@@ -757,10 +758,10 @@ export function GraphView() {
     return [...flow, ...resources.edges];
   }, [base.edges, resources.edges, hotEdge, pulse, traversed]);
 
-  if (!activeAgentId) return <Empty text="Select an agent to see its graph." />;
+  if (!activeAgentId) return <Empty title="No agent selected" hint="Pick one in the sidebar and its compiled topology is introspected and drawn here." />;
   if (loading && !graph) return <GraphSkeleton />;
-  if (graph?.error) return <Empty text={`Graph unavailable — ${graph.error}`} />;
-  if (!graph?.nodes?.length) return <Empty text="No graph to show." />;
+  if (graph?.error) return <Empty title="Graph unavailable" hint={graph.error} />;
+  if (!graph?.nodes?.length) return <Empty title="No graph to show" hint="This agent’s build_graph() produced no nodes." />;
 
   return (
     <div className="graph-canvas relative h-full w-full">
@@ -818,6 +819,10 @@ export function GraphView() {
   );
 }
 
-function Empty({ text }: { text: string }) {
-  return <div className="flex h-full items-center justify-center text-muted text-[12px] px-6 text-center">{text}</div>;
+function Empty({ title, hint }: { title: string; hint?: string }) {
+  return (
+    <div className="graph-canvas h-full">
+      <EmptyState icon={GitBranchIcon} title={title} hint={hint} />
+    </div>
+  );
 }

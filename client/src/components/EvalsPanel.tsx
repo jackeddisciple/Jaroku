@@ -16,6 +16,8 @@ import { ExampleDrillDown } from "./EvalDrillDown.tsx";
 import { EvalRunBar } from "./EvalRunBar.tsx";
 import { relTime } from "../lib/format.ts";
 import { Chip } from "./Chip.tsx";
+import { EmptyState } from "./EmptyState.tsx";
+import { DatabaseIcon } from "./panelIcons.tsx";
 
 type Mode = "dataset" | "results";
 
@@ -49,12 +51,11 @@ export function EvalsPanel() {
 
   if (!activeAgentId) {
     return (
-      <div className="flex h-full items-center justify-center text-center px-6">
-        <div className="text-muted">
-          <div className="text-ink mb-1">Evals</div>
-          <div className="text-[12px]">Select an agent to build a dataset for it.</div>
-        </div>
-      </div>
+      <EmptyState
+        icon={DatabaseIcon}
+        title="No agent selected"
+        hint="Pick one in the sidebar to build it a dataset and compare providers on it."
+      />
     );
   }
 
@@ -124,9 +125,11 @@ export function EvalsPanel() {
               <ExampleDrillDown results={results} />
             </>
           ) : (
-            <div className="text-[12px] text-muted pt-6">
-              No results yet. Pick providers below the dataset and run it.
-            </div>
+            <EmptyState
+              icon={DatabaseIcon}
+              title="No results yet"
+              hint="Pick providers under the dataset and run it — quality, cost and latency land here side by side."
+            />
           )}
         </div>
       )}

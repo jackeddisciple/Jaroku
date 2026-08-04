@@ -14,8 +14,10 @@ import { sendLoadRun } from "../lib/socket.ts";
 import { ICON } from "../lib/tokens.ts";
 import { Chip } from "./Chip.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
+import { EmptyState } from "./EmptyState.tsx";
 import {
-  ChevronRightIcon, GitForkIcon, LoaderIcon, PlusIcon, SearchIcon, SettingsIcon, XIcon,
+  ActivityIcon, ChevronRightIcon, GitForkIcon, LoaderIcon, PlusIcon, SearchIcon, SettingsIcon,
+  SparklesIcon, XIcon,
 } from "./panelIcons.tsx";
 
 type Filter = "all" | "running" | "deployed" | "drafts";
@@ -197,9 +199,16 @@ export function Sidebar() {
       {/* agent list */}
       <div className="max-h-[38%] overflow-auto shrink-0">
         {visible.length === 0 ? (
-          <div className="px-4 py-4 text-muted text-[12px]">
-            {agents.length === 0 ? "No agents yet — describe one to get started." : "Nothing here."}
-          </div>
+          <EmptyState
+            size="inline"
+            icon={agents.length === 0 ? SparklesIcon : SearchIcon}
+            title={agents.length === 0 ? "No agents yet" : "Nothing here"}
+            hint={
+              agents.length === 0
+                ? "Describe one in the composer and you’ll get a plan to approve first."
+                : undefined
+            }
+          />
         ) : (
           visible.map((a) => <AgentRow key={a.agent_id} agent={a} />)
         )}
@@ -212,7 +221,7 @@ export function Sidebar() {
       </div>
       <div className="flex-1 overflow-auto">
         {runList.length === 0 ? (
-          <div className="px-4 py-4 text-muted text-[12px]">No runs yet.</div>
+          <EmptyState size="inline" icon={ActivityIcon} title="No runs yet" />
         ) : (
           runList.map((r) => <RunRow key={r.id} run={r} />)
         )}

@@ -21,6 +21,7 @@ import { useEvalStore } from "../store/evalStore.ts";
 import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
 import { Chip } from "./Chip.tsx";
 import { DiffCard } from "./DiffCard.tsx";
+import { EmptyState } from "./EmptyState.tsx";
 import { Prose } from "./InlineCode.tsx";
 import { StreamingFileRow } from "./FileList.tsx";
 import { PlanCard } from "./PlanCard.tsx";
@@ -29,7 +30,7 @@ import { StatusDot } from "./StatusBadge.tsx";
 import { StatRow, STAT_ICON, type Stat } from "./StatRow.tsx";
 import {
   ChevronRightIcon, DollarSignIcon, FileIcon, HashIcon, PlugIcon, SparklesIcon, UserCircleIcon,
-  XIcon, ZapIcon,
+  WrenchIcon, XIcon, ZapIcon,
 } from "./panelIcons.tsx";
 import { useMcpStore, allMcpTools } from "../store/mcpStore.ts";
 import { ACCENT, ICON, STATUS } from "../lib/tokens.ts";
@@ -580,22 +581,20 @@ export function BuildPane() {
           widest step in the scale, so the thread reads as separate exchanges rather than one
           continuous document. */}
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-6 py-2 space-y-6">
-        {turns.length === 0 && (
-          <div className="text-[12px] text-muted pt-4">
-            {mode === "generate" ? (
-              <>
-                Describe the agent you want. You’ll get a short plan first — its tools, state and
-                graph — to approve or correct; nothing is generated until you do.
-              </>
-            ) : (
-              <>
-                Describe a change to this agent — e.g. “add Redis conversation memory” or
-                “the SQL tool needs a LIMIT clause”. You’ll get a reviewable diff to apply or
-                discard; nothing is changed until you apply it.
-              </>
-            )}
-          </div>
-        )}
+        {turns.length === 0 &&
+          (mode === "generate" ? (
+            <EmptyState
+              icon={SparklesIcon}
+              title="Describe the agent you want"
+              hint="You’ll get a short plan first — its tools, state and graph — to approve or correct. Nothing is generated until you do."
+            />
+          ) : (
+            <EmptyState
+              icon={WrenchIcon}
+              title={`Describe a change to ${agent?.name ?? "this agent"}`}
+              hint="You’ll get a reviewable diff to apply or discard. Nothing is changed until you apply it."
+            />
+          ))}
         {turns.map((t) => (
           <Turn key={t.id} turn={t} isLastGen={t.id === lastGenId} />
         ))}
