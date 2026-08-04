@@ -37,8 +37,15 @@ export function RightPanel() {
       tab === t ? "bg-active text-ink" : "text-muted hover:text-ink"
     }`;
 
+  // overflow-CLIP, not hidden. Step Details parks itself off the right edge when it is closed
+  // (`translate-x-full`), so 340px of this element's content sits past its right edge. `hidden`
+  // clips that from view but still makes this a scroll container — and a scroll container with
+  // no scrollbar is a trap. StepRow calls scrollIntoView when a step is selected; the browser
+  // found the phantom 340px scrollable and slid the whole column — tabs, header, trace — to the
+  // left, where it stayed, with nothing to scroll it back. `clip` renders identically and
+  // creates no scroll container at all, so there is nothing to scroll.
   return (
-    <div className="relative flex h-full flex-col bg-bg overflow-hidden">
+    <div className="relative flex h-full flex-col bg-bg overflow-clip">
       <div className="flex shrink-0 items-center gap-1 border-b border-hair px-4 py-2">
         {TABS.map((t) => (
           <button key={t.id} className={tabClass(t.id)} onClick={() => setTab(t.id)}>
