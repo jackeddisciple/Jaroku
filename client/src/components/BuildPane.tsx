@@ -155,7 +155,9 @@ function ReplyTurnView({ turn }: { turn: ReplyTurn }) {
   return (
     <div className={`text-[13px] whitespace-pre-wrap break-words ${turn.status === "error" ? "text-err" : "text-ink"}`}>
       <Prose text={text} />
-      {turn.status === "streaming" && <span className="text-faint animate-pulse">▋</span>}
+      {turn.status === "streaming" && (
+        <span className="animate-stream-pulse text-faint motion-reduce:animate-none">▋</span>
+      )}
     </div>
   );
 }
@@ -1043,7 +1045,7 @@ export function BuildPane() {
                     : "Voice input isn't supported in this browser"
                 }
                 className={`transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
-                  voice.listening ? "text-run animate-pulse" : "text-muted hover:text-ink"
+                  voice.listening ? "text-run animate-stream-pulse motion-reduce:animate-none" : "text-muted hover:text-ink"
                 }`}
               >
                 <MicIcon size={17} />

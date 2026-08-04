@@ -15,7 +15,7 @@ function StatusDot({ status }: { status: string }) {
   const label = status === "running" ? "running" : status === "draft" ? "draft" : "ready";
   return (
     <span className="inline-flex items-center gap-1.5 text-muted text-[12px]">
-      <span className={`w-1.5 h-1.5 rounded-full ${color} ${status === "running" ? "animate-pulse" : ""}`} />
+      <span className={`w-1.5 h-1.5 rounded-full ${color} ${status === "running" ? "animate-stream-pulse motion-reduce:animate-none" : ""}`} />
       {label}
     </span>
   );

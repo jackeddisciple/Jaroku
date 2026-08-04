@@ -63,7 +63,7 @@ export function StreamingFileRow({
           <span className="font-mono text-faint">{bytes.toLocaleString()} B</span>
         </>
       }
-      className="animate-slide-in"
+      className="animate-slide-in motion-reduce:animate-none"
     />
   );
 }

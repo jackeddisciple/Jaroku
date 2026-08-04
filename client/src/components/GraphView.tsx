@@ -119,7 +119,7 @@ function StatusDot({ status }: { status?: NodeStatus }) {
   const c = STATUS_COLOR[status];
   return (
     <span
-      className={`absolute -top-1.5 -right-1.5 w-3 h-3 rounded-full ${status === "running" ? "animate-pulse" : ""}`}
+      className={`absolute -top-1.5 -right-1.5 w-3 h-3 rounded-full ${status === "running" ? "animate-stream-pulse motion-reduce:animate-none" : ""}`}
       style={{ background: c, boxShadow: `0 0 0 2.5px ${CARD_BG}` }}
       title={status}
     />
@@ -639,7 +639,7 @@ function GraphSkeleton() {
       <div className="flex items-center gap-10">
         {[0, 1, 2].map((i) => (
           <div key={i} className="flex items-center gap-10">
-            <div className="rounded-card bg-active animate-pulse" style={{ width: i === 1 ? AGENT_W : CARD_W, height: i === 1 ? AGENT_H : CARD_H }} />
+            <div className="animate-pulse rounded-card bg-active motion-reduce:animate-none" style={{ width: i === 1 ? AGENT_W : CARD_W, height: i === 1 ? AGENT_H : CARD_H }} />
             {i < 2 && <div className="h-px w-8 bg-hair" />}
           </div>
         ))}

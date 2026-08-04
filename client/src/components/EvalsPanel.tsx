@@ -76,7 +76,7 @@ export function EvalsPanel() {
         {tab("dataset", "Dataset")}
         {tab("results", "Results")}
         {running && (
-          <span className="ml-2 text-[11px] text-run animate-pulse">
+          <span className="ml-2 text-[11px] text-run animate-stream-pulse motion-reduce:animate-none">
             {progress.scoring && progress.status ? "scoring…" : `running ${progress.done}/${progress.total}`}
           </span>
         )}

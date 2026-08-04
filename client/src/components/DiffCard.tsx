@@ -267,7 +267,7 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
   const isLatestApplied = turn.status === "applied" && turn.version === agent?.edit_count;
 
   return (
-    <div className="text-[12px] animate-slide-in">
+    <div className="animate-slide-in text-[12px] motion-reduce:animate-none">
       {/* A change summary is mostly about named things — "added a LIMIT clause to pg_query" — so
           it is the sentence in the panel that most needs its identifiers marked. No vocabulary to
           pass here: a proposal carries no plan, so shape is all there is to go on. */}

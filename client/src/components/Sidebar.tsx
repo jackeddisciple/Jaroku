@@ -36,7 +36,7 @@ function StatusGlyph({ status }: { status: RunStatus }) {
 
 function AgentDot({ status }: { status: AgentStatus }) {
   const color = status === "running" ? "bg-run" : status === "draft" ? "bg-faint" : "bg-ok";
-  return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${color} ${status === "running" ? "animate-pulse" : ""}`} />;
+  return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${color} ${status === "running" ? "animate-stream-pulse motion-reduce:animate-none" : ""}`} />;
 }
 
 function RunRow({ run }: { run: RunSummary }) {

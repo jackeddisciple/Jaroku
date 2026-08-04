@@ -364,7 +364,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
         {streamingRaw && (
           <div className="mt-2 whitespace-pre-wrap break-words text-muted">
             {streamingRaw}
-            <span className="text-faint animate-pulse">▋</span>
+            <span className="animate-stream-pulse text-faint motion-reduce:animate-none">▋</span>
           </div>
         )}
       </Card>
@@ -407,7 +407,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
 
   return (
     <Card>
-      <div className="flex items-center gap-2 pb-2.5 border-b border-hair animate-slide-in">
+      <div className="flex animate-slide-in items-center gap-2 border-b border-hair pb-2.5 motion-reduce:animate-none">
         <span className="text-ink font-medium">Here’s the plan</span>
         {turn.revision > 1 && (
           <span className="font-mono text-faint text-[11px] tabular-nums">

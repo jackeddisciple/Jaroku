@@ -38,7 +38,7 @@ export function CodeOverlay() {
   return (
     <div className="fixed inset-0 z-40 flex items-stretch justify-end bg-black/50" onClick={() => setOpen(false)}>
       <div
-        className="w-[min(880px,80vw)] bg-bg flex flex-col border-l border-edge shadow-overlay animate-slide-in"
+        className="w-[min(880px,80vw)] bg-bg flex flex-col border-l border-edge shadow-overlay animate-slide-in motion-reduce:animate-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center gap-2 border-b border-hair px-4 py-2">

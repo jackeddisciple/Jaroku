@@ -127,7 +127,7 @@ export function CodeViewer() {
           <Truncate className="text-[12px] text-ink" title={file.path}>{file.path}</Truncate>
           <span className="text-faint text-[11px] shrink-0">{lang}</span>
           {file.readOnly && <span className="text-faint text-[11px] shrink-0">read-only</span>}
-          {!complete && <span className="text-run text-[11px] animate-pulse shrink-0">writing…</span>}
+          {!complete && <span className="shrink-0 animate-stream-pulse text-[11px] text-run motion-reduce:animate-none">writing…</span>}
           <span className="ml-auto text-faint text-[11px] shrink-0 tabular-nums">
             {content.split("\n").length} lines
           </span>

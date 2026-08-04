@@ -25,6 +25,7 @@
 // aligned however tall a row grows. A column of rows whose right edge moves is a column you
 // read one row at a time.
 
+import { useRef } from "react";
 import { actionFor, type ActionDescriptor, type ActionKind } from "../lib/actionIcons.tsx";
 import { ICON, STATUS } from "../lib/tokens.ts";
 
@@ -109,6 +110,16 @@ export function ActionRow({
   // green — what went wrong outranks what kind of thing it was.
   const iconColor = STATE_COLOR[state] ?? descriptor.accent;
 
+  // Finishing is a state change and gets the mark that lands. Arriving already finished is not:
+  // a settled trace loaded from history would otherwise pop forty icons at once, which says
+  // "forty things just happened" about a run that ended yesterday.
+  //
+  // A ref rather than a timer. It is captured on the first render and never written again, so a
+  // row that mounts done never animates, a row that becomes done keeps the class from then on,
+  // and a CSS animation with no iteration count plays exactly once when it is applied.
+  const mountedAs = useRef(state);
+  const justFinished = state === "done" && mountedAs.current !== "done";
+
   return (
     <div>
       <div
@@ -124,7 +135,9 @@ export function ActionRow({
         {/* Fixed height rather than fixed alignment, so a one-line row and a wrapped one put
             their icon at the same distance from the top of the text. */}
         <span
-          className="shrink-0 flex h-[19px] items-center"
+          className={`shrink-0 flex h-[19px] items-center ${
+            justFinished ? "animate-check-in motion-reduce:animate-none" : ""
+          }`}
           style={{ color: iconColor }}
           aria-hidden
         >

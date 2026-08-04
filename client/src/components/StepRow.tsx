@@ -48,7 +48,7 @@ export function StepRow({ step }: { step: Step }) {
   }, [selected]);
 
   return (
-    <div ref={rowRef} className="relative pl-7 py-1.5 animate-slide-in">
+    <div ref={rowRef} className="relative animate-slide-in py-1.5 pl-7 motion-reduce:animate-none">
       {/* connector node on the timeline's vertical line */}
       <span
         className={`absolute left-[6px] top-[13px] w-[7px] h-[7px] rounded-full ring-2 ring-bg ${

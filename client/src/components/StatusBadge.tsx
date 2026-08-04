@@ -108,7 +108,7 @@ export function StatusDot({
   return (
     <span
       title={title}
-      className={`inline-flex items-center ${pulse ? "animate-pulse" : ""}`}
+      className={`inline-flex items-center ${pulse ? "animate-stream-pulse motion-reduce:animate-none" : ""}`}
       style={{ color: color ?? STATUS[state] }}
     >
       <Icon size={size} />
