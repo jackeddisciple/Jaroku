@@ -189,6 +189,37 @@ export type SetMcpServerAuthCommand = {
   token: string | null;
 };
 
+// Model-provider credentials. Grouped and forwarded exactly like the MCP set above, for the
+// same reason: writing a key touches runtime/.env and — for the test — makes a network call
+// against someone else's API, so the app answers with a precise result rather than the relay
+// guessing. `listProviders` is the exception and is answered locally, like `listMcpServers`,
+// because it is a pure read of state already in memory.
+
+/**
+ * Store a provider's API key. Answered with a fresh provider snapshot.
+ *
+ * `key` is the second field on any command in this file that carries a secret (see
+ * AddMcpServerCommand.token). It travels one way — browser to server, over the loopback
+ * socket the whole product runs on — is written to runtime/.env by the same credential writer
+ * every other key goes through, and is forgotten. Nothing ever sends it back: a provider
+ * reports `configured: true`, never its credential. See envWriter.ts and providers.ts.
+ */
+export type SetProviderKeyCommand = { cmd: "setProviderKey"; provider: string; key: string };
+/**
+ * Prove a key works without storing it — the "Test connection" button.
+ *
+ * Deliberately not folded into setProviderKey: a test that writes first would put a
+ * credential on disk before the user pressed Save, which is not what the button says it does.
+ * The same one-way, never-echoed discipline applies to `key` here.
+ */
+export type TestProviderKeyCommand = { cmd: "testProviderKey"; provider: string; key: string };
+export type ListProvidersCommand = { cmd: "listProviders" };
+
+/** Provider-channel commands, grouped so the forwarding switch stays readable. */
+export type ProviderCommand = SetProviderKeyCommand | TestProviderKeyCommand;
+
+const PROVIDER_COMMANDS = new Set(["setProviderKey", "testProviderKey"]);
+
 /** MCP-channel commands, grouped so the forwarding switch stays readable. */
 export type McpCommand =
   | AddMcpServerCommand
@@ -229,7 +260,9 @@ export type ClientCommand =
   | ExplainCommand
   | EvalCommand
   | McpCommand
-  | ListMcpServersCommand;
+  | ListMcpServersCommand
+  | ProviderCommand
+  | ListProvidersCommand;
 
 /** Eval-channel commands, grouped so the forwarding switch stays readable. */
 export type EvalCommand =
@@ -272,7 +305,8 @@ export type ForwardedCommand =
   | BranchRunCommand
   | ExplainCommand
   | EvalCommand
-  | McpCommand;
+  | McpCommand
+  | ProviderCommand;
 
 // Generation rides its own channel, deliberately parallel to "trace". It never enters the
 // trace store or the event schema — schema/events.md v1 stays frozen.
@@ -406,6 +440,29 @@ export type McpEvent =
   // The request is over: answered, or the run died, or the runner gave up waiting.
   | { type: "confirmResolved"; runId: string; nonce: string; verdict: string };
 
+// Model-provider credentials ride their own channel, parallel to trace/gen/edit/debug/reply/
+// eval/mcp — still one socket, and still no second transport.
+//
+// It is not folded into "mcp" because that channel means "the MCP registry": every message on
+// it is a full snapshot of the connected third-party servers, and the client REPLACES its
+// whole server list on each one. A provider key is not an MCP server, and smuggling it
+// through would make a message about Anthropic look like a claim about somebody's MCP
+// endpoints.
+//
+// Same discipline as the eval and MCP channels: every mutation answers with a full snapshot,
+// so a client replaces rather than merges. And like them, nothing here ever carries a
+// credential — `configured` says a NAMED VARIABLE IS SET, and that is the whole of it.
+export type ProviderEvent =
+  | { type: "providers"; providers: unknown[] }
+  // The answer to "Test connection": did that key authenticate. Nothing was written.
+  | { type: "testResult"; provider: string; ok: boolean; message: string | null }
+  // A write that could not happen (an unknown provider, a value the .env format cannot store
+  // faithfully — see envWriter.renderLine).
+  | { type: "error"; message: string; provider?: string }
+  // A write that happened but comes with a caveat worth a sentence — most often that the same
+  // variable is exported in the server's shell and will win again after a restart.
+  | { type: "notice"; message: string; provider?: string };
+
 export type DebugEvent =
   | { type: "paused"; runId: string; seq: number }
   | { type: "resumed"; runId: string; seqOffset: number }
@@ -417,13 +474,15 @@ export interface RelayOptions {
   port: number;
   store: TraceStore;
   clientHtmlPath: string;
-  // "loadRun", "listAgents", "loadAgentFiles", "loadAgentGraph" and "listMcpServers" are
-  // answered locally; the rest are forwarded.
+  // "loadRun", "listAgents", "loadAgentFiles", "loadAgentGraph", "listMcpServers" and
+  // "listProviders" are answered locally; the rest are forwarded.
   onCommand?: (cmd: ForwardedCommand) => void;
   listAgents?: () => unknown[];
   listAgentFiles?: (agentId: string) => unknown[];
   getAgentGraph?: (agentId: string) => Promise<unknown>;
   listMcpServers?: () => unknown[];
+  /** Which provider keys are set, by name. Never a value — see providers.ts. */
+  listProviders?: () => unknown[];
 }
 
 export class WsRelay {
@@ -445,6 +504,9 @@ export class WsRelay {
       this.sendTo(ws, { channel: "history", runs: this.store.listRuns() });
       this.sendTo(ws, { channel: "agents", agents: this.opts.listAgents?.() ?? [] });
       this.sendTo(ws, { channel: "mcp", type: "servers", servers: this.opts.listMcpServers?.() ?? [] });
+      // Which providers are connected, so a first-run client knows on frame one whether it is
+      // looking at a configured install or an empty one.
+      this.sendTo(ws, { channel: "providers", type: "providers", providers: this.opts.listProviders?.() ?? [] });
 
       ws.on("message", (data) => {
         try {
@@ -494,6 +556,16 @@ export class WsRelay {
             this.onCommand?.(msg);
           } else if (msg.cmd === "listMcpServers") {
             this.sendTo(ws, { channel: "mcp", type: "servers", servers: this.opts.listMcpServers?.() ?? [] });
+          } else if (msg.cmd === "listProviders") {
+            this.sendTo(ws, {
+              channel: "providers",
+              type: "providers",
+              providers: this.opts.listProviders?.() ?? [],
+            });
+          } else if (PROVIDER_COMMANDS.has(msg.cmd)) {
+            // Shape-checked in the app, which owns the credential writer and can answer with a
+            // precise error on the "providers" channel rather than dropping the message here.
+            this.onCommand?.(msg as ProviderCommand);
           } else if (MCP_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the registry and can answer with a
             // precise error on the "mcp" channel rather than dropping the message here.
@@ -607,6 +679,15 @@ export class WsRelay {
   // is an ordinary tool_call Step and still arrives on "trace" like any other.
   broadcastMcp(event: McpEvent): void {
     const msg = JSON.stringify({ channel: "mcp", ...event });
+    for (const ws of this.clients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+    }
+  }
+
+  // Broadcast a provider-credential event. Separate channel by design — see ProviderEvent.
+  // Nothing on it ever carries a key: `configured` says a named variable is set.
+  broadcastProviders(event: ProviderEvent): void {
+    const msg = JSON.stringify({ channel: "providers", ...event });
     for (const ws of this.clients) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
     }
