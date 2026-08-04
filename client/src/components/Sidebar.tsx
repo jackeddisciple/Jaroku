@@ -19,21 +19,30 @@ import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import {
-  ActivityIcon, ChevronRightIcon, GitForkIcon, LoaderIcon, PlusIcon, SearchIcon, SettingsIcon,
-  SparklesIcon, XIcon,
+  ActivityIcon, ChevronRightIcon, GitForkIcon, LoaderIcon, PauseIcon, PlusIcon, SearchIcon,
+  SettingsIcon, SparklesIcon, XIcon,
 } from "./panelIcons.tsx";
 
 type Filter = "all" | "running" | "deployed" | "drafts";
 
-// A run's outcome, in the same three marks the rest of the app uses for the same three facts.
-// It was three font characters — a pulsing ●, a ✗ and a ✓ — which sat on the text baseline at
+// A run's outcome, in the same marks the rest of the app uses for the same facts.
+// It was font characters — a pulsing ●, a ✗ and a ✓ — which sat on the text baseline at
 // whatever weight the row happened to be and never optically matched the icons two panels over.
+//
+// `paused` is exhaustive here on purpose. It arrived after the other three and fell through to
+// the ✓, so a run halted mid-graph wore the same green tick as one that ran to completion — and
+// this list is the only place a paused run can be found and resumed from.
 function StatusGlyph({ status }: { status: RunStatus }) {
-  if (status === "running") {
-    return <StatusDot state="pending" icon={LoaderIcon} pulse title="running" />;
+  switch (status) {
+    case "running":
+      return <StatusDot state="pending" icon={LoaderIcon} pulse title="running" />;
+    case "paused":
+      return <StatusDot state="pending" icon={PauseIcon} title="paused — resumable" />;
+    case "error":
+      return <StatusDot state="error" icon={XIcon} title="error" />;
+    case "completed":
+      return <StatusDot state="ok" title="completed" />;
   }
-  if (status === "error") return <StatusDot state="error" icon={XIcon} title="error" />;
-  return <StatusDot state="ok" title="completed" />;
 }
 
 function AgentDot({ status }: { status: AgentStatus }) {
