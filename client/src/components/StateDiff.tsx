@@ -1,5 +1,6 @@
 import { diffState, summarizeItem, type DiffEntry } from "../lib/stateDiff.ts";
 import { jsonPretty } from "../lib/format.ts";
+import { DiffStat } from "./DiffStat.tsx";
 
 /** One `+`/`-` line. Status colors only — `ok` for additions, `err` for removals. */
 function Line({ sign, text }: { sign: "+" | "-"; text: string }) {
@@ -19,11 +20,24 @@ function Line({ sign, text }: { sign: "+" | "-"; text: string }) {
 function Entry({ entry }: { entry: DiffEntry }) {
   if (entry.kind === "unchanged") return null;
 
+  // A list-valued field changed by some number of items, and that is a measurement — the same
+  // measurement a diff card reports, so it gets the same green/red figures rather than the
+  // sentence ("+3 items") it used to render in the same grey as everything else in the row.
+  // A scalar field has no count to give: "changed" is the honest summary and stays a word.
+  const added = entry.items?.reduce((n, i) => n + (i.kind === "added" ? 1 : 0), 0) ?? 0;
+  const removed = entry.items?.reduce((n, i) => n + (i.kind === "removed" ? 1 : 0), 0) ?? 0;
+
   return (
     <div className="mt-2 first:mt-0">
       <div className="flex items-baseline gap-3">
-        <span className="text-muted text-[12px]">{entry.key}</span>
-        <span className="ml-auto text-faint text-[11px] tabular-nums">{entry.summary}</span>
+        <span className="font-mono text-muted text-[12px]">{entry.key}</span>
+        <span className="ml-auto">
+          {entry.items ? (
+            <DiffStat additions={added} deletions={removed} unit="items" />
+          ) : (
+            <span className="text-faint text-[11px]">{entry.summary}</span>
+          )}
+        </span>
       </div>
 
       <div className="mt-1 space-y-px">

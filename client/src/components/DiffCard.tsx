@@ -10,7 +10,7 @@ import { useBuildStore } from "../store/buildStore.ts";
 import { sendApplyEdit, sendDiscardEdit, sendUndoEdit } from "../lib/socket.ts";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { ChevronDownIcon } from "./composerIcons.tsx";
-import { DiffBar } from "./DiffBar.tsx";
+import { DiffStat } from "./DiffStat.tsx";
 import { StreamingFileRow } from "./FileList.tsx";
 import { iconForPath } from "./fileIcons.tsx";
 import { Prose } from "./InlineCode.tsx";
@@ -110,13 +110,13 @@ function FileRow({
             />
           </span>
         )}
-        <span className="ml-auto shrink-0 flex items-center gap-2 font-mono tabular-nums text-[11px]">
-          <span>
-            <span className="text-ok">+{file.additions}</span>{" "}
-            <span className="text-err">−{file.deletions}</span>
-          </span>
-          <DiffBar additions={file.additions} deletions={file.deletions} scale={scale} />
-        </span>
+        <DiffStat
+          additions={file.additions}
+          deletions={file.deletions}
+          bar
+          scale={scale}
+          className="ml-auto shrink-0"
+        />
       </div>
       {open && <HunkLines file={file} />}
     </div>
@@ -275,13 +275,9 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
           <span className="font-mono tabular-nums">{nFiles}</span>
           <span>{nFiles === 1 ? "file" : "files"}</span>
         </span>
-        <span className="inline-flex items-center gap-1.5 font-mono tabular-nums">
-          <span className="text-ok">+{totals.add}</span>
-          <span className="text-err">−{totals.del}</span>
-          {/* No scale here: the totals bar is the whole change, so it fills. What it carries is
-              the mix — is this card mostly new code, or mostly a deletion. */}
-          <DiffBar additions={totals.add} deletions={totals.del} />
-        </span>
+        {/* No scale here: the totals bar is the whole change, so it fills. What it carries is
+            the mix — is this card mostly new code, or mostly a deletion. */}
+        <DiffStat additions={totals.add} deletions={totals.del} bar />
         {turn.status === "applied" && (
           <StatusBadge
             state="ok"
