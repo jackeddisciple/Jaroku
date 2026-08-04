@@ -71,14 +71,15 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
     return (
       <div className="text-[12px]">
         <div className="text-run">Generating…</div>
-        <div className="mt-2 space-y-1">
+        <div className="mt-2 space-y-0.5">
           {list.map((f) => (
             <StreamingFileRow
               key={f.path}
               path={f.path}
-              done={f.complete}
-              figure={f.path === streamingFile ? "writing…" : `${f.content.length} B`}
-              title={f.complete ? "Written" : "Still writing"}
+              // Three states, not two. A file that has arrived but is not the one streaming used
+              // to look identical to the one being written this second.
+              state={f.complete ? "done" : f.path === streamingFile ? "active" : "pending"}
+              bytes={f.content.length}
             />
           ))}
         </div>

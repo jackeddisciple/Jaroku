@@ -198,14 +198,17 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
     return (
       <div className="text-[12px]">
         <div className="text-run">Proposing changes…</div>
-        <div className="mt-2 space-y-1">
+        <div className="mt-2 space-y-0.5">
           {turn.streaming.map((f) => (
+            // The fix loop rewrites files that already exist, so the verb says so — "Rewriting
+            // pg_query.py" is a different claim from "Writing" it, and the difference is exactly
+            // what a reviewer of a proposal needs to know.
             <StreamingFileRow
               key={f.path}
+              rewrite
               path={f.path}
-              done={f.done}
-              figure={f.done ? `${f.bytes} B` : "rewriting…"}
-              title={f.done ? "Rewritten" : "Still rewriting"}
+              state={f.done ? "done" : "active"}
+              bytes={f.bytes}
             />
           ))}
         </div>

@@ -1,47 +1,69 @@
-// A file streaming onto disk.
+// A file landing on disk, as a line of the build's narrative.
 //
-// Generation and the fix loop both stream files, and both drew the row by hand: a status dot, a
-// path, and a figure that is a byte count once the file lands and a word ("writing…", "rewriting…")
-// until it does. Two copies of the same row in two files is how they end up subtly different, so
-// this is the one copy.
+// Generation and the fix loop both stream files, and both drew the row by hand before this became
+// the one copy. What that copy still did not say was what was HAPPENING to the file: the row was a
+// type glyph, a path, a dot and a figure that flipped between a byte count and the word "writing…"
+// tucked in on the right, where the eye reads figures rather than verbs.
 //
-// The trace panel shows file paths too — a tool that read or wrote one — and would read better with
-// the same type glyph in the same slot. Not wired there in this pass; iconForPath is the reusable
-// half and this row is the panel-specific half.
+// Now it is an ActionRow like every other narrative line in the app, and the verb leads:
 //
-// The leading slot is the file's type rather than its status. Type is what you scan a list of seven
-// files for; status is what you glance at, and it now sits beside the figure it qualifies — the dot
-// and "writing…" say the same thing, so they belong together rather than at opposite ends of the
-// row. Nothing is lost: a finished file still has its check, still in the same colour it had before.
+//     Writing   agent.py                   ● 1,204 B
+//     Wrote     tools/order_lookup.py      ✓   812 B
+//     Writes    .env.example               ○    96 B
+//
+// Three tenses, because a build has three states per file and they are the whole of a progress
+// indicator: this one is being written now, this one is finished, this one is still coming. The
+// third is new — a queued file used to show a byte count with a pending dot and no way to tell it
+// from the one actually streaming.
+//
+// The icon stays the file's own type rather than a generic write mark. In a list of seven files
+// what you scan for is which one is agent.py; that all seven are being written is said by the line
+// above them, and now by every verb in the column.
 
-import { iconForPath } from "./fileIcons.tsx";
+import { actionForFile } from "../lib/actionIcons.tsx";
+import { ActionRow, type ActionState } from "./ActionRow.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { STAT_ICON } from "./StatRow.tsx";
 
+/** Present, past, and not-yet — for the two loops that write files. */
+function verbFor(state: ActionState, rewrite: boolean): string {
+  if (state === "active") return rewrite ? "Rewriting" : "Writing";
+  if (state === "done") return rewrite ? "Rewrote" : "Wrote";
+  return rewrite ? "Rewrites" : "Writes";
+}
+
 export function StreamingFileRow({
   path,
-  done,
-  figure,
-  title,
+  state,
+  bytes,
+  rewrite = false,
 }: {
   path: string;
-  done: boolean;
-  /** The right-hand figure: a byte count when it lands, a live word until then. */
-  figure: string;
-  /** What the status dot means here — written, rewritten, still going. */
-  title: string;
+  /** `active` while this file is the one streaming, `done` once it closes, else `pending`. */
+  state: ActionState;
+  /** How much has landed. Shown at every state — a partial count is still information. */
+  bytes: number;
+  /** The fix loop rewrites files that already exist; generation writes new ones. */
+  rewrite?: boolean;
 }) {
-  const TypeIcon = iconForPath(path);
   return (
-    <div className="flex items-center gap-2 animate-slide-in">
-      <span className="shrink-0 flex items-center text-faint" aria-hidden>
-        <TypeIcon size={STAT_ICON} />
-      </span>
-      <span className="font-mono text-muted truncate">{path}</span>
-      <span className="ml-auto shrink-0 flex items-center gap-1.5">
-        <StatusDot state={done ? "ok" : "pending"} pulse={!done} title={title} />
-        <span className="font-mono text-faint text-[11px] tabular-nums">{figure}</span>
-      </span>
-    </div>
+    <ActionRow
+      action={actionForFile(path)}
+      state={state}
+      verb={verbFor(state, rewrite)}
+      object={<span className="font-mono text-muted [overflow-wrap:anywhere]">{path}</span>}
+      trailing={
+        <>
+          <StatusDot
+            state={state === "done" ? "ok" : "pending"}
+            pulse={state === "active"}
+            size={STAT_ICON}
+            title={state === "done" ? (rewrite ? "Rewritten" : "Written") : "Still writing"}
+          />
+          <span className="font-mono text-faint">{bytes.toLocaleString()} B</span>
+        </>
+      }
+      className="animate-slide-in"
+    />
   );
 }
