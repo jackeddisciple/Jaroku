@@ -90,7 +90,15 @@ export function ComposerColumn({ phase }: { phase: OnboardingPhase }) {
   const exampleAgent = agents.find((a) => a.agent_id === EXAMPLE_AGENT_ID);
   // Only once the snapshot has landed: before that, "no key" and "not told yet" look identical,
   // and the free framing would flash at a user who has a key.
-  const freePath = loaded && !canBuild(providers);
+  //
+  // The run provider is the second half of this, and it is the half that was missing. The free
+  // path used to mean only "cannot build" — so a user WITH an Anthropic key who pressed "Try it
+  // free first" was handed "Describe the agent you want", whose first action is a paid planning
+  // call. The button said free and the screen behind it charged. The previous step records the
+  // choice by setting the run provider, so read it: picking the dry-run provider IS choosing
+  // the free path, whether or not a key happens to exist.
+  const runProvider = useUiStore((s) => s.provider);
+  const freePath = loaded && (!canBuild(providers) || runProvider === "fake");
 
   // Point the app at whatever the branch needs, once. The free path needs the reference agent
   // selected and the composer in Test mode (its input is the agent's input, not an instruction
@@ -147,9 +155,13 @@ export function ComposerColumn({ phase }: { phase: OnboardingPhase }) {
             <ExampleButton key={e.text} text={e.text} hint={e.hint} onPick={() => runExample(e.text)} />
           ))}
         </div>
+        {/* Two audiences reach this screen now: someone with no key, and someone who has one
+            and chose to look around first. Telling the second to go connect a key is telling
+            them to do something they have already done. */}
         <p className="mt-3 text-[11px] leading-[1.6] text-faint">
-          Describing an agent of your own goes through Anthropic — connect a key from Settings
-          whenever you want to build one.
+          {canBuild(providers)
+            ? "Describing an agent of your own goes through Anthropic, which is already connected — build one whenever you are ready."
+            : "Describing an agent of your own goes through Anthropic — connect a key from Settings whenever you want to build one."}
         </p>
       </>
     );

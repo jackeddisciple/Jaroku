@@ -45,12 +45,22 @@ export function ConnectProviderStep() {
 
   const proceed = () => setStep("prompt");
 
-  const skip = () => {
-    // The free path is a real configuration, not an absence of one: the run provider is set to
-    // the dry-run model so the next screen is already pointed somewhere that works.
-    setProvider("fake");
+  /**
+   * Advance, pointing the run provider at what was just chosen.
+   *
+   * Every exit from this screen goes through here, because the choice made on it is the only
+   * record of what the user wants — the next step reads the run provider to decide whether to
+   * offer a free run of the shipped agent or a paid "describe an agent to build". Saving a key
+   * used to advance without setting it, which left that decision resting on a default.
+   */
+  const proceedWith = (providerId: string) => {
+    setProvider(providerId);
     proceed();
   };
+
+  // The free path is a real configuration, not an absence of one: the run provider is set to
+  // the dry-run model so the next screen is already pointed somewhere that works.
+  const skip = () => proceedWith("fake");
 
   // The provider that is ALREADY connected, if any.
   //
@@ -62,12 +72,9 @@ export function ConnectProviderStep() {
   const connected = providers.filter((p) => p.configured);
   const primary = connected.find((p) => p.powers_jaroku) ?? connected[0];
 
-  const continueConnected = () => {
-    // Same reasoning as skip(): point the next screen at something that works, which here is
-    // the key the user already has rather than the dry-run model.
-    if (primary) setProvider(primary.id);
-    proceed();
-  };
+  // Same reasoning as skip(): point the next screen at something that works, which here is the
+  // key the user already has rather than the dry-run model.
+  const continueConnected = () => (primary ? proceedWith(primary.id) : proceed());
 
   return (
     <OnboardingSurface>
@@ -135,7 +142,7 @@ export function ConnectProviderStep() {
                     alone lets you run agents on GPT, not build them.
                   </p>
                 )}
-                {expanded && <ProviderKeyForm provider={p} onSaved={proceed} autoFocus />}
+                {expanded && <ProviderKeyForm provider={p} onSaved={() => proceedWith(p.id)} autoFocus />}
               </div>
             </div>
           );
