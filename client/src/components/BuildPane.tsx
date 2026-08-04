@@ -12,14 +12,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { orderedFiles, useBuildStore } from "../store/buildStore.ts";
 import {
   isPlanning, pendingPlanId, threadFor, useChatStore,
-  type ChatTurn, type GenTurn, type ReplyTurn,
+  type ChatTurn, type GenTurn, type PlanTurn, type ProposalTurn, type ReplyTurn,
 } from "../store/chatStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { inputKey, RUN_PROVIDERS, useUiStore } from "../store/uiStore.ts";
-import { sendBranchRun, sendEdit, sendExplain, sendPlanAgent, sendPromoteTestInput, sendRun } from "../lib/socket.ts";
+import {
+  sendApplyEdit, sendBranchRun, sendDiscardEdit, sendDiscardPlan, sendEdit, sendExplain,
+  sendGenerate, sendPlanAgent, sendPromoteTestInput, sendRun,
+} from "../lib/socket.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
 import { Chip } from "./Chip.tsx";
+import { ChoiceRow, type Choice } from "./ChoiceRow.tsx";
 import { DiffCard } from "./DiffCard.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { Prose } from "./InlineCode.tsx";
@@ -30,8 +34,9 @@ import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { StatRow, STAT_ICON, type Stat } from "./StatRow.tsx";
 import {
-  CheckIcon, ChevronRightIcon, DollarSignIcon, FileIcon, HashIcon, PlugIcon, SparklesIcon,
-  UserCircleIcon, WrenchIcon, XIcon, ZapIcon,
+  AlertTriangleIcon, CheckIcon, ChevronRightIcon, DollarSignIcon, FileIcon, HashIcon,
+  LightbulbIcon, PencilIcon, PlugIcon, RefreshIcon, SparklesIcon, UserCircleIcon, WrenchIcon,
+  XIcon, ZapIcon,
 } from "./panelIcons.tsx";
 import { useMcpStore, allMcpTools } from "../store/mcpStore.ts";
 import { ACCENT, ICON, STATUS, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
@@ -335,6 +340,9 @@ export function BuildPane() {
   // available to choose from; it grants an agent nothing on its own.
   const [selectedMcp, setSelectedMcp] = useState<string[]>([]);
   const [mcpOpen, setMcpOpen] = useState(false);
+  // Which fork the user has waved away, by key. Local and unpersisted on purpose: skipping is a
+  // decision about this moment, and the next fork — or the same one on a new plan — should ask.
+  const [skippedFork, setSkippedFork] = useState<string | null>(null);
   const mcpServers = useMcpStore((s) => s.servers);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -580,6 +588,162 @@ export function BuildPane() {
 
   const lastGenId = [...turns].reverse().find((t) => t.role === "jaroku" && t.kind === "gen")?.id;
 
+  // ── The fork the session is at, if it is at one ──────────────────────────────
+  //
+  // Derived entirely from state that already exists. Precedence is by what BLOCKS: a plan or a
+  // proposal is a decision the app is waiting on and nothing else can happen until it is
+  // answered, so it outranks a failed step, which is an invitation rather than a gate.
+  const openPlan = [...turns]
+    .reverse()
+    .find(
+      (t): t is PlanTurn =>
+        t.role === "jaroku" && t.kind === "plan" && (t.status === "pending" || t.status === "stale"),
+    );
+  const openProposal = [...turns]
+    .reverse()
+    .find(
+      (t): t is ProposalTurn => t.role === "jaroku" && t.kind === "proposal" && t.status === "pending",
+    );
+
+  let fork: { key: string; question: string; choices: Choice[] } | null = null;
+  if (openPlan?.planId && openPlan.status === "pending") {
+    fork = {
+      key: `plan:${openPlan.planId}`,
+      question: "This plan is waiting on you",
+      choices: [
+        {
+          id: "generate",
+          label: "Generate",
+          hint: "write the project",
+          icon: SparklesIcon,
+          accent: ACCENT.bespoke,
+          primary: true,
+          title: "Generate the agent this plan describes",
+          onPick: () => sendGenerate(openPlan.prompt, [], undefined, openPlan.planId ?? undefined),
+        },
+        {
+          id: "revise",
+          label: "Revise",
+          hint: "say what to change",
+          icon: PencilIcon,
+          title: "Type feedback — the plan is re-written against it",
+          onPick: () => {
+            setComposerMode("chat");
+            composerRef.current?.focus();
+          },
+        },
+        {
+          id: "discard",
+          label: "Discard",
+          hint: "hand the brief back",
+          icon: XIcon,
+          title: "Drop this plan and return your description to the composer",
+          onPick: () => {
+            if (openPlan.planId) sendDiscardPlan(openPlan.planId);
+            useUiStore.getState().prefillChat(openPlan.prompt);
+          },
+        },
+      ],
+    };
+  } else if (openPlan?.planId && openPlan.status === "stale") {
+    fork = {
+      key: `stale:${openPlan.planId}`,
+      question: "The connectors changed after this plan was written",
+      choices: [
+        {
+          id: "replan",
+          label: "Re-plan",
+          hint: "against the new selection",
+          icon: AlertTriangleIcon,
+          accent: STATUS.pending,
+          primary: true,
+          onPick: () => {
+            useUiStore.getState().prefillChat(openPlan.prompt);
+          },
+        },
+        {
+          id: "discard",
+          label: "Discard",
+          hint: "start from something else",
+          icon: XIcon,
+          onPick: () => {
+            if (openPlan.planId) sendDiscardPlan(openPlan.planId);
+            useUiStore.getState().prefillChat(openPlan.prompt);
+          },
+        },
+      ],
+    };
+  } else if (openProposal?.proposalId) {
+    fork = {
+      key: `edit:${openProposal.proposalId}`,
+      question: "This change is waiting on you",
+      choices: [
+        {
+          id: "apply",
+          label: "Apply",
+          hint: "write it to disk",
+          icon: CheckIcon,
+          accent: STATUS.ok,
+          primary: true,
+          title: "Snapshot the project, then swap these files in",
+          onPick: () => openProposal.proposalId && sendApplyEdit(openProposal.proposalId),
+        },
+        {
+          id: "discard",
+          label: "Discard",
+          hint: "change nothing",
+          icon: XIcon,
+          onPick: () => openProposal.proposalId && sendDiscardEdit(openProposal.proposalId),
+        },
+      ],
+    };
+  } else if (selectedStep?.error && activeAgentId) {
+    // Three things you can do with a failure, each already reachable by typing a phrase the
+    // intent router recognises. The cards name them, which is the part that was undiscoverable.
+    const failed = selectedStep;
+    fork = {
+      key: `step:${failed.id}`,
+      question: `Step #${failed.seq} failed`,
+      choices: [
+        {
+          id: "explain",
+          label: "Explain",
+          hint: "why did this fail?",
+          icon: LightbulbIcon,
+          primary: true,
+          onPick: () =>
+            sendExplain(activeAgentId, "Why did this step fail?", {
+              kind: "step",
+              step: {
+                name: failed.name,
+                type: failed.type,
+                seq: failed.seq,
+                error: failed.error,
+                input: failed.input,
+                output: failed.output,
+              },
+            }),
+        },
+        {
+          id: "fix",
+          label: "Fix it",
+          hint: "propose a code change",
+          icon: WrenchIcon,
+          accent: ACCENT.bespoke,
+          onPick: () => sendEdit(activeAgentId, fixPrompt(failed)),
+        },
+        {
+          id: "rerun",
+          label: "Re-run",
+          hint: "branch from this step",
+          icon: RefreshIcon,
+          onPick: () => sendBranchRun(failed.run_id, failed.seq),
+        },
+      ],
+    };
+  }
+  const showFork = fork !== null && fork.key !== skippedFork && composerMode === "chat" && !busy;
+
   return (
     // The family comes from the body now — every panel is on the prose/code split, and this
     // pane no longer has to declare what it always was.
@@ -754,6 +918,16 @@ export function BuildPane() {
               </div>
             )}
           </div>
+        )}
+
+        {/* The fork, when there is one. Above the input rather than replacing it: these are the
+            reasonable answers, and anything else is still a sentence you type underneath. */}
+        {showFork && fork && (
+          <ChoiceRow
+            question={fork.question}
+            choices={fork.choices}
+            onSkip={() => setSkippedFork(fork.key)}
+          />
         )}
 
         {/* context chip + live routing hint (Chat mode) — so the one composer stays transparent */}

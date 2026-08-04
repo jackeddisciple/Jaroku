@@ -251,6 +251,17 @@ export function SettingsIcon(p: P) {
   );
 }
 
+/** lucide:pencil — say it differently. Revising a plan rather than accepting or dropping it. */
+export function PencilIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
+      <path d="m15 5 4 4" />
+    </>,
+  );
+}
+
 /** lucide:chevron-right — "there is more this way". Never a `›` character. */
 export function ChevronRightIcon(p: P) {
   return svg(p, <path d="m9 18 6-6-6-6" />);
