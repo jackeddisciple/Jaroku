@@ -6,25 +6,17 @@
 import { useEffect } from "react";
 import { useTraceStore } from "../store/traceStore.ts";
 import { fmtCost, fmtDuration, fmtTokens } from "../lib/format.ts";
+import { actionForStep } from "../lib/actionIcons.tsx";
 import { ICON, STEP_TYPE } from "../lib/tokens.ts";
+import { ActionRow } from "./ActionRow.tsx";
 import { Chip } from "./Chip.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
-import { DatabaseIcon, GitBranchIcon, SparklesIcon, WrenchIcon, XIcon } from "./panelIcons.tsx";
+import { XIcon } from "./panelIcons.tsx";
 import { StepDetail } from "./StepDetail.tsx";
 import { StateBranchEditor } from "./StateBranchEditor.tsx";
 import { McpBadge } from "./McpBadge.tsx";
 import { useBuildStore } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
-
-// The step's kind, as an icon from the app's one set rather than four font characters (✦ ⚙ ⑃ ◆)
-// that sat at whatever weight the surrounding line happened to be. Same four shapes the plan card
-// already uses for the same four ideas: a model call, a tool, a branch, a change to state.
-const ICON_FOR_TYPE: Record<string, (p: { size?: number }) => React.ReactElement> = {
-  llm_call: SparklesIcon,
-  tool_call: WrenchIcon,
-  router: GitBranchIcon,
-  state_update: DatabaseIcon,
-};
 
 function Kv({ label, value, tag }: { label: string; value: string; tag?: boolean }) {
   return (
@@ -84,26 +76,24 @@ export function StepDetailPanel() {
           </div>
 
           <div className="px-4 pb-3 shrink-0">
-            <div className="flex items-center gap-2">
-              <span className={`shrink-0 ${step.error ? "text-err" : "text-run"}`}>
-                {(ICON_FOR_TYPE[step.type] ?? DatabaseIcon)({ size: ICON.sm })}
-              </span>
-              <span className="text-ink truncate">{step.name}</span>
-              {/* Room to say the word here, unlike the timeline row. Someone reading a step's
-                  input and output should be told whose code produced them. */}
-              {step.type === "tool_call" && mcpNames.has(step.name) && <McpBadge />}
-              <Chip
-                mono
-                size="sm"
-                color={STEP_TYPE[step.type].fg}
-                background={STEP_TYPE[step.type].bg}
-                className="ml-auto shrink-0"
-              >
-                {step.type}
-              </Chip>
-            </div>
+            {/* The same sentence the timeline row states, in the same four slots — a reader who
+                clicked a row should land on the row they clicked, not on a differently-shaped
+                description of it. What this panel adds is room: the MCP badge says the word here
+                rather than showing the plug alone, and the schema's own name for the step type
+                appears, which is the one place it is worth spelling out. */}
+            <ActionRow
+              action={actionForStep(step)}
+              state={step.error ? "error" : "done"}
+              object={<span className="font-mono font-medium text-ink [overflow-wrap:anywhere]">{step.name}</span>}
+              badges={step.type === "tool_call" && mcpNames.has(step.name) ? <McpBadge /> : undefined}
+              trailing={
+                <Chip mono size="sm" color={STEP_TYPE[step.type].fg} background={STEP_TYPE[step.type].bg}>
+                  {step.type}
+                </Chip>
+              }
+            />
             {/* Outcome, in the app's own status mark rather than a coloured bullet character. */}
-            <div className="mt-1.5 flex items-center gap-1.5 text-[11px]">
+            <div className="mt-1.5 flex items-center gap-1.5 pl-[22px] text-[11px]">
               <StatusDot state={step.error ? "error" : "ok"} />
               <span className={step.error ? "text-err" : "text-ok"}>{step.error ? "failed" : "ok"}</span>
             </div>

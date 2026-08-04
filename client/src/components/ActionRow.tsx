@@ -70,6 +70,11 @@ export type ActionRowProps = {
   onClick?: () => void;
   selected?: boolean;
   title?: string;
+  /**
+   * Applied to the row itself rather than to a wrapper around it, so a caller's padding is inside
+   * the hover and selection surface. A highlight that stops short of the row's own padding reads
+   * as a misaligned box.
+   */
   className?: string;
 };
 
@@ -98,11 +103,11 @@ export function ActionRow({
   const iconColor = STATE_COLOR[state] ?? descriptor.accent;
 
   return (
-    <div className={className}>
+    <div>
       <div
         className={`flex items-start gap-2 ${
           onClick ? "cursor-pointer select-none rounded-control transition-colors duration-fast" : ""
-        } ${selected ? "bg-active" : onClick ? "hover:bg-active/40" : ""}`}
+        } ${selected ? "bg-active" : onClick ? "hover:bg-active/40" : ""} ${className}`}
         onClick={onClick}
         title={title}
       >

@@ -1,13 +1,37 @@
+// One step of a trace, as a sentence about something that happened.
+//
+// The row used to read `#3  [tool_call]  get_time    1,204 tok · $0.0031 · 820 ms`. Everything in
+// it is true and none of it says what the agent DID: `tool_call` is the name of a field in the
+// frozen event schema, and the reader has to translate it every time. Scanning eight of those to
+// find where a run went wrong means reading eight type names and eight node names and assembling
+// the story yourself.
+//
+// Now it reads `#3  Called get_time   1,204 tok  $0.0031  820 ms`, drawn through the shared
+// ActionRow so the trace narrates itself in the same words and the same four slots the plan card
+// and the generation list use.
+//
+// The type badge is gone from the row rather than moved. Verb and type are the same fact — every
+// `tool_call` is a "Called" and nothing else — so the chip was the schema's name for what the verb
+// already says, in a slot that could hold the tool name instead. The exact field value is still
+// one click away in the step-detail panel, which is where somebody who wants the schema's word
+// for it is looking.
+//
+// The spine is untouched: the rail, the connector node, and the amber accent bar on the selected
+// row all still say "these are one sequence, and you are here". Those answer a different question
+// from the action icon a few pixels to their right, which says what kind of thing this step was.
+
 import { useEffect, useRef } from "react";
 import type { Step } from "../types.ts";
+import { actionForStep } from "../lib/actionIcons.tsx";
 import { fmtCost, fmtDuration, fmtTokens } from "../lib/format.ts";
-import { STEP_TYPE } from "../lib/tokens.ts";
-import { Chip } from "./Chip.tsx";
+import { ICON } from "../lib/tokens.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
+import { ActionRow } from "./ActionRow.tsx";
 import { McpBadge } from "./McpBadge.tsx";
+import { StatusDot } from "./StatusBadge.tsx";
 
 export function StepRow({ step }: { step: Step }) {
   const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === s.activeAgentId));
@@ -23,53 +47,44 @@ export function StepRow({ step }: { step: Step }) {
     if (selected) rowRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [selected]);
 
-  const meta: string[] = [];
-  if (step.tokens != null) meta.push(fmtTokens(step.tokens));
-  if (step.cost != null) meta.push(fmtCost(step.cost));
-  meta.push(fmtDuration(step.latency_ms));
-
   return (
     <div ref={rowRef} className="relative pl-7 py-1.5 animate-slide-in">
       {/* connector node on the timeline's vertical line */}
       <span
-        className={`absolute left-[6px] top-[11px] w-[7px] h-[7px] rounded-full ring-2 ring-bg ${
+        className={`absolute left-[6px] top-[13px] w-[7px] h-[7px] rounded-full ring-2 ring-bg ${
           step.error ? "bg-err" : selected ? "bg-run" : "bg-[#3f3f46]"
         }`}
       />
-      {/* 2px left accent + subtle fill when this step is the sync focus (never a full-color fill) */}
+      {/* 2px left accent when this step is the sync focus (never a full-color fill) */}
       {selected && <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-run rounded-full" />}
-      <div
-        className={`flex items-baseline gap-3 cursor-pointer select-none rounded-control ${
-          selected ? "bg-active -mx-2 px-2" : ""
-        }`}
+      <ActionRow
+        action={actionForStep(step)}
+        state={step.error ? "error" : "done"}
+        selected={selected}
+        className="-mx-2 px-2"
+        lead={<span className="w-8 text-right">#{step.seq}</span>}
+        object={<span className="font-mono font-medium text-ink [overflow-wrap:anywhere]">{step.name}</span>}
+        // Derived from the AGENT's manifest, not from the step: the frozen Step schema has
+        // no provenance field and must not grow one.
+        badges={
+          step.type === "tool_call" && mcpNames.has(step.name) ? <McpBadge variant="compact" /> : undefined
+        }
+        trailing={
+          <>
+            {step.tokens != null && <span className="text-muted">{fmtTokens(step.tokens)}</span>}
+            {step.cost != null && <span className="text-muted">{fmtCost(step.cost)}</span>}
+            <span className="text-muted">{fmtDuration(step.latency_ms)}</span>
+            {/* Only failures get a mark. A green check on every row is a column of green checks,
+                and the figures beside it are already the evidence that a step completed. */}
+            {step.error && <StatusDot state="error" size={ICON.xs} title="This step failed" />}
+          </>
+        }
         onClick={() => {
           selectStep(step.id);
           setExpandedStep(open ? null : step.id);
           useUiStore.getState().setSelectedNodeId(null); // composer context is now this step
         }}
-      >
-        <span className="text-faint w-9 shrink-0 tabular-nums">#{step.seq}</span>
-        {/* A step type is an identifier the schema fixes, not a word we chose — so it is mono,
-            and it wears the same chip as every other label in the app. */}
-        <Chip
-          mono
-          size="sm"
-          color={STEP_TYPE[step.type].fg}
-          background={STEP_TYPE[step.type].bg}
-          className="shrink-0"
-        >
-          {step.type}
-        </Chip>
-        <span className="text-ink truncate">{step.name}</span>
-        {/* Derived from the AGENT's manifest, not from the step: the frozen Step schema has
-            no provenance field and must not grow one. Compact, because this row is dense and
-            a word here would push out the name it describes. */}
-        {step.type === "tool_call" && mcpNames.has(step.name) && <McpBadge variant="compact" />}
-        <span className="ml-auto text-muted text-[12px] whitespace-nowrap tabular-nums">
-          {meta.join(" · ")}
-          {step.error && <span className="text-err ml-2">ERROR</span>}
-        </span>
-      </div>
+      />
     </div>
   );
 }
