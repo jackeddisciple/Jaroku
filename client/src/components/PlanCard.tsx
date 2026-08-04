@@ -148,7 +148,11 @@ function Section({
       {open && (
         <>
           {note && <div className="mt-1 text-[11px] text-faint">{note}</div>}
-          <div className="mt-2.5">{children}</div>
+          {/* A shallow well, one step under the card. Five sections stacked with nothing but
+              margins between them read as one list with headings in it; this says each heading
+              owns what follows it. Deliberately no border — at five repetitions a hairline
+              becomes a table, and the card already has the only real edge here. */}
+          <div className="mt-2 rounded-control bg-bg/30 px-2 py-1">{children}</div>
         </>
       )}
     </div>

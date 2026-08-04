@@ -121,7 +121,7 @@ export function McpConfirmModal() {
           <p className="text-[10px] uppercase tracking-wide text-faint">
             Arguments the agent produced
           </p>
-          <pre className="mt-1 max-h-56 overflow-auto rounded-control bg-bg p-2.5 font-mono text-[11px] leading-[1.55] text-ink">
+          <pre className="mt-1 max-h-56 overflow-auto rounded-control border border-hair bg-bg/60 p-2.5 font-mono text-[11px] leading-[1.55] text-ink">
             {formatArgs(request.args)}
           </pre>
         </div>

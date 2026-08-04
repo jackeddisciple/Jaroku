@@ -118,7 +118,7 @@ function ToolRow({ tool, serverId }: { tool: McpTool; serverId: string }) {
           </div>
 
           {open && (
-            <pre className="mt-1.5 overflow-x-auto rounded-control bg-bg p-2 font-mono text-[10px] leading-[1.5] text-muted">
+            <pre className="mt-1.5 overflow-x-auto rounded-control border border-hair bg-bg/60 p-2 font-mono text-[10px] leading-[1.5] text-muted">
               {JSON.stringify(tool.input_schema, null, 2)}
             </pre>
           )}

@@ -1,7 +1,12 @@
 // Diff card — the fix loop's trust surface (doc §4.4). Every proposed change renders
 // inline in the conversation: files touched, +adds/−removes, expandable hunks, and explicit
-// Apply / Discard / Undo. Borderless-first: the card sits on the background, separated by
-// spacing and the same +/− visual language as the state diff (StateDiff.tsx).
+// Apply / Discard / Undo.
+//
+// Three levels, because the content has three. The summary and its figures are Jaroku speaking
+// in the conversation and stay on the thread's own surface, unboxed. The file list is the
+// artefact being spoken about, and takes a card. Each file's hunks are what that row is about,
+// and take a well inside it. Before this they were one flat stack: eight rows and eight loose
+// blocks of code with nothing saying where a file ended and the next one began.
 
 import { useEffect, useRef, useState } from "react";
 import type { FileDiff } from "../types.ts";
@@ -22,7 +27,10 @@ import { CheckIcon, FileIcon, PlusIcon, UndoIcon } from "./panelIcons.tsx";
 function HunkLines({ file }: { file: FileDiff }) {
   return (
     // Diff bodies are the most literally-code thing in the pane — mono, always.
-    <div className="mt-1 overflow-x-auto font-mono">
+    // A well inside the file row: one step darker than the list it sits in, with its own
+    // hairline. Hunks are the thing the row is about rather than more of the row, and unbounded
+    // they ran straight into the next file's header.
+    <div className="mt-1.5 overflow-x-auto rounded-control border border-hair bg-bg/60 py-1.5 font-mono">
       {file.hunks.map((h, hi) => (
         <div key={hi} className={hi > 0 ? "mt-2" : ""}>
           <div className="px-2 text-[11px] text-faint tabular-nums select-none">
@@ -65,7 +73,9 @@ function FileRow({
   const TypeIcon = iconForPath(file.path);
 
   return (
-    <div className="mt-2 first:mt-0">
+    // One container per file: the row and its hunks belong together, and a flat stack of eight
+    // rows with eight loose hunk blocks under them gave no answer to "where does this file end".
+    <div className="border-t border-hair px-2.5 py-2 first:border-t-0">
       <div className="flex items-center gap-2 text-[12px]">
         {/* One mark that turns, not two glyphs — the same disclosure the plan card's sections
             use, so opening a file and opening a section are visibly the same gesture. */}
@@ -293,7 +303,14 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
         )}
       </div>
 
-      <div className={`mt-4 ${turn.status !== "pending" ? "opacity-70" : ""}`}>
+      {/* The change itself, bounded. The card above the fold — the summary and the figures —
+          is Jaroku speaking in the conversation; this is the artefact it is speaking about, and
+          the two were running into each other with nothing but a margin between them. */}
+      <div
+        className={`mt-3 overflow-hidden rounded-card border border-edge bg-panel/30 ${
+          turn.status !== "pending" ? "opacity-70" : ""
+        }`}
+      >
         {turn.files.map((f) => (
           <FileRow key={f.path} file={f} defaultOpen={turn.status === "pending"} scale={largest} />
         ))}

@@ -9,7 +9,10 @@ function Section({ label, value }: { label: string; value: unknown }) {
   return (
     <div className="mt-3 first:mt-0">
       <div className="text-faint uppercase tracking-wide text-[11px] mb-1">{label}</div>
-      <pre className="whitespace-pre-wrap break-words text-[12px] text-[#a1a1aa] leading-relaxed">
+      {/* The payload is what this panel exists to show, and it was flowing text against the
+          panel's own surface — three sections in a row read as one long blob. A well bounds
+          each one. */}
+      <pre className="whitespace-pre-wrap break-words rounded-control border border-hair bg-bg/60 p-2 text-[12px] leading-relaxed text-[#a1a1aa]">
         {text}
       </pre>
     </div>
@@ -56,7 +59,7 @@ export function StepDetail({ step }: { step: Step }) {
       {step.error && (
         <div className="mt-3 first:mt-0">
           <div className="text-err uppercase tracking-wide text-[11px] mb-1">error</div>
-          <pre className="whitespace-pre-wrap break-words text-[12px] text-err leading-relaxed">
+          <pre className="whitespace-pre-wrap break-words rounded-control border border-err/25 bg-err/[0.04] p-2 text-[12px] leading-relaxed text-err">
             {step.error}
           </pre>
           {/* One-Click Fix is now the unified composer: select this step and type "fix this"
