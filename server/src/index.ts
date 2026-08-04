@@ -27,6 +27,7 @@ import {
   type GenerateCommand,
   type McpCommand,
   type PlanAgentCommand,
+  type ProviderCommand,
 } from "./wsRelay.ts";
 import { Generator, type UsageSummary } from "./generator.ts";
 import { Planner } from "./planner.ts";
@@ -41,6 +42,7 @@ import { loadRuntimeEnv } from "./env.ts";
 import { McpStore } from "./mcpStore.ts";
 import { McpRegistry } from "./mcpRegistry.ts";
 import { fileCredentialWriter } from "./envWriter.ts";
+import { PROVIDER_ENV_KEY, isProviderId, providerStatus, verifyProviderKey } from "./providers.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = resolve(__dirname, "..");
@@ -70,10 +72,12 @@ const evalStore = new EvalStore(store.connection());
 //
 // The credential writer is the only thing in the process that writes runtime/.env. It logs
 // key names, never values, exactly as loadRuntimeEnv does when reading them back.
-const mcpRegistry = new McpRegistry(
-  new McpStore(store.connection()),
-  fileCredentialWriter(join(RUNTIME_DIR, ".env")),
-);
+//
+// One instance, shared. MCP server tokens and model-provider API keys are the same kind of
+// secret going to the same file, and the rule is that there is exactly one path to it — so
+// they get the same writer object rather than two constructed from the same path.
+const credentials = fileCredentialWriter(join(RUNTIME_DIR, ".env"));
+const mcpRegistry = new McpRegistry(new McpStore(store.connection()), credentials);
 // Slot 0 is the interactive run; the rest are the eval fan-out's. Modest by default —
 // each slot is a Python subprocess with a LangGraph import, and oversubscribing the machine
 // inflates every run's latency, which the comparison dashboard then reports as if it were
@@ -215,6 +219,8 @@ const relay = new WsRelay({
   listAgentFiles: agentProjectFiles,
   getAgentGraph: agentGraph,
   listMcpServers: () => mcpRegistry.list(),
+  // By name only. The client learns THAT a key is set, never what it is.
+  listProviders: () => providerStatus(),
   onCommand: (cmd: ForwardedCommand) => {
     if (cmd.cmd === "run") runAgent(cmd.input, cmd.provider, cmd.model, cmd.agentId);
     else if (cmd.cmd === "generate") generateAgent(cmd);
@@ -229,6 +235,7 @@ const relay = new WsRelay({
     else if (cmd.cmd === "branchRun") branchRun(cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState);
     else if (cmd.cmd === "explain") explainAgent(cmd);
     else if (MCP_COMMAND_NAMES.has(cmd.cmd)) void handleMcpCommand(cmd as McpCommand);
+    else if (PROVIDER_COMMAND_NAMES.has(cmd.cmd)) void handleProviderCommand(cmd as ProviderCommand);
     else handleEvalCommand(cmd);
   },
 });
@@ -475,6 +482,74 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
     const message = (err as Error)?.message ?? String(err);
     console.error(`[mcp] ${cmd.cmd} failed: ${message}`);
     relay.broadcastMcp({ type: "error", message: `${cmd.cmd} failed: ${message}` });
+  }
+}
+
+// --- providers: model credentials -------------------------------------------
+// The bring-your-own-key surface, on its own channel. Two commands, deliberately:
+// `testProviderKey` proves a key works and writes NOTHING, `setProviderKey` stores it. Folding
+// them would mean the "Test connection" button put a credential on disk before the user
+// pressed Save.
+//
+// Nothing broadcast here carries a key. A provider reports `configured: true/false`, which is
+// the name of a variable being set, and never the value behind it — the same guarantee the MCP
+// registry gives, through the same credential writer.
+
+const PROVIDER_COMMAND_NAMES = new Set(["setProviderKey", "testProviderKey"]);
+
+function broadcastProviders(): void {
+  relay.broadcastProviders({ type: "providers", providers: providerStatus() });
+}
+
+async function handleProviderCommand(cmd: ProviderCommand): Promise<void> {
+  try {
+    if (!isProviderId(cmd.provider)) {
+      // Named rather than echoed: `cmd.provider` is client-supplied and about to be rendered.
+      relay.broadcastProviders({
+        type: "error",
+        message: `"${String(cmd.provider).slice(0, 32)}" is not a provider you can connect — expected anthropic or openai`,
+      });
+      return;
+    }
+    const provider = cmd.provider;
+    const key = typeof cmd.key === "string" ? cmd.key.trim() : "";
+    if (!key) {
+      relay.broadcastProviders({ type: "error", message: "no key was entered", provider });
+      return;
+    }
+
+    if (cmd.cmd === "testProviderKey") {
+      const result = await verifyProviderKey(provider, key);
+      // The outcome, never the input. A failure message comes from the provider and names the
+      // status, not the credential.
+      console.log(`[providers] ${provider} key tested — ${result.ok ? "ok" : "rejected"}`);
+      relay.broadcastProviders({ type: "testResult", provider, ok: result.ok, message: result.message });
+      return;
+    }
+
+    // setProviderKey. Straight through the one credential writer — the value is used by
+    // `set` and nowhere else in this function.
+    const written = credentials.set(PROVIDER_ENV_KEY[provider], key);
+    if (!written.ok) {
+      relay.broadcastProviders({
+        type: "error",
+        message: written.warning ?? "could not store that key",
+        provider,
+      });
+      return;
+    }
+    // Names only, exactly as loadRuntimeEnv logs them on the way in.
+    console.log(`[providers] ${provider} key set (${PROVIDER_ENV_KEY[provider]})`);
+    broadcastProviders();
+    // A key shadowed by the server's own shell works now and reverts on restart. Saying so is
+    // the difference between a puzzling regression tomorrow and a sentence today.
+    if (written.warning) {
+      relay.broadcastProviders({ type: "notice", message: written.warning, provider });
+    }
+  } catch (err) {
+    const message = (err as Error)?.message ?? String(err);
+    console.error(`[providers] ${cmd.cmd} failed: ${message}`);
+    relay.broadcastProviders({ type: "error", message: `${cmd.cmd} failed: ${message}` });
   }
 }
 

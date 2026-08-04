@@ -8,9 +8,10 @@ import { useChatStore } from "../store/chatStore.ts";
 import { useGraphStore } from "../store/graphStore.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { useMcpStore } from "../store/mcpStore.ts";
+import { useProviderStore } from "../store/providerStore.ts";
 import type {
-  ClientCommand, EvalTarget, ExplainSubject, McpConfirmVerdict, McpImpact, RubricCriterion,
-  ServerMessage,
+  ClientCommand, EvalTarget, ExplainSubject, McpConfirmVerdict, McpImpact, ProviderId,
+  RubricCriterion, ServerMessage,
 } from "../types.ts";
 
 const WS_URL = import.meta.env.VITE_JAROKU_WS ?? `ws://localhost:4317`;
@@ -143,6 +144,17 @@ function dispatch(msg: ServerMessage): void {
       else if (msg.type === "notice") m.setNotice(msg.message);
       else if (msg.type === "confirmRequest") m.addConfirm(msg);
       else if (msg.type === "confirmResolved") m.resolveConfirm(msg.runId, msg.nonce);
+      break;
+    }
+    case "providers": {
+      // Model-provider credentials. Like the MCP channel, every `providers` message is a full
+      // snapshot and this is a replace, never a merge — and nothing on it carries a key, so
+      // there is nothing here to be careful with beyond not inventing state the server owns.
+      const p = useProviderStore.getState();
+      if (msg.type === "providers") p.setProviders(msg.providers);
+      else if (msg.type === "testResult") p.setTestResult({ provider: msg.provider, ok: msg.ok, message: msg.message });
+      else if (msg.type === "error") p.setError(msg.message);
+      else if (msg.type === "notice") p.setNotice(msg.message);
       break;
     }
     case "reply": {
@@ -324,6 +336,36 @@ export function sendResolveMcpConfirm(runId: string, nonce: string, verdict: Mcp
 /** Override the impact classification for one tool. `null` restores the classifier's call. */
 export function sendSetMcpToolImpact(serverId: string, toolName: string, impact: McpImpact | null): void {
   send({ cmd: "setMcpToolImpact", serverId, toolName, impact });
+}
+
+// --- model providers -------------------------------------------------------
+// Answered on the "providers" channel. A mutation comes back as a fresh snapshot of every
+// provider's configured state, so the caller never optimistically patches local state — and
+// the key never comes back at all.
+
+export function sendListProviders(): void {
+  send({ cmd: "listProviders" });
+}
+
+/**
+ * Store a provider's API key.
+ *
+ * `key` travels one way. It is written to runtime/.env server-side by the same credential
+ * writer MCP tokens go through, and the answer is `configured: true` — never the key.
+ */
+export function sendSetProviderKey(provider: ProviderId, key: string): void {
+  send({ cmd: "setProviderKey", provider, key });
+}
+
+/**
+ * Prove a key works without storing it — the "Test connection" button.
+ *
+ * Deliberately not a flag on the command above: a test that wrote first would put a credential
+ * on disk before the user pressed Save, which is not what the button says it does.
+ */
+export function sendTestProviderKey(provider: ProviderId, key: string): void {
+  useProviderStore.getState().startTest(provider);
+  send({ cmd: "testProviderKey", provider, key });
 }
 
 // --- eval: dataset CRUD ----------------------------------------------------

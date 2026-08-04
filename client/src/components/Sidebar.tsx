@@ -12,6 +12,7 @@ import { agentStatus, type AgentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark, ConnectorDot } from "../lib/icons.tsx";
 import { sendLoadRun } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
+import { useUiStore } from "../store/uiStore.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
@@ -230,7 +231,13 @@ export function Sidebar() {
 
       {/* bottom-anchored: settings + user/plan */}
       <div className="shrink-0 space-y-1 border-t border-hair px-3 py-2.5">
-        <button className="w-full flex items-center gap-2 text-[12px] text-muted hover:text-ink transition-colors px-2 py-1.5">
+        {/* Was a dead affordance. It now opens the one thing this app actually has settings for
+            — the provider keys — which is also where onboarding told a user to come back to. */}
+        <button
+          onClick={() => useUiStore.getState().setProviderPanel(true)}
+          title="Provider keys"
+          className="w-full flex items-center gap-2 text-[12px] text-muted hover:text-ink transition-colors px-2 py-1.5"
+        >
           <SettingsIcon size={ICON.sm} /> Settings
           <span className="ml-auto text-faint"><ChevronRightIcon size={ICON.xs} /></span>
         </button>

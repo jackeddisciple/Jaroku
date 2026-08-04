@@ -27,6 +27,7 @@ of the repo and run yourself.
 - [Why it exists](#why-it-exists)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
+- [First run](#first-run)
 - [Try it in 60 seconds](#try-it-in-60-seconds)
 - [Repository layout](#repository-layout)
 - [Architecture](#architecture)
@@ -137,7 +138,11 @@ cd ..
 
 **4 — Provider keys** (optional, but needed for anything that calls a model)
 
-Create `runtime/.env`:
+You can skip this and add keys in the app: the first run walks you through it, and Settings in
+the sidebar opens the same form afterwards. Either way the key ends up in the file below, and
+nothing but the local server process ever reads it.
+
+To do it by hand, create `runtime/.env`:
 
 ```bash
 # Planning, generation, editing, explain, and the eval judge all use this key.
@@ -184,6 +189,31 @@ is alive without running Vite.
 
 On startup the server fires one run of the hand-written fixture agent so you see a live trace
 immediately. Set `JAROKU_NO_AUTORUN=1` to suppress it.
+
+---
+
+## First run
+
+The first time you open the UI on a machine, Jaroku walks you from nothing to a live trace in
+four screens, then gets out of the way permanently.
+
+1. **Welcome** — what the product does, one button.
+2. **Connect a provider** — Anthropic and/or OpenAI, with the key's destination stated before
+   the field that wants it. **Test connection** is free and writes nothing; **Save** writes.
+   There is a real skip: the dry-run path costs nothing and exercises the whole trace/graph/UI.
+3. **First prompt** — the ordinary composer, alone, with a few real examples. With an Anthropic
+   key those are agents to build; without one they are inputs for the bundled `example_agent`,
+   because planning and generation go through Anthropic while *running* does not.
+4. **First run** — the sidebar arrives when a plan card does, the right panel when files start
+   streaming, and the Trace tab when the first run does. Nothing appears before it has something
+   in it.
+
+Reaching `run_end` ends onboarding. The three-column app is then just the same layout with the
+last two columns mounted — no reload, no reset, and it never appears again.
+
+State lives in `localStorage` under `jaroku.onboarding` (`onboardingComplete`,
+`onboardingStep`, `onboardingHintsShown`). Delete that key to see it again. An install that
+already has a generated agent in `runtime/agents/` is treated as onboarded and skips it.
 
 ---
 
@@ -1187,6 +1217,7 @@ frozen event schema, and everything added since rides beside it.
 | `debug` | Control plane: `paused`, `resumed`, `boundary`, `branched`, `error` |
 | `eval` | Datasets, examples, rubrics, eval progress, scores, results, estimates |
 | `mcp` | MCP registry snapshots, discovery progress, and the first-use confirmation request |
+| `providers` | Which provider keys are set (`configured: true/false`, by name) and test results |
 | `reply` | Streaming "explain" answers |
 | `log` | stderr lines and parse errors, for visibility |
 
@@ -1199,7 +1230,13 @@ frozen event schema, and everything added since rides beside it.
 `deleteExample` · `promoteTestInput` · `startEval` · `cancelEval` · `estimateEval` ·
 `loadEvalResults` · `listEvals` · `loadRubric` · `saveRubric` · and the MCP set:
 `listMcpServers` · `addMcpServer` · `removeMcpServer` · `rediscoverMcpServer` ·
-`setMcpServerAuth` · `setMcpToolImpact` · `resolveMcpConfirm`
+`setMcpServerAuth` · `setMcpToolImpact` · `resolveMcpConfirm` · and the provider set:
+`listProviders` · `setProviderKey` · `testProviderKey`
+
+`setProviderKey` and `testProviderKey` are two commands rather than one on purpose: the test
+proves a key authenticates and writes **nothing**, so "Test connection" cannot put a credential
+on disk before you have pressed Save. Both tests are models-list calls, so checking a key is
+free.
 
 Reads are answered locally by the relay (only the requesting client); mutations are forwarded
 to the app, which answers by broadcasting the affected snapshot — the same shape a fresh read
@@ -1394,6 +1431,7 @@ plan. The planner logs a loud warning for exactly this reason.
 
 | Path | What | Tracked? |
 |---|---|---|
+| browser `localStorage` | `jaroku.onboarding` (first-run progress) and `jaroku.input.<agent>` (last test input). UI-only; deleting either loses nothing that matters | n/a |
 | `server/jaroku.db` | Traces (`runs`, `steps`) + eval control plane (`datasets`, `dataset_examples`, `rubrics`, `eval_runs`, `eval_jobs`, `eval_scores`) + MCP registry (`mcp_servers`, `mcp_tools`) | No |
 | `runtime/agents/<id>/` | A generated agent project — yours, editable, portable | No (except `example_agent`) |
 | `runtime/agents/.staging/` | In-flight generations and edit proposals. Cleared on server start — a proposal interrupted by a shutdown is an orphan | No |
@@ -1440,6 +1478,11 @@ back to branch from.
 - **MCP credentials are stored as env var names.** The value lives only in `runtime/.env`,
   is read at the moment of use, and never reaches the database, a generated project, a log
   line, or the browser.
+- **Provider keys take exactly that path.** A key entered in the first-run flow or in Settings
+  goes through the *same* credential writer — one instance, shared — and lands as one
+  correctly-named line in `runtime/.env`. Every other line of that file survives byte for byte,
+  the file is `chmod 600`, and what the browser learns is `configured: true`. The server logs
+  `[providers] anthropic key set`; the value appears nowhere.
 - **The server binds to localhost.** It has no authentication and is not built to be exposed
   to a network. Don't put it on one.
 

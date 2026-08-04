@@ -19,14 +19,45 @@ export interface UsageSummary {
 export const GENERATION_MODEL = "claude-haiku-4-5";
 
 let client: Anthropic | null = null;
+// The key the memoized client was built with.
+//
+// Memoizing on existence alone was fine while the key could only arrive before startup. It
+// can now be written mid-session (the onboarding flow — see providers.ts), and a client built
+// from a key the user has since replaced would keep authenticating as the old one for the rest
+// of the process, with no way to tell from the outside. Comparing the value costs nothing and
+// makes "connect a provider" take effect without a restart.
+let clientKey: string | null = null;
 
 export function anthropicClient(): Anthropic {
-  if (!client) {
-    const key = process.env.ANTHROPIC_API_KEY;
-    if (!key) throw new Error("ANTHROPIC_API_KEY is not set (expected in runtime/.env)");
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) throw new Error("ANTHROPIC_API_KEY is not set (expected in runtime/.env)");
+  if (!client || clientKey !== key) {
     client = new Anthropic({ apiKey: key });
+    clientKey = key;
   }
   return client;
+}
+
+/**
+ * Prove a key authenticates, without writing it anywhere.
+ *
+ * It lives here because this is the one module allowed to construct the Anthropic SDK, and a
+ * key the user has typed but not yet saved is not in `process.env` — so `anthropicClient()`
+ * cannot be the thing that tests it. Everything else about the discipline holds: the value is
+ * used in this call and nowhere else, never logged, never returned, never stored.
+ *
+ * `models.list()` rather than a test completion: it authenticates just as conclusively and
+ * costs nothing, and "Money asks first" should apply to the button that checks a key too.
+ */
+export async function verifyAnthropicKey(key: string): Promise<{ ok: boolean; message: string | null }> {
+  try {
+    await new Anthropic({ apiKey: key }).models.list({ limit: 1 });
+    return { ok: true, message: null };
+  } catch (err) {
+    // The SDK's message names the status and the reason ("401 authentication_error: invalid
+    // x-api-key"), which is what the user needs, and never contains the key itself.
+    return { ok: false, message: (err as Error)?.message ?? String(err) };
+  }
 }
 
 export function summarizeUsage(u: {

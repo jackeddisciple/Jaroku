@@ -118,9 +118,19 @@ export default {
               "0 0 0 1px rgba(245,158,11,0.8), 0 0 24px 3px rgba(245,158,11,0.58), 0 0 64px 13px rgba(245,158,11,0.3)",
           },
         },
+        // A column arriving during first-run onboarding (doc: progressive reveal). It fades and
+        // slides in from its own edge rather than scaling, because the panel is already at its
+        // final width — the reveal is about it appearing beside the composer, not growing into
+        // place. Slower than slide-in: this is a piece of the app arriving, and at 120ms it
+        // read as a glitch rather than as something being handed to you.
+        "panel-in": {
+          "0%": { opacity: "0", transform: "translateX(-8px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" },
+        },
       },
       animation: {
         "slide-in": "slide-in 120ms ease-out",
+        "panel-in": "panel-in 260ms cubic-bezier(0.2, 0, 0, 1)",
         breathe: "breathe 4.2s ease-in-out infinite",
         "pulse-node": "pulse-node 2.4s ease-in-out infinite",
         "check-in": "check-in 180ms cubic-bezier(0.2, 0, 0, 1)",
