@@ -5,7 +5,9 @@
 import { useEffect, useRef } from "react";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
+import { ICON } from "../lib/tokens.ts";
 import { CodeViewer } from "./CodeViewer.tsx";
+import { XIcon } from "./panelIcons.tsx";
 
 export function CodeOverlay() {
   const open = useUiStore((s) => s.codeOverlayOpen);
@@ -40,8 +42,12 @@ export function CodeOverlay() {
       >
         <div className="flex items-center gap-2 px-4 py-2 shrink-0 bg-panel">
           <span className="text-[11px] uppercase tracking-widest text-faint">Code</span>
-          <button onClick={() => setOpen(false)} className="ml-auto text-muted hover:text-ink text-[13px]" title="Close (Esc)">
-            ✕
+          <button
+            onClick={() => setOpen(false)}
+            className="ml-auto text-muted transition-colors duration-fast hover:text-ink"
+            title="Close (Esc)"
+          >
+            <XIcon size={ICON.sm} />
           </button>
         </div>
         <div className="flex-1 min-h-0">

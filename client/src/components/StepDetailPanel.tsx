@@ -6,22 +6,25 @@
 import { useEffect } from "react";
 import { useTraceStore } from "../store/traceStore.ts";
 import { fmtCost, fmtDuration, fmtTokens } from "../lib/format.ts";
-import { STEP_TYPE } from "../lib/tokens.ts";
+import { ICON, STEP_TYPE } from "../lib/tokens.ts";
 import { Chip } from "./Chip.tsx";
+import { StatusDot } from "./StatusBadge.tsx";
+import { DatabaseIcon, GitBranchIcon, SparklesIcon, WrenchIcon, XIcon } from "./panelIcons.tsx";
 import { StepDetail } from "./StepDetail.tsx";
 import { StateBranchEditor } from "./StateBranchEditor.tsx";
 import { McpBadge } from "./McpBadge.tsx";
 import { useBuildStore } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
 
-function glyphForType(type: string): string {
-  switch (type) {
-    case "llm_call": return "✦";
-    case "tool_call": return "⚙";
-    case "router": return "⑃";
-    default: return "◆"; // state_update
-  }
-}
+// The step's kind, as an icon from the app's one set rather than four font characters (✦ ⚙ ⑃ ◆)
+// that sat at whatever weight the surrounding line happened to be. Same four shapes the plan card
+// already uses for the same four ideas: a model call, a tool, a branch, a change to state.
+const ICON_FOR_TYPE: Record<string, (p: { size?: number }) => React.ReactElement> = {
+  llm_call: SparklesIcon,
+  tool_call: WrenchIcon,
+  router: GitBranchIcon,
+  state_update: DatabaseIcon,
+};
 
 function Kv({ label, value, tag }: { label: string; value: string; tag?: boolean }) {
   return (
@@ -73,16 +76,18 @@ export function StepDetailPanel() {
             <span className="text-[11px] uppercase tracking-widest text-faint">Step Details</span>
             <button
               onClick={() => setExpandedStep(null)}
-              className="ml-auto text-muted hover:text-ink text-[13px]"
+              className="ml-auto text-muted hover:text-ink transition-colors duration-fast"
               title="Close (Esc)"
             >
-              ✕
+              <XIcon size={ICON.sm} />
             </button>
           </div>
 
           <div className="px-4 pb-3 shrink-0">
             <div className="flex items-center gap-2">
-              <span className={`text-[13px] ${step.error ? "text-err" : "text-run"}`}>{glyphForType(step.type)}</span>
+              <span className={`shrink-0 ${step.error ? "text-err" : "text-run"}`}>
+                {(ICON_FOR_TYPE[step.type] ?? DatabaseIcon)({ size: ICON.sm })}
+              </span>
               <span className="text-ink truncate">{step.name}</span>
               {/* Room to say the word here, unlike the timeline row. Someone reading a step's
                   input and output should be told whose code produced them. */}
@@ -97,8 +102,10 @@ export function StepDetailPanel() {
                 {step.type}
               </Chip>
             </div>
-            <div className="mt-1 text-[11px]">
-              {step.error ? <span className="text-err">● failed</span> : <span className="text-ok">● ok</span>}
+            {/* Outcome, in the app's own status mark rather than a coloured bullet character. */}
+            <div className="mt-1.5 flex items-center gap-1.5 text-[11px]">
+              <StatusDot state={step.error ? "error" : "ok"} />
+              <span className={step.error ? "text-err" : "text-ok"}>{step.error ? "failed" : "ok"}</span>
             </div>
           </div>
 

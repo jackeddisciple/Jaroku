@@ -41,7 +41,8 @@ import { useGraphStore } from "../store/graphStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { sendLoadAgentGraph } from "../lib/socket.ts";
-import { RADIUS } from "../lib/tokens.ts";
+import { ICON, RADIUS } from "../lib/tokens.ts";
+import { PlusIcon, XIcon } from "./panelIcons.tsx";
 import { activeEdge, activeNodeId, latestStepForNode, stepEdge, stepNodeId, traversedEdges } from "../lib/traceGraphMap.ts";
 import type { AgentGraph, GraphNode as GNode, Step } from "../types.ts";
 import {
@@ -127,10 +128,10 @@ function StatusDot({ status }: { status?: NodeStatus }) {
 function PlusChip({ style }: { style: React.CSSProperties }) {
   return (
     <span
-      className="absolute flex items-center justify-center text-muted text-[13px] leading-none pointer-events-none"
+      className="absolute flex items-center justify-center text-muted pointer-events-none"
       style={{ width: 20, height: 20, borderRadius: RADIUS.control, background: "#202024", border: `1px solid ${BORDER}`, ...style }}
     >
-      +
+      <PlusIcon size={ICON.xs} />
     </span>
   );
 }
@@ -572,7 +573,9 @@ function NodeInspector({ nodeId, ntype, onClose }: { nodeId: string; ntype: stri
     <div className="absolute top-2 right-2 bottom-2 w-64 bg-panel rounded-card p-3 overflow-auto text-[12px] shadow-2xl">
       <div className="flex items-center justify-between mb-3">
         <span className="text-ink truncate">{nodeId}</span>
-        <button className="text-muted hover:text-ink" onClick={onClose}>✕</button>
+        <button className="text-muted transition-colors duration-fast hover:text-ink" onClick={onClose}>
+          <XIcon size={ICON.sm} />
+        </button>
       </div>
       <Row label="Type" value={ntype} />
       {ntype === "agent" && run && <Row label="Model" value={run.model} />}

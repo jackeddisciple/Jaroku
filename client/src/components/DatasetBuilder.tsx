@@ -24,7 +24,9 @@ import {
   sendUpdateExample,
 } from "../lib/socket.ts";
 import { csvToExamples } from "../lib/csv.ts";
+import { ICON } from "../lib/tokens.ts";
 import { Chip } from "./Chip.tsx";
+import { XIcon } from "./panelIcons.tsx";
 import type { DatasetExample } from "../types.ts";
 
 /** An input/expected pair, editable in place. Commits on blur; Escape reverts. */
@@ -107,9 +109,9 @@ function ExampleRow({
         type="button"
         onClick={() => sendDeleteExample(datasetId, example.id)}
         title="Remove this example"
-        className="text-faint hover:text-err opacity-0 group-hover:opacity-100 transition-opacity text-[13px] pt-1 shrink-0"
+        className="text-faint hover:text-err opacity-0 group-hover:opacity-100 transition-opacity pt-1 shrink-0"
       >
-        ×
+        <XIcon size={ICON.xs} />
       </button>
     </div>
   );
@@ -244,9 +246,9 @@ export function DatasetBuilder() {
           <span className={error ? "text-err" : "text-muted"}>{error ?? importNote}</span>
           <button
             onClick={() => { setError(null); setImportNote(null); }}
-            className="text-faint hover:text-ink"
+            className="shrink-0 text-faint transition-colors duration-fast hover:text-ink"
           >
-            ×
+            <XIcon size={ICON.xs} />
           </button>
         </div>
       )}

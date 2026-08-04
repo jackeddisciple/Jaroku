@@ -89,6 +89,7 @@ export function StatusDot({
   pulse = false,
   title,
   color,
+  icon,
 }: {
   state: BadgeState;
   size?: number;
@@ -96,8 +97,14 @@ export function StatusDot({
   title?: string;
   /** Override for a category accent — an audited tool is teal, not green. */
   color?: string;
+  /**
+   * Override the state's glyph, the same escape hatch StatusBadge has. "Waiting on a decision"
+   * and "running right now" are both amber and are not the same fact, and a clock misdescribes
+   * the second — the colour still carries the state, the icon narrows what kind.
+   */
+  icon?: (p: { size?: number }) => React.ReactElement;
 }) {
-  const Icon = ICON_FOR[state];
+  const Icon = icon ?? ICON_FOR[state];
   return (
     <span
       title={title}

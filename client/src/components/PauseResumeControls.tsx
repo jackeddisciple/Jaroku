@@ -4,6 +4,8 @@
 
 import { useTraceStore } from "../store/traceStore.ts";
 import { sendPauseRun, sendResumeRun } from "../lib/socket.ts";
+import { ICON } from "../lib/tokens.ts";
+import { PauseIcon, PlayIcon } from "./panelIcons.tsx";
 
 export function PauseResumeControls() {
   const activeRunId = useTraceStore((s) => s.activeRunId);
@@ -20,7 +22,7 @@ export function PauseResumeControls() {
         className={`${base} border-hair text-run hover:bg-active`}
         title="Pause at the next step boundary"
       >
-        <span className="text-[9px] leading-none">❚❚</span> Pause
+        <PauseIcon size={ICON.xs} /> Pause
       </button>
     );
   }
@@ -30,7 +32,7 @@ export function PauseResumeControls() {
       className={`${base} border-hair text-ok hover:bg-active`}
       title="Resume from the durable checkpoint"
     >
-      <span className="text-[9px] leading-none">▶</span> Resume
+      <PlayIcon size={ICON.xs} /> Resume
     </button>
   );
 }

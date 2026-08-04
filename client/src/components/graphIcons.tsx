@@ -5,28 +5,42 @@
 //     nodes (Postgres, Gmail, Slack, Anthropic, …). These are self-coloured, recognizable
 //     reconstructions (no external assets — the canvas CSP forbids remote images).
 //
+// The app's single-stroke-weight rule governs the FIRST family and deliberately not the second.
+// A logo is a reproduction of somebody else's mark, and redrawing Slack's pinwheel or the Claude
+// sunburst at our stroke weight would make them wrong rather than consistent. What the rule does
+// cover is everything generic — the globe, the sparkle, the hex nut, the plug — because those are
+// icons that happen to sit in a resource circle, and they are the ones that looked imported.
+//
 // Everything here is presentation-only; mappers turn a tool file path or a provider id into the
 // right brand mark + a human label.
 
 import type { ReactElement } from "react";
+import { ACCENT } from "../lib/tokens.ts";
+import { PlugIcon, svg } from "./panelIcons.tsx";
 
 type IconProps = { size?: number };
 
 /* ─────────────────────────── Flow (main-path) icons ─────────────────────────── */
+//
+// Drawn through panelIcons' shared svg() factory, at the one stroke weight, like every other
+// icon in the app. They used to be a mix: two solid fills and two strokes at 1.7, in a canvas
+// that also renders the plug and wrench from the trace panel's set — so a graph read as though
+// its icons had been collected from three places over three years, which is exactly what had
+// happened. The shapes are unchanged; only the treatment is.
 
 export function TriggerIcon({ size = 20 }: IconProps) {
-  // lightning bolt — the "this starts the run" mark
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M13 2 L4 14 h6 l-1 8 9-12 h-6 z" />
-    </svg>
+  // lucide:zap — "this starts the run"
+  return svg(
+    { size },
+    <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" />,
   );
 }
 
 export function AgentIcon({ size = 22 }: IconProps) {
-  // friendly robot head
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+  // lucide:bot — a friendly robot head
+  return svg(
+    { size },
+    <>
       <rect x="4" y="8" width="16" height="11" rx="3" />
       <path d="M12 4.5 v3" />
       <circle cx="12" cy="4" r="1.1" fill="currentColor" stroke="none" />
@@ -34,37 +48,33 @@ export function AgentIcon({ size = 22 }: IconProps) {
       <circle cx="15" cy="13" r="1.2" fill="currentColor" stroke="none" />
       <path d="M9.5 16.3 h5" />
       <path d="M4 12 H2.6 M20 12 h1.4" />
-    </svg>
+    </>,
   );
 }
 
 export function ToolIcon({ size = 20 }: IconProps) {
-  // bold solid wrench — unmistakably "tools", never a flower/sun
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M21 5.3a.9.9 0 0 0-1.5-.4l-2.6 2.6-2.1-.3-.3-2.1 2.6-2.6A.9.9 0 0 0 16.7 1a6 6 0 0 0-7.9 7.4L2.5 14.7a2.6 2.6 0 0 0 3.7 3.7l6.3-6.3A6 6 0 0 0 21 5.3z" />
-    </svg>
+  // lucide:wrench — the same wrench the plan card's tool sections use.
+  return svg(
+    { size },
+    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />,
   );
 }
 
 export function ActionIcon({ size = 20 }: IconProps) {
   // generic "do something" — a play-into-tray glyph
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+  return svg(
+    { size },
+    <>
       <path d="M5 12h9" />
       <path d="M11 8l4 4-4 4" />
       <path d="M17 5v14" />
-    </svg>
+    </>,
   );
 }
 
 export function TerminalIcon({ size = 18 }: IconProps) {
-  // stop / finish square
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <rect x="6" y="6" width="12" height="12" rx="2.5" />
-    </svg>
-  );
+  // lucide:square — the run stops here
+  return svg({ size }, <rect x="5" y="5" width="14" height="14" rx="3" />);
 }
 
 /* ─────────────────────────── Brand (resource) icons ─────────────────────────── */
@@ -113,13 +123,19 @@ export function GmailIcon({ size = 26 }: IconProps) {
   );
 }
 
+// A globe is not a logo, so it follows the icon rules rather than the brand ones: the shared
+// factory, one stroke weight, colour set by the wrapper rather than baked into the path.
 export function HttpIcon({ size = 26 }: IconProps) {
-  // generic HTTP / webhook — a globe
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#7FA9D6" strokeWidth="1.6" aria-hidden>
-      <circle cx="12" cy="12" r="8.5" />
-      <path d="M3.5 12h17M12 3.5c2.5 2.4 2.5 14.6 0 17M12 3.5c-2.5 2.4-2.5 14.6 0 17" />
-    </svg>
+    <span className="inline-flex" style={{ color: "#7FA9D6" }}>
+      {svg(
+        { size },
+        <>
+          <circle cx="12" cy="12" r="8.5" />
+          <path d="M3.5 12h17M12 3.5c2.5 2.4 2.5 14.6 0 17M12 3.5c-2.5 2.4-2.5 14.6 0 17" />
+        </>,
+      )}
+    </span>
   );
 }
 
@@ -144,23 +160,35 @@ export function OpenAIIcon({ size = 26 }: IconProps) {
   );
 }
 
+// The two generic fallbacks. Neither identifies a service, so neither is a brand mark, and both
+// are drawn to the icon rules — same sparkle the plan card uses for a model-written tool, same
+// hex nut for a tool with no logo to show.
 export function ModelChipIcon({ size = 24 }: IconProps) {
-  // generic / dry-run model — a bold AI sparkle
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="#A6B0FF" aria-hidden>
-      <path d="M12 1.8l2 5.9a3.2 3.2 0 0 0 2.3 2.3l5.9 2-5.9 2a3.2 3.2 0 0 0-2.3 2.3l-2 5.9-2-5.9a3.2 3.2 0 0 0-2.3-2.3l-5.9-2 5.9-2A3.2 3.2 0 0 0 10 7.7z" />
-      <circle cx="19" cy="5" r="1.7" />
-    </svg>
+    <span className="inline-flex" style={{ color: "#A6B0FF" }}>
+      {svg(
+        { size },
+        <>
+          <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+          <path d="M20 3v4" />
+          <path d="M22 5h-4" />
+        </>,
+      )}
+    </span>
   );
 }
 
 export function GenericToolIcon({ size = 24 }: IconProps) {
-  // custom tool with no known brand — a bold hex nut (reads as "hardware / tool")
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="#c3c7d1" aria-hidden>
-      <path d="M12 2.2l8.2 4.7v9.5L12 21.8l-8.2-4.7V7z" />
-      <circle cx="12" cy="12" r="3.5" fill="#18181b" />
-    </svg>
+    <span className="inline-flex" style={{ color: "#c3c7d1" }}>
+      {svg(
+        { size },
+        <>
+          <path d="M12 2.6l7.8 4.5v9L12 20.6l-7.8-4.5v-9z" />
+          <circle cx="12" cy="12" r="3.2" />
+        </>,
+      )}
+    </span>
   );
 }
 
@@ -172,16 +200,12 @@ const pretty = (stem: string) =>
   stem.replace(/[_-]+/g, " ").replace(/\.py$/, "").replace(/\b\w/g, (c) => c.toUpperCase()).trim();
 
 /** A tool file path (tools/postgres.py) → a brand mark + label for its resource circle. */
-/** The MCP bridge's mark: the same plug outline the badge uses, in the same rose. */
+/** The MCP bridge's mark: the badge's own plug, in the badge's own rose, at the app's weight. */
 function McpBridgeIcon({ size = 18 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#f472b6"
-      strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M12 22v-5" />
-      <path d="M9 8V2" />
-      <path d="M15 8V2" />
-      <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8z" />
-    </svg>
+    <span className="inline-flex" style={{ color: ACCENT.mcp }}>
+      <PlugIcon size={size} />
+    </span>
   );
 }
 

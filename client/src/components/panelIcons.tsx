@@ -202,6 +202,76 @@ export function InfoIcon(p: P) {
   );
 }
 
+/** lucide:git-fork — a branch. A run forked from another run's checkpoint. */
+export function GitForkIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <circle cx="12" cy="18" r="3" />
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="18" cy="6" r="3" />
+      <path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" />
+      <path d="M12 12v3" />
+    </>,
+  );
+}
+
+// ── Navigation and controls ─────────────────────────────────────────────────
+
+/** lucide:search — the sidebar's agent filter. */
+export function SearchIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <circle cx="11" cy="11" r="8" />
+      <path d="m21 21-4.3-4.3" />
+    </>,
+  );
+}
+
+/** lucide:settings — the one place the app's own configuration lives. */
+export function SettingsIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+      <circle cx="12" cy="12" r="3" />
+    </>,
+  );
+}
+
+/** lucide:chevron-right — "there is more this way". Never a `›` character. */
+export function ChevronRightIcon(p: P) {
+  return svg(p, <path d="m9 18 6-6-6-6" />);
+}
+
+/** lucide:play — resume a paused run from its durable checkpoint. */
+export function PlayIcon(p: P) {
+  return svg(p, <path d="M6 3.6a1 1 0 0 1 1.5-.87l12 8.4a1 1 0 0 1 0 1.74l-12 8.4A1 1 0 0 1 6 20.4z" />);
+}
+
+/** lucide:pause — halt the live run at its next node boundary. */
+export function PauseIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <rect x="6" y="4" width="4" height="16" rx="1" />
+      <rect x="14" y="4" width="4" height="16" rx="1" />
+    </>,
+  );
+}
+
+/**
+ * lucide:loader-circle — work in flight.
+ *
+ * The one state the four StatusBadge glyphs could not say. A clock is "waiting on a decision",
+ * which is a different thing from "running right now", and the app was drawing the difference
+ * with a pulsing `●` character.
+ */
+export function LoaderIcon(p: P) {
+  return svg(p, <path d="M21 12a9 9 0 1 1-6.219-8.56" />);
+}
+
 // ── Speakers ────────────────────────────────────────────────────────────────
 
 /** lucide:circle-user-round — the person. The one who asked for this. */

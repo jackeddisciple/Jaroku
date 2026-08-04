@@ -6,7 +6,7 @@ import { useBuildStore } from "../store/buildStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { agentStatus } from "../lib/agentStatus.ts";
-import { ProviderMark, BRAND_COLOR } from "../lib/icons.tsx";
+import { ProviderMark, BRAND_COLOR, JarokuGlyph } from "../lib/icons.tsx";
 import { Chip } from "./Chip.tsx";
 
 function StatusDot({ status }: { status: string }) {
@@ -37,7 +37,7 @@ export function TopBar() {
   return (
     <div className="flex items-center gap-3 px-4 h-11 shrink-0 bg-panel">
       {/* brand */}
-      <span className="text-run text-[15px] leading-none" aria-hidden>◭</span>
+      <JarokuGlyph />
       <span className="text-ink font-semibold">Jaroku</span>
 
       {/* active agent + status */}

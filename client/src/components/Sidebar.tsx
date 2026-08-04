@@ -11,14 +11,24 @@ import { relTime } from "../lib/format.ts";
 import { agentStatus, type AgentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark, ConnectorDot } from "../lib/icons.tsx";
 import { sendLoadRun } from "../lib/socket.ts";
+import { ICON } from "../lib/tokens.ts";
 import { Chip } from "./Chip.tsx";
+import { StatusDot } from "./StatusBadge.tsx";
+import {
+  ChevronRightIcon, GitForkIcon, LoaderIcon, PlusIcon, SearchIcon, SettingsIcon, XIcon,
+} from "./panelIcons.tsx";
 
 type Filter = "all" | "running" | "deployed" | "drafts";
 
+// A run's outcome, in the same three marks the rest of the app uses for the same three facts.
+// It was three font characters — a pulsing ●, a ✗ and a ✓ — which sat on the text baseline at
+// whatever weight the row happened to be and never optically matched the icons two panels over.
 function StatusGlyph({ status }: { status: RunStatus }) {
-  if (status === "running") return <span className="text-run animate-pulse" title="running">●</span>;
-  if (status === "error") return <span className="text-err" title="error">✗</span>;
-  return <span className="text-ok" title="completed">✓</span>;
+  if (status === "running") {
+    return <StatusDot state="pending" icon={LoaderIcon} pulse title="running" />;
+  }
+  if (status === "error") return <StatusDot state="error" icon={XIcon} title="error" />;
+  return <StatusDot state="ok" title="completed" />;
 }
 
 function AgentDot({ status }: { status: AgentStatus }) {
@@ -38,9 +48,13 @@ function RunRow({ run }: { run: RunSummary }) {
       className={`relative w-full text-left px-4 py-2 transition-colors ${active ? "bg-active" : "hover:bg-active/40"}`}
     >
       {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-ink" />}
-      {/* Branches (debug depth) are indented under the run they forked from, with a ⑂ marker. */}
+      {/* Branches (debug depth) are indented under the run they forked from, with a fork mark. */}
       <div className={`flex items-center gap-2 ${run.parent_run_id ? "pl-3" : ""}`}>
-        {run.parent_run_id && <span className="text-faint text-[11px]" title="branch">⑂</span>}
+        {run.parent_run_id && (
+          <span className="shrink-0 text-faint" title="branch">
+            <GitForkIcon size={ICON.xs} />
+          </span>
+        )}
         <StatusGlyph status={run.status} />
         <span className="text-ink truncate text-[12px]">{run.agent_id}</span>
         <span className="ml-auto text-faint text-[11px] shrink-0">{relTime(run.started_at)}</span>
@@ -78,7 +92,11 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
     >
       {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-ink" />}
       <div className="flex items-center gap-2">
-        {agent.runnable ? <AgentDot status={status} /> : <span className="text-err" title="missing agent.py">✗</span>}
+        {agent.runnable ? (
+          <AgentDot status={status} />
+        ) : (
+          <StatusDot state="error" icon={XIcon} title="missing agent.py" />
+        )}
         <span className="text-ink truncate">{agent.name}</span>
         {last && <span className="ml-auto text-faint text-[11px] shrink-0">{relTime(last.started_at)}</span>}
       </div>
@@ -150,14 +168,14 @@ export function Sidebar() {
             activeAgentId === null ? "bg-active text-ink" : "text-muted hover:bg-active/50 hover:text-ink"
           }`}
         >
-          <span className="text-[15px] leading-none">+</span> New Agent
+          <PlusIcon size={ICON.sm} /> New Agent
         </button>
       </div>
 
       {/* search */}
       <div className="px-3 pt-2 shrink-0">
         <div className="flex items-center gap-2 bg-active rounded-control px-2.5 py-1.5">
-          <span className="text-faint text-[12px]">⌕</span>
+          <span className="shrink-0 text-faint"><SearchIcon size={ICON.xs} /></span>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -203,7 +221,8 @@ export function Sidebar() {
       {/* bottom-anchored: settings + user/plan */}
       <div className="shrink-0 px-3 py-2.5 space-y-1">
         <button className="w-full flex items-center gap-2 text-[12px] text-muted hover:text-ink transition-colors px-2 py-1.5">
-          <span className="text-[13px]">⚙</span> Settings <span className="ml-auto text-faint">›</span>
+          <SettingsIcon size={ICON.sm} /> Settings
+          <span className="ml-auto text-faint"><ChevronRightIcon size={ICON.xs} /></span>
         </button>
         <div className="flex items-center gap-2 px-2 py-1.5">
           <span className="w-5 h-5 rounded-control bg-active text-ink text-[11px] flex items-center justify-center">J</span>

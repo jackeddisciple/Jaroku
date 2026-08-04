@@ -28,7 +28,8 @@ import { ArrowUpIcon, ChevronDownIcon, MicIcon, SaveToDatasetIcon } from "./comp
 import { StatusDot } from "./StatusBadge.tsx";
 import { StatRow, STAT_ICON, type Stat } from "./StatRow.tsx";
 import {
-  DollarSignIcon, FileIcon, HashIcon, PlugIcon, SparklesIcon, UserCircleIcon, ZapIcon,
+  ChevronRightIcon, DollarSignIcon, FileIcon, HashIcon, PlugIcon, SparklesIcon, UserCircleIcon,
+  XIcon, ZapIcon,
 } from "./panelIcons.tsx";
 import { useMcpStore, allMcpTools } from "../store/mcpStore.ts";
 import { ACCENT, ICON, STATUS } from "../lib/tokens.ts";
@@ -730,10 +731,14 @@ export function BuildPane() {
         {composerMode === "chat" && (contextLabel || text.trim()) && (
           <div className="mb-2 flex items-center gap-2 text-[11px]">
             {contextLabel && (
-              <Chip mono icon={<span className="text-faint">▸</span>}>
+              <Chip mono icon={<span className="text-faint"><ChevronRightIcon size={ICON.xs} /></span>}>
                 {contextLabel}
-                <button onClick={clearContext} className="text-faint hover:text-ink" title="Clear context">
-                  ×
+                <button
+                  onClick={clearContext}
+                  className="text-faint transition-colors duration-fast hover:text-ink"
+                  title="Clear context"
+                >
+                  <XIcon size={ICON.xs} />
                 </button>
               </Chip>
             )}

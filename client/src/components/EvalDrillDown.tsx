@@ -14,7 +14,9 @@ import { sendLoadRun } from "../lib/socket.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { fmtCost, fmtLatency } from "../lib/format.ts";
+import { ICON } from "../lib/tokens.ts";
 import { Chip } from "./Chip.tsx";
+import { ChevronRightIcon } from "./panelIcons.tsx";
 import type { EvalResults, ExampleCell } from "../types.ts";
 
 /** Compact score chip. Distinguishes scored / unscored / failed — three different things. */
@@ -77,8 +79,12 @@ function CellDetail({ cell, criteria }: { cell: ExampleCell; criteria: string[] 
           </span>
         )}
         {cell.runId && (
-          <button onClick={openTrace} className="text-faint hover:text-ink transition-colors ml-auto">
-            Open trace →
+          <button
+            onClick={openTrace}
+            className="ml-auto inline-flex items-center gap-1 text-faint transition-colors duration-fast hover:text-ink"
+          >
+            Open trace
+            <ChevronRightIcon size={ICON.xs} />
           </button>
         )}
       </div>

@@ -67,8 +67,17 @@ function FileRow({
   return (
     <div className="mt-2 first:mt-0">
       <div className="flex items-center gap-2 text-[12px]">
-        <button onClick={() => setOpen((o) => !o)} className="text-faint hover:text-ink w-3 shrink-0">
-          {open ? "▾" : "▸"}
+        {/* One mark that turns, not two glyphs — the same disclosure the plan card's sections
+            use, so opening a file and opening a section are visibly the same gesture. */}
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          title={open ? "Hide this file's changes" : "Show this file's changes"}
+          className={`shrink-0 text-faint transition-transform duration-fast hover:text-ink ${
+            open ? "" : "-rotate-90"
+          }`}
+        >
+          <ChevronDownIcon size={ICON.xs} />
         </button>
         {/* Between the disclosure and the path, so the type is the first thing on the row that is
             about the file itself. Faint: it classifies the row, it doesn't compete with the name. */}

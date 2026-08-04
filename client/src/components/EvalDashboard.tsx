@@ -19,7 +19,23 @@ import {
   resultsToJson,
   summaryToCsv,
 } from "../lib/evalExport.ts";
+import { ICON } from "../lib/tokens.ts";
+import { CheckIcon } from "./panelIcons.tsx";
 import type { EvalResults, ProviderMetrics } from "../types.ts";
+
+/**
+ * "This one leads the column." A green check rather than the `●` it replaces: a coloured bullet
+ * character is the same shape as every other bullet on the screen, and this one is the only mark
+ * in the table that means something. Same check the rest of the app uses for "this is the good
+ * one", at the same weight.
+ */
+function LeadMark({ title }: { title: string }) {
+  return (
+    <span className="ml-1 inline-flex align-middle text-ok" title={title}>
+      <CheckIcon size={ICON.xs} />
+    </span>
+  );
+}
 
 /** Cost cell. The three states — known, unknown, floor — must stay visually distinct. */
 function CostCell({ p }: { p: ProviderMetrics }) {
@@ -123,7 +139,7 @@ export function ComparisonTable({
                 <td className="py-1.5 px-2 text-right">
                   <QualityCell p={p} />
                   {lead.best === p.model && p.qualityScore !== null && (
-                    <span className="text-ok ml-1" title="highest quality">●</span>
+                    <LeadMark title="highest quality" />
                   )}
                 </td>
                 <td className="py-1.5 px-2 text-right"><CostCell p={p} /></td>
@@ -132,13 +148,13 @@ export function ComparisonTable({
                     {p.costUnknown ? "—" : fmtCost(p.costPerRunUsd ?? 0)}
                   </span>
                   {lead.cheapest === p.model && !p.costUnknown && (
-                    <span className="text-ok ml-1" title="cheapest per run">●</span>
+                    <LeadMark title="cheapest per run" />
                   )}
                 </td>
                 <td className="py-1.5 px-2 text-right text-muted tabular-nums">
                   {fmtLatency(p.latencyP50Ms)}
                   {lead.fastest === p.model && p.latencyP50Ms !== null && (
-                    <span className="text-ok ml-1" title="fastest">●</span>
+                    <LeadMark title="fastest" />
                   )}
                 </td>
                 <td className="py-1.5 px-2 text-right text-muted tabular-nums">{fmtLatency(p.latencyP95Ms)}</td>

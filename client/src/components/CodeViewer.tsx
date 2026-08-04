@@ -11,6 +11,8 @@
 
 import { useEffect, useState } from "react";
 import { orderedFiles, useBuildStore } from "../store/buildStore.ts";
+import { ICON } from "../lib/tokens.ts";
+import { StatusDot } from "./StatusBadge.tsx";
 
 const LANGS = ["python", "json", "markdown", "toml"] as const;
 const THEME = "vitesse-dark"; // muted, close to the app's near-black palette
@@ -62,7 +64,9 @@ function FileRail() {
             }`}
           >
             {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-ink" />}
-            {f.path === streamingFile && <span className="text-run animate-pulse">● </span>}
+            {f.path === streamingFile && (
+              <StatusDot state="pending" pulse size={ICON.xs} title="Still writing" />
+            )}
             {f.path}
             {f.readOnly && <span className="text-faint"> ⌀</span>}
           </button>
