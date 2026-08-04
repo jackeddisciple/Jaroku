@@ -30,6 +30,7 @@ import {
   getBezierPath,
   type Edge,
   type EdgeProps,
+  type FitViewOptions,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
@@ -70,6 +71,12 @@ const RES_GAP = 148; // horizontal spacing between resource circles
 // Closest two resource circles may sit, centre to centre: their own width plus a gap wide enough
 // that neither one's label can reach the other. The floor the model/tool row layout is held to.
 const RES_MIN_SEP = RES_D + 24;
+// How much of this canvas the Step Details overlay covers when it is open. It is drawn over
+// the graph rather than beside it, so this is the one number that tells fitView the right
+// edge is not really the right edge. Kept in step with StepDetailPanel's `w-[340px]`.
+const STEP_PANEL_W = 340;
+
+type FitOptions = Pick<FitViewOptions, "padding">;
 
 // ── palette (flat, n8n-ish) ───────────────────────────────────────────────────
 // Solid, opaque cards on the design-system panel colour; a slightly lighter fill marks the
@@ -713,6 +720,75 @@ export function GraphView() {
     return { ...built, hasModel: true, hasTool: tools.length > 0 };
   }, [base, files, provider, model]);
 
+  // ── keeping the graph in frame ──────────────────────────────────────────────
+  //
+  // `fitView` is an on-mount prop: React Flow frames the graph once, against the canvas as
+  // it was at that instant, and then holds that viewport for good. Three ordinary things
+  // move the frame out from under it, and each one silently cut nodes off past the right
+  // edge with nothing to say anything was missing:
+  //
+  //   1. Step Details opens. It is an OVERLAY — absolutely positioned over this canvas, not
+  //      a column that shrinks it — so the canvas never resizes and fitView, told to use the
+  //      full width, frames a third of the graph underneath an opaque panel. Reserving the
+  //      strip is the whole fix; there is nothing to observe.
+  //   2. The pane itself is resized (the column splitter, the window).
+  //   3. A different agent is selected, and its topology is wider than the last one's.
+  //
+  // Refit for all three — but only until the user takes the wheel. Once they have panned or
+  // zoomed deliberately, refitting is the view fighting them, so `userMoved` latches and
+  // this stops. Selecting a different agent is a new graph rather than a new view of the
+  // old one, so it releases the latch.
+  const rf = useRef<{ fitView: (o?: FitOptions) => void } | null>(null);
+  const userMoved = useRef(false);
+  const canvasRef = useRef<HTMLDivElement>(null);
+
+  // Kept in a ref as well as in render, so the ResizeObserver below — registered once — fits
+  // against the panel state at the time it fires rather than at the time it was created.
+  const detailOpen = useTraceStore((s) => Boolean(s.expandedStepId));
+  const fitOptions = useMemo<FitOptions>(() => {
+    if (!detailOpen) return { padding: 0.2 };
+    const width = canvasRef.current?.clientWidth ?? 0;
+    // Mirrors StepDetailPanel's `w-[340px] max-w-[85%]`, plus a gutter so the nearest node
+    // does not sit flush against the panel's edge.
+    const covered = Math.min(STEP_PANEL_W, width * 0.85) + 24;
+    return { padding: { top: "8%", bottom: "8%", left: "8%", right: `${Math.round(covered)}px` } };
+  }, [detailOpen]);
+
+  const fitRef = useRef(fitOptions);
+  fitRef.current = fitOptions;
+
+  const topologyKey = useMemo(
+    () => `${activeAgentId}|${base.nodes.map((n) => n.id).join(",")}|${resources.nodes.length}`,
+    [activeAgentId, base.nodes, resources.nodes.length],
+  );
+
+  useEffect(() => {
+    userMoved.current = false;
+  }, [activeAgentId]);
+
+  useEffect(() => {
+    if (userMoved.current) return;
+    rf.current?.fitView(fitOptions);
+  }, [topologyKey, fitOptions]);
+
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let frame = 0;
+    const ro = new ResizeObserver(() => {
+      // Coalesce to one refit per frame: a drag on the splitter fires this continuously.
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (!userMoved.current) rf.current?.fitView(fitRef.current);
+      });
+    });
+    ro.observe(el);
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+    };
+  }, []);
+
   const activeNode = useMemo(() => (running ? activeNodeId(bucket) : undefined), [running, bucket]);
   const selectedNode = useMemo(() => {
     const step = selectedStepId && bucket ? bucket[selectedStepId] : undefined;
@@ -778,14 +854,25 @@ export function GraphView() {
   if (!graph?.nodes?.length) return <Empty title="No graph to show" hint="This agent’s build_graph() produced no nodes." />;
 
   return (
-    <div className="graph-canvas relative h-full w-full">
+    <div ref={canvasRef} className="graph-canvas relative h-full w-full">
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         fitView
-        fitViewOptions={{ padding: 0.2 }}
+        fitViewOptions={fitOptions}
+        onInit={(inst) => {
+          rf.current = inst;
+        }}
+        // onMove, not onMoveStart: panning is a drag gesture, and its START fires on any
+        // mousedown on the canvas — so latching there would have counted an ordinary click
+        // on empty space as "the user is driving" and disabled refitting for good. onMove
+        // fires only once the viewport actually changes, and reports null when the change
+        // came from our own fitView.
+        onMove={(event) => {
+          if (event) userMoved.current = true;
+        }}
         minZoom={0.35}
         maxZoom={1.75}
         proOptions={{ hideAttribution: true }}
