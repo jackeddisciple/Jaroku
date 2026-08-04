@@ -633,6 +633,13 @@ function handleEvalCommand(cmd: ForwardedCommand): void {
           relay.broadcastEval({ type: "error", message: "an eval is already running" });
           return;
         }
+        // Same reason as runAgent: this id ends up as the working directory of every job's
+        // subprocess. Refusing it here also keeps a whole eval run and its jobs from being
+        // written for an agent that cannot exist.
+        if (!isSafeAgentId(cmd.agentId ?? "")) {
+          relay.broadcastEval({ type: "error", message: `invalid agent id: ${cmd.agentId}` });
+          return;
+        }
         const started = evalRunner.start({
           datasetId: cmd.datasetId,
           agentId: cmd.agentId,
@@ -1094,6 +1101,16 @@ function editAgent(agentId: string, instruction: string): void {
 function runAgent(input?: string, provider?: string, model?: string, agentId?: string): void {
   if (pool.interactiveRunning) {
     console.log("[manager] agent already running; ignoring run request");
+    return;
+  }
+  // The same check loadAgentGraph and agentProjectFiles already make. Without it a
+  // client-supplied id went straight into a subprocess spawn, and the Python contract — the
+  // last line of defence, not the first — was what turned it away. By then a process had been
+  // started and a run row written, so `../../etc/passwd` became a permanent errored run in the
+  // history that the sidebar renders like any other. Refuse it here instead.
+  if (agentId !== undefined && !isSafeAgentId(agentId)) {
+    console.log(`[manager] refusing run — invalid agent id ${JSON.stringify(agentId)}`);
+    relay.broadcastDebug({ type: "error", message: `invalid agent id: ${agentId}` });
     return;
   }
   // Mint the run id server-side so we can address the run (e.g. pause it) before run_start races
