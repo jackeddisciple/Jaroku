@@ -22,6 +22,12 @@ import { StatusBadge } from "../StatusBadge.tsx";
 import { OnboardingSurface } from "./OnboardingSurface.tsx";
 import { ProviderKeyForm } from "./ProviderKeyForm.tsx";
 
+/** Display names, so the card heading and the continue button cannot drift apart. */
+const PROVIDER_LABEL: Record<string, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+};
+
 /** What each provider is FOR, which is the thing a chooser actually needs to know. */
 const BLURB: Record<string, string> = {
   anthropic:
@@ -43,6 +49,23 @@ export function ConnectProviderStep() {
     // The free path is a real configuration, not an absence of one: the run provider is set to
     // the dry-run model so the next screen is already pointed somewhere that works.
     setProvider("fake");
+    proceed();
+  };
+
+  // The provider that is ALREADY connected, if any.
+  //
+  // Every other way off this screen goes through saving a key. That leaves out the person the
+  // README tells to write runtime/.env by hand before ever opening the app: they arrive here,
+  // see CONNECTED, and the only offers are "Try it free first" — which quietly points the next
+  // screen at the dry-run provider — and re-typing a key they already have. Continuing with
+  // what is already configured is the obvious answer and it was the one thing missing.
+  const connected = providers.filter((p) => p.configured);
+  const primary = connected.find((p) => p.powers_jaroku) ?? connected[0];
+
+  const continueConnected = () => {
+    // Same reasoning as skip(): point the next screen at something that works, which here is
+    // the key the user already has rather than the dry-run model.
+    if (primary) setProvider(primary.id);
     proceed();
   };
 
@@ -84,7 +107,7 @@ export function ConnectProviderStep() {
               >
                 <ProviderMark provider={p.id} size={16} />
                 <span className="text-[13px] text-ink" style={{ color: BRAND_COLOR[p.id] }}>
-                  {p.id === "anthropic" ? "Anthropic" : "OpenAI"}
+                  {PROVIDER_LABEL[p.id] ?? p.id}
                 </span>
                 {p.configured && (
                   <StatusBadge state="ok" variant="outline" label="connected" icon={KeyIcon} />
@@ -118,6 +141,22 @@ export function ConnectProviderStep() {
           );
         })}
       </div>
+
+      {/* Continue on the key that is already there. Only once the snapshot has landed —
+          before that, "nothing is configured" and "we have not been told yet" look the same,
+          and a button that appears a beat late is worse than one that waits. */}
+      {loaded && primary && (
+        <button
+          type="button"
+          onClick={continueConnected}
+          autoFocus
+          className="mt-6 rounded-control px-6 py-2.5 text-[13px] font-medium transition-opacity
+            hover:opacity-90 focus:outline-none focus:shadow-focusring"
+          style={{ background: "#4f46e5", color: "#fff" }}
+        >
+          Continue with {PROVIDER_LABEL[primary.id] ?? primary.id}
+        </button>
+      )}
 
       {/* The skip. A sibling of the cards above, not a way out of them. */}
       <div className="mt-6 border-t border-hair pt-4">
