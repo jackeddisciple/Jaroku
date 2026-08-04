@@ -11,6 +11,7 @@ import { relTime } from "../lib/format.ts";
 import { agentStatus, type AgentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark, ConnectorDot } from "../lib/icons.tsx";
 import { sendLoadRun } from "../lib/socket.ts";
+import { Chip } from "./Chip.tsx";
 
 type Filter = "all" | "running" | "deployed" | "drafts";
 
@@ -44,8 +45,10 @@ function RunRow({ run }: { run: RunSummary }) {
         <span className="text-ink truncate text-[12px]">{run.agent_id}</span>
         <span className="ml-auto text-faint text-[11px] shrink-0">{relTime(run.started_at)}</span>
       </div>
-      <div className={`mt-0.5 text-[11px] text-muted flex items-center gap-1.5 ${run.parent_run_id ? "pl-8" : "pl-5"}`}>
-        <span className="text-faint">{run.provider}</span>
+      <div className={`mt-0.5 text-[11px] text-muted flex items-center gap-1.5 ${run.parent_run_id ? "pl-7" : "pl-4"}`}>
+        {/* The same bare chip the agent row uses for the same fact, so a run and the agent it
+            belongs to name their provider identically. */}
+        <Chip size="sm" tone="faint" mono variant="bare">{run.provider}</Chip>
         {run.step_count != null && <><span className="text-faint">·</span><span>{run.step_count} steps</span></>}
         {run.parent_run_id != null && run.branch_from_seq != null && (
           <><span className="text-faint">·</span><span className="text-faint">branch @{run.branch_from_seq}</span></>
@@ -79,11 +82,23 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
         <span className="text-ink truncate">{agent.name}</span>
         {last && <span className="ml-auto text-faint text-[11px] shrink-0">{relTime(last.started_at)}</span>}
       </div>
-      <div className="mt-0.5 pl-3.5 text-[11px] text-muted flex items-center gap-1.5">
-        <ProviderMark provider={agent.default_provider} size={11} />
-        <span className="text-faint">{agent.default_provider}</span>
+      {/* A provider and a connector are both names of things this agent is wired to — the same
+          kind of label the plan card puts on a reviewed tool. Bare rather than filled: a row of
+          four filled chips under every agent would out-weigh the agent's own name above it. */}
+      <div className="mt-0.5 pl-2 flex flex-wrap items-center gap-0.5">
+        <Chip
+          size="sm"
+          tone="faint"
+          mono
+          variant="bare"
+          icon={<ProviderMark provider={agent.default_provider} size={10} />}
+        >
+          {agent.default_provider}
+        </Chip>
         {agent.connectors.map((c) => (
-          <span key={c} className="flex items-center gap-1"><ConnectorDot id={c} /><span className="text-faint">{c}</span></span>
+          <Chip key={c} size="sm" tone="faint" mono variant="bare" icon={<ConnectorDot id={c} />}>
+            {c}
+          </Chip>
         ))}
       </div>
     </button>
@@ -193,7 +208,7 @@ export function Sidebar() {
         <div className="flex items-center gap-2 px-2 py-1.5">
           <span className="w-5 h-5 rounded-control bg-active text-ink text-[11px] flex items-center justify-center">J</span>
           <span className="text-[12px] text-ink">jaroku</span>
-          <span className="ml-auto text-[10px] text-faint bg-active rounded-chip px-1.5 py-0.5">Free</span>
+          <Chip caps size="sm" tone="faint" className="ml-auto">Free</Chip>
         </div>
       </div>
     </div>

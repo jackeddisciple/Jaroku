@@ -52,6 +52,22 @@ export const STATUS = {
 
 export type StatusName = keyof typeof STATUS;
 
+/**
+ * Trace step types. The fourth category set, and it belongs here for the same reason the other
+ * three do: it says what *kind* of thing a step is, never how it went.
+ *
+ * Deliberately low-saturation. The timeline is a dense column of these and full-strength accents
+ * would turn it into a rainbow (doc §4.2), so each pair is a dim fill with a legible text colour
+ * rather than a bright one. They came out of lib/format.ts, where they were a pair of Tailwind
+ * class names and therefore unreachable to anything that needs a value.
+ */
+export const STEP_TYPE = {
+  llm_call: { fg: "#7fa9db", bg: "#182130" },
+  tool_call: { fg: "#79c48f", bg: "#16221a" },
+  state_update: { fg: "#c99a52", bg: "#241f18" },
+  router: { fg: "#a98cc4", bg: "#221826" },
+} as const;
+
 /** Surfaces, for the cases that need a value rather than a class (canvas, inline style). */
 export const SURFACE = {
   bg: "#0d0d0f",

@@ -15,6 +15,7 @@ import { ComparisonTable } from "./EvalDashboard.tsx";
 import { ExampleDrillDown } from "./EvalDrillDown.tsx";
 import { EvalRunBar } from "./EvalRunBar.tsx";
 import { relTime } from "../lib/format.ts";
+import { Chip } from "./Chip.tsx";
 
 type Mode = "dataset" | "results";
 
@@ -91,21 +92,20 @@ export function EvalsPanel() {
           {evals.length > 1 && (
             <div className="flex flex-wrap items-center gap-1.5 pb-3">
               {evals.slice(0, 6).map((e) => (
-                <button
+                <Chip
                   key={e.id}
                   onClick={() => selectEval(e.id)}
+                  selected={e.id === selectedEvalId}
+                  tone="faint"
                   title={`${e.status} · ${e.targets.map((t) => t.model).join(", ")}`}
-                  className={`rounded-control px-2 py-0.5 text-[11px] transition-colors ${
-                    e.id === selectedEvalId ? "bg-active text-ink" : "text-faint hover:text-ink"
-                  }`}
                 >
                   {relTime(e.started_at)}
                   {e.status !== "completed" && (
-                    <span className={e.status === "aborted_over_budget" ? "text-err ml-1" : "text-muted ml-1"}>
-                      · {e.status === "aborted_over_budget" ? "over budget" : e.status}
+                    <span className={e.status === "aborted_over_budget" ? "text-err" : "text-muted"}>
+                      {e.status === "aborted_over_budget" ? "over budget" : e.status}
                     </span>
                   )}
-                </button>
+                </Chip>
               ))}
             </div>
           )}

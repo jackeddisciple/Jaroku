@@ -19,6 +19,7 @@
 // what green means.
 
 import { ICON, STATUS, type StatusName } from "../lib/tokens.ts";
+import { Chip } from "./Chip.tsx";
 import { AlertTriangleIcon, CheckIcon, ClockIcon, XIcon } from "./panelIcons.tsx";
 
 export type BadgeState = StatusName;
@@ -69,19 +70,12 @@ export function StatusBadge({
 }) {
   const color = colorOverride ?? STATUS[state];
   const Icon = icon ?? ICON_FOR[state];
+  // Geometry comes from Chip — a status badge is a chip whose label happens to be a state, and
+  // it has to sit level with the file-reference chip two pixels away from it.
   return (
-    <span
-      title={title}
-      className="inline-flex items-center gap-1 rounded-chip px-1.5 py-[2px] text-[10px] font-medium uppercase tracking-wider align-middle"
-      style={
-        variant === "fill"
-          ? { color, backgroundColor: `${color}1f` }
-          : { color, boxShadow: `inset 0 0 0 1px ${color}59` }
-      }
-    >
-      <Icon size={10} />
+    <Chip caps size="sm" variant={variant} color={color} title={title} icon={<Icon size={10} />}>
       {label}
-    </span>
+    </Chip>
   );
 }
 

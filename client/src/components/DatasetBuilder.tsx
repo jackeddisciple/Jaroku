@@ -24,6 +24,7 @@ import {
   sendUpdateExample,
 } from "../lib/socket.ts";
 import { csvToExamples } from "../lib/csv.ts";
+import { Chip } from "./Chip.tsx";
 import type { DatasetExample } from "../types.ts";
 
 /** An input/expected pair, editable in place. Commits on blur; Escape reverts. */
@@ -181,19 +182,19 @@ export function DatasetBuilder() {
       {/* datasets */}
       <div className="px-4 pb-2 shrink-0 flex flex-wrap items-center gap-1.5">
         {datasets.map((d) => (
-          <button
+          <Chip
             key={d.id}
+            size="lg"
             onClick={() => selectDataset(d.id)}
+            selected={d.id === selectedDatasetId}
             title={d.name}
             // Names come from agent names, which are generated from prompts and can be long.
             // Truncate so one dataset can't push the row into a second line.
-            className={`flex items-center gap-1.5 max-w-[220px] rounded-control px-2.5 py-1 text-[12px] transition-colors ${
-              d.id === selectedDatasetId ? "bg-active text-ink" : "text-muted hover:text-ink"
-            }`}
+            className="max-w-[220px]"
+            figure={d.example_count ?? 0}
           >
             <span className="truncate">{d.name}</span>
-            <span className="text-faint tabular-nums shrink-0">{d.example_count ?? 0}</span>
-          </button>
+          </Chip>
         ))}
         <button
           onClick={() => sendCreateDataset(activeAgentId, nextDatasetName())}

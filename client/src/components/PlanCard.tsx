@@ -24,7 +24,8 @@ import { noteKind } from "../lib/noteKind.ts";
 import { BRAND_COLOR } from "../lib/icons.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
 import { ChevronDownIcon } from "./composerIcons.tsx";
-import { CHIP, Prose } from "./InlineCode.tsx";
+import { Chip } from "./Chip.tsx";
+import { Prose } from "./InlineCode.tsx";
 import { StatusBadge, StatusDot } from "./StatusBadge.tsx";
 import {
   AlertTriangleIcon,
@@ -200,18 +201,19 @@ function GraphStep({
 function ConnectorChip({ id }: { id: string }) {
   const brand = BRAND_COLOR[id];
   return (
-    // Same CHIP as an identifier in a sentence — one declaration, so the two can never drift.
-    // Muted rather than ink because this is a label *about* the tool, not the tool's own name.
-    <span className={`inline-flex items-center gap-1.5 ${CHIP} text-muted`}>
-      {brand && (
-        <span
-          className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
-          style={{ background: brand }}
-          aria-hidden
-        />
-      )}
+    // The same Chip as every other label in the app. Muted rather than ink because this is a
+    // label *about* the tool, not the tool's own name.
+    <Chip
+      mono
+      tone="muted"
+      icon={
+        brand ? (
+          <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: brand }} />
+        ) : undefined
+      }
+    >
       {id}
-    </span>
+    </Chip>
   );
 }
 
@@ -470,13 +472,15 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                     // audited; this code does not exist yet, and a tick here would say the one
                     // thing about a bespoke tool that is never true.
                     status={
-                      <span
-                        className="text-[10px] uppercase tracking-wider"
-                        style={{ color: ACCENT.bespoke }}
+                      <Chip
+                        caps
+                        size="sm"
+                        variant="bare"
+                        color={ACCENT.bespoke}
                         title="Not yet written — this tool will be generated, and is worth reading"
                       >
                         new
-                      </span>
+                      </Chip>
                     }
                   />
                 ))}

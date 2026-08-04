@@ -1,8 +1,6 @@
 // Small display helpers. Copy style from jarokudoc.md §11: short, factual, present tense
 // ("Worked for 4m 29s", "Edited 3 files"). Numbers never lie — cost/token math stays exact.
 
-import type { StepType } from "../types.ts";
-
 export function relTime(iso: string): string {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return "";
@@ -58,15 +56,6 @@ export function jsonPretty(v: unknown): string {
   }
 }
 
-// Type → muted badge classes. Color hints at kind; it is intentionally low-saturation so the
-// timeline reads as content, not a rainbow (doc §4.2 restraint). Status colors are separate.
-const BADGE: Record<StepType, string> = {
-  llm_call: "bg-[#182130] text-[#7fa9db]",
-  tool_call: "bg-[#16221a] text-[#79c48f]",
-  state_update: "bg-[#241f18] text-[#c99a52]",
-  router: "bg-[#221826] text-[#a98cc4]",
-};
-
-export function typeBadge(type: StepType): string {
-  return BADGE[type];
-}
+// The step-type colours moved to lib/tokens.ts as STEP_TYPE. They are a category accent set, which
+// is what that file is for, and as a pair of Tailwind class names they could only ever be handed
+// to a `className` — the chip that renders them takes values.

@@ -14,6 +14,7 @@ import { sendLoadRun } from "../lib/socket.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { fmtCost, fmtLatency } from "../lib/format.ts";
+import { Chip } from "./Chip.tsx";
 import type { EvalResults, ExampleCell } from "../types.ts";
 
 /** Compact score chip. Distinguishes scored / unscored / failed — three different things. */
@@ -34,16 +35,18 @@ function ScoreChip({ cell, active, onClick }: { cell: ExampleCell; active: boole
           ? "text-err"
           : "text-ink";
   return (
-    <button
+    <Chip
       onClick={onClick}
+      selected={active}
+      // The model id is the identifier and stays mono; the score rides in the figure slot, which
+      // is tabular everywhere, so a column of these lines up.
+      mono
+      tone="muted"
       title={`${cell.model}${failed ? ` — ${cell.error ?? cell.status}` : cell.score === null ? ` — ${cell.scoreError ?? "unscored"}` : ""}`}
-      className={`flex items-baseline gap-1.5 rounded-control px-2 py-1 text-[11px] transition-colors ${
-        active ? "bg-active" : "hover:bg-active/50"
-      }`}
+      figure={<span className={tone}>{label}</span>}
     >
-      <span className="text-muted truncate max-w-[110px]">{cell.model}</span>
-      <span className={`${tone} tabular-nums`}>{label}</span>
-    </button>
+      <span className="truncate max-w-[110px]">{cell.model}</span>
+    </Chip>
   );
 }
 

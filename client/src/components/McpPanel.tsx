@@ -23,6 +23,7 @@ import {
   sendSetMcpToolImpact,
 } from "../lib/socket.ts";
 import { ACCENT, ICON, STATUS, TEXT } from "../lib/tokens.ts";
+import { Chip } from "./Chip.tsx";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { StatusBadge, StatusDot } from "./StatusBadge.tsx";
 import {
@@ -320,18 +321,23 @@ export function McpPanel() {
       {/* Server chips */}
       <div className="flex shrink-0 items-center gap-1 overflow-x-auto px-4 py-2">
         {servers.map((s) => (
-          <button
+          <Chip
             key={s.id}
+            size="lg"
             onClick={() => setSelectedId(s.id)}
-            className={`flex max-w-[220px] shrink-0 items-center gap-1.5 rounded-control px-2 py-1 text-[12px] transition-colors ${
-              selected?.id === s.id ? "bg-active text-ink" : "text-muted hover:text-ink"
-            }`}
+            selected={selected?.id === s.id}
+            className="max-w-[220px] shrink-0"
+            figure={s.tools.length}
+            icon={
+              <StatusDot
+                state={STATUS_COPY[s.status].state}
+                size={7}
+                color={s.status === "connected" ? ACCENT.mcp : undefined}
+              />
+            }
           >
-            <StatusDot state={STATUS_COPY[s.status].state} size={7}
-              color={s.status === "connected" ? ACCENT.mcp : undefined} />
             <span className="truncate">{s.label}</span>
-            <span className="text-faint tabular-nums">{s.tools.length}</span>
-          </button>
+          </Chip>
         ))}
         <button className={quietBtn + " shrink-0 inline-flex items-center gap-1"}
           onClick={() => setAdding((v) => !v)}>

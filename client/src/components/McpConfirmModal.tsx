@@ -24,7 +24,8 @@ import { useMcpStore } from "../store/mcpStore.ts";
 import { sendResolveMcpConfirm } from "../lib/socket.ts";
 import { ACCENT, ICON, STATUS } from "../lib/tokens.ts";
 import { primaryBtn, quietBtn } from "./buttons.ts";
-import { PlugIcon, ShieldAlertIcon } from "./panelIcons.tsx";
+import { McpBadge } from "./McpBadge.tsx";
+import { ShieldAlertIcon } from "./panelIcons.tsx";
 import type { McpConfirmVerdict } from "../types.ts";
 
 /** Pretty-print the bridge's JSON args, falling back to the raw text if it isn't JSON. */
@@ -100,13 +101,10 @@ export function McpConfirmModal() {
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span
-              className="inline-flex items-center gap-1 rounded-chip px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
-              style={{ color: ACCENT.mcp, boxShadow: `inset 0 0 0 1px ${ACCENT.mcp}59` }}
-            >
-              <PlugIcon size={ICON.xs} />
-              MCP
-            </span>
+            {/* The badge itself, not a copy of it. This is the one dialog where a user has to
+                recognise the mark instantly, and a hand-drawn near-match would be the version
+                they had never seen before. */}
+            <McpBadge title="From an MCP server — third-party code Jaroku has not reviewed" />
             <span className="font-mono text-[13px] text-ink">{request.tool}</span>
             <span className="text-[11px] text-muted">on {request.server}</span>
           </div>

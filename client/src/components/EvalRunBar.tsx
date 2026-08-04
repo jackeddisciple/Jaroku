@@ -20,6 +20,7 @@ import { useTraceStore } from "../store/traceStore.ts";
 import { RUN_PROVIDERS } from "../store/uiStore.ts";
 import { sendCancelEval, sendEstimateEval, sendStartEval } from "../lib/socket.ts";
 import { fmtCost } from "../lib/format.ts";
+import { Chip } from "./Chip.tsx";
 import type { EvalTarget } from "../types.ts";
 
 const key = (t: EvalTarget) => `${t.provider}/${t.model}`;
@@ -99,17 +100,18 @@ export function EvalRunBar() {
             const on = targets.some((x) => key(x) === key(t));
             const free = p.id === "fake";
             return (
-              <button
+              <Chip
                 key={key(t)}
                 onClick={() => toggle(t)}
+                selected={on}
                 disabled={running}
+                // "Dry run (free)" is prose; a model id is an identifier. Only the latter is mono.
+                mono={!free}
                 title={free ? "Free — no API calls" : `${p.label} · billed per token`}
-                className={`rounded-control px-2 py-1 text-[11px] whitespace-nowrap transition-colors disabled:opacity-40 ${
-                  on ? "bg-active text-ink" : "text-muted hover:text-ink"
-                }`}
+                className="whitespace-nowrap"
               >
                 {free ? "Dry run (free)" : m}
-              </button>
+              </Chip>
             );
           }),
         )}

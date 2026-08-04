@@ -7,6 +7,7 @@ import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { agentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark, BRAND_COLOR } from "../lib/icons.tsx";
+import { Chip } from "./Chip.tsx";
 
 function StatusDot({ status }: { status: string }) {
   const color = status === "running" ? "bg-run" : status === "draft" ? "bg-faint" : "bg-ok";
@@ -50,11 +51,11 @@ export function TopBar() {
 
       <div className="ml-auto flex items-center gap-2">
         {/* provider chip — brand color only because it's the chosen provider */}
-        <span className="flex items-center gap-2 text-[12px] text-muted bg-active rounded-chip px-2.5 py-1">
-          <ProviderMark provider={provider} />
-          <span className="text-ink">{PROVIDER_LABEL[provider] ?? provider}</span>
-          {provider !== "fake" && <span className="text-faint">{model}</span>}
-        </span>
+        <Chip size="lg" tone="ink" icon={<ProviderMark provider={provider} />}>
+          {PROVIDER_LABEL[provider] ?? provider}
+          {/* A model id is an identifier; the provider's name is prose. */}
+          {provider !== "fake" && <span className="font-mono text-faint">{model}</span>}
+        </Chip>
 
         <button
           title="Sharing isn't available yet"

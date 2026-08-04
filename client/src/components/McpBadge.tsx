@@ -11,6 +11,7 @@
 // external tool teaches people to stop looking.
 
 import { ACCENT, ICON, STATUS } from "../lib/tokens.ts";
+import { Chip } from "./Chip.tsx";
 import { PlugIcon, ShieldAlertIcon } from "./panelIcons.tsx";
 
 /**
@@ -39,14 +40,19 @@ export function McpBadge({
     );
   }
   return (
-    <span
-      className="inline-flex shrink-0 items-center gap-1 rounded-chip px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
-      style={{ color: ACCENT.mcp, boxShadow: `inset 0 0 0 1px ${ACCENT.mcp}59` }}
+    // Chip geometry, so this badge and the "high impact" one beside it and the "approved" one in
+    // the card above are all one size. Only the colour and the word are this component's own.
+    <Chip
+      caps
+      size="sm"
+      variant="outline"
+      color={ACCENT.mcp}
       title={label}
+      className="shrink-0"
+      icon={<PlugIcon size={ICON.xs} />}
     >
-      <PlugIcon size={ICON.xs} />
       MCP
-    </span>
+    </Chip>
   );
 }
 
@@ -57,17 +63,20 @@ export function McpBadge({
  */
 export function HighImpactBadge({ reason }: { reason?: string }) {
   return (
-    <span
-      className="inline-flex shrink-0 items-center gap-1 rounded-chip px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
-      style={{ color: STATUS.pending, boxShadow: `inset 0 0 0 1px ${STATUS.pending}59` }}
+    <Chip
+      caps
+      size="sm"
+      variant="outline"
+      color={STATUS.pending}
+      className="shrink-0"
+      icon={<ShieldAlertIcon size={ICON.xs} />}
       title={
         reason
           ? `Asks for your confirmation before its first call — ${reason}`
           : "Asks for your confirmation before its first call"
       }
     >
-      <ShieldAlertIcon size={ICON.xs} />
       confirms
-    </span>
+    </Chip>
   );
 }

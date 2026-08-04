@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import type { Step } from "../types.ts";
-import { fmtCost, fmtDuration, fmtTokens, typeBadge } from "../lib/format.ts";
+import { fmtCost, fmtDuration, fmtTokens } from "../lib/format.ts";
+import { STEP_TYPE } from "../lib/tokens.ts";
+import { Chip } from "./Chip.tsx";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
@@ -47,9 +49,17 @@ export function StepRow({ step }: { step: Step }) {
         }}
       >
         <span className="text-faint w-9 shrink-0 tabular-nums">#{step.seq}</span>
-        <span className={`text-[11px] px-1.5 py-px rounded-chip ${typeBadge(step.type)}`}>
+        {/* A step type is an identifier the schema fixes, not a word we chose — so it is mono,
+            and it wears the same chip as every other label in the app. */}
+        <Chip
+          mono
+          size="sm"
+          color={STEP_TYPE[step.type].fg}
+          background={STEP_TYPE[step.type].bg}
+          className="shrink-0"
+        >
           {step.type}
-        </span>
+        </Chip>
         <span className="text-ink truncate">{step.name}</span>
         {/* Derived from the AGENT's manifest, not from the step: the frozen Step schema has
             no provenance field and must not grow one. Compact, because this row is dense and

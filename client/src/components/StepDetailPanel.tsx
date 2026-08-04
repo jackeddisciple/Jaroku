@@ -5,7 +5,9 @@
 
 import { useEffect } from "react";
 import { useTraceStore } from "../store/traceStore.ts";
-import { fmtCost, fmtDuration, fmtTokens, typeBadge } from "../lib/format.ts";
+import { fmtCost, fmtDuration, fmtTokens } from "../lib/format.ts";
+import { STEP_TYPE } from "../lib/tokens.ts";
+import { Chip } from "./Chip.tsx";
 import { StepDetail } from "./StepDetail.tsx";
 import { StateBranchEditor } from "./StateBranchEditor.tsx";
 import { McpBadge } from "./McpBadge.tsx";
@@ -27,7 +29,7 @@ function Kv({ label, value, tag }: { label: string; value: string; tag?: boolean
       <span className="text-muted">{label}</span>
       <span className="flex items-center gap-2">
         <span className="text-ink tabular-nums">{value}</span>
-        {tag && <span className="text-[9px] text-faint bg-active rounded-chip px-1 py-px uppercase tracking-wide">this step</span>}
+        {tag && <Chip caps size="sm" tone="faint">this step</Chip>}
       </span>
     </div>
   );
@@ -85,7 +87,15 @@ export function StepDetailPanel() {
               {/* Room to say the word here, unlike the timeline row. Someone reading a step's
                   input and output should be told whose code produced them. */}
               {step.type === "tool_call" && mcpNames.has(step.name) && <McpBadge />}
-              <span className={`ml-auto text-[11px] px-1.5 py-px rounded-chip ${typeBadge(step.type)}`}>{step.type}</span>
+              <Chip
+                mono
+                size="sm"
+                color={STEP_TYPE[step.type].fg}
+                background={STEP_TYPE[step.type].bg}
+                className="ml-auto shrink-0"
+              >
+                {step.type}
+              </Chip>
             </div>
             <div className="mt-1 text-[11px]">
               {step.error ? <span className="text-err">● failed</span> : <span className="text-ok">● ok</span>}

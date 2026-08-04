@@ -19,6 +19,7 @@ import { inputKey, RUN_PROVIDERS, useUiStore } from "../store/uiStore.ts";
 import { sendBranchRun, sendEdit, sendExplain, sendPlanAgent, sendPromoteTestInput, sendRun } from "../lib/socket.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
+import { Chip } from "./Chip.tsx";
 import { DiffCard } from "./DiffCard.tsx";
 import { Prose } from "./InlineCode.tsx";
 import { StreamingFileRow } from "./FileList.tsx";
@@ -607,30 +608,25 @@ export function BuildPane() {
             {CONNECTORS.map((c) => {
               const on = selected.includes(c.id);
               return (
-                <button
+                // Ticked means "this agent gets the audited template", so the check is the
+                // reviewed accent — the same colour it will wear in the plan a moment later.
+                //
+                // `reserveIcon` keeps the slot there when unticked. Rendering the check only when
+                // on made each chip ~14px wider the moment you clicked it, and with three
+                // connectors that was enough to wrap the row onto two lines and shove the whole
+                // composer down mid-click. A control must not resize because you used it.
+                <Chip
                   key={c.id}
+                  size="lg"
                   onClick={() => toggle(c.id)}
+                  selected={on}
                   disabled={busy}
                   title={c.hint}
-                  className={`inline-flex items-center gap-1.5 rounded-control px-2.5 py-1 text-[12px] transition-colors disabled:opacity-50 ${
-                    on ? "bg-active text-ink" : "bg-panel text-muted hover:text-ink"
-                  }`}
+                  reserveIcon
+                  icon={on ? <StatusDot state="ok" size={11} color={ACCENT.reviewed} /> : undefined}
                 >
-                  {/* Ticked means "this agent gets the audited template", so the check is the
-                      reviewed accent — the same colour it will wear in the plan a moment later.
-
-                      The slot is always there, empty when unticked. Rendering the check only when
-                      on made each button ~14px wider the moment you clicked it, and with three
-                      connectors that was enough to wrap the row onto two lines and shove the whole
-                      composer down mid-click. A control must not resize because you used it. */}
-                  <span
-                    className="inline-flex w-[11px] shrink-0 items-center justify-center"
-                    aria-hidden
-                  >
-                    {on && <StatusDot state="ok" size={11} color={ACCENT.reviewed} />}
-                  </span>
                   {c.label}
-                </button>
+                </Chip>
               );
             })}
             {/* Locked once a plan exists, because by then it does nothing. Generation takes the
@@ -709,10 +705,18 @@ export function BuildPane() {
                           advertise the same tool name and mean different things. */}
                       <span className="text-faint truncate">{t.serverLabel}</span>
                       {high && (
-                        <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide"
-                          style={{ color: STATUS.pending }} title="Asks before it runs the first time">
+                        // The same word, the same colour and now the same chip the plan card and
+                        // the MCP panel use for this fact one screen away.
+                        <Chip
+                          caps
+                          size="sm"
+                          variant="bare"
+                          color={STATUS.pending}
+                          className="ml-auto shrink-0"
+                          title="Asks before it runs the first time"
+                        >
                           confirms
-                        </span>
+                        </Chip>
                       )}
                     </button>
                   );
@@ -726,13 +730,12 @@ export function BuildPane() {
         {composerMode === "chat" && (contextLabel || text.trim()) && (
           <div className="mb-2 flex items-center gap-2 text-[11px]">
             {contextLabel && (
-              <span className="inline-flex items-center gap-1 bg-active rounded-chip px-2 py-0.5 font-mono text-muted">
-                <span className="text-faint">▸</span>
+              <Chip mono icon={<span className="text-faint">▸</span>}>
                 {contextLabel}
-                <button onClick={clearContext} className="text-faint hover:text-ink ml-0.5" title="Clear context">
+                <button onClick={clearContext} className="text-faint hover:text-ink" title="Clear context">
                   ×
                 </button>
-              </span>
+              </Chip>
             )}
             {text.trim() && <span className="text-faint ml-auto">⌘↵ will {routeLabel(intent)}</span>}
           </div>
