@@ -78,14 +78,14 @@ function ExampleRow({
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commit(); }
         }}
         rows={Math.min(draft.split("\n").length + 1, 6)}
-        className="w-full resize-none bg-active text-ink rounded px-2 py-1 text-[12px] outline-none focus:ring-1 focus:ring-[#2a2a2e]"
+        className="w-full resize-none bg-active text-ink rounded-control px-2 py-1 text-[12px] outline-none focus:ring-1 focus:ring-[#2a2a2e]"
       />
     ) : (
       <button
         type="button"
         onClick={() => begin(which)}
         title="Click to edit"
-        className={`w-full text-left text-[12px] rounded px-2 py-1 -mx-2 hover:bg-active/50 transition-colors whitespace-pre-wrap break-words ${
+        className={`w-full text-left text-[12px] rounded-control px-2 py-1 -mx-2 hover:bg-active/50 transition-colors whitespace-pre-wrap break-words ${
           text ? (which === "input" ? "text-ink" : "text-muted") : "text-faint italic"
         }`}
       >
@@ -187,7 +187,7 @@ export function DatasetBuilder() {
             title={d.name}
             // Names come from agent names, which are generated from prompts and can be long.
             // Truncate so one dataset can't push the row into a second line.
-            className={`flex items-center gap-1.5 max-w-[220px] rounded px-2.5 py-1 text-[12px] transition-colors ${
+            className={`flex items-center gap-1.5 max-w-[220px] rounded-control px-2.5 py-1 text-[12px] transition-colors ${
               d.id === selectedDatasetId ? "bg-active text-ink" : "text-muted hover:text-ink"
             }`}
           >
@@ -198,7 +198,7 @@ export function DatasetBuilder() {
         <button
           onClick={() => sendCreateDataset(activeAgentId, nextDatasetName())}
           disabled={!connected}
-          className="rounded px-2.5 py-1 text-[12px] text-faint hover:text-ink transition-colors disabled:opacity-40 shrink-0"
+          className="rounded-control px-2.5 py-1 text-[12px] text-faint hover:text-ink transition-colors disabled:opacity-40 shrink-0"
         >
           + New dataset
         </button>
@@ -278,12 +278,12 @@ export function DatasetBuilder() {
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addExample(); } }}
             disabled={!connected}
             placeholder="Add an input the agent should handle…"
-            className="flex-1 bg-panel text-ink placeholder:text-faint rounded px-2.5 py-1.5 text-[12px] outline-none focus:ring-1 focus:ring-[#2a2a2e] disabled:opacity-50"
+            className="flex-1 bg-panel text-ink placeholder:text-faint rounded-control px-2.5 py-1.5 text-[12px] outline-none focus:ring-1 focus:ring-[#2a2a2e] disabled:opacity-50"
           />
           <button
             onClick={addExample}
             disabled={!connected || !newInput.trim()}
-            className="rounded px-2.5 py-1.5 text-[12px] bg-active text-ink transition-opacity disabled:opacity-30"
+            className="rounded-control px-2.5 py-1.5 text-[12px] bg-active text-ink transition-opacity disabled:opacity-30"
           >
             Add
           </button>

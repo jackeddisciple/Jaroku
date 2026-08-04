@@ -252,7 +252,7 @@ function ModelSelector({
         <ChevronDownIcon size={13} />
       </button>
       {open && (
-        <div className="absolute bottom-full mb-2 left-0 z-30 min-w-[190px] rounded-lg bg-panel border border-edge shadow-2xl py-1">
+        <div className="absolute bottom-full mb-2 left-0 z-30 min-w-[190px] rounded-card bg-panel border border-edge shadow-2xl py-1">
           {RUN_PROVIDERS.map((p) => (
             <div key={p.id}>
               <div className="px-3 pt-1.5 pb-0.5 text-[10px] uppercase tracking-wide text-faint">{p.label}</div>
@@ -612,7 +612,7 @@ export function BuildPane() {
                   onClick={() => toggle(c.id)}
                   disabled={busy}
                   title={c.hint}
-                  className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[12px] transition-colors disabled:opacity-50 ${
+                  className={`inline-flex items-center gap-1.5 rounded-control px-2.5 py-1 text-[12px] transition-colors disabled:opacity-50 ${
                     on ? "bg-active text-ink" : "bg-panel text-muted hover:text-ink"
                   }`}
                 >
@@ -651,7 +651,7 @@ export function BuildPane() {
                   ? "The name is fixed once a plan is on the table — discard the plan to change it"
                   : "Optional. Otherwise the name is taken from your description."
               }
-              className="ml-auto w-40 bg-panel font-mono text-ink placeholder:text-faint rounded px-2.5 py-1 text-[12px] outline-none focus:ring-1 focus:ring-[#2a2a2e] disabled:opacity-50"
+              className="ml-auto w-40 bg-panel font-mono text-ink placeholder:text-faint rounded-control px-2.5 py-1 text-[12px] outline-none focus:ring-1 focus:ring-[#2a2a2e] disabled:opacity-50"
             />
           </div>
         )}
@@ -685,7 +685,7 @@ export function BuildPane() {
             </button>
 
             {mcpOpen && (
-              <div className="mt-1.5 max-h-40 overflow-y-auto rounded bg-panel p-1.5">
+              <div className="mt-1.5 max-h-40 overflow-y-auto rounded-card bg-panel p-1.5">
                 {mcpTools.map((t) => {
                   const on = selectedMcp.includes(t.ref);
                   const high = t.impact === "high";
@@ -695,7 +695,7 @@ export function BuildPane() {
                       onClick={() => toggleMcp(t.ref)}
                       disabled={busy}
                       title={`${t.serverLabel} — ${t.impact_reason}`}
-                      className={`flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[12px] transition-colors disabled:opacity-50 ${
+                      className={`flex w-full items-center gap-1.5 rounded-control px-1.5 py-1 text-left text-[12px] transition-colors disabled:opacity-50 ${
                         on ? "bg-active text-ink" : "text-muted hover:text-ink"
                       }`}
                     >
@@ -726,7 +726,7 @@ export function BuildPane() {
         {composerMode === "chat" && (contextLabel || text.trim()) && (
           <div className="mb-2 flex items-center gap-2 text-[11px]">
             {contextLabel && (
-              <span className="inline-flex items-center gap-1 bg-active rounded px-2 py-0.5 font-mono text-muted">
+              <span className="inline-flex items-center gap-1 bg-active rounded-chip px-2 py-0.5 font-mono text-muted">
                 <span className="text-faint">▸</span>
                 {contextLabel}
                 <button onClick={clearContext} className="text-faint hover:text-ink ml-0.5" title="Clear context">
@@ -739,7 +739,7 @@ export function BuildPane() {
         )}
 
         {/* the card — textarea sits directly in it; only the toggle + send read as solid elements */}
-        <div className="rounded-2xl bg-panel border border-edge" style={{ padding: "14px 16px 12px" }}>
+        <div className="rounded-modal bg-panel border border-edge" style={{ padding: "14px 16px 12px" }}>
           {/* input slot: the textarea and the live waveform crossfade in place (~200ms) so the
               transition from typing to recording is smooth and the card doesn't jump. */}
           <div className="relative" style={{ height: showWave ? recordHeight : undefined }}>
@@ -838,7 +838,7 @@ export function BuildPane() {
 
             {/* right — the only two solid elements: mode toggle + send circle */}
             <div className="flex items-center gap-2.5">
-              <div className="flex items-center rounded-[20px] bg-active p-0.5">
+              <div className="flex items-center rounded-full bg-active p-0.5">
                 {(["chat", "test"] as const).map((m) => {
                   const active = composerMode === m;
                   return (
@@ -846,7 +846,7 @@ export function BuildPane() {
                       key={m}
                       type="button"
                       onClick={() => setComposerMode(m)}
-                      className={`rounded-[16px] text-[12px] transition-colors ${active ? "" : "text-muted hover:text-ink"}`}
+                      className={`rounded-full text-[12px] transition-colors ${active ? "" : "text-muted hover:text-ink"}`}
                       style={{ padding: "5px 11px", background: active ? "#e4e4e7" : "transparent", color: active ? "#0d0d0f" : undefined }}
                     >
                       {m === "chat" ? "Chat" : "Test"}

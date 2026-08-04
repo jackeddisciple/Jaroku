@@ -41,6 +41,7 @@ import { useGraphStore } from "../store/graphStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { sendLoadAgentGraph } from "../lib/socket.ts";
+import { RADIUS } from "../lib/tokens.ts";
 import { activeEdge, activeNodeId, latestStepForNode, stepEdge, stepNodeId, traversedEdges } from "../lib/traceGraphMap.ts";
 import type { AgentGraph, GraphNode as GNode, Step } from "../types.ts";
 import {
@@ -127,7 +128,7 @@ function PlusChip({ style }: { style: React.CSSProperties }) {
   return (
     <span
       className="absolute flex items-center justify-center text-muted text-[13px] leading-none pointer-events-none"
-      style={{ width: 20, height: 20, borderRadius: 6, background: "#202024", border: `1px solid ${BORDER}`, ...style }}
+      style={{ width: 20, height: 20, borderRadius: RADIUS.control, background: "#202024", border: `1px solid ${BORDER}`, ...style }}
     >
       +
     </span>
@@ -196,13 +197,13 @@ function FlowNode({ data }: NodeProps) {
     return (
       <div className="relative select-none font-mono" style={{ width: AGENT_W, height: AGENT_H }}>
         <div
-          className="relative flex items-center gap-4 rounded-2xl px-5 h-full overflow-hidden"
+          className="relative flex items-center gap-4 rounded-card px-5 h-full overflow-hidden"
           style={{ background: stateBg(d), border: `1px solid ${BORDER}` }}
         >
-          <AccentBar d={d} radius={16} />
+          <AccentBar d={d} radius={RADIUS.card} />
           <StatusDot status={d.status} />
           <span
-            className="flex items-center justify-center rounded-xl shrink-0"
+            className="flex items-center justify-center rounded-control shrink-0"
             style={{ width: 46, height: 46, background: ICON_BG, color: accent, border: `1px solid ${BORDER}` }}
           >
             <Icon size={24} />
@@ -238,10 +239,10 @@ function FlowNode({ data }: NodeProps) {
   return (
     <div className="relative select-none font-mono" style={{ width: CARD_W, height: CARD_H }}>
       <div
-        className="relative flex items-center justify-center rounded-2xl h-full overflow-hidden"
+        className="relative flex items-center justify-center rounded-card h-full overflow-hidden"
         style={{ background: stateBg(d), border: `1px solid ${BORDER}` }}
       >
-        <AccentBar d={d} radius={16} />
+        <AccentBar d={d} radius={RADIUS.card} />
         <StatusDot status={d.status} />
         <span style={{ color: accent }}>
           <Icon size={28} />
@@ -568,7 +569,7 @@ function NodeInspector({ nodeId, ntype, onClose }: { nodeId: string; ntype: stri
   const toolFiles = findToolFiles(files);
 
   return (
-    <div className="absolute top-2 right-2 bottom-2 w-64 bg-panel rounded-lg p-3 overflow-auto text-[12px] shadow-2xl">
+    <div className="absolute top-2 right-2 bottom-2 w-64 bg-panel rounded-card p-3 overflow-auto text-[12px] shadow-2xl">
       <div className="flex items-center justify-between mb-3">
         <span className="text-ink truncate">{nodeId}</span>
         <button className="text-muted hover:text-ink" onClick={onClose}>✕</button>
@@ -631,7 +632,7 @@ function GraphSkeleton() {
       <div className="flex items-center gap-10">
         {[0, 1, 2].map((i) => (
           <div key={i} className="flex items-center gap-10">
-            <div className="rounded-2xl bg-active animate-pulse" style={{ width: i === 1 ? AGENT_W : CARD_W, height: i === 1 ? AGENT_H : CARD_H }} />
+            <div className="rounded-card bg-active animate-pulse" style={{ width: i === 1 ? AGENT_W : CARD_W, height: i === 1 ? AGENT_H : CARD_H }} />
             {i < 2 && <div className="h-px w-8 bg-hair" />}
           </div>
         ))}
@@ -795,11 +796,11 @@ export function GraphView() {
         }}
       >
         <Background variant={BackgroundVariant.Dots} gap={28} size={1} color="#242429" />
-        <Controls showInteractive={false} className="!bg-panel/80 !backdrop-blur !border-0 !rounded-lg !shadow-lg" />
+        <Controls showInteractive={false} className="!bg-panel/80 !backdrop-blur !border-0 !rounded-card !shadow-lg" />
         <MiniMap
           pannable
           zoomable
-          className="!bg-panel/80 !rounded-lg !border-0"
+          className="!bg-panel/80 !rounded-card !border-0"
           maskColor="rgba(13,13,15,0.7)"
           nodeColor={(n) => {
             if (n.type === "resource") return "#3f3f46";

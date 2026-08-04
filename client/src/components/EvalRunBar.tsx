@@ -104,7 +104,7 @@ export function EvalRunBar() {
                 onClick={() => toggle(t)}
                 disabled={running}
                 title={free ? "Free — no API calls" : `${p.label} · billed per token`}
-                className={`rounded px-2 py-1 text-[11px] whitespace-nowrap transition-colors disabled:opacity-40 ${
+                className={`rounded-control px-2 py-1 text-[11px] whitespace-nowrap transition-colors disabled:opacity-40 ${
                   on ? "bg-active text-ink" : "text-muted hover:text-ink"
                 }`}
               >
@@ -117,7 +117,7 @@ export function EvalRunBar() {
 
       {/* the estimate — shown only when money is involved, and always as a range */}
       {confirming && (
-        <div className="rounded bg-panel px-3 py-2 space-y-1.5">
+        <div className="rounded-card bg-panel px-3 py-2 space-y-1.5">
           {!estimate ? (
             <div className="text-[11px] text-muted">estimating…</div>
           ) : (
@@ -150,7 +150,7 @@ export function EvalRunBar() {
                   value={ceiling}
                   onChange={(e) => setCeiling(e.target.value)}
                   inputMode="decimal"
-                  className="w-20 bg-active text-ink rounded px-2 py-1 text-[11px] tabular-nums outline-none focus:ring-1 focus:ring-[#2a2a2e]"
+                  className="w-20 bg-active text-ink rounded-control px-2 py-1 text-[11px] tabular-nums outline-none focus:ring-1 focus:ring-[#2a2a2e]"
                 />
                 <span className="text-[10px] text-faint">
                   hard ceiling — checked against real spend, not this estimate
@@ -164,7 +164,7 @@ export function EvalRunBar() {
                 <button
                   onClick={confirmRun}
                   disabled={!(Number(ceiling) > 0)}
-                  className="rounded px-3 py-1 text-[11px] whitespace-nowrap transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="rounded-control px-3 py-1 text-[11px] whitespace-nowrap transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
                   style={{ background: "#e4e4e7", color: "#0d0d0f" }}
                 >
                   Run for real
@@ -189,7 +189,7 @@ export function EvalRunBar() {
           {running ? (
             <button
               onClick={() => progress && sendCancelEval(progress.evalId)}
-              className="rounded px-3 py-1.5 text-[12px] text-err hover:bg-active transition-colors whitespace-nowrap"
+              className="rounded-control px-3 py-1.5 text-[12px] text-err hover:bg-active transition-colors whitespace-nowrap"
             >
               Cancel
             </button>
@@ -197,7 +197,7 @@ export function EvalRunBar() {
             <button
               onClick={beginRun}
               disabled={!connected || !examples.length || !targets.length}
-              className="rounded px-3 py-1.5 text-[12px] whitespace-nowrap shrink-0 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
+              className="rounded-control px-3 py-1.5 text-[12px] whitespace-nowrap shrink-0 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
               style={{ background: "#e4e4e7", color: "#0d0d0f" }}
             >
               {needsConfirm ? "Estimate cost…" : "Run eval"}

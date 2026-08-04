@@ -37,7 +37,7 @@ function ScoreChip({ cell, active, onClick }: { cell: ExampleCell; active: boole
     <button
       onClick={onClick}
       title={`${cell.model}${failed ? ` — ${cell.error ?? cell.status}` : cell.score === null ? ` — ${cell.scoreError ?? "unscored"}` : ""}`}
-      className={`flex items-baseline gap-1.5 rounded px-2 py-1 text-[11px] transition-colors ${
+      className={`flex items-baseline gap-1.5 rounded-control px-2 py-1 text-[11px] transition-colors ${
         active ? "bg-active" : "hover:bg-active/50"
       }`}
     >

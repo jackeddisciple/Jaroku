@@ -65,6 +65,8 @@ export function DiffBar({
       {Array.from({ length: SEGMENTS }, (_, i) => (
         <span
           key={i}
+          // Below the radius scale's floor on purpose: a 3px-wide segment given the 4px chip
+          // radius clamps to a lozenge, and eight lozenges in a row stop reading as a bar.
           className="h-2 w-[3px] rounded-[1px]"
           style={{
             background: i < added ? STATUS.ok : i < filled ? STATUS.error : SURFACE.active,

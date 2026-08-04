@@ -35,9 +35,9 @@ export function StepRow({ step }: { step: Step }) {
         }`}
       />
       {/* 2px left accent + subtle fill when this step is the sync focus (never a full-color fill) */}
-      {selected && <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-run rounded" />}
+      {selected && <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-run rounded-full" />}
       <div
-        className={`flex items-baseline gap-3 cursor-pointer select-none rounded ${
+        className={`flex items-baseline gap-3 cursor-pointer select-none rounded-control ${
           selected ? "bg-active -mx-2 px-2" : ""
         }`}
         onClick={() => {
@@ -47,7 +47,7 @@ export function StepRow({ step }: { step: Step }) {
         }}
       >
         <span className="text-faint w-9 shrink-0 tabular-nums">#{step.seq}</span>
-        <span className={`text-[11px] px-1.5 py-px rounded ${typeBadge(step.type)}`}>
+        <span className={`text-[11px] px-1.5 py-px rounded-chip ${typeBadge(step.type)}`}>
           {step.type}
         </span>
         <span className="text-ink truncate">{step.name}</span>

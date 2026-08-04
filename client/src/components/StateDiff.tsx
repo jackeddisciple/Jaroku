@@ -6,7 +6,7 @@ function Line({ sign, text }: { sign: "+" | "-"; text: string }) {
   const add = sign === "+";
   return (
     <div
-      className={`flex gap-2 px-2 py-0.5 rounded-sm text-[12px] leading-relaxed ${
+      className={`flex gap-2 px-2 py-0.5 rounded-chip text-[12px] leading-relaxed ${
         add ? "bg-ok/[0.07] text-ok" : "bg-err/[0.07] text-err"
       }`}
     >

@@ -24,7 +24,7 @@ import { segmentProse } from "../lib/inlineCode.ts";
  * riding high the way an inline-block otherwise does.
  */
 export const CHIP =
-  "rounded bg-active px-1.5 py-[1px] font-mono text-[11px] align-middle [overflow-wrap:anywhere]";
+  "rounded-chip bg-active px-1.5 py-[1px] font-mono text-[11px] align-middle [overflow-wrap:anywhere]";
 
 /**
  * Colour is left out of CHIP and chosen per use, because the two uses mean different things: an

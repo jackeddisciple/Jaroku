@@ -307,7 +307,7 @@ function Note({ text, vocabulary }: { text: string; vocabulary: readonly string[
  */
 function Card({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-[10px] border border-hair bg-panel/40 px-3.5 py-3 text-[12px]">
+    <div className="rounded-card border border-hair bg-panel/40 px-3.5 py-3 text-[12px]">
       {children}
     </div>
   );

@@ -113,9 +113,80 @@ export const ICON = {
   strokeWidth: 1.75,
 } as const;
 
+// ── Radius ──────────────────────────────────────────────────────────────────
+// Four steps, and the rule that picks between them is *size*, not component type: a corner
+// radius reads as a proportion of the box it turns, so the same 10px looks tight on a modal and
+// bulbous on a 20px pill. Naming the steps after the size of thing they belong to is what keeps
+// two people making the same choice.
+//
+// Four because the app has four sizes of box and no more. Before this it had nine values —
+// `rounded`, `-sm`, `-md`, `-lg`, `-xl`, `-2xl`, and three arbitrary pixel counts — spread across
+// components that sit next to each other, which is how a composer card ended up 6px rounder than
+// the popover that opens out of it.
+//
+// A pill is not on this scale. Something whose radius is half its height is a *shape*, not a
+// corner treatment, and it stays `rounded-full` so it keeps working when the height changes.
+
 export const RADIUS = {
-  /** Badges and chips. */
+  /** Chips, badges, pills-that-aren't-round, inline code. Under ~22px tall. */
   chip: 4,
-  /** Cards. */
+  /** Buttons, inputs, tabs, rows, popover items. Roughly 24–36px tall. */
+  control: 6,
+  /** Cards, popovers, panels — anything that holds other things. */
   card: 10,
+  /** Modals and the composer: the largest boxes, and the only ones that float free. */
+  modal: 14,
+} as const;
+
+// ── Elevation ───────────────────────────────────────────────────────────────
+// Depth, in four steps, so the eye can tell what is active from what is merely present.
+//
+// Each level is a hairline plus a shadow, never a shadow alone. On a near-black background a
+// soft shadow is nearly invisible — the thing that actually separates two dark surfaces is the
+// 1px edge catching light at the top of the box — and a border alone reads as a drawn rectangle.
+// The pair reads as depth; either half alone reads as a mistake.
+//
+// The values are deliberately low-alpha and large-blur. Doc §4.2's restraint means depth should
+// be something you notice only when it is missing: enough to say "this is on top", never enough
+// to say "look at this shadow".
+//
+// Exported as ready-to-use CSS strings rather than as parts, because half of the consumers are
+// React Flow nodes and popovers that need an inline style, and a token that only exists as a
+// Tailwind class can't be handed to those.
+
+export const ELEVATION = {
+  /** In the page. A section boundary, not a raised object. */
+  flat: "none",
+  /** One step up: cards, rows that own their content. */
+  raised: "0 1px 2px rgba(0,0,0,0.4)",
+  /** Off the page: popovers, the step-detail panel, the code overlay. */
+  floating: "0 2px 6px rgba(0,0,0,0.35), 0 12px 28px -8px rgba(0,0,0,0.55)",
+  /** Above everything: modals, and the app shell against the desktop. */
+  overlay: "0 4px 12px rgba(0,0,0,0.4), 0 28px 64px -16px rgba(0,0,0,0.7)",
+} as const;
+
+export type ElevationName = keyof typeof ELEVATION;
+
+/** Border colours that pair with each elevation. `edge` is the default; `hair` recedes further. */
+export const ELEVATION_BORDER = {
+  flat: "#1e1e22",
+  raised: SURFACE.edge,
+  floating: SURFACE.edge,
+  overlay: SURFACE.edge,
+} as const;
+
+/** The focus ring. One value, so a focused input and a focused button are the same idea. */
+export const FOCUS_RING = "0 0 0 1px #3a3a44, 0 0 0 4px rgba(58,58,68,0.28)";
+
+// ── Motion ──────────────────────────────────────────────────────────────────
+// Two durations and one easing, because a transition that communicates a state change has to be
+// perceptible and then out of the way. Anything slower than `base` starts to feel like latency,
+// which is the opposite of what a state change should say.
+
+export const MOTION = {
+  /** Hover, colour, opacity — things that must feel instant. */
+  fast: 120,
+  /** A state change with something to show: a check landing, a panel sliding. */
+  base: 180,
+  ease: "cubic-bezier(0.2, 0, 0, 1)",
 } as const;

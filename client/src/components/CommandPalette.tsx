@@ -103,7 +103,7 @@ export function CommandPalette() {
       label="Command palette"
       className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh]"
       overlayClassName="fixed inset-0 bg-black/50"
-      contentClassName="relative w-[min(560px,92vw)] bg-panel rounded-lg overflow-hidden shadow-2xl"
+      contentClassName="relative w-[min(560px,92vw)] bg-panel rounded-modal overflow-hidden shadow-2xl"
     >
       <Command loop>
         <Command.Input
@@ -167,7 +167,7 @@ function Item({
     <Command.Item
       onSelect={onSelect}
       disabled={disabled}
-      className="flex items-center justify-between gap-3 px-3 py-2 rounded text-[13px] text-muted rounded cursor-pointer data-[selected=true]:bg-active data-[selected=true]:text-ink data-[disabled=true]:opacity-40"
+      className="flex items-center justify-between gap-3 px-3 py-2 rounded-control text-[13px] text-muted cursor-pointer data-[selected=true]:bg-active data-[selected=true]:text-ink data-[disabled=true]:opacity-40"
     >
       <span className="flex items-center gap-2 min-w-0">{children}</span>
       {kbd && <span className="text-faint text-[11px] tabular-nums shrink-0">{kbd}</span>}

@@ -20,18 +20,18 @@
 
 /** The decision. Filled surface, ink text. */
 export const primaryBtn =
-  "rounded px-3 py-1.5 text-[12px] bg-panel text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+  "rounded-control px-3 py-1.5 text-[12px] bg-panel text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
 /**
  * The other answer. Same box as primary so the two sit level, but no surface until you hover —
  * declining should be one step away, never one step *down*.
  */
 export const quietBtn =
-  "rounded px-3 py-1.5 text-[12px] text-muted hover:text-ink transition-colors";
+  "rounded-control px-3 py-1.5 text-[12px] text-muted hover:text-ink transition-colors";
 
 /**
  * Not a decision. Same surface and radius as primary, one size down and muted until you reach for
  * it. `inline-flex` because everything at this weight carries an icon.
  */
 export const secondaryBtn =
-  "inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] bg-panel text-muted hover:text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+  "inline-flex items-center gap-1.5 rounded-control px-2.5 py-1 text-[11px] bg-panel text-muted hover:text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";

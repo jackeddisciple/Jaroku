@@ -11,7 +11,7 @@ export function PauseResumeControls() {
   if (!activeRunId || (status !== "running" && status !== "paused")) return null;
 
   const base =
-    "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors border";
+    "flex items-center gap-1.5 rounded-control px-2 py-1 text-[11px] transition-colors border";
 
   if (status === "running") {
     return (

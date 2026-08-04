@@ -155,7 +155,7 @@ function VersionPicker({ current, count }: { current: number; count: number }) {
       {open && (
         // Opens upward: this sits at the bottom of a card, near the bottom of a scrolling thread.
         // Same surface as the composer's model popover, which is the only other one in this pane.
-        <div className="absolute bottom-full mb-1 left-0 z-30 min-w-[150px] rounded-lg bg-panel border border-edge shadow-2xl py-1">
+        <div className="absolute bottom-full mb-1 left-0 z-30 min-w-[150px] rounded-card bg-panel border border-edge shadow-2xl py-1">
           <div className="px-3 pt-1.5 pb-1 text-[10px] uppercase tracking-wide text-faint">
             Versions
           </div>

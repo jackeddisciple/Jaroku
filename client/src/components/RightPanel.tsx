@@ -33,7 +33,7 @@ export function RightPanel() {
   }, [activeRunId, setTab]);
 
   const tabClass = (t: RightTab) =>
-    `px-3 py-1.5 text-[12px] rounded transition-colors ${
+    `px-3 py-1.5 text-[12px] rounded-control transition-colors ${
       tab === t ? "bg-active text-ink" : "text-muted hover:text-ink"
     }`;
 

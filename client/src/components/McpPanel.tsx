@@ -47,7 +47,7 @@ function ToolRow({ tool, serverId }: { tool: McpTool; serverId: string }) {
   const Icon = high ? ShieldAlertIcon : EyeIcon;
 
   return (
-    <div className="rounded px-2 py-1.5 hover:bg-active/40 transition-colors">
+    <div className="rounded-control px-2 py-1.5 hover:bg-active/40 transition-colors">
       <div className="flex items-start gap-2">
         <span className="mt-0.5 shrink-0" style={{ color: high ? STATUS.pending : TEXT.muted }}>
           <Icon size={ICON.sm} />
@@ -116,7 +116,7 @@ function ToolRow({ tool, serverId }: { tool: McpTool; serverId: string }) {
           </div>
 
           {open && (
-            <pre className="mt-1.5 overflow-x-auto rounded bg-bg p-2 font-mono text-[10px] leading-[1.5] text-muted">
+            <pre className="mt-1.5 overflow-x-auto rounded-control bg-bg p-2 font-mono text-[10px] leading-[1.5] text-muted">
               {JSON.stringify(tool.input_schema, null, 2)}
             </pre>
           )}
@@ -161,7 +161,7 @@ function ServerDetail({ server }: { server: McpServer }) {
         )}
 
         {server.last_error && (
-          <p className="mt-1 rounded bg-panel px-2 py-1.5 text-[11px] leading-[1.5] text-err break-words">
+          <p className="mt-1 rounded-control bg-panel px-2 py-1.5 text-[11px] leading-[1.5] text-err break-words">
             {server.last_error}
           </p>
         )}
@@ -185,12 +185,12 @@ function ServerDetail({ server }: { server: McpServer }) {
         </div>
 
         {showToken && (
-          <div className="mt-2 rounded bg-panel p-2">
+          <div className="mt-2 rounded-card bg-panel p-2">
             <div className="flex items-center gap-2">
               <input
                 type="password"
                 autoComplete="off"
-                className="min-w-0 flex-1 rounded bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none placeholder:text-faint"
+                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none placeholder:text-faint"
                 placeholder="bearer token or API key"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
@@ -306,7 +306,7 @@ export function McpPanel() {
 
       {(error || notice) && (
         <div className="shrink-0 px-4 pt-2">
-          <div className={`flex items-start gap-2 rounded px-2 py-1.5 text-[11px] leading-[1.5] ${
+          <div className={`flex items-start gap-2 rounded-control px-2 py-1.5 text-[11px] leading-[1.5] ${
             error ? "bg-panel text-err" : "bg-panel text-muted"}`}>
             <span className="min-w-0 flex-1 break-words">{error ?? notice}</span>
             <button className="shrink-0 text-faint hover:text-ink"
@@ -323,7 +323,7 @@ export function McpPanel() {
           <button
             key={s.id}
             onClick={() => setSelectedId(s.id)}
-            className={`flex max-w-[220px] shrink-0 items-center gap-1.5 rounded px-2 py-1 text-[12px] transition-colors ${
+            className={`flex max-w-[220px] shrink-0 items-center gap-1.5 rounded-control px-2 py-1 text-[12px] transition-colors ${
               selected?.id === s.id ? "bg-active text-ink" : "text-muted hover:text-ink"
             }`}
           >
@@ -342,10 +342,10 @@ export function McpPanel() {
 
       {adding && (
         <div className="shrink-0 px-4 pb-2">
-          <div className="rounded bg-panel p-2">
+          <div className="rounded-card bg-panel p-2">
             <input
               autoFocus
-              className="w-full rounded bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none placeholder:text-faint"
+              className="w-full rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none placeholder:text-faint"
               placeholder="https://example.com/mcp"
               value={endpoint}
               onChange={(e) => setEndpoint(e.target.value)}
@@ -353,7 +353,7 @@ export function McpPanel() {
             />
             <div className="mt-1.5 flex items-center gap-2">
               <input
-                className="min-w-0 flex-1 rounded bg-bg px-2 py-1 text-[11px] text-ink outline-none placeholder:text-faint"
+                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 text-[11px] text-ink outline-none placeholder:text-faint"
                 placeholder="name (optional)"
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
@@ -362,7 +362,7 @@ export function McpPanel() {
               <input
                 type="password"
                 autoComplete="off"
-                className="min-w-0 flex-1 rounded bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none placeholder:text-faint"
+                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none placeholder:text-faint"
                 placeholder="token (if it needs one)"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}

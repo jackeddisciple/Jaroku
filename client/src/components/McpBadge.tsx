@@ -40,7 +40,7 @@ export function McpBadge({
   }
   return (
     <span
-      className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
+      className="inline-flex shrink-0 items-center gap-1 rounded-chip px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
       style={{ color: ACCENT.mcp, boxShadow: `inset 0 0 0 1px ${ACCENT.mcp}59` }}
       title={label}
     >
@@ -58,7 +58,7 @@ export function McpBadge({
 export function HighImpactBadge({ reason }: { reason?: string }) {
   return (
     <span
-      className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
+      className="inline-flex shrink-0 items-center gap-1 rounded-chip px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
       style={{ color: STATUS.pending, boxShadow: `inset 0 0 0 1px ${STATUS.pending}59` }}
       title={
         reason

@@ -81,7 +81,7 @@ export function McpConfirmModal() {
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="mcp-confirm-title"
-        className="w-[min(560px,94vw)] overflow-hidden rounded-lg bg-panel shadow-2xl"
+        className="w-[min(560px,94vw)] overflow-hidden rounded-modal bg-panel shadow-2xl"
         style={{ border: `1px solid ${ACCENT.mcp}33` }}
       >
         <div className="px-5 pt-4">
@@ -101,7 +101,7 @@ export function McpConfirmModal() {
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span
-              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
+              className="inline-flex items-center gap-1 rounded-chip px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
               style={{ color: ACCENT.mcp, boxShadow: `inset 0 0 0 1px ${ACCENT.mcp}59` }}
             >
               <PlugIcon size={ICON.xs} />
@@ -123,7 +123,7 @@ export function McpConfirmModal() {
           <p className="text-[10px] uppercase tracking-wide text-faint">
             Arguments the agent produced
           </p>
-          <pre className="mt-1 max-h-56 overflow-auto rounded bg-bg p-2.5 font-mono text-[11px] leading-[1.55] text-ink">
+          <pre className="mt-1 max-h-56 overflow-auto rounded-control bg-bg p-2.5 font-mono text-[11px] leading-[1.55] text-ink">
             {formatArgs(request.args)}
           </pre>
         </div>

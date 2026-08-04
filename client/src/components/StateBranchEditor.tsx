@@ -79,7 +79,7 @@ export function StateBranchEditor({ step }: { step: Step }) {
                 onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))}
                 spellCheck={false}
                 rows={Math.min(6, (draft[k]?.split("\n").length ?? 1) + 1)}
-                className="w-full mt-1 bg-bg text-ink text-[11px] font-mono rounded p-2 resize-y
+                className="w-full mt-1 bg-bg text-ink text-[11px] font-mono rounded-control p-2 resize-y
                   outline-none border border-hair focus:border-faint leading-relaxed"
               />
             </label>
@@ -96,7 +96,7 @@ export function StateBranchEditor({ step }: { step: Step }) {
         <button
           onClick={() => branch(true)}
           disabled={dirtyKeys.length === 0}
-          className="flex-1 rounded-md py-1.5 text-[12px] border border-hair text-ink
+          className="flex-1 rounded-control py-1.5 text-[12px] border border-hair text-ink
             enabled:hover:bg-active disabled:opacity-40 disabled:cursor-not-allowed"
           title={dirtyKeys.length === 0 ? "Edit a field to branch with changes" : "Fork a new run with these edits"}
         >
@@ -104,7 +104,7 @@ export function StateBranchEditor({ step }: { step: Step }) {
         </button>
         <button
           onClick={() => branch(false)}
-          className="rounded-md px-3 py-1.5 text-[12px] border border-hair text-muted hover:bg-active hover:text-ink"
+          className="rounded-control px-3 py-1.5 text-[12px] border border-hair text-muted hover:bg-active hover:text-ink"
           title="Fork a new run from this checkpoint without changes"
         >
           Re-run from here

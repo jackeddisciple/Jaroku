@@ -50,7 +50,7 @@ export function TopBar() {
 
       <div className="ml-auto flex items-center gap-2">
         {/* provider chip — brand color only because it's the chosen provider */}
-        <span className="flex items-center gap-2 text-[12px] text-muted bg-active rounded px-2.5 py-1">
+        <span className="flex items-center gap-2 text-[12px] text-muted bg-active rounded-chip px-2.5 py-1">
           <ProviderMark provider={provider} />
           <span className="text-ink">{PROVIDER_LABEL[provider] ?? provider}</span>
           {provider !== "fake" && <span className="text-faint">{model}</span>}
@@ -58,13 +58,13 @@ export function TopBar() {
 
         <button
           title="Sharing isn't available yet"
-          className="text-[12px] text-muted hover:text-ink rounded px-2.5 py-1 transition-colors"
+          className="text-[12px] text-muted hover:text-ink rounded-control px-2.5 py-1 transition-colors"
         >
           Share
         </button>
         <button
           title="Deploy isn't available yet"
-          className="text-[12px] rounded px-3 py-1 transition-colors"
+          className="text-[12px] rounded-control px-3 py-1 transition-colors"
           style={{ background: "#4f46e5", color: "#fff" }}
         >
           Deploy

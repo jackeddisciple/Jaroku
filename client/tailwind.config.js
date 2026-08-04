@@ -27,6 +27,32 @@ export default {
         bespoke: "#c084fc", // written by a model for this agent only
         stateful: "#a5b4fc", // state fields — the agent's shape, not its capabilities
       },
+      // Corner radius — four steps, mirroring RADIUS in src/lib/tokens.ts. The scale is chosen by
+      // the SIZE of the box, not by what the component is called, because a radius reads as a
+      // proportion of the corner it turns. `rounded-full` is deliberately not on the scale: a pill
+      // is a shape, and it has to keep working when the height changes.
+      borderRadius: {
+        chip: "4px", // chips, badges, inline code
+        control: "6px", // buttons, inputs, tabs, rows
+        card: "10px", // cards, popovers, panels
+        modal: "14px", // modals, the composer
+      },
+      // Depth — mirrors ELEVATION in src/lib/tokens.ts. Every level pairs with a hairline border;
+      // on a near-black background the 1px edge is what actually separates two surfaces, and the
+      // shadow only says which way is up.
+      boxShadow: {
+        raised: "0 1px 2px rgba(0,0,0,0.4)",
+        floating: "0 2px 6px rgba(0,0,0,0.35), 0 12px 28px -8px rgba(0,0,0,0.55)",
+        overlay: "0 4px 12px rgba(0,0,0,0.4), 0 28px 64px -16px rgba(0,0,0,0.7)",
+        focusring: "0 0 0 1px #3a3a44, 0 0 0 4px rgba(58,58,68,0.28)",
+      },
+      transitionDuration: {
+        fast: "120ms",
+        base: "180ms",
+      },
+      transitionTimingFunction: {
+        state: "cubic-bezier(0.2, 0, 0, 1)",
+      },
       fontFamily: {
         // Prose. The body default — plan explanations, notes, descriptions, labels.
         sans: [
@@ -53,6 +79,21 @@ export default {
           "0%": { opacity: "0", transform: "translateY(6px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
+        // A step, a file or a task finished. The mark scales up past its resting size and settles,
+        // which is what makes it read as *landing* rather than as having quietly always been there.
+        // Fast, and it never repeats: this is a state change, not a status.
+        "check-in": {
+          "0%": { opacity: "0", transform: "scale(0.4)" },
+          "60%": { opacity: "1", transform: "scale(1.15)" },
+          "100%": { opacity: "1", transform: "scale(1)" },
+        },
+        // Something is receiving data right now. Distinct from Tailwind's `animate-pulse`, which
+        // fades to 50% and reads as "disabled" on text — this holds most of its opacity and moves
+        // slowly, so it says "alive" rather than "greyed out".
+        "stream-pulse": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.62" },
+        },
         // Idle "breathing" — the graph feels alive at rest. A ~1.8% scale over a slow loop;
         // per-node delay (set inline) desyncs the field so it never reads as one mechanical pulse.
         breathe: {
@@ -78,6 +119,8 @@ export default {
         "slide-in": "slide-in 120ms ease-out",
         breathe: "breathe 4.2s ease-in-out infinite",
         "pulse-node": "pulse-node 2.4s ease-in-out infinite",
+        "check-in": "check-in 180ms cubic-bezier(0.2, 0, 0, 1)",
+        "stream-pulse": "stream-pulse 1.4s ease-in-out infinite",
       },
     },
   },

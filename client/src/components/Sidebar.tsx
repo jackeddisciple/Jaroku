@@ -119,7 +119,7 @@ export function Sidebar() {
   const tab = (id: Filter, label: string, count?: number) => (
     <button
       onClick={() => setFilter(id)}
-      className={`text-[11px] px-2 py-1 rounded transition-colors ${filter === id ? "bg-active text-ink" : "text-muted hover:text-ink"}`}
+      className={`text-[11px] px-2 py-1 rounded-control transition-colors ${filter === id ? "bg-active text-ink" : "text-muted hover:text-ink"}`}
     >
       {label}{count != null && count > 0 && <span className="ml-1 text-faint">{count}</span>}
     </button>
@@ -131,7 +131,7 @@ export function Sidebar() {
       <div className="px-3 pt-3 shrink-0">
         <button
           onClick={() => selectAgent(null)}
-          className={`w-full text-left text-[13px] rounded px-3 py-2 transition-colors flex items-center gap-2 ${
+          className={`w-full text-left text-[13px] rounded-control px-3 py-2 transition-colors flex items-center gap-2 ${
             activeAgentId === null ? "bg-active text-ink" : "text-muted hover:bg-active/50 hover:text-ink"
           }`}
         >
@@ -141,7 +141,7 @@ export function Sidebar() {
 
       {/* search */}
       <div className="px-3 pt-2 shrink-0">
-        <div className="flex items-center gap-2 bg-active rounded px-2.5 py-1.5">
+        <div className="flex items-center gap-2 bg-active rounded-control px-2.5 py-1.5">
           <span className="text-faint text-[12px]">⌕</span>
           <input
             value={query}
@@ -191,9 +191,9 @@ export function Sidebar() {
           <span className="text-[13px]">⚙</span> Settings <span className="ml-auto text-faint">›</span>
         </button>
         <div className="flex items-center gap-2 px-2 py-1.5">
-          <span className="w-5 h-5 rounded bg-active text-ink text-[11px] flex items-center justify-center">J</span>
+          <span className="w-5 h-5 rounded-control bg-active text-ink text-[11px] flex items-center justify-center">J</span>
           <span className="text-[12px] text-ink">jaroku</span>
-          <span className="ml-auto text-[10px] text-faint bg-active rounded px-1.5 py-0.5">Free</span>
+          <span className="ml-auto text-[10px] text-faint bg-active rounded-chip px-1.5 py-0.5">Free</span>
         </div>
       </div>
     </div>

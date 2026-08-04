@@ -72,7 +72,7 @@ export function StatusBadge({
   return (
     <span
       title={title}
-      className="inline-flex items-center gap-1 rounded px-1.5 py-[2px] text-[10px] font-medium uppercase tracking-wider align-middle"
+      className="inline-flex items-center gap-1 rounded-chip px-1.5 py-[2px] text-[10px] font-medium uppercase tracking-wider align-middle"
       style={
         variant === "fill"
           ? { color, backgroundColor: `${color}1f` }

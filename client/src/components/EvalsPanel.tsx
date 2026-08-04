@@ -60,7 +60,7 @@ export function EvalsPanel() {
   const tab = (m: Mode, label: string) => (
     <button
       onClick={() => setMode(m)}
-      className={`px-2.5 py-1 text-[12px] rounded transition-colors ${
+      className={`px-2.5 py-1 text-[12px] rounded-control transition-colors ${
         mode === m ? "bg-active text-ink" : "text-muted hover:text-ink"
       }`}
     >
@@ -95,7 +95,7 @@ export function EvalsPanel() {
                   key={e.id}
                   onClick={() => selectEval(e.id)}
                   title={`${e.status} · ${e.targets.map((t) => t.model).join(", ")}`}
-                  className={`rounded px-2 py-0.5 text-[11px] transition-colors ${
+                  className={`rounded-control px-2 py-0.5 text-[11px] transition-colors ${
                     e.id === selectedEvalId ? "bg-active text-ink" : "text-faint hover:text-ink"
                   }`}
                 >
