@@ -34,7 +34,7 @@ import {
   WrenchIcon, XIcon, ZapIcon,
 } from "./panelIcons.tsx";
 import { useMcpStore, allMcpTools } from "../store/mcpStore.ts";
-import { ACCENT, ICON, STATUS } from "../lib/tokens.ts";
+import { ACCENT, ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { displayTitle, fullTitle } from "../lib/title.ts";
 import { useStreamedText } from "../lib/useStreamedText.ts";
 import { useVoiceInput } from "../lib/useVoiceInput.ts";
@@ -265,7 +265,7 @@ function ModelSelector({
         <div className="absolute bottom-full mb-2 left-0 z-30 min-w-[190px] rounded-card bg-panel border border-edge shadow-floating py-1">
           {RUN_PROVIDERS.map((p) => (
             <div key={p.id}>
-              <div className="px-3 pt-1.5 pb-0.5 text-[10px] uppercase tracking-wide text-faint">{p.label}</div>
+              <div className={`px-3 pb-0.5 pt-1.5 ${TYPE.sectionLabel}`}>{p.label}</div>
               {p.models.map((m) => {
                 const active = provider === p.id && model === m;
                 return (
@@ -556,18 +556,16 @@ export function BuildPane() {
   const lastGenId = [...turns].reverse().find((t) => t.role === "jaroku" && t.kind === "gen")?.id;
 
   return (
-    // font-sans is scoped here rather than on body: this pane is the only one migrated onto the
-    // prose/code split, and the trace, graph and sidebar stay monospace until they follow.
+    // The family comes from the body now — every panel is on the prose/code split, and this
+    // pane no longer has to declare what it always was.
     //
     // Line-height is set once here and inherits. Prose was a scatter of `leading-relaxed` (1.625)
     // on some blocks and the 1.5 body default on others, so two paragraphs of the same size could
     // sit at different rhythms depending on which component rendered them. 1.55 for everything the
     // panel reads as prose; code overrides back down where it needs to (diff hunks).
-    <div className="flex h-full flex-col bg-bg font-sans leading-[1.55]">
+    <div className="flex h-full flex-col bg-bg leading-[1.55]">
       <div className="flex shrink-0 items-baseline gap-2 border-b border-hair px-6 pb-2 pt-4">
-        <span className="text-[11px] uppercase tracking-widest text-faint">
-          {mode === "generate" ? "New agent" : "Fix"}
-        </span>
+        <span className={TYPE.panelLabel}>{mode === "generate" ? "New agent" : "Fix"}</span>
         {agent && (
           // Two truncations, two fixes. The server's 60-char cut already happened and landed
           // mid-word, so displayTitle() ends it on a whole word; `truncate` handles the narrow-pane
@@ -782,6 +780,8 @@ export function BuildPane() {
               }
               className="w-full resize-none bg-transparent text-ink placeholder:text-muted outline-none leading-[1.5] transition-opacity duration-200"
               style={{
+                // Off the 11/12/13 ladder on purpose, and the only thing in the app that is. This
+                // is the sentence the user writes; it should be the largest text on the screen.
                 fontSize: "14.5px",
                 minHeight: "44px",
                 maxHeight: "200px",

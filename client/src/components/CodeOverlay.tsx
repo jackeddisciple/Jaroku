@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { ICON } from "../lib/tokens.ts";
+import { TYPE } from "../lib/tokens.ts";
 import { CodeViewer } from "./CodeViewer.tsx";
 import { XIcon } from "./panelIcons.tsx";
 
@@ -41,7 +42,7 @@ export function CodeOverlay() {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center gap-2 border-b border-hair px-4 py-2">
-          <span className="text-[11px] uppercase tracking-widest text-faint">Code</span>
+          <span className={TYPE.panelLabel}>Code</span>
           <button
             onClick={() => setOpen(false)}
             className="ml-auto text-muted transition-colors duration-fast hover:text-ink"

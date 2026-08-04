@@ -21,13 +21,14 @@
   #root {
     height: 100%;
   }
-  /* The app default stays monospace — the trace, graph and sidebar are all built on it and are
-     not part of this pass. The prose/code split is scoped to the generation panel, which opts in
-     with font-sans on its root and marks its identifiers font-mono from there. */
+  /* Prose is the default everywhere now, and monospace is opted into at the point of use. The
+     split was scoped to the generation panel when it was introduced; every other panel is on it
+     as of this pass, and a default of "code unless told otherwise" was backwards — most of what
+     the app says is sentences, and only identifiers, paths and figures are literally code. */
   /* The page is the surface the app floats ON, not the app. The shell in App.tsx carries `bg`;
      everything visible out here is the few pixels of inset around it. */
   body {
-    @apply bg-void text-ink font-mono;
+    @apply bg-void text-ink font-sans;
     font-size: 13px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
@@ -67,11 +68,13 @@
   .graph-canvas .react-flow__pane {
     background: transparent;
   }
-  /* Force the app's mono typeface on every graph label (React Flow otherwise falls back to a
-     system font that reads as inconsistent next to the rest of the app). */
+  /* React Flow otherwise falls back to a system font, which reads as a different app. This sets
+     the base family only — it used to force mono on the whole node, which made every subtitle
+     ("Tool node · reaches MCP") code as well. Node names are identifiers and mark themselves
+     mono in the markup; the prose around them is prose. */
   .graph-canvas .react-flow__node,
   .graph-canvas .react-flow__edgelabel-renderer {
-    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   }
 
   /* React Flow chrome — recolour the built-in controls/minimap to the dark system. */

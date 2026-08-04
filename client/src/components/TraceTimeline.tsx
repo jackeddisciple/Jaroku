@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import type { Step } from "../types.ts";
 import { fmtCost, fmtDuration, fmtTokens } from "../lib/format.ts";
+import { TYPE } from "../lib/tokens.ts";
 import { StepRow } from "./StepRow.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { PauseResumeControls } from "./PauseResumeControls.tsx";
@@ -50,13 +51,14 @@ export function TraceTimeline() {
     <div className="flex h-full flex-col bg-bg">
       {/* header */}
       <div className="flex shrink-0 items-center gap-3 border-b border-hair px-6 py-3">
-        <span className="text-[11px] uppercase tracking-widest text-faint">Trace</span>
+        <span className={TYPE.panelLabel}>Trace</span>
         {run ? (
           <>
-            <span className="text-muted text-[12px]">
+            {/* A provider, a model id and a run id are all identifiers. */}
+            <span className="font-mono text-[11px] text-muted">
               {run.provider}/{run.model} · {run.id.slice(0, 8)}
             </span>
-            <span className="ml-auto flex items-center gap-4 text-[12px] tabular-nums">
+            <span className="ml-auto flex items-center gap-4 font-mono text-[11px] tabular-nums">
               <PauseResumeControls />
               {running ? (
                 <span className="text-run">Working {fmtDuration(elapsed)}</span>

@@ -22,7 +22,7 @@ import { Prose } from "./InlineCode.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { STAT_ICON } from "./StatRow.tsx";
-import { ICON } from "../lib/tokens.ts";
+import { ICON, TYPE } from "../lib/tokens.ts";
 import { CheckIcon, FileIcon, PlusIcon, UndoIcon } from "./panelIcons.tsx";
 
 function HunkLines({ file }: { file: FileDiff }) {
@@ -176,7 +176,7 @@ function VersionPicker({ current, count }: { current: number; count: number }) {
         // Opens upward: this sits at the bottom of a card, near the bottom of a scrolling thread.
         // Same surface as the composer's model popover, which is the only other one in this pane.
         <div className="absolute bottom-full mb-1 left-0 z-30 min-w-[150px] rounded-card bg-panel border border-edge shadow-floating py-1">
-          <div className="px-3 pt-1.5 pb-1 text-[10px] uppercase tracking-wide text-faint">
+          <div className={`px-3 pb-1 pt-1.5 ${TYPE.sectionLabel}`}>
             Versions
           </div>
           {Array.from({ length: count }, (_, i) => count - i).map((v) => (

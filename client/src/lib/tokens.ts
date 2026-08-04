@@ -129,6 +129,40 @@ export const ICON = {
   strokeWidth: 1.75,
 } as const;
 
+// ── Type ────────────────────────────────────────────────────────────────────
+// Three sizes and three weights, and hierarchy comes from the WEIGHT.
+//
+// The client had 11, 12, 13, 15, 12.5, 11.5 and 10, which is not a ladder — it is what happens
+// when each component picks a size against whatever was next to it. Worse, the differences were
+// carrying the hierarchy: a heading was smaller and greyer than its own content, which is how a
+// panel ends up with a title you have to hunt for. Weight can separate a heading from body text
+// at the same size, and at 11-13px on a dark background it separates them better than size can.
+//
+// So: 11 / 12 / 13, and the jumps between them are deliberately small. 400 for body, 500 for
+// anything that names something, 600 for the one wordmark. Two deliberate exceptions, both
+// documented at their call site: a chip's 10px floor, and the composer's input, which is the
+// thing you type into and is allowed to be the largest text in the app.
+//
+// These are class strings rather than values because every consumer is a `className` — the same
+// reason SPACE_CLASS below is.
+
+export const TYPE = {
+  /**
+   * A panel's own name: "Trace", "Step Details", "Runs", "Code". Uppercase and tracked, because
+   * at this size that is what separates a label from a very short sentence. Was three different
+   * trackings and two sizes across five panels.
+   */
+  panelLabel: "text-[11px] font-medium uppercase tracking-wider text-faint",
+  /** A block inside a panel: a plan section, a step's payload, a table's header row. */
+  sectionLabel: "text-[11px] font-medium uppercase tracking-wider text-muted",
+  /** The name of the thing a card or row is about. */
+  title: "text-[13px] font-medium text-ink",
+  /** Prose. The default, and the reason `font-sans` is on the body. */
+  body: "text-[12px] text-ink",
+  /** Subordinate prose — a caption, a hint, a reason. */
+  meta: "text-[11px] text-muted",
+} as const;
+
 // ── Radius ──────────────────────────────────────────────────────────────────
 // Four steps, and the rule that picks between them is *size*, not component type: a corner
 // radius reads as a proportion of the box it turns, so the same 10px looks tight on a modal and

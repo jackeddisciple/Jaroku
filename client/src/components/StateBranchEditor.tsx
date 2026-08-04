@@ -12,6 +12,7 @@ import type { Step } from "../types.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { stepNodeId } from "../lib/traceGraphMap.ts";
 import { sendBranchRun } from "../lib/socket.ts";
+import { TYPE } from "../lib/tokens.ts";
 
 function domainFields(stateAfter: unknown): Record<string, unknown> {
   if (!stateAfter || typeof stateAfter !== "object") return {};
@@ -61,7 +62,7 @@ export function StateBranchEditor({ step }: { step: Step }) {
   return (
     <div className="mt-4 border-t border-hair pt-3">
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-[11px] uppercase tracking-widest text-faint">Branch from here</span>
+        <span className={TYPE.panelLabel}>Branch from here</span>
         {node && <span className="text-[10px] text-muted">node: {node}</span>}
       </div>
 

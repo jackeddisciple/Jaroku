@@ -16,6 +16,7 @@ import { useUiStore } from "../store/uiStore.ts";
 import { fmtCost, fmtLatency } from "../lib/format.ts";
 import { ICON } from "../lib/tokens.ts";
 import { Truncate } from "./Truncate.tsx";
+import { TYPE } from "../lib/tokens.ts";
 import { Chip } from "./Chip.tsx";
 import { ChevronRightIcon } from "./panelIcons.tsx";
 import type { EvalResults, ExampleCell } from "../types.ts";
@@ -70,7 +71,7 @@ function CellDetail({ cell, criteria }: { cell: ExampleCell; criteria: string[] 
   return (
     <div className="mt-2 ml-6 space-y-2 border-l border-hair pl-3">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[11px]">
-        <span className="text-ink">{cell.model}</span>
+        <span className="font-mono text-ink">{cell.model}</span>
         <span className={cell.status === "succeeded" ? "text-muted" : "text-err"}>{cell.status}</span>
         <span className="text-muted tabular-nums">{fmtCost(cell.costUsd)}</span>
         <span className="text-muted tabular-nums">{fmtLatency(cell.latencyMs)}</span>
@@ -97,7 +98,7 @@ function CellDetail({ cell, criteria }: { cell: ExampleCell; criteria: string[] 
         <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
           {criteria.map((id) => (
             <span key={id} className="text-muted">
-              {id} <span className="text-ink tabular-nums">{cell.perCriterion?.[id] ?? "—"}</span>
+              {id} <span className="font-mono text-ink tabular-nums">{cell.perCriterion?.[id] ?? "—"}</span>
               <span className="text-faint">/4</span>
             </span>
           ))}
@@ -131,7 +132,7 @@ export function ExampleDrillDown({ results }: { results: EvalResults }) {
 
   return (
     <div className="mt-5">
-      <div className="text-faint text-[10px] uppercase tracking-wide pb-1.5">By example</div>
+      <div className={`pb-1.5 ${TYPE.sectionLabel}`}>By example</div>
       <div className="space-y-1">
         {results.rows.map((row, i) => {
           const open = row.cells.find((c) => c.jobId === openCell);

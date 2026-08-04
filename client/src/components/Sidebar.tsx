@@ -11,7 +11,7 @@ import { relTime } from "../lib/format.ts";
 import { agentStatus, type AgentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark, ConnectorDot } from "../lib/icons.tsx";
 import { sendLoadRun } from "../lib/socket.ts";
-import { ICON } from "../lib/tokens.ts";
+import { ICON, TYPE } from "../lib/tokens.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
@@ -217,7 +217,7 @@ export function Sidebar() {
 
       {/* runs — how you re-open a past trace */}
       <div className="mt-1 flex shrink-0 items-center border-t border-hair px-4 py-2">
-        <span className="text-[11px] uppercase tracking-widest text-faint">Runs</span>
+        <span className={TYPE.panelLabel}>Runs</span>
         <span className="ml-auto text-faint text-[11px]">{runList.length}</span>
       </div>
       <div className="flex-1 overflow-auto">

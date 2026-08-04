@@ -2,13 +2,14 @@ import { useState } from "react";
 import type { Step } from "../types.ts";
 import { jsonPretty } from "../lib/format.ts";
 import { StateDiff, canDiff } from "./StateDiff.tsx";
+import { TYPE } from "../lib/tokens.ts";
 
 function Section({ label, value }: { label: string; value: unknown }) {
   const text = jsonPretty(value);
   if (!text) return null;
   return (
     <div className="mt-3 first:mt-0">
-      <div className="text-faint uppercase tracking-wide text-[11px] mb-1">{label}</div>
+      <div className={`mb-1 ${TYPE.sectionLabel}`}>{label}</div>
       {/* The payload is what this panel exists to show, and it was flowing text against the
           panel's own surface — three sections in a row read as one long blob. A well bounds
           each one. */}
@@ -29,7 +30,7 @@ function StateView({ step }: { step: Step }) {
   return (
     <div className="mt-3">
       <div className="flex items-baseline gap-3 mb-1">
-        <span className="text-faint uppercase tracking-wide text-[11px]">state</span>
+        <span className={TYPE.sectionLabel}>state</span>
         <button
           type="button"
           onClick={() => setRaw((v) => !v)}
@@ -58,7 +59,7 @@ export function StepDetail({ step }: { step: Step }) {
     <div className="pb-1">
       {step.error && (
         <div className="mt-3 first:mt-0">
-          <div className="text-err uppercase tracking-wide text-[11px] mb-1">error</div>
+          <div className={`mb-1 ${TYPE.sectionLabel} !text-err`}>error</div>
           <pre className="whitespace-pre-wrap break-words rounded-control border border-err/25 bg-err/[0.04] p-2 text-[12px] leading-relaxed text-err">
             {step.error}
           </pre>

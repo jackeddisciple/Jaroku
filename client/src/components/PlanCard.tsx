@@ -19,7 +19,7 @@ import { useState } from "react";
 import type { PlanTurn } from "../store/chatStore.ts";
 import { sendDiscardPlan, sendGenerate } from "../lib/socket.ts";
 import { useUiStore } from "../store/uiStore.ts";
-import { ACCENT, ICON } from "../lib/tokens.ts";
+import { ACCENT, ICON, TYPE } from "../lib/tokens.ts";
 import { noteKind } from "../lib/noteKind.ts";
 import { useStreamedText } from "../lib/useStreamedText.ts";
 import { BRAND_COLOR } from "../lib/icons.tsx";
@@ -127,7 +127,7 @@ function Section({
         <span className="shrink-0 flex items-center" style={accent ? { color: accent } : undefined}>
           {icon}
         </span>
-        <span className="text-[11px] font-medium uppercase tracking-wider text-muted">{label}</span>
+        <span className={TYPE.sectionLabel}>{label}</span>
         {/* Normally the count is only worth showing for more than one row. Collapsed, it is the
             only thing left saying how much is behind the header, so it always shows. */}
         {count !== undefined && (count > 1 || !open) && (

@@ -20,6 +20,7 @@ import {
   summaryToCsv,
 } from "../lib/evalExport.ts";
 import { ICON } from "../lib/tokens.ts";
+import { TYPE } from "../lib/tokens.ts";
 import { CheckIcon } from "./panelIcons.tsx";
 import type { EvalResults, ProviderMetrics } from "../types.ts";
 
@@ -109,7 +110,7 @@ export function ComparisonTable({
       <div className="overflow-x-auto">
         <table className="w-full text-[12px] border-separate border-spacing-0">
           <thead>
-            <tr className="text-faint text-[10px] uppercase tracking-wide">
+            <tr className={TYPE.sectionLabel}>
               <th className="text-left font-normal pb-1.5 pr-3">Provider</th>
               <th className="text-right font-normal pb-1.5 px-2">Quality</th>
               <th className="text-right font-normal pb-1.5 px-2">Cost</th>
@@ -133,7 +134,7 @@ export function ComparisonTable({
                     thing being compared is the last text in a comparison table that should be
                     guessable. */}
                 <td className="py-1.5 pr-3">
-                  <span className="text-ink whitespace-nowrap">{p.model}</span>
+                  <span className="whitespace-nowrap font-mono text-ink">{p.model}</span>
                   <span className="text-faint ml-1.5 text-[10px]">{p.provider}</span>
                 </td>
                 <td className="py-1.5 px-2 text-right">
@@ -176,7 +177,7 @@ export function ComparisonTable({
           "which provider is cheaper per run"; this answers "what did this eval cost me" —
           and includes the failed attempts and the judge, which the comparison excludes. */}
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px] pt-1">
-        <span className="text-faint uppercase tracking-wide text-[10px]">Spent</span>
+        <span className={TYPE.sectionLabel}>Spent</span>
         <span className={overBudget ? "text-err" : "text-ink"}>
           {fmtCost(totals.trueSpendUsd)} total
         </span>
@@ -194,7 +195,7 @@ export function ComparisonTable({
         {/* Export. Every caveat above survives the trip — unknown cost is an empty cell
             with a cost_known flag beside it, never a 0 a spreadsheet would happily sum. */}
         <span className="ml-auto flex items-center gap-2">
-          <span className="text-faint uppercase tracking-wide text-[10px]">Export</span>
+          <span className={TYPE.sectionLabel}>Export</span>
           <button
             onClick={() => download(`${exportStem(results)}-summary.csv`, summaryToCsv(results), "text/csv")}
             className="text-faint hover:text-ink transition-colors"

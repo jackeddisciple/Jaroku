@@ -212,8 +212,8 @@ function FlowNode({ data }: NodeProps) {
             <Icon size={24} />
           </span>
           <span className="flex flex-col min-w-0 leading-tight gap-1">
-            <Truncate className="text-[15px] font-semibold text-ink">{d.title}</Truncate>
-            <Truncate className="text-[12px] text-muted">{d.subtitle}</Truncate>
+            <Truncate className="font-mono text-[13px] font-semibold text-ink">{d.title}</Truncate>
+            <Truncate className="text-[11px] text-muted">{d.subtitle}</Truncate>
           </span>
         </div>
 
@@ -268,12 +268,12 @@ function FlowNode({ data }: NodeProps) {
 
       {/* label beneath the card */}
       <div className="absolute left-1/2 -translate-x-1/2 text-center" style={{ top: CARD_H + 8, width: 200 }}>
-        <Truncate fade="both" className="text-[13px] font-medium leading-tight text-ink">
+        <Truncate fade="both" className="font-mono text-[12px] font-medium leading-tight text-ink">
           {d.title}
         </Truncate>
         <Truncate
           fade="both"
-          className={`text-[11.5px] leading-tight ${d.mcp ? "" : "text-muted"}`}
+          className={`text-[11px] leading-tight ${d.mcp ? "" : "text-muted"}`}
         >
           <span style={d.mcp ? { color: ACCENT_MCP } : undefined}>{d.subtitle}</span>
         </Truncate>
@@ -300,7 +300,7 @@ function ResourceNode({ data }: NodeProps) {
         <Icon size={44} />
       </div>
       <div className="absolute left-1/2 -translate-x-1/2 text-center" style={{ top: RES_D + 9, width: 112 }}>
-        <Truncate fade="both" className="text-[12.5px] leading-tight text-ink">{d.label}</Truncate>
+        <Truncate fade="both" className="font-mono text-[11px] leading-tight text-ink">{d.label}</Truncate>
       </div>
       <Handle id="in" type="target" position={Position.Top} className={HANDLE_HIDDEN} />
       <Diamond style={{ left: RES_D / 2, top: 0 }} />

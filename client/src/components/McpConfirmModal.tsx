@@ -22,7 +22,7 @@
 import { useEffect, useState } from "react";
 import { useMcpStore } from "../store/mcpStore.ts";
 import { sendResolveMcpConfirm } from "../lib/socket.ts";
-import { ACCENT, ICON, STATUS } from "../lib/tokens.ts";
+import { ACCENT, ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { primaryBtn, quietBtn } from "./buttons.ts";
 import { McpBadge } from "./McpBadge.tsx";
 import { ShieldAlertIcon } from "./panelIcons.tsx";
@@ -118,7 +118,7 @@ export function McpConfirmModal() {
         {/* The body of the dialog. Approving the tool happened at planning time; what has
             never been approved is this call, with these values. */}
         <div className="mt-3 px-5">
-          <p className="text-[10px] uppercase tracking-wide text-faint">
+          <p className={TYPE.sectionLabel}>
             Arguments the agent produced
           </p>
           <pre className="mt-1 max-h-56 overflow-auto rounded-control border border-hair bg-bg/60 p-2.5 font-mono text-[11px] leading-[1.55] text-ink">

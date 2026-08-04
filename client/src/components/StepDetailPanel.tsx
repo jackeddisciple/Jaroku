@@ -7,7 +7,7 @@ import { useEffect } from "react";
 import { useTraceStore } from "../store/traceStore.ts";
 import { fmtCost, fmtDuration, fmtTokens } from "../lib/format.ts";
 import { actionForStep } from "../lib/actionIcons.tsx";
-import { ICON, STEP_TYPE } from "../lib/tokens.ts";
+import { ICON, STEP_TYPE, TYPE } from "../lib/tokens.ts";
 import { ActionRow } from "./ActionRow.tsx";
 import { Chip } from "./Chip.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
@@ -65,7 +65,7 @@ export function StepDetailPanel() {
       {step && (
         <>
           <div className="flex items-center gap-2 px-4 py-3 shrink-0">
-            <span className="text-[11px] uppercase tracking-widest text-faint">Step Details</span>
+            <span className={TYPE.panelLabel}>Step Details</span>
             <button
               onClick={() => setExpandedStep(null)}
               className="ml-auto text-muted hover:text-ink transition-colors duration-fast"

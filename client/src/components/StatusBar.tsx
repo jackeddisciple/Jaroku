@@ -39,7 +39,7 @@ export function StatusBar() {
   const sep = <span className="text-hair">|</span>;
 
   return (
-    <div className="flex h-7 shrink-0 items-center gap-3 border-t border-hair px-4 text-[11px] text-muted tabular-nums">
+    <div className="flex h-7 shrink-0 items-center gap-3 border-t border-hair px-4 font-mono text-[11px] text-muted tabular-nums">
       <span className="flex items-center gap-1.5">
         <span className={`w-2 h-2 rounded-full ${DOT[connection]}`} />
         {LABEL[connection]}
