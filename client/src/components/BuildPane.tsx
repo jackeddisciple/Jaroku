@@ -336,7 +336,28 @@ export function BuildPane({
    * about the composer, the routing and the cards stays the one implementation.
    */
   emptySlot,
-}: { emptySlot?: React.ReactNode } = {}) {
+  /**
+   * This pane IS the screen, rather than the middle column of three.
+   *
+   * True for exactly one moment: onboarding step 3, where nothing else is mounted. Three things
+   * follow, and all three are the same observation — chrome that orients you between panels is
+   * noise when there are no other panels:
+   *
+   *   * the header goes. "NEW AGENT" labels a column against its neighbours; with none, it is a
+   *     caption on a blank screen sitting directly above a heading that says the same thing in
+   *     a sentence
+   *   * the optional name field goes. The name is taken from the description when it is left
+   *     empty, which is what everybody does with their first agent, and it is the only control
+   *     here that can be ignored entirely with no consequence
+   *   * an empty conversation stops being a tall scroll area with the composer pinned beneath
+   *     it. The examples and the composer become one centred group, so the box you type into is
+   *     the middle of the screen rather than the thing at the bottom of it
+   *
+   * Everything else — the routing, the connectors, the modes, the cards — is untouched. This is
+   * about what surrounds the composer, never about what it does.
+   */
+  standalone = false,
+}: { emptySlot?: React.ReactNode; standalone?: boolean } = {}) {
   // One composer, two send modes. Each mode keeps its OWN draft so toggling never clobbers text
   // (a half-typed chat message can't be sent as agent input, and vice-versa). `text`/`setText`
   // are the active mode's draft, so the rest of the component is unchanged.
@@ -775,6 +796,10 @@ export function BuildPane({
     contextLabel,
   });
 
+  // An empty thread on a screen this pane owns. The one case where the composer is not the
+  // bottom of a conversation but the middle of a page — see `standalone`.
+  const anchored = standalone && turns.length === 0;
+
   return (
     // The family comes from the body now — every panel is on the prose/code split, and this
     // pane no longer has to declare what it always was.
@@ -783,8 +808,12 @@ export function BuildPane({
     // on some blocks and the 1.5 body default on others, so two paragraphs of the same size could
     // sit at different rhythms depending on which component rendered them. 1.55 for everything the
     // panel reads as prose; code overrides back down where it needs to (diff hunks).
-    <div className="flex h-full flex-col bg-bg leading-[1.55]">
-      <div className="flex shrink-0 items-baseline gap-2 border-b border-hair px-6 pb-2 pt-4">
+    <div className={`flex h-full flex-col bg-bg leading-[1.55] ${anchored ? "justify-center" : ""}`}>
+      <div
+        className={`shrink-0 items-baseline gap-2 border-b border-hair px-6 pb-2 pt-4 ${
+          standalone ? "hidden" : "flex"
+        }`}
+      >
         <span className={TYPE.panelLabel}>{mode === "generate" ? "New agent" : "Fix"}</span>
         {agent && (
           // Two truncations, two fixes. The server's 60-char cut already happened and landed
@@ -804,7 +833,12 @@ export function BuildPane({
       {/* Turns are distinct moments — a prompt, a plan, a generation. 24px between them, the
           widest step in the scale, so the thread reads as separate exchanges rather than one
           continuous document. */}
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-6 py-2 space-y-6">
+      <div
+        ref={scrollRef}
+        className={`px-6 ${
+          anchored ? "shrink-0" : "flex-1 min-h-0 overflow-y-auto py-2 space-y-6"
+        }`}
+      >
         {turns.length === 0 && emptySlot}
         {turns.length === 0 && !emptySlot &&
           (mode === "generate" ? (
@@ -829,8 +863,15 @@ export function BuildPane({
       <div className="px-6 pb-4 pt-2 shrink-0">
         {/* connectors + name — new-agent generation only (Chat mode, no agent selected) */}
         {composerMode === "chat" && mode === "generate" && (
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-faint mr-1">Connectors</span>
+          // On first run this row is one of three stacked groups — examples, connectors,
+          // composer — and a lowercase caption between two proper section headings reads as a
+          // stray word rather than as the head of its own group. It gets the panel's section
+          // label there, and stays a caption in the three-column app, where it is the only
+          // label above the composer and an uppercase one would shout.
+          <div className={`mb-2 flex flex-wrap items-center gap-2 ${standalone ? "mt-1" : ""}`}>
+            <span className={standalone ? `${TYPE.sectionLabel} mr-1` : "text-[11px] text-faint mr-1"}>
+              Connectors
+            </span>
             {CONNECTORS.map((c) => {
               const on = selected.includes(c.id);
               return (
@@ -870,6 +911,10 @@ export function BuildPane({
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
+              // Hidden, not removed, on first run: `name` is still the state the submit path
+              // reads, and it is still empty, which is what makes generation take the name from
+              // the description. See `standalone` for why it is not on screen there.
+              hidden={standalone}
               disabled={busy || Boolean(planId)}
               placeholder={planId ? "name (set by the plan)" : "name (optional)"}
               title={
@@ -1002,8 +1047,13 @@ export function BuildPane({
         )}
 
         {/* the card — textarea sits directly in it; only the toggle + send read as solid elements */}
+        {/* On first run it carries a resting glow. The screen has one thing to do and this is
+            it, and a box that only lights up once you have already found it is not an anchor —
+            it is a form field that happens to be focusable. In the three-column app the composer
+            is one of several places to look and it goes back to a hairline and a shadow. */}
         <div
-          className="rounded-modal border border-edge bg-panel shadow-raised transition-shadow duration-fast focus-within:shadow-focusring"
+          className={`rounded-modal border border-edge bg-panel transition-shadow duration-fast
+            focus-within:shadow-focusring ${standalone ? "shadow-glow" : "shadow-raised"}`}
           style={{ padding: "14px 16px 12px" }}
         >
           {/* input slot: the textarea and the live waveform crossfade in place (~200ms) so the
@@ -1011,6 +1061,11 @@ export function BuildPane({
           <div className="relative" style={{ height: showWave ? recordHeight : undefined }}>
             <textarea
               ref={composerRef}
+              // First run only. The caret belongs in the one control the screen exists for, and
+              // §4.5's keyboard-first rule is not satisfied by a screen you have to click into
+              // before you can type. In the three-column app the pane does not get to steal focus
+              // from wherever the user actually is.
+              autoFocus={standalone}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
