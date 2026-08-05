@@ -15,8 +15,21 @@ import { basename, dirname, join, relative } from "node:path";
 // Mirror of jaroku_runner/contract.py _SAFE_AGENT_ID — one contract, two enforcers.
 const SAFE_AGENT_ID = /^[a-z][a-z0-9_]{0,63}$/;
 
-export function isSafeAgentId(agentId: string): boolean {
-  return SAFE_AGENT_ID.test(agentId);
+/**
+ * The gate every agent id passes through before it becomes a path.
+ *
+ * The type check is not defensive noise. `RegExp.test` coerces its argument to a string
+ * first, so this function used to answer TRUE for `undefined` ("undefined" is lowercase
+ * letters), for `null` ("null" likewise), and for `["ok_agent"]`, whose toString is the id it
+ * contains. A client sending a null agent id got past the one check standing between it and
+ * a path join, and came back with a Node internal error about the "path" argument.
+ *
+ * Ids arrive over a socket from a client that can send anything, and this guard is shared by
+ * run, edit, generate, eval, graph, files and deploy — so it has to be true for exactly the
+ * strings it describes and nothing else.
+ */
+export function isSafeAgentId(agentId: unknown): agentId is string {
+  return typeof agentId === "string" && SAFE_AGENT_ID.test(agentId);
 }
 
 export interface ProjectFile {
