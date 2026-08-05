@@ -140,12 +140,6 @@ export default {
           "0%": { opacity: "0", transform: "translateY(8px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
-        // A path drawing itself, for the hero trace. Pairs with a stroke-dasharray set to the
-        // path's own length, so the edge appears to be laid down rather than faded in.
-        "draw-edge": {
-          "0%": { strokeDashoffset: "var(--draw-len)" },
-          "100%": { strokeDashoffset: "0" },
-        },
       },
       animation: {
         "slide-in": "slide-in 120ms ease-out",
@@ -153,7 +147,6 @@ export default {
         // `backwards` matters: these are staggered by animation-delay, and without it every
         // block paints at full opacity first and then jumps back to hidden to start.
         rise: "rise 320ms cubic-bezier(0.2, 0, 0, 1) backwards",
-        "draw-edge": "draw-edge 420ms cubic-bezier(0.2, 0, 0, 1) backwards",
         breathe: "breathe 4.2s ease-in-out infinite",
         "pulse-node": "pulse-node 2.4s ease-in-out infinite",
         "check-in": "check-in 180ms cubic-bezier(0.2, 0, 0, 1)",
