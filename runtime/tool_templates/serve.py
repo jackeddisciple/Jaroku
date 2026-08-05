@@ -225,6 +225,25 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _refuse(self, code: int, payload: dict) -> None:
+        """Answer without having read the request body, and end the connection.
+
+        Under HTTP/1.1 a connection is a stream of framed messages, so a body left unread is
+        not discarded — it stays in the socket and the server parses it as the NEXT request
+        line. Refusing an oversized body produced exactly that: the client got a connection
+        reset instead of the 413, and a following request came back as `414 Request-URI Too
+        Long` made of its own JSON. Saying `Connection: close` is the honest framing when the
+        rest of the message is not going to be consumed.
+        """
+        self.close_connection = True
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+
     def log_message(self, fmt: str, *args) -> None:
         # BaseHTTPRequestHandler logs to stderr by default and includes the request line.
         # Route it to stdout with the rest of the service's output, and keep it one line.
@@ -273,6 +292,36 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
             return
 
+        # The body is framed BEFORE anything else is decided. Content-Length is the only
+        # honest way to know where this message ends, and a refusal issued without consuming
+        # the message corrupts every request behind it on the same connection.
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if length < 0:
+                raise ValueError
+        except ValueError:
+            # Unparseable framing: there is no safe number of bytes to skip, so end here.
+            self._refuse(400, {"error": "invalid Content-Length"})
+            return
+        if length > MAX_BODY_BYTES:
+            # Refused on the header, so an oversized body is never buffered. The connection
+            # goes with it — draining megabytes to be polite is the attack, not the fix.
+            self._refuse(413, {"error": f"request body over {MAX_BODY_BYTES} bytes"})
+            return
+
+        # Read before authorising. It looks backwards and is not: the body is already bounded
+        # to MAX_BODY_BYTES above, so this is a bounded read from an unauthenticated peer —
+        # and consuming it is what lets the 401 below be an ordinary answer on a connection
+        # the client can keep using, rather than a desync.
+        try:
+            raw = self.rfile.read(length) if length else b""
+        except OSError:
+            self._refuse(408, {"error": "timed out reading the request body"})
+            return
+        if len(raw) < length:
+            self._refuse(400, {"error": "the request body was shorter than Content-Length"})
+            return
+
         if not self._authorised():
             # No detail: which half of a credential was wrong is not the caller's business.
             self.send_response(401)
@@ -281,19 +330,8 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        # Checked against the header before a single byte is read, so an oversized body is
-        # refused rather than buffered.
         try:
-            length = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            self._send(400, {"error": "invalid Content-Length"})
-            return
-        if length > MAX_BODY_BYTES:
-            self._send(413, {"error": f"request body over {MAX_BODY_BYTES} bytes"})
-            return
-
-        try:
-            payload = json.loads(self.rfile.read(length) or b"{}")
+            payload = json.loads(raw or b"{}")
         except (ValueError, UnicodeDecodeError):
             self._send(400, {"error": "body must be JSON"})
             return
