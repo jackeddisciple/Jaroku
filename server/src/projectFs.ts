@@ -34,19 +34,44 @@ export interface ProjectFile {
 // agent's reach into a third-party system without anyone approving it. Listing them always,
 // installed or not, also means the model cannot introduce a file masquerading as one, the
 // same reason the connector block list covers every catalogue filename.
+//
+// The four deploy artifacts are here for a sharper version of the same reason. serve.py is
+// the reviewed process that answers a PUBLICLY REACHABLE URL, and the Dockerfile decides what
+// runs around it — an edit able to rewrite either could change what a container on the open
+// internet does, spending the user's provider key, with nobody approving it. They are listed
+// unconditionally, before the deploy layer has ever written one, so an edit cannot get in
+// first with a file masquerading as one.
+/**
+ * The four files the deploy layer writes into a project. Exported so there is one list:
+ * the artifact writer produces exactly these, and the edit loop refuses exactly these.
+ */
+export const DEPLOY_ARTIFACTS = new Set([
+  "serve.py",
+  "Dockerfile",
+  ".dockerignore",
+  "pyproject.toml",
+]);
+
 const HOST_OWNED = new Set([
   "jaroku.json",
   "__init__.py",
   "mcp_tools.json",
   join("tools", "mcp_bridge.py"),
+  ...DEPLOY_ARTIFACTS,
 ]);
 
 // What counts as project text worth showing/editing. Everything else (pyc, caches) is noise.
 const TEXT_EXTENSIONS = new Set([".py", ".md", ".json", ".toml", ".txt"]);
 const MAX_FILE_BYTES = 200_000; // sanity cap; agent projects are a few KB
 
+// Project text with no extension to match on. A Dockerfile is the file a user is most likely
+// to want to read before trusting a deploy, so it has to be visible in the file list — and
+// .dockerignore is what proves .env never enters the build context, which is worth being able
+// to check. Both are named exactly, the same way .env.example already is.
+const EXTENSIONLESS_TEXT = new Set(["Dockerfile", ".dockerignore", ".env.example"]);
+
 function isTextFile(name: string): boolean {
-  if (name === ".env.example") return true;
+  if (EXTENSIONLESS_TEXT.has(name)) return true;
   const dot = name.lastIndexOf(".");
   return dot >= 0 && TEXT_EXTENSIONS.has(name.slice(dot));
 }
@@ -66,7 +91,7 @@ export function listProjectFiles(projectDir: string, connectorFiles: string[]): 
 
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir)) {
-      if (entry === "__pycache__" || entry.startsWith(".") && entry !== ".env.example") continue;
+      if (entry === "__pycache__" || (entry.startsWith(".") && !EXTENSIONLESS_TEXT.has(entry))) continue;
       const full = join(dir, entry);
       const stat = statSync(full);
       if (stat.isDirectory()) {

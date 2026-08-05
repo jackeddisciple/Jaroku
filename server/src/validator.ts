@@ -31,6 +31,14 @@ const TOOL_NODE = /ToolNode\s*\(/;
 const TOOL_ERRORS_HANDLED = /ToolNode\s*\([^)]*handle_tool_errors\s*=\s*True/s;
 const ENV_KEY = /os\.environ(?:\.get)?\s*[[(]\s*["']([A-Z0-9_]+)["']/g;
 
+// Reviewed host-owned Python that can be in a project without the model having written it.
+// Excluded from the model-output lints unconditionally rather than by the caller remembering:
+// serve.py is a copied-in template that deliberately does two things a generated file may not
+// — it constructs the model (it IS the injection point rule 2 exists to preserve) and it logs
+// to stdout (nothing is reading a trace out there). Linting it would fail every edit made
+// after an agent's first deploy, for code no model wrote.
+const REVIEWED_HOST_PY = ["serve.py"];
+
 function pythonFiles(dir: string, base = dir): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir)) {
@@ -472,7 +480,8 @@ export async function validateProject(
   if (!/\bTOOLS\b/.test(agentSrc)) problems.push("agent.py never references TOOLS");
 
   // --- hard rules, across every generated file ------------------------------
-  const generated = pythonFiles(projectDir).filter((f) => !opts.connectorFiles.includes(f));
+  const reviewed = [...opts.connectorFiles, ...REVIEWED_HOST_PY];
+  const generated = pythonFiles(projectDir).filter((f) => !reviewed.includes(f));
   for (const rel of generated) {
     const src = readFileSync(join(projectDir, rel), "utf8");
 
@@ -511,7 +520,7 @@ export async function validateProject(
       opts.runtimeDir,
       projectDir,
       opts.connectorToolNames ?? [],
-      opts.connectorFiles,
+      reviewed,
       mcpToolMap(opts.mcpTools),
     )),
   );

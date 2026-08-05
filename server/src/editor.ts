@@ -22,7 +22,9 @@ import { anthropicClient, emptyUsage, summarizeUsage, type UsageSummary } from "
 import { loadConnectors, type Connector } from "./connectors.ts";
 import { FileProtocolParser, type ProtocolEvent } from "./fileProtocol.ts";
 import { agentsDir, replayFixture, safeRelativePath } from "./generator.ts";
-import { atomicSwap, copyProject, isSafeAgentId, listProjectFiles, readOnlyPaths } from "./projectFs.ts";
+import {
+  atomicSwap, copyProject, DEPLOY_ARTIFACTS, isSafeAgentId, listProjectFiles, readOnlyPaths,
+} from "./projectFs.ts";
 import { buildEditSystemPrompt, buildEditUserPrompt } from "./prompt.ts";
 import type { McpToolView } from "./mcpRegistry.ts";
 import { validateProject } from "./validator.ts";
@@ -168,9 +170,11 @@ export class Editor extends EventEmitter<EditorEvents> {
       const installedFiles = installed.map((c) => `tools/${c.file}`);
       // The emit-block covers every catalog connector filename, installed or not, so the
       // model can never introduce a file masquerading as a reviewed template.
-      // readOnlyPaths also covers mcp_tools.json and tools/mcp_bridge.py unconditionally
-      // (projectFs.ts) — the manifest is this agent's entire MCP grant, and an edit able to
-      // rewrite it could widen the agent's reach with nobody approving it.
+      // readOnlyPaths also covers mcp_tools.json, tools/mcp_bridge.py and the four deploy
+      // artifacts unconditionally (projectFs.ts) — the manifest is this agent's entire MCP
+      // grant, and serve.py plus the Dockerfile are what a publicly reachable container runs.
+      // An edit able to rewrite any of them could widen the agent's reach, or change what
+      // answers on the open internet, with nobody approving it.
       const blocked = readOnlyPaths(all.map((c) => `tools/${c.file}`));
 
       // Read before the model touches anything: whether THIS agent already survives a raising tool.
@@ -195,16 +199,24 @@ export class Editor extends EventEmitter<EditorEvents> {
             // pair gets its own, because "ask for a wrapper" is the wrong advice for a
             // manifest — the fix there is to change the agent's scope, which is a decision
             // the user makes in the MCP panel, not one an edit should be able to make.
+            // The deploy artifacts get theirs for the same shape of reason: they are
+            // regenerated from jaroku.json on every deploy, so an edit to them would be
+            // silently discarded even if it were allowed.
             const isMcp = safe === "mcp_tools.json" || safe === "tools/mcp_bridge.py";
+            const isDeploy = DEPLOY_ARTIFACTS.has(safe);
             throw new Error(
               isMcp
                 ? `${safe} is host-owned and read-only — it is what scopes this agent's ` +
                   `access to third-party MCP servers. Change the selection in the MCP panel ` +
                   `and re-generate to give it different tools.`
-                : safe.startsWith("tools/")
-                  ? `${safe} is a reviewed connector template and cannot be edited — ` +
-                    `ask for a wrapper tool that adapts its results instead`
-                  : `${safe} is host-owned and read-only`,
+                : isDeploy
+                  ? `${safe} is host-owned and read-only — it is deploy tooling Jaroku ` +
+                    `regenerates from jaroku.json every time you deploy, so an edit here ` +
+                    `would not survive. Change the agent instead, then deploy again.`
+                  : safe.startsWith("tools/")
+                    ? `${safe} is a reviewed connector template and cannot be edited — ` +
+                      `ask for a wrapper tool that adapts its results instead`
+                    : `${safe} is host-owned and read-only`,
             );
           }
           buffers.set(event.path, "");
