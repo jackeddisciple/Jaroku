@@ -148,7 +148,8 @@ export type AddMcpServerCommand = {
   /**
    * A bearer token or API key, if the server needs one.
    *
-   * This is the only field on any command in this file that carries a secret. It travels
+   * This is the first of three fields on any command in this file that carry a secret (see
+   * SetProviderKeyCommand.key and SetRailwayTokenCommand.token). It travels
    * one way — browser to server, over the loopback socket the whole product runs on — and
    * is written to runtime/.env and forgotten. Nothing ever sends it back: a server reports
    * `configured: true`, never its credential. See envWriter.ts.
@@ -198,8 +199,8 @@ export type SetMcpServerAuthCommand = {
 /**
  * Store a provider's API key. Answered with a fresh provider snapshot.
  *
- * `key` is the second field on any command in this file that carries a secret (see
- * AddMcpServerCommand.token). It travels one way — browser to server, over the loopback
+ * `key` is the second of the three fields on any command in this file that carry a secret
+ * (see AddMcpServerCommand.token and SetRailwayTokenCommand.token). It travels one way — browser to server, over the loopback
  * socket the whole product runs on — is written to runtime/.env by the same credential writer
  * every other key goes through, and is forgotten. Nothing ever sends it back: a provider
  * reports `configured: true`, never its credential. See envWriter.ts and providers.ts.
@@ -219,6 +220,81 @@ export type ListProvidersCommand = { cmd: "listProviders" };
 export type ProviderCommand = SetProviderKeyCommand | TestProviderKeyCommand;
 
 const PROVIDER_COMMANDS = new Set(["setProviderKey", "testProviderKey"]);
+
+// Deploy. Everything below rides beside the frozen schema in a new channel, exactly as
+// pause/resume, the eval engine and the MCP registry did — a deploy is not an agent run and
+// emits no trace events at all.
+//
+// One rule governs every shape here: NAMES TRAVEL, VALUES DO NOT. A deploy hands the user's
+// own credentials to their own hosting account, and nothing about that transaction needs a
+// value to cross this socket. The only exception is the same one the other two credential
+// commands are: a token going ONE WAY, browser to server, to be written to runtime/.env.
+
+/**
+ * What a deploy would need, before committing to one. Answered on the deploy channel with a
+ * plan: variable names, what is missing, what would be refused. Nothing is created and
+ * nothing is spent, so this is safe to call whenever the form changes.
+ */
+export type PlanDeployCommand = {
+  cmd: "planDeploy";
+  agentId: string;
+  provider: string;
+  model: string;
+};
+
+/** Start a deploy. `envKeys` are NAMES the user ticked — the server reads the values. */
+export type DeployCommand = {
+  cmd: "deploy";
+  agentId: string;
+  provider: string;
+  model: string;
+  envKeys: string[];
+  /** Proceed even though a declared variable has no value on this machine. */
+  allowMissing?: boolean;
+  /** Serve with no bearer token. The UI has to ask for this explicitly; it is never default. */
+  publicEndpoint?: boolean;
+};
+
+export type CancelDeployCommand = { cmd: "cancelDeploy"; deploymentId: string };
+
+/** Detach a deployment record from Jaroku. Never touches anything in the user's account. */
+export type ForgetDeploymentCommand = { cmd: "forgetDeployment"; deploymentId: string };
+
+export type ListDeploymentsCommand = { cmd: "listDeployments" };
+export type LoadDeployLogsCommand = { cmd: "loadDeployLogs"; deploymentId: string; sinceSeq?: number };
+
+/**
+ * Store the user's Railway token. Answered with a fresh deploy snapshot.
+ *
+ * `token` is the third and last field on any command in this file that carries a secret (see
+ * AddMcpServerCommand.token and SetProviderKeyCommand.key). Same discipline, same writer: one
+ * way, browser to server, into runtime/.env, forgotten. What comes back is `configured: true`.
+ * `token: null` removes the key.
+ */
+export type SetRailwayTokenCommand = { cmd: "setRailwayToken"; token: string | null };
+
+/**
+ * Prove a Railway token works without storing it — the "Test connection" button, again.
+ *
+ * A separate command for the reason testProviderKey is: a test that wrote first would put a
+ * credential on disk before the user pressed Save.
+ */
+export type TestRailwayTokenCommand = { cmd: "testRailwayToken"; token: string };
+
+/** Deploy-channel commands, grouped so the forwarding switch stays readable. */
+export type DeployChannelCommand =
+  | PlanDeployCommand
+  | DeployCommand
+  | CancelDeployCommand
+  | ForgetDeploymentCommand
+  | LoadDeployLogsCommand
+  | SetRailwayTokenCommand
+  | TestRailwayTokenCommand;
+
+const DEPLOY_COMMANDS = new Set([
+  "planDeploy", "deploy", "cancelDeploy", "forgetDeployment", "loadDeployLogs",
+  "setRailwayToken", "testRailwayToken",
+]);
 
 /** MCP-channel commands, grouped so the forwarding switch stays readable. */
 export type McpCommand =
@@ -262,7 +338,9 @@ export type ClientCommand =
   | McpCommand
   | ListMcpServersCommand
   | ProviderCommand
-  | ListProvidersCommand;
+  | ListProvidersCommand
+  | DeployChannelCommand
+  | ListDeploymentsCommand;
 
 /** Eval-channel commands, grouped so the forwarding switch stays readable. */
 export type EvalCommand =
@@ -306,7 +384,8 @@ export type ForwardedCommand =
   | ExplainCommand
   | EvalCommand
   | McpCommand
-  | ProviderCommand;
+  | ProviderCommand
+  | DeployChannelCommand;
 
 // Generation rides its own channel, deliberately parallel to "trace". It never enters the
 // trace store or the event schema — schema/events.md v1 stays frozen.
@@ -463,6 +542,41 @@ export type ProviderEvent =
   // variable is exported in the server's shell and will win again after a restart.
   | { type: "notice"; message: string; provider?: string };
 
+// Deploy rides its own channel, for the same reason providers does: a deployment is not an
+// MCP server and not a provider, and the other channels are full snapshots of something else.
+// schema/events.md v1 is untouched — a deploy emits no trace events at all.
+//
+// Every mutation answers with a full snapshot, so a client replaces rather than merges. And
+// as everywhere else: `deployments[].env_keys` are NAMES, `railwayConfigured` says a named
+// variable is set, and nothing on this channel carries a credential — with one deliberate,
+// one-shot exception, `serveToken` below.
+export type DeployEvent =
+  // The whole picture: every deployment, plus whether a Railway token is configured.
+  | { type: "deployments"; deployments: unknown[]; railwayConfigured: boolean; cliVersion?: string | null }
+  // What a deploy would need, answered before anything is created or spent.
+  | { type: "plan"; agentId: string; secrets: unknown[]; problems: string[]; warnings: string[] }
+  | { type: "started"; deploymentId: string; agentId: string }
+  // One per phase transition. The UI reads `stage` for the narrative and `status` for the row.
+  | { type: "stage"; deploymentId: string; stage: string; status: string }
+  // One line of build output, already scrubbed of every secret this deploy handled.
+  | { type: "log"; deploymentId: string; seq: number; stage: string; stream: string; text: string }
+  // A backfill of stored lines, for a client that connected mid-deploy or reloaded.
+  | { type: "logs"; deploymentId: string; lines: unknown[] }
+  | { type: "finished"; deploymentId: string; status: string; url: string | null; error: string | null }
+  /**
+   * The bearer token for a newly live endpoint, sent exactly once.
+   *
+   * The one credential that travels server -> browser anywhere in this file, and it is
+   * deliberate: Jaroku generated it, set it on Railway, and keeps no copy, so this message is
+   * the only chance the user has to see it. It is not persisted, not in the deployment row,
+   * and not in the log table — which is exactly why it has to be its own event rather than a
+   * `log` line.
+   */
+  | { type: "serveToken"; deploymentId: string; url: string; token: string }
+  | { type: "testResult"; ok: boolean; message: string | null }
+  | { type: "error"; message: string; deploymentId?: string }
+  | { type: "notice"; message: string; deploymentId?: string };
+
 export type DebugEvent =
   | { type: "paused"; runId: string; seq: number }
   | { type: "resumed"; runId: string; seqOffset: number }
@@ -483,6 +597,8 @@ export interface RelayOptions {
   listMcpServers?: () => unknown[];
   /** Which provider keys are set, by name. Never a value — see providers.ts. */
   listProviders?: () => unknown[];
+  /** Every deployment, plus whether a Railway token is configured. Names only. */
+  listDeployments?: () => { deployments: unknown[]; railwayConfigured: boolean };
 }
 
 export class WsRelay {
@@ -507,6 +623,10 @@ export class WsRelay {
       // Which providers are connected, so a first-run client knows on frame one whether it is
       // looking at a configured install or an empty one.
       this.sendTo(ws, { channel: "providers", type: "providers", providers: this.opts.listProviders?.() ?? [] });
+      // And what is deployed, so the sidebar's Deployed filter is right on frame one rather
+      // than after a round trip.
+      const deploySnapshot = this.opts.listDeployments?.() ?? { deployments: [], railwayConfigured: false };
+      this.sendTo(ws, { channel: "deploy", type: "deployments", ...deploySnapshot });
 
       ws.on("message", (data) => {
         try {
@@ -556,12 +676,19 @@ export class WsRelay {
             this.onCommand?.(msg);
           } else if (msg.cmd === "listMcpServers") {
             this.sendTo(ws, { channel: "mcp", type: "servers", servers: this.opts.listMcpServers?.() ?? [] });
+          } else if (msg.cmd === "listDeployments") {
+            const snapshot = this.opts.listDeployments?.() ?? { deployments: [], railwayConfigured: false };
+            this.sendTo(ws, { channel: "deploy", type: "deployments", ...snapshot });
           } else if (msg.cmd === "listProviders") {
             this.sendTo(ws, {
               channel: "providers",
               type: "providers",
               providers: this.opts.listProviders?.() ?? [],
             });
+          } else if (DEPLOY_COMMANDS.has(msg.cmd)) {
+            // Shape-checked in the app, which owns the deploy manager and can answer with a
+            // precise error on the "deploy" channel rather than dropping the message here.
+            this.onCommand?.(msg as DeployChannelCommand);
           } else if (PROVIDER_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the credential writer and can answer with a
             // precise error on the "providers" channel rather than dropping the message here.
@@ -679,6 +806,14 @@ export class WsRelay {
   // is an ordinary tool_call Step and still arrives on "trace" like any other.
   broadcastMcp(event: McpEvent): void {
     const msg = JSON.stringify({ channel: "mcp", ...event });
+    for (const ws of this.clients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+    }
+  }
+
+  /** Broadcast a deploy event. Separate channel by design — see DeployEvent. */
+  broadcastDeploy(event: DeployEvent): void {
+    const msg = JSON.stringify({ channel: "deploy", ...event });
     for (const ws of this.clients) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
     }
