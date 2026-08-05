@@ -517,7 +517,7 @@ export type ProviderMessage =
 
 export type DeployStatus =
   | "queued" | "packaging" | "uploading" | "building" | "deploying"
-  | "live" | "failed" | "cancelled" | "interrupted" | "removed";
+  | "live" | "failed" | "cancelled" | "interrupted" | "superseded" | "removed";
 
 /** Statuses a deploy can still leave under its own power. Mirror of deployStore.IN_FLIGHT. */
 export const DEPLOY_IN_FLIGHT: ReadonlySet<DeployStatus> = new Set<DeployStatus>([
@@ -566,7 +566,7 @@ export interface DeployLogLine {
 
 export type DeployMessage =
   | { channel: "deploy"; type: "deployments"; deployments: Deployment[]; railwayConfigured: boolean; cliVersion?: string | null }
-  | { channel: "deploy"; type: "plan"; agentId: string; secrets: DeploySecretStatus[]; problems: string[]; warnings: string[] }
+  | { channel: "deploy"; type: "plan"; agentId: string; secrets: DeploySecretStatus[]; problems: string[]; warnings: string[]; redeploy: boolean }
   | { channel: "deploy"; type: "started"; deploymentId: string; agentId: string }
   | { channel: "deploy"; type: "stage"; deploymentId: string; stage: string; status: DeployStatus }
   | { channel: "deploy"; type: "log"; deploymentId: string; seq: number; stage: string; stream: string; text: string }

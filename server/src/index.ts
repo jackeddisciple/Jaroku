@@ -706,6 +706,7 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
           secrets: plan.secrets,
           problems: plan.problems,
           warnings: plan.warnings,
+          redeploy: plan.redeploy,
         });
         return;
       }

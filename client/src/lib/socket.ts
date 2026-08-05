@@ -167,7 +167,10 @@ function dispatch(msg: ServerMessage): void {
       const d = useDeployStore.getState();
       if (msg.type === "deployments") d.setDeployments(msg.deployments, msg.railwayConfigured);
       else if (msg.type === "plan") {
-        d.setPlan({ agentId: msg.agentId, secrets: msg.secrets, problems: msg.problems, warnings: msg.warnings });
+        d.setPlan({
+          agentId: msg.agentId, secrets: msg.secrets, problems: msg.problems,
+          warnings: msg.warnings, redeploy: msg.redeploy,
+        });
       } else if (msg.type === "stage") d.setStage(msg.deploymentId, msg.stage);
       else if (msg.type === "log") {
         d.appendLog({

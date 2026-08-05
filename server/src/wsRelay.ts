@@ -554,7 +554,7 @@ export type DeployEvent =
   // The whole picture: every deployment, plus whether a Railway token is configured.
   | { type: "deployments"; deployments: unknown[]; railwayConfigured: boolean; cliVersion?: string | null }
   // What a deploy would need, answered before anything is created or spent.
-  | { type: "plan"; agentId: string; secrets: unknown[]; problems: string[]; warnings: string[] }
+  | { type: "plan"; agentId: string; secrets: unknown[]; problems: string[]; warnings: string[]; redeploy: boolean }
   | { type: "started"; deploymentId: string; agentId: string }
   // One per phase transition. The UI reads `stage` for the narrative and `status` for the row.
   | { type: "stage"; deploymentId: string; stage: string; status: string }

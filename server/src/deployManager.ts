@@ -90,6 +90,14 @@ export interface StartDeployRequest {
 export interface DeployPlan {
   agentId: string;
   secrets: DeploySecretStatus[];
+  /**
+   * Whether this would go back into a Railway service the agent already has.
+   *
+   * Worth saying before the button is pressed: "this replaces what is live" and "this creates
+   * a second one" are different decisions, and the user is the only one who knows which they
+   * meant.
+   */
+  redeploy: boolean;
   /** Blocking problems. A non-empty list means Deploy is refused, with these reasons. */
   problems: string[];
   /** Non-blocking. Worth saying, not worth stopping for. */
@@ -110,7 +118,10 @@ export function planDeploy(deps: DeployManagerDeps, req: StartDeployRequest): De
   const warnings: string[] = [];
 
   if (!isSafeAgentId(req.agentId)) {
-    return { agentId: req.agentId, secrets: [], problems: ["invalid agent id"], warnings, cliVersion: null };
+    return {
+      agentId: req.agentId, secrets: [], problems: ["invalid agent id"], warnings,
+      redeploy: false, cliVersion: null,
+    };
   }
   const projectDir = join(deps.runtimeDir, "agents", req.agentId);
   if (!existsSync(join(projectDir, "agent.py"))) {
@@ -174,7 +185,14 @@ export function planDeploy(deps: DeployManagerDeps, req: StartDeployRequest): De
     );
   }
 
-  return { agentId: req.agentId, secrets, problems, warnings, cliVersion: cli.version };
+  return {
+    agentId: req.agentId,
+    secrets,
+    problems,
+    warnings,
+    redeploy: deps.store.reusableTarget(req.agentId) !== null,
+    cliVersion: cli.version,
+  };
 }
 
 export class DeployManager {
@@ -305,25 +323,17 @@ export class DeployManager {
       // --- provision ---
       this.stage(id, "provisioning", "packaging");
       const api = new RailwayApi({ token, scrub });
-      const project = await api.createProject(this.projectName(req.agentId));
+      const target = await this.resolveTarget(id, api, req.agentId);
       this.deps.store.patch(id, {
-        railway_project_id: project.id,
-        railway_environment_id: project.environmentId,
+        railway_project_id: target.projectId,
+        railway_environment_id: target.environmentId,
+        railway_service_id: target.serviceId,
       });
-      this.log(id, "provisioning", "jaroku", `created Railway project ${project.name}`);
-
-      const service = await api.createService(project.id, req.agentId);
-      this.deps.store.patch(id, { railway_service_id: service.id });
       this.deps.onChanged();
       if (this.stopped(id)) return;
 
       // --- variables ---
       this.stage(id, "variables", "packaging");
-      const target = {
-        projectId: project.id,
-        environmentId: project.environmentId,
-        serviceId: service.id,
-      };
       await api.upsertVariables(target, { ...Object.fromEntries(secretValues), ...host.env });
       // NAMES, never values. The names are already in the row; this line just says it happened.
       this.log(id, "variables", "jaroku",
@@ -336,9 +346,9 @@ export class DeployManager {
       if (this.active) this.active.upload = upload;
       const result = await upload.run({
         token,
-        projectId: project.id,
-        serviceId: service.id,
-        environmentId: project.environmentId,
+        projectId: target.projectId,
+        serviceId: target.serviceId,
+        environmentId: target.environmentId,
         projectDir: join(this.deps.runtimeDir, "agents", req.agentId),
         onLine: (stream, line) => {
           // Remembered so the buildLogs poll below does not show the same output a second
@@ -368,6 +378,13 @@ export class DeployManager {
       const existing = await api.existingDomain(target.projectId, target.environmentId, target.serviceId);
       const url = existing ?? (await api.createDomain(target.serviceId, target.environmentId, SERVE_PORT));
       this.deps.store.patch(id, { url });
+      // Exactly one row may claim to be live on a service. Two would be two different URLs
+      // both described as the current one.
+      const replaced = this.deps.store.supersede(id, target.serviceId);
+      if (replaced) {
+        this.log(id, "publishing", "jaroku",
+          `replaced ${replaced} earlier deployment(s) on this service`);
+      }
       this.log(id, "publishing", "jaroku", `live at ${url}`);
       if (serveToken) {
         // NOT through log(). A log line is persisted to deployment_logs, and this token gates
@@ -463,6 +480,49 @@ export class DeployManager {
   }
 
   // --- helpers ---
+
+  /**
+   * Where this deploy goes: back into the agent's existing Railway service, or a new one.
+   *
+   * Reuse is the default and it matters. Creating a fresh project on every deploy left the
+   * previous service running and billing, holding a URL the user had already been given and
+   * that Jaroku still listed as live — two services, two bills, and nothing saying which URL
+   * was current. A redeploy is the ordinary case, not an edge one.
+   *
+   * The remembered ids are checked before they are trusted, because Railway is not ours: a
+   * user can delete a project in their dashboard, and a deploy that then wrote variables into
+   * a service that no longer exists would fail somewhere much less legible. If the check
+   * fails for any reason, this makes a new project and says so — falling back to working is
+   * better than refusing over a stale id we only cached as a convenience.
+   */
+  private async resolveTarget(
+    id: string,
+    api: RailwayApi,
+    agentId: string,
+  ): Promise<{ projectId: string; environmentId: string; serviceId: string }> {
+    const remembered = this.deps.store.reusableTarget(agentId);
+    if (remembered) {
+      try {
+        await api.deployments(remembered.projectId, remembered.serviceId, remembered.environmentId, 1);
+        this.log(id, "provisioning", "jaroku",
+          "redeploying into the Railway service this agent already has — no second project");
+        return remembered;
+      } catch (err) {
+        const detail = err instanceof RailwayError ? err.message : String(err);
+        this.log(id, "provisioning", "jaroku",
+          `the Railway service this agent used is gone (${detail}); creating a new one`);
+      }
+    }
+
+    const project = await api.createProject(this.projectName(agentId));
+    this.log(id, "provisioning", "jaroku", `created Railway project ${project.name}`);
+    const service = await api.createService(project.id, agentId);
+    return {
+      projectId: project.id,
+      environmentId: project.environmentId,
+      serviceId: service.id,
+    };
+  }
 
   /** Railway project names are user-visible; keep them recognisable and unique enough. */
   private projectName(agentId: string): string {

@@ -30,6 +30,8 @@ export interface DeployPlan {
   secrets: DeploySecretStatus[];
   problems: string[];
   warnings: string[];
+  /** True when Deploy would replace what this agent already has running. */
+  redeploy: boolean;
 }
 
 export interface ServeTokenReveal {

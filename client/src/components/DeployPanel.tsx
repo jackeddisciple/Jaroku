@@ -37,7 +37,7 @@ import { ActionRow, type ActionState } from "./ActionRow.tsx";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
 import { EmptyState } from "./EmptyState.tsx";
-import { StatusDot } from "./StatusBadge.tsx";
+import { StatusDot, type BadgeState } from "./StatusBadge.tsx";
 import { Truncate } from "./Truncate.tsx";
 import {
   AlertTriangleIcon, CheckIcon, GlobeIcon, KeyIcon, RocketIcon, XIcon,
@@ -59,7 +59,7 @@ const STAGES: { id: string; active: string; done: string; detail: string }[] = [
   { id: "publishing", active: "Publishing", done: "Published", detail: "pointing a public URL at the service" },
 ];
 
-const STATUS_COPY: Record<DeployStatus, { state: "ok" | "error" | "pending"; label: string }> = {
+const STATUS_COPY: Record<DeployStatus, { state: BadgeState; label: string }> = {
   queued: { state: "pending", label: "queued" },
   packaging: { state: "pending", label: "packaging" },
   uploading: { state: "pending", label: "uploading" },
@@ -69,6 +69,8 @@ const STATUS_COPY: Record<DeployStatus, { state: "ok" | "error" | "pending"; lab
   failed: { state: "error", label: "failed" },
   cancelled: { state: "error", label: "cancelled" },
   interrupted: { state: "error", label: "interrupted" },
+  // Not an error: it worked, and then a later deploy of the same agent replaced it.
+  superseded: { state: "neutral", label: "replaced" },
   removed: { state: "error", label: "removed" },
 };
 
@@ -347,6 +349,16 @@ function DeployForm({
         </div>
       ))}
 
+      {plan?.redeploy && (
+        // "Replace what is live" and "put a second one up" are different decisions, and only
+        // the user knows which they meant. Said before the button, not after.
+        <p className="text-[11px] leading-[1.5] text-muted">
+          This agent already has a Railway service. Deploying replaces what is running there —
+          same project, same URL — rather than creating a second one you would also be billed
+          for.
+        </p>
+      )}
+
       <div className="flex items-center gap-2 border-t border-hair pt-3">
         <label
           className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted"
@@ -367,7 +379,7 @@ function DeployForm({
             sendDeploy({ agentId, provider, model, envKeys: chosen, allowMissing, publicEndpoint })
           }
         >
-          Deploy
+          {plan?.redeploy ? "Redeploy" : "Deploy"}
         </button>
       </div>
     </div>

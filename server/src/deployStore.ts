@@ -38,11 +38,12 @@ import { randomUUID } from "node:crypto";
  * failed      → terminal, with a reason
  * cancelled   → terminal, the user stopped it
  * interrupted → terminal, the server died while it was in flight (see reconcile)
+ * superseded  → terminal, a later deploy replaced it on the same Railway service
  * removed     → terminal, the user detached the record from Jaroku
  */
 export type DeployStatus =
   | "queued" | "packaging" | "uploading" | "building" | "deploying"
-  | "live" | "failed" | "cancelled" | "interrupted" | "removed";
+  | "live" | "failed" | "cancelled" | "interrupted" | "superseded" | "removed";
 
 /** Statuses a deploy can still leave under its own power. */
 export const IN_FLIGHT: ReadonlySet<DeployStatus> = new Set<DeployStatus>([
@@ -111,6 +112,13 @@ export interface DeploymentPatch {
   railway_service_id?: string | null;
   railway_environment_id?: string | null;
   railway_deployment_id?: string | null;
+}
+
+/** Where a redeploy of an agent should go, if it has somewhere to go back to. */
+export interface RailwayTarget {
+  projectId: string;
+  serviceId: string;
+  environmentId: string;
 }
 
 // --- store -------------------------------------------------------------------
@@ -355,6 +363,47 @@ export class DeployStore {
       }
     }
     return out;
+  }
+
+  /**
+   * The Railway project and service this agent was last deployed into, if any.
+   *
+   * A redeploy belongs in the SAME service. Creating a new project every time leaves the
+   * previous one running and billing, with a URL the user was given and Jaroku still lists as
+   * live — two services, two bills, and no way to tell which URL is the current one.
+   *
+   * Rows that never got as far as provisioning have no ids and are skipped; `removed` is
+   * skipped too, since detaching a record is the user saying they no longer want it followed.
+   */
+  reusableTarget(agentId: string): RailwayTarget | null {
+    for (const d of this.listForAgent(agentId)) {
+      if (d.railway_project_id && d.railway_service_id && d.railway_environment_id) {
+        return {
+          projectId: d.railway_project_id,
+          serviceId: d.railway_service_id,
+          environmentId: d.railway_environment_id,
+        };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Mark earlier deployments of the same Railway service as replaced.
+   *
+   * Without this a redeploy leaves two rows claiming to be live, which is not a display
+   * problem — it is two different URLs both described as the current one. Returns how many
+   * were superseded.
+   */
+  supersede(keepId: string, serviceId: string): number {
+    let count = 0;
+    for (const d of this.list()) {
+      if (d.id === keepId || d.railway_service_id !== serviceId) continue;
+      if (d.status !== "live") continue;
+      this.patch(d.id, { status: "superseded" });
+      count++;
+    }
+    return count;
   }
 
   logs(deploymentId: string, sinceSeq = -1): DeployLogLine[] {
