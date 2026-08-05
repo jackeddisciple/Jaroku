@@ -132,7 +132,9 @@ const withEnv = <T>(vars: Record<string, string | undefined>, fn: () => T): T =>
 
 // --- 4. what the deploy sets itself is not a credential ----------------------------------
 {
-  const env = hostEnv({ provider: "anthropic", model: "claude-haiku-4-5", serveToken: "tok-abc" });
+  const { env, secret } = hostEnv({
+    provider: "anthropic", model: "claude-haiku-4-5", serveToken: "tok-abcdefgh",
+  });
   check("the deploy sets the provider and model it was told",
     env["JAROKU_PROVIDER"] === "anthropic" && env["JAROKU_MODEL"] === "claude-haiku-4-5");
 
@@ -141,9 +143,27 @@ const withEnv = <T>(vars: Record<string, string | undefined>, fn: () => T): T =>
   check("high-impact MCP calls fail closed on the host",
     env["JAROKU_MCP_CONFIRM"] === "require");
 
-  check("the serve token is passed when there is one", env["JAROKU_SERVE_TOKEN"] === "tok-abc");
+  check("the serve token is passed when there is one", env["JAROKU_SERVE_TOKEN"] === "tok-abcdefgh");
+  const publicEnv = hostEnv({ provider: "openai", model: "m", serveToken: null });
   check("...and omitted entirely when the endpoint is deliberately public",
-    !("JAROKU_SERVE_TOKEN" in hostEnv({ provider: "openai", model: "m", serveToken: null })));
+    !("JAROKU_SERVE_TOKEN" in publicEnv.env));
+
+  // Which host values are credentials is declared here, not inferred by the caller. The
+  // caller inferred "all of them" and redacted the provider name out of every build log.
+  check("only the serve token is marked secret",
+    secret.length === 1 && secret[0] === "tok-abcdefgh", secret.join(","));
+  check("the provider and model are NOT secret",
+    !secret.includes("anthropic") && !secret.includes("claude-haiku-4-5"));
+  check("a public endpoint has no host secret at all", publicEnv.secret.length === 0);
+
+  // The regression itself, end to end: a build log line naming the provider must survive.
+  const scrubbed = makeScrubber([...secret, "sk-ant-REAL-SECRET-000"])(
+    "RUN uv pip install langchain-anthropic>=0.3.0 with sk-ant-REAL-SECRET-000",
+  );
+  check("a build line naming the provider is left readable",
+    scrubbed.includes("langchain-anthropic>=0.3.0"), scrubbed);
+  check("...while the credential beside it still goes",
+    !scrubbed.includes("sk-ant-REAL-SECRET-000"), scrubbed);
 }
 
 // --- 5. the scrubber catches what a build log could echo ----------------------------------

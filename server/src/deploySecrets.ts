@@ -93,15 +93,30 @@ export function requiredSecrets(input: RequiredSecretsInput): DeploySecretStatus
 /**
  * Variables the DEPLOY sets rather than copies, and their values.
  *
- * These are not credentials to hand over — they are how the container is told it is running
- * unattended. Kept here beside the secrets so the full set of what reaches a host is readable
- * in one place.
+ * Mostly not credentials — they are how the container is told it is running unattended. The
+ * one exception is the serve token, so the return value separates the two rather than leaving
+ * a caller to work out which is which.
  */
+export interface HostEnv {
+  /** Everything to set on the host. */
+  env: Record<string, string>;
+  /**
+   * Which of those values are credentials.
+   *
+   * Declared here rather than remembered at the call site, because the call site got it
+   * wrong: it scrubbed *every* host value out of the build log, and "anthropic" and
+   * "claude-haiku-4-5" are host values. Every build log came back reading
+   * `langchain-••••••••>=0.3.0`. Secrecy is a property of the value, so it is stated where
+   * the value is made — and a new secret variable added below cannot be forgotten.
+   */
+  secret: string[];
+}
+
 export function hostEnv(opts: {
   provider: string;
   model: string;
   serveToken: string | null;
-}): Record<string, string> {
+}): HostEnv {
   const env: Record<string, string> = {
     JAROKU_PROVIDER: opts.provider,
     JAROKU_MODEL: opts.model,
@@ -111,8 +126,12 @@ export function hostEnv(opts: {
     // rebuilding the service from a different source.
     JAROKU_MCP_CONFIRM: "require",
   };
-  if (opts.serveToken) env["JAROKU_SERVE_TOKEN"] = opts.serveToken;
-  return env;
+  const secret: string[] = [];
+  if (opts.serveToken) {
+    env["JAROKU_SERVE_TOKEN"] = opts.serveToken;
+    secret.push(opts.serveToken);
+  }
+  return { env, secret };
 }
 
 /**

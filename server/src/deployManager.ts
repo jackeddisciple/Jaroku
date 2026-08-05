@@ -264,7 +264,10 @@ export class DeployManager {
     const secretValues = resolveSecretValues(envKeys);
     const serveToken = req.publicEndpoint ? null : randomBytes(24).toString("base64url");
     const host = hostEnv({ provider: req.provider, model: req.model, serveToken });
-    const scrub = makeScrubber([...secretValues.values(), ...Object.values(host), token]);
+    // Credentials only. Scrubbing every host value used to redact the provider name and the
+    // model id out of the build log, so an ordinary install line arrived as
+    // `langchain-••••••••>=0.3.0` — a log the user cannot read, hiding nothing.
+    const scrub = makeScrubber([...secretValues.values(), ...host.secret, token]);
 
     try {
       // --- package ---
@@ -300,10 +303,10 @@ export class DeployManager {
         environmentId: project.environmentId,
         serviceId: service.id,
       };
-      await api.upsertVariables(target, { ...Object.fromEntries(secretValues), ...host });
+      await api.upsertVariables(target, { ...Object.fromEntries(secretValues), ...host.env });
       // NAMES, never values. The names are already in the row; this line just says it happened.
       this.log(id, "variables", "jaroku",
-        `set ${[...secretValues.keys(), ...Object.keys(host)].sort().join(", ")} on Railway`);
+        `set ${[...secretValues.keys(), ...Object.keys(host.env)].sort().join(", ")} on Railway`);
       if (this.stopped(id)) return;
 
       // --- upload ---
