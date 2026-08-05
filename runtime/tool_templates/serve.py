@@ -215,6 +215,15 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "jaroku-serve"
     sys_version = ""
 
+    # How long one client may hold a connection without finishing what it is saying.
+    #
+    # Without this a peer can open a socket, send half a request line, and keep a thread for
+    # as long as it likes — no bytes, no cost, no timeout. A few dozen of those exhaust a
+    # threaded server, and this one is on a public URL where anybody can open a socket. The
+    # ceiling is generous because a legitimate slow uploader is a real thing, and finite
+    # because an illegitimate one is too.
+    timeout = float(os.environ.get("JAROKU_SERVE_TIMEOUT_S") or 30)
+
     # --- plumbing ---
 
     def _send(self, code: int, payload: dict) -> None:
@@ -243,6 +252,18 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
+
+    def handle_one_request(self) -> None:
+        """Turn a stalled connection into a closed one instead of an exception on stderr.
+
+        socketserver arms self.timeout on the socket, so a client that stops mid-request
+        raises here. The base class would let it escape as a traceback; the connection is
+        simply over, and that is not an error worth a stack trace on every port scan.
+        """
+        try:
+            super().handle_one_request()
+        except (TimeoutError, OSError):
+            self.close_connection = True
 
     def log_message(self, fmt: str, *args) -> None:
         # BaseHTTPRequestHandler logs to stderr by default and includes the request line.
