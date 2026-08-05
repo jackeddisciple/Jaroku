@@ -148,30 +148,54 @@ def _final_answer(state) -> str:
     return ""
 
 
-def _jsonable(value):
+#: How deep into a state this will walk before it stops describing and starts summarising.
+#: Deep enough for any message list; shallow enough that a pathological graph cannot make the
+#: response cost more than the run did.
+MAX_STATE_DEPTH = 24
+
+
+def _jsonable(value, _depth: int = 0, _seen: frozenset[int] = frozenset()):
     """Best-effort JSON for a LangGraph state. Never raises — a state that cannot be rendered
     is still a response worth sending, and the answer is carried separately anyway.
 
     LangChain messages get ``model_dump()`` rather than ``repr()``: a state field is worth
     reading programmatically, and a wall of ``AIMessage(content='…', additional_kwargs={}, …)``
     is not. Falling back to ``repr`` only for objects that offer nothing better.
+
+    Cycles and depth are both bounded, and they have to be. A state field that points back at
+    something already on the way down — a parent pointer, a memo, a graph handle — used to
+    recurse until the interpreter's stack ran out, and the RecursionError surfaced as a 500 on
+    a run that had actually succeeded. Near-stack-exhaustion inside a threaded server is worse
+    than the wrong answer; a truncation marker is a much better outcome than either.
     """
     try:
         json.dumps(value)
         return value
     except (TypeError, ValueError):
         pass
+    if _depth >= MAX_STATE_DEPTH:
+        return "<…max depth>"
+    if isinstance(value, (dict, list, tuple)) or hasattr(value, "model_dump"):
+        # Identity, not equality: two equal-but-distinct dicts are not a cycle, and refusing
+        # to render the second would lose real data. `_seen` is per-branch rather than global
+        # for the same reason — a value repeated across sibling fields is not a cycle either.
+        if id(value) in _seen:
+            return "<…circular>"
+        _seen = _seen | {id(value)}
     if isinstance(value, dict):
-        return {str(k): _jsonable(v) for k, v in value.items()}
+        return {str(k): _jsonable(v, _depth + 1, _seen) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_jsonable(v) for v in value]
+        return [_jsonable(v, _depth + 1, _seen) for v in value]
     dump = getattr(value, "model_dump", None)
     if callable(dump):
         try:
-            return _jsonable(dump())
+            return _jsonable(dump(), _depth + 1, _seen)
         except Exception:  # noqa: BLE001 — a state field must never fail a response
             pass
-    return repr(value)
+    try:
+        return repr(value)
+    except Exception:  # noqa: BLE001 — an object whose own repr raises is still not our crash
+        return f"<unrenderable {type(value).__name__}>"
 
 
 # --- the service -----------------------------------------------------------------------
