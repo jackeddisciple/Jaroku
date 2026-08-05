@@ -57,6 +57,15 @@ interface DeployState {
   serveToken: ServeTokenReveal | null;
   /** Which deployment the panel is looking at. */
   selectedId: string | null;
+  /**
+   * Whether the user asked for the deploy FORM rather than a deployment.
+   *
+   * Needed because `selectedId: null` cannot tell "nothing selected yet" from "the user
+   * pressed Deploy another". Without it, the next snapshot to arrive — any snapshot, from any
+   * cause — re-selected the newest deployment and the form disappeared while they were
+   * filling it in.
+   */
+  formOpen: boolean;
   testing: boolean;
   testResult: { ok: boolean; message: string | null } | null;
   error: string | null;
@@ -70,6 +79,7 @@ interface DeployState {
   setLogs: (deploymentId: string, lines: DeployLogLine[]) => void;
   setServeToken: (reveal: ServeTokenReveal) => void;
   dismissServeToken: () => void;
+  /** Show a deployment, or `null` for the deploy form. */
   select: (deploymentId: string | null) => void;
   startTest: () => void;
   setTestResult: (result: { ok: boolean; message: string | null }) => void;
@@ -92,6 +102,7 @@ export const useDeployStore = create<DeployState>((set) => ({
   stage: {},
   serveToken: null,
   selectedId: null,
+  formOpen: false,
   testing: false,
   testResult: null,
   error: null,
@@ -107,9 +118,11 @@ export const useDeployStore = create<DeployState>((set) => ({
       loaded: true,
       planning: false,
       testing: false,
-      // Follow the live one, unless the user has deliberately selected something else.
-      selectedId:
-        s.selectedId && deployments.some((d) => d.id === s.selectedId)
+      // Follow the live one, unless the user is looking at something in particular — either a
+      // deployment they picked, or the form they deliberately opened.
+      selectedId: s.formOpen
+        ? null
+        : s.selectedId && deployments.some((d) => d.id === s.selectedId)
           ? s.selectedId
           : (deployments.find((d) => isDeployInFlight(d.status))?.id ?? deployments[0]?.id ?? null),
     })),
@@ -120,10 +133,13 @@ export const useDeployStore = create<DeployState>((set) => ({
   // "done" is a sentinel meaning the deploy settled, not a phase — the deployment's own
   // status carries that. Recording it would erase which phase was last reached, which is the
   // only thing that says how far a FAILED deploy got.
+  // A deploy that is actually moving takes the panel back from the form: the user pressed
+  // Deploy, and what they asked to see is the thing they started.
   setStage: (deploymentId, stage) =>
     set((s) => ({
       stage: stage === "done" ? s.stage : { ...s.stage, [deploymentId]: stage },
       selectedId: deploymentId,
+      formOpen: false,
     })),
 
   appendLog: (line) =>
@@ -139,7 +155,7 @@ export const useDeployStore = create<DeployState>((set) => ({
   setServeToken: (reveal) => set({ serveToken: reveal }),
   dismissServeToken: () => set({ serveToken: null }),
 
-  select: (deploymentId) => set({ selectedId: deploymentId }),
+  select: (deploymentId) => set({ selectedId: deploymentId, formOpen: deploymentId === null }),
 
   startTest: () => set({ testing: true, testResult: null, error: null }),
   setTestResult: (result) => set({ testing: false, testResult: result }),

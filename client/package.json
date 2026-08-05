@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test:plan-flow": "../server/node_modules/.bin/tsx src/store/planFlow.test.ts",
+    "test:deploy-store": "../server/node_modules/.bin/tsx src/store/deployStore.test.ts",
     "test:note-kind": "../server/node_modules/.bin/tsx src/lib/noteKind.test.ts",
     "test:inline-code": "../server/node_modules/.bin/tsx src/lib/inlineCode.test.ts",
     "test:title": "../server/node_modules/.bin/tsx src/lib/title.test.ts",
