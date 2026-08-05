@@ -77,6 +77,13 @@ export interface AgentSummary {
   hand_written: boolean;
   runnable: boolean;
   edit_count?: number; // applied edits available to undo (fix loop)
+  /**
+   * This agent's current deployment, or null if it has never been deployed.
+   *
+   * Carried on the agent list rather than fetched per row so the sidebar's Deployed filter is
+   * answerable without N round trips. `url` is null until the host has one — never a guess.
+   */
+  deployment?: { id: string; status: DeployStatus; url: string | null } | null;
 }
 
 export interface GenUsage {
@@ -498,6 +505,83 @@ export type ProviderMessage =
   | { channel: "providers"; type: "error"; message: string; provider?: string }
   | { channel: "providers"; type: "notice"; message: string; provider?: string };
 
+// --- deploy (see server/src/deployStore.ts, deployManager.ts) ---
+//
+// Jaroku orchestrates a deploy; it hosts nothing. The agent goes to the USER's own Railway
+// account, on the user's own credentials, and this channel carries the state of that.
+//
+// One rule everywhere below: names travel, values do not. `env_keys` on a deployment and
+// `name` on a secret are variable NAMES; `configured` says one is set. The single exception
+// is `serveToken`, documented where it appears — it is the only credential that ever travels
+// server to browser in this product, and it does so once because Jaroku keeps no copy.
+
+export type DeployStatus =
+  | "queued" | "packaging" | "uploading" | "building" | "deploying"
+  | "live" | "failed" | "cancelled" | "interrupted" | "removed";
+
+/** Statuses a deploy can still leave under its own power. Mirror of deployStore.IN_FLIGHT. */
+export const DEPLOY_IN_FLIGHT: ReadonlySet<DeployStatus> = new Set<DeployStatus>([
+  "queued", "packaging", "uploading", "building", "deploying",
+]);
+
+export function isDeployInFlight(status: DeployStatus): boolean {
+  return DEPLOY_IN_FLIGHT.has(status);
+}
+
+export interface Deployment {
+  id: string;
+  agent_id: string;
+  target: string;
+  status: DeployStatus;
+  url: string | null;
+  provider: string;
+  model: string;
+  /** NAMES of the variables handed to the host. Never values. */
+  env_keys: string[];
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  ended_at: string | null;
+}
+
+export interface DeploySecretStatus {
+  /** The NAME of a variable the deployed agent needs. */
+  name: string;
+  /** Whether this machine has a value for it. */
+  configured: boolean;
+  reason: string;
+  /** Whether a deploy is refused without it. */
+  required: boolean;
+}
+
+export interface DeployLogLine {
+  deployment_id: string;
+  seq: number;
+  ts: string;
+  stage: string;
+  stream: string;
+  /** Already scrubbed server-side of every secret the deploy handled. */
+  text: string;
+}
+
+export type DeployMessage =
+  | { channel: "deploy"; type: "deployments"; deployments: Deployment[]; railwayConfigured: boolean; cliVersion?: string | null }
+  | { channel: "deploy"; type: "plan"; agentId: string; secrets: DeploySecretStatus[]; problems: string[]; warnings: string[] }
+  | { channel: "deploy"; type: "started"; deploymentId: string; agentId: string }
+  | { channel: "deploy"; type: "stage"; deploymentId: string; stage: string; status: DeployStatus }
+  | { channel: "deploy"; type: "log"; deploymentId: string; seq: number; stage: string; stream: string; text: string }
+  | { channel: "deploy"; type: "logs"; deploymentId: string; lines: DeployLogLine[] }
+  | { channel: "deploy"; type: "finished"; deploymentId: string; status: DeployStatus; url: string | null; error: string | null }
+  /**
+   * The bearer token for a newly live endpoint — the ONE credential that travels server to
+   * browser in this product. Jaroku generated it, set it on Railway, and kept no copy, so this
+   * message is the only chance to see it. Never persisted anywhere; show it, do not store it.
+   */
+  | { channel: "deploy"; type: "serveToken"; deploymentId: string; url: string; token: string }
+  | { channel: "deploy"; type: "testResult"; ok: boolean; message: string | null }
+  | { channel: "deploy"; type: "error"; message: string; deploymentId?: string }
+  | { channel: "deploy"; type: "notice"; message: string; deploymentId?: string };
+
 // --- server → client channel messages (see server/src/wsRelay.ts) ---
 
 export type ServerMessage =
@@ -521,7 +605,8 @@ export type ServerMessage =
   | EditMessage
   | EvalMessage
   | McpMessage
-  | ProviderMessage;
+  | ProviderMessage
+  | DeployMessage;
 
 // --- client → server commands ---
 
@@ -579,7 +664,26 @@ export type ClientCommand =
   // a separate command rather than a flag on the one that stores it.
   | { cmd: "listProviders" }
   | { cmd: "setProviderKey"; provider: ProviderId; key: string }
-  | { cmd: "testProviderKey"; provider: ProviderId; key: string };
+  | { cmd: "testProviderKey"; provider: ProviderId; key: string }
+  // Deploy. `envKeys` are NAMES the user ticked — the server reads the values from its own
+  // environment. `token` is the third and last field in this union carrying a secret, and it
+  // takes the identical path: one way, into runtime/.env, never echoed back.
+  | { cmd: "listDeployments" }
+  | { cmd: "planDeploy"; agentId: string; provider: string; model: string }
+  | {
+      cmd: "deploy";
+      agentId: string;
+      provider: string;
+      model: string;
+      envKeys: string[];
+      allowMissing?: boolean;
+      publicEndpoint?: boolean;
+    }
+  | { cmd: "cancelDeploy"; deploymentId: string }
+  | { cmd: "forgetDeployment"; deploymentId: string }
+  | { cmd: "loadDeployLogs"; deploymentId: string; sinceSeq?: number }
+  | { cmd: "setRailwayToken"; token: string | null }
+  | { cmd: "testRailwayToken"; token: string };
 
 // Unified composer "explain" subject — what the question is about, built from already-in-memory
 // context (a trace step, a graph node, or the agent generally). No new data is fetched.

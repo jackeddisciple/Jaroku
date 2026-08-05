@@ -9,6 +9,7 @@ import { useGraphStore } from "../store/graphStore.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { useMcpStore } from "../store/mcpStore.ts";
 import { useProviderStore } from "../store/providerStore.ts";
+import { useDeployStore } from "../store/deployStore.ts";
 import type {
   ClientCommand, EvalTarget, ExplainSubject, McpConfirmVerdict, McpImpact, ProviderId,
   RubricCriterion, ServerMessage,
@@ -155,6 +156,33 @@ function dispatch(msg: ServerMessage): void {
       else if (msg.type === "testResult") p.setTestResult({ provider: msg.provider, ok: msg.ok, message: msg.message });
       else if (msg.type === "error") p.setError(msg.message);
       else if (msg.type === "notice") p.setNotice(msg.message);
+      break;
+    }
+    case "deploy": {
+      // Deploy state. Full-snapshot discipline like `providers` and `mcp`: `deployments`
+      // replaces the list rather than merging into it. The one thing here to be careful with
+      // is `serveToken` — the only credential the server ever sends a client, delivered once
+      // because Jaroku keeps no copy. It goes into memory for the panel to show and is never
+      // persisted anywhere.
+      const d = useDeployStore.getState();
+      if (msg.type === "deployments") d.setDeployments(msg.deployments, msg.railwayConfigured);
+      else if (msg.type === "plan") {
+        d.setPlan({ agentId: msg.agentId, secrets: msg.secrets, problems: msg.problems, warnings: msg.warnings });
+      } else if (msg.type === "stage") d.setStage(msg.deploymentId, msg.stage);
+      else if (msg.type === "log") {
+        d.appendLog({
+          deployment_id: msg.deploymentId, seq: msg.seq, ts: new Date().toISOString(),
+          stage: msg.stage, stream: msg.stream, text: msg.text,
+        });
+      } else if (msg.type === "logs") d.setLogs(msg.deploymentId, msg.lines);
+      else if (msg.type === "serveToken") {
+        d.setServeToken({ deploymentId: msg.deploymentId, url: msg.url, token: msg.token });
+      } else if (msg.type === "finished") {
+        // The snapshot that follows carries the row; this only makes the outcome loud.
+        if (msg.error) d.setError(msg.error);
+      } else if (msg.type === "testResult") d.setTestResult({ ok: msg.ok, message: msg.message });
+      else if (msg.type === "error") d.setError(msg.message);
+      else if (msg.type === "notice") d.setNotice(msg.message);
       break;
     }
     case "reply": {
@@ -366,6 +394,66 @@ export function sendSetProviderKey(provider: ProviderId, key: string): void {
 export function sendTestProviderKey(provider: ProviderId, key: string): void {
   useProviderStore.getState().startTest(provider);
   send({ cmd: "testProviderKey", provider, key });
+}
+
+// --- deploy ----------------------------------------------------------------
+// Answered on the "deploy" channel. Every mutation comes back as a fresh snapshot of every
+// deployment, so nothing here optimistically patches local state.
+
+export function sendListDeployments(): void {
+  send({ cmd: "listDeployments" });
+}
+
+/** What a deploy would need. Creates nothing, spends nothing — safe on every form change. */
+export function sendPlanDeploy(agentId: string, provider: string, model: string): void {
+  useDeployStore.getState().startPlanning();
+  send({ cmd: "planDeploy", agentId, provider, model });
+}
+
+/**
+ * Start a deploy.
+ *
+ * `envKeys` are variable NAMES the user ticked. The server reads their values out of its own
+ * environment at the moment it hands them to Railway — no value is ever sent from here.
+ */
+export function sendDeploy(opts: {
+  agentId: string;
+  provider: string;
+  model: string;
+  envKeys: string[];
+  allowMissing?: boolean;
+  publicEndpoint?: boolean;
+}): void {
+  send({ cmd: "deploy", ...opts });
+}
+
+export function sendCancelDeploy(deploymentId: string): void {
+  send({ cmd: "cancelDeploy", deploymentId });
+}
+
+/** Detach a record from Jaroku. Nothing in the user's Railway account is touched. */
+export function sendForgetDeployment(deploymentId: string): void {
+  send({ cmd: "forgetDeployment", deploymentId });
+}
+
+export function sendLoadDeployLogs(deploymentId: string, sinceSeq?: number): void {
+  send({ cmd: "loadDeployLogs", deploymentId, sinceSeq });
+}
+
+/**
+ * Store the user's Railway token. `null` removes it.
+ *
+ * Travels one way, exactly as a provider key does: written to runtime/.env server-side by the
+ * same credential writer, and the answer is `railwayConfigured: true` — never the token.
+ */
+export function sendSetRailwayToken(token: string | null): void {
+  send({ cmd: "setRailwayToken", token });
+}
+
+/** Prove a token works without storing it. Separate command, same reason as the provider one. */
+export function sendTestRailwayToken(token: string): void {
+  useDeployStore.getState().startTest();
+  send({ cmd: "testRailwayToken", token });
 }
 
 // --- eval: dataset CRUD ----------------------------------------------------
