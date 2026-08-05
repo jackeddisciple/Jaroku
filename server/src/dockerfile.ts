@@ -41,6 +41,23 @@ const PROVIDER_REQUIRES: Record<string, string> = {
 /** The MCP bridge's own dependency, from runtime/pyproject.toml's `connectors` extra. */
 const MCP_REQUIRES = "mcp>=1.9.0";
 
+/**
+ * What a dependency is allowed to look like: a PEP 508 name, optional extras, optional
+ * version specifiers. Nothing else — no spaces, no quotes, no shell.
+ *
+ * The requirements are interpolated into a `RUN uv pip install "…"` line, which is a shell
+ * command that runs as root while an image is built. A value containing a double quote closes
+ * the string and everything after it is a command; a value containing a newline ends the
+ * instruction and starts a new one. They come from a catalog we control today, which is
+ * exactly the argument that stops being true the first time somebody adds a connector.
+ */
+const SAFE_REQUIREMENT =
+  /^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9,._-]+\])?(\s*(==|>=|<=|~=|!=|<|>)\s*[A-Za-z0-9._*+!-]+)?(\s*,\s*(==|>=|<=|~=|!=|<|>)\s*[A-Za-z0-9._*+!-]+)*$/;
+
+export function isSafeRequirement(requirement: string): boolean {
+  return SAFE_REQUIREMENT.test(requirement);
+}
+
 export interface ArtifactInput {
   agentId: string;
   /** The agent's own metadata. `connectors` and `mcp_servers` decide the dependency set. */
@@ -81,6 +98,18 @@ export function deployRequires(
 
   for (const req of pipRequires(selected)) if (!out.includes(req)) out.push(req);
   if (input.hasMcpTools && !out.includes(MCP_REQUIRES)) out.push(MCP_REQUIRES);
+
+  // Refused rather than escaped. A requirement that needs escaping to be safe here is not a
+  // requirement — it is a mistake in the catalog, and installing a mangled version of it
+  // would be worse than saying so.
+  const unsafe = out.filter((r) => !isSafeRequirement(r));
+  if (unsafe.length) {
+    throw new Error(
+      `refusing to build an image from ${unsafe.length} malformed requirement(s): ` +
+        `${unsafe.map((r) => JSON.stringify(r)).join(", ")}. ` +
+        `Check pip_requires in runtime/tool_templates/catalog.json.`,
+    );
+  }
   return out;
 }
 
