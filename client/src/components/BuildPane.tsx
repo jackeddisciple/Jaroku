@@ -41,7 +41,7 @@ import {
 } from "./panelIcons.tsx";
 import { useMcpStore, allMcpTools } from "../store/mcpStore.ts";
 import { ACCENT, ICON, STATUS, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
-import { ProviderMark } from "../lib/icons.tsx";
+import { JarokuGlyph, ProviderMark } from "../lib/icons.tsx";
 import { displayTitle, fullTitle } from "../lib/title.ts";
 import { useStreamedText } from "../lib/useStreamedText.ts";
 import { useVoiceInput } from "../lib/useVoiceInput.ts";
@@ -188,22 +188,22 @@ function TurnRow({ marker, children }: { marker?: React.ReactNode; children: Rea
 }
 
 /**
- * Jaroku's mark.
+ * Jaroku's mark — who is speaking, in the gutter of every turn it takes.
  *
- * There is no Jaroku glyph anywhere in the app — only the wordmark in the top bar — so rather than
- * invent one, this reuses the sparkle the plan card already uses for bespoke tools. In that card it
- * means "a model wrote this", which is exactly what it means here; the panel gets a second use of
- * one idea instead of a second idea.
+ * This was a sparkle in a filled ring, a stand-in from when the app had no glyph of its own: the
+ * ring existed to give a 10px speck enough mass to answer a 14px face across the gutter. There is
+ * a real mark now, and a mark that is a solid shape does not need a disc drawn behind it — so the
+ * ring goes and the logo takes the whole slot.
  *
- * Grey in a filled ring, not violet. Violet is the bespoke-tool accent and lives inside the card;
- * this sits outside it, saying who is speaking rather than what kind of thing something is. The
- * ring is what gives it the visual mass to answer a 14px face across the gutter — a bare sparkle
- * at that size reads as a speck.
+ * Muted rather than ink. This says who spoke; it is not the thing you came to read, and at
+ * full ink on every second row a solid glyph pulls harder than the sentence beside it. It still
+ * sits a step above the `faint` face opposite, which is the right order — one of these two
+ * produced what follows it.
  */
 function JarokuMark() {
   return (
-    <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-active text-muted">
-      <SparklesIcon size={10} />
+    <span className="flex h-[18px] w-[18px] items-center justify-center text-muted">
+      <JarokuGlyph size={15} />
     </span>
   );
 }

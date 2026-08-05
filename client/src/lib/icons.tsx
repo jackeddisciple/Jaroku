@@ -60,26 +60,32 @@ export function ProviderMark({ provider, active = true, size = 12 }: { provider:
 }
 
 /**
- * The Jaroku mark in the top bar.
+ * The Jaroku mark.
  *
- * It was `◭` — a font character, which means it renders as whatever the user's system decides,
- * at whatever weight that font draws it, and on a machine without the glyph as a box. A wordmark
- * is the one thing in a UI that must look the same everywhere, so it is drawn.
+ * The real logo, traced from `assets/logo.jpeg` (the source of truth; `assets/logo.svg` is the
+ * same three contours as a standalone file). Three curved strokes chasing each other around a
+ * circle — the loop the product is about — drawn as three closed shapes on the 24px grid every
+ * other icon uses, inset to 22 so it sits at the same optical weight as one.
  *
- * A triangle with its left half filled, which is what the character was standing in for. Solid
- * rather than stroked because it is a mark, not an icon — the stroke ladder governs the icon set,
- * and a logo drawn to the same rules as a chevron reads as neither.
+ * What it replaces was a stand-in: a half-filled triangle, itself standing in for a `◭` character.
  *
- * No outline, for a reason that only showed up on screen: an amber triangle WITH a stroked border
- * is a warning sign, and in an app where amber already means "running" and a real alert triangle
- * is two panels away, the wordmark cannot be the thing people look at twice. Two solid tones and
- * no edge reads as a mark.
+ * Two things it does differently from the stand-in.
+ *
+ * Solid fills, no stroke. A mark is not an icon — the stroke ladder governs the icon set, and a
+ * logo drawn to the same rules as a chevron reads as neither.
+ *
+ * `currentColor` by default, rather than amber. Amber is `run` — it means an agent is executing —
+ * and doc §4.2's rule is that color carries meaning and nothing else. A brand mark permanently
+ * wearing the running color spends the one thing the status palette cannot afford to spend, and
+ * on a screen where a real running badge is inches away it is the wrong kind of twice-look. The
+ * mark inherits the ink of whatever it sits in; callers that need a specific tone pass `color`.
  */
-export function JarokuGlyph({ size = 15, color = "#f59e0b" }: { size?: number; color?: string }) {
+export function JarokuGlyph({ size = 15, color }: { size?: number; color?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden fill="none">
-      <path d="M12 3.5 20.5 20H12z" fill={color} fillOpacity="0.38" />
-      <path d="M12 3.5V20H3.5z" fill={color} />
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden fill={color ?? "currentColor"}>
+      <path d="M11 1.04C11.6 0.98 12.2 0.97 12.79 1.03C13.38 1.07 13.97 1.18 14.54 1.34C15.12 1.5 15.69 1.7 16.22 1.95C16.76 2.2 17.37 2.46 17.76 2.85C18.13 3.25 18.55 3.85 18.51 4.36C18.48 4.85 17.94 5.4 17.56 5.85C17.19 6.3 16.73 6.7 16.24 7.05C15.77 7.39 15.23 7.66 14.69 7.9C14.15 8.14 13.57 8.32 12.99 8.47C12.42 8.62 11.83 8.7 11.25 8.83C10.66 8.96 10.08 9.07 9.51 9.24C8.94 9.41 8.37 9.62 7.83 9.86C7.29 10.09 6.76 10.37 6.25 10.68C5.75 11 5.26 11.36 4.81 11.74C4.36 12.13 4.01 12.68 3.55 13C3.08 13.31 2.39 13.78 2.02 13.62C1.64 13.48 1.39 12.64 1.3 12.08C1.21 11.53 1.37 10.89 1.47 10.31C1.57 9.73 1.71 9.14 1.9 8.58C2.08 8.01 2.29 7.45 2.57 6.92C2.83 6.39 3.15 5.89 3.49 5.4C3.85 4.92 4.24 4.47 4.67 4.05C5.09 3.64 5.56 3.26 6.05 2.92C6.54 2.59 7.06 2.29 7.59 2.04C8.13 1.78 8.69 1.56 9.26 1.39C9.83 1.23 10.41 1.1 11 1.04Z" />
+      <path d="M20.99 7.72C21.31 7.65 21.84 8.21 22.08 8.61C22.33 9.01 22.39 9.63 22.5 10.15C22.6 10.67 22.66 11.2 22.69 11.73C22.71 12.27 22.68 12.8 22.62 13.33C22.57 13.85 22.48 14.38 22.34 14.9C22.21 15.41 22.04 15.91 21.83 16.41C21.62 16.9 21.39 17.38 21.11 17.83C20.85 18.29 20.53 18.73 20.2 19.14C19.86 19.55 19.51 19.96 19.11 20.31C18.73 20.67 18.29 20.99 17.85 21.29C17.41 21.58 16.95 21.86 16.47 22.08C16 22.31 15.49 22.5 14.98 22.65C14.47 22.8 13.92 22.97 13.41 22.96C12.9 22.95 12.31 22.84 11.9 22.57C11.49 22.29 11.08 21.79 10.95 21.32C10.81 20.86 10.88 20.22 11.07 19.77C11.27 19.32 11.72 18.92 12.12 18.59C12.52 18.26 13.05 18.07 13.49 17.78C13.93 17.49 14.38 17.19 14.8 16.85C15.21 16.52 15.6 16.15 15.97 15.78C16.34 15.39 16.68 14.98 17.01 14.57C17.34 14.15 17.66 13.71 17.95 13.27C18.24 12.83 18.53 12.38 18.78 11.91C19.04 11.45 19.29 10.97 19.52 10.49C19.75 10.01 19.91 9.49 20.16 9.03C20.41 8.56 20.67 7.78 20.99 7.72Z" />
+      <path d="M10.31 11.35C10.75 11.29 11.21 11.29 11.65 11.3C12.1 11.33 12.56 11.37 12.98 11.51C13.39 11.64 13.88 11.82 14.15 12.13C14.42 12.43 14.61 12.94 14.61 13.35C14.6 13.76 14.36 14.22 14.12 14.59C13.88 14.94 13.5 15.24 13.15 15.51C12.81 15.8 12.4 16.01 12.04 16.25C11.66 16.51 11.29 16.75 10.94 17.02C10.59 17.31 10.24 17.6 9.95 17.94C9.65 18.27 9.37 18.64 9.18 19.04C8.99 19.43 8.87 19.88 8.8 20.32C8.74 20.76 8.9 21.28 8.76 21.66C8.63 22.05 8.33 22.51 7.99 22.64C7.64 22.78 7.09 22.61 6.67 22.46C6.26 22.32 5.86 22.07 5.5 21.81C5.14 21.55 4.81 21.23 4.54 20.88C4.26 20.53 4.03 20.14 3.85 19.73C3.69 19.32 3.56 18.87 3.52 18.43C3.48 18 3.51 17.53 3.59 17.1C3.68 16.66 3.81 16.22 4 15.81C4.17 15.4 4.4 15.01 4.66 14.65C4.91 14.28 5.21 13.93 5.53 13.62C5.84 13.31 6.2 13.03 6.57 12.78C6.94 12.53 7.34 12.33 7.75 12.14C8.16 11.95 8.57 11.77 9 11.64C9.42 11.51 9.86 11.41 10.31 11.35Z" />
     </svg>
   );
 }
