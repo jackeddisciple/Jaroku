@@ -31,7 +31,7 @@ import { fmtDuration } from "../lib/format.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useDeployStore, selectedDeployment } from "../store/deployStore.ts";
 import { RUN_PROVIDERS } from "../store/uiStore.ts";
-import type { Deployment, DeployStatus } from "../types.ts";
+import type { Deployment, DeployLogLine, DeployStatus } from "../types.ts";
 import { isDeployInFlight } from "../types.ts";
 import { ActionRow, type ActionState } from "./ActionRow.tsx";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
@@ -74,6 +74,9 @@ const STATUS_COPY: Record<DeployStatus, { state: BadgeState; label: string }> = 
   removed: { state: "error", label: "removed" },
 };
 
+/** A stable empty array — a fresh `[]` per render would defeat every memo below it. */
+const EMPTY_LINES: DeployLogLine[] = [];
+
 /** A ticker, only while something is moving. Same shape as TraceTimeline's. */
 function useTick(active: boolean, ms = 500): number {
   const [now, setNow] = useState(() => Date.now());
@@ -86,10 +89,22 @@ function useTick(active: boolean, ms = 500): number {
 }
 
 export function DeployPanel() {
-  const {
-    deployments, railwayConfigured, loaded, plan, planning, logs, stage,
-    serveToken, error, notice, setError, setNotice, dismissServeToken, select,
-  } = useDeployStore();
+  // Field by field rather than the whole store. `useDeployStore()` with no selector
+  // re-renders on ANY change, and during a build the store changes once per log line — so a
+  // noisy dependency install re-rendered the form, the chip strip, the stage rail and the
+  // whole log well a thousand times over, while the user was trying to read it.
+  const deployments = useDeployStore((s) => s.deployments);
+  const railwayConfigured = useDeployStore((s) => s.railwayConfigured);
+  const loaded = useDeployStore((s) => s.loaded);
+  const plan = useDeployStore((s) => s.plan);
+  const planning = useDeployStore((s) => s.planning);
+  const serveToken = useDeployStore((s) => s.serveToken);
+  const error = useDeployStore((s) => s.error);
+  const notice = useDeployStore((s) => s.notice);
+  const setError = useDeployStore((s) => s.setError);
+  const setNotice = useDeployStore((s) => s.setNotice);
+  const dismissServeToken = useDeployStore((s) => s.dismissServeToken);
+  const select = useDeployStore((s) => s.select);
   const selectedId = useDeployStore((s) => s.selectedId);
   const agentId = useBuildStore((s) => s.activeAgentId);
   const agents = useBuildStore((s) => s.agents);
@@ -103,8 +118,11 @@ export function DeployPanel() {
   const selected = selectedDeployment({ deployments, selectedId });
 
   // A deployment the user opened but has no lines for yet — reloaded, or connected mid-build.
+  // Read imperatively rather than subscribed: this only needs the answer at the moment the
+  // selection changes, and subscribing to `logs` here would undo the point of the selectors
+  // above.
   useEffect(() => {
-    if (selected && !logs[selected.id]) sendLoadDeployLogs(selected.id);
+    if (selected && !useDeployStore.getState().logs[selected.id]) sendLoadDeployLogs(selected.id);
   }, [selected?.id]);
 
   if (!loaded) {
@@ -181,12 +199,7 @@ export function DeployPanel() {
 
       <div className="min-h-0 flex-1 overflow-auto">
         {selected ? (
-          <DeployDetail
-            key={selected.id}
-            deployment={selected}
-            lines={logs[selected.id] ?? []}
-            stage={stage[selected.id] ?? null}
-          />
+          <DeployDetail key={selected.id} deployment={selected} />
         ) : agentId ? (
           <DeployForm
             agentId={agentId}
@@ -405,15 +418,11 @@ function DeployForm({
 
 // --- the live detail -------------------------------------------------------
 
-function DeployDetail({
-  deployment,
-  lines,
-  stage,
-}: {
-  deployment: Deployment;
-  lines: { seq: number; stage: string; stream: string; text: string }[];
-  stage: string | null;
-}) {
+function DeployDetail({ deployment }: { deployment: Deployment }) {
+  // Subscribed here rather than passed down, so a log line re-renders the detail pane and
+  // nothing above it.
+  const lines = useDeployStore((s) => s.logs[deployment.id]) ?? EMPTY_LINES;
+  const stage = useDeployStore((s) => s.stage[deployment.id]) ?? null;
   const running = isDeployInFlight(deployment.status);
   const now = useTick(running);
   const scrollRef = useRef<HTMLPreElement>(null);
@@ -442,8 +451,11 @@ function DeployDetail({
     if (i > reached) return "pending";
     return running ? "active" : "error";
   };
-  const buildLines = lines.filter((l) => l.stream !== "jaroku");
-  const narration = lines.filter((l) => l.stream === "jaroku");
+  // Split once per change of the log, not once per render of the panel.
+  const { buildLines, narration } = useMemo(() => ({
+    buildLines: lines.filter((l) => l.stream !== "jaroku"),
+    narration: lines.filter((l) => l.stream === "jaroku"),
+  }), [lines]);
 
   return (
     <div className="p-4">
