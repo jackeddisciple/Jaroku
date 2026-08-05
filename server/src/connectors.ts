@@ -21,6 +21,8 @@ export interface Connector {
   module: string;
   description: string;
   required_env: string[];
+  /** PyPI requirements this connector's template lazy-imports. What a deployed image installs. */
+  pip_requires?: string[];
   tools: ConnectorTool[];
 }
 
@@ -46,6 +48,18 @@ export function requiredEnv(selected: Connector[]): string[] {
   const seen: string[] = [];
   for (const c of selected) {
     for (const key of c.required_env) if (!seen.includes(key)) seen.push(key);
+  }
+  return seen;
+}
+
+/**
+ * Union of PyPI requirements the selected connectors need, in catalog order, de-duplicated.
+ * Mirror of `tool_templates.pip_requires` — one field, two readers, same as required_env.
+ */
+export function pipRequires(selected: Connector[]): string[] {
+  const seen: string[] = [];
+  for (const c of selected) {
+    for (const req of c.pip_requires ?? []) if (!seen.includes(req)) seen.push(req);
   }
   return seen;
 }
