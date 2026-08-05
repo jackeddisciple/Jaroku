@@ -63,6 +63,32 @@ const seed = (store: DeployStore, agentId = "a1", envKeys: string[] = []) =>
     logCols.sort().join(",") === "deployment_id,seq,stage,stream,text,ts", logCols.join(","));
 }
 
+// --- 2b. patch writes columns, not whatever it was handed ---------------------------------
+{
+  const store = freshStore();
+  const d = seed(store, "a1");
+  const patchAny = store as unknown as { patch: (id: string, c: Record<string, unknown>) => unknown };
+
+  // TypeScript keeps the in-tree callers honest and does nothing at runtime. Passing `id`
+  // rewrote the primary key: the deploy driving that row went on patching an id that no
+  // longer existed, while the record it thought it was updating became unreachable.
+  for (const column of ["id", "agent_id", "created_at"]) {
+    let threw = "";
+    try { patchAny.patch(d.id, { [column]: "hijacked" }); } catch (e) { threw = (e as Error).message; }
+    check(`${column} cannot be patched`, threw.includes("not a patchable column"), threw || "accepted");
+  }
+  let injected = "";
+  try { patchAny.patch(d.id, { "url = 'x' --": "y" }); } catch (e) { injected = (e as Error).message; }
+  check("a key that is not a column at all is refused",
+    injected.includes("not a patchable column"), injected || "accepted");
+
+  const row = store.get(d.id);
+  check("...and the row is still itself afterwards",
+    row?.id === d.id && row?.agent_id === "a1", JSON.stringify(row?.id));
+  store.patch(d.id, { status: "live", url: "https://x.up.railway.app" });
+  check("real patches still apply", store.get(d.id)?.url === "https://x.up.railway.app");
+}
+
 // --- 3. ended_at follows the status, never the caller --------------------------------------
 {
   const store = freshStore();

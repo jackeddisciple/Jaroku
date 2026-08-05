@@ -125,6 +125,18 @@ export interface RailwayTarget {
 
 const nowIso = (): string => new Date().toISOString();
 
+/**
+ * Columns `patch()` may write.
+ *
+ * Deliberately not derived from DeploymentPatch — a type cannot check anything at runtime,
+ * and the columns this must never touch (`id`, `agent_id`, `created_at`) are exactly the ones
+ * that identify the row being patched.
+ */
+const PATCHABLE: ReadonlySet<string> = new Set([
+  "status", "url", "error",
+  "railway_project_id", "railway_service_id", "railway_environment_id", "railway_deployment_id",
+]);
+
 /** How much of a deploy's log is kept. A build log is diagnostic, not an archive. */
 const LOG_CAP = 2000;
 
@@ -240,6 +252,15 @@ export class DeployStore {
     const values: (string | null)[] = [nowIso()];
     for (const [key, value] of Object.entries(changes)) {
       if (value === undefined) continue;
+      // Whitelisted, because this builds SQL out of object keys. TypeScript keeps the
+      // in-tree callers honest and does nothing at runtime: passing `{ id: "…" }` rewrote the
+      // primary key, and the deploy driving that row went on patching an id that no longer
+      // existed while the record it thought it was updating had silently become unreachable.
+      // A key that is not a column is a bug in the caller, so it says so rather than
+      // half-applying the rest of the patch around it.
+      if (!PATCHABLE.has(key)) {
+        throw new Error(`deployments.${key} is not a patchable column`);
+      }
       sets.push(`${key} = ?`);
       values.push(value as string | null);
     }
