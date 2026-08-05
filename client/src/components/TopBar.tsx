@@ -1,12 +1,22 @@
 // Top bar (doc §4.1): brand, the active agent + its live status, the provider chip, and the
-// Share / Deploy actions. Share and Deploy have no backend in the MVP, so they're honest
-// stubs — visible affordances that say "not yet" rather than pretending to work.
+// Share / Deploy actions.
+//
+// Deploy is real now, and it does the smallest thing that is honest: it opens the Deploy
+// panel, where the decisions live. A one-click button that started a deploy from here would
+// be starting one without the user having seen which credentials it is about to hand over —
+// and that is exactly the review the panel exists to give them. While a deploy is running the
+// button becomes the way to stop it, the Run/Cancel swap EvalRunBar already uses.
+//
+// Share still has no backend, and is still an honest stub.
 
 import { useEffect, useRef } from "react";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useProviderStore } from "../store/providerStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
+import { useDeployStore } from "../store/deployStore.ts";
+import { sendCancelDeploy } from "../lib/socket.ts";
+import { isDeployInFlight } from "../types.ts";
 import { agentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark, BRAND_COLOR, JarokuGlyph } from "../lib/icons.tsx";
 import { TYPE } from "../lib/tokens.ts";
@@ -117,6 +127,8 @@ export function TopBar() {
   const model = useUiStore((s) => s.model);
 
   const status = agent ? agentStatus(agent.agent_id, runs) : "draft";
+  const setRightTab = useUiStore((s) => s.setRightTab);
+  const inFlight = useDeployStore((s) => s.deployments.find((d) => isDeployInFlight(d.status)));
 
   return (
     <div className="flex h-11 shrink-0 items-center gap-3 border-b border-hair px-4">
@@ -143,13 +155,27 @@ export function TopBar() {
         >
           Share
         </button>
-        <button
-          title="Deploy isn't available yet"
-          className="text-[12px] rounded-control px-3 py-1 transition-colors"
-          style={{ background: "#4f46e5", color: "#fff" }}
-        >
-          Deploy
-        </button>
+        {inFlight ? (
+          // Same swap EvalRunBar makes: while something is running, the button that started it
+          // becomes the one that stops it, rather than sitting there disabled and useless.
+          <button
+            title={`Deploying ${inFlight.agent_id} — click to cancel`}
+            className="rounded-control px-3 py-1 text-[12px] text-err transition-colors hover:bg-active"
+            onClick={() => sendCancelDeploy(inFlight.id)}
+          >
+            Cancel deploy
+          </button>
+        ) : (
+          <button
+            title={agent ? `Deploy ${agent.name} to your own Railway account` : "Select an agent to deploy"}
+            className="rounded-control px-3 py-1 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+            style={{ background: "#4f46e5", color: "#fff" }}
+            disabled={!agent}
+            onClick={() => setRightTab("deploy")}
+          >
+            Deploy
+          </button>
+        )}
       </div>
     </div>
   );

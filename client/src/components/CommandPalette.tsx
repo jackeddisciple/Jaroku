@@ -142,6 +142,7 @@ export function CommandPalette() {
               <Command.Group heading="View" className="mb-1">
                 <Item onSelect={run(() => setRightTab("graph"))}>Open Graph</Item>
                 <Item onSelect={run(() => setRightTab("trace"))}>Open Trace</Item>
+                <Item onSelect={run(() => setRightTab("deploy"))}>Open Deploy</Item>
                 <Item onSelect={run(() => { setMode("files"); })} kbd="⌘P">Jump to file…</Item>
                 <Item onSelect={run(focusChat)} kbd="⌘/">Focus chat</Item>
               </Command.Group>
