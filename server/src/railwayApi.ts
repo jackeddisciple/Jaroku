@@ -28,8 +28,16 @@ export function railwayEndpoint(): string {
   return process.env["JAROKU_RAILWAY_API"] || DEFAULT_ENDPOINT;
 }
 
-/** The env var the user's Railway token lives under. Written by the credential writer. */
-export const RAILWAY_ENV_KEY = "RAILWAY_TOKEN";
+/**
+ * The env var the user's Railway token lives under. Written by the credential writer.
+ *
+ * RAILWAY_API_TOKEN rather than RAILWAY_TOKEN because the two mean different things to
+ * Railway's own tooling: RAILWAY_TOKEN is a project-scoped token that can only deploy, and
+ * RAILWAY_API_TOKEN is the account-scoped one that can also create a project — which is what
+ * one-click deploy has to do. Storing an account token under the project-token name would
+ * work here and then behave strangely the first time the user ran the CLI themselves.
+ */
+export const RAILWAY_ENV_KEY = "RAILWAY_API_TOKEN";
 
 const REQUEST_TIMEOUT_MS = Number(process.env["JAROKU_RAILWAY_TIMEOUT_MS"] ?? 20_000);
 

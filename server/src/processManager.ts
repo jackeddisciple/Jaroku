@@ -4,6 +4,7 @@
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { RAILWAY_ENV_KEY } from "./railwayApi.ts";
 import { isTraceEvent, type TraceEvent } from "./types.ts";
 
 // Debug-depth control plane: the runner writes one `@@JAROKU_CTRL@@ {json}` line per node
@@ -51,11 +52,15 @@ export class ProcessManager extends EventEmitter<ProcessManagerEvents> {
     if (opts.input) args.push(opts.input);
 
     // uv lives in Homebrew's bin; make sure it's on PATH for the spawned process.
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       ...process.env,
       PATH: `/opt/homebrew/bin:${process.env.PATH ?? ""}`,
       ...opts.env,
     };
+    // The Railway token is a deploy-layer credential and no agent has any use for it. An
+    // agent's own keys have to be here — a Gmail tool cannot work without them — but this one
+    // does not, and generated code runs in this process. Least privilege where it is free.
+    delete env[RAILWAY_ENV_KEY];
 
     const child = spawn("uv", args, { cwd: opts.runtimeDir, env });
     this.child = child;
