@@ -1,5 +1,6 @@
 {
-  "comment": "Connector registry. The Node builder reads this to (a) render connector signatures into the generation prompt, (b) copy the right template files into a generated project, and (c) build .env.example from required_env. Keep in sync with the .py files — tool_templates/__init__.py has a check_catalog() that verifies it.",
+  "comment": "Connector registry. The Node builder reads this to (a) render connector signatures into the generation prompt, (b) copy the right template files into a generated project, (c) build .env.example from required_env, and (d) build a deployed image's dependency list from pip_requires. Keep in sync with the .py files — tool_templates/__init__.py has a check_catalog() that verifies it.",
+  "pip_requires_comment": "The PyPI requirements each connector's template lazy-imports, as they appear in runtime/pyproject.toml's `connectors` extra. Split per connector because a deployed image should install what its agent actually uses, not the union — an agent with one Postgres tool has no business pulling in the Google API client. check_catalog() proves every entry is still a subset of the extra, so the two cannot drift.",
   "schema_version": 1,
   "connectors": [
     {
@@ -9,6 +10,7 @@
       "module": "gmail",
       "description": "Search the user's mail and create draft replies. Creates drafts only — never sends.",
       "required_env": ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"],
+      "pip_requires": ["google-api-python-client>=2.100.0", "google-auth>=2.23.0"],
       "tools": [
         {
           "name": "gmail_search",
@@ -29,6 +31,7 @@
       "module": "slack",
       "description": "List and read public channels, and post messages. Posting is immediate and cannot be undone.",
       "required_env": ["SLACK_BOT_TOKEN"],
+      "pip_requires": ["slack-sdk>=3.26.0"],
       "tools": [
         {
           "name": "slack_list_channels",
@@ -54,6 +57,7 @@
       "module": "postgres",
       "description": "Read-only SQL access. Writes and DDL are rejected by both a statement check and a read-only transaction.",
       "required_env": ["DATABASE_URL"],
+      "pip_requires": ["psycopg[binary]>=3.1.0"],
       "tools": [
         {
           "name": "pg_query",

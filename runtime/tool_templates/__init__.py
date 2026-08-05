@@ -29,6 +29,21 @@ def required_env(connector_ids) -> list[str]:
     return seen
 
 
+def pip_requires(connector_ids) -> list[str]:
+    """Union of the PyPI requirements the given connectors need, in stable order.
+
+    What a deployed image has to install. Per connector rather than the whole `connectors`
+    extra, because an agent with one Postgres tool has no business pulling in the Google API
+    client — that is image size, build time and attack surface for nothing.
+    """
+    seen: list[str] = []
+    for cid in connector_ids:
+        for req in CONNECTORS.get(cid, {}).get("pip_requires", []):
+            if req not in seen:
+                seen.append(req)
+    return seen
+
+
 def check_catalog() -> list[str]:
     """Verify catalog.json matches the modules. Returns a list of problems (empty = good)."""
     import importlib
@@ -56,6 +71,44 @@ def check_catalog() -> list[str]:
                 f"{cid}: tool names mismatch — catalog {sorted(catalog_tools)} "
                 f"vs module {sorted(module_tools)}"
             )
+
+    problems.extend(_check_pip_requires())
+    return problems
+
+
+def _check_pip_requires() -> list[str]:
+    """Verify every connector's pip_requires is real, and is a subset of the extra.
+
+    A deployed image installs from this field, so a typo here is not a lint failure — it is a
+    container that builds and then raises ImportError on the first tool call, in production,
+    against somebody's real Gmail account. Checking it against runtime/pyproject.toml's
+    `connectors` extra is what keeps the two from drifting: that extra is what the local venv
+    installs, so anything outside it has never been tried anywhere.
+    """
+    pyproject = Path(__file__).parent.parent / "pyproject.toml"
+    if not pyproject.exists():
+        return [f"cannot verify pip_requires: {pyproject} is missing"]
+
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # pragma: no cover — Python < 3.11
+        return []
+
+    extra = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    declared = set(extra.get("project", {}).get("optional-dependencies", {}).get("connectors", []))
+
+    problems: list[str] = []
+    for cid, entry in CONNECTORS.items():
+        reqs = entry.get("pip_requires")
+        if reqs is None:
+            problems.append(f"{cid}: no pip_requires — a deployed image would not install it")
+            continue
+        for req in reqs:
+            if req not in declared:
+                problems.append(
+                    f"{cid}: pip_requires {req!r} is not in pyproject.toml's `connectors` "
+                    f"extra, so it is installed nowhere but a deployed image"
+                )
     return problems
 
 
@@ -108,6 +161,7 @@ __all__ = [
     "CATALOG",
     "CONNECTORS",
     "required_env",
+    "pip_requires",
     "check_catalog",
     "check_failures_raise",
 ]
