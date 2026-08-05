@@ -13,11 +13,11 @@ The generated projects import nothing from Jaroku. They are plain LangGraph you 
 of the repo and run yourself.
 
 ```
-  you ──▶ plan ──▶ generate ──▶ run ──▶ trace ──▶ edit ──▶ eval
-           │          │          │        │        │        │
-        review     validated   traced   stepped  diffed  compared
-        before     before      live     through  before  across
-        writing    landing              & forked applying providers
+  you ──▶ plan ──▶ generate ──▶ run ──▶ trace ──▶ edit ──▶ eval ──▶ deploy
+           │          │          │        │        │        │        │
+        review     validated   traced   stepped  diffed  compared  to YOUR
+        before     before      live     through  before  across    Railway
+        writing    landing              & forked applying providers account
 ```
 
 ---
@@ -42,6 +42,7 @@ of the repo and run yourself.
 - [Cost accounting](#cost-accounting)
 - [Connectors](#connectors)
 - [MCP servers](#mcp-servers)
+- [Deploying an agent](#deploying-an-agent)
 - [The React client](#the-react-client)
 - [WebSocket protocol](#websocket-protocol)
 - [Configuration](#configuration)
@@ -93,6 +94,7 @@ a tool you trust and one you don't:
 | **Python** | **3.12+** | Pinned in `runtime/.python-version`. |
 | **uv** | any recent | The server spawns every agent as `uv run python -m jaroku_runner …`. Install from [astral.sh/uv](https://docs.astral.sh/uv/). |
 | **Anthropic API key** | optional | Needed for planning, generation, editing, explain and the eval judge. Everything else — running agents on the dry-run provider, the trace pipeline, the graph view, the whole UI — works with no key at all. |
+| **Railway CLI** | optional | Only to deploy. Jaroku uses it to upload a project; everything else about a deploy goes over Railway's API. `brew install railway` or `npm i -g @railway/cli`. |
 
 macOS and Linux are the tested platforms. On macOS the server prepends `/opt/homebrew/bin`
 to `PATH` when spawning Python so a Homebrew-installed `uv` is always found.
@@ -249,6 +251,13 @@ endpoint handy. You'll see exactly what it says it can do, each tool classified 
 or high-impact *with the reason*. Tick the ones an agent should have, plan, generate, and run:
 the read-only tools just run, and the high-impact ones stop and show you the arguments before
 they go anywhere.
+
+**Ship it.** Open the **Deploy** tab, add a Railway account token, pick a real provider, and
+look at the list of credentials it is about to hand over — names only, with whether each one is
+set on this machine. Press Deploy and watch it package the project, create a Railway project and
+service, set the variables, upload, build and publish. You end with a URL and a bearer token
+shown once. The agent runs in **your** Railway account, on **your** credentials; Jaroku hosts
+nothing.
 
 **Compare providers.** Go to the **Evals** tab, add a few example inputs to a dataset, pick
 providers, read the estimate, set a ceiling, and run. You get a comparison table of quality,
@@ -515,6 +524,13 @@ exists so a fresh checkout has something to run before anything has been generat
 | `mcpImpact.ts` | Classifies a discovered tool `high`/`low`, with its reason. A ratchet: an untrusted signal may only raise. |
 | `mcpRegistry.ts` | Connect / re-discover / remove. A failed refresh never destroys a working tool list. |
 | `mcpManifest.ts` | Builds `mcp_tools.json` — the grant a generated agent's bridge honours. |
+| `deployStore.ts` | Deploy control-plane tables (`deployments`, `deployment_logs`) beside the frozen schema. Stores env var *names*, never credentials. |
+| `deploySecrets.ts` | Which credentials a deploy needs, by name; reads their values at the moment of use; scrubs them out of every build-log line. |
+| `dockerfile.ts` | Pure synthesis: `jaroku.json` → the Dockerfile, `.dockerignore` and `pyproject.toml` an image is built from. |
+| `deployArtifacts.ts` | Writes those four files into a project, staged and atomic-swapped. A failure leaves the project untouched. |
+| `railwayApi.ts` | Railway's GraphQL control plane. Every call bounded, every failure classified, every message scrubbed. |
+| `railwayCli.ts` | `railway up` — the one job the API cannot do. Token via the child's environment, never its arguments. |
+| `deployManager.ts` | The orchestrator: refuse → record → package → provision → variables → upload → follow → publish. |
 | `envWriter.ts` | The only code that writes `runtime/.env`. Refuses anything it cannot read back identically. |
 | `claude.ts` | One lazy Anthropic client, one usage/cost accounting. The key never leaves the process. |
 | `pricing.ts` | Node reader of the shared `runtime/pricing.json`. |
@@ -1139,6 +1155,190 @@ attempt, a self-reported error, and one tool that never answers at all.
 
 ---
 
+## Deploying an agent
+
+An agent you trust is an agent you want reachable. Deploy packages it, ships it to **your own
+Railway account**, and gives you back a URL you can `curl`.
+
+Jaroku orchestrates the deploy. It does not host anything: your credentials, your account, your
+agent, your bill. There is no Jaroku infrastructure in this path at all.
+
+```
+you press Deploy
+      │
+      ├─ refuse      everything knowable locally, BEFORE touching your account
+      ├─ record      a row, before the first Railway call
+      ├─ package     serve.py + Dockerfile + .dockerignore + pyproject.toml, atomically
+      ├─ provision   a project and a service, in your Railway account
+      ├─ variables   your credentials, over HTTPS, in a request body
+      ├─ upload      the project, over the Railway CLI, token in the environment
+      ├─ follow      the build, until it settles
+      └─ publish     a public URL, once there is something behind it
+```
+
+### The agent contract does not change
+
+Not one line, and no agent is regenerated. The contract already describes a request handler —
+
+```
+build_initial_state(text) → state → graph.invoke(state) → answer
+```
+
+— and `jaroku_runner` just happens to call it once and exit. What was missing was a caller that
+loops, not a symbol. So `runtime/tool_templates/serve.py` is a **reviewed template**, copied
+byte-for-byte into a project exactly like `mcp_bridge.py` and the connectors, and every agent
+ever generated became deployable the day it landed.
+
+| Route | Behaviour |
+|---|---|
+| `GET /health` | `{"ok": true, "agent": "<id>"}`. Unauthenticated — it reveals nothing, and a health check that needs a credential is one the platform cannot make. |
+| `POST /run` | `{"input": "…"}` → `{"output", "state", "provider", "model", "duration_ms"}`. Bearer token required. |
+
+It holds two properties, and both are the reason it looks like this:
+
+- **It imports nothing from Jaroku.** Pulling in `jaroku_runner.models` for twelve lines of
+  provider selection would quietly end the promise that a generated project is yours to copy
+  out and run. Those twelve lines are duplicated instead.
+- **It adds no dependency.** Stdlib `ThreadingHTTPServer`. LangGraph invocation is blocking, so
+  threads are the right shape, and a project's dependency closure is unchanged by being
+  deployable.
+
+It does two things a *generated* file may not, and both are the point: it **constructs the
+model** (rule 2 forbids `agent.py` from doing so precisely so the model can be injected — this
+is the injection point) and it **writes to stdout** (rule 3 protects the NDJSON trace stream,
+and out there stdout is the deployment's log pane).
+
+### What lands in a project
+
+```
+runtime/agents/<id>/
+├── serve.py          ← reviewed template, copied byte-for-byte
+├── Dockerfile        ← synthesised from jaroku.json
+├── .dockerignore     ← excludes .env from the build context
+└── pyproject.toml    ← the project's own dependency manifest
+```
+
+All four are **host-owned and read-only to the edit loop**, alongside `jaroku.json` and the MCP
+pair. `serve.py` is the process that answers a publicly reachable URL and the Dockerfile decides
+what runs around it — an edit able to rewrite either could change what a container on the open
+internet does, with nobody approving it.
+
+They are written through the same **staging + atomic swap** discipline generation and the fix
+loop use. A failed or cancelled deploy leaves `agents/<id>/` byte for byte as it was.
+
+`pyproject.toml` pays an old debt. `example_agent` has always carried one, with a comment
+promising the project is "export-ready: copy this directory out of Jaroku and it is a standalone
+uv/pip project" — and no *generated* agent ever had one. Now they all do. Deploy tooling makes
+portability stronger, not weaker.
+
+The image installs **what the agent actually uses**: base LangGraph, the one provider SDK it will
+run on, and each selected connector's `pip_requires` from the catalog. An agent with one Postgres
+tool does not pull in the Google API client.
+
+The project is put on `sys.path`, never `pip install`ed — `runtime/pyproject.toml` does not ship
+`agents` in its wheel, so installing would produce an image where every agent fails to load.
+
+### Secrets handoff
+
+The first time a credential leaves this machine. The rule everywhere:
+
+> **Names travel. Values do not.**
+
+```
+        runtime/.env  (chmod 600, gitignored)      ← still the only home
+              │
+        process.env                                ← still the only reader
+              │
+   NAMES ─────┼──▶  the browser sees [{ name, configured: true|false }]
+              │     and ticks which to send. NO VALUE CROSSES THE SOCKET.
+              │
+   VALUES ────┴──▶  read at the moment of the mutation
+                      ├─ POST variableCollectionUpsert — value in the HTTPS BODY
+                      │  never argv · never a log · never the DB · never a file
+                      └─ held for THIS deploy only, to scrub every build-log line
+                         finally { cleared }
+```
+
+| Property | How it holds |
+|---|---|
+| **The database never sees a value** | `deployments.env_keys` is a JSON array of names. There is no column one would fit in. |
+| **Never in an argument** | A process table is world-readable. This is the only reason the transport is split: the API sets variables in a request body, and the CLI — which would need `--set NAME=value` — is used *only* to upload source. |
+| **Never in a log** | Values exist as a local inside one function; and every build-log line is scrubbed before it is broadcast or stored, because Railway echoes build output and a `RUN echo $DATABASE_URL` would otherwise land in the log pane, the table and every browser at once. Values under 8 characters are left alone — a log full of holes says more than it hides. |
+| **Never in the image** | `.dockerignore` excludes `.env`, and no artifact contains a credential. Secrets arrive only as host environment variables at runtime, which is exactly what `env.py`'s "environment wins" precedence was built for. |
+| **Verified before anything is created** | `testRailwayToken` proves a token works and writes nothing — the same two-command split as `testProviderKey`. |
+
+The Railway token itself takes the established path: `RAILWAY_API_TOKEN` in `runtime/.env`,
+through the one shared credential writer, `chmod 600`, never logged, never echoed back. (The
+*account*-scoped variable, not `RAILWAY_TOKEN`, which Railway's own tooling reads as
+project-scoped and which cannot create a project.) It is also stripped from every agent
+subprocess: an agent's own keys have to be there, a deploy credential does not.
+
+### The bearer token
+
+A deployed URL runs an agent on your provider key on every request. So Jaroku mints a random
+`JAROKU_SERVE_TOKEN`, sets it on Railway, and shows it to you **once** — `serve.py` refuses to
+start without one unless `JAROKU_SERVE_PUBLIC=1` says out loud that the endpoint is open.
+
+That token is the only credential this product ever sends *to* a browser, and it is never
+persisted: not in the deployments row, not in `deployment_logs`, not in `localStorage`. Reloading
+loses it, and the card says so.
+
+```bash
+curl https://your-agent.up.railway.app/health
+curl -XPOST https://your-agent.up.railway.app/run \
+  -H 'Authorization: Bearer <the token>' \
+  -d '{"input":"What time is it in Europe/Paris?"}'
+```
+
+### What a deploy refuses
+
+- **The dry-run provider.** It answers with placeholder text; a deployed one would be a URL that
+  looks like a working agent and is not.
+- **A missing connector credential.** Rule 7 makes an unconfigured template *raise* on every
+  call, so that container deploys green and is dead. Overridable — you may intend to set it in
+  Railway by hand — but not by default.
+- **An agent with a run in flight.** Deploying writes into the project, and rewriting files a
+  subprocess is importing would change code out from under a run. The same rule edits follow.
+- **A missing Railway CLI**, before any resource exists — so a missing binary costs you a
+  message, not an orphaned project.
+
+### High-impact MCP tools fail closed
+
+A copied-out project proceeds on a high-impact MCP tool with a warning, because a person running
+a script on their own machine *is* the authorisation. A container is not that: nobody is there to
+ask, and the bridge's "allow for this run" grant is module-global, so one approval would leak
+across every later request for the life of the process. Deployed agents therefore run with
+`JAROKU_MCP_CONFIRM=require` — set in the Dockerfile *and* on the host — and refuse them. Their
+read-only tools are unaffected.
+
+### The deploy record
+
+A row is written **before the first Railway call**, not after the last one — a deploy that dies
+mid-flight still leaves a record of what was attempted and where. On startup, any row still in
+flight is marked `interrupted` with a message pointing at your Railway dashboard, because
+whatever was already created is still there.
+
+```
+queued → packaging → uploading → building → deploying → live
+                                                ↘
+   any stage ──▶ failed | cancelled | interrupted
+```
+
+`cancelled` and `interrupted` are deliberately not `failed`. One means you stopped it; one means
+nobody was watching. Telling somebody their deploy failed when it may be about to come up is how
+they end up deploying a second copy.
+
+**Forget** detaches a record from Jaroku and touches nothing in your account — the notice tells
+you where the real thing still is.
+
+### Not in this milestone
+
+Deployed agents do **not** stream trace events back yet. That is the next layer (Weeks 13–14),
+and building it now would mean shipping `jaroku_interceptor` inside the image — breaking the one
+guarantee the deployed artifact should keep hardest.
+
+---
+
 ## The React client
 
 Three resizable columns:
@@ -1217,6 +1417,7 @@ frozen event schema, and everything added since rides beside it.
 | `debug` | Control plane: `paused`, `resumed`, `boundary`, `branched`, `error` |
 | `eval` | Datasets, examples, rubrics, eval progress, scores, results, estimates |
 | `mcp` | MCP registry snapshots, discovery progress, and the first-use confirmation request |
+| `deploy` | Deployment snapshots, the pre-deploy plan, live stage transitions, scrubbed build-log lines, and the one-shot serve token |
 | `providers` | Which provider keys are set (`configured: true/false`, by name) and test results |
 | `reply` | Streaming "explain" answers |
 | `log` | stderr lines and parse errors, for visibility |
@@ -1231,7 +1432,9 @@ frozen event schema, and everything added since rides beside it.
 `loadEvalResults` · `listEvals` · `loadRubric` · `saveRubric` · and the MCP set:
 `listMcpServers` · `addMcpServer` · `removeMcpServer` · `rediscoverMcpServer` ·
 `setMcpServerAuth` · `setMcpToolImpact` · `resolveMcpConfirm` · and the provider set:
-`listProviders` · `setProviderKey` · `testProviderKey`
+`listProviders` · `setProviderKey` · `testProviderKey` · and the deploy set: `listDeployments` · `planDeploy` ·
+`deploy` · `cancelDeploy` · `forgetDeployment` · `loadDeployLogs` · `setRailwayToken` ·
+`testRailwayToken`
 
 `setProviderKey` and `testProviderKey` are two commands rather than one on purpose: the test
 proves a key authenticates and writes **nothing**, so "Test connection" cannot put a credential
@@ -1262,6 +1465,12 @@ The client reconnects automatically with a 1-second backoff, and re-requests wha
 | `JAROKU_RETRY_BASE_MS` | `2000` | Base for exponential retry backoff |
 | `JAROKU_MCP_TIMEOUT_MS` | `10000` | Per-request ceiling during MCP discovery |
 | `JAROKU_MCP_DISCOVERY_MS` | `30000` | Whole-discovery ceiling, so slow pages can't stall forever |
+| `RAILWAY_API_TOKEN` | — | Your Railway **account** token. Written by the deploy panel, never by hand |
+| `JAROKU_RAILWAY_API` | `https://backboard.railway.com/graphql/v2` | Railway's GraphQL endpoint |
+| `JAROKU_RAILWAY_CLI` | `railway` | The CLI binary used to upload a project |
+| `JAROKU_RAILWAY_TIMEOUT_MS` | `20000` | Per-request ceiling on a Railway API call |
+| `JAROKU_DEPLOY_TIMEOUT_MS` | `900000` | Wall-clock ceiling on one upload + build |
+| `JAROKU_DEPLOY_FOLLOW_MS` | `600000` | How long to keep watching a build before saying so |
 
 ### Models
 
@@ -1296,6 +1505,16 @@ should not disagree about who is doing the thinking.
 | `JAROKU_MCP_CALL_TIMEOUT_S` | `60` — wall-clock ceiling on one MCP tool call |
 | `JAROKU_MCP_MAX_RESULT_CHARS` | `20000` — cap on what one MCP result may hand back |
 | `JAROKU_MCP_<SERVER>_TOKEN` | A server's credential. Written by the UI, never logged |
+
+### A deployed agent (set on the host by the deploy, or by hand outside Jaroku)
+
+| Variable | Purpose |
+|---|---|
+| `PORT` | What `serve.py` binds. `8080` by default; hosting platforms set it themselves |
+| `JAROKU_SERVE_TOKEN` | The bearer token `/run` requires. Minted per deploy and shown once |
+| `JAROKU_SERVE_PUBLIC` | `1` to serve `/run` with **no** authentication. Refuses to start otherwise |
+| `JAROKU_SERVE_CONCURRENCY` | `4` — simultaneous requests; over it, `429` |
+| `JAROKU_PROVIDER` / `JAROKU_MODEL` | What the deployed agent runs on. `fake` is refused |
 
 ### Client
 
@@ -1367,6 +1586,9 @@ npm run test:mcp-client  # discovery, pagination, auth, failure classification
 npm run test:mcp-registry # override voiding, and a failed refresh keeping its tools
 npm run test:mcp-isolation # a hostile server can't corrupt a trace or hang a run
 npm run test:mcp-validate  # MCP wiring, shadowing, and calls checked against the schema
+npm run test:deploy-artifacts # the image's deps, and that no artifact carries a secret
+npm run test:deploy-secrets   # names out, values never; the log scrubber's hard cases
+npm run test:deploy-store     # deploy status transitions, restart reconciliation, Railway failure kinds
 ```
 
 ```bash
@@ -1432,13 +1654,14 @@ plan. The planner logs a loud warning for exactly this reason.
 | Path | What | Tracked? |
 |---|---|---|
 | browser `localStorage` | `jaroku.onboarding` (first-run progress) and `jaroku.input.<agent>` (last test input). UI-only; deleting either loses nothing that matters | n/a |
-| `server/jaroku.db` | Traces (`runs`, `steps`) + eval control plane (`datasets`, `dataset_examples`, `rubrics`, `eval_runs`, `eval_jobs`, `eval_scores`) + MCP registry (`mcp_servers`, `mcp_tools`) | No |
+| `server/jaroku.db` | Traces (`runs`, `steps`) + eval control plane (`datasets`, `dataset_examples`, `rubrics`, `eval_runs`, `eval_jobs`, `eval_scores`) + MCP registry (`mcp_servers`, `mcp_tools`) + deploy records (`deployments`, `deployment_logs`) | No |
 | `runtime/agents/<id>/` | A generated agent project — yours, editable, portable | No (except `example_agent`) |
 | `runtime/agents/.staging/` | In-flight generations and edit proposals. Cleared on server start — a proposal interrupted by a shutdown is an orphan | No |
 | `runtime/agents/.history/<id>/` | Per-agent version snapshots + `history.json`, powering Undo across reloads | No |
 | `runtime/.checkpoints/` | Durable LangGraph checkpoints (`<run_id>.sqlite`) and pause control files | No |
 | `runtime/.env` | Provider, connector and MCP server keys | No |
 | `runtime/agents/<id>/mcp_tools.json` | An agent's MCP grant: servers, tools, schemas, impact. Host-written, read-only to edits | No (with the project) |
+| `runtime/agents/<id>/{serve.py,Dockerfile,.dockerignore,pyproject.toml}` | Deploy tooling. Host-written, read-only to edits, regenerated on every deploy | No (with the project) |
 
 Both SQLite stores share one database file on one connection — a single writer, and
 aggregation can `JOIN` eval jobs against the frozen `steps` table directly.
@@ -1483,8 +1706,23 @@ back to branch from.
   correctly-named line in `runtime/.env`. Every other line of that file survives byte for byte,
   the file is `chmod 600`, and what the browser learns is `configured: true`. The server logs
   `[providers] anthropic key set`; the value appears nowhere.
+- **A deploy sends credentials, by name and then by value, and nothing else.** What crosses the
+  socket is variable *names* plus whether each is set. The values are read from `process.env` at
+  the moment of the Railway mutation, travel in an HTTPS request body — never an argument, since
+  a process table is world-readable — and are held only long enough to scrub them out of every
+  build-log line before it is shown or stored. `deployments.env_keys` has names in it; there is
+  no column a value would fit in, and `.dockerignore` keeps `.env` out of the image.
+- **A deployed agent's URL requires a bearer token.** It runs on your provider key, so an open
+  one is an unmetered way for anyone who finds it to spend your money. Jaroku mints the token,
+  sets it on Railway and shows it once; `serve.py` refuses to start without one unless
+  `JAROKU_SERVE_PUBLIC=1` says so explicitly. The check is constant-time.
+- **High-impact MCP tools are refused in a deployed container.** There is nobody there to ask,
+  and the bridge's per-run grant is process-global — one approval would leak across every later
+  request. Deployed agents run with `JAROKU_MCP_CONFIRM=require`.
 - **The server binds to localhost.** It has no authentication and is not built to be exposed
-  to a network. Don't put it on one.
+  to a network. Don't put it on one. A *deployed agent* deliberately binds `0.0.0.0`, because a
+  service nothing can reach is not a service — which is exactly why the bearer token above is
+  not optional.
 
 ---
 
@@ -1518,6 +1756,27 @@ addressed, or ask for the same agent more specifically.
 **The trace is empty but the agent "ran"**
 Check stderr in the server console. `run_start` is emitted before the agent is even imported,
 so a completely empty trace usually means the subprocess never spawned.
+
+**"the Railway CLI is not installed"**
+Jaroku uses it to upload your project. `brew install railway` or `npm i -g @railway/cli`, then
+restart the Jaroku server — it inherits its `PATH` at launch. Nothing was created in your
+account: the CLI is checked before any Railway resource exists.
+
+**A deploy says `interrupted`**
+The Jaroku server restarted while it was in flight, so nothing is watching it any more. Whatever
+had already been created still exists in your Railway account — check there before deploying
+again, or you will end up with two projects.
+
+**The deployed agent returns 401**
+`/run` needs `Authorization: Bearer <token>`. The token is shown once, when the deploy goes live,
+and Jaroku keeps no copy — rotate it by setting `JAROKU_SERVE_TOKEN` in Railway yourself, or
+deploy again for a fresh one.
+
+**The deployed agent 500s on every request**
+Usually a credential the container does not have. The deploy warns before it starts if a declared
+variable is unset locally, but you can proceed past that — a connector template *raises* when it
+is unconfigured (rule 7), so a missing key is a failed request rather than a degraded one. Set it
+in Railway's variables and redeploy.
 
 **Branching says "no durable checkpoint for that step"**
 That run predates checkpointing, or its checkpoint was swept (which happens for finished eval
