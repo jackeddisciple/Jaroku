@@ -115,8 +115,14 @@ export const useDeployStore = create<DeployState>((set) => ({
   setPlan: (plan) => set({ plan, planning: false, error: null }),
   startPlanning: () => set({ planning: true, error: null }),
 
+  // "done" is a sentinel meaning the deploy settled, not a phase — the deployment's own
+  // status carries that. Recording it would erase which phase was last reached, which is the
+  // only thing that says how far a FAILED deploy got.
   setStage: (deploymentId, stage) =>
-    set((s) => ({ stage: { ...s.stage, [deploymentId]: stage }, selectedId: deploymentId })),
+    set((s) => ({
+      stage: stage === "done" ? s.stage : { ...s.stage, [deploymentId]: stage },
+      selectedId: deploymentId,
+    })),
 
   appendLog: (line) =>
     set((s) => ({

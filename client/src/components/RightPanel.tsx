@@ -11,6 +11,9 @@ import { TraceTimeline } from "./TraceTimeline.tsx";
 import { GraphView } from "./GraphView.tsx";
 import { EvalsPanel } from "./EvalsPanel.tsx";
 import { McpPanel } from "./McpPanel.tsx";
+import { DeployPanel } from "./DeployPanel.tsx";
+import { useDeployStore } from "../store/deployStore.ts";
+import { isDeployInFlight } from "../types.ts";
 import { StepDetailPanel } from "./StepDetailPanel.tsx";
 
 const TABS: { id: RightTab; label: string }[] = [
@@ -18,6 +21,7 @@ const TABS: { id: RightTab; label: string }[] = [
   { id: "trace", label: "Trace" },
   { id: "evals", label: "Evals" },
   { id: "mcp", label: "MCP" },
+  { id: "deploy", label: "Deploy" },
 ];
 
 export function RightPanel() {
@@ -31,6 +35,17 @@ export function RightPanel() {
     if (activeRunId && activeRunId !== prevRunId.current) setTab("trace");
     prevRunId.current = activeRunId;
   }, [activeRunId, setTab]);
+
+  // Same idiom for a deploy: a NEW one steals the tab, once. Diffed against a ref rather than
+  // fired on every deploy message, so selecting an old deployment by hand does not yank the
+  // panel away from whatever the user was reading.
+  const deployId = useDeployStore((s) => s.selectedId);
+  const deployRunning = useDeployStore((s) => s.deployments.some((d) => isDeployInFlight(d.status)));
+  const prevDeployId = useRef(deployId);
+  useEffect(() => {
+    if (deployId && deployId !== prevDeployId.current && deployRunning) setTab("deploy");
+    prevDeployId.current = deployId;
+  }, [deployId, deployRunning, setTab]);
 
   const tabClass = (t: RightTab) =>
     `px-3 py-1.5 text-[12px] rounded-control transition-colors ${
@@ -57,6 +72,7 @@ export function RightPanel() {
         {tab === "graph" ? <GraphView />
           : tab === "evals" ? <EvalsPanel />
           : tab === "mcp" ? <McpPanel />
+          : tab === "deploy" ? <DeployPanel />
           : <TraceTimeline />}
       </div>
 
