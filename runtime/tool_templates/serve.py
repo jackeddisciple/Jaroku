@@ -198,6 +198,18 @@ def _jsonable(value, _depth: int = 0, _seen: frozenset[int] = frozenset()):
         return f"<unrenderable {type(value).__name__}>"
 
 
+def _dump(payload: dict) -> bytes:
+    """A response body, as UTF-8.
+
+    ``ensure_ascii=False`` because the default escapes every non-ASCII character, and an agent
+    that answers in Japanese was returning six bytes of ``\\uXXXX`` for each one — a response
+    several times larger than the text it carried, unreadable in a terminal, and identical
+    only after a decode step every client has to remember. The Content-Type already says
+    UTF-8, which is what the escaping was standing in for.
+    """
+    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
 # --- the service -----------------------------------------------------------------------
 
 
@@ -251,9 +263,9 @@ class Handler(BaseHTTPRequestHandler):
     # --- plumbing ---
 
     def _send(self, code: int, payload: dict) -> None:
-        body = json.dumps(payload).encode("utf-8")
+        body = _dump(payload)
         self.send_response(code)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -269,9 +281,9 @@ class Handler(BaseHTTPRequestHandler):
         rest of the message is not going to be consumed.
         """
         self.close_connection = True
-        body = json.dumps(payload).encode("utf-8")
+        body = _dump(payload)
         self.send_response(code)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Connection", "close")
         self.end_headers()
