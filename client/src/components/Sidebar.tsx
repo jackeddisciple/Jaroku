@@ -12,15 +12,15 @@ import { agentStatus, type AgentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark, ConnectorDot } from "../lib/icons.tsx";
 import { selectAgent, selectRun } from "../lib/selection.ts";
 import { sendLoadRun } from "../lib/socket.ts";
-import { ICON, TYPE } from "../lib/tokens.ts";
+import { ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import {
-  ActivityIcon, ChevronRightIcon, GitForkIcon, LoaderIcon, PauseIcon, PlusIcon, SearchIcon,
-  SettingsIcon, SparklesIcon, XIcon,
+  ActivityIcon, ChevronRightIcon, GitForkIcon, GlobeIcon, LoaderIcon, PauseIcon, PlusIcon,
+  SearchIcon, SettingsIcon, SparklesIcon, XIcon,
 } from "./panelIcons.tsx";
 
 type Filter = "all" | "running" | "deployed" | "drafts";
@@ -45,9 +45,26 @@ function StatusGlyph({ status }: { status: RunStatus }) {
   }
 }
 
+// Two states pulse: a local run and a deploy in flight. Both mean "this is changing right
+// now", which is the only thing the animation is ever allowed to mean.
+const DOT_COLOR: Record<AgentStatus, string> = {
+  running: "bg-run",
+  deploying: "bg-run",
+  draft: "bg-faint",
+  deployed: "bg-ok",
+  ran: "bg-ok",
+};
+
 function AgentDot({ status }: { status: AgentStatus }) {
-  const color = status === "running" ? "bg-run" : status === "draft" ? "bg-faint" : "bg-ok";
-  return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${color} ${status === "running" ? "animate-stream-pulse motion-reduce:animate-none" : ""}`} />;
+  const moving = status === "running" || status === "deploying";
+  return (
+    <span
+      title={status}
+      className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT_COLOR[status]} ${
+        moving ? "animate-stream-pulse motion-reduce:animate-none" : ""
+      }`}
+    />
+  );
 }
 
 function RunRow({ run }: { run: RunSummary }) {
@@ -89,7 +106,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const runs = useTraceStore((s) => s.runs);
   const active = agent.agent_id === activeAgentId;
-  const status = agentStatus(agent.agent_id, runs);
+  const status = agentStatus(agent.agent_id, runs, agent.deployment);
 
   // Newest run for this agent → last-active timestamp.
   let last: RunSummary | undefined;
@@ -130,6 +147,19 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
             {c}
           </Chip>
         ))}
+        {/* Where it is serving, not just that it is. A URL is the whole point of a deploy, and
+            an agent list that says "deployed" without saying where makes you go and look. */}
+        {agent.deployment?.status === "live" && agent.deployment.url && (
+          <Chip
+            size="sm"
+            tone="faint"
+            mono
+            variant="bare"
+            icon={<span style={{ color: STATUS.ok }}><GlobeIcon size={10} /></span>}
+          >
+            {agent.deployment.url.replace(/^https?:\/\//, "")}
+          </Chip>
+        )}
       </div>
     </button>
   );
@@ -142,21 +172,27 @@ export function Sidebar() {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
 
-  const counts = { running: 0, drafts: 0 };
+  const counts = { running: 0, deployed: 0, drafts: 0 };
   for (const a of agents) {
-    const st = agentStatus(a.agent_id, runs);
+    const st = agentStatus(a.agent_id, runs, a.deployment);
     if (st === "running") counts.running++;
     else if (st === "draft") counts.drafts++;
+    // Counted separately from the filter's `else if` chain: an agent that is deployed AND
+    // running locally is both, and a Deployed tab that hid it while a test run was in flight
+    // would flicker its own count.
+    if (st === "deployed" || st === "deploying") counts.deployed++;
   }
 
   const q = query.trim().toLowerCase();
   const visible = agents.filter((a) => {
     if (q && !(`${a.name} ${a.agent_id}`.toLowerCase().includes(q))) return false;
     if (filter === "all") return true;
-    const st = agentStatus(a.agent_id, runs);
+    const st = agentStatus(a.agent_id, runs, a.deployment);
     if (filter === "running") return st === "running";
     if (filter === "drafts") return st === "draft";
-    return false; // "deployed": no deploy backend yet — always empty
+    // Deployed shows what is live AND what is on its way there — the tab is about where an
+    // agent is, and a deploy in flight is the most interesting answer that question has.
+    return st === "deployed" || st === "deploying";
   });
 
   const runList = orderedRuns(runs);
@@ -201,7 +237,7 @@ export function Sidebar() {
       <div className="flex items-center gap-1 px-3 pt-2 pb-1 shrink-0">
         {tab("all", "All")}
         {tab("running", "Running", counts.running)}
-        {tab("deployed", "Deployed")}
+        {tab("deployed", "Deployed", counts.deployed)}
         {tab("drafts", "Drafts", counts.drafts)}
       </div>
 

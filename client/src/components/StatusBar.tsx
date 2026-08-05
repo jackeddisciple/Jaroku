@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import { fmtCost, fmtDuration, fmtTokens } from "../lib/format.ts";
+import { useDeployStore } from "../store/deployStore.ts";
+import { isDeployInFlight } from "../types.ts";
 
 const DOT: Record<string, string> = {
   open: "bg-ok",
@@ -36,6 +38,10 @@ export function StatusBar() {
     return { tokens: tk, cost: ct, count: steps.length, duration: dur };
   }, [bucket, run]);
 
+  const deploying = useDeployStore((s) => s.deployments.find((d) => isDeployInFlight(d.status)));
+  const deployStage = useDeployStore((s) => (deploying ? (s.stage[deploying.id] ?? null) : null));
+  const live = useDeployStore((s) => s.deployments.filter((d) => d.status === "live").length);
+
   const sep = <span className="text-hair">|</span>;
 
   return (
@@ -59,6 +65,19 @@ export function StatusBar() {
           {sep}
           <span>{fmtDuration(duration)}</span>
         </>
+      )}
+      {/* A deploy is the one thing that happens outside this machine, and it can be running
+          while the user is reading something else entirely. It gets the far end of the strip
+          so it never pushes the run's own figures around. */}
+      {deploying && (
+        <>
+          <span className="ml-auto text-run">deploying {deploying.agent_id}</span>
+          {sep}
+          <span className="text-run">{deployStage ?? deploying.status}</span>
+        </>
+      )}
+      {!deploying && live > 0 && (
+        <span className="ml-auto">{live} deployed</span>
       )}
     </div>
   );
