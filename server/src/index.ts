@@ -37,12 +37,15 @@ import { loadConnectors } from "./connectors.ts";
 import { isSafeAgentId, listProjectFiles } from "./projectFs.ts";
 import { introspectGraph, type GraphResult } from "./graphIntrospect.ts";
 import { streamExplain } from "./explainer.ts";
-import type { ExplainCommand } from "./wsRelay.ts";
+import type { DeployChannelCommand, ExplainCommand } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { McpStore } from "./mcpStore.ts";
 import { McpRegistry } from "./mcpRegistry.ts";
 import { fileCredentialWriter } from "./envWriter.ts";
 import { PROVIDER_ENV_KEY, isProviderId, providerStatus, verifyProviderKey } from "./providers.ts";
+import { DeployStore } from "./deployStore.ts";
+import { DeployManager, planDeploy, type DeployManagerDeps } from "./deployManager.ts";
+import { RailwayApi, RailwayError, RAILWAY_ENV_KEY } from "./railwayApi.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = resolve(__dirname, "..");
@@ -174,6 +177,64 @@ const editor = new Editor({
     runActive || pool.busy ? "cannot modify the agent while a run is in progress" : null,
 });
 
+// --- deploy -----------------------------------------------------------------
+// Control-plane, beside the frozen schema, exactly like the eval and MCP stores. A deploy is
+// not an agent run: nothing here goes near `runs`, `steps`, or the trace channel.
+//
+// The manager gets its dependencies rather than importing them, so it has no idea a WebSocket
+// exists — the EvalRunnerDeps shape. Note `token`: a function, not a value, so the credential
+// is read from process.env at the moment of use and is never held by the manager.
+const deployStore = new DeployStore(store.connection());
+
+// The same reasoning for deploys, with a sharper edge: a deploy in flight was creating real
+// resources in the user's Railway account. A row still reading "building" after a restart is
+// not building — nothing is watching it — and the honest thing is to say so and point at the
+// dashboard, because whatever was already created is still there.
+for (const stale of deployStore.reconcileInterrupted()) {
+  console.log(`[deploy] ${stale.id} (${stale.agent_id}) was interrupted by a restart`);
+}
+
+
+const deployDeps: DeployManagerDeps = {
+  runtimeDir: RUNTIME_DIR,
+  store: deployStore,
+  token: () => process.env[RAILWAY_ENV_KEY],
+  // The same pool-aware check the editor uses, and for a sharper version of the reason:
+  // deploying WRITES into the project, so doing it while a subprocess is importing those
+  // files would change code out from under a run in flight.
+  agentBusy: () => runActive || pool.busy,
+  onStage: (e) => relay.broadcastDeploy({ type: "stage", ...e }),
+  onLog: (e) => relay.broadcastDeploy({ type: "log", ...e }),
+  onServeToken: (e) => relay.broadcastDeploy({ type: "serveToken", ...e }),
+  onFinished: (d) =>
+    relay.broadcastDeploy({
+      type: "finished",
+      deploymentId: d.id,
+      status: d.status,
+      url: d.url,
+      error: d.error,
+    }),
+  onChanged: () => {
+    broadcastDeployments();
+    // An agent's row in the sidebar carries its deployment, so the agent list is stale too.
+    relay.broadcastAgents();
+  },
+};
+
+const deployManager = new DeployManager(deployDeps);
+
+/** The full snapshot: every deployment, plus whether a Railway token is set. Names only. */
+function deploySnapshot(): { deployments: unknown[]; railwayConfigured: boolean } {
+  return {
+    deployments: deployStore.list(),
+    railwayConfigured: Boolean(process.env[RAILWAY_ENV_KEY]),
+  };
+}
+
+function broadcastDeployments(): void {
+  relay.broadcastDeploy({ type: "deployments", ...deploySnapshot() });
+}
+
 /** Current on-disk files of an agent project, connector files flagged read-only. */
 function agentProjectFiles(agentId: string): unknown[] {
   if (!isSafeAgentId(agentId)) return [];
@@ -211,16 +272,26 @@ const relay = new WsRelay({
   port: PORT,
   store,
   clientHtmlPath: join(SERVER_DIR, "debug-client.html"),
-  listAgents: () =>
-    listAgents(RUNTIME_DIR).map((a) => ({
-      ...a,
-      edit_count: editCount(RUNTIME_DIR, a.agent_id),
-    })),
+  listAgents: () => {
+    // One query for the whole list, so the sidebar can show a deploy state per row without
+    // N round trips. `deployment` is null for an agent that has never been deployed.
+    const deployed = deployStore.currentByAgent();
+    return listAgents(RUNTIME_DIR).map((a) => {
+      const d = deployed.get(a.agent_id);
+      return {
+        ...a,
+        edit_count: editCount(RUNTIME_DIR, a.agent_id),
+        deployment: d ? { id: d.id, status: d.status, url: d.url } : null,
+      };
+    });
+  },
   listAgentFiles: agentProjectFiles,
   getAgentGraph: agentGraph,
   listMcpServers: () => mcpRegistry.list(),
   // By name only. The client learns THAT a key is set, never what it is.
   listProviders: () => providerStatus(),
+  // Same: env_keys are names, railwayConfigured is a boolean. No value crosses this.
+  listDeployments: () => deploySnapshot(),
   onCommand: (cmd: ForwardedCommand) => {
     if (cmd.cmd === "run") runAgent(cmd.input, cmd.provider, cmd.model, cmd.agentId);
     else if (cmd.cmd === "generate") generateAgent(cmd);
@@ -235,6 +306,7 @@ const relay = new WsRelay({
     else if (cmd.cmd === "branchRun") branchRun(cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState);
     else if (cmd.cmd === "explain") explainAgent(cmd);
     else if (MCP_COMMAND_NAMES.has(cmd.cmd)) void handleMcpCommand(cmd as McpCommand);
+    else if (DEPLOY_COMMAND_NAMES.has(cmd.cmd)) void handleDeployCommand(cmd as DeployChannelCommand);
     else if (PROVIDER_COMMAND_NAMES.has(cmd.cmd)) void handleProviderCommand(cmd as ProviderCommand);
     else handleEvalCommand(cmd);
   },
@@ -550,6 +622,158 @@ async function handleProviderCommand(cmd: ProviderCommand): Promise<void> {
     const message = (err as Error)?.message ?? String(err);
     console.error(`[providers] ${cmd.cmd} failed: ${message}`);
     relay.broadcastProviders({ type: "error", message: `${cmd.cmd} failed: ${message}` });
+  }
+}
+
+// --- deploy: commands -------------------------------------------------------
+// Every mutation answers by re-broadcasting the affected snapshot on the "deploy" channel,
+// the same shape a fresh `listDeployments` would return — so a client never reconciles a
+// partial update against local state.
+//
+// The credential discipline is the provider handler's, unchanged: the Railway token goes
+// through the one shared writer, the log line names the variable and never the value, and
+// what the browser learns is `railwayConfigured: true`.
+
+const DEPLOY_COMMAND_NAMES = new Set([
+  "planDeploy", "deploy", "cancelDeploy", "forgetDeployment", "loadDeployLogs",
+  "setRailwayToken", "testRailwayToken",
+]);
+
+async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
+  try {
+    switch (cmd.cmd) {
+      case "setRailwayToken": {
+        // null clears it — the same "remove the key entirely" shape setMcpServerAuth has.
+        if (cmd.token === null) {
+          credentials.clear(RAILWAY_ENV_KEY);
+          console.log(`[deploy] Railway token cleared (${RAILWAY_ENV_KEY})`);
+          broadcastDeployments();
+          return;
+        }
+        const token = typeof cmd.token === "string" ? cmd.token.trim() : "";
+        if (!token) {
+          relay.broadcastDeploy({ type: "error", message: "no token was entered" });
+          return;
+        }
+        const written = credentials.set(RAILWAY_ENV_KEY, token);
+        if (!written.ok) {
+          relay.broadcastDeploy({ type: "error", message: written.warning ?? "could not store that token" });
+          return;
+        }
+        console.log(`[deploy] Railway token set (${RAILWAY_ENV_KEY})`);
+        broadcastDeployments();
+        if (written.warning) relay.broadcastDeploy({ type: "notice", message: written.warning });
+        return;
+      }
+
+      case "testRailwayToken": {
+        // Writes nothing, by design — see TestRailwayTokenCommand.
+        const token = typeof cmd.token === "string" ? cmd.token.trim() : "";
+        if (!token) {
+          relay.broadcastDeploy({ type: "testResult", ok: false, message: "no token was entered" });
+          return;
+        }
+        try {
+          const { projectCount } = await new RailwayApi({ token }).verify();
+          console.log("[deploy] Railway token tested — ok");
+          relay.broadcastDeploy({
+            type: "testResult",
+            ok: true,
+            message: projectCount ? "connected" : "connected — no projects yet",
+          });
+        } catch (err) {
+          const detail = err instanceof RailwayError ? err.message : String(err);
+          console.log("[deploy] Railway token tested — rejected");
+          relay.broadcastDeploy({ type: "testResult", ok: false, message: detail });
+        }
+        return;
+      }
+
+      case "planDeploy": {
+        if (!isSafeAgentId(cmd.agentId)) {
+          relay.broadcastDeploy({ type: "error", message: "invalid agent id" });
+          return;
+        }
+        const plan = planDeploy(deployDeps, {
+          agentId: cmd.agentId,
+          provider: cmd.provider,
+          model: cmd.model,
+          envKeys: [],
+        });
+        relay.broadcastDeploy({
+          type: "plan",
+          agentId: plan.agentId,
+          secrets: plan.secrets,
+          problems: plan.problems,
+          warnings: plan.warnings,
+        });
+        return;
+      }
+
+      case "deploy": {
+        if (!isSafeAgentId(cmd.agentId)) {
+          relay.broadcastDeploy({ type: "error", message: "invalid agent id" });
+          return;
+        }
+        if (deployManager.busy) {
+          relay.broadcastDeploy({ type: "error", message: "a deploy is already running" });
+          return;
+        }
+        const envKeys = Array.isArray(cmd.envKeys)
+          ? (cmd.envKeys as unknown[]).filter((k): k is string => typeof k === "string")
+          : [];
+        const result = await deployManager.start({
+          agentId: cmd.agentId,
+          provider: String(cmd.provider ?? ""),
+          model: String(cmd.model ?? ""),
+          envKeys,
+          allowMissing: cmd.allowMissing === true,
+          publicEndpoint: cmd.publicEndpoint === true,
+        });
+        if ("error" in result) relay.broadcastDeploy({ type: "error", message: result.error });
+        return;
+      }
+
+      case "cancelDeploy": {
+        await deployManager.cancel(cmd.deploymentId);
+        return;
+      }
+
+      case "forgetDeployment": {
+        // Detaches the record from Jaroku and touches NOTHING in the user's account. Deleting
+        // somebody's live service because they tidied a list is not a trade this makes; the
+        // notice says where the real thing still is.
+        const row = deployStore.get(cmd.deploymentId);
+        if (!row) return;
+        if (deployManager.activeId === cmd.deploymentId) {
+          relay.broadcastDeploy({ type: "error", message: "that deploy is still running — cancel it first" });
+          return;
+        }
+        deployStore.patch(cmd.deploymentId, { status: "removed" });
+        broadcastDeployments();
+        relay.broadcastAgents();
+        relay.broadcastDeploy({
+          type: "notice",
+          message: row.url
+            ? `removed from Jaroku. The service is still running at ${row.url} — delete it in Railway if you want it gone.`
+            : "removed from Jaroku. Anything created in your Railway account is still there.",
+        });
+        return;
+      }
+
+      case "loadDeployLogs": {
+        relay.broadcastDeploy({
+          type: "logs",
+          deploymentId: cmd.deploymentId,
+          lines: deployStore.logs(cmd.deploymentId, typeof cmd.sinceSeq === "number" ? cmd.sinceSeq : -1),
+        });
+        return;
+      }
+    }
+  } catch (err) {
+    const message = (err as Error)?.message ?? String(err);
+    console.error(`[deploy] ${cmd.cmd} failed: ${message}`);
+    relay.broadcastDeploy({ type: "error", message: `${cmd.cmd} failed: ${message}` });
   }
 }
 

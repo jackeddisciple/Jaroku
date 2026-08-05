@@ -21,6 +21,9 @@ const check = (name: string, ok: boolean, detail = "") => {
   else { fail++; console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ""}`); }
 };
 
+/** The one-time comment setEnvVar writes above the first key it appends. */
+const HEADER = "# Written by Jaroku";
+
 const paths: string[] = [];
 const tmpEnv = (contents: string): string => {
   const p = join(tmpdir(), `jaroku-env-${randomUUID()}`);
@@ -106,14 +109,14 @@ SLACK_BOT_TOKEN=xoxb-123
   check("...and the new value is the one kept", after.includes("JAROKU_MCP_LINEAR_TOKEN=second"));
   check("...and the old value is gone", !after.includes("first"));
   check("only one header comment is ever added",
-    after.split("# MCP server credentials").length - 1 === 1);
+    after.split(HEADER).length - 1 === 1);
 
   // Rewriting an EXISTING unrelated key must also work in place — the header block is only
   // for keys we add, and someone may have moved ours by hand.
   setEnvVar(p, "SLACK_BOT_TOKEN", "xoxb-rotated");
   const after2 = readFileSync(p, "utf8");
   check("an existing key is rewritten where it already sits",
-    after2.indexOf("SLACK_BOT_TOKEN") < after2.indexOf("# MCP server credentials"));
+    after2.indexOf("SLACK_BOT_TOKEN") < after2.indexOf(HEADER));
   check("...with its new value", after2.includes("SLACK_BOT_TOKEN=xoxb-rotated"));
   check("...and no duplicate",
     after2.split("\n").filter((l) => l.startsWith("SLACK_BOT_TOKEN=")).length === 1);

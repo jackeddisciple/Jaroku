@@ -117,9 +117,14 @@ export function setEnvVar(path: string, key: string, value: string): { ok: boole
       .join("\n");
   } else {
     const body = existing.length && !existing.endsWith("\n") ? `${existing}\n` : existing;
-    const header = existing.includes("# MCP server credentials")
-      ? ""
-      : "\n# MCP server credentials (written by Jaroku; safe to edit or delete by hand)\n";
+    // The old wording said "MCP server credentials", which was true when MCP tokens were the
+    // only thing this wrote. Provider keys and the Railway deploy token come through here
+    // too, so a file that labels all three as MCP is a file that misleads whoever opens it.
+    // The old string is still recognised so an existing .env does not grow a second header.
+    const header =
+      existing.includes("# Written by Jaroku") || existing.includes("# MCP server credentials")
+        ? ""
+        : "\n# Written by Jaroku (safe to edit or delete by hand)\n";
     next = `${body}${header}${line}\n`;
   }
 
