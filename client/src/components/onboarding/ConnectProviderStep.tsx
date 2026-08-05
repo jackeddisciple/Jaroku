@@ -14,8 +14,9 @@ import { useState } from "react";
 import { useProviderStore } from "../../store/providerStore.ts";
 import { useUiStore } from "../../store/uiStore.ts";
 import { BRAND_COLOR, ProviderMark } from "../../lib/icons.tsx";
-import { ICON, SURFACE, TEXT } from "../../lib/tokens.ts";
+import { ICON } from "../../lib/tokens.ts";
 import { quietBtn } from "../buttons.ts";
+import { PrimaryCta } from "./Cta.tsx";
 import { ChevronDownIcon } from "../composerIcons.tsx";
 import { KeyIcon, ShieldCheckIcon } from "../panelIcons.tsx";
 import { StatusBadge } from "../StatusBadge.tsx";
@@ -77,7 +78,7 @@ export function ConnectProviderStep() {
   const continueConnected = () => (primary ? proceedWith(primary.id) : proceed());
 
   return (
-    <OnboardingSurface>
+    <OnboardingSurface step="provider">
       <h1 className="text-[22px] font-semibold leading-tight text-ink">Connect a provider</h1>
       <p className="mt-2 text-[13px] leading-[1.6] text-muted">
         Jaroku runs on your own API keys — there is no Jaroku account, and nothing is proxied
@@ -153,16 +154,11 @@ export function ConnectProviderStep() {
           before that, "nothing is configured" and "we have not been told yet" look the same,
           and a button that appears a beat late is worse than one that waits. */}
       {loaded && primary && (
-        <button
-          type="button"
-          onClick={continueConnected}
-          autoFocus
-          className="mt-6 rounded-control px-6 py-2.5 text-[13px] font-medium transition-opacity
-            hover:opacity-90 focus:outline-none focus:shadow-focusring"
-          style={{ background: TEXT.ink, color: SURFACE.bg }}
-        >
-          Continue with {PROVIDER_LABEL[primary.id] ?? primary.id}
-        </button>
+        <div className="mt-6">
+          <PrimaryCta onClick={continueConnected} autoFocus kbd="↵">
+            Continue with {PROVIDER_LABEL[primary.id] ?? primary.id}
+          </PrimaryCta>
+        </div>
       )}
 
       {/* The skip. A sibling of the cards above, not a way out of them. */}

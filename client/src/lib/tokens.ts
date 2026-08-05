@@ -228,6 +228,25 @@ export const ELEVATION_BORDER = {
 /** The focus ring. One value, so a focused input and a focused button are the same idea. */
 export const FOCUS_RING = "0 0 0 1px #3a3a44, 0 0 0 4px rgba(58,58,68,0.28)";
 
+/**
+ * Lift by light. The other half of ELEVATION, and the half a near-black app actually needs.
+ *
+ * ELEVATION answers "how far off the page is this", which is a question about the object. GLOW
+ * answers "is this the one I am on", which is a question about the pointer and the keyboard —
+ * and a darker shadow is the wrong tool for it, because on #0d0d0f a hovered card cannot get
+ * meaningfully darker. It can only get brighter at its edge.
+ *
+ * Both values are neutral, deliberately. §4.2 reserves hue for status, and "you are hovering
+ * this" is not a status — it is the surface acknowledging a pointer. Light without hue is the
+ * only way to say it that does not spend a colour.
+ */
+export const GLOW = {
+  /** An interactive card under the pointer, or reached by Tab. Border brightens, edge blooms. */
+  hover: "0 0 0 1px #34343c, 0 0 32px -10px rgba(228,228,231,0.16)",
+  /** The one action a screen is asking for. Sits on the filled control, not around it. */
+  cta: "0 0 0 4px rgba(228,228,231,0.07)",
+} as const;
+
 // ── Motion ──────────────────────────────────────────────────────────────────
 // Two durations and one easing, because a transition that communicates a state change has to be
 // perceptible and then out of the way. Anything slower than `base` starts to feel like latency,

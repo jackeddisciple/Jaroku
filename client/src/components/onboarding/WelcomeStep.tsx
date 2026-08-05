@@ -12,13 +12,13 @@
 import { useUiStore } from "../../store/uiStore.ts";
 import { JarokuGlyph } from "../../lib/icons.tsx";
 import { OnboardingSurface } from "./OnboardingSurface.tsx";
-import { SURFACE, TEXT } from "../../lib/tokens.ts";
+import { PrimaryCta } from "./Cta.tsx";
 
 export function WelcomeStep() {
   const setStep = useUiStore((s) => s.setOnboardingStep);
 
   return (
-    <OnboardingSurface>
+    <OnboardingSurface step="welcome">
       <div className="flex flex-col items-center text-center">
         {/* The mark at the size the top bar uses it, scaled up — the same glyph the app wears
             everywhere else rather than a bespoke splash logo. */}
@@ -34,15 +34,11 @@ export function WelcomeStep() {
           mutation it made.
         </p>
 
-        <button
-          type="button"
-          onClick={() => setStep("provider")}
-          autoFocus
-          className="mt-9 rounded-control px-6 py-2.5 text-[13px] font-medium transition-opacity hover:opacity-90 focus:outline-none focus:shadow-focusring"
-          style={{ background: TEXT.ink, color: SURFACE.bg }}
-        >
-          Get started
-        </button>
+        <div className="mt-9">
+          <PrimaryCta onClick={() => setStep("provider")} autoFocus kbd="↵">
+            Get started
+          </PrimaryCta>
+        </div>
 
         {/* Two facts worth having before the next screen asks for a credential: nothing is
             uploaded, and there is a free path. Said here so the ask arrives expected. */}

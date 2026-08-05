@@ -49,6 +49,11 @@ export default {
         floating: "0 2px 6px rgba(0,0,0,0.35), 0 12px 28px -8px rgba(0,0,0,0.55)",
         overlay: "0 4px 12px rgba(0,0,0,0.4), 0 28px 64px -16px rgba(0,0,0,0.7)",
         focusring: "0 0 0 1px #3a3a44, 0 0 0 4px rgba(58,58,68,0.28)",
+        // Lift by light rather than by dark — mirrors GLOW in src/lib/tokens.ts. A shadow says
+        // "this is above the page"; a glow says "this is the one you are on", which is what a
+        // hovered or keyboard-reached control needs to say.
+        glow: "0 0 0 1px #34343c, 0 0 32px -10px rgba(228,228,231,0.16)",
+        "glow-cta": "0 0 0 4px rgba(228,228,231,0.07)",
       },
       transitionDuration: {
         fast: "120ms",
@@ -127,10 +132,28 @@ export default {
           "0%": { opacity: "0", transform: "translateX(-8px)" },
           "100%": { opacity: "1", transform: "translateX(0)" },
         },
+        // A block of a first-run screen arriving. Same idea as slide-in and the same easing, one
+        // step longer and one step further: these are paragraphs and cards rather than list rows,
+        // and they are staggered, so each one has to still be moving when the next begins or the
+        // sequence reads as four separate glitches instead of one screen assembling.
+        rise: {
+          "0%": { opacity: "0", transform: "translateY(8px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+        // A path drawing itself, for the hero trace. Pairs with a stroke-dasharray set to the
+        // path's own length, so the edge appears to be laid down rather than faded in.
+        "draw-edge": {
+          "0%": { strokeDashoffset: "var(--draw-len)" },
+          "100%": { strokeDashoffset: "0" },
+        },
       },
       animation: {
         "slide-in": "slide-in 120ms ease-out",
         "panel-in": "panel-in 260ms cubic-bezier(0.2, 0, 0, 1)",
+        // `backwards` matters: these are staggered by animation-delay, and without it every
+        // block paints at full opacity first and then jumps back to hidden to start.
+        rise: "rise 320ms cubic-bezier(0.2, 0, 0, 1) backwards",
+        "draw-edge": "draw-edge 420ms cubic-bezier(0.2, 0, 0, 1) backwards",
         breathe: "breathe 4.2s ease-in-out infinite",
         "pulse-node": "pulse-node 2.4s ease-in-out infinite",
         "check-in": "check-in 180ms cubic-bezier(0.2, 0, 0, 1)",
