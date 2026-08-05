@@ -9,19 +9,28 @@
 // The second is make skipping a real answer. The free dry-run path exercises the whole trace,
 // graph and UI with real depth and no cost, so it is framed as a way to explore rather than as
 // a lesser tier with a nag attached.
+//
+// The composition was fighting both of those. Three boxes of equal weight ran down the screen —
+// the guarantee, then Anthropic, then OpenAI — so the promise about the key looked like a third
+// provider, and the free path was a text link below a rule, which is where a product puts the
+// thing it hopes you will not click. Now the page has exactly one kind of box, a card you can
+// choose, and there are three of them: two providers and the free path. The guarantee stops
+// being a box at all and becomes a note against a rule, which is what a footnote that must be
+// read but not chosen actually looks like.
 
 import { useState } from "react";
 import { useProviderStore } from "../../store/providerStore.ts";
 import { useUiStore } from "../../store/uiStore.ts";
 import { BRAND_COLOR, ProviderMark } from "../../lib/icons.tsx";
-import { ICON } from "../../lib/tokens.ts";
+import { ICON, SURFACE, TYPE } from "../../lib/tokens.ts";
 import { quietBtn } from "../buttons.ts";
-import { PrimaryCta } from "./Cta.tsx";
 import { ChevronDownIcon } from "../composerIcons.tsx";
-import { KeyIcon, ShieldCheckIcon } from "../panelIcons.tsx";
+import { KeyIcon, PlusIcon, ShieldCheckIcon, ZapIcon } from "../panelIcons.tsx";
 import { StatusBadge } from "../StatusBadge.tsx";
 import { OnboardingSurface } from "./OnboardingSurface.tsx";
+import { PrimaryCta, GhostCta } from "./Cta.tsx";
 import { ProviderKeyForm } from "./ProviderKeyForm.tsx";
+import { Reveal } from "./Reveal.tsx";
 
 /** Display names, so the card heading and the continue button cannot drift apart. */
 const PROVIDER_LABEL: Record<string, string> = {
@@ -36,6 +45,37 @@ const BLURB: Record<string, string> = {
     "and runs your agents on Claude.",
   openai: "Runs your agents on GPT models.",
 };
+
+/**
+ * The card everything on this screen that can be CHOSEN is drawn as.
+ *
+ * Elevation by light, never by shadow (§4.2, and see GLOW): the border brightens and the edge
+ * blooms when the pointer is over it or the keyboard is in it. On #0d0d0f that is the only
+ * direction a surface can move — it cannot get darker than the page.
+ *
+ * `focus-within` rather than `focus-visible` for the glow, deliberately. This is not a focus
+ * ring; it is the card saying it is the one you are working in, which is true whether you got
+ * there by tab or by click, and stays true while you are typing a key into it. The ring proper
+ * still lives on the controls inside.
+ */
+function ChoiceCard({
+  tint,
+  children,
+}: {
+  /** A brand colour, when the card has earned one. Undefined keeps it neutral. */
+  tint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="rounded-card border bg-panel/50 transition-shadow duration-base ease-state
+        hover:shadow-glow focus-within:shadow-glow"
+      style={{ borderColor: tint ? `${tint}33` : SURFACE.edge }}
+    >
+      {children}
+    </div>
+  );
+}
 
 export function ConnectProviderStep() {
   const providers = useProviderStore((s) => s.providers);
@@ -79,109 +119,185 @@ export function ConnectProviderStep() {
 
   return (
     <OnboardingSurface step="provider">
-      <h1 className="text-[22px] font-semibold leading-tight text-ink">Connect a provider</h1>
-      <p className="mt-2 text-[13px] leading-[1.6] text-muted">
-        Jaroku runs on your own API keys — there is no Jaroku account, and nothing is proxied
-        through us.
-      </p>
-
-      {/* The guarantees, before the field that needs them. */}
-      <div className="mt-4 flex items-start gap-2.5 rounded-card border border-edge bg-panel px-3 py-2.5">
-        <span className="mt-[2px] shrink-0 text-ok">
-          <ShieldCheckIcon size={ICON.sm} />
-        </span>
-        <p className="text-[12px] leading-[1.6] text-muted">
-          A key you enter is written to <span className="font-mono text-ink">runtime/.env</span>,
-          which is gitignored, and read only by the Jaroku server process on this machine. It is
-          never logged, never written into a generated project, never sent to any third party, and
-          never sent back to this page — the browser only ever learns that a key is{" "}
-          <span className="font-mono text-ink">set</span>. You can remove it by deleting one line
-          from that file.
+      <Reveal>
+        <h1 className="text-[24px] font-semibold leading-tight tracking-[-0.01em] text-ink">
+          Connect a provider
+        </h1>
+        <p className="mt-2 text-[13.5px] leading-[1.6] text-muted">
+          Jaroku runs on your own API keys — there is no Jaroku account, and nothing is proxied
+          through us.
         </p>
-      </div>
+      </Reveal>
+
+      {/* The guarantee. Against a rule rather than in a box: it has to be read before the field
+          below it, and it is not one of the things being chosen. The full version — env key
+          name and all — lives inside the form itself, where the field it describes actually is. */}
+      <Reveal delay={60}>
+        <div className="mt-5 flex items-start gap-2.5 border-l border-hair pl-3">
+          <span className="mt-[2px] shrink-0 text-ok">
+            <ShieldCheckIcon size={ICON.sm} />
+          </span>
+          <p className="text-[12px] leading-[1.6] text-muted">
+            A key you enter is written to <span className="font-mono text-ink">runtime/.env</span>{" "}
+            on this machine — gitignored, read only by the Jaroku server process, never logged,
+            never written into a generated project, and never sent back to this page.
+          </p>
+        </div>
+      </Reveal>
 
       {/* One card per provider the Python runtime actually supports (jaroku_runner/models.py).
-          `fake` is deliberately absent: it is not something you connect, it is the skip path. */}
-      <div className="mt-5 space-y-2">
-        {!loaded && <p className="text-[12px] text-faint">Checking which providers are connected…</p>}
-        {providers.map((p) => {
-          const expanded = open === p.id;
-          return (
-            <div key={p.id} className="overflow-hidden rounded-card border border-edge">
-              <button
-                type="button"
-                onClick={() => setOpen(expanded ? null : p.id)}
-                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-active/40"
-              >
-                <ProviderMark provider={p.id} size={16} />
-                <span className="text-[13px] text-ink" style={{ color: BRAND_COLOR[p.id] }}>
-                  {PROVIDER_LABEL[p.id] ?? p.id}
-                </span>
-                {p.configured && (
-                  <StatusBadge state="ok" variant="outline" label="connected" icon={KeyIcon} />
-                )}
-                <span className="ml-auto flex items-center gap-2">
-                  <span className="hidden text-[11px] text-faint sm:inline">
-                    {p.configured ? "replace key" : "add a key"}
+          `fake` is deliberately absent from this list: it is not something you connect, it is
+          the third card below. */}
+      <Reveal delay={120}>
+        <div className={`${TYPE.sectionLabel} mt-7`}>Providers</div>
+        <div className="mt-2 space-y-2">
+          {!loaded && (
+            <p className="text-[12px] text-faint">Checking which providers are connected…</p>
+          )}
+          {providers.map((p) => {
+            const expanded = open === p.id;
+            const brand = BRAND_COLOR[p.id];
+            return (
+              <ChoiceCard key={p.id} tint={p.configured ? brand : undefined}>
+                <button
+                  type="button"
+                  onClick={() => setOpen(expanded ? null : p.id)}
+                  aria-expanded={expanded}
+                  className="flex w-full items-center gap-3 rounded-card px-3 py-3 text-left outline-none
+                    transition-colors duration-fast hover:bg-active/30 focus-visible:shadow-focusring"
+                >
+                  {/* The mark, bare. It is a logo, and a logo in a bordered square is a
+                      favicon — the box was doing the work the card around it already does.
+                      icons.tsx's rule carries the state instead: full brand colour when the
+                      provider is connected, grey when it is not, which is legible from across
+                      the screen without reading a word of the card. */}
+                  <span className="mt-[3px] shrink-0 self-start">
+                    <ProviderMark provider={p.id} active={p.configured} size={20} />
                   </span>
-                  <span
-                    className={`text-faint transition-transform duration-fast ${expanded ? "rotate-180" : ""}`}
-                    aria-hidden
-                  >
-                    <ChevronDownIcon size={ICON.xs} />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2">
+                      {/* The name is ink, not brand-coloured. The tile beside it carries the
+                          brand; a label that also wears it makes the provider's hue the loudest
+                          thing on a screen whose actual state is "connected" or "not". */}
+                      <span className="text-[13.5px] font-medium text-ink">
+                        {PROVIDER_LABEL[p.id] ?? p.id}
+                      </span>
+                      {p.configured && (
+                        <StatusBadge state="ok" variant="outline" label="connected" icon={KeyIcon} />
+                      )}
+                    </span>
+                    <span className="mt-0.5 block text-[12px] leading-[1.5] text-muted">
+                      {BLURB[p.id]}
+                    </span>
                   </span>
-                </span>
-              </button>
-              <div className="px-3 pb-3">
-                <p className="mb-2 text-[12px] leading-[1.55] text-muted">{BLURB[p.id]}</p>
+                  {/* Two states, two shapes. "Add key" is an offer and reads as a control;
+                      "replace key" is maintenance on something already done and recedes. */}
+                  <span className="ml-auto flex shrink-0 items-center gap-2">
+                    {p.configured ? (
+                      <span className="hidden text-[11px] text-faint sm:inline">replace key</span>
+                    ) : (
+                      <span className="hidden items-center gap-1 rounded-control border border-edge px-2 py-1 text-[11px] text-muted sm:inline-flex">
+                        <PlusIcon size={ICON.xs} />
+                        Add key
+                      </span>
+                    )}
+                    <span
+                      className={`text-faint transition-transform duration-fast ${expanded ? "rotate-180" : ""}`}
+                      aria-hidden
+                    >
+                      <ChevronDownIcon size={ICON.xs} />
+                    </span>
+                  </span>
+                </button>
+
                 {/* The one honest caveat the flow would otherwise hide until it bit somebody:
                     connecting OpenAI alone does not make Jaroku able to BUILD an agent, because
                     planning and generation are Anthropic-only (see the README's requirements). */}
                 {!p.powers_jaroku && (
-                  <p className="mb-2 text-[11px] leading-[1.55] text-faint">
+                  <p className="px-3 pb-3 text-[11px] leading-[1.55] text-faint">
                     Note: describing and generating agents goes through Anthropic. An OpenAI key
                     alone lets you run agents on GPT, not build them.
                   </p>
                 )}
-                {expanded && <ProviderKeyForm provider={p} onSaved={() => proceedWith(p.id)} autoFocus />}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+                {expanded && (
+                  <div className="px-3 pb-3">
+                    <ProviderKeyForm
+                      provider={p}
+                      onSaved={() => proceedWith(p.id)}
+                      autoFocus
+                      flush
+                    />
+                  </div>
+                )}
+              </ChoiceCard>
+            );
+          })}
+        </div>
+      </Reveal>
 
       {/* Continue on the key that is already there. Only once the snapshot has landed —
           before that, "nothing is configured" and "we have not been told yet" look the same,
           and a button that appears a beat late is worse than one that waits. */}
       {loaded && primary && (
-        <div className="mt-6">
-          <PrimaryCta onClick={continueConnected} autoFocus kbd="↵">
-            Continue with {PROVIDER_LABEL[primary.id] ?? primary.id}
-          </PrimaryCta>
-        </div>
+        <Reveal delay={180}>
+          <div className="mt-5">
+            <PrimaryCta onClick={continueConnected} autoFocus kbd="↵">
+              Continue with {PROVIDER_LABEL[primary.id] ?? primary.id}
+            </PrimaryCta>
+          </div>
+        </Reveal>
       )}
 
-      {/* The skip. A sibling of the cards above, not a way out of them. */}
-      <div className="mt-6 border-t border-hair pt-4">
-        <button
-          type="button"
-          onClick={skip}
-          className="text-[13px] text-ink underline decoration-hair underline-offset-4 transition-colors hover:decoration-ink"
-        >
-          Try it free first →
-        </button>
-        <p className="mt-1.5 max-w-[520px] text-[12px] leading-[1.6] text-faint">
-          The dry-run provider costs nothing and is not a demo: it runs a real agent through the
-          real graph and emits a real trace, so the timeline, the state diffs and the graph view
-          all work exactly as they will with a paid key. Connect a provider any time from
-          Settings, or from the provider chip in the top bar.
-        </p>
-      </div>
+      {/* The free path, as the third card rather than as a link under a rule.
+          It is a real answer to the question this screen asks, so it is drawn as one — same box,
+          same hover, same weight of action inside it. "or" between, because the two are
+          alternatives and not a preference with an escape hatch. */}
+      <Reveal delay={220}>
+        <div className="mt-6 flex items-center gap-3" aria-hidden>
+          <span className="h-px flex-1 bg-hair" />
+          <span className={TYPE.panelLabel}>or</span>
+          <span className="h-px flex-1 bg-hair" />
+        </div>
+
+        <div className="mt-4">
+          <ChoiceCard>
+            <div className="flex items-start gap-3 p-3">
+              {/* Amber, and the same glyph the free run wears on the next screen — this is the
+                  dry-run provider, and `run` is the colour of an agent executing. Bare, level
+                  with the provider marks above it, because this card is one of the same three
+                  choices and not a callout about them. */}
+              <span className="mt-[3px] shrink-0 self-start text-run">
+                <ZapIcon size={20} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-[13.5px] font-medium text-ink">Try it free first</h2>
+                <p className="mt-1 text-[12px] leading-[1.6] text-muted">
+                  The dry-run provider costs nothing and is not a demo: it runs a real agent
+                  through the real graph and emits a real trace, so the timeline, the state diffs
+                  and the graph view all work exactly as they will with a paid key. Connect a
+                  provider any time from Settings, or from the chip in the top bar.
+                </p>
+                <div className="mt-3">
+                  <GhostCta onClick={skip} autoFocus={loaded && !primary}>
+                    Explore with no key →
+                  </GhostCta>
+                </div>
+              </div>
+            </div>
+          </ChoiceCard>
+        </div>
+      </Reveal>
 
       {/* A way back, because a step you cannot leave is a trap even when it is the right step. */}
-      <button type="button" className={`${quietBtn} mt-4 !px-0 !text-[11px]`} onClick={() => setStep("welcome")}>
-        ← back
-      </button>
+      <Reveal delay={260}>
+        <button
+          type="button"
+          className={`${quietBtn} mt-4 !px-0 !text-[11px]`}
+          onClick={() => setStep("welcome")}
+        >
+          ← back
+        </button>
+      </Reveal>
     </OnboardingSurface>
   );
 }

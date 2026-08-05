@@ -25,7 +25,7 @@ import { TYPE } from "../../lib/tokens.ts";
 
 /** The rail's own model. `prompt` is the app itself, so it is only ever the step ahead. */
 const STEPS = [
-  { id: "welcome", label: "Welcome" },
+  { id: "welcome", label: "Get started" },
   { id: "provider", label: "Connect" },
   { id: "prompt", label: "Build" },
 ] as const;

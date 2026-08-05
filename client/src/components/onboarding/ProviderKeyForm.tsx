@@ -32,11 +32,21 @@ export function ProviderKeyForm({
   onSaved,
   saveLabel = "Save & continue",
   autoFocus = false,
+  flush = false,
 }: {
   provider: ProviderStatus;
   /** Called once the server confirms the key is stored. */
   onSaved?: () => void;
   saveLabel?: string;
+  /**
+   * Drop the form's own card.
+   *
+   * It draws one because in the top bar's popover it is a free-standing block on a flat panel.
+   * Onboarding opens it INSIDE a provider card, and a bordered card immediately inside another
+   * bordered card is the box-in-a-box the whole step was rewritten to get rid of. A hairline
+   * above it says "this belongs to the card above" without drawing a second one.
+   */
+  flush?: boolean;
   /**
    * Off by default, because the settings panel renders one of these PER PROVIDER — and with
    * autofocus on, opening it moved the caret to whichever field happened to mount last. It is
@@ -91,7 +101,13 @@ export function ProviderKeyForm({
   };
 
   return (
-    <div className="rounded-card border border-edge bg-panel p-3 shadow-raised">
+    <div
+      className={
+        flush
+          ? "border-t border-hair pt-3"
+          : "rounded-card border border-edge bg-panel p-3 shadow-raised"
+      }
+    >
       <div className="flex items-center gap-2">
         <input
           type="password"
