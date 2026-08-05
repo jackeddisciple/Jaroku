@@ -19,6 +19,7 @@
     "test:env-writer": "tsx src/envWriter.test.ts",
     "test:providers": "tsx src/providers.test.ts",
     "test:deploy-artifacts": "tsx src/deployArtifacts.test.ts",
+    "test:deploy-secrets": "tsx src/deploySecrets.test.ts",
     "test:mcp-impact": "tsx src/mcpImpact.test.ts",
     "test:mcp-client": "tsx src/mcpClient.test.ts",
     "test:mcp-isolation": "tsx src/mcpIsolation.test.ts",
