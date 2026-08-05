@@ -240,6 +240,21 @@ export class DeployManager {
     const declared = new Set(plan.secrets.map((s) => s.name));
     const envKeys = req.envKeys.filter((k) => declared.has(k));
 
+    // Nor narrow it silently. planDeploy refuses over a credential this machine cannot supply,
+    // and a credential the user unticked leaves the container in exactly the same state — the
+    // template raises on every call and the deploy is green and dead. The two cases deserve
+    // the same answer and the same override, so they get it here rather than only in the form.
+    const withheld = plan.secrets
+      .filter((s) => s.required && s.configured && !envKeys.includes(s.name))
+      .map((s) => s.name);
+    if (withheld.length && !req.allowMissing) {
+      return {
+        error:
+          `not sending: ${withheld.join(", ")}. The agent's tools raise without them, so it ` +
+          `would deploy successfully and then fail every request.`,
+      };
+    }
+
     const deployment = this.deps.store.create({
       agentId: req.agentId,
       provider: req.provider,

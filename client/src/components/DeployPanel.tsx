@@ -235,10 +235,16 @@ function DeployForm({
     RUN_PROVIDERS.find((p) => p.id === provider)?.models ?? [];
   const secrets = plan?.secrets ?? [];
   const chosen = secrets.filter((s) => !excluded.has(s.name)).map((s) => s.name);
+  // A required credential the user has unticked leaves the container in exactly the state a
+  // missing one does — the template raises on every call — so it is shown the same way and
+  // cleared by the same override, rather than being discovered after a green deploy.
+  const withheld = secrets
+    .filter((s) => s.required && s.configured && excluded.has(s.name))
+    .map((s) => s.name);
   const blocking = (plan?.problems ?? []).filter(
     (p) => !allowMissing || !p.startsWith("not set on this machine"),
   );
-  const canDeploy = Boolean(plan) && blocking.length === 0;
+  const canDeploy = Boolean(plan) && blocking.length === 0 && (allowMissing || withheld.length === 0);
 
   return (
     <div className="space-y-4 p-4">
@@ -321,6 +327,16 @@ function DeployForm({
         </p>
       </div>
 
+      {withheld.length > 0 && !allowMissing && (
+        <div className="flex items-start gap-2 text-[11px] leading-[1.5] text-err">
+          <span className="mt-[2px] shrink-0"><AlertTriangleIcon size={ICON.xs} /></span>
+          <span className="min-w-0 flex-1">
+            not sending: {withheld.join(", ")}. The agent's tools raise without them, so it
+            would deploy successfully and then fail every request.
+          </span>
+        </div>
+      )}
+
       {plan?.problems.length ? (
         <div className="space-y-1">
           {plan.problems.map((p) => (
@@ -329,18 +345,19 @@ function DeployForm({
               <span className="min-w-0 flex-1">{p}</span>
             </div>
           ))}
-          {plan.problems.some((p) => p.startsWith("not set on this machine")) && (
-            <label className="flex cursor-pointer items-center gap-1.5 pt-1 text-[11px] text-muted">
-              <input
-                type="checkbox"
-                checked={allowMissing}
-                onChange={(e) => setAllowMissing(e.target.checked)}
-              />
-              I will set the missing ones in Railway myself
-            </label>
-          )}
         </div>
       ) : null}
+
+      {(withheld.length > 0 || plan?.problems.some((p) => p.startsWith("not set on this machine"))) && (
+        <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted">
+          <input
+            type="checkbox"
+            checked={allowMissing}
+            onChange={(e) => setAllowMissing(e.target.checked)}
+          />
+          Deploy anyway — I will set the rest in Railway myself
+        </label>
+      )}
 
       {plan?.warnings.map((w) => (
         <div key={w} className="flex items-start gap-2 text-[11px] leading-[1.5] text-run">
