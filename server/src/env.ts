@@ -47,3 +47,27 @@ export function loadRuntimeEnv(path: string): string[] {
   }
   return loaded;
 }
+
+/**
+ * A positive number from the environment, or the default.
+ *
+ * Every timeout in the deploy layer used `Number(process.env.X ?? default)`, and `Number` of
+ * a typo is NaN. NaN does not fail loudly — it fails silently and backwards: `Date.now() <
+ * Date.now() + NaN` is FALSE, so a mistyped JAROKU_DEPLOY_FOLLOW_MS meant the loop watching a
+ * build never ran a single iteration and every deploy reported itself interrupted a
+ * millisecond after starting. A configuration typo should cost you the setting, not the
+ * feature.
+ *
+ * Zero and negatives fall back too. A timeout of zero is not a fast timeout, it is a broken
+ * one, and it would break in the same silent direction.
+ */
+export function numberFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.warn(`[env] ${name}=${raw} is not a positive number — using ${fallback}`);
+    return fallback;
+  }
+  return parsed;
+}

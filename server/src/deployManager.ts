@@ -33,6 +33,7 @@ import {
 import { isSafeAgentId } from "./projectFs.ts";
 import { RailwayApi, RailwayError, RAILWAY_ENV_KEY, isTerminalStatus, RAILWAY_TERMINAL_OK } from "./railwayApi.ts";
 import { checkRailwayCli, RailwayUpload } from "./railwayCli.ts";
+import { numberFromEnv } from "./env.ts";
 
 /** The port serve.py binds, and the port the public domain is pointed at. */
 const SERVE_PORT = 8080;
@@ -48,7 +49,7 @@ const FOLLOW_POLL_MS = 5_000;
  */
 const BUILD_LOG_PAGE = 1000;
 const BUILD_LOG_MEMORY = 5000;
-const FOLLOW_TIMEOUT_MS = Number(process.env["JAROKU_DEPLOY_FOLLOW_MS"] ?? 10 * 60_000);
+const FOLLOW_TIMEOUT_MS = numberFromEnv("JAROKU_DEPLOY_FOLLOW_MS", 10 * 60_000);
 
 export type DeployStage =
   | "checking" | "packaging" | "provisioning" | "variables"

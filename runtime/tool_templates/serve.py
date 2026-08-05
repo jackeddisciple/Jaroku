@@ -61,6 +61,35 @@ def log(*args) -> None:
     print(*args, flush=True)
 
 
+def _num_env(name: str, default: float) -> float:
+    """A positive number from the environment, or the default.
+
+    Falls back rather than raising, and that matters most where it is used: the connection
+    timeout is read in a class body, so a typo in it did not produce a bad timeout — it raised
+    ValueError while the module was being imported, and the container never started at all. A
+    configuration typo should cost you the setting, not the service.
+
+    Zero and negatives fall back too. A timeout of zero is not a fast timeout, it is a broken
+    one, and it fails in the silent direction.
+    """
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        log(f"[serve] {name}={raw!r} is not a number — using {default}")
+        return default
+    if value <= 0:
+        log(f"[serve] {name}={raw!r} is not positive — using {default}")
+        return default
+    return value
+
+
+def _int_env(name: str, default: int) -> int:
+    return int(_num_env(name, default))
+
+
 # --- the agent -------------------------------------------------------------------------
 
 
@@ -258,7 +287,7 @@ class Handler(BaseHTTPRequestHandler):
     # threaded server, and this one is on a public URL where anybody can open a socket. The
     # ceiling is generous because a legitimate slow uploader is a real thing, and finite
     # because an illegitimate one is too.
-    timeout = float(os.environ.get("JAROKU_SERVE_TIMEOUT_S") or 30)
+    timeout = _num_env("JAROKU_SERVE_TIMEOUT_S", 30)
 
     # --- plumbing ---
 
@@ -418,17 +447,6 @@ class Handler(BaseHTTPRequestHandler):
 
 
 # --- entrypoint ------------------------------------------------------------------------
-
-
-def _int_env(name: str, default: int) -> int:
-    raw = (os.environ.get(name) or "").strip()
-    if not raw:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        log(f"[serve] {name}={raw!r} is not a number — using {default}")
-        return default
 
 
 def _resolve_token() -> str | None:

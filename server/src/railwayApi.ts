@@ -21,6 +21,8 @@
 //     credentials in its input. Every error message goes through the deploy's scrubber before
 //     it is returned, so a value cannot reach a caller that stores or broadcasts it.
 
+import { numberFromEnv } from "./env.ts";
+
 const DEFAULT_ENDPOINT = "https://backboard.railway.com/graphql/v2";
 
 /** Overridable so the fixture path and any future self-hosted Railway can be pointed at. */
@@ -39,7 +41,7 @@ export function railwayEndpoint(): string {
  */
 export const RAILWAY_ENV_KEY = "RAILWAY_API_TOKEN";
 
-const REQUEST_TIMEOUT_MS = Number(process.env["JAROKU_RAILWAY_TIMEOUT_MS"] ?? 20_000);
+const REQUEST_TIMEOUT_MS = numberFromEnv("JAROKU_RAILWAY_TIMEOUT_MS", 20_000);
 
 export type RailwayFailureKind =
   /** The token is missing, wrong, or lacks the scope. The user has to fix a credential. */

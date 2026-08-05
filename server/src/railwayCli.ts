@@ -22,6 +22,7 @@
 // because the CLI is installed the same way uv is and the server does not inherit a shell rc.
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { numberFromEnv } from "./env.ts";
 
 /** Overridable so a fixture can stand in for the real binary. */
 export function railwayBin(): string {
@@ -33,7 +34,7 @@ export function railwayBin(): string {
  * dependency install genuinely takes minutes — but bounded, because a hung upload with no
  * ceiling is a deploy that never resolves either way.
  */
-const UPLOAD_TIMEOUT_MS = Number(process.env["JAROKU_DEPLOY_TIMEOUT_MS"] ?? 15 * 60_000);
+const UPLOAD_TIMEOUT_MS = numberFromEnv("JAROKU_DEPLOY_TIMEOUT_MS", 15 * 60_000);
 
 export interface CliPresence {
   present: boolean;
