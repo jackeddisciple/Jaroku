@@ -639,6 +639,17 @@ const DEPLOY_COMMAND_NAMES = new Set([
   "setRailwayToken", "testRailwayToken",
 ]);
 
+/**
+ * A deployment id off the wire, or null.
+ *
+ * The commands that take one used to hand it straight to the store, so a null arrived as
+ * "Provided value cannot be bound to SQLite parameter 1" — a message about our database,
+ * shown to someone who cannot act on it, from a command that should simply have said no.
+ */
+function deploymentIdOf(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 && value.length <= 64 ? value : null;
+}
+
 async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
   try {
     switch (cmd.cmd) {
@@ -696,8 +707,8 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
         }
         const plan = planDeploy(deployDeps, {
           agentId: cmd.agentId,
-          provider: cmd.provider,
-          model: cmd.model,
+          provider: typeof cmd.provider === "string" ? cmd.provider : "",
+          model: typeof cmd.model === "string" ? cmd.model : "",
           envKeys: [],
         });
         relay.broadcastDeploy({
@@ -736,7 +747,12 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
       }
 
       case "cancelDeploy": {
-        await deployManager.cancel(cmd.deploymentId);
+        const target = deploymentIdOf(cmd.deploymentId);
+        if (!target) {
+          relay.broadcastDeploy({ type: "error", message: "no deployment id to cancel" });
+          return;
+        }
+        await deployManager.cancel(target);
         return;
       }
 
@@ -744,13 +760,21 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
         // Detaches the record from Jaroku and touches NOTHING in the user's account. Deleting
         // somebody's live service because they tidied a list is not a trade this makes; the
         // notice says where the real thing still is.
-        const row = deployStore.get(cmd.deploymentId);
-        if (!row) return;
-        if (deployManager.activeId === cmd.deploymentId) {
+        const target = deploymentIdOf(cmd.deploymentId);
+        if (!target) {
+          relay.broadcastDeploy({ type: "error", message: "no deployment id to forget" });
+          return;
+        }
+        const row = deployStore.get(target);
+        if (!row) {
+          relay.broadcastDeploy({ type: "error", message: "no such deployment" });
+          return;
+        }
+        if (deployManager.activeId === target) {
           relay.broadcastDeploy({ type: "error", message: "that deploy is still running — cancel it first" });
           return;
         }
-        deployStore.patch(cmd.deploymentId, { status: "removed" });
+        deployStore.patch(target, { status: "removed" });
         broadcastDeployments();
         relay.broadcastAgents();
         relay.broadcastDeploy({
@@ -763,10 +787,15 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
       }
 
       case "loadDeployLogs": {
+        const target = deploymentIdOf(cmd.deploymentId);
+        if (!target) return;
+        // A non-finite `since` would come back out of SQLite as a comparison against NaN and
+        // quietly return nothing, which reads as "this deploy produced no output".
+        const since = Number.isFinite(cmd.sinceSeq) ? Number(cmd.sinceSeq) : -1;
         relay.broadcastDeploy({
           type: "logs",
-          deploymentId: cmd.deploymentId,
-          lines: deployStore.logs(cmd.deploymentId, typeof cmd.sinceSeq === "number" ? cmd.sinceSeq : -1),
+          deploymentId: target,
+          lines: deployStore.logs(target, since),
         });
         return;
       }
