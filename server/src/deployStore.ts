@@ -314,10 +314,19 @@ export class DeployStore {
     return row ? DeployStore.hydrate(row) : null;
   }
 
-  /** Newest first. The whole list is small — one row per deploy the user has ever run. */
+  /**
+   * Newest first. The whole list is small — one row per deploy the user has ever run.
+   *
+   * `rowid DESC` breaks ties, and the tie is not hypothetical: created_at is an ISO string
+   * with millisecond resolution, and redeploying twice in the same millisecond (a test, a
+   * double-click, a retry loop) made "the most recent deployment" whichever row SQLite
+   * happened to return first. That is the value the sidebar shows and the Deploy panel
+   * selects, so a coin flip there is a row that reports the wrong status. rowid is insertion
+   * order and always ascends.
+   */
   list(): Deployment[] {
     const rows = this.db
-      .prepare("SELECT * FROM deployments WHERE status != 'removed' ORDER BY created_at DESC")
+      .prepare("SELECT * FROM deployments WHERE status != 'removed' ORDER BY created_at DESC, rowid DESC")
       .all() as Record<string, unknown>[];
     return rows.map((r) => DeployStore.hydrate(r));
   }
