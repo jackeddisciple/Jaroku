@@ -39,6 +39,15 @@ const SERVE_PORT = 8080;
 
 /** How long to keep asking Railway whether the build finished, and how often. */
 const FOLLOW_POLL_MS = 5_000;
+/**
+ * How many build-log lines to ask for per poll, and how many to remember having shown.
+ *
+ * The page is generous because it is a window onto the END of the log: anything that scrolls
+ * past between two polls is gone, and a noisy dependency install can produce hundreds of lines
+ * in five seconds.
+ */
+const BUILD_LOG_PAGE = 1000;
+const BUILD_LOG_MEMORY = 5000;
 const FOLLOW_TIMEOUT_MS = Number(process.env["JAROKU_DEPLOY_FOLLOW_MS"] ?? 10 * 60_000);
 
 export type DeployStage =
@@ -170,6 +179,16 @@ export function planDeploy(deps: DeployManagerDeps, req: StartDeployRequest): De
 
 export class DeployManager {
   private active: { deploymentId: string; upload: RailwayUpload | null; cancelled: boolean } | null = null;
+  /** Build-log lines already shown for the deploy in flight. See seenBuildLine. */
+  private seenBuild = new Set<string>();
+  /**
+   * Build-log text the CLI already streamed.
+   *
+   * Kept separately because the CLI's lines carry no timestamp, and `buildLogs` returns the
+   * SAME build output the CLI was streaming — so without this the whole log appears twice,
+   * once live and once again on the first poll after the upload.
+   */
+  private streamedByCli = new Set<string>();
 
   constructor(private deps: DeployManagerDeps) {}
 
@@ -209,6 +228,8 @@ export class DeployManager {
       envKeys,
     });
     this.active = { deploymentId: deployment.id, upload: null, cancelled: false };
+    this.seenBuild.clear();
+    this.streamedByCli.clear();
     this.deps.onChanged();
 
     try {
@@ -319,8 +340,12 @@ export class DeployManager {
         serviceId: service.id,
         environmentId: project.environmentId,
         projectDir: join(this.deps.runtimeDir, "agents", req.agentId),
-        onLine: (stream, line) =>
-          this.log(id, "building", stream === "stderr" ? "build-err" : "build", scrub(line)),
+        onLine: (stream, line) => {
+          // Remembered so the buildLogs poll below does not show the same output a second
+          // time — it is the same build's log, read a different way.
+          if (this.streamedByCli.size < BUILD_LOG_MEMORY) this.streamedByCli.add(line);
+          this.log(id, "building", stream === "stderr" ? "build-err" : "build", scrub(line));
+        },
       });
       if (this.active) this.active.upload = null;
 
@@ -376,7 +401,6 @@ export class DeployManager {
   ): Promise<{ id: string; status: string } | null> {
     const deadline = Date.now() + FOLLOW_TIMEOUT_MS;
     let lastStatus = "";
-    let seenLogs = 0;
 
     while (Date.now() < deadline) {
       if (this.active?.cancelled) {
@@ -408,12 +432,13 @@ export class DeployManager {
         if (deployment.status.toUpperCase() === "DEPLOYING") this.stage(id, "building", "deploying");
       }
 
-      // Build output the CLI did not already stream — a build that Railway retried, or one
-      // whose tail arrived after the CLI exited.
+      // Build output the CLI did not already stream — a build Railway retried, or a tail that
+      // arrived after the CLI exited. Deduplicated rather than counted: see emitBuildLogs.
       try {
-        const logs = await api.buildLogs(deployment.id, 200);
-        for (const line of logs.slice(seenLogs)) this.log(id, "building", "build", scrub(line.message));
-        seenLogs = Math.max(seenLogs, logs.length);
+        for (const line of await api.buildLogs(deployment.id, BUILD_LOG_PAGE)) {
+          if (this.seenBuildLine(line.timestamp, line.message)) continue;
+          this.log(id, "building", "build", scrub(line.message));
+        }
       } catch {
         /* logs are a nicety; never fail a deploy because they could not be read */
       }
@@ -442,6 +467,37 @@ export class DeployManager {
   /** Railway project names are user-visible; keep them recognisable and unique enough. */
   private projectName(agentId: string): string {
     return `${agentId.replace(/_/g, "-")}-${Date.now().toString(36).slice(-4)}`;
+  }
+
+  /**
+   * Has this build-log line already been shown?
+   *
+   * Two different bugs made a counter wrong here, and both are why this is a set.
+   *
+   * `buildLogs` returns the most recent N lines, so it is a sliding window, not a growing
+   * list. Treating its length as a cursor meant that once a build produced more lines than
+   * one page, the length stopped changing, `slice(cursor)` returned nothing, and the build
+   * log simply stopped updating — a user watching a long build saw it freeze partway and had
+   * no way to tell that from a stalled build.
+   *
+   * And the CLI has already streamed most of these lines itself, so anything not deduplicated
+   * against what was shown is shown twice.
+   *
+   * Keyed on timestamp AND text, so two identical lines a build genuinely emitted at
+   * different moments both survive. Bounded, because this is a log and not an archive.
+   */
+  private seenBuildLine(timestamp: string, message: string): boolean {
+    if (this.streamedByCli.has(message)) return true;
+    const key = `${timestamp}\u0000${message}`;
+    if (this.seenBuild.has(key)) return true;
+    if (this.seenBuild.size >= BUILD_LOG_MEMORY) {
+      // Oldest first — a Set iterates in insertion order, and the oldest line is the one
+      // least likely to come round again in a window onto the end of the log.
+      const oldest = this.seenBuild.values().next();
+      if (!oldest.done) this.seenBuild.delete(oldest.value);
+    }
+    this.seenBuild.add(key);
+    return false;
   }
 
   /** Cancelled between steps? Settle the row and tell the caller to stop. */
