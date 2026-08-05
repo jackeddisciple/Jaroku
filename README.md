@@ -1192,7 +1192,7 @@ ever generated became deployable the day it landed.
 | Route | Behaviour |
 |---|---|
 | `GET /health` | `{"ok": true, "agent": "<id>"}`. Unauthenticated — it reveals nothing, and a health check that needs a credential is one the platform cannot make. |
-| `POST /run` | `{"input": "…"}` → `{"output", "state", "provider", "model", "duration_ms"}`. Bearer token required. |
+| `POST /run` | `{"input": "…"}` → `{"output", "state", "provider", "model", "duration_ms"}`. Bearer token required. UTF-8, capped at 64 KB in, bounded concurrency out. |
 
 It holds two properties, and both are the reason it looks like this:
 
@@ -1294,9 +1294,10 @@ curl -XPOST https://your-agent.up.railway.app/run \
 
 - **The dry-run provider.** It answers with placeholder text; a deployed one would be a URL that
   looks like a working agent and is not.
-- **A missing connector credential.** Rule 7 makes an unconfigured template *raise* on every
-  call, so that container deploys green and is dead. Overridable — you may intend to set it in
-  Railway by hand — but not by default.
+- **A missing connector credential** — or one you unticked. Rule 7 makes an unconfigured
+  template *raise* on every call, so that container deploys green and is dead, and it makes no
+  difference whether the value was absent or withheld. Overridable by the same checkbox — you
+  may intend to set it in Railway by hand — but not by default.
 - **An agent with a run in flight.** Deploying writes into the project, and rewriting files a
   subprocess is importing would change code out from under a run. The same rule edits follow.
 - **A missing Railway CLI**, before any resource exists — so a missing binary costs you a
@@ -1320,13 +1321,31 @@ whatever was already created is still there.
 
 ```
 queued → packaging → uploading → building → deploying → live
-                                                ↘
-   any stage ──▶ failed | cancelled | interrupted
+                                                ↘         ↘
+   any stage ──▶ failed | cancelled | interrupted      superseded
 ```
 
 `cancelled` and `interrupted` are deliberately not `failed`. One means you stopped it; one means
 nobody was watching. Telling somebody their deploy failed when it may be about to come up is how
 they end up deploying a second copy.
+
+`superseded` is not a failure either: it worked, and then a later deploy of the same agent
+replaced it. Exactly one row may claim to be `live` on a service, because two would be two URLs
+both described as the current one.
+
+### Redeploying
+
+**A redeploy goes back into the same Railway project and service.** The button says *Redeploy*
+when that is what it will do, and the form says so before you press it — "replaces what is
+running there" and "puts up a second one you will also be billed for" are different decisions,
+and only you know which you meant.
+
+The remembered ids are checked before they are trusted, because Railway is not ours: if you
+deleted the project from your dashboard, the deploy makes a new one and the log says why.
+
+**Forget** is the exception. It detaches the record, so the next deploy has nothing to go back
+into and creates a fresh project — while the old service keeps running. The notice says so, with
+its URL, when you press it.
 
 **Forget** detaches a record from Jaroku and touches nothing in your account — the notice tells
 you where the real thing still is.
@@ -1514,6 +1533,7 @@ should not disagree about who is doing the thinking.
 | `JAROKU_SERVE_TOKEN` | The bearer token `/run` requires. Minted per deploy and shown once |
 | `JAROKU_SERVE_PUBLIC` | `1` to serve `/run` with **no** authentication. Refuses to start otherwise |
 | `JAROKU_SERVE_CONCURRENCY` | `4` — simultaneous requests; over it, `429` |
+| `JAROKU_SERVE_TIMEOUT_S` | `30` — how long one client may hold a connection before it is dropped |
 | `JAROKU_PROVIDER` / `JAROKU_MODEL` | What the deployed agent runs on. `fake` is refused |
 
 ### Client
@@ -1598,6 +1618,7 @@ npm run test:plan-flow   # the plan → confirm → generate state machine
 npm run test:note-kind   # rule vs note classification
 npm run test:inline-code # inline code detection in prose
 npm run test:title       # title truncation (never mid-word)
+npm run test:deploy-store # the deploy panel's state, and the races it has to survive
 npm run test:export      # CSV/JSON export preserves every caveat
 npm run test:csv         # RFC-4180 quoting
 ```
@@ -1761,6 +1782,12 @@ so a completely empty trace usually means the subprocess never spawned.
 Jaroku uses it to upload your project. `brew install railway` or `npm i -g @railway/cli`, then
 restart the Jaroku server — it inherits its `PATH` at launch. Nothing was created in your
 account: the CLI is checked before any Railway resource exists.
+
+**I deployed twice and only see one URL**
+That is deliberate: a redeploy replaces what is running on the same Railway service rather than
+creating a second one. The earlier record is kept and marked `superseded`. Use **Forget** first
+if you genuinely want a separate deployment — and delete the old service in Railway, because
+forgetting a record does not stop the thing it described.
 
 **A deploy says `interrupted`**
 The Jaroku server restarted while it was in flight, so nothing is watching it any more. Whatever
