@@ -12,6 +12,7 @@
 import { useUiStore } from "../../store/uiStore.ts";
 import { JarokuGlyph } from "../../lib/icons.tsx";
 import { OnboardingSurface } from "./OnboardingSurface.tsx";
+import { SURFACE, TEXT } from "../../lib/tokens.ts";
 
 export function WelcomeStep() {
   const setStep = useUiStore((s) => s.setOnboardingStep);
@@ -38,7 +39,7 @@ export function WelcomeStep() {
           onClick={() => setStep("provider")}
           autoFocus
           className="mt-9 rounded-control px-6 py-2.5 text-[13px] font-medium transition-opacity hover:opacity-90 focus:outline-none focus:shadow-focusring"
-          style={{ background: "#4f46e5", color: "#fff" }}
+          style={{ background: TEXT.ink, color: SURFACE.bg }}
         >
           Get started
         </button>

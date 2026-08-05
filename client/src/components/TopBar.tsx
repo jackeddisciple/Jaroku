@@ -19,7 +19,7 @@ import { sendCancelDeploy } from "../lib/socket.ts";
 import { isDeployInFlight } from "../types.ts";
 import { agentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark, BRAND_COLOR, JarokuGlyph } from "../lib/icons.tsx";
-import { TYPE } from "../lib/tokens.ts";
+import { SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
 import { ProviderKeyForm } from "./onboarding/ProviderKeyForm.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { Chip } from "./Chip.tsx";
@@ -169,7 +169,7 @@ export function TopBar() {
           <button
             title={agent ? `Deploy ${agent.name} to your own Railway account` : "Select an agent to deploy"}
             className="rounded-control px-3 py-1 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ background: "#4f46e5", color: "#fff" }}
+            style={{ background: TEXT.ink, color: SURFACE.bg }}
             disabled={!agent}
             onClick={() => setRightTab("deploy")}
           >

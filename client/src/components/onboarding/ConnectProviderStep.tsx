@@ -14,7 +14,7 @@ import { useState } from "react";
 import { useProviderStore } from "../../store/providerStore.ts";
 import { useUiStore } from "../../store/uiStore.ts";
 import { BRAND_COLOR, ProviderMark } from "../../lib/icons.tsx";
-import { ICON } from "../../lib/tokens.ts";
+import { ICON, SURFACE, TEXT } from "../../lib/tokens.ts";
 import { quietBtn } from "../buttons.ts";
 import { ChevronDownIcon } from "../composerIcons.tsx";
 import { KeyIcon, ShieldCheckIcon } from "../panelIcons.tsx";
@@ -159,7 +159,7 @@ export function ConnectProviderStep() {
           autoFocus
           className="mt-6 rounded-control px-6 py-2.5 text-[13px] font-medium transition-opacity
             hover:opacity-90 focus:outline-none focus:shadow-focusring"
-          style={{ background: "#4f46e5", color: "#fff" }}
+          style={{ background: TEXT.ink, color: SURFACE.bg }}
         >
           Continue with {PROVIDER_LABEL[primary.id] ?? primary.id}
         </button>
