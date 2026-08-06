@@ -40,6 +40,32 @@ types.setTypeParser(NUMERIC, (v) => Number(v));
 types.setTypeParser(FLOAT8, (v) => Number(v));
 
 /**
+ * Timestamps come back as ISO-8601 UTC strings, not Date objects.
+ *
+ * The identity tables use timestamptz because Session 8 has to sweep and partition by month,
+ * and date arithmetic against a text column is a sequential scan over the biggest table in
+ * the system. But `pg` parses timestamptz into a JS Date, and SQLite — which has no such
+ * type — hands back the string that was stored. A row that is a Date on one driver and a
+ * string on the other is the same class of quiet difference as int8-as-string: it throws
+ * nowhere, it just makes `row.created_at.slice(0, 10)` work locally and fail hosted.
+ *
+ * So the storage keeps a real instant and the boundary keeps one shape. Everything above
+ * sees ISO-8601 UTC, exactly as the frozen event schema already does for a run's timestamps.
+ */
+const TIMESTAMPTZ = 1184;
+const TIMESTAMP = 1114;
+const toIso = (v: string | null): string | null => {
+  if (v === null) return null;
+  // A `timestamp without time zone` carries no offset; Postgres stores these in UTC and the
+  // column type is the only thing that says so, so it is spelled out rather than left to the
+  // parser's local timezone.
+  const d = new Date(/[+-]\d\d:?\d\d$|Z$/.test(v) ? v : `${v}Z`);
+  return Number.isNaN(d.getTime()) ? v : d.toISOString();
+};
+types.setTypeParser(TIMESTAMPTZ, toIso);
+types.setTypeParser(TIMESTAMP, toIso);
+
+/**
  * Rewrite `?` placeholders to `$1…$n`.
  *
  * One spelling is written throughout the stores — the SQLite one, because it was there
