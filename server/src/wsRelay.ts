@@ -607,11 +607,12 @@ export interface RelayOptions {
   // "loadRun", "listAgents", "loadAgentFiles", "loadAgentGraph", "listMcpServers" and
   // "listProviders" are answered locally; the rest are forwarded.
   onCommand?: (cmd: ForwardedCommand, ctx: TenantContext) => void;
-  // Every database-backed read takes the asking socket's context. The filesystem-backed ones
-  // do not yet — they read a global directory, which Session 3's object store fixes by
-  // making the key itself workspace-scoped.
+  // Every read takes the asking socket's context, the filesystem-backed ones included: the
+  // directory they read is global, so the caller's right to a given agent is a question only
+  // the database can answer. Session 3's object store makes the key itself workspace-scoped
+  // and the check becomes structural rather than a lookup.
   listAgents?: (ctx: TenantContext) => unknown[] | Promise<unknown[]>;
-  listAgentFiles?: (ctx: TenantContext, agentId: string) => unknown[];
+  listAgentFiles?: (ctx: TenantContext, agentId: string) => unknown[] | Promise<unknown[]>;
   getAgentGraph?: (ctx: TenantContext, agentId: string) => Promise<unknown>;
   listMcpServers?: (ctx: TenantContext) => unknown[] | Promise<unknown[]>;
   /** Which provider keys are set, by name. Never a value — see providers.ts. */
@@ -701,7 +702,7 @@ export class WsRelay {
             void this.answer(ws, async (ctx) => ({
               channel: "agentFiles",
               agentId,
-              files: this.opts.listAgentFiles?.(ctx, agentId) ?? [],
+              files: (await this.opts.listAgentFiles?.(ctx, agentId)) ?? [],
             }), pending);
           } else if (msg.cmd === "loadAgentGraph" && typeof msg.agentId === "string") {
             // Async: spawn introspection, then answer only the requesting client.
@@ -974,7 +975,7 @@ export class WsRelay {
       this.sendTo(ws, {
         channel: "agentFiles",
         agentId,
-        files: this.opts.listAgentFiles?.(ctx, agentId) ?? [],
+        files: (await this.opts.listAgentFiles?.(ctx, agentId)) ?? [],
       });
     });
   }

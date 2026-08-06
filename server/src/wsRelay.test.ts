@@ -73,14 +73,25 @@ let connections = 0;
 const commandLog: { cmd: string; workspaceId: string }[] = [];
 const PORT = 4507;
 
+/** Which workspace owns which agent. The agents table answers this for real. */
+const OWNED: Record<string, string[]> = { [A]: ["agent_a"], [B]: ["agent_b"] };
+
 const relay = new WsRelay({
   port: PORT,
   store,
   clientHtmlPath: "/dev/null",
   contextFor: () => (connections++ === 0 ? ctxA : ctxB),
   listAgents: async (ctx) => [{ agent_id: ctx.workspaceId === A ? "agent_a" : "agent_b" }],
-  listAgentFiles: (ctx) => [{ path: ctx.workspaceId === A ? "a.py" : "b.py" }],
-  getAgentGraph: async (ctx) => ({ agent_id: ctx.workspaceId === A ? "a" : "b" }),
+  // Modelled on the real wiring rather than answering unconditionally: an agent's source is
+  // read from a global directory BY ID, so the implementation has to check that the caller's
+  // workspace owns that id. A stub that ignores agentId cannot tell a correct implementation
+  // from one that hands any caller any agent's code — which is what this used to do.
+  listAgentFiles: async (ctx, agentId) =>
+    OWNED[ctx.workspaceId]?.includes(agentId) ? [{ path: `${agentId}.py` }] : [],
+  getAgentGraph: async (ctx, agentId) =>
+    OWNED[ctx.workspaceId]?.includes(agentId)
+      ? { agent_id: agentId }
+      : { agent_id: agentId, error: "no such agent in this workspace" },
   listMcpServers: async (ctx) => [{ id: ctx.workspaceId === A ? "server_a" : "server_b" }],
   listProviders: () => [],
   listDeployments: async (ctx) => ({
@@ -161,13 +172,28 @@ console.log("\nlocally-answered reads are per socket");
   const own: any = await a.want((m) => m.channel === "runSteps" && m.runId === runA, "A loadRun of its own");
   check(own.steps.length === 1, "A can load its own");
 
-  b.send({ cmd: "loadAgentFiles", agentId: "x" });
-  const files: any = await b.want((m) => m.channel === "agentFiles", "B files");
-  check(files.files[0]?.path === "b.py", "loadAgentFiles answers in the asking socket's workspace");
+  b.send({ cmd: "loadAgentFiles", agentId: "agent_b" });
+  const files: any = await b.want((m) => m.channel === "agentFiles" && m.agentId === "agent_b", "B files");
+  check(files.files[0]?.path === "agent_b.py", "loadAgentFiles answers for the socket's own agent");
 
-  b.send({ cmd: "loadAgentGraph", agentId: "x" });
-  const graph: any = await b.want((m) => m.channel === "graph", "B graph");
-  check(graph.graph?.agent_id === "b", "loadAgentGraph answers in the asking socket's workspace");
+  // The leak this is really about: an agent's source lives in a global directory keyed by id,
+  // so B naming A's agent is a request for another tenant's generated code.
+  b.send({ cmd: "loadAgentFiles", agentId: "agent_a" });
+  const stolenFiles: any = await b.want((m) => m.channel === "agentFiles" && m.agentId === "agent_a", "B files for A's agent");
+  check(stolenFiles.files.length === 0,
+    `B cannot read A's agent source by naming it (${stolenFiles.files.length} files)`,
+    JSON.stringify(stolenFiles.files).slice(0, 120));
+
+  b.send({ cmd: "loadAgentGraph", agentId: "agent_b" });
+  const graph: any = await b.want((m) => m.channel === "graph" && m.agentId === "agent_b", "B graph");
+  check(graph.graph?.agent_id === "agent_b" && !graph.graph?.error,
+    "loadAgentGraph answers for the socket's own agent");
+
+  b.send({ cmd: "loadAgentGraph", agentId: "agent_a" });
+  const stolenGraph: any = await b.want((m) => m.channel === "graph" && m.agentId === "agent_a", "B graph for A's agent");
+  check(Boolean(stolenGraph.graph?.error),
+    "B cannot introspect A's agent topology by naming it",
+    JSON.stringify(stolenGraph.graph).slice(0, 120));
 }
 
 console.log("\nforwarded commands carry the asking socket's workspace");

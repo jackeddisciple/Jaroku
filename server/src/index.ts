@@ -417,8 +417,25 @@ const relay = new WsRelay({
   // limit of Session 1: runtime/agents/ is one namespace for every workspace, and Session 3's
   // object store is what makes the key itself workspace-scoped. They take the context now so
   // that when the storage moves, the signature does not.
-  listAgentFiles: (_ctx, agentId) => agentProjectFiles(agentId),
-  getAgentGraph: (_ctx, agentId) => agentGraph(agentId),
+  // An agent's source is read from disk BY ID, so the workspace has to be checked here —
+  // the filesystem has no idea who owns what. These were the last two reads that took a
+  // context and ignored it; every other one was fixed when the socket's context started
+  // being forwarded, and these two were missed because they answer from disk rather than
+  // from the database, so nothing about them looked like a query.
+  //
+  // `bySlug` is the membership check: it is scoped to the caller's workspace, so an agent
+  // another tenant owns comes back undefined and this answers empty. Not exploitable across
+  // tenants today, because every workspace on a box syncs the same runtime/agents directory
+  // at boot and therefore legitimately has a row for each — Session 3 moves the projects to
+  // the object store and ends that. It is the shape that matters now: Session 2 hands two
+  // workspaces to one process, and on that day this is a client asking for another tenant's
+  // generated source code by name and getting it.
+  listAgentFiles: async (ctx, agentId) =>
+    (await agentRepo.bySlug(ctx, agentId)) ? agentProjectFiles(agentId) : [],
+  getAgentGraph: async (ctx, agentId) =>
+    (await agentRepo.bySlug(ctx, agentId))
+      ? agentGraph(agentId)
+      : { agent_id: agentId, error: "no such agent in this workspace" },
   listMcpServers: (ctx) => mcpRegistry.list(ctx),
   // By name only. The client learns THAT a key is set, never what it is.
   listProviders: () => providerStatus(),
