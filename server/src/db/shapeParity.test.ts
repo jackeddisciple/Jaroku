@@ -22,9 +22,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { migrate } from "./migrate.ts";
-import { PostgresDb } from "./postgres.ts";
 import { SqliteDb } from "./sqlite.ts";
-import { PG_URL_ENV } from "./open.ts";
+import { withScratchPostgres } from "./testDb.ts";
 import { LOCAL_WORKSPACE_ID, newRequestId, systemContextFor } from "./tenant.ts";
 import { TraceStore } from "../store.ts";
 import type { Run, Step } from "../types.ts";
@@ -39,16 +38,6 @@ const check = (ok: boolean, msg: string): void => {
 };
 
 const MIGRATIONS = join(new URL("../..", import.meta.url).pathname, "migrations");
-
-const url = process.env[PG_URL_ENV];
-if (!url) {
-  console.log(
-    `SKIPPED: no ${PG_URL_ENV}. This suite compares two drivers, so it needs both.\n` +
-      `  docker compose up -d postgres\n` +
-      `  ${PG_URL_ENV}=postgres://jaroku:jaroku@127.0.0.1:5433/jaroku npm run test:shape-parity`,
-  );
-  process.exit(0);
-}
 
 const runId = randomUUID();
 
@@ -134,37 +123,12 @@ const pick = <T extends object>(o: T, keys: readonly string[]): Record<string, u
 
 const tmp = mkdtempSync(join(tmpdir(), "jaroku-parity-"));
 const sqlite = new SqliteDb(join(tmp, "parity.db"));
-const postgres = new PostgresDb({ url });
+await migrate(sqlite.migrationTarget(), join(MIGRATIONS, "sqlite"), () => {});
+const sqliteStore = new TraceStore(sqlite);
+await sqliteStore.init();
 
-try {
-  await postgres.ping();
-} catch (err) {
-  console.log(`SKIPPED: ${PG_URL_ENV} is set but unreachable — ${(err as Error).message}`);
-  await sqlite.close();
-  await postgres.close();
-  rmSync(tmp, { recursive: true, force: true });
-  process.exit(0);
-}
-
-// A schema of its own, so this never touches whatever else lives in the target database and
-// two runs of the suite cannot collide.
-const schema = `parity_${Math.random().toString(36).slice(2, 8)}`;
-await postgres.exec(`CREATE SCHEMA ${schema}`);
-
-try {
-  await migrate(sqlite.migrationTarget(), join(MIGRATIONS, "sqlite"), () => {});
-  const sqliteStore = new TraceStore(sqlite);
-  await sqliteStore.init();
-
-  // `public` stays behind the scratch schema on the search_path: extensions are installed
-  // once per database, so citext may already live there and would otherwise be unreachable.
-  const scoped = new PostgresDb({
-    url: `${url}${url.includes("?") ? "&" : "?"}options=-csearch_path%3D${schema},public`,
-  });
-  // The full migration list, not just the baseline — the trace tables now reference a
-  // workspace, so the identity tables and the tenancy migration have to exist first.
-  await migrate(scoped.migrationTarget(), join(MIGRATIONS, "postgres"), () => {});
-  const pgStore = new TraceStore(scoped);
+const ran = await withScratchPostgres(async (pg) => {
+  const pgStore = new TraceStore(pg);
   await pgStore.init(); // a no-op on this dialect, called for symmetry
 
   const a = await roundTrip(sqliteStore);
@@ -191,13 +155,14 @@ try {
     check(original === back, `step ${i} survives the write/read round trip unchanged`);
     if (original !== back) console.log(`       in:  ${original}\n       out: ${back}`);
   }
+  return true;
+});
 
-  await scoped.close();
-} finally {
-  await postgres.exec(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(() => {});
-  await sqlite.close();
-  await postgres.close();
-  rmSync(tmp, { recursive: true, force: true });
+await sqlite.close();
+rmSync(tmp, { recursive: true, force: true });
+if (ran === null) {
+  console.log("SKIPPED: this suite compares two drivers, so it needs both.");
+  process.exit(0);
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

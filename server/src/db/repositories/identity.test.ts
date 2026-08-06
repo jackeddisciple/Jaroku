@@ -15,8 +15,7 @@ import { join } from "node:path";
 import type { Db } from "../db.ts";
 import { migrate } from "../migrate.ts";
 import { SqliteDb } from "../sqlite.ts";
-import { PostgresDb } from "../postgres.ts";
-import { PG_URL_ENV } from "../open.ts";
+import { withScratchPostgres } from "../testDb.ts";
 import { IdentityRepository, slugify } from "./identity.ts";
 import { newRequestId, systemContext, systemContextFor } from "../tenant.ts";
 
@@ -187,46 +186,7 @@ const tmp = mkdtempSync(join(tmpdir(), "jaroku-identity-"));
 }
 rmSync(tmp, { recursive: true, force: true });
 
-const url = process.env[PG_URL_ENV];
-if (!url) {
-  console.log(`\n(skipping Postgres: no ${PG_URL_ENV})`);
-} else {
-  const db = new PostgresDb({ url });
-  let reachable = true;
-  try {
-    await db.ping();
-  } catch (err) {
-    reachable = false;
-    console.log(`\n(skipping Postgres: ${(err as Error).message})`);
-  }
-  if (reachable) {
-    // A schema of its own, dropped afterwards, so the suite never disturbs a real database
-    // and two runs cannot collide.
-    const schema = `identity_${Math.random().toString(36).slice(2, 8)}`;
-    await db.exec(`CREATE SCHEMA ${schema}`);
-    // `public` stays on the search_path behind the scratch schema. Extensions are installed
-    // once per DATABASE, so `CREATE EXTENSION IF NOT EXISTS citext` is a no-op when a real
-    // migration already put citext in public — and the type would then be unreachable from a
-    // schema that had excluded it, which reads as "type citext does not exist".
-    const scoped = new PostgresDb({
-      url: `${url}${url.includes("?") ? "&" : "?"}options=-csearch_path%3D${schema},public`,
-    });
-    try {
-      const target = scoped.migrationTarget();
-      await target.withLock(async () => {
-        await target.exec(`CREATE EXTENSION IF NOT EXISTS citext`);
-        await target.exec(`CREATE EXTENSION IF NOT EXISTS pgcrypto`);
-      });
-      const { readFileSync } = await import("node:fs");
-      await scoped.exec(readFileSync(join(MIGRATIONS, "postgres", "003_identity.sql"), "utf8"));
-      await suite("PostgresDb", scoped);
-    } finally {
-      await scoped.close();
-      await db.exec(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(() => {});
-    }
-  }
-  await db.close();
-}
+await withScratchPostgres((db) => suite("PostgresDb", db));
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

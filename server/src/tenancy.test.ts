@@ -25,8 +25,7 @@ import { join } from "node:path";
 import type { Db } from "./db/db.ts";
 import { migrate } from "./db/migrate.ts";
 import { SqliteDb } from "./db/sqlite.ts";
-import { PostgresDb } from "./db/postgres.ts";
-import { PG_URL_ENV } from "./db/open.ts";
+import { withScratchPostgres } from "./db/testDb.ts";
 import { newRequestId, systemContext, systemContextFor, type TenantContext } from "./db/tenant.ts";
 import { IdentityRepository } from "./db/repositories/identity.ts";
 import { AgentRepository } from "./db/repositories/agents.ts";
@@ -442,35 +441,10 @@ const tmp = mkdtempSync(join(tmpdir(), "jaroku-tenancy-"));
 }
 rmSync(tmp, { recursive: true, force: true });
 
-const url = process.env[PG_URL_ENV];
-if (!url) {
-  console.log(`\n(skipping Postgres: no ${PG_URL_ENV})`);
-} else {
-  const admin = new PostgresDb({ url });
-  let reachable = true;
-  try {
-    await admin.ping();
-  } catch (err) {
-    reachable = false;
-    console.log(`\n(skipping Postgres: ${(err as Error).message})`);
-  }
-  if (reachable) {
-    const schema = `tenancy_${Math.random().toString(36).slice(2, 8)}`;
-    await admin.exec(`CREATE SCHEMA ${schema}`);
-    const db = new PostgresDb({
-      url: `${url}${url.includes("?") ? "&" : "?"}options=-csearch_path%3D${schema},public`,
-    });
-    try {
-      await migrate(db.migrationTarget(), join(MIGRATIONS, "postgres"), () => {});
-      await suite("PostgresDb", db);
-      await remainder(db);
-    } finally {
-      await db.close();
-      await admin.exec(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(() => {});
-    }
-  }
-  await admin.close();
-}
+await withScratchPostgres(async (db) => {
+  await suite("PostgresDb", db);
+  await remainder(db);
+});
 
 coverage();
 
