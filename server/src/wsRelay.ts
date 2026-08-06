@@ -624,6 +624,7 @@ export interface RelayOptions {
 
 export class WsRelay {
   private wss: WebSocketServer;
+  private http: ReturnType<typeof createServer>;
   private clients = new Set<WebSocket>();
   /**
    * Each socket's workspace.
@@ -641,8 +642,8 @@ export class WsRelay {
     this.store = opts.store;
     this.onCommand = opts.onCommand;
 
-    const http = createServer((req, res) => this.serveStatic(req, res));
-    this.wss = new WebSocketServer({ server: http });
+    this.http = createServer((req, res) => this.serveStatic(req, res));
+    this.wss = new WebSocketServer({ server: this.http });
 
     this.wss.on("connection", (ws, req) => {
       this.clients.add(ws);
@@ -788,7 +789,7 @@ export class WsRelay {
       });
     });
 
-    http.listen(opts.port, () => {
+    this.http.listen(opts.port, () => {
       console.log(`[relay] http+ws listening on http://localhost:${opts.port}`);
     });
   }
@@ -812,6 +813,54 @@ export class WsRelay {
   }
 
   /**
+   * Send to the clients in ONE workspace.
+   *
+   * Every channel below except `providers` carries something a workspace owns: a run's
+   * payloads, an agent's generated source, a build log, an MCP confirmation showing the
+   * arguments a model just produced. Sending any of them to every connected socket is the
+   * same leak the history and agent snapshots were fixed for, and it is a worse one — those
+   * were lists of names, these are the contents.
+   *
+   * A socket whose context has not resolved yet receives nothing rather than everything. It
+   * is mid-handshake and about to get a full snapshot anyway; guessing would be the only way
+   * to get this wrong.
+   */
+  private broadcastTo(ctx: TenantContext, payload: unknown): void {
+    const msg = JSON.stringify(payload);
+    for (const ws of this.clients) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (this.contexts.get(ws)?.workspaceId !== ctx.workspaceId) continue;
+      ws.send(msg);
+    }
+  }
+
+  /** Rebuild a snapshot per recipient. For the channels whose payload IS a query result. */
+  async broadcastMcpServers(): Promise<void> {
+    await this.perClient(async (ws, ctx) => {
+      this.sendTo(ws, { channel: "mcp", type: "servers", servers: (await this.opts.listMcpServers?.(ctx)) ?? [] });
+    });
+  }
+
+  async broadcastDeployments(): Promise<void> {
+    await this.perClient(async (ws, ctx) => {
+      const snapshot = (await this.opts.listDeployments?.(ctx)) ?? {
+        deployments: [],
+        railwayConfigured: false,
+      };
+      this.sendTo(ws, { channel: "deploy", type: "deployments", ...snapshot });
+    });
+  }
+
+  /** Stop listening. For tests; the server itself runs until the process does. */
+  async close(): Promise<void> {
+    for (const ws of this.clients) ws.close();
+    this.clients.clear();
+    this.contexts.clear();
+    await new Promise<void>((resolve) => this.wss.close(() => resolve()));
+    await new Promise<void>((resolve) => this.http.close(() => resolve()));
+  }
+
+  /**
    * Answer one client with something a database has to be asked for.
    *
    * A read that throws must not take the socket down with it: the client asked a question,
@@ -831,80 +880,53 @@ export class WsRelay {
   }
 
   // Broadcast a trace event to every connected client.
-  broadcast(event: TraceEvent): void {
-    const msg = JSON.stringify({ channel: "trace", event });
-    for (const ws of this.clients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-    }
+  broadcastTrace(ctx: TenantContext, event: TraceEvent): void {
+    this.broadcastTo(ctx, { channel: "trace", event });
   }
 
   // Broadcast a diagnostic (stderr line, parse error) for visibility in the client.
-  broadcastLog(level: "stderr" | "parseError", text: string): void {
-    const msg = JSON.stringify({ channel: "log", level, text });
-    for (const ws of this.clients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-    }
+  broadcastLog(ctx: TenantContext, level: "stderr" | "parseError", text: string): void {
+    this.broadcastTo(ctx, { channel: "log", level, text });
   }
 
   // Broadcast a generation event. Separate channel from "trace" by design.
-  broadcastGen(event: GenEvent): void {
-    const msg = JSON.stringify({ channel: "gen", ...event });
-    for (const ws of this.clients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-    }
+  broadcastGen(ctx: TenantContext, event: GenEvent): void {
+    this.broadcastTo(ctx, { channel: "gen", ...event });
   }
 
   // Broadcast an edit-flow event. Separate channel from "trace" and "gen" by design.
-  broadcastEdit(event: EditEvent): void {
-    const msg = JSON.stringify({ channel: "edit", ...event });
-    for (const ws of this.clients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-    }
+  broadcastEdit(ctx: TenantContext, event: EditEvent): void {
+    this.broadcastTo(ctx, { channel: "edit", ...event });
   }
 
   // Broadcast a debug-depth control event (pause/resume/boundary/branched). Separate channel by
   // design — the run's steps still arrive as normal schema-v1 events on "trace".
-  broadcastDebug(event: DebugEvent): void {
-    const msg = JSON.stringify({ channel: "debug", ...event });
-    for (const ws of this.clients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-    }
+  broadcastDebug(ctx: TenantContext, event: DebugEvent): void {
+    this.broadcastTo(ctx, { channel: "debug", ...event });
   }
 
   // Broadcast an "explain" reply event (unified composer). Separate channel by design — it never
   // enters the trace store or the frozen event schema.
-  broadcastReply(event: ReplyEvent): void {
-    const msg = JSON.stringify({ channel: "reply", ...event });
-    for (const ws of this.clients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-    }
+  broadcastReply(ctx: TenantContext, event: ReplyEvent): void {
+    this.broadcastTo(ctx, { channel: "reply", ...event });
   }
 
   // Broadcast an eval-channel event (datasets, and later eval progress/results). Separate
   // channel by design — it never carries trace steps, so a running eval can't steal the
   // Trace timeline's focus.
-  broadcastEval(event: EvalEvent): void {
-    const msg = JSON.stringify({ channel: "eval", ...event });
-    for (const ws of this.clients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-    }
+  broadcastEval(ctx: TenantContext, event: EvalEvent): void {
+    this.broadcastTo(ctx, { channel: "eval", ...event });
   }
 
   // Broadcast an MCP registry event. Separate channel by design — an MCP tool call itself
   // is an ordinary tool_call Step and still arrives on "trace" like any other.
-  broadcastMcp(event: McpEvent): void {
-    const msg = JSON.stringify({ channel: "mcp", ...event });
-    for (const ws of this.clients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-    }
+  broadcastMcp(ctx: TenantContext, event: McpEvent): void {
+    this.broadcastTo(ctx, { channel: "mcp", ...event });
   }
 
   /** Broadcast a deploy event. Separate channel by design — see DeployEvent. */
-  broadcastDeploy(event: DeployEvent): void {
-    const msg = JSON.stringify({ channel: "deploy", ...event });
-    for (const ws of this.clients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-    }
+  broadcastDeploy(ctx: TenantContext, event: DeployEvent): void {
+    this.broadcastTo(ctx, { channel: "deploy", ...event });
   }
 
   // Broadcast a provider-credential event. Separate channel by design — see ProviderEvent.

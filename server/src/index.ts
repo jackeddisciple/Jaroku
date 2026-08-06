@@ -279,11 +279,11 @@ const deployDeps: DeployManagerDeps = {
   // deploying WRITES into the project, so doing it while a subprocess is importing those
   // files would change code out from under a run in flight.
   agentBusy: () => runActive || pool.busy,
-  onStage: (e) => relay.broadcastDeploy({ type: "stage", ...e }),
-  onLog: (e) => relay.broadcastDeploy({ type: "log", ...e }),
-  onServeToken: (e) => relay.broadcastDeploy({ type: "serveToken", ...e }),
+  onStage: (e) => relay.broadcastDeploy(serverContext(), { type: "stage", ...e }),
+  onLog: (e) => relay.broadcastDeploy(serverContext(), { type: "log", ...e }),
+  onServeToken: (e) => relay.broadcastDeploy(serverContext(), { type: "serveToken", ...e }),
   onFinished: (d) =>
-    relay.broadcastDeploy({
+    relay.broadcastDeploy(serverContext(), {
       type: "finished",
       deploymentId: d.id,
       status: d.status,
@@ -311,7 +311,7 @@ async function deploySnapshot(
 
 function broadcastDeployments(): void {
   void deploySnapshot(serverContext())
-    .then((snapshot) => relay.broadcastDeploy({ type: "deployments", ...snapshot }))
+    .then((snapshot) => relay.broadcastDeploy(serverContext(), { type: "deployments", ...snapshot }))
     .catch((err) => console.error("[deploy] snapshot failed:", (err as Error).message));
 }
 
@@ -421,10 +421,10 @@ const judge = new JudgeScorer({
   store,
   evalStore,
   context: serverContext,
-  onScored: (e) => relay.broadcastEval({ type: "scored", ...e }),
+  onScored: (e) => relay.broadcastEval(serverContext(), { type: "scored", ...e }),
   onScoringFinished: (e) => {
     console.log(`[eval] ${e.evalId} scoring done — ${e.scored} scored, ${e.unscored} unscored`);
-    relay.broadcastEval({ type: "scoringFinished", ...e });
+    relay.broadcastEval(serverContext(), { type: "scoringFinished", ...e });
   },
 });
 
@@ -439,13 +439,13 @@ evalRunner = new EvalRunner({
     if (isEval) evalRunIds.add(runId);
     else evalRunIds.delete(runId);
   },
-  onStarted: (e) => relay.broadcastEval({ type: "evalStarted", ...e }),
-  onProgress: (p) => relay.broadcastEval({ type: "evalProgress", ...p }),
+  onStarted: (e) => relay.broadcastEval(serverContext(), { type: "evalStarted", ...e }),
+  onProgress: (p) => relay.broadcastEval(serverContext(), { type: "evalProgress", ...p }),
   // Score as results land rather than in a batch at the end, so the quality column fills in
   // alongside the rest of the row instead of appearing all at once minutes later.
   onJobFinished: (job) => judge.enqueue(job.eval_id, job),
   onFinished: (e) => {
-    relay.broadcastEval({ type: "evalFinished", ...e });
+    relay.broadcastEval(serverContext(), { type: "evalFinished", ...e });
     // The eval's runs are now in history like any other; refresh so drill-down can reach
     // them without a reconnect.
     void relay.broadcastHistory();
@@ -521,14 +521,14 @@ function clearConfirms(runId: string, reason: string, nonce?: string): void {
     if (nonce !== undefined && p.nonce !== nonce) continue;
     pendingConfirms.delete(key);
     rmSync(approvalFile(p.runId, p.nonce), { force: true });
-    relay.broadcastMcp({ type: "confirmResolved", runId: p.runId, nonce: p.nonce, verdict: reason });
+    relay.broadcastMcp(serverContext(), { type: "confirmResolved", runId: p.runId, nonce: p.nonce, verdict: reason });
   }
 }
 
 function broadcastMcpServers(): void {
   void mcpRegistry
     .list(serverContext())
-    .then((servers) => relay.broadcastMcp({ type: "servers", servers }))
+    .then((servers) => relay.broadcastMcp(serverContext(), { type: "servers", servers }))
     .catch((err) => console.error("[mcp] snapshot failed:", (err as Error).message));
 }
 
@@ -538,12 +538,12 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
     switch (cmd.cmd) {
       case "addMcpServer": {
         if (typeof cmd.endpoint !== "string" || !cmd.endpoint.trim()) {
-          relay.broadcastMcp({ type: "error", message: "an endpoint is required" });
+          relay.broadcastMcp(serverContext(), { type: "error", message: "an endpoint is required" });
           return;
         }
         // A handshake against someone else's server takes as long as it takes. Saying so
         // is the difference between "connecting" and "the button did nothing".
-        relay.broadcastMcp({ type: "discovering", serverId: null, endpoint: cmd.endpoint });
+        relay.broadcastMcp(serverContext(), { type: "discovering", serverId: null, endpoint: cmd.endpoint });
         const added = await mcpRegistry.addServer(ctx, {
           endpoint: cmd.endpoint,
           label: cmd.label,
@@ -556,16 +556,16 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         );
         broadcastMcpServers();
         if (!added.ok && added.message) {
-          relay.broadcastMcp({ type: "error", message: added.message, ...(added.server ? { serverId: added.server.id } : {}) });
+          relay.broadcastMcp(serverContext(), { type: "error", message: added.message, ...(added.server ? { serverId: added.server.id } : {}) });
         } else if (added.message && added.server) {
-          relay.broadcastMcp({ type: "notice", message: added.message, serverId: added.server.id });
+          relay.broadcastMcp(serverContext(), { type: "notice", message: added.message, serverId: added.server.id });
         }
         return;
       }
 
       case "rediscoverMcpServer": {
         if (typeof cmd.serverId !== "string") return;
-        relay.broadcastMcp({
+        relay.broadcastMcp(serverContext(), {
           type: "discovering",
           serverId: cmd.serverId,
           endpoint: (await mcpRegistry.get(ctx, cmd.serverId))?.endpoint ?? "",
@@ -576,9 +576,9 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         );
         broadcastMcpServers();
         if (!res.ok && res.message) {
-          relay.broadcastMcp({ type: "error", message: res.message, serverId: cmd.serverId });
+          relay.broadcastMcp(serverContext(), { type: "error", message: res.message, serverId: cmd.serverId });
         } else if (res.message) {
-          relay.broadcastMcp({ type: "notice", message: res.message, serverId: cmd.serverId });
+          relay.broadcastMcp(serverContext(), { type: "notice", message: res.message, serverId: cmd.serverId });
         }
         return;
       }
@@ -589,7 +589,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         if (removed) console.log(`[mcp] removed ${cmd.serverId}`);
         broadcastMcpServers();
         if (!removed) {
-          relay.broadcastMcp({ type: "error", message: `no server called "${cmd.serverId}"` });
+          relay.broadcastMcp(serverContext(), { type: "error", message: `no server called "${cmd.serverId}"` });
         }
         return;
       }
@@ -602,7 +602,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         if (!pending) {
           // Already answered, timed out, or the run died. Saying so beats silence: two
           // people clicking the same modal should not both think they decided it.
-          relay.broadcastMcp({
+          relay.broadcastMcp(serverContext(), {
             type: "error",
             message: "that confirmation is no longer waiting — the run moved on without it",
           });
@@ -611,7 +611,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         pendingConfirms.delete(key);
         writeApproval(cmd.runId, cmd.nonce, verdict);
         console.log(`[mcp] ${pending.server}/${pending.tool} — ${verdict}`);
-        relay.broadcastMcp({ type: "confirmResolved", runId: cmd.runId, nonce: cmd.nonce, verdict });
+        relay.broadcastMcp(serverContext(), { type: "confirmResolved", runId: cmd.runId, nonce: cmd.nonce, verdict });
         return;
       }
 
@@ -620,19 +620,19 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         const token = typeof cmd.token === "string" && cmd.token.length ? cmd.token : null;
         const { result, warning } = await mcpRegistry.setCredential(ctx, cmd.serverId, token);
         if (!result.ok) {
-          relay.broadcastMcp({ type: "error", message: result.message ?? "could not store the credential", serverId: cmd.serverId });
+          relay.broadcastMcp(serverContext(), { type: "error", message: result.message ?? "could not store the credential", serverId: cmd.serverId });
           return;
         }
         // Log that a credential changed, never which value it changed to.
         console.log(`[mcp] ${cmd.serverId} credential ${token ? "set" : "cleared"}`);
         // A stored credential is only useful if it works, so prove it immediately rather
         // than leaving the server sitting in auth_required until someone clicks refresh.
-        relay.broadcastMcp({ type: "discovering", serverId: cmd.serverId, endpoint: result.server?.endpoint ?? "" });
+        relay.broadcastMcp(serverContext(), { type: "discovering", serverId: cmd.serverId, endpoint: result.server?.endpoint ?? "" });
         const retried = await mcpRegistry.rediscover(ctx, cmd.serverId);
         broadcastMcpServers();
-        if (warning) relay.broadcastMcp({ type: "notice", message: warning, serverId: cmd.serverId });
+        if (warning) relay.broadcastMcp(serverContext(), { type: "notice", message: warning, serverId: cmd.serverId });
         if (!retried.ok && retried.message) {
-          relay.broadcastMcp({ type: "error", message: retried.message, serverId: cmd.serverId });
+          relay.broadcastMcp(serverContext(), { type: "error", message: retried.message, serverId: cmd.serverId });
         }
         return;
       }
@@ -642,7 +642,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         const impact = cmd.impact === "high" || cmd.impact === "low" ? cmd.impact : null;
         const updated = await mcpRegistry.setToolImpact(ctx, cmd.serverId, cmd.toolName, impact);
         if (!updated) {
-          relay.broadcastMcp({
+          relay.broadcastMcp(serverContext(), {
             type: "error",
             message: `no tool "${cmd.toolName}" on "${cmd.serverId}"`,
             serverId: cmd.serverId,
@@ -659,7 +659,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
   } catch (err) {
     const message = (err as Error)?.message ?? String(err);
     console.error(`[mcp] ${cmd.cmd} failed: ${message}`);
-    relay.broadcastMcp({ type: "error", message: `${cmd.cmd} failed: ${message}` });
+    relay.broadcastMcp(serverContext(), { type: "error", message: `${cmd.cmd} failed: ${message}` });
   }
 }
 
@@ -770,17 +770,17 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
         }
         const token = typeof cmd.token === "string" ? cmd.token.trim() : "";
         if (!token) {
-          relay.broadcastDeploy({ type: "error", message: "no token was entered" });
+          relay.broadcastDeploy(serverContext(), { type: "error", message: "no token was entered" });
           return;
         }
         const written = credentials.set(RAILWAY_ENV_KEY, token);
         if (!written.ok) {
-          relay.broadcastDeploy({ type: "error", message: written.warning ?? "could not store that token" });
+          relay.broadcastDeploy(serverContext(), { type: "error", message: written.warning ?? "could not store that token" });
           return;
         }
         console.log(`[deploy] Railway token set (${RAILWAY_ENV_KEY})`);
         broadcastDeployments();
-        if (written.warning) relay.broadcastDeploy({ type: "notice", message: written.warning });
+        if (written.warning) relay.broadcastDeploy(serverContext(), { type: "notice", message: written.warning });
         return;
       }
 
@@ -788,13 +788,13 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
         // Writes nothing, by design — see TestRailwayTokenCommand.
         const token = typeof cmd.token === "string" ? cmd.token.trim() : "";
         if (!token) {
-          relay.broadcastDeploy({ type: "testResult", ok: false, message: "no token was entered" });
+          relay.broadcastDeploy(serverContext(), { type: "testResult", ok: false, message: "no token was entered" });
           return;
         }
         try {
           const { projectCount } = await new RailwayApi({ token }).verify();
           console.log("[deploy] Railway token tested — ok");
-          relay.broadcastDeploy({
+          relay.broadcastDeploy(serverContext(), {
             type: "testResult",
             ok: true,
             message: projectCount ? "connected" : "connected — no projects yet",
@@ -802,14 +802,14 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
         } catch (err) {
           const detail = err instanceof RailwayError ? err.message : String(err);
           console.log("[deploy] Railway token tested — rejected");
-          relay.broadcastDeploy({ type: "testResult", ok: false, message: detail });
+          relay.broadcastDeploy(serverContext(), { type: "testResult", ok: false, message: detail });
         }
         return;
       }
 
       case "planDeploy": {
         if (!isSafeAgentId(cmd.agentId)) {
-          relay.broadcastDeploy({ type: "error", message: "invalid agent id" });
+          relay.broadcastDeploy(serverContext(), { type: "error", message: "invalid agent id" });
           return;
         }
         const plan = await planDeploy(deployDeps, {
@@ -818,7 +818,7 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
           model: typeof cmd.model === "string" ? cmd.model : "",
           envKeys: [],
         });
-        relay.broadcastDeploy({
+        relay.broadcastDeploy(serverContext(), {
           type: "plan",
           agentId: plan.agentId,
           secrets: plan.secrets,
@@ -831,11 +831,11 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
 
       case "deploy": {
         if (!isSafeAgentId(cmd.agentId)) {
-          relay.broadcastDeploy({ type: "error", message: "invalid agent id" });
+          relay.broadcastDeploy(serverContext(), { type: "error", message: "invalid agent id" });
           return;
         }
         if (deployManager.busy) {
-          relay.broadcastDeploy({ type: "error", message: "a deploy is already running" });
+          relay.broadcastDeploy(serverContext(), { type: "error", message: "a deploy is already running" });
           return;
         }
         const envKeys = Array.isArray(cmd.envKeys)
@@ -849,14 +849,14 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
           allowMissing: cmd.allowMissing === true,
           publicEndpoint: cmd.publicEndpoint === true,
         });
-        if ("error" in result) relay.broadcastDeploy({ type: "error", message: result.error });
+        if ("error" in result) relay.broadcastDeploy(serverContext(), { type: "error", message: result.error });
         return;
       }
 
       case "cancelDeploy": {
         const target = deploymentIdOf(cmd.deploymentId);
         if (!target) {
-          relay.broadcastDeploy({ type: "error", message: "no deployment id to cancel" });
+          relay.broadcastDeploy(serverContext(), { type: "error", message: "no deployment id to cancel" });
           return;
         }
         await deployManager.cancel(target);
@@ -869,22 +869,22 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
         // notice says where the real thing still is.
         const target = deploymentIdOf(cmd.deploymentId);
         if (!target) {
-          relay.broadcastDeploy({ type: "error", message: "no deployment id to forget" });
+          relay.broadcastDeploy(serverContext(), { type: "error", message: "no deployment id to forget" });
           return;
         }
         const row = await deployStore.get(ctx, target);
         if (!row) {
-          relay.broadcastDeploy({ type: "error", message: "no such deployment" });
+          relay.broadcastDeploy(serverContext(), { type: "error", message: "no such deployment" });
           return;
         }
         if (deployManager.activeId === target) {
-          relay.broadcastDeploy({ type: "error", message: "that deploy is still running — cancel it first" });
+          relay.broadcastDeploy(serverContext(), { type: "error", message: "that deploy is still running — cancel it first" });
           return;
         }
         await deployStore.patch(ctx, target, { status: "removed" });
         broadcastDeployments();
         void relay.broadcastAgents();
-        relay.broadcastDeploy({
+        relay.broadcastDeploy(serverContext(), {
           type: "notice",
           message: row.url
             ? `removed from Jaroku. The service is still running at ${row.url} — delete it in Railway if you want it gone.`
@@ -899,7 +899,7 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
         // A non-finite `since` would come back out of SQLite as a comparison against NaN and
         // quietly return nothing, which reads as "this deploy produced no output".
         const since = Number.isFinite(cmd.sinceSeq) ? Number(cmd.sinceSeq) : -1;
-        relay.broadcastDeploy({
+        relay.broadcastDeploy(serverContext(), {
           type: "logs",
           deploymentId: target,
           lines: await deployStore.logs(ctx, target, since),
@@ -910,7 +910,7 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
   } catch (err) {
     const message = (err as Error)?.message ?? String(err);
     console.error(`[deploy] ${cmd.cmd} failed: ${message}`);
-    relay.broadcastDeploy({ type: "error", message: `${cmd.cmd} failed: ${message}` });
+    relay.broadcastDeploy(serverContext(), { type: "error", message: `${cmd.cmd} failed: ${message}` });
   }
 }
 
@@ -920,7 +920,7 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
 // never has to reconcile a partial update against local state.
 
 async function broadcastDatasets(ctx: TenantContext, agentId: string | null): Promise<void> {
-  relay.broadcastEval({
+  relay.broadcastEval(serverContext(), {
     type: "datasets",
     agentId,
     datasets: await evalStore.listDatasets(ctx, agentId ?? undefined),
@@ -928,7 +928,7 @@ async function broadcastDatasets(ctx: TenantContext, agentId: string | null): Pr
 }
 
 async function broadcastDataset(ctx: TenantContext, datasetId: string): Promise<void> {
-  relay.broadcastEval({
+  relay.broadcastEval(serverContext(), {
     type: "dataset",
     datasetId,
     examples: await evalStore.listExamples(ctx, datasetId),
@@ -959,7 +959,7 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
       }
       case "deleteDataset": {
         await evalStore.deleteDataset(ctx, cmd.datasetId);
-        relay.broadcastEval({ type: "datasetDeleted", datasetId: cmd.datasetId });
+        relay.broadcastEval(ctx, { type: "datasetDeleted", datasetId: cmd.datasetId });
         await broadcastDatasets(ctx, cmd.agentId);
         return;
       }
@@ -968,7 +968,7 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
         // let it become a job that burns a real API call on whitespace.
         const input = (cmd.input ?? "").trim();
         if (!input) {
-          relay.broadcastEval({ type: "error", datasetId: cmd.datasetId, message: "an example needs an input" });
+          relay.broadcastEval(ctx, { type: "error", datasetId: cmd.datasetId, message: "an example needs an input" });
           return;
         }
         await evalStore.addExample(ctx, cmd.datasetId, input, cmd.expected ?? null, cmd.notes ?? null);
@@ -996,14 +996,14 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
         // slots and each would report latency inflated by the other — a comparison the
         // numbers can't support.
         if (evalRunner.active) {
-          relay.broadcastEval({ type: "error", message: "an eval is already running" });
+          relay.broadcastEval(ctx, { type: "error", message: "an eval is already running" });
           return;
         }
         // Same reason as runAgent: this id ends up as the working directory of every job's
         // subprocess. Refusing it here also keeps a whole eval run and its jobs from being
         // written for an agent that cannot exist.
         if (!isSafeAgentId(cmd.agentId ?? "")) {
-          relay.broadcastEval({ type: "error", message: `invalid agent id: ${cmd.agentId}` });
+          relay.broadcastEval(ctx, { type: "error", message: `invalid agent id: ${cmd.agentId}` });
           return;
         }
         const started = await evalRunner.start({
@@ -1013,7 +1013,7 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
           targets: cmd.targets ?? [],
           budgetUsd: cmd.budgetUsd ?? null,
         });
-        if ("error" in started) relay.broadcastEval({ type: "error", message: started.error });
+        if ("error" in started) relay.broadcastEval(ctx, { type: "error", message: started.error });
         return;
       }
       case "cancelEval": {
@@ -1021,7 +1021,7 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
         return;
       }
       case "estimateEval": {
-        relay.broadcastEval({
+        relay.broadcastEval(ctx, {
           type: "estimate",
           estimate: await estimateEval(ctx, store, evalStore, {
             datasetId: cmd.datasetId,
@@ -1035,15 +1035,15 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
       case "loadEvalResults": {
         const results = await aggregateEval(ctx, evalStore, cmd.evalId);
         if (!results) {
-          relay.broadcastEval({ type: "error", message: "unknown eval" });
+          relay.broadcastEval(ctx, { type: "error", message: "unknown eval" });
           return;
         }
-        relay.broadcastEval({ type: "evalResults", evalId: cmd.evalId, results });
+        relay.broadcastEval(ctx, { type: "evalResults", evalId: cmd.evalId, results });
         return;
       }
       case "listEvals": {
         const all = await evalStore.listEvalRuns(ctx);
-        relay.broadcastEval({
+        relay.broadcastEval(ctx, {
           type: "evals",
           evals: cmd.datasetId ? all.filter((e) => e.dataset_id === cmd.datasetId) : all,
         });
@@ -1051,7 +1051,7 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
       }
       case "loadRubric": {
         const r = await rubricFor(ctx, cmd.datasetId);
-        relay.broadcastEval({
+        relay.broadcastEval(ctx, {
           type: "rubric", datasetId: cmd.datasetId, rubric: r, isDefault: r.dataset_id === null,
         });
         return;
@@ -1064,11 +1064,11 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
             typeof c?.id === "string" && c.id.trim() !== "" && typeof c.description === "string",
         );
         if (!criteria.length) {
-          relay.broadcastEval({ type: "error", message: "a rubric needs at least one criterion" });
+          relay.broadcastEval(ctx, { type: "error", message: "a rubric needs at least one criterion" });
           return;
         }
         if (!criteria.some((c) => c.weight > 0)) {
-          relay.broadcastEval({ type: "error", message: "a rubric needs at least one criterion with weight above zero" });
+          relay.broadcastEval(ctx, { type: "error", message: "a rubric needs at least one criterion with weight above zero" });
           return;
         }
         const existing = await evalStore.rubricForDataset(ctx, cmd.datasetId);
@@ -1079,13 +1079,13 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
           criteria,
         });
         console.log(`[eval] rubric saved for dataset ${cmd.datasetId} — ${criteria.length} criteria`);
-        relay.broadcastEval({ type: "rubric", datasetId: cmd.datasetId, rubric: saved, isDefault: false });
+        relay.broadcastEval(ctx, { type: "rubric", datasetId: cmd.datasetId, rubric: saved, isDefault: false });
         return;
       }
       case "promoteTestInput": {
         const input = (cmd.input ?? "").trim();
         if (!input) {
-          relay.broadcastEval({ type: "error", message: "nothing to promote — the test input is empty" });
+          relay.broadcastEval(ctx, { type: "error", message: "nothing to promote — the test input is empty" });
           return;
         }
         const ds = await evalStore.defaultDatasetFor(ctx, cmd.agentId, cmd.agentName);
@@ -1096,7 +1096,7 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
         console.log(
           `[eval] promote → "${ds.name}"${duplicate ? " (already present)" : ""}: ${input.slice(0, 60)}`,
         );
-        relay.broadcastEval({ type: "promoted", datasetId: ds.id, datasetName: ds.name, duplicate });
+        relay.broadcastEval(ctx, { type: "promoted", datasetId: ds.id, datasetName: ds.name, duplicate });
         await broadcastDatasets(ctx, cmd.agentId);
         await broadcastDataset(ctx, ds.id);
         return;
@@ -1105,7 +1105,7 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
   } catch (err) {
     const message = (err as Error).message;
     console.error(`[eval] ${cmd.cmd} failed:`, message);
-    relay.broadcastEval({ type: "error", message: `${cmd.cmd} failed: ${message}` });
+    relay.broadcastEval(ctx, { type: "error", message: `${cmd.cmd} failed: ${message}` });
   }
 }
 
@@ -1163,18 +1163,18 @@ pool.on("event", ({ runId, event }) => {
     } catch (err) {
       console.error("[store] failed to persist event:", (err as Error).message);
     }
-    if (!isEvalRun(runId)) relay.broadcast(event);
+    if (!isEvalRun(runId)) relay.broadcastTrace(serverContext(), event);
   });
 });
 
 pool.on("parseError", ({ runId, line, error }) => {
   console.error(`[manager] non-event stdout line (${error}):`, line.slice(0, 200));
-  if (!isEvalRun(runId)) relay.broadcastLog("parseError", `${error}: ${line.slice(0, 200)}`);
+  if (!isEvalRun(runId)) relay.broadcastLog(serverContext(), "parseError", `${error}: ${line.slice(0, 200)}`);
 });
 
 pool.on("stderr", ({ runId, line }) => {
   console.error("[agent]", line);
-  if (!isEvalRun(runId)) relay.broadcastLog("stderr", line);
+  if (!isEvalRun(runId)) relay.broadcastLog(serverContext(), "stderr", line);
 });
 
 // Debug-depth control events (off the trace stream). A `boundary` correlates the durable
@@ -1194,7 +1194,7 @@ pool.on("control", ({ ctrl }) => {
         if (checkpointId && seqHigh >= 0) {
           await store.setCheckpointUpto(serverContext(), runId, seqHigh, checkpointId);
         }
-        relay.broadcastDebug({ type: "boundary", runId, seq: seqHigh, next });
+        relay.broadcastDebug(serverContext(), { type: "boundary", runId, seq: seqHigh, next });
       });
     } else if (ctrl.ctrl === "paused") {
       // The id is recorded immediately — resume reads it, and a pause the process does not
@@ -1202,7 +1202,7 @@ pool.on("control", ({ ctrl }) => {
       pausedRunId = runId;
       ingest(async () => {
         await store.setRunStatus(serverContext(), runId, "paused");
-        relay.broadcastDebug({ type: "paused", runId, seq: seqHigh });
+        relay.broadcastDebug(serverContext(), { type: "paused", runId, seq: seqHigh });
       });
     } else if (ctrl.ctrl === "tool_confirm") {
       // A run has stopped before a high-impact MCP tool's first call. It is blocked right
@@ -1217,7 +1217,7 @@ pool.on("control", ({ ctrl }) => {
         runId, nonce, server, tool, requestedAt: Date.now(),
       });
       console.log(`[mcp] ${runId} is waiting for confirmation of ${server}/${tool}`);
-      relay.broadcastMcp({
+      relay.broadcastMcp(serverContext(), {
         type: "confirmRequest",
         runId,
         nonce,
@@ -1274,9 +1274,9 @@ pool.on("exit", ({ runId, code, signal, timedOut }) => {
 // Every failure here goes out as plan_error, never as the gen channel's plain "error". That
 // one is wired to buildStore.fail() on the client and paints the build pane as a failed
 // generation — which, at plan time, would be reporting a failure that never happened.
-planner.on("started", (e) => relay.broadcastGen({ type: "plan_started", ...e }));
-planner.on("delta", (e) => relay.broadcastGen({ type: "plan_delta", ...e }));
-planner.on("discarded", (e) => relay.broadcastGen({ type: "plan_discarded", ...e }));
+planner.on("started", (e) => relay.broadcastGen(serverContext(), { type: "plan_started", ...e }));
+planner.on("delta", (e) => relay.broadcastGen(serverContext(), { type: "plan_delta", ...e }));
+planner.on("discarded", (e) => relay.broadcastGen(serverContext(), { type: "plan_discarded", ...e }));
 
 planner.on("plan", (e) => {
   const usage = e.usage as { cost_usd?: number; output_tokens?: number };
@@ -1286,19 +1286,19 @@ planner.on("plan", (e) => {
       `$${(usage?.cost_usd ?? 0).toFixed(5)}`,
   );
   for (const w of e.warnings) console.log(`  ! ${w}`);
-  relay.broadcastGen({ type: "plan", ...e });
+  relay.broadcastGen(serverContext(), { type: "plan", ...e });
 });
 
 planner.on("error", (e) => {
   console.error(`[plan] failed: ${e.message}`);
-  relay.broadcastGen({ type: "plan_error", message: e.message });
+  relay.broadcastGen(serverContext(), { type: "plan_error", message: e.message });
 });
 
 async function planAgent(cmd: PlanAgentCommand): Promise<void> {
   // A generation in flight owns the pipeline; planning the next agent mid-build would put two
   // plans and one generation on the same single-slot state.
   if (generating) {
-    relay.broadcastGen({ type: "plan_error", message: "a generation is already in progress" });
+    relay.broadcastGen(serverContext(), { type: "plan_error", message: "a generation is already in progress" });
     return;
   }
   console.log(
@@ -1328,12 +1328,12 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
     // build pane as a failed generation, and the pending plan is still perfectly good. The
     // check also comes before take(), so a refused click doesn't spend the plan.
     if (cmd.planId) {
-      relay.broadcastGen({
+      relay.broadcastGen(serverContext(), {
         type: "plan_error",
         message: "a generation is already in progress — this plan is still here when it finishes",
       });
     } else {
-      relay.broadcastGen({ type: "error", message: "a generation is already in progress" });
+      relay.broadcastGen(serverContext(), { type: "error", message: "a generation is already in progress" });
     }
     return;
   }
@@ -1355,7 +1355,7 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
       // Never fall through to an unplanned generation here. The user approved a specific
       // plan; quietly building something they never reviewed is the exact failure this gate
       // exists to prevent.
-      relay.broadcastGen({
+      relay.broadcastGen(serverContext(), {
         type: "plan_error",
         message: "that plan is no longer available — describe the agent again",
       });
@@ -1370,7 +1370,7 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
     const known = new Set(loadConnectors(RUNTIME_DIR).map((c) => c.id));
     const missing = (rec.connectors ?? []).filter((id) => !known.has(id));
     if (missing.length) {
-      relay.broadcastGen({
+      relay.broadcastGen(serverContext(), {
         type: "plan_error",
         message:
           `the plan uses ${missing.join(", ")}, which ${missing.length > 1 ? "are" : "is"} no ` +
@@ -1389,7 +1389,7 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
     );
     const goneMcp = approvedRefs.filter((r) => !stillThere.has(r));
     if (goneMcp.length) {
-      relay.broadcastGen({
+      relay.broadcastGen(serverContext(), {
         type: "plan_error",
         message:
           `the plan uses the MCP tool${goneMcp.length > 1 ? "s" : ""} ${goneMcp.join(", ")}, which ` +
@@ -1408,11 +1408,11 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
 
   generating = true;
   console.log(`[gen] generating${plan ? " from an approved plan" : ""} — "${prompt.slice(0, 80)}"`);
-  relay.broadcastGen({ type: "started", prompt });
+  relay.broadcastGen(serverContext(), { type: "started", prompt });
 
-  const onStart = (e: { path: string }) => relay.broadcastGen({ type: "file_start", ...e });
-  const onDelta = (e: { path: string; text: string }) => relay.broadcastGen({ type: "file_delta", ...e });
-  const onEnd = (e: { path: string }) => relay.broadcastGen({ type: "file_end", ...e });
+  const onStart = (e: { path: string }) => relay.broadcastGen(serverContext(), { type: "file_start", ...e });
+  const onDelta = (e: { path: string; text: string }) => relay.broadcastGen(serverContext(), { type: "file_delta", ...e });
+  const onEnd = (e: { path: string }) => relay.broadcastGen(serverContext(), { type: "file_end", ...e });
 
   const cleanup = () => {
     generating = false;
@@ -1435,7 +1435,7 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
         // understate it every single time.
         (planCost ? ` + $${planCost.toFixed(5)} plan = $${(planCost + (usage?.cost_usd ?? 0)).toFixed(5)}` : ""),
     );
-    relay.broadcastGen({ type: "done", ...e });
+    relay.broadcastGen(serverContext(), { type: "done", ...e });
     void syncAgents().then(() => relay.broadcastAgents());
     cleanup();
   };
@@ -1443,7 +1443,7 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
   const onError = (e: { message: string; problems?: string[] }) => {
     console.error(`[gen] failed: ${e.message}`);
     for (const p of e.problems ?? []) console.error(`  - ${p}`);
-    relay.broadcastGen({ type: "error", ...e });
+    relay.broadcastGen(serverContext(), { type: "error", ...e });
     cleanup();
   };
 
@@ -1466,20 +1466,20 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
 // --- editing (fix loop) -----------------------------------------------------
 // Streams into the "edit" channel. Like generation, nothing here touches the trace store
 // or the frozen event schema. Listeners are permanent — every event carries its ids.
-editor.on("file_start", (e) => relay.broadcastEdit({ type: "file_start", ...e }));
-editor.on("file_delta", (e) => relay.broadcastEdit({ type: "file_delta", ...e }));
-editor.on("file_end", (e) => relay.broadcastEdit({ type: "file_end", ...e }));
+editor.on("file_start", (e) => relay.broadcastEdit(serverContext(), { type: "file_start", ...e }));
+editor.on("file_delta", (e) => relay.broadcastEdit(serverContext(), { type: "file_delta", ...e }));
+editor.on("file_end", (e) => relay.broadcastEdit(serverContext(), { type: "file_end", ...e }));
 
 editor.on("proposal", (e) => {
   console.log(
     `[edit] proposal for ${e.agentId} — ${e.files.length} file(s): ${e.summary}`,
   );
-  relay.broadcastEdit({ type: "proposal", ...e });
+  relay.broadcastEdit(serverContext(), { type: "proposal", ...e });
 });
 
 editor.on("applied", (e) => {
   console.log(`[edit] applied v${e.version} to ${e.agentId}: ${e.summary}`);
-  relay.broadcastEdit({ type: "applied", ...e });
+  relay.broadcastEdit(serverContext(), { type: "applied", ...e });
   void syncAgents().then(() => relay.broadcastAgents());
   relay.broadcastAgentFiles(e.agentId);
   // An edit may have changed the graph structure — invalidate and re-push.
@@ -1489,24 +1489,24 @@ editor.on("applied", (e) => {
 
 editor.on("undone", (e) => {
   console.log(`[edit] undid v${e.version} on ${e.agentId}`);
-  relay.broadcastEdit({ type: "undone", ...e });
+  relay.broadcastEdit(serverContext(), { type: "undone", ...e });
   void syncAgents().then(() => relay.broadcastAgents());
   relay.broadcastAgentFiles(e.agentId);
   graphCache.delete(e.agentId);
   void relay.broadcastAgentGraph(e.agentId);
 });
 
-editor.on("discarded", (e) => relay.broadcastEdit({ type: "discarded", ...e }));
+editor.on("discarded", (e) => relay.broadcastEdit(serverContext(), { type: "discarded", ...e }));
 
 editor.on("error", (e) => {
   console.error(`[edit] failed: ${e.message}`);
   for (const p of e.problems ?? []) console.error(`  - ${p}`);
-  relay.broadcastEdit({ type: "error", ...e });
+  relay.broadcastEdit(serverContext(), { type: "error", ...e });
 });
 
 function editAgent(agentId: string, instruction: string): void {
   console.log(`[edit] ${agentId} — "${instruction.slice(0, 80)}"`);
-  relay.broadcastEdit({ type: "started", agentId, instruction });
+  relay.broadcastEdit(serverContext(), { type: "started", agentId, instruction });
   void editor.propose(agentId, instruction);
 }
 
@@ -1523,7 +1523,7 @@ function runAgent(input?: string, provider?: string, model?: string, agentId?: s
   // history that the sidebar renders like any other. Refuse it here instead.
   if (agentId !== undefined && !isSafeAgentId(agentId)) {
     console.log(`[manager] refusing run — invalid agent id ${JSON.stringify(agentId)}`);
-    relay.broadcastDebug({ type: "error", message: `invalid agent id: ${agentId}` });
+    relay.broadcastDebug(serverContext(), { type: "error", message: `invalid agent id: ${agentId}` });
     return;
   }
   // Mint the run id server-side so we can address the run (e.g. pause it) before run_start races
@@ -1578,18 +1578,18 @@ async function resumeRun(runId: string): Promise<void> {
         ? "another run is active — stop it before resuming this one"
         : "the previous run has not finished shutting down yet — try again in a moment";
     console.log(`[debug] resumeRun refused for ${runId}: ${message}`);
-    relay.broadcastDebug({ type: "error", runId, message });
+    relay.broadcastDebug(serverContext(), { type: "error", runId, message });
     return;
   }
   const run = await store.getRun(serverContext(), runId);
   if (!run) {
-    relay.broadcastDebug({ type: "error", runId, message: "unknown run" });
+    relay.broadcastDebug(serverContext(), { type: "error", runId, message: "unknown run" });
     return;
   }
   // 'paused' is a store-only status (never an emitted event), so it's outside the frozen
   // RunStatus mirror — compare as a plain string rather than widening that type.
   if ((run.status as string) !== "paused") {
-    relay.broadcastDebug({ type: "error", runId, message: `run is ${run.status}, not paused` });
+    relay.broadcastDebug(serverContext(), { type: "error", runId, message: `run is ${run.status}, not paused` });
     return;
   }
   const seqOffset = (await store.maxSeqForRun(serverContext(), runId)) + 1;
@@ -1605,7 +1605,7 @@ async function resumeRun(runId: string): Promise<void> {
   runActive = true;
   activeRunId = runId;
   pausedRunId = null;
-  relay.broadcastDebug({ type: "resumed", runId, seqOffset });
+  relay.broadcastDebug(serverContext(), { type: "resumed", runId, seqOffset });
   pool.startInteractive({ runId, runtimeDir: RUNTIME_DIR, agentId: run.agent_id, env });
 }
 
@@ -1619,19 +1619,19 @@ async function branchRun(
   editedState?: Record<string, unknown>,
 ): Promise<void> {
   if (pool.interactiveRunning) {
-    relay.broadcastDebug({ type: "error", runId: fromRunId, message: "a run is active — stop it before branching" });
+    relay.broadcastDebug(serverContext(), { type: "error", runId: fromRunId, message: "a run is active — stop it before branching" });
     return;
   }
   const parent = await store.getRun(serverContext(), fromRunId);
   if (!parent) {
-    relay.broadcastDebug({ type: "error", runId: fromRunId, message: "unknown run to branch from" });
+    relay.broadcastDebug(serverContext(), { type: "error", runId: fromRunId, message: "unknown run to branch from" });
     return;
   }
   // Resolve the node boundary containing `atSeq` — we fork at a whole-node boundary, never mid-node.
   const boundary = await store.boundaryForStep(serverContext(), fromRunId, atSeq);
   const parentDb = join(CHECKPOINT_DIR, `${fromRunId}.sqlite`);
   if (!boundary || !existsSync(parentDb)) {
-    relay.broadcastDebug({ type: "error", runId: fromRunId, message: "no durable checkpoint for that step (branching needs a checkpointed run)" });
+    relay.broadcastDebug(serverContext(), { type: "error", runId: fromRunId, message: "no durable checkpoint for that step (branching needs a checkpointed run)" });
     return;
   }
 
@@ -1643,7 +1643,7 @@ async function branchRun(
     await store.copyRunPrefix(serverContext(), fromRunId, branchId, seqHigh, seqHigh);
     copyFileSync(parentDb, join(CHECKPOINT_DIR, `${branchId}.sqlite`));
   } catch (err) {
-    relay.broadcastDebug({ type: "error", runId: fromRunId, message: `branch prep failed: ${(err as Error).message}` });
+    relay.broadcastDebug(serverContext(), { type: "error", runId: fromRunId, message: `branch prep failed: ${(err as Error).message}` });
     return;
   }
 
@@ -1668,7 +1668,7 @@ async function branchRun(
   pausedRunId = null;
   console.log(`[debug] branching ${fromRunId} @seq ${seqHigh} -> ${branchId} (agent ${parent.agent_id})`);
   void relay.broadcastHistory(); // surface the new branch run in history immediately
-  relay.broadcastDebug({ type: "branched", parentRunId: fromRunId, branchId, fromSeq: seqHigh });
+  relay.broadcastDebug(serverContext(), { type: "branched", parentRunId: fromRunId, branchId, fromSeq: seqHigh });
   pool.startInteractive({ runId: branchId, runtimeDir: RUNTIME_DIR, agentId: parent.agent_id, env });
 }
 
@@ -1713,16 +1713,16 @@ function buildExplainContext(cmd: ExplainCommand): string {
 
 function explainAgent(cmd: ExplainCommand): void {
   if (explaining) {
-    relay.broadcastReply({ type: "error", agentId: cmd.agentId, message: "already answering — one at a time" });
+    relay.broadcastReply(serverContext(), { type: "error", agentId: cmd.agentId, message: "already answering — one at a time" });
     return;
   }
   explaining = true;
-  relay.broadcastReply({ type: "started", agentId: cmd.agentId, question: cmd.question });
+  relay.broadcastReply(serverContext(), { type: "started", agentId: cmd.agentId, question: cmd.question });
   const context = buildExplainContext(cmd);
   void streamExplain(context, cmd.question, {
-    onDelta: (text) => relay.broadcastReply({ type: "delta", agentId: cmd.agentId, text }),
-    onDone: () => { explaining = false; relay.broadcastReply({ type: "done", agentId: cmd.agentId }); },
-    onError: (message) => { explaining = false; relay.broadcastReply({ type: "error", agentId: cmd.agentId, message }); },
+    onDelta: (text) => relay.broadcastReply(serverContext(), { type: "delta", agentId: cmd.agentId, text }),
+    onDone: () => { explaining = false; relay.broadcastReply(serverContext(), { type: "done", agentId: cmd.agentId }); },
+    onError: (message) => { explaining = false; relay.broadcastReply(serverContext(), { type: "error", agentId: cmd.agentId, message }); },
   });
 }
 
