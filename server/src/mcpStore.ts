@@ -194,6 +194,17 @@ export class McpStore {
   // copy the `ensureColumn` helper from store.ts or evalStore.ts — an existing database has
   // no migration row saying it is missing a column, so a migration cannot know to add it.
 
+  /**
+   * The database, scoped to a request's workspace.
+   *
+   * Every read and write in this class goes through it, so on Postgres each statement carries
+   * the SET LOCAL the RLS policies read. On SQLite it is the connection itself — no RLS to
+   * scope — which is why the substitution is uniform and costs that driver nothing.
+   */
+  private q(ctx: TenantContext): Queryable {
+    return this.db.forWorkspace(ctx.workspaceId);
+  }
+
   /** Dialect-aware, for the reason jsonFromColumn documents. */
   private parseJson<T>(v: unknown, fallback: T): T {
     const parsed = jsonFromColumn(this.db.dialect, v);
@@ -215,7 +226,7 @@ export class McpStore {
   // --- servers ---------------------------------------------------------------
 
   async listServers(ctx: TenantContext): Promise<McpServer[]> {
-    const rows = await this.db.all<Record<string, unknown>>(
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT ${SERVER_COLUMNS} FROM mcp_servers WHERE workspace_id = ? ORDER BY created_at ASC`,
       [ctx.workspaceId],
     );
@@ -223,7 +234,7 @@ export class McpStore {
   }
 
   async getServer(ctx: TenantContext, id: string): Promise<McpServer | null> {
-    const row = await this.db.get<Record<string, unknown>>(
+    const row = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT ${SERVER_COLUMNS} FROM mcp_servers WHERE id = ? AND workspace_id = ?`,
       [id, ctx.workspaceId],
     );
@@ -243,7 +254,7 @@ export class McpStore {
       ...input,
       created_at: input.created_at ?? existing?.created_at ?? nowIso(),
     };
-    await this.db.run(
+    await this.q(ctx).run(
       `INSERT INTO mcp_servers
          (workspace_id, id, label, endpoint, transport, auth_env_key, server_name,
           server_version, protocol_version, status, last_error, discovered_at, created_at)
@@ -291,7 +302,7 @@ export class McpStore {
     status: McpServerStatus,
     lastError: string | null,
   ): Promise<void> {
-    await this.db.run(
+    await this.q(ctx).run(
       `UPDATE mcp_servers SET status = ?, last_error = ? WHERE id = ? AND workspace_id = ?`,
       [status, lastError, id, ctx.workspaceId],
     );
@@ -299,7 +310,7 @@ export class McpStore {
 
   /** Records the env var NAME. The value never passes through this module. */
   async setServerAuthEnvKey(ctx: TenantContext, id: string, envKey: string | null): Promise<void> {
-    await this.db.run(`UPDATE mcp_servers SET auth_env_key = ? WHERE id = ? AND workspace_id = ?`, [
+    await this.q(ctx).run(`UPDATE mcp_servers SET auth_env_key = ? WHERE id = ? AND workspace_id = ?`, [
       envKey,
       id,
       ctx.workspaceId,
@@ -307,7 +318,7 @@ export class McpStore {
   }
 
   async deleteServer(ctx: TenantContext, id: string): Promise<void> {
-    await this.db.transaction(async (tx: Queryable) => {
+    await this.db.scoped(ctx.workspaceId, async (tx: Queryable) => {
       await tx.run(`DELETE FROM mcp_tools WHERE server_id = ? AND workspace_id = ?`, [id, ctx.workspaceId]);
       await tx.run(`DELETE FROM mcp_servers WHERE id = ? AND workspace_id = ?`, [id, ctx.workspaceId]);
     });
@@ -317,12 +328,12 @@ export class McpStore {
 
   async listTools(ctx: TenantContext, serverId?: string): Promise<McpTool[]> {
     const rows = serverId
-      ? await this.db.all<Record<string, unknown>>(
+      ? await this.q(ctx).all<Record<string, unknown>>(
           `SELECT ${TOOL_COLUMNS} FROM mcp_tools
             WHERE server_id = ? AND workspace_id = ? ORDER BY name ASC`,
           [serverId, ctx.workspaceId],
         )
-      : await this.db.all<Record<string, unknown>>(
+      : await this.q(ctx).all<Record<string, unknown>>(
           `SELECT ${TOOL_COLUMNS} FROM mcp_tools
             WHERE workspace_id = ? ORDER BY server_id ASC, name ASC`,
           [ctx.workspaceId],
@@ -331,7 +342,7 @@ export class McpStore {
   }
 
   async getTool(ctx: TenantContext, serverId: string, name: string): Promise<McpTool | null> {
-    const row = await this.db.get<Record<string, unknown>>(
+    const row = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT ${TOOL_COLUMNS} FROM mcp_tools WHERE server_id = ? AND name = ? AND workspace_id = ?`,
       [serverId, name, ctx.workspaceId],
     );
@@ -389,7 +400,7 @@ export class McpStore {
       };
     });
 
-    await this.db.transaction(async (tx: Queryable) => {
+    await this.db.scoped(ctx.workspaceId, async (tx: Queryable) => {
       await tx.run(`DELETE FROM mcp_tools WHERE server_id = ? AND workspace_id = ?`, [
         serverId,
         ctx.workspaceId,
@@ -441,7 +452,7 @@ export class McpStore {
   ): Promise<McpTool | null> {
     const tool = await this.getTool(ctx, serverId, name);
     if (!tool) return null;
-    await this.db.run(
+    await this.q(ctx).run(
       `UPDATE mcp_tools SET impact_override = ?, override_schema_hash = ?
          WHERE server_id = ? AND name = ? AND workspace_id = ?`,
       [override, override === null ? null : tool.schema_hash, serverId, name, ctx.workspaceId],

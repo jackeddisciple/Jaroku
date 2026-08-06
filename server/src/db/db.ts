@@ -61,6 +61,30 @@ export type Tx = Queryable;
 
 export interface Db extends Queryable {
   /**
+   * Run `fn` inside a transaction with the RLS scope established.
+   *
+   * `SET LOCAL app.workspace_id` is what the tenant_isolation policies read. LOCAL, not
+   * SESSION: it is scoped to the transaction, so it cannot leak to whoever gets this pooled
+   * connection next — which is precisely the bug a session-scoped SET produces under
+   * PgBouncer, where a connection is handed on between statements.
+   *
+   * On SQLite this is an ordinary transaction. There is no RLS there and no second wall; the
+   * repository layer is the whole of the enforcement, which is why every method takes a
+   * context rather than trusting one to have been set.
+   */
+  scoped<T>(workspaceId: string, fn: (tx: Tx) => Promise<T>): Promise<T>;
+  /**
+   * A `Queryable` whose every statement runs with the RLS scope established.
+   *
+   * The shape the stores use, because a store method issues one or two statements and
+   * wrapping each call site in a callback would be noise. On Postgres each statement is a
+   * one-statement transaction carrying its SET LOCAL — the cost of the backstop, and the
+   * reason multi-statement work still goes through `scoped` instead. On SQLite it is the
+   * connection itself: there is no RLS to scope, and wrapping reads in BEGIN IMMEDIATE would
+   * take a write lock to answer a question.
+   */
+  forWorkspace(workspaceId: string): Queryable;
+  /**
    * Run `fn` inside a single transaction on a single connection: committed if it returns,
    * rolled back if it throws, and never partly either.
    *

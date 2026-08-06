@@ -229,6 +229,52 @@ export class PostgresDb implements Db {
   }
 
   /**
+   * A transaction with `app.workspace_id` set, which is what the RLS policies read.
+   *
+   * SET LOCAL takes effect for the rest of the transaction and is discarded at COMMIT or
+   * ROLLBACK, so it cannot outlive the work it scopes. The value is bound as a parameter
+   * rather than interpolated — `set_config` exists for exactly that, because SET LOCAL
+   * itself takes no placeholders and building it by string concatenation would put a
+   * client-supplied id into SQL text.
+   */
+  async scoped<T>(workspaceId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT set_config('app.workspace_id', $1, true)", [workspaceId]);
+      const out = await fn(queryable(client));
+      await client.query("COMMIT");
+      return out;
+    } catch (err) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* already gone; releasing below discards it */
+      }
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * A `Queryable` that carries the scope on every statement.
+   *
+   * Each call is its own one-statement transaction with its own SET LOCAL, which is a real
+   * cost — a round trip that a bare query would not pay — and it is what the backstop costs.
+   * Work that issues several statements should use `scoped` instead and pay it once.
+   */
+  forWorkspace(workspaceId: string): Tx {
+    return {
+      dialect: DIALECT,
+      all: (sql, params) => this.scoped(workspaceId, (tx) => tx.all(sql, params)),
+      get: (sql, params) => this.scoped(workspaceId, (tx) => tx.get(sql, params)),
+      run: (sql, params) => this.scoped(workspaceId, (tx) => tx.run(sql, params)),
+      exec: (sql) => this.scoped(workspaceId, (tx) => tx.exec(sql)),
+    };
+  }
+
+  /**
    * A `MigrationTarget` holding ONE client for the whole run.
    *
    * Both properties matter. The client is held because the runner opens explicit

@@ -12,7 +12,7 @@
 // becomes a materialisation of the row rather than the other way round.
 
 import { randomUUID } from "node:crypto";
-import { asInt, asBool, jsonFromColumn, type Db } from "../db.ts";
+import { asInt, asBool, jsonFromColumn, type Db, type Queryable } from "../db.ts";
 import type { TenantContext } from "../tenant.ts";
 
 /** Same pattern the runner enforces on the Python side. A slug is a directory name. */
@@ -53,6 +53,11 @@ const COLUMNS = `id, slug, display_name, description, connectors, mcp_tools, req
 export class AgentRepository {
   constructor(private db: Db) {}
 
+  /** The database, scoped to the request's workspace. See TraceStore's note. */
+  private q(ctx: TenantContext): Queryable {
+    return this.db.forWorkspace(ctx.workspaceId);
+  }
+
   private hydrate(row: Record<string, unknown>): Agent {
     const d = this.db.dialect;
     const arr = (v: unknown): string[] => {
@@ -71,7 +76,7 @@ export class AgentRepository {
 
   /** Newest first, hand-written reference agents last — the order the sidebar renders. */
   async list(ctx: TenantContext): Promise<Agent[]> {
-    const rows = await this.db.all<Record<string, unknown>>(
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT ${COLUMNS} FROM agents
         WHERE workspace_id = ? AND deleted_at IS NULL
         ORDER BY hand_written ASC, created_at DESC`,
@@ -81,7 +86,7 @@ export class AgentRepository {
   }
 
   async bySlug(ctx: TenantContext, slug: string): Promise<Agent | undefined> {
-    const row = await this.db.get<Record<string, unknown>>(
+    const row = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT ${COLUMNS} FROM agents WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`,
       [ctx.workspaceId, slug],
     );
@@ -89,7 +94,7 @@ export class AgentRepository {
   }
 
   async byId(ctx: TenantContext, id: string): Promise<Agent | undefined> {
-    const row = await this.db.get<Record<string, unknown>>(
+    const row = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT ${COLUMNS} FROM agents WHERE workspace_id = ? AND id = ? AND deleted_at IS NULL`,
       [ctx.workspaceId, id],
     );
@@ -105,7 +110,7 @@ export class AgentRepository {
    */
   async upsertFromDisk(ctx: TenantContext, a: AgentOnDisk): Promise<Agent> {
     if (!SAFE_SLUG.test(a.slug)) throw new Error(`not a usable agent id: ${a.slug}`);
-    await this.db.run(
+    await this.q(ctx).run(
       `INSERT INTO agents (id, workspace_id, slug, display_name, description, connectors,
          mcp_tools, required_env, default_provider, hand_written, creation_cost, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -151,7 +156,7 @@ export class AgentRepository {
     const seen = new Set(onDisk.map((a) => a.slug));
     for (const existing of await this.list(ctx)) {
       if (!seen.has(existing.slug)) {
-        await this.db.run(
+        await this.q(ctx).run(
           `UPDATE agents SET deleted_at = ? WHERE workspace_id = ? AND slug = ?`,
           [new Date().toISOString(), ctx.workspaceId, existing.slug],
         );
@@ -174,7 +179,7 @@ export class AgentRepository {
     agentId: string,
     manifest: Record<string, { sha256: string; bytes: number }>,
   ): Promise<number> {
-    return this.db.transaction(async (tx) => {
+    return this.db.scoped(ctx.workspaceId, async (tx) => {
       const row = await tx.get<{ current_version: unknown }>(
         `SELECT current_version FROM agents WHERE id = ? AND workspace_id = ?`,
         [agentId, ctx.workspaceId],

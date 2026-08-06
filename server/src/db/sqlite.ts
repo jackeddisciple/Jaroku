@@ -106,6 +106,25 @@ export class SqliteDb implements Db {
   }
 
   /**
+   * An ordinary transaction. SQLite has no row-level security to scope.
+   *
+   * The parameter is accepted and ignored on purpose rather than the method being absent:
+   * repository code calls the same thing on both drivers, and a driver-specific branch at
+   * every call site is how the two paths drift.
+   */
+  async scoped<T>(_workspaceId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
+    return this.transaction(fn);
+  }
+
+  /**
+   * The connection itself. There is no RLS here to scope, and wrapping every read in a
+   * transaction would take SQLite's write lock to answer a question.
+   */
+  forWorkspace(_workspaceId: string): Tx {
+    return this;
+  }
+
+  /**
    * A `MigrationTarget` over this connection.
    *
    * `withLock` is a documented no-op, and that is the correct answer rather than a missing

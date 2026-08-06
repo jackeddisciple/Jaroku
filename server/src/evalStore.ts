@@ -219,6 +219,17 @@ export class EvalStore {
   // jsonFromColumn. Every column here holds an object or an array, so the string-scalar trap
   // it defends against cannot arise; it goes through the same helper anyway, because "this
   // one is safe by accident" is how the next column added here stops being safe.
+  /**
+   * The database, scoped to a request's workspace.
+   *
+   * Every read and write in this class goes through it, so on Postgres each statement carries
+   * the SET LOCAL the RLS policies read. On SQLite it is the connection itself — no RLS to
+   * scope — which is why the substitution is uniform and costs that driver nothing.
+   */
+  private q(ctx: TenantContext): Queryable {
+    return this.db.forWorkspace(ctx.workspaceId);
+  }
+
   private parseJson<T>(v: unknown, fallback: T): T {
     const parsed = jsonFromColumn(this.db.dialect, v);
     return parsed === null || typeof parsed === "string" ? fallback : (parsed as T);
@@ -234,7 +245,7 @@ export class EvalStore {
       created_at: nowIso(),
       updated_at: nowIso(),
     };
-    await this.db.run(
+    await this.q(ctx).run(
       `INSERT INTO datasets (id, workspace_id, agent_id, name, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [row.id, ctx.workspaceId, row.agent_id, row.name, row.created_at, row.updated_at],
@@ -243,7 +254,7 @@ export class EvalStore {
   }
 
   async renameDataset(ctx: TenantContext, datasetId: string, name: string): Promise<void> {
-    await this.db.run(`UPDATE datasets SET name = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, [
+    await this.q(ctx).run(`UPDATE datasets SET name = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, [
       name,
       nowIso(),
       datasetId,
@@ -255,7 +266,7 @@ export class EvalStore {
   async listDatasets(ctx: TenantContext, agentId?: string): Promise<DatasetSummary[]> {
     const where = agentId ? `AND d.agent_id = ?` : ``;
     const args: unknown[] = agentId ? [ctx.workspaceId, agentId] : [ctx.workspaceId];
-    const rows = await this.db.all<Record<string, unknown>>(
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT d.id, d.agent_id, d.name, d.created_at, d.updated_at,
               (SELECT COUNT(*) FROM dataset_examples e
                 WHERE e.dataset_id = d.id AND e.workspace_id = d.workspace_id) AS example_count
@@ -266,7 +277,7 @@ export class EvalStore {
   }
 
   async getDataset(ctx: TenantContext, datasetId: string): Promise<Dataset | undefined> {
-    return (await this.db.get(
+    return (await this.q(ctx).get(
       `SELECT id, agent_id, name, created_at, updated_at
          FROM datasets WHERE id = ? AND workspace_id = ?`,
       [datasetId, ctx.workspaceId],
@@ -276,7 +287,7 @@ export class EvalStore {
   /** Deletes the dataset and its examples. Eval history that referenced it is left intact
    *  — a past comparison stays readable even after its dataset is gone. */
   async deleteDataset(ctx: TenantContext, datasetId: string): Promise<void> {
-    await this.db.transaction(async (tx: Queryable) => {
+    await this.db.scoped(ctx.workspaceId, async (tx: Queryable) => {
       await tx.run(`DELETE FROM dataset_examples WHERE dataset_id = ? AND workspace_id = ?`, [
         datasetId,
         ctx.workspaceId,
@@ -294,7 +305,7 @@ export class EvalStore {
     expected?: string | null,
     notes?: string | null,
   ): Promise<DatasetExample> {
-    const next = await this.db.get<{ p: unknown }>(
+    const next = await this.q(ctx).get<{ p: unknown }>(
       `SELECT COALESCE(MAX(position), -1) + 1 AS p FROM dataset_examples
         WHERE dataset_id = ? AND workspace_id = ?`,
       [datasetId, ctx.workspaceId],
@@ -308,7 +319,7 @@ export class EvalStore {
       position: asInt(next?.p),
       created_at: nowIso(),
     };
-    await this.db.transaction(async (tx: Queryable) => {
+    await this.db.scoped(ctx.workspaceId, async (tx: Queryable) => {
       await tx.run(
         `INSERT INTO dataset_examples
            (id, workspace_id, dataset_id, input, expected, notes, position, created_at)
@@ -339,14 +350,14 @@ export class EvalStore {
     if (patch.notes !== undefined) { sets.push("notes = ?"); args.push(patch.notes); }
     if (!sets.length) return;
     args.push(exampleId, ctx.workspaceId);
-    await this.db.run(
+    await this.q(ctx).run(
       `UPDATE dataset_examples SET ${sets.join(", ")} WHERE id = ? AND workspace_id = ?`,
       args,
     );
   }
 
   async deleteExample(ctx: TenantContext, exampleId: string): Promise<void> {
-    await this.db.run(`DELETE FROM dataset_examples WHERE id = ? AND workspace_id = ?`, [
+    await this.q(ctx).run(`DELETE FROM dataset_examples WHERE id = ? AND workspace_id = ?`, [
       exampleId,
       ctx.workspaceId,
     ]);
@@ -355,7 +366,7 @@ export class EvalStore {
   /** Whether this exact input is already in the dataset. Promotion uses it to avoid
    *  silently doubling the cost of an eval by adding the same case twice. */
   async hasExampleWithInput(ctx: TenantContext, datasetId: string, input: string): Promise<boolean> {
-    const row = await this.db.get(
+    const row = await this.q(ctx).get(
       `SELECT 1 AS x FROM dataset_examples
         WHERE dataset_id = ? AND workspace_id = ? AND input = ? LIMIT 1`,
       [datasetId, ctx.workspaceId, input],
@@ -367,7 +378,7 @@ export class EvalStore {
    *  one, or a new default. Server-side so promotion stays a single round trip — a client
    *  can't create-then-add without waiting to learn the new id. */
   async defaultDatasetFor(ctx: TenantContext, agentId: string, agentName?: string): Promise<Dataset> {
-    const row = (await this.db.get(
+    const row = (await this.q(ctx).get(
       `SELECT id, agent_id, name, created_at, updated_at FROM datasets
         WHERE agent_id = ? AND workspace_id = ? ORDER BY updated_at DESC LIMIT 1`,
       [agentId, ctx.workspaceId],
@@ -376,7 +387,7 @@ export class EvalStore {
   }
 
   async listExamples(ctx: TenantContext, datasetId: string): Promise<DatasetExample[]> {
-    return (await this.db.all(
+    return (await this.q(ctx).all(
       `SELECT id, dataset_id, input, expected, notes, position, created_at
          FROM dataset_examples WHERE dataset_id = ? AND workspace_id = ? ORDER BY position ASC`,
       [datasetId, ctx.workspaceId],
@@ -384,7 +395,7 @@ export class EvalStore {
   }
 
   async getExample(ctx: TenantContext, exampleId: string): Promise<DatasetExample | undefined> {
-    return (await this.db.get(
+    return (await this.q(ctx).get(
       `SELECT id, dataset_id, input, expected, notes, position, created_at
          FROM dataset_examples WHERE id = ? AND workspace_id = ?`,
       [exampleId, ctx.workspaceId],
@@ -419,7 +430,7 @@ export class EvalStore {
       created_at: existing?.created_at ?? nowIso(),
       updated_at: nowIso(),
     };
-    await this.db.run(
+    await this.q(ctx).run(
       `INSERT INTO rubrics (id, workspace_id, dataset_id, name, criteria, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
@@ -435,7 +446,7 @@ export class EvalStore {
   }
 
   async getRubric(ctx: TenantContext, rubricId: string): Promise<Rubric | undefined> {
-    const row = await this.db.get<Record<string, unknown>>(
+    const row = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT ${RUBRIC_COLUMNS} FROM rubrics WHERE id = ? AND workspace_id = ?`,
       [rubricId, ctx.workspaceId],
     );
@@ -444,7 +455,7 @@ export class EvalStore {
 
   /** The rubric a dataset scores against, if it has customized one. */
   async rubricForDataset(ctx: TenantContext, datasetId: string): Promise<Rubric | undefined> {
-    const row = await this.db.get<Record<string, unknown>>(
+    const row = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT ${RUBRIC_COLUMNS} FROM rubrics
         WHERE dataset_id = ? AND workspace_id = ? ORDER BY updated_at DESC LIMIT 1`,
       [datasetId, ctx.workspaceId],
@@ -463,7 +474,7 @@ export class EvalStore {
     ctx: TenantContext,
     criteria: RubricCriterion[],
   ): Promise<Rubric> {
-    const row = await this.db.get<Record<string, unknown>>(
+    const row = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT ${RUBRIC_COLUMNS} FROM rubrics
         WHERE workspace_id = ? AND dataset_id IS NULL ORDER BY created_at ASC LIMIT 1`,
       [ctx.workspaceId],
@@ -499,7 +510,7 @@ export class EvalStore {
       ended_at: null,
       error: null,
     };
-    await this.db.run(
+    await this.q(ctx).run(
       `INSERT INTO eval_runs (id, workspace_id, dataset_id, agent_id, rubric_id, status,
          targets, budget_usd, judge_cost_usd, started_at, ended_at, error)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, NULL)`,
@@ -518,7 +529,7 @@ export class EvalStore {
     error?: string | null,
   ): Promise<void> {
     const ended = status === "queued" || status === "running" ? null : nowIso();
-    await this.db.run(
+    await this.q(ctx).run(
       `UPDATE eval_runs SET status = ?, ended_at = COALESCE(?, ended_at), error = ?
         WHERE id = ? AND workspace_id = ?`,
       [status, ended, error ?? null, evalId, ctx.workspaceId],
@@ -527,14 +538,14 @@ export class EvalStore {
 
   /** Accumulate judge spend. Separate from any provider's agent cost by design. */
   async addJudgeCost(ctx: TenantContext, evalId: string, usd: number): Promise<void> {
-    await this.db.run(
+    await this.q(ctx).run(
       `UPDATE eval_runs SET judge_cost_usd = judge_cost_usd + ? WHERE id = ? AND workspace_id = ?`,
       [usd, evalId, ctx.workspaceId],
     );
   }
 
   async getEvalRun(ctx: TenantContext, evalId: string): Promise<EvalRun | undefined> {
-    const row = await this.db.get<Record<string, unknown>>(
+    const row = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT ${EVAL_RUN_COLUMNS} FROM eval_runs WHERE id = ? AND workspace_id = ?`,
       [evalId, ctx.workspaceId],
     );
@@ -542,7 +553,7 @@ export class EvalStore {
   }
 
   async listEvalRuns(ctx: TenantContext, limit = 50): Promise<EvalRun[]> {
-    const rows = await this.db.all<Record<string, unknown>>(
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT ${EVAL_RUN_COLUMNS} FROM eval_runs
         WHERE workspace_id = ? ORDER BY started_at DESC LIMIT ?`,
       [ctx.workspaceId, limit],
@@ -560,6 +571,7 @@ export class EvalStore {
    * alongside each row so the caller can scope the writes that follow.
    */
   async unfinishedEvalRuns(_ctx: SystemContext): Promise<(EvalRun & { workspace_id: string })[]> {
+    // Unscoped, so not through `q` — same administrative-connection note as the sweeper's.
     return (await this.db.all<Record<string, unknown>>(
       `SELECT ${EVAL_RUN_COLUMNS}, workspace_id FROM eval_runs WHERE status IN ('queued', 'running')`,
     )).map((r) => ({
@@ -596,7 +608,7 @@ export class EvalStore {
     jobs: { example_id: string; provider: string; model: string }[],
   ): Promise<EvalJob[]> {
     const out: EvalJob[] = [];
-    await this.db.transaction(async (tx: Queryable) => {
+    await this.db.scoped(ctx.workspaceId, async (tx: Queryable) => {
       let position = 0;
       for (const j of jobs) {
         const id = randomUUID();
@@ -623,7 +635,7 @@ export class EvalStore {
     runId: string,
     attempt: number,
   ): Promise<void> {
-    await this.db.run(
+    await this.q(ctx).run(
       `UPDATE eval_jobs SET status = 'running', run_id = ?, attempt = ?, started_at = ?
         WHERE id = ? AND workspace_id = ?`,
       [runId, attempt, nowIso(), jobId, ctx.workspaceId],
@@ -649,7 +661,7 @@ export class EvalStore {
       error?: string | null;
     } = {},
   ): Promise<void> {
-    await this.db.run(
+    await this.q(ctx).run(
       `UPDATE eval_jobs SET status = ?, cost_usd = ?, spent_usd = COALESCE(spent_usd, 0) + ?,
          tokens = ?, latency_ms = ?, cost_complete = ?, error = ?, ended_at = ?
         WHERE id = ? AND workspace_id = ?`,
@@ -672,7 +684,7 @@ export class EvalStore {
    *  pool refuses a dispatch the caps said should fit — the work is still owed, and
    *  leaving the row in 'running' would strand it. */
   async requeueJob(ctx: TenantContext, jobId: string): Promise<void> {
-    await this.db.run(
+    await this.q(ctx).run(
       `UPDATE eval_jobs SET status = 'queued', run_id = NULL, started_at = NULL
         WHERE id = ? AND workspace_id = ?`,
       [jobId, ctx.workspaceId],
@@ -692,7 +704,7 @@ export class EvalStore {
     attempt: number,
     notBefore: Date,
   ): Promise<void> {
-    await this.db.run(
+    await this.q(ctx).run(
       `UPDATE eval_jobs SET status = 'queued', attempt = ?, retry_not_before = ?,
          run_id = NULL, started_at = NULL, ended_at = NULL WHERE id = ? AND workspace_id = ?`,
       [attempt, notBefore.toISOString(), jobId, ctx.workspaceId],
@@ -701,7 +713,7 @@ export class EvalStore {
 
   /** Cancel everything still queued — how a budget abort stops the bleeding. */
   async cancelQueuedJobs(ctx: TenantContext, evalId: string, reason: string): Promise<number> {
-    const res = await this.db.run(
+    const res = await this.q(ctx).run(
       `UPDATE eval_jobs SET status = 'cancelled', error = ?, ended_at = ?
         WHERE eval_id = ? AND workspace_id = ? AND status = 'queued'`,
       [reason, nowIso(), evalId, ctx.workspaceId],
@@ -710,7 +722,7 @@ export class EvalStore {
   }
 
   async jobsForEval(ctx: TenantContext, evalId: string): Promise<EvalJob[]> {
-    return (await this.db.all(
+    return (await this.q(ctx).all(
       `SELECT ${EVAL_JOB_COLUMNS} FROM eval_jobs
         WHERE eval_id = ? AND workspace_id = ? ORDER BY position ASC, id ASC`,
       [evalId, ctx.workspaceId],
@@ -718,7 +730,7 @@ export class EvalStore {
   }
 
   async getJob(ctx: TenantContext, jobId: string): Promise<EvalJob | undefined> {
-    return (await this.db.get(
+    return (await this.q(ctx).get(
       `SELECT ${EVAL_JOB_COLUMNS} FROM eval_jobs WHERE id = ? AND workspace_id = ?`,
       [jobId, ctx.workspaceId],
     )) as EvalJob | undefined;
@@ -726,7 +738,7 @@ export class EvalStore {
 
   /** The eval job a trace run belongs to, if any. Lets run events be routed correctly. */
   async jobForRun(ctx: TenantContext, runId: string): Promise<EvalJob | undefined> {
-    return (await this.db.get(
+    return (await this.q(ctx).get(
       `SELECT ${EVAL_JOB_COLUMNS} FROM eval_jobs WHERE run_id = ? AND workspace_id = ?`,
       [runId, ctx.workspaceId],
     )) as EvalJob | undefined;
@@ -741,12 +753,12 @@ export class EvalStore {
    */
   async trueSpend(ctx: TenantContext, evalId: string): Promise<number> {
     // spent_usd, not cost_usd: the cumulative column is the one that survives retries.
-    const jobs = await this.db.get<{ c: number | null }>(
+    const jobs = await this.q(ctx).get<{ c: number | null }>(
       `SELECT COALESCE(SUM(spent_usd), 0) AS c FROM eval_jobs
         WHERE eval_id = ? AND workspace_id = ?`,
       [evalId, ctx.workspaceId],
     );
-    const run = await this.db.get<{ j: number | null }>(
+    const run = await this.q(ctx).get<{ j: number | null }>(
       `SELECT COALESCE(judge_cost_usd, 0) AS j FROM eval_runs WHERE id = ? AND workspace_id = ?`,
       [evalId, ctx.workspaceId],
     );
@@ -765,7 +777,7 @@ export class EvalStore {
     judge_cost_usd?: number | null;
     error?: string | null;
   }): Promise<void> {
-    await this.db.run(
+    await this.q(ctx).run(
       `INSERT INTO eval_scores (id, workspace_id, job_id, score, per_criterion, rationale,
          judge_model, judge_cost_usd, error, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -784,7 +796,7 @@ export class EvalStore {
   }
 
   async scoresForEval(ctx: TenantContext, evalId: string): Promise<EvalScore[]> {
-    const rows = await this.db.all<Record<string, unknown>>(
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT ${EVAL_SCORE_COLUMNS.split(",").map((c) => `s.${c.trim()}`).join(", ")}
          FROM eval_scores s JOIN eval_jobs j ON j.id = s.job_id AND j.workspace_id = s.workspace_id
         WHERE j.eval_id = ? AND s.workspace_id = ?`,

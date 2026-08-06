@@ -127,10 +127,31 @@ export async function migrate(
   const migrations = loadMigrations(dir);
 
   return target.withLock(async () => {
-    await target.exec(BOOKKEEPING);
-    const rows = await target.all<{ version: number | bigint; name: string; checksum: string }>(
-      `SELECT version, name, checksum FROM schema_migrations ORDER BY version`,
-    );
+    // Read before write.
+    //
+    // A production connection is the APPLICATION role, which by design cannot create or
+    // alter tables — that is what makes RLS a backstop rather than a suggestion. But a
+    // correctly-migrated database still has to boot on it, so a database that is already
+    // current must not need a single DDL statement to find that out. So: try to read the
+    // bookkeeping table; only create it if reading said it is not there.
+    let rows: { version: number | bigint; name: string; checksum: string }[];
+    try {
+      rows = await target.all(`SELECT version, name, checksum FROM schema_migrations ORDER BY version`);
+    } catch {
+      // Either it does not exist yet, or this connection cannot read it. Creating it answers
+      // both — and fails with the privilege error below if it is the second.
+      try {
+        await target.exec(BOOKKEEPING);
+      } catch (err) {
+        throw new Error(
+          `[migrate] this connection cannot create schema_migrations — ` +
+            `${(err as Error)?.message ?? String(err)}. Migrations run as the database OWNER; ` +
+            `run \`npm run migrate\` with an owner connection before starting the server.`,
+          { cause: err },
+        );
+      }
+      rows = await target.all(`SELECT version, name, checksum FROM schema_migrations ORDER BY version`);
+    }
     const applied = new Map(rows.map((r) => [Number(r.version), r]));
 
     // A file that changed after it ran. Every migration numbered above it was written
@@ -166,6 +187,10 @@ export async function migrate(
     }
 
     const done: Migration[] = [];
+    // Everything below writes. If this connection is not allowed to, say which migrations are
+    // owed and who has to apply them — a raw "permission denied for schema public" at boot
+    // tells a deployer nothing about what is actually wrong.
+    const owed = (): string => pending.map((m) => `${label(m)}.sql`).join(", ");
     for (const m of pending) {
       log(`[migrate] applying ${label(m)}`);
       await target.exec("BEGIN");
@@ -180,9 +205,16 @@ export async function migrate(
         // Best-effort: the transaction may already be aborted, and the original error is
         // the one worth raising.
         await target.exec("ROLLBACK").catch(() => {});
-        throw new Error(`[migrate] ${label(m)} failed: ${(err as Error)?.message ?? String(err)}`, {
-          cause: err,
-        });
+        const message = (err as Error)?.message ?? String(err);
+        if (/permission denied|must be owner/i.test(message)) {
+          throw new Error(
+            `[migrate] this connection cannot apply migrations (${message}). ` +
+              `${pending.length} pending: ${owed()}. Migrations run as the database OWNER — ` +
+              `run \`npm run migrate\` with an owner connection before starting the server.`,
+            { cause: err },
+          );
+        }
+        throw new Error(`[migrate] ${label(m)} failed: ${message}`, { cause: err });
       }
       done.push(m);
     }

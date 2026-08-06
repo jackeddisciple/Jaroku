@@ -175,6 +175,17 @@ export class DeployStore {
     return true;
   }
 
+  /**
+   * The database, scoped to a request's workspace.
+   *
+   * Every read and write in this class goes through it, so on Postgres each statement carries
+   * the SET LOCAL the RLS policies read. On SQLite it is the connection itself — no RLS to
+   * scope — which is why the substitution is uniform and costs that driver nothing.
+   */
+  private q(ctx: TenantContext): Queryable {
+    return this.db.forWorkspace(ctx.workspaceId);
+  }
+
   private hydrate(row: Record<string, unknown>): Deployment {
     // SQLite stores TEXT and Postgres `json`; jsonFromColumn is told which. A row whose
     // env_keys cannot be read still describes a real deployment, so it is shown with none
@@ -215,7 +226,7 @@ export class DeployStore {
     // The sequence read and the insert are one transaction: two deploys started together
     // would otherwise read the same maximum and claim the same position, which is exactly
     // the tie `created_seq` exists to break.
-    await this.db.transaction(async (tx: Queryable) => {
+    await this.db.scoped(ctx.workspaceId, async (tx: Queryable) => {
       const top = await tx.get<{ n: unknown }>(
         `SELECT COALESCE(MAX(created_seq), 0) AS n FROM deployments WHERE workspace_id = ?`,
         [ctx.workspaceId],
@@ -269,7 +280,7 @@ export class DeployStore {
     }
 
     values.push(id, ctx.workspaceId);
-    await this.db.run(
+    await this.q(ctx).run(
       `UPDATE deployments SET ${sets.join(", ")} WHERE id = ? AND workspace_id = ?`,
       values,
     );
@@ -292,7 +303,7 @@ export class DeployStore {
   ): Promise<number> {
     // Read-then-insert in one transaction: build output arrives in bursts and two lines
     // racing for the same seq would collide on the (deployment_id, seq) primary key.
-    return this.db.transaction(async (tx: Queryable) => {
+    return this.db.scoped(ctx.workspaceId, async (tx: Queryable) => {
       const row = await tx.get<{ max_seq: unknown }>(
         "SELECT MAX(seq) AS max_seq FROM deployment_logs WHERE deployment_id = ? AND workspace_id = ?",
         [deploymentId, ctx.workspaceId],
@@ -331,6 +342,8 @@ export class DeployStore {
    * comes back with each row so the write that follows is scoped again.
    */
   async reconcileInterrupted(ctx: SystemContext): Promise<Deployment[]> {
+    // Unscoped on purpose — see the note on finishedEvalRunsAcrossWorkspaces. A restart
+    // settles every workspace's in-flight deploys, which the app role cannot see under RLS.
     const stale = await this.db.all<Record<string, unknown>>(
       `SELECT ${DEPLOY_COLUMNS}, workspace_id FROM deployments
         WHERE status IN (${[...IN_FLIGHT].map(() => "?").join(",")})`,
@@ -350,7 +363,7 @@ export class DeployStore {
   // --- reads ---
 
   async get(ctx: TenantContext, id: string): Promise<Deployment | null> {
-    const row = await this.db.get<Record<string, unknown>>(
+    const row = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT ${DEPLOY_COLUMNS} FROM deployments WHERE id = ? AND workspace_id = ?`,
       [id, ctx.workspaceId],
     );
@@ -371,7 +384,7 @@ export class DeployStore {
    * borrowed from one storage engine's internals.
    */
   async list(ctx: TenantContext): Promise<Deployment[]> {
-    const rows = await this.db.all<Record<string, unknown>>(
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT ${DEPLOY_COLUMNS} FROM deployments
         WHERE workspace_id = ? AND status != 'removed'
         ORDER BY created_at DESC, created_seq DESC`,
@@ -448,7 +461,7 @@ export class DeployStore {
   }
 
   async logs(ctx: TenantContext, deploymentId: string, sinceSeq = -1): Promise<DeployLogLine[]> {
-    return (await this.db.all(
+    return (await this.q(ctx).all(
       `SELECT deployment_id, seq, ts, stage, stream, text FROM deployment_logs
         WHERE deployment_id = ? AND workspace_id = ? AND seq > ?
         ORDER BY seq ASC`,

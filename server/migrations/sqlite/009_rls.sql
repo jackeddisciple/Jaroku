@@ -1,0 +1,11 @@
+-- 009_rls — nothing to do on SQLite, and the gap is worth naming rather than hiding.
+--
+-- SQLite has no row-level security and no roles. There is no second wall on this driver: the
+-- repository layer is the whole of the enforcement, which is why every method takes a
+-- TenantContext as a parameter you cannot omit rather than a filter you must remember, and
+-- why npm run test:tenancy runs here too.
+--
+-- That is an acceptable difference because of what this driver is for. SQLite is the local
+-- development path — one person, one machine, one workspace — and the threat RLS defends
+-- against is a query written months from now that forgets its scope in a database holding six
+-- thousand tenants. Hosted is Postgres, and hosted is where the backstop exists.

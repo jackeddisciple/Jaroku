@@ -72,6 +72,17 @@ export class TraceStore {
     }
   }
 
+  /**
+   * The database, scoped to a request's workspace.
+   *
+   * Every read and write in this class goes through it, so on Postgres each statement carries
+   * the SET LOCAL the RLS policies read. On SQLite it is the connection itself — no RLS to
+   * scope — which is why the substitution is uniform and costs that driver nothing.
+   */
+  private q(ctx: TenantContext): Queryable {
+    return this.db.forWorkspace(ctx.workspaceId);
+  }
+
   private static j(v: unknown): string | null {
     if (v === null || v === undefined) return null;
     return JSON.stringify(v);
@@ -104,7 +115,7 @@ export class TraceStore {
   // Not redundant: a run id is a uuid a client can send back, and without the scope a
   // `run_end` naming another workspace's run would overwrite its status and its cost.
   async upsertRun(ctx: TenantContext, run: Run): Promise<void> {
-    await this.db.run(
+    await this.q(ctx).run(
       `INSERT INTO runs (id, workspace_id, agent_id, provider, model, status, started_at,
                          ended_at, cost, tokens, error)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -124,7 +135,7 @@ export class TraceStore {
   // spelling both dialects understand. A step arriving twice — a resumed segment replaying
   // its boundary, an at-least-once ingest — must be ignored, never duplicated.
   async insertStep(ctx: TenantContext, step: Step): Promise<void> {
-    await this.db.run(
+    await this.q(ctx).run(
       `INSERT INTO steps
          (id, workspace_id, run_id, seq, type, name, input, output, state_before, state_after,
           tokens, cost, latency_ms, error, parent_step_id, started_at)
@@ -141,7 +152,7 @@ export class TraceStore {
   }
 
   async listRuns(ctx: TenantContext, limit = 50): Promise<RunSummary[]> {
-    const rows = await this.db.all<Record<string, unknown>>(
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT ${cols(RUN_COLUMNS, "r")},
               (SELECT COUNT(*) FROM steps s
                 WHERE s.run_id = r.id AND s.workspace_id = r.workspace_id) AS step_count
@@ -155,7 +166,7 @@ export class TraceStore {
   }
 
   async getRun(ctx: TenantContext, runId: string): Promise<Run | undefined> {
-    return (await this.db.get<Record<string, unknown>>(
+    return (await this.q(ctx).get<Record<string, unknown>>(
       `SELECT ${cols(RUN_COLUMNS)} FROM runs WHERE id = ? AND workspace_id = ?`,
       [runId, ctx.workspaceId],
     )) as Run | undefined;
@@ -164,7 +175,7 @@ export class TraceStore {
   // Store-only status flip (e.g. 'running' -> 'paused' when a run halts at a boundary, or back to
   // 'running' on resume). NOT a frozen-event change — no run_end/run_start is emitted for a pause.
   async setRunStatus(ctx: TenantContext, runId: string, status: string): Promise<void> {
-    await this.db.run(`UPDATE runs SET status = ? WHERE id = ? AND workspace_id = ?`, [
+    await this.q(ctx).run(`UPDATE runs SET status = ? WHERE id = ? AND workspace_id = ?`, [
       status,
       runId,
       ctx.workspaceId,
@@ -173,7 +184,7 @@ export class TraceStore {
 
   // The run's current highest seq — the offset a resumed subprocess continues its timeline from.
   async maxSeqForRun(ctx: TenantContext, runId: string): Promise<number> {
-    const row = await this.db.get<{ m: unknown }>(
+    const row = await this.q(ctx).get<{ m: unknown }>(
       `SELECT MAX(seq) AS m FROM steps WHERE run_id = ? AND workspace_id = ?`,
       [runId, ctx.workspaceId],
     );
@@ -188,7 +199,7 @@ export class TraceStore {
     uptoSeq: number,
     checkpointId: string,
   ): Promise<void> {
-    await this.db.run(
+    await this.q(ctx).run(
       `UPDATE steps SET checkpoint_id = ?
         WHERE run_id = ? AND workspace_id = ? AND seq <= ? AND checkpoint_id IS NULL`,
       [checkpointId, runId, ctx.workspaceId, uptoSeq],
@@ -203,12 +214,12 @@ export class TraceStore {
     runId: string,
     seq: number,
   ): Promise<{ checkpointId: string; seqHigh: number } | null> {
-    const row = await this.db.get<{ checkpoint_id: string | null }>(
+    const row = await this.q(ctx).get<{ checkpoint_id: string | null }>(
       `SELECT checkpoint_id FROM steps WHERE run_id = ? AND workspace_id = ? AND seq = ?`,
       [runId, ctx.workspaceId, seq],
     );
     if (!row?.checkpoint_id) return null;
-    const hi = await this.db.get<{ m: unknown }>(
+    const hi = await this.q(ctx).get<{ m: unknown }>(
       `SELECT MAX(seq) AS m FROM steps WHERE run_id = ? AND workspace_id = ? AND checkpoint_id = ?`,
       [runId, ctx.workspaceId, row.checkpoint_id],
     );
@@ -237,7 +248,7 @@ export class TraceStore {
     uptoSeq: number,
     branchFromSeq: number,
   ): Promise<void> {
-    await this.db.transaction(async (tx: Queryable) => {
+    await this.db.scoped(ctx.workspaceId, async (tx: Queryable) => {
       const parent = await tx.get<Record<string, unknown>>(
         `SELECT ${cols(RUN_COLUMNS)} FROM runs WHERE id = ? AND workspace_id = ?`,
         [parentRunId, ctx.workspaceId],
@@ -294,7 +305,7 @@ export class TraceStore {
   }
 
   async stepsForRun(ctx: TenantContext, runId: string): Promise<Step[]> {
-    const rows = await this.db.all<Record<string, unknown>>(
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT ${cols(STEP_COLUMNS)} FROM steps
         WHERE run_id = ? AND workspace_id = ? ORDER BY seq ASC`,
       [runId, ctx.workspaceId],
