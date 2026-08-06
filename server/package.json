@@ -14,6 +14,7 @@
     "test:db": "tsx src/db/sqlite.test.ts",
     "test:db-postgres": "tsx src/db/postgres.test.ts",
     "test:shape-parity": "tsx src/db/shapeParity.test.ts",
+    "test:payloads": "tsx src/db/payloads.test.ts",
     "test:identity": "tsx src/db/repositories/identity.test.ts",
     "test:trace": "tsx src/store.test.ts",
     "test:rls": "tsx src/db/rls.test.ts",

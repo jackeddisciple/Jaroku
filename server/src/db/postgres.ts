@@ -11,6 +11,7 @@
 // SQLite one. It stays behind this file: nothing outside `server/src/db/` imports it.
 
 import pgPkg from "pg";
+import { stripNul } from "./db.ts";
 import type { Db, DbRow, Dialect, Tx, WriteResult } from "./db.ts";
 import type { MigrationTarget } from "./migrate.ts";
 
@@ -128,18 +129,21 @@ export function toPositional(sql: string): string {
   return out;
 }
 
+/** Postgres cannot store a NUL in any column type. See stripNul. */
+const bind = (params: readonly unknown[]): unknown[] => params.map(stripNul);
+
 /** A `Queryable` bound to one client — what a transaction hands its callback. */
 function queryable(client: PoolClient): Tx {
   return {
     dialect: DIALECT,
     async all<T = DbRow>(sql: string, params: readonly unknown[] = []): Promise<T[]> {
-      return (await client.query(toPositional(sql), [...params])).rows as T[];
+      return (await client.query(toPositional(sql), bind(params))).rows as T[];
     },
     async get<T = DbRow>(sql: string, params: readonly unknown[] = []): Promise<T | undefined> {
-      return (await client.query(toPositional(sql), [...params])).rows[0] as T | undefined;
+      return (await client.query(toPositional(sql), bind(params))).rows[0] as T | undefined;
     },
     async run(sql: string, params: readonly unknown[] = []): Promise<WriteResult> {
-      const r = await client.query(toPositional(sql), [...params]);
+      const r = await client.query(toPositional(sql), bind(params));
       return { changes: r.rowCount ?? 0 };
     },
     async exec(sql: string): Promise<void> {
@@ -181,15 +185,15 @@ export class PostgresDb implements Db {
   }
 
   async all<T = DbRow>(sql: string, params: readonly unknown[] = []): Promise<T[]> {
-    return (await this.pool.query(toPositional(sql), [...params])).rows as T[];
+    return (await this.pool.query(toPositional(sql), bind(params))).rows as T[];
   }
 
   async get<T = DbRow>(sql: string, params: readonly unknown[] = []): Promise<T | undefined> {
-    return (await this.pool.query(toPositional(sql), [...params])).rows[0] as T | undefined;
+    return (await this.pool.query(toPositional(sql), bind(params))).rows[0] as T | undefined;
   }
 
   async run(sql: string, params: readonly unknown[] = []): Promise<WriteResult> {
-    const r = await this.pool.query(toPositional(sql), [...params]);
+    const r = await this.pool.query(toPositional(sql), bind(params));
     return { changes: r.rowCount ?? 0 };
   }
 

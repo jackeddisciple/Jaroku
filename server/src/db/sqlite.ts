@@ -13,6 +13,7 @@
 // real async function and can therefore be suspended halfway — see below.
 
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { stripNul } from "./db.ts";
 import type { Db, DbRow, Dialect, Tx, WriteResult } from "./db.ts";
 import type { MigrationTarget } from "./migrate.ts";
 
@@ -20,7 +21,10 @@ const DIALECT: Dialect = "sqlite";
 
 /** node:sqlite binds a narrow set of JS values. Anything else is a caller bug, loudly. */
 function bind(params: readonly unknown[]): SQLInputValue[] {
-  return params.map((p) => {
+  return params.map((raw) => {
+    // Stripped here too, though SQLite would take it: the drivers have to agree, or a trace
+    // written locally and one written hosted differ by a character nobody can see.
+    const p = stripNul(raw);
     if (p === null || p === undefined) return null;
     if (typeof p === "string" || typeof p === "number" || typeof p === "bigint") return p;
     if (typeof p === "boolean") return p ? 1 : 0; // SQLite has no boolean; Postgres does.

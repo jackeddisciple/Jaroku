@@ -158,3 +158,24 @@ export function jsonFromColumn(dialect: Dialect, v: unknown): unknown {
     return v; // Not JSON (shouldn't happen) — hand back the raw text rather than throw.
   }
 }
+
+/**
+ * Remove NUL characters from a value on its way into the database.
+ *
+ * Postgres cannot store one. Not in `text`, not in `json` — the encoding has no room for it,
+ * and the driver fails the whole statement with `invalid byte sequence for encoding "UTF8":
+ * 0x00`. SQLite stores it without comment.
+ *
+ * That difference is not academic. `steps.error` holds a Python exception message, and a tool
+ * that reads a file, decodes a protocol or touches binary data raises with the bytes in the
+ * message. On SQLite the step is recorded; on Postgres the INSERT fails, the ingest logs a
+ * persist failure, and the trace silently loses a step — the ERROR step, which is the one the
+ * user came to look at.
+ *
+ * So it is stripped at the boundary, on both drivers, so they agree. Losing one unprintable
+ * character from a message is a smaller lie than losing the step that carried it, and there is
+ * no column in this schema where a NUL means anything.
+ */
+export function stripNul(v: unknown): unknown {
+  return typeof v === "string" && v.includes("\u0000") ? v.replaceAll("\u0000", "") : v;
+}
