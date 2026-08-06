@@ -329,7 +329,7 @@ const relay = new WsRelay({
   },
   listAgentFiles: agentProjectFiles,
   getAgentGraph: agentGraph,
-  listMcpServers: () => mcpRegistry.list(),
+  listMcpServers: () => mcpRegistry.list(serverContext()),
   // By name only. The client learns THAT a key is set, never what it is.
   listProviders: () => providerStatus(),
   // Same: env_keys are names, railwayConfigured is a boolean. No value crosses this.
@@ -470,12 +470,13 @@ function clearConfirms(runId: string, reason: string, nonce?: string): void {
 
 function broadcastMcpServers(): void {
   void mcpRegistry
-    .list()
+    .list(serverContext())
     .then((servers) => relay.broadcastMcp({ type: "servers", servers }))
     .catch((err) => console.error("[mcp] snapshot failed:", (err as Error).message));
 }
 
 async function handleMcpCommand(cmd: McpCommand): Promise<void> {
+  const ctx = serverContext();
   try {
     switch (cmd.cmd) {
       case "addMcpServer": {
@@ -486,7 +487,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         // A handshake against someone else's server takes as long as it takes. Saying so
         // is the difference between "connecting" and "the button did nothing".
         relay.broadcastMcp({ type: "discovering", serverId: null, endpoint: cmd.endpoint });
-        const added = await mcpRegistry.addServer({
+        const added = await mcpRegistry.addServer(ctx, {
           endpoint: cmd.endpoint,
           label: cmd.label,
           token: cmd.token,
@@ -510,9 +511,9 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         relay.broadcastMcp({
           type: "discovering",
           serverId: cmd.serverId,
-          endpoint: (await mcpRegistry.get(cmd.serverId))?.endpoint ?? "",
+          endpoint: (await mcpRegistry.get(ctx, cmd.serverId))?.endpoint ?? "",
         });
-        const res = await mcpRegistry.rediscover(cmd.serverId);
+        const res = await mcpRegistry.rediscover(ctx, cmd.serverId);
         console.log(
           `[mcp] rediscover ${cmd.serverId} — ${res.ok ? `${res.server?.tools.length ?? 0} tool(s)` : `failed: ${res.server?.status ?? "unknown"}`}`,
         );
@@ -527,7 +528,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
 
       case "removeMcpServer": {
         if (typeof cmd.serverId !== "string") return;
-        const removed = await mcpRegistry.removeServer(cmd.serverId);
+        const removed = await mcpRegistry.removeServer(ctx, cmd.serverId);
         if (removed) console.log(`[mcp] removed ${cmd.serverId}`);
         broadcastMcpServers();
         if (!removed) {
@@ -560,7 +561,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
       case "setMcpServerAuth": {
         if (typeof cmd.serverId !== "string") return;
         const token = typeof cmd.token === "string" && cmd.token.length ? cmd.token : null;
-        const { result, warning } = await mcpRegistry.setCredential(cmd.serverId, token);
+        const { result, warning } = await mcpRegistry.setCredential(ctx, cmd.serverId, token);
         if (!result.ok) {
           relay.broadcastMcp({ type: "error", message: result.message ?? "could not store the credential", serverId: cmd.serverId });
           return;
@@ -570,7 +571,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         // A stored credential is only useful if it works, so prove it immediately rather
         // than leaving the server sitting in auth_required until someone clicks refresh.
         relay.broadcastMcp({ type: "discovering", serverId: cmd.serverId, endpoint: result.server?.endpoint ?? "" });
-        const retried = await mcpRegistry.rediscover(cmd.serverId);
+        const retried = await mcpRegistry.rediscover(ctx, cmd.serverId);
         broadcastMcpServers();
         if (warning) relay.broadcastMcp({ type: "notice", message: warning, serverId: cmd.serverId });
         if (!retried.ok && retried.message) {
@@ -582,7 +583,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
       case "setMcpToolImpact": {
         if (typeof cmd.serverId !== "string" || typeof cmd.toolName !== "string") return;
         const impact = cmd.impact === "high" || cmd.impact === "low" ? cmd.impact : null;
-        const updated = await mcpRegistry.setToolImpact(cmd.serverId, cmd.toolName, impact);
+        const updated = await mcpRegistry.setToolImpact(ctx, cmd.serverId, cmd.toolName, impact);
         if (!updated) {
           relay.broadcastMcp({
             type: "error",
@@ -1252,7 +1253,7 @@ async function planAgent(cmd: PlanAgentCommand): Promise<void> {
     // Resolved here rather than in the planner, so the planner keeps its single dependency
     // on the connector catalogue. Refs naming a server or tool that has since gone away
     // resolve to nothing rather than to a guess — the same posture as resolveSelected.
-    mcpTools: await mcpRegistry.resolve(cmd.mcpTools ?? []),
+    mcpTools: await mcpRegistry.resolve(serverContext(), cmd.mcpTools ?? []),
     name: cmd.name,
     revisePlanId: cmd.revisePlanId,
   });
@@ -1326,7 +1327,7 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
     // approved produces an agent that silently cannot do what its plan promised.
     const approvedRefs = rec.mcpTools ?? [];
     const stillThere = new Set(
-      (await mcpRegistry.resolve(approvedRefs)).map((t) => `${t.server_id}/${t.name}`),
+      (await mcpRegistry.resolve(serverContext(), approvedRefs)).map((t) => `${t.server_id}/${t.name}`),
     );
     const goneMcp = approvedRefs.filter((r) => !stillThere.has(r));
     if (goneMcp.length) {
@@ -1396,8 +1397,9 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
 
   // Resolved fresh at build time, so the manifest carries the schemas and impact ratings as
   // they stand now rather than as they stood when the plan was written.
-  const mcpTools = await mcpRegistry.resolve(mcpRefs);
-  const mcpServers = await mcpRegistry.list();
+  const genCtx = serverContext();
+  const mcpTools = await mcpRegistry.resolve(genCtx, mcpRefs);
+  const mcpServers = await mcpRegistry.list(genCtx);
   void generator.generate({
     runtimeDir: RUNTIME_DIR, prompt, connectors, mcpTools, mcpServers, name, plan, planUsage,
   });

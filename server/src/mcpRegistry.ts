@@ -22,6 +22,7 @@
 
 import { discover, type DiscoveryResult } from "./mcpClient.ts";
 import { authEnvKeyFor, type CredentialWriter } from "./envWriter.ts";
+import type { TenantContext } from "./db/tenant.ts";
 import { classify } from "./mcpImpact.ts";
 import {
   McpStore,
@@ -92,11 +93,11 @@ export function slugifyServerId(input: string): string {
   return slug;
 }
 
-async function uniqueServerId(store: McpStore, base: string): Promise<string> {
-  if (!(await store.getServer(base))) return base;
+async function uniqueServerId(ctx: TenantContext, store: McpStore, base: string): Promise<string> {
+  if (!(await store.getServer(ctx, base))) return base;
   for (let n = 2; n < 1000; n++) {
     const candidate = `${base.slice(0, 28)}_${n}`;
-    if (!(await store.getServer(candidate))) return candidate;
+    if (!(await store.getServer(ctx, candidate))) return candidate;
   }
   return `${base.slice(0, 24)}_${Date.now() % 100000}`;
 }
@@ -168,8 +169,8 @@ export class McpRegistry {
     };
   }
 
-  async view(server: McpServer): Promise<McpServerView> {
-    const tools = await this.store.listTools(server.id);
+  async view(ctx: TenantContext, server: McpServer): Promise<McpServerView> {
+    const tools = await this.store.listTools(ctx, server.id);
     return {
       ...server,
       configured: this.configured(server),
@@ -177,26 +178,26 @@ export class McpRegistry {
     };
   }
 
-  async list(): Promise<McpServerView[]> {
-    const servers = await this.store.listServers();
+  async list(ctx: TenantContext): Promise<McpServerView[]> {
+    const servers = await this.store.listServers(ctx);
     const out: McpServerView[] = [];
-    for (const s of servers) out.push(await this.view(s));
+    for (const s of servers) out.push(await this.view(ctx, s));
     return out;
   }
 
-  async get(id: string): Promise<McpServerView | null> {
-    const server = await this.store.getServer(id);
-    return server ? this.view(server) : null;
+  async get(ctx: TenantContext, id: string): Promise<McpServerView | null> {
+    const server = await this.store.getServer(ctx, id);
+    return server ? this.view(ctx, server) : null;
   }
 
   /** Every discovered tool across every server, for the selection UI and the prompt. */
-  async allTools(): Promise<McpToolView[]> {
-    return (await this.store.listTools()).map((t) => this.viewTool(t));
+  async allTools(ctx: TenantContext): Promise<McpToolView[]> {
+    return (await this.store.listTools(ctx)).map((t) => this.viewTool(t));
   }
 
   /** Resolve `"server/tool"` refs, dropping any that no longer exist. Least privilege. */
-  async resolve(refs: string[]): Promise<McpToolView[]> {
-    return (await this.store.resolveTools(refs)).map((t) => this.viewTool(t));
+  async resolve(ctx: TenantContext, refs: string[]): Promise<McpToolView[]> {
+    return (await this.store.resolveTools(ctx, refs)).map((t) => this.viewTool(t));
   }
 
   // --- writes ----------------------------------------------------------------
@@ -208,7 +209,7 @@ export class McpRegistry {
    * work" is a state the user needs to see and retry from — losing the endpoint they typed
    * and making them type it again would be worse than an honest error row.
    */
-  async addServer(opts: AddServerOptions): Promise<RegistrationResult> {
+  async addServer(ctx: TenantContext, opts: AddServerOptions): Promise<RegistrationResult> {
     const endpoint = opts.endpoint.trim();
     if (!endpoint) return { ok: false, server: null, message: "an endpoint is required" };
 
@@ -220,10 +221,10 @@ export class McpRegistry {
         message: `"${requested}" is not a usable server id — lowercase letters, digits and underscores, starting with a letter`,
       };
     }
-    if (opts.id && (await this.store.getServer(opts.id))) {
+    if (opts.id && (await this.store.getServer(ctx, opts.id))) {
       return { ok: false, server: null, message: `a server called "${opts.id}" is already connected` };
     }
-    const id = opts.id ?? (await uniqueServerId(this.store, requested));
+    const id = opts.id ?? (await uniqueServerId(ctx, this.store, requested));
     const label = opts.label?.trim() || id;
 
     // A token the user just typed is written to runtime/.env under a derived name, then
@@ -256,7 +257,7 @@ export class McpRegistry {
     };
 
     if (!result.ok) {
-      await this.store.upsertServer({
+      await this.store.upsertServer(ctx, {
         ...base,
         server_name: null,
         server_version: null,
@@ -265,10 +266,10 @@ export class McpRegistry {
         last_error: result.error,
         discovered_at: null,
       });
-      return { ok: false, server: await this.get(id), message: joinMessages(credentialWarning, result.error) };
+      return { ok: false, server: await this.get(ctx, id), message: joinMessages(credentialWarning, result.error) };
     }
 
-    await this.store.upsertServer({
+    await this.store.upsertServer(ctx, {
       ...base,
       server_name: result.server_name,
       server_version: result.server_version,
@@ -277,11 +278,11 @@ export class McpRegistry {
       last_error: null,
       discovered_at: null, // set by replaceTools, so the timestamp matches the list it stamps
     });
-    await this.store.replaceTools(id, this.classifyAll(result));
+    await this.store.replaceTools(ctx, id, this.classifyAll(result));
 
     return {
       ok: true,
-      server: await this.get(id),
+      server: await this.get(ctx, id),
       message: joinMessages(credentialWarning, truncationNote(result)),
     };
   }
@@ -293,18 +294,18 @@ export class McpRegistry {
    * that is briefly unreachable must not silently strip every agent scoped to it; "the
    * tools vanished" is a much worse failure than a status line saying unreachable.
    */
-  async rediscover(id: string): Promise<RegistrationResult> {
-    const server = await this.store.getServer(id);
+  async rediscover(ctx: TenantContext, id: string): Promise<RegistrationResult> {
+    const server = await this.store.getServer(ctx, id);
     if (!server) return { ok: false, server: null, message: `no server called "${id}"` };
 
     const result = await discover({ endpoint: server.endpoint, token: this.token(server) });
 
     if (!result.ok) {
-      await this.store.setServerStatus(id, result.status, result.error);
-      return { ok: false, server: await this.get(id), message: result.error };
+      await this.store.setServerStatus(ctx, id, result.status, result.error);
+      return { ok: false, server: await this.get(ctx, id), message: result.error };
     }
 
-    await this.store.upsertServer({
+    await this.store.upsertServer(ctx, {
       ...server,
       server_name: result.server_name,
       server_version: result.server_version,
@@ -312,23 +313,24 @@ export class McpRegistry {
       status: "connected",
       last_error: null,
     });
-    await this.store.replaceTools(id, this.classifyAll(result));
-    return { ok: true, server: await this.get(id), message: truncationNote(result) };
+    await this.store.replaceTools(ctx, id, this.classifyAll(result));
+    return { ok: true, server: await this.get(ctx, id), message: truncationNote(result) };
   }
 
-  async removeServer(id: string): Promise<boolean> {
-    if (!(await this.store.getServer(id))) return false;
-    await this.store.deleteServer(id);
+  async removeServer(ctx: TenantContext, id: string): Promise<boolean> {
+    if (!(await this.store.getServer(ctx, id))) return false;
+    await this.store.deleteServer(ctx, id);
     return true;
   }
 
   /** Record (or clear) a user's impact override. Stamped against the current schema. */
   async setToolImpact(
+    ctx: TenantContext,
     serverId: string,
     toolName: string,
     override: McpImpact | null,
   ): Promise<McpToolView | null> {
-    const updated = await this.store.setToolImpactOverride(serverId, toolName, override);
+    const updated = await this.store.setToolImpactOverride(ctx, serverId, toolName, override);
     return updated ? this.viewTool(updated) : null;
   }
 
@@ -341,10 +343,11 @@ export class McpRegistry {
    * rather than an orphaned line in a file.
    */
   async setCredential(
+    ctx: TenantContext,
     id: string,
     token: string | null,
   ): Promise<{ result: RegistrationResult; warning: string | null }> {
-    const server = await this.store.getServer(id);
+    const server = await this.store.getServer(ctx, id);
     if (!server) {
       return { result: { ok: false, server: null, message: `no server called "${id}"` }, warning: null };
     }
@@ -352,8 +355,8 @@ export class McpRegistry {
 
     if (token === null) {
       this.credentials?.clear(key);
-      await this.store.setServerAuthEnvKey(id, null);
-      return { result: { ok: true, server: await this.get(id), message: null }, warning: null };
+      await this.store.setServerAuthEnvKey(ctx, id, null);
+      return { result: { ok: true, server: await this.get(ctx, id), message: null }, warning: null };
     }
 
     const written = this.credentials?.set(key, token) ?? { ok: true, warning: null };
@@ -361,14 +364,14 @@ export class McpRegistry {
       return {
         result: {
           ok: false,
-          server: await this.get(id),
+          server: await this.get(ctx, id),
           message: written.warning ?? "could not store the credential",
         },
         warning: null,
       };
     }
-    await this.store.setServerAuthEnvKey(id, key);
-    return { result: { ok: true, server: await this.get(id), message: null }, warning: written.warning };
+    await this.store.setServerAuthEnvKey(ctx, id, key);
+    return { result: { ok: true, server: await this.get(ctx, id), message: null }, warning: written.warning };
   }
 
   private classifyAll(result: Extract<DiscoveryResult, { ok: true }>): DiscoveredTool[] {

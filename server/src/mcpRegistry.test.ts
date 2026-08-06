@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
 import { TraceStore } from "./store.ts";
-import { openTestSqlite } from "./db/testDb.ts";
+import { openTestSqlite, testContext } from "./db/testDb.ts";
 import { McpStore } from "./mcpStore.ts";
 import { McpRegistry, slugifyServerId } from "./mcpRegistry.ts";
 import { startMockServer } from "../fixtures/mcp/mockServer.ts";
@@ -29,6 +29,7 @@ const db = await openTestSqlite(DB);
 const trace = new TraceStore(db);
 await trace.init();
 const registry = new McpRegistry(new McpStore(trace.database()));
+const ctx = testContext();
 
 // --- 1. ids -------------------------------------------------------------------------
 {
@@ -41,7 +42,7 @@ const registry = new McpRegistry(new McpStore(trace.database()));
 // --- 2. connecting, and what the user is shown before anything is granted -------------
 {
   const mock = await startMockServer();
-  const added = await registry.addServer({ endpoint: mock.url, label: "Mock" });
+  const added = await registry.addServer(ctx, { endpoint: mock.url, label: "Mock" });
 
   check("registration succeeds", added.ok, added.message ?? "");
   const server = added.server!;
@@ -66,17 +67,17 @@ const registry = new McpRegistry(new McpStore(trace.database()));
     Object.keys(server.tools.find((t) => t.name === "send_message")!.input_schema).length > 0);
 
   // A second server on the same endpoint must not collide with the first.
-  const twin = await registry.addServer({ endpoint: mock.url, label: "Mock" });
+  const twin = await registry.addServer(ctx, { endpoint: mock.url, label: "Mock" });
   check("a duplicate label gets its own id", twin.ok && twin.server!.id !== server.id,
     twin.server?.id);
-  await registry.removeServer(twin.server!.id);
+  await registry.removeServer(ctx, twin.server!.id);
 
   await mock.close();
 }
 
 // --- 3. a failed connection is a state, not a lost endpoint --------------------------
 {
-  const dead = await registry.addServer({ endpoint: "http://127.0.0.1:9/mcp", label: "Dead" });
+  const dead = await registry.addServer(ctx, { endpoint: "http://127.0.0.1:9/mcp", label: "Dead" });
   check("a failed handshake still returns a row", !dead.ok && dead.server !== null);
   check("...with an actionable status", dead.server?.status === "unreachable");
   check("...and the real message", (dead.server?.last_error ?? "").length > 0);
@@ -84,18 +85,18 @@ const registry = new McpRegistry(new McpStore(trace.database()));
   check("...and the endpoint the user typed is kept",
     dead.server?.endpoint === "http://127.0.0.1:9/mcp");
   check("a server that never connected advertises no tools", dead.server?.tools.length === 0);
-  await registry.removeServer(dead.server!.id);
+  await registry.removeServer(ctx, dead.server!.id);
 }
 
 // --- 4. a transient failure must not strip a working tool list -----------------------
 {
   const mock = await startMockServer();
-  const added = await registry.addServer({ endpoint: mock.url, label: "Flaky", id: "flaky" });
+  const added = await registry.addServer(ctx, { endpoint: mock.url, label: "Flaky", id: "flaky" });
   check("connected with tools", added.ok && added.server!.tools.length === 8);
 
   await mock.close(); // the server goes away mid-session
 
-  const refreshed = await registry.rediscover("flaky");
+  const refreshed = await registry.rediscover(ctx, "flaky");
   check("a failed refresh reports the failure", !refreshed.ok);
   check("...marks the server unreachable", refreshed.server?.status === "unreachable");
   // The bug this guards: wiping the list on a network blip silently breaks every agent
@@ -134,21 +135,21 @@ const registry = new McpRegistry(new McpStore(trace.database()));
   const port = (http.address() as { port: number }).port;
   const url = `http://127.0.0.1:${port}/mcp`;
 
-  await registry.addServer({ endpoint: url, label: "Shifty", id: "shifty" });
-  let tool = (await registry.get("shifty"))!.tools[0]!;
+  await registry.addServer(ctx, { endpoint: url, label: "Shifty", id: "shifty" });
+  let tool = (await registry.get(ctx, "shifty"))!.tools[0]!;
   check("an unreadable tool is high by default", tool.impact === "high");
 
   // The user looks at it, decides it is harmless, and lowers it.
-  await registry.setToolImpact("shifty", "frobnicate", "low");
-  tool = (await registry.get("shifty"))!.tools[0]!;
+  await registry.setToolImpact(ctx, "shifty", "frobnicate", "low");
+  tool = (await registry.get(ctx, "shifty"))!.tools[0]!;
   check("an override takes effect", tool.impact === "low");
   check("...and is visible as an override", tool.overridden === true);
   check("...without losing what the classifier said", tool.computed_impact === "high");
 
   // A refresh that changes nothing must not disturb it, or overrides would evaporate on
   // every reconnect and nobody would bother using them.
-  await registry.rediscover("shifty");
-  tool = (await registry.get("shifty"))!.tools[0]!;
+  await registry.rediscover(ctx, "shifty");
+  tool = (await registry.get(ctx, "shifty"))!.tools[0]!;
   check("an unchanged schema keeps the override", tool.impact === "low" && tool.overridden);
 
   // Now the server quietly widens the tool the user already agreed to trust.
@@ -157,8 +158,8 @@ const registry = new McpRegistry(new McpStore(trace.database()));
     properties: { id: { type: "string" }, cascade: { type: "boolean" } },
     required: ["id"],
   };
-  await registry.rediscover("shifty");
-  tool = (await registry.get("shifty"))!.tools[0]!;
+  await registry.rediscover(ctx, "shifty");
+  tool = (await registry.get(ctx, "shifty"))!.tools[0]!;
   check("a changed schema voids the override", tool.impact === "high");
   check("...and says so, rather than silently dropping it", tool.override_voided === true);
   check("...leaving the override recorded, not deleted", tool.overridden === false);
@@ -168,10 +169,10 @@ const registry = new McpRegistry(new McpStore(trace.database()));
 
 // --- 6. removal ----------------------------------------------------------------------
 {
-  check("removing a server removes it", (await registry.removeServer("shifty")) === true);
-  check("...and its tools go with it", (await registry.get("shifty")) === null);
-  check("removing something absent is not an error", (await registry.removeServer("nope")) === false);
-  check("the other server is untouched", (await registry.get("flaky")) !== null);
+  check("removing a server removes it", (await registry.removeServer(ctx, "shifty")) === true);
+  check("...and its tools go with it", (await registry.get(ctx, "shifty")) === null);
+  check("removing something absent is not an error", (await registry.removeServer(ctx, "nope")) === false);
+  check("the other server is untouched", (await registry.get(ctx, "flaky")) !== null);
 }
 
 trace.close();

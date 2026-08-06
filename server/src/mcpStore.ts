@@ -39,6 +39,7 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import { jsonFromColumn, type Db, type Queryable } from "./db/db.ts";
+import type { TenantContext } from "./db/tenant.ts";
 
 // --- row shapes --------------------------------------------------------------
 
@@ -170,8 +171,22 @@ export function parseToolRef(ref: string): { serverId: string; toolName: string 
 
 // --- store -------------------------------------------------------------------
 
+// Explicit column lists — `SELECT *` would put workspace_id on the registry snapshot every
+// connected client receives.
+const SERVER_COLUMNS = `id, label, endpoint, transport, auth_env_key, server_name,
+                        server_version, protocol_version, status, last_error, discovered_at,
+                        created_at`;
+const TOOL_COLUMNS = `id, server_id, name, description, input_schema, schema_hash, impact,
+                      impact_reason, impact_override, override_schema_hash, annotations,
+                      discovered_at`;
+
 export class McpStore {
   // Shares the trace store's database: same file, single writer. See TraceStore.database().
+  //
+  // A server id is a slug — "linear", "github", "mock" — so it is per workspace, not global.
+  // Before that was true, the second workspace to connect the same service would not collide
+  // but UPDATE: `upsertServer` would repoint somebody else's server at your endpoint and hand
+  // your agents their tools.
   constructor(private db: Db) {}
 
   // No `init()`, because there is nothing to do. These tables come from migration 002 on
@@ -199,13 +214,19 @@ export class McpStore {
 
   // --- servers ---------------------------------------------------------------
 
-  async listServers(): Promise<McpServer[]> {
-    const rows = await this.db.all<Record<string, unknown>>(`SELECT * FROM mcp_servers ORDER BY created_at ASC`);
+  async listServers(ctx: TenantContext): Promise<McpServer[]> {
+    const rows = await this.db.all<Record<string, unknown>>(
+      `SELECT ${SERVER_COLUMNS} FROM mcp_servers WHERE workspace_id = ? ORDER BY created_at ASC`,
+      [ctx.workspaceId],
+    );
     return rows.map(McpStore.hydrateServer);
   }
 
-  async getServer(id: string): Promise<McpServer | null> {
-    const row = await this.db.get<Record<string, unknown>>(`SELECT * FROM mcp_servers WHERE id = ?`, [id]);
+  async getServer(ctx: TenantContext, id: string): Promise<McpServer | null> {
+    const row = await this.db.get<Record<string, unknown>>(
+      `SELECT ${SERVER_COLUMNS} FROM mcp_servers WHERE id = ? AND workspace_id = ?`,
+      [id, ctx.workspaceId],
+    );
     return row ? McpStore.hydrateServer(row) : null;
   }
 
@@ -214,19 +235,20 @@ export class McpStore {
    * list doesn't reshuffle under a re-discovery.
    */
   async upsertServer(
+    ctx: TenantContext,
     input: Omit<McpServer, "created_at"> & { created_at?: string },
   ): Promise<McpServer> {
-    const existing = await this.getServer(input.id);
+    const existing = await this.getServer(ctx, input.id);
     const row: McpServer = {
       ...input,
       created_at: input.created_at ?? existing?.created_at ?? nowIso(),
     };
     await this.db.run(
       `INSERT INTO mcp_servers
-         (id, label, endpoint, transport, auth_env_key, server_name, server_version,
-          protocol_version, status, last_error, discovered_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
+         (workspace_id, id, label, endpoint, transport, auth_env_key, server_name,
+          server_version, protocol_version, status, last_error, discovered_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(workspace_id, id) DO UPDATE SET
          label            = excluded.label,
          endpoint         = excluded.endpoint,
          transport        = excluded.transport,
@@ -238,6 +260,7 @@ export class McpStore {
          last_error       = excluded.last_error,
          discovered_at    = excluded.discovered_at`,
       [
+        ctx.workspaceId,
         row.id,
         row.label,
         row.endpoint,
@@ -262,38 +285,55 @@ export class McpStore {
    * Wiping them would break every agent scoped to them on a transient network blip, and
    * "the tools vanished" is a far worse failure than "the status says unreachable".
    */
-  async setServerStatus(id: string, status: McpServerStatus, lastError: string | null): Promise<void> {
-    await this.db.run(`UPDATE mcp_servers SET status = ?, last_error = ? WHERE id = ?`, [status, lastError, id]);
+  async setServerStatus(
+    ctx: TenantContext,
+    id: string,
+    status: McpServerStatus,
+    lastError: string | null,
+  ): Promise<void> {
+    await this.db.run(
+      `UPDATE mcp_servers SET status = ?, last_error = ? WHERE id = ? AND workspace_id = ?`,
+      [status, lastError, id, ctx.workspaceId],
+    );
   }
 
   /** Records the env var NAME. The value never passes through this module. */
-  async setServerAuthEnvKey(id: string, envKey: string | null): Promise<void> {
-    await this.db.run(`UPDATE mcp_servers SET auth_env_key = ? WHERE id = ?`, [envKey, id]);
+  async setServerAuthEnvKey(ctx: TenantContext, id: string, envKey: string | null): Promise<void> {
+    await this.db.run(`UPDATE mcp_servers SET auth_env_key = ? WHERE id = ? AND workspace_id = ?`, [
+      envKey,
+      id,
+      ctx.workspaceId,
+    ]);
   }
 
-  async deleteServer(id: string): Promise<void> {
+  async deleteServer(ctx: TenantContext, id: string): Promise<void> {
     await this.db.transaction(async (tx: Queryable) => {
-      await tx.run(`DELETE FROM mcp_tools WHERE server_id = ?`, [id]);
-      await tx.run(`DELETE FROM mcp_servers WHERE id = ?`, [id]);
+      await tx.run(`DELETE FROM mcp_tools WHERE server_id = ? AND workspace_id = ?`, [id, ctx.workspaceId]);
+      await tx.run(`DELETE FROM mcp_servers WHERE id = ? AND workspace_id = ?`, [id, ctx.workspaceId]);
     });
   }
 
   // --- tools -----------------------------------------------------------------
 
-  async listTools(serverId?: string): Promise<McpTool[]> {
+  async listTools(ctx: TenantContext, serverId?: string): Promise<McpTool[]> {
     const rows = serverId
       ? await this.db.all<Record<string, unknown>>(
-          `SELECT * FROM mcp_tools WHERE server_id = ? ORDER BY name ASC`,
-          [serverId],
+          `SELECT ${TOOL_COLUMNS} FROM mcp_tools
+            WHERE server_id = ? AND workspace_id = ? ORDER BY name ASC`,
+          [serverId, ctx.workspaceId],
         )
-      : await this.db.all<Record<string, unknown>>(`SELECT * FROM mcp_tools ORDER BY server_id ASC, name ASC`);
+      : await this.db.all<Record<string, unknown>>(
+          `SELECT ${TOOL_COLUMNS} FROM mcp_tools
+            WHERE workspace_id = ? ORDER BY server_id ASC, name ASC`,
+          [ctx.workspaceId],
+        );
     return rows.map((r) => this.hydrateTool(r));
   }
 
-  async getTool(serverId: string, name: string): Promise<McpTool | null> {
+  async getTool(ctx: TenantContext, serverId: string, name: string): Promise<McpTool | null> {
     const row = await this.db.get<Record<string, unknown>>(
-      `SELECT * FROM mcp_tools WHERE server_id = ? AND name = ?`,
-      [serverId, name],
+      `SELECT ${TOOL_COLUMNS} FROM mcp_tools WHERE server_id = ? AND name = ? AND workspace_id = ?`,
+      [serverId, name, ctx.workspaceId],
     );
     return row ? this.hydrateTool(row) : null;
   }
@@ -305,12 +345,12 @@ export class McpStore {
    * A ref naming a removed server or a tool the server stopped advertising resolves to
    * nothing rather than to a guess.
    */
-  async resolveTools(refs: string[]): Promise<McpTool[]> {
+  async resolveTools(ctx: TenantContext, refs: string[]): Promise<McpTool[]> {
     const out: McpTool[] = [];
     for (const ref of refs) {
       const parsed = parseToolRef(ref);
       if (!parsed) continue;
-      const tool = await this.getTool(parsed.serverId, parsed.toolName);
+      const tool = await this.getTool(ctx, parsed.serverId, parsed.toolName);
       if (tool) out.push(tool);
     }
     return out;
@@ -324,8 +364,12 @@ export class McpStore {
    * schema_hash they were made against. effectiveImpact() then decides whether that
    * judgement still applies — see the header note on schema_hash.
    */
-  async replaceTools(serverId: string, discovered: DiscoveredTool[]): Promise<McpTool[]> {
-    const previous = new Map((await this.listTools(serverId)).map((t) => [t.name, t]));
+  async replaceTools(
+    ctx: TenantContext,
+    serverId: string,
+    discovered: DiscoveredTool[],
+  ): Promise<McpTool[]> {
+    const previous = new Map((await this.listTools(ctx, serverId)).map((t) => [t.name, t]));
     const at = nowIso();
     const rows: McpTool[] = discovered.map((d) => {
       const prior = previous.get(d.name);
@@ -346,14 +390,19 @@ export class McpStore {
     });
 
     await this.db.transaction(async (tx: Queryable) => {
-      await tx.run(`DELETE FROM mcp_tools WHERE server_id = ?`, [serverId]);
+      await tx.run(`DELETE FROM mcp_tools WHERE server_id = ? AND workspace_id = ?`, [
+        serverId,
+        ctx.workspaceId,
+      ]);
       for (const r of rows) {
         await tx.run(
           `INSERT INTO mcp_tools
-             (id, server_id, name, description, input_schema, schema_hash, impact,
-              impact_reason, impact_override, override_schema_hash, annotations, discovered_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (workspace_id, id, server_id, name, description, input_schema, schema_hash,
+              impact, impact_reason, impact_override, override_schema_hash, annotations,
+              discovered_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
+            ctx.workspaceId,
             r.id,
             r.server_id,
             r.name,
@@ -369,7 +418,11 @@ export class McpStore {
           ],
         );
       }
-      await tx.run(`UPDATE mcp_servers SET discovered_at = ? WHERE id = ?`, [at, serverId]);
+      await tx.run(`UPDATE mcp_servers SET discovered_at = ? WHERE id = ? AND workspace_id = ?`, [
+        at,
+        serverId,
+        ctx.workspaceId,
+      ]);
     });
     return rows;
   }
@@ -381,17 +434,18 @@ export class McpStore {
    * way back to "just use the classifier" is always one click, in both directions.
    */
   async setToolImpactOverride(
+    ctx: TenantContext,
     serverId: string,
     name: string,
     override: McpImpact | null,
   ): Promise<McpTool | null> {
-    const tool = await this.getTool(serverId, name);
+    const tool = await this.getTool(ctx, serverId, name);
     if (!tool) return null;
     await this.db.run(
       `UPDATE mcp_tools SET impact_override = ?, override_schema_hash = ?
-         WHERE server_id = ? AND name = ?`,
-      [override, override === null ? null : tool.schema_hash, serverId, name],
+         WHERE server_id = ? AND name = ? AND workspace_id = ?`,
+      [override, override === null ? null : tool.schema_hash, serverId, name, ctx.workspaceId],
     );
-    return this.getTool(serverId, name);
+    return this.getTool(ctx, serverId, name);
   }
 }
