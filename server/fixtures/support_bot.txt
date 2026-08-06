@@ -36,7 +36,7 @@ def build_graph(llm):
 
     graph = StateGraph(AgentState)
     graph.add_node("agent", call_model)
-    graph.add_node("tools", ToolNode(TOOLS))
+    graph.add_node("tools", ToolNode(TOOLS, handle_tool_errors=True))
     graph.add_node("record_orders", record_orders)
     graph.add_edge(START, "agent")
     graph.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
