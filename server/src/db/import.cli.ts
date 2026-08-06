@@ -199,7 +199,23 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  const source = new SqliteDb(args.from);
+  // Existing is not the same as readable. `--from` is a path a person typed, so the wrong
+  // one is the common case: a `.db-wal` beside the database, a half-finished download, a
+  // text file, an encrypted database. Opening any of those throws out of the constructor
+  // before the try block below exists, and the user gets a Node stack trace naming
+  // sqlite.ts:57 — a line in our code, about a file of theirs.
+  let source: SqliteDb;
+  try {
+    source = new SqliteDb(args.from);
+  } catch (err) {
+    console.error(
+      `[import] ${args.from} could not be opened as a SQLite database — ` +
+        `${(err as Error).message}.\n` +
+        `         --from wants a jaroku.db itself, not its -wal or -shm sidecar.`,
+    );
+    return 1;
+  }
+
   const dest = openDb({ sqlitePath: process.env.JAROKU_DB ?? join(SERVER_DIR, "jaroku.db") });
 
   try {
