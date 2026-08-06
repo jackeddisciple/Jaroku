@@ -49,6 +49,7 @@ of the repo and run yourself.
 - [Running things by hand](#running-things-by-hand)
 - [Tests](#tests)
 - [Developing for free (fixtures)](#developing-for-free-fixtures)
+- [The tenancy model](#the-tenancy-model)
 - [Where data lives](#where-data-lives)
 - [Security notes](#security-notes)
 - [Troubleshooting](#troubleshooting)
@@ -1475,7 +1476,10 @@ The client reconnects automatically with a 1-second backoff, and re-requests wha
 | Variable | Default | Purpose |
 |---|---|---|
 | `JAROKU_PORT` | `4317` | HTTP + WebSocket port |
-| `JAROKU_DB` | `server/jaroku.db` | SQLite file (traces + eval control plane) |
+| `JAROKU_DB` | `server/jaroku.db` | SQLite file. Everything, not just traces — see [where data lives](#where-data-lives) |
+| `JAROKU_DB_DRIVER` | `sqlite` | `sqlite` \| `postgres`. Refuses anything else rather than falling back |
+| `JAROKU_PG_URL` | — | Jaroku's own Postgres. Deliberately **not** `DATABASE_URL`, which is the credential the Postgres *connector* reads — reusing it would point every agent's `pg_query` at the control plane |
+| `JAROKU_DEV_WORKSPACE` | the local workspace | Which workspace this process acts in until there is authentication. Announced at boot |
 | `JAROKU_NO_AUTORUN` | — | Set to `1` to skip the startup run |
 | `JAROKU_EVAL_CONCURRENCY` | `4` | Pool slots. Slot 0 is always the interactive run |
 | `JAROKU_LIMIT_<PROVIDER>` | `16` (fake) / `2` (real) | Per-provider concurrent-run cap, e.g. `JAROKU_LIMIT_ANTHROPIC=4` |
@@ -1589,9 +1593,28 @@ uv run python -m jaroku_runner example_agent 2>/dev/null | python3 -m json.tool 
 The test suites are plain `tsx` scripts with no test-runner dependency, covering the logic
 where a bug would be silent rather than loud.
 
+The tenancy suites are the gate for every session of the hosted migration. They run against
+SQLite always, and against Postgres as well when `JAROKU_PG_URL` is set — the same assertions,
+both drivers, because the ways the two differ are almost all silent.
+
 ```bash
 cd server
 npm run typecheck        # tsc --noEmit
+npm run migrate          # apply pending migrations and exit
+
+# tenancy — see "The tenancy model"
+npm run test:tenancy     # two workspaces; neither can read, mutate or enumerate the other's
+npm run test:db-boundary # no driver outside src/db/; every store method takes a context first
+npm run test:rls         # the policies, exercised: forced, write-checked, fail-closed unscoped
+npm run test:trace       # trace scoping, and that workspace_id never reaches an emitted event
+npm run test:identity    # users, workspaces, memberships, audit
+
+# the database boundary
+npm run test:migrate     # forward-only, checksummed, transactional, refuses an edited file
+npm run test:db          # the driver conformance suite, on SQLite
+npm run test:db-postgres # the same suite on Postgres, plus placeholder rewriting
+npm run test:shape-parity # one Run and four Steps through both drivers, compared field by field
+
 npm run test:protocol    # the file-emission stream parser, at every chunk boundary
 npm run test:plan        # plan parsing + degradation + connector reconciliation
 npm run test:pricing     # exact/prefix matching, cache multipliers, unpriced → null
@@ -1601,11 +1624,13 @@ npm run test:retry       # transient vs deterministic failure classification
 npm run test:judge       # rubric prompt construction + verdict parsing
 npm run test:cleanup     # checkpoint sweeping (never touches interactive runs)
 npm run test:env-writer  # .env writes: no clobbering, no injection, exact round trips
+npm run test:providers   # provider keys: names out, values never; test writes nothing
 npm run test:mcp-impact  # the impact ratchet, in both directions
 npm run test:mcp-client  # discovery, pagination, auth, failure classification
 npm run test:mcp-registry # override voiding, and a failed refresh keeping its tools
 npm run test:mcp-isolation # a hostile server can't corrupt a trace or hang a run
 npm run test:mcp-validate  # MCP wiring, shadowing, and calls checked against the schema
+npm run test:mcp-hardening # a server's own advertisement, bounded at the point it arrives
 npm run test:deploy-artifacts # the image's deps, and that no artifact carries a secret
 npm run test:deploy-secrets   # names out, values never; the log scrubber's hard cases
 npm run test:deploy-store     # deploy status transitions, restart reconciliation, Railway failure kinds
@@ -1670,12 +1695,170 @@ plan. The planner logs a loud warning for exactly this reason.
 
 ---
 
+## The tenancy model
+
+Jaroku is becoming a hosted, multi-tenant product. Session 1 of that migration is done: every
+row in the system belongs to a **workspace**, and it is structurally difficult to write a query
+that crosses one. There is no authentication yet — a dev context supplies a fixed workspace, so
+the whole app works end to end exactly as before — but the shape everything else will hang off
+is in place.
+
+**The local path is untouched and stays the default.** `npm run dev` needs nothing installed and
+nothing running: SQLite, the fixtures, the mock MCP server, no Postgres, no Docker.
+
+### Workspace, not user
+
+Every scoping column is `workspace_id`. `user_id` appears in exactly three places: membership
+rows, audit rows, and "who did this" attribution. A single user is a workspace with one member,
+so adding a second member later is a row rather than a re-migration of every table and a rewrite
+of every query.
+
+| Table | What it is |
+|---|---|
+| `users` | One row per person. `external_id` is the auth provider's `sub`, opaque and never parsed |
+| `workspaces` | The tenancy unit. `personal` is created at signup; `team` is everything else |
+| `workspace_members` | Who may act in a workspace, and as what: `owner` / `admin` / `member` |
+| `audit_log` | Membership changes, deletions, and every denied cross-tenant attempt |
+| `agents` | The agent list, which used to be a directory listing. Slugs are unique **per workspace** |
+| `agent_versions` | `{path: {sha256, bytes}}` per version. Written now; Session 3 reads it |
+
+`runs`, `steps`, the eval control plane, the MCP registry and the deploy records all gained a
+`workspace_id` referencing `workspaces.id`.
+
+### The one exception to the frozen schema
+
+`schema/events.md` v1 is unchanged. `workspace_id` on `runs` and `steps` is a **storage** column —
+which tenant a row belongs to is a property of the database, not of the event — and it must never
+appear in an emitted `run_start`, `step` or `run_end`.
+
+That is a `SELECT *` away from being false at all times, so the trace store names its columns and
+`npm run test:trace` asserts both halves: nothing called `workspace_id` comes back on a Run, a
+Step or a history summary, and every field schema v1 promises is still there.
+
+### Two rules, enforced
+
+**Every store and repository method takes a context first.** A parameter you must supply is
+harder to forget than a `WHERE` clause you must remember.
+
+```ts
+type TenantContext = { workspaceId: string; actorUserId: string | null; role: Role; requestId: string };
+type SystemContext = { actorUserId: string | null; role: "system"; requestId: string };
+```
+
+Two types, because there are genuinely two situations. Almost everything takes a `TenantContext`.
+A short list of operations happen *before* a workspace is known and cannot be scoped by the thing
+they are producing — mapping an auth provider's `sub` to a user on first sight, creating that
+user's personal workspace, answering "which workspaces do you belong to" — and those take a
+`SystemContext`. They are separate types on purpose: the compiler refuses to let a tenant query
+run unscoped, and the exceptions are visible in the signatures rather than buried in the bodies.
+
+**Nothing outside `server/src/db/` imports a driver.** `node:sqlite` and `pg` are reachable from
+one directory. A module that could open its own connection is a connection nobody scopes.
+
+Both are checked by `npm run test:db-boundary`, which is a plain `tsx` script rather than an
+eslint rule — there is no lint toolchain here, and every other check is a script too. It asserts
+the drivers *are* imported inside `src/db/` (so a pass cannot come from the feature being
+deleted), that no exemption names a method that no longer exists, and that the rule still fails
+on text designed to fail it.
+
+### RLS is the backstop, not the enforcement
+
+On Postgres every tenant table has `ENABLE` **and** `FORCE ROW LEVEL SECURITY` plus a
+`tenant_isolation` policy with both `USING` and `WITH CHECK`:
+
+```sql
+CREATE POLICY tenant_isolation ON runs
+  USING      (workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid)
+  WITH CHECK (workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid);
+```
+
+Every detail there is load-bearing:
+
+- **`FORCE`**, because `ENABLE` alone exempts the table owner — and on a modest deployment the
+  owner is whoever ran the migrations, often the app, so `ENABLE`-only RLS never applies once.
+- **`WITH CHECK`**, because `USING` alone lets a caller INSERT into another workspace and merely
+  not read it back, which is a write across the boundary and still a hole.
+- **`SET LOCAL`** in the repository's transaction wrapper, because a session-scoped `SET` leaks
+  to whoever gets that pooled connection next.
+- **`NULLIF`**, because a custom setting that has ever been set keeps *existing* on that
+  connection holding `''`, so the next unscoped user of a pooled connection gets `''` rather than
+  NULL — and `''::uuid` raises instead of matching nothing.
+- **A missing setting matches nothing.** Fail closed, which is the entire point.
+
+`audit_log` and `workspace_members` are deliberately policy-free, and both for the same reason: a
+policy on either would break the thing that makes every other policy work. The audit table's most
+important row is a *denied* attempt, whose workspace may not exist; and `workspace_members` is
+what *answers* which workspace a request may act in.
+
+**The application must not connect as a superuser or with `BYPASSRLS`** — either ignores every
+policy unconditionally, and nothing in the schema would tell you. Migration `009_rls` creates a
+`jaroku_app` role with neither, and `npm run test:rls` asserts it.
+
+SQLite has no RLS and no roles, so on that driver there is no second wall: the repository layer is
+the whole of the enforcement. That is acceptable for what SQLite is here — one person, one machine
+— and it is why `npm run test:tenancy` runs there too.
+
+### Adding a table
+
+A new table without a `workspace_id`, a policy and a tenancy test **will be rejected**. In order:
+
+1. Write the migration in **both** `server/migrations/postgres/` and `server/migrations/sqlite/`
+   under the same number. A dialect with nothing to do gets a comment-only file, so the two
+   sequences can never drift.
+2. Add `workspace_id`, backfill, constrain, and index with `workspace_id` **leading** — a trailing
+   tenant column makes the planner scan an index built for a different question.
+3. Add the table to the policy loop in a new RLS migration.
+4. Give it a repository whose every method takes a context first.
+5. Add its methods to `SCOPED_API` in `src/tenancy.test.ts` and exercise them. The coverage
+   assertion fails until you do.
+
+### Running it
+
+```bash
+docker compose up -d postgres            # or any Postgres; 5433, not 5432
+cd server
+JAROKU_DB_DRIVER=postgres JAROKU_PG_URL=postgres://jaroku:jaroku@127.0.0.1:5433/jaroku npm run migrate
+JAROKU_DB_DRIVER=postgres JAROKU_PG_URL=postgres://jaroku:jaroku@127.0.0.1:5433/jaroku npm run dev
+```
+
+Migrations run as the database **owner**; the server connects as the application role. A server
+whose connection cannot apply migrations says which ones are owed and who has to apply them,
+rather than failing with a raw privilege error.
+
+Bringing an existing local install across:
+
+```bash
+npm run import -- --workspace "Ada's Team" --dry-run   # reads everything, writes nothing
+npm run import -- --workspace "Ada's Team"
+```
+
+Idempotent and resumable — every insert is `ON CONFLICT DO NOTHING` on an id the source already
+assigned, so a failed import is resumed by running it again. `runtime/agents/` is **not** copied:
+the projects still live on this machine's disk until Session 3 moves them to an object store.
+
+### What Session 1 deliberately did not do
+
+- **No authentication.** `JAROKU_DEV_WORKSPACE` names the workspace this process acts in, loudly,
+  at boot. Session 2 replaces the resolution with a verified JWT and a membership lookup; nothing
+  below it changes.
+- **The filesystem is still one namespace.** Agent slugs are unique per workspace in the *table*,
+  but two workspaces with a `support_bot` would still collide on `runtime/agents/support_bot/`.
+  Session 3's object store fixes that with keys built from the workspace id and the agent uuid.
+- **Agent files and the graph are still read from a global directory.** Those two relay reads take
+  a context and ignore it, so that when the storage moves the signature does not.
+- **Cross-workspace maintenance reads run unscoped** and say so in their signatures — the restart
+  reconciliations for interrupted evals and deploys, and the startup checkpoint sweep. Under RLS
+  they need an administrative connection rather than the app role.
+
+---
+
 ## Where data lives
 
 | Path | What | Tracked? |
 |---|---|---|
 | browser `localStorage` | `jaroku.onboarding` (first-run progress) and `jaroku.input.<agent>` (last test input). UI-only; deleting either loses nothing that matters | n/a |
-| `server/jaroku.db` | Traces (`runs`, `steps`) + eval control plane (`datasets`, `dataset_examples`, `rubrics`, `eval_runs`, `eval_jobs`, `eval_scores`) + MCP registry (`mcp_servers`, `mcp_tools`) + deploy records (`deployments`, `deployment_logs`) | No |
+| `server/jaroku.db` | The local database. Identity (`users`, `workspaces`, `workspace_members`, `audit_log`) + agents (`agents`, `agent_versions`) + traces (`runs`, `steps`) + eval control plane (`datasets`, `dataset_examples`, `rubrics`, `eval_runs`, `eval_jobs`, `eval_scores`) + MCP registry (`mcp_servers`, `mcp_tools`) + deploy records (`deployments`, `deployment_logs`). Every one of them carries a `workspace_id` | No |
+| Postgres (`JAROKU_PG_URL`) | The same schema, hosted, with RLS. Selected by `JAROKU_DB_DRIVER=postgres`; see [the tenancy model](#the-tenancy-model) | No |
 | `runtime/agents/<id>/` | A generated agent project — yours, editable, portable | No (except `example_agent`) |
 | `runtime/agents/.staging/` | In-flight generations and edit proposals. Cleared on server start — a proposal interrupted by a shutdown is an orphan | No |
 | `runtime/agents/.history/<id>/` | Per-agent version snapshots + `history.json`, powering Undo across reloads | No |
