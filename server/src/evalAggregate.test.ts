@@ -18,14 +18,15 @@ import { TraceStore } from "./store.ts";
 import { EvalStore } from "./evalStore.ts";
 import { aggregateEval, aggregateJob } from "./evalAggregate.ts";
 import type { Step } from "./types.ts";
-import { SqliteDb } from "./db/sqlite.ts";
+import { openTestSqlite, testContext } from "./db/testDb.ts";
 
 const DB = join(tmpdir(), `jaroku-agg-${randomUUID()}.db`);
-const db = new SqliteDb(DB);
+const db = await openTestSqlite(DB);
 const store = new TraceStore(db);
 await store.init();
 const evalStore = new EvalStore(store.database());
 await evalStore.init();
+const ctx = testContext();
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = "") => {
@@ -35,7 +36,7 @@ const check = (name: string, ok: boolean, detail = "") => {
 
 let seq = 0;
 async function step(runId: string, over: Partial<Step>): Promise<void> {
-  await store.insertStep({
+  await store.insertStep(ctx, {
     id: randomUUID(), run_id: runId, seq: seq++, type: "llm_call", name: "call_model",
     input: null, output: null, state_before: null, state_after: null,
     tokens: null, cost: null, latency_ms: 0, error: null, parent_step_id: null,
@@ -54,7 +55,7 @@ async function makeRun(opts: {
   runCost?: number;
 }): Promise<string> {
   const runId = randomUUID();
-  await store.upsertRun({
+  await store.upsertRun(ctx, {
     id: runId, agent_id: "a", provider: "p", model: opts.model,
     status: opts.endedAt === null ? "running" : "completed",
     started_at: opts.startedAt ?? "2026-01-01T00:00:00.000Z",
@@ -74,7 +75,7 @@ async function makeRun(opts: {
   // The exact shape of a run that died mid-graph: real spend in the steps, run_end never
   // fired, so runs.cost still reads 0.
   const runId = await makeRun({ model: "claude-haiku-4-5", costs: [0.004, 0.006], endedAt: null, runCost: 0 });
-  const m = await aggregateJob(store, runId, "claude-haiku-4-5");
+  const m = await aggregateJob(ctx, store, runId, "claude-haiku-4-5");
   check("crashed run reports its real spend, not runs.cost's 0",
     m.cost_usd === 0.01, `got ${m.cost_usd}`);
   check("crashed run's cost is still complete", m.cost_complete === true);
@@ -84,12 +85,12 @@ async function makeRun(opts: {
 {
   const unpriced = await makeRun({ model: "some-unreleased-model", costs: [null, null] });
   check("unpriced model reports null, NOT 0",
-    (await aggregateJob(store, unpriced, "some-unreleased-model")).cost_usd === null);
+    (await aggregateJob(ctx, store, unpriced, "some-unreleased-model")).cost_usd === null);
 
   // The dry-run provider genuinely costs nothing; that must not render the same as
   // "we don't know what this cost".
   const free = await makeRun({ model: "fake-dry-run", costs: [null, null], tokens: [null, null] });
-  const m = await aggregateJob(store, free, "fake-dry-run");
+  const m = await aggregateJob(ctx, store, free, "fake-dry-run");
   check("priced-and-free model reports 0, not null", m.cost_usd === 0, `got ${m.cost_usd}`);
   check("free model is not flagged incomplete", m.cost_complete === true);
 }
@@ -98,7 +99,7 @@ async function makeRun(opts: {
 {
   // One llm_call priced, one with tokens but no cost — the sum is a floor.
   const runId = await makeRun({ model: "claude-haiku-4-5", costs: [0.01, null], tokens: [500, 500] });
-  const m = await aggregateJob(store, runId, "claude-haiku-4-5");
+  const m = await aggregateJob(ctx, store, runId, "claude-haiku-4-5");
   check("partially-priced run flags cost_complete = false", m.cost_complete === false);
   check("partially-priced run still reports the floor", m.cost_usd === 0.01, `got ${m.cost_usd}`);
 }
@@ -111,7 +112,7 @@ async function makeRun(opts: {
   });
   // Step durations sum to ~0; the truth is 2500ms of wall clock, most of it spent waiting.
   check("latency is wall clock, not the sum of step durations",
-    (await aggregateJob(store, runId, "claude-haiku-4-5")).latency_ms === 2500);
+    (await aggregateJob(ctx, store, runId, "claude-haiku-4-5")).latency_ms === 2500);
 }
 
 // --- 5. comparison cost vs true spend ------------------------------------------------

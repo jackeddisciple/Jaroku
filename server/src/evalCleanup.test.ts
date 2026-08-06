@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TraceStore } from "./store.ts";
-import { SqliteDb } from "./db/sqlite.ts";
+import { openTestSqlite } from "./db/testDb.ts";
 import { EvalStore } from "./evalStore.ts";
 import { sweepEvalArtifacts, sweepOrphanedEvalArtifacts } from "./evalCleanup.ts";
 
@@ -25,7 +25,7 @@ const check = (n: string, ok: boolean, d = "") => {
 
 const DB = join(tmpdir(), `jaroku-sweep-${randomUUID()}.db`);
 const CKPT = mkdtempSync(join(tmpdir(), "jaroku-ckpt-"));
-const db = new SqliteDb(DB);
+const db = await openTestSqlite(DB);
 const store = new TraceStore(db);
 await store.init();
 const evalStore = new EvalStore(store.database());

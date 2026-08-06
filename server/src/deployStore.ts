@@ -145,40 +145,9 @@ export class DeployStore {
   constructor(private db: Db) {}
 
   /** SQLite only — on Postgres these tables come from the numbered migrations. */
+  /** Compatibility fixes for a database that predates a column. See TraceStore.init. */
   async init(): Promise<void> {
     if (this.db.dialect !== "sqlite") return;
-    await this.db.exec(`
-      CREATE TABLE IF NOT EXISTS deployments (
-        id                     TEXT PRIMARY KEY,
-        agent_id               TEXT NOT NULL,
-        target                 TEXT NOT NULL,
-        status                 TEXT NOT NULL,
-        url                    TEXT,
-        provider               TEXT NOT NULL,
-        model                  TEXT NOT NULL,
-        env_keys               TEXT NOT NULL DEFAULT '[]',
-        railway_project_id     TEXT,
-        railway_service_id     TEXT,
-        railway_environment_id TEXT,
-        railway_deployment_id  TEXT,
-        error                  TEXT,
-        created_at             TEXT NOT NULL,
-        updated_at             TEXT NOT NULL,
-        ended_at               TEXT
-      );
-      CREATE TABLE IF NOT EXISTS deployment_logs (
-        deployment_id TEXT NOT NULL,
-        seq           INTEGER NOT NULL,
-        ts            TEXT NOT NULL,
-        stage         TEXT NOT NULL,
-        stream        TEXT NOT NULL,
-        text          TEXT NOT NULL,
-        PRIMARY KEY (deployment_id, seq),
-        FOREIGN KEY (deployment_id) REFERENCES deployments(id)
-      );
-      CREATE INDEX IF NOT EXISTS idx_deployments_agent  ON deployments(agent_id, created_at);
-      CREATE INDEX IF NOT EXISTS idx_deployments_status ON deployments(status);
-    `);
     // Insertion order, made explicit — see `list()` for why the tie-break matters.
     //
     // It used to be SQLite's hidden `rowid`, which does not exist in Postgres and has no

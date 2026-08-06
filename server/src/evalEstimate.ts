@@ -21,6 +21,7 @@
 import type { TraceStore } from "./store.ts";
 import type { EvalStore, EvalTarget } from "./evalStore.ts";
 import { asInt } from "./db/db.ts";
+import type { TenantContext } from "./db/tenant.ts";
 import { costFor, isPriced, round8 } from "./pricing.ts";
 import { JUDGE_MODEL } from "./judge/score.ts";
 
@@ -77,6 +78,7 @@ export interface EvalEstimate {
 
 /** Mean input/output tokens per run for this agent on this model, from real history. */
 async function measureRuns(
+  ctx: TenantContext,
   store: TraceStore,
   agentId: string,
   model: string | null,
@@ -88,12 +90,12 @@ async function measureRuns(
             COALESCE(SUM(s.tokens), 0) AS tokens
      FROM runs r
      JOIN steps s ON s.run_id = r.id AND s.type = 'llm_call'
-     WHERE r.agent_id = ? AND r.status = 'completed'
+     WHERE r.workspace_id = ? AND r.agent_id = ? AND r.status = 'completed'
        ${model ? "AND r.model = ?" : "AND r.provider != 'fake'"}
      GROUP BY r.id
      ORDER BY MAX(r.started_at) DESC
      LIMIT 20`,
-    model ? [agentId, model] : [agentId],
+    model ? [ctx.workspaceId, agentId, model] : [ctx.workspaceId, agentId],
   );
   // SUM over an integer column is a bigint in Postgres and arrives as a string.
   const rows = raw.map((r) => ({ run_id: r.run_id, tokens: asInt(r.tokens) }));
@@ -115,6 +117,7 @@ async function measureRuns(
 }
 
 export async function estimateEval(
+  ctx: TenantContext,
   store: TraceStore,
   evalStore: EvalStore,
   opts: { datasetId: string; agentId: string; targets: EvalTarget[]; judgeEnabled: boolean },
@@ -130,12 +133,12 @@ export async function estimateEval(
     // Calibrate from this agent's real runs, preferring the same model.
     let basis: Basis = "default";
     let sample = { input: DEFAULT_INPUT_TOKENS, output: DEFAULT_OUTPUT_TOKENS, runs: 0 };
-    const sameModel = await measureRuns(store, opts.agentId, t.model);
+    const sameModel = await measureRuns(ctx, store, opts.agentId, t.model);
     if (sameModel) {
       basis = "measured";
       sample = sameModel;
     } else {
-      const anyModel = await measureRuns(store, opts.agentId, null);
+      const anyModel = await measureRuns(ctx, store, opts.agentId, null);
       if (anyModel) {
         // Token counts for the same graph are similar across models, but tokenizers differ
         // — say so rather than presenting it as measured.

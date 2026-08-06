@@ -87,3 +87,13 @@ export function systemContext(requestId: string): SystemContext {
 export function newRequestId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+/**
+ * The workspace migration 004 creates, and backfills every pre-tenancy row into.
+ *
+ * A fixed id rather than a lookup, because the migration that creates it and the code that
+ * reads it have to agree without either being able to ask the other. It is the workspace a
+ * local `npm run dev` runs in and the one JAROKU_DEV_WORKSPACE defaults to; on a fresh
+ * hosted database it is simply an empty workspace nobody is a member of.
+ */
+export const LOCAL_WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";

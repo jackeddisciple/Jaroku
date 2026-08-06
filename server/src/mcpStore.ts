@@ -174,47 +174,10 @@ export class McpStore {
   // Shares the trace store's database: same file, single writer. See TraceStore.database().
   constructor(private db: Db) {}
 
-  /** SQLite only — on Postgres these tables come from the numbered migrations. */
-  async init(): Promise<void> {
-    if (this.db.dialect !== "sqlite") return;
-    await this.db.exec(`
-      CREATE TABLE IF NOT EXISTS mcp_servers (
-        id               TEXT PRIMARY KEY,
-        label            TEXT NOT NULL,
-        endpoint         TEXT NOT NULL,
-        transport        TEXT NOT NULL,
-        auth_env_key     TEXT,
-        server_name      TEXT,
-        server_version   TEXT,
-        protocol_version TEXT,
-        status           TEXT NOT NULL,
-        last_error       TEXT,
-        discovered_at    TEXT,
-        created_at       TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS mcp_tools (
-        id                   TEXT PRIMARY KEY,
-        server_id            TEXT NOT NULL,
-        name                 TEXT NOT NULL,
-        description          TEXT,
-        input_schema         TEXT NOT NULL,
-        schema_hash          TEXT NOT NULL,
-        impact               TEXT NOT NULL,
-        impact_reason        TEXT NOT NULL,
-        impact_override      TEXT,
-        override_schema_hash TEXT,
-        annotations          TEXT,
-        discovered_at        TEXT NOT NULL,
-        UNIQUE (server_id, name),
-        FOREIGN KEY (server_id) REFERENCES mcp_servers(id)
-      );
-      CREATE INDEX IF NOT EXISTS idx_mcp_tools_server ON mcp_tools(server_id, name);
-    `);
-  }
-
-  // No additive migrations yet — these tables are new. When one is needed, copy the
-  // `ensureColumn` helper from store.ts / evalStore.ts: CREATE TABLE IF NOT EXISTS never
-  // alters an existing table.
+  // No `init()`, because there is nothing to do. These tables come from migration 002 on
+  // both drivers and no column has ever been added to them after the fact. When one is,
+  // copy the `ensureColumn` helper from store.ts or evalStore.ts — an existing database has
+  // no migration row saying it is missing a column, so a migration cannot know to add it.
 
   /** Dialect-aware, for the reason jsonFromColumn documents. */
   private parseJson<T>(v: unknown, fallback: T): T {

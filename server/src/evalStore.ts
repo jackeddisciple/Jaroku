@@ -159,84 +159,9 @@ export class EvalStore {
   constructor(private db: Db) {}
 
   /** SQLite only — on Postgres these tables come from the numbered migrations. */
+  /** Compatibility fixes for a database that predates a column. See TraceStore.init. */
   async init(): Promise<void> {
     if (this.db.dialect !== "sqlite") return;
-    await this.db.exec(`
-      CREATE TABLE IF NOT EXISTS datasets (
-        id          TEXT PRIMARY KEY,
-        agent_id    TEXT NOT NULL,
-        name        TEXT NOT NULL,
-        created_at  TEXT NOT NULL,
-        updated_at  TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS dataset_examples (
-        id          TEXT PRIMARY KEY,
-        dataset_id  TEXT NOT NULL,
-        input       TEXT NOT NULL,
-        expected    TEXT,
-        notes       TEXT,
-        position    INTEGER NOT NULL DEFAULT 0,
-        created_at  TEXT NOT NULL,
-        FOREIGN KEY (dataset_id) REFERENCES datasets(id)
-      );
-      CREATE TABLE IF NOT EXISTS rubrics (
-        id          TEXT PRIMARY KEY,
-        dataset_id  TEXT,
-        name        TEXT NOT NULL,
-        criteria    TEXT NOT NULL,
-        created_at  TEXT NOT NULL,
-        updated_at  TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS eval_runs (
-        id             TEXT PRIMARY KEY,
-        dataset_id     TEXT NOT NULL,
-        agent_id       TEXT NOT NULL,
-        rubric_id      TEXT NOT NULL,
-        status         TEXT NOT NULL,
-        targets        TEXT NOT NULL,
-        budget_usd     REAL,
-        judge_cost_usd REAL NOT NULL DEFAULT 0,
-        started_at     TEXT NOT NULL,
-        ended_at       TEXT,
-        error          TEXT
-      );
-      CREATE TABLE IF NOT EXISTS eval_jobs (
-        id            TEXT PRIMARY KEY,
-        eval_id       TEXT NOT NULL,
-        example_id    TEXT NOT NULL,
-        provider      TEXT NOT NULL,
-        model         TEXT NOT NULL,
-        status        TEXT NOT NULL,
-        attempt       INTEGER NOT NULL DEFAULT 0,
-        run_id        TEXT,
-        cost_usd      REAL,
-        tokens        INTEGER,
-        latency_ms    REAL,
-        cost_complete INTEGER NOT NULL DEFAULT 1,
-        error         TEXT,
-        started_at    TEXT,
-        ended_at      TEXT,
-        FOREIGN KEY (eval_id) REFERENCES eval_runs(id),
-        FOREIGN KEY (example_id) REFERENCES dataset_examples(id)
-      );
-      CREATE TABLE IF NOT EXISTS eval_scores (
-        id             TEXT PRIMARY KEY,
-        job_id         TEXT NOT NULL UNIQUE,
-        score          REAL,
-        per_criterion  TEXT,
-        rationale      TEXT,
-        judge_model    TEXT,
-        judge_cost_usd REAL,
-        error          TEXT,
-        created_at     TEXT NOT NULL,
-        FOREIGN KEY (job_id) REFERENCES eval_jobs(id)
-      );
-      CREATE INDEX IF NOT EXISTS idx_examples_dataset ON dataset_examples(dataset_id, position);
-      CREATE INDEX IF NOT EXISTS idx_datasets_agent   ON datasets(agent_id);
-      CREATE INDEX IF NOT EXISTS idx_jobs_eval        ON eval_jobs(eval_id, status);
-      CREATE INDEX IF NOT EXISTS idx_jobs_run         ON eval_jobs(run_id);
-      CREATE INDEX IF NOT EXISTS idx_rubrics_dataset  ON rubrics(dataset_id);
-    `);
     // Additive migration for DBs created before retry landed. A retried job must not be
     // re-dispatched immediately — backing off is the entire point when the failure was a
     // rate limit.

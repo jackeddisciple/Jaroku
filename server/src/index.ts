@@ -16,6 +16,7 @@ import { RunPool } from "./runPool.ts";
 import { TraceStore } from "./store.ts";
 import { migrate } from "./db/migrate.ts";
 import { openDb } from "./db/open.ts";
+import { LOCAL_WORKSPACE_ID, newRequestId, systemContextFor, type TenantContext } from "./db/tenant.ts";
 import { EvalStore, type Rubric, type RubricCriterion } from "./evalStore.ts";
 import { EvalRunner } from "./evalRunner.ts";
 import { DEFAULT_CRITERIA } from "./judge/rubric.ts";
@@ -71,6 +72,27 @@ rmSync(join(RUNTIME_DIR, "agents", ".staging"), { recursive: true, force: true }
 // `npm run dev` still needs nothing installed and nothing running.
 const db = openDb({ sqlitePath: DB_PATH });
 console.log(`[server] database: ${db.dialect}${db.dialect === "sqlite" ? ` (${DB_PATH})` : ""}`);
+
+// THE WORKSPACE THIS PROCESS ACTS IN.
+//
+// Every store method takes a TenantContext, and until there is authentication there is one
+// context: the local workspace migration 004 created and backfilled every pre-tenancy row
+// into. A single-user install is a workspace with one member who has not signed in yet.
+//
+// Deliberately a function rather than a constant, and deliberately minted per call rather
+// than shared. The requestId is what correlates a log line, an audit row and a trace, so a
+// process-wide singleton would make every one of them read as the same request. Session 2
+// replaces the body; nothing above it changes.
+const serverContext = (): TenantContext => systemContextFor(LOCAL_WORKSPACE_ID, newRequestId());
+
+// MIGRATIONS FIRST, before a single store is built.
+//
+// They own the schema on both drivers now, so nothing above may touch a table before they
+// have run. Boot-time apply is deliberate: a server whose code expects a column the database
+// does not have should fail at startup, where somebody is watching, rather than at the first
+// request that happens to touch it.
+await migrate(db.migrationTarget(), join(SERVER_DIR, "migrations", db.dialect));
+
 const store = new TraceStore(db);
 await store.init();
 // Eval's control-plane tables live in the same database file, on the same connection
@@ -90,7 +112,6 @@ await evalStore.init();
 // they get the same writer object rather than two constructed from the same path.
 const credentials = fileCredentialWriter(join(RUNTIME_DIR, ".env"));
 const mcpStore = new McpStore(store.database());
-await mcpStore.init();
 const mcpRegistry = new McpRegistry(mcpStore, credentials);
 // Slot 0 is the interactive run; the rest are the eval fan-out's. Modest by default —
 // each slot is a Python subprocess with a LangGraph import, and oversubscribing the machine
@@ -198,18 +219,6 @@ const editor = new Editor({
 const deployStore = new DeployStore(store.database());
 await deployStore.init();
 
-// Every store has now declared the tables it owns, so the schema is whole and migrations can
-// run against it. Boot-time apply is deliberate: a server whose code expects a column the
-// database does not have fails at the first query, on whichever request happens to arrive
-// first, rather than at startup where somebody is watching.
-//
-// The ordering is load-bearing in the other direction too. The store constructors are the
-// SQLite path's own DDL and predate this runner; migrations here ALTER what they created, so
-// they cannot run first. Postgres has no such constructors — its tables come from migrations
-// all the way down — and that asymmetry is the reason the two dialects have separate
-// directories rather than one set of portable files.
-await migrate(db.migrationTarget(), join(SERVER_DIR, "migrations", db.dialect));
-
 // The same reasoning for deploys, with a sharper edge: a deploy in flight was creating real
 // resources in the user's Railway account. A row still reading "building" after a restart is
 // not building — nothing is watching it — and the honest thing is to say so and point at the
@@ -297,6 +306,7 @@ function agentGraph(agentId: string): Promise<GraphResult> {
 const relay = new WsRelay({
   port: PORT,
   store,
+  context: serverContext,
   clientHtmlPath: join(SERVER_DIR, "debug-client.html"),
   listAgents: async () => {
     // One query for the whole list, so the sidebar can show a deploy state per row without
@@ -347,6 +357,7 @@ const relay = new WsRelay({
 const judge = new JudgeScorer({
   store,
   evalStore,
+  context: serverContext,
   onScored: (e) => relay.broadcastEval({ type: "scored", ...e }),
   onScoringFinished: (e) => {
     console.log(`[eval] ${e.evalId} scoring done — ${e.scored} scored, ${e.unscored} unscored`);
@@ -358,6 +369,7 @@ evalRunner = new EvalRunner({
   pool,
   store,
   evalStore,
+  context: serverContext,
   runtimeDir: RUNTIME_DIR,
   // An eval job's run persists like any other but stays off the live "trace" channel.
   markEvalRun: (runId, isEval) => {
@@ -945,7 +957,7 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
       case "estimateEval": {
         relay.broadcastEval({
           type: "estimate",
-          estimate: await estimateEval(store, evalStore, {
+          estimate: await estimateEval(serverContext(), store, evalStore, {
             datasetId: cmd.datasetId,
             agentId: cmd.agentId,
             targets: cmd.targets ?? [],
@@ -1078,9 +1090,9 @@ pool.on("event", ({ runId, event }) => {
     // better than the client showing nothing and no one knowing why.
     try {
       if (event.kind === "run_start" || event.kind === "run_end") {
-        await store.upsertRun(event.run);
+        await store.upsertRun(serverContext(), event.run);
       } else if (event.kind === "step") {
-        await store.insertStep(event.step);
+        await store.insertStep(serverContext(), event.step);
       }
     } catch (err) {
       console.error("[store] failed to persist event:", (err as Error).message);
@@ -1113,7 +1125,9 @@ pool.on("control", ({ ctrl }) => {
       // On the ingest chain, behind the steps this stamps. A boundary that overtook them
       // would stamp nothing, and the run would silently stop being branchable.
       ingest(async () => {
-        if (checkpointId && seqHigh >= 0) await store.setCheckpointUpto(runId, seqHigh, checkpointId);
+        if (checkpointId && seqHigh >= 0) {
+          await store.setCheckpointUpto(serverContext(), runId, seqHigh, checkpointId);
+        }
         relay.broadcastDebug({ type: "boundary", runId, seq: seqHigh, next });
       });
     } else if (ctrl.ctrl === "paused") {
@@ -1121,7 +1135,7 @@ pool.on("control", ({ ctrl }) => {
       // know about yet is a pause the user cannot undo. Only the status write is queued.
       pausedRunId = runId;
       ingest(async () => {
-        await store.setRunStatus(runId, "paused");
+        await store.setRunStatus(serverContext(), runId, "paused");
         relay.broadcastDebug({ type: "paused", runId, seq: seqHigh });
       });
     } else if (ctrl.ctrl === "tool_confirm") {
@@ -1481,7 +1495,7 @@ async function resumeRun(runId: string): Promise<void> {
     console.log("[debug] resumeRun ignored — a run is already active");
     return;
   }
-  const run = await store.getRun(runId);
+  const run = await store.getRun(serverContext(), runId);
   if (!run) {
     relay.broadcastDebug({ type: "error", runId, message: "unknown run" });
     return;
@@ -1492,9 +1506,9 @@ async function resumeRun(runId: string): Promise<void> {
     relay.broadcastDebug({ type: "error", runId, message: `run is ${run.status}, not paused` });
     return;
   }
-  const seqOffset = (await store.maxSeqForRun(runId)) + 1;
+  const seqOffset = (await store.maxSeqForRun(serverContext(), runId)) + 1;
   clearControl(runId); // drop the pause request so it doesn't immediately re-pause
-  await store.setRunStatus(runId, "running");
+  await store.setRunStatus(serverContext(), runId, "running");
   console.log(`[debug] resuming run ${runId} from seq ${seqOffset} (agent ${run.agent_id})`);
   const env: NodeJS.ProcessEnv = {
     JAROKU_RESUME_RUN_ID: runId,
@@ -1522,13 +1536,13 @@ async function branchRun(
     relay.broadcastDebug({ type: "error", runId: fromRunId, message: "a run is active — stop it before branching" });
     return;
   }
-  const parent = await store.getRun(fromRunId);
+  const parent = await store.getRun(serverContext(), fromRunId);
   if (!parent) {
     relay.broadcastDebug({ type: "error", runId: fromRunId, message: "unknown run to branch from" });
     return;
   }
   // Resolve the node boundary containing `atSeq` — we fork at a whole-node boundary, never mid-node.
-  const boundary = await store.boundaryForStep(fromRunId, atSeq);
+  const boundary = await store.boundaryForStep(serverContext(), fromRunId, atSeq);
   const parentDb = join(CHECKPOINT_DIR, `${fromRunId}.sqlite`);
   if (!boundary || !existsSync(parentDb)) {
     relay.broadcastDebug({ type: "error", runId: fromRunId, message: "no durable checkpoint for that step (branching needs a checkpointed run)" });
@@ -1540,7 +1554,7 @@ async function branchRun(
   try {
     // Copy the parent's step prefix (0..boundary) + a physical copy of its checkpoint db, so the
     // parent is never mutated and the branch is self-contained + independently inspectable.
-    await store.copyRunPrefix(fromRunId, branchId, seqHigh, seqHigh);
+    await store.copyRunPrefix(serverContext(), fromRunId, branchId, seqHigh, seqHigh);
     copyFileSync(parentDb, join(CHECKPOINT_DIR, `${branchId}.sqlite`));
   } catch (err) {
     relay.broadcastDebug({ type: "error", runId: fromRunId, message: `branch prep failed: ${(err as Error).message}` });

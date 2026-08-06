@@ -7,7 +7,7 @@
 // pulls the agent's answer out of a step's output, and the CSV export walks it.
 //
 // SQLite keeps that promise by storing payloads as TEXT and parsing on the way out. Postgres
-// keeps it by storing jsonb and letting the driver parse. Those are different mechanisms
+// keeps it by storing `json` and letting the driver parse. Those are different mechanisms
 // reaching the same place, and "reaching the same place" is a claim that has to be checked
 // rather than asserted — which is what this file is. It is the one test that would catch a
 // payload silently changing type between the machine a feature was written on and the one it
@@ -25,6 +25,7 @@ import { migrate } from "./migrate.ts";
 import { PostgresDb } from "./postgres.ts";
 import { SqliteDb } from "./sqlite.ts";
 import { PG_URL_ENV } from "./open.ts";
+import { LOCAL_WORKSPACE_ID, newRequestId, systemContextFor } from "./tenant.ts";
 import { TraceStore } from "../store.ts";
 import type { Run, Step } from "../types.ts";
 
@@ -65,7 +66,7 @@ const run: Run = {
 };
 
 /**
- * The payload shapes that actually differ between a TEXT column and a jsonb one.
+ * The payload shapes that actually differ between a TEXT column and a `json` one.
  *
  * The interesting ones are the scalars. An object round-trips through either mechanism
  * unremarkably; a payload that IS a JSON string, or a number, or `null`, is where "parse
@@ -82,7 +83,7 @@ const steps: Step[] = [
   },
   {
     // A tool that returns a bare string, and one whose result LOOKS like a number. The
-    // second is the trap: as jsonb it reads back as the JS string "123", and a hydration
+    // second is the trap: from Postgres it reads back as the JS string "123", and a hydration
     // that re-parsed every string would hand the consumer the number 123 instead.
     id: randomUUID(), run_id: runId, seq: 1, type: "tool_call", name: "lookup",
     input: "plain string argument",
@@ -109,10 +110,12 @@ const steps: Step[] = [
   },
 ];
 
+const ctx = systemContextFor(LOCAL_WORKSPACE_ID, newRequestId());
+
 async function roundTrip(store: TraceStore): Promise<{ run: Run | undefined; steps: Step[] }> {
-  await store.upsertRun(run);
-  for (const s of steps) await store.insertStep(s);
-  return { run: await store.getRun(runId), steps: await store.stepsForRun(runId) };
+  await store.upsertRun(ctx, run);
+  for (const s of steps) await store.insertStep(ctx, s);
+  return { run: await store.getRun(ctx, runId), steps: await store.stepsForRun(ctx, runId) };
 }
 
 /** Only the frozen schema's fields. Storage columns are not part of the comparison. */
@@ -147,31 +150,20 @@ try {
 // two runs of the suite cannot collide.
 const schema = `parity_${Math.random().toString(36).slice(2, 8)}`;
 await postgres.exec(`CREATE SCHEMA ${schema}`);
-await postgres.exec(`SET search_path TO ${schema}`);
 
 try {
   await migrate(sqlite.migrationTarget(), join(MIGRATIONS, "sqlite"), () => {});
-  // The Postgres pool hands out a fresh connection per query, and search_path is per session,
-  // so the migration has to name the schema itself rather than rely on the SET above.
-  const pgTarget = postgres.migrationTarget();
-  await pgTarget.withLock(async () => {
-    await pgTarget.exec(`SET search_path TO ${schema}`);
-    await pgTarget.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
-      version integer PRIMARY KEY, name text NOT NULL, checksum text NOT NULL, applied_at text NOT NULL)`);
-  });
-
   const sqliteStore = new TraceStore(sqlite);
   await sqliteStore.init();
 
-  // The Postgres tables come from the baseline migration, re-run inside this schema.
-  const { readFileSync } = await import("node:fs");
-  const baseline = readFileSync(join(MIGRATIONS, "postgres", "002_baseline.sql"), "utf8");
-  await postgres.transaction(async (tx) => {
-    await tx.exec(`SET LOCAL search_path TO ${schema}`);
-    await tx.exec(baseline);
+  // `public` stays behind the scratch schema on the search_path: extensions are installed
+  // once per database, so citext may already live there and would otherwise be unreachable.
+  const scoped = new PostgresDb({
+    url: `${url}${url.includes("?") ? "&" : "?"}options=-csearch_path%3D${schema},public`,
   });
-  // Every later query needs to find those tables too, and the pool will not remember a SET.
-  const scoped = new PostgresDb({ url: `${url}${url.includes("?") ? "&" : "?"}options=-csearch_path%3D${schema}` });
+  // The full migration list, not just the baseline — the trace tables now reference a
+  // workspace, so the identity tables and the tenancy migration have to exist first.
+  await migrate(scoped.migrationTarget(), join(MIGRATIONS, "postgres"), () => {});
   const pgStore = new TraceStore(scoped);
   await pgStore.init(); // a no-op on this dialect, called for symmetry
 

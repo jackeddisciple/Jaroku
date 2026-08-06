@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
 import { TraceStore } from "./store.ts";
-import { SqliteDb } from "./db/sqlite.ts";
+import { openTestSqlite } from "./db/testDb.ts";
 import { McpStore } from "./mcpStore.ts";
 import { McpRegistry, slugifyServerId } from "./mcpRegistry.ts";
 import { startMockServer } from "../fixtures/mcp/mockServer.ts";
@@ -25,12 +25,10 @@ const check = (name: string, ok: boolean, detail = "") => {
 };
 
 const DB = join(tmpdir(), `jaroku-mcp-registry-${randomUUID()}.db`);
-const db = new SqliteDb(DB);
+const db = await openTestSqlite(DB);
 const trace = new TraceStore(db);
 await trace.init();
-const mcpStore = new McpStore(trace.database());
-await mcpStore.init();
-const registry = new McpRegistry(mcpStore);
+const registry = new McpRegistry(new McpStore(trace.database()));
 
 // --- 1. ids -------------------------------------------------------------------------
 {

@@ -27,6 +27,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { anthropicClient } from "../claude.ts";
 import { costFor } from "../pricing.ts";
 import type { TraceStore } from "../store.ts";
+import type { TenantContext } from "../db/tenant.ts";
 import type { EvalJob, EvalStore, RubricCriterion } from "../evalStore.ts";
 import { buildJudgePrompt, parseJudgeVerdict } from "./rubric.ts";
 import { extractAgentOutput } from "./output.ts";
@@ -52,6 +53,8 @@ export interface ScoredEvent {
 
 export interface JudgeScorerDeps {
   store: TraceStore;
+  /** The workspace whose runs this judge may read. Read at the moment of use. */
+  context: () => TenantContext;
   evalStore: EvalStore;
   onScored: (e: ScoredEvent) => void;
   onScoringFinished: (e: { evalId: string; scored: number; unscored: number }) => void;
@@ -159,7 +162,7 @@ export class JudgeScorer {
     const criteria: RubricCriterion[] = rubric?.criteria ?? [];
     if (!criteria.length) { await this.markUnscored(evalId, job, "the rubric has no criteria"); return; }
 
-    const steps = await this.deps.store.stepsForRun(job.run_id);
+    const steps = await this.deps.store.stepsForRun(this.deps.context(), job.run_id);
     const output = extractAgentOutput(steps);
     const prompt = buildJudgePrompt(
       { input: example.input, expected: example.expected, output: output.text },

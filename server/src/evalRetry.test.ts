@@ -12,7 +12,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TraceStore } from "./store.ts";
-import { SqliteDb } from "./db/sqlite.ts";
+import { openTestSqlite } from "./db/testDb.ts";
 import { EvalStore } from "./evalStore.ts";
 import { aggregateEval } from "./evalAggregate.ts";
 import { isTransientFailure } from "./evalRunner.ts";
@@ -63,7 +63,7 @@ const check = (name: string, ok: boolean, detail = "") => {
 // --- 2. a retry must not lose the failed attempt's spend ------------------------------
 {
   const DB = join(tmpdir(), `jaroku-retry-${randomUUID()}.db`);
-  const db = new SqliteDb(DB);
+  const db = await openTestSqlite(DB);
   const store = new TraceStore(db);
   await store.init();
   const evalStore = new EvalStore(store.database());
@@ -104,7 +104,7 @@ const check = (name: string, ok: boolean, detail = "") => {
 // --- 3. the ceiling is checked against true spend, not the comparison figure ----------
 {
   const DB = join(tmpdir(), `jaroku-budget-${randomUUID()}.db`);
-  const db = new SqliteDb(DB);
+  const db = await openTestSqlite(DB);
   const store = new TraceStore(db);
   await store.init();
   const evalStore = new EvalStore(store.database());

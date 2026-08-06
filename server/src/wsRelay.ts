@@ -6,6 +6,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFile } from "node:fs/promises";
 import { WebSocketServer, WebSocket } from "ws";
 import type { TraceStore } from "./store.ts";
+import type { TenantContext } from "./db/tenant.ts";
 import type { TraceEvent } from "./types.ts";
 
 export type RunCommand = {
@@ -587,6 +588,17 @@ export type DebugEvent =
 export interface RelayOptions {
   port: number;
   store: TraceStore;
+  /**
+   * The workspace a read is answered in.
+   *
+   * A stopgap shaped like the thing that replaces it. Today it is the server's one context;
+   * in Session 2 it becomes per-socket, resolved from the ticket the client presented, and
+   * this signature does not change. What matters now is that the relay can no longer read
+   * the trace store without naming a scope — the query that used to be `listRuns()` is the
+   * single most dangerous line in the pre-tenancy design, because the relay answers reads
+   * locally and a broadcast is the one thing a tenant boundary cannot survive.
+   */
+  context: () => TenantContext;
   clientHtmlPath: string;
   // "loadRun", "listAgents", "loadAgentFiles", "loadAgentGraph", "listMcpServers" and
   // "listProviders" are answered locally; the rest are forwarded.
@@ -626,7 +638,7 @@ export class WsRelay {
       // client that received `agents` before `history` would render a sidebar whose runs
       // belong to agents it has not been told about yet.
       void (async () => {
-        this.sendTo(ws, { channel: "history", runs: await this.store.listRuns() });
+        this.sendTo(ws, { channel: "history", runs: await this.store.listRuns(this.opts.context()) });
         this.sendTo(ws, { channel: "agents", agents: (await this.opts.listAgents?.()) ?? [] });
         this.sendTo(ws, { channel: "mcp", type: "servers", servers: (await this.opts.listMcpServers?.()) ?? [] });
         // Which providers are connected, so a first-run client knows on frame one whether it
@@ -732,7 +744,7 @@ export class WsRelay {
             void this.answer(ws, async () => ({
               channel: "runSteps",
               runId,
-              steps: await this.store.stepsForRun(runId),
+              steps: await this.store.stepsForRun(this.opts.context(), runId),
             }));
           }
         } catch {
@@ -870,7 +882,7 @@ export class WsRelay {
   // Push a refreshed run-history snapshot to everyone (e.g. after a branch is created, so the new
   // branch run appears in history without needing a run_start event of its own).
   async broadcastHistory(): Promise<void> {
-    const msg = JSON.stringify({ channel: "history", runs: await this.store.listRuns() });
+    const msg = JSON.stringify({ channel: "history", runs: await this.store.listRuns(this.opts.context()) });
     for (const ws of this.clients) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
     }

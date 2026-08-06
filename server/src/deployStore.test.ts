@@ -14,7 +14,7 @@
 
 import { createServer, type Server } from "node:http";
 
-import { SqliteDb } from "./db/sqlite.ts";
+import { openTestSqlite } from "./db/testDb.ts";
 
 import { DeployStore, isInFlight, type DeployStatus } from "./deployStore.ts";
 import { RailwayApi, RailwayError, isTerminalStatus } from "./railwayApi.ts";
@@ -26,7 +26,7 @@ const check = (name: string, ok: boolean, detail = ""): void => {
 };
 
 async function freshStore(): Promise<DeployStore> {
-  const store = new DeployStore(new SqliteDb(":memory:"));
+  const store = new DeployStore(await openTestSqlite());
   await store.init();
   return store;
 }
@@ -54,7 +54,7 @@ const seed = (store: DeployStore, agentId = "a1", envKeys: string[] = []) =>
 
 // --- 2. the schema has nowhere to put a credential ----------------------------------------
 {
-  const db = new SqliteDb(":memory:");
+  const db = await openTestSqlite();
   await new DeployStore(db).init();
   const names = (await db.all<{ name: string }>("PRAGMA table_info(deployments)")).map((c) => c.name);
   check("the deployments table has an env_keys column", names.includes("env_keys"));

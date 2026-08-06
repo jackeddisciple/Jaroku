@@ -27,6 +27,7 @@
 import { randomUUID } from "node:crypto";
 import type { RunPool } from "./runPool.ts";
 import type { TraceStore } from "./store.ts";
+import type { TenantContext } from "./db/tenant.ts";
 import type { EvalStore, EvalJob, EvalTarget } from "./evalStore.ts";
 import { aggregateJob } from "./evalAggregate.ts";
 
@@ -95,6 +96,14 @@ export interface EvalProgress {
 export interface EvalRunnerDeps {
   pool: RunPool;
   store: TraceStore;
+  /**
+   * The workspace every job in this runner belongs to.
+   *
+   * A function, not a value, matching the deploy manager's `token`: it is read at the
+   * moment of use so the runner never holds a context that has gone stale, and so the
+   * per-command contexts of Session 2 can replace this without changing a call site here.
+   */
+  context: () => TenantContext;
   evalStore: EvalStore;
   runtimeDir: string;
   /** Register/unregister a run id as belonging to an eval, so its events stay off "trace". */
@@ -356,7 +365,7 @@ export class EvalRunner {
     // The run row is the source of truth for what happened — the runner brackets every
     // execution with run_start/run_end, so a contract violation or a mid-graph crash is
     // already recorded there as status 'error'.
-    const run = await this.deps.store.getRun(runId);
+    const run = await this.deps.store.getRun(this.deps.context(), runId);
     const status = timedOut
       ? "timed_out"
       : spawnError
@@ -372,7 +381,12 @@ export class EvalRunner {
     // emitted run_end, so its row reads 0 while its steps record what it really spent.
     // Recorded for failed and timed-out jobs too: partial spend is still spend, and the
     // budget ceiling has to see it.
-    const metrics = await aggregateJob(this.deps.store, runId, job?.model ?? run?.model ?? "");
+    const metrics = await aggregateJob(
+      this.deps.context(),
+      this.deps.store,
+      runId,
+      job?.model ?? run?.model ?? "",
+    );
 
     await this.deps.evalStore.finishJob(jobId, status as "succeeded" | "failed" | "timed_out", {
       error,
