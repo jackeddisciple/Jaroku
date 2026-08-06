@@ -1546,8 +1546,27 @@ function pauseRun(runId: string): void {
 // Resume a paused run from its durable checkpoint: a fresh subprocess continues the SAME run id,
 // its seq starting where the paused segment left off (no run_start, no re-run of done nodes).
 async function resumeRun(runId: string): Promise<void> {
+  // WAIT FOR THE SLOT, rather than refusing the moment it looks busy.
+  //
+  // A pause is announced when the runner writes its control line; the subprocess exits a
+  // few milliseconds later. In between, `interactiveRunning` is still true — so a user who
+  // presses Resume as soon as the UI says "paused", which is exactly what the UI invites,
+  // hits a slot that is about to free and was told nothing at all. The wait is bounded and
+  // short because a paused run is always on its way out.
+  if (pool.interactiveRunning && pausedRunId === runId) {
+    for (let i = 0; i < 40 && pool.interactiveRunning; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
   if (pool.interactiveRunning) {
-    console.log("[debug] resumeRun ignored — a run is already active");
+    // A genuinely different run is executing. Say so ON THE CHANNEL: a console.log is
+    // invisible to the client, so the Resume button simply appeared to do nothing.
+    const message =
+      activeRunId && activeRunId !== runId
+        ? "another run is active — stop it before resuming this one"
+        : "the previous run has not finished shutting down yet — try again in a moment";
+    console.log(`[debug] resumeRun refused for ${runId}: ${message}`);
+    relay.broadcastDebug({ type: "error", runId, message });
     return;
   }
   const run = await store.getRun(serverContext(), runId);
