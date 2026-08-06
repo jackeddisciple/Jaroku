@@ -9,6 +9,7 @@
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "migrate": "tsx src/db/migrate.cli.ts",
+    "import": "tsx src/db/import.cli.ts",
     "test:migrate": "tsx src/db/migrate.test.ts",
     "test:db": "tsx src/db/sqlite.test.ts",
     "test:db-postgres": "tsx src/db/postgres.test.ts",

@@ -211,6 +211,31 @@ export class IdentityRepository {
   }
 
   /**
+   * A workspace with no members yet.
+   *
+   * For the importer, and only for it. Every other path creates a workspace with an owner,
+   * because a workspace nobody can administer is a dead end — but an import happens before
+   * anybody has signed in, and inventing a user to hold it would put a person in the members
+   * list who does not exist. Session 2's first sign-in adopts it.
+   */
+  async createWorkspaceUnowned(
+    ctx: SystemContext | TenantContext,
+    input: { name: string; kind?: WorkspaceKind },
+  ): Promise<Workspace> {
+    return this.db.transaction(async (tx) => {
+      const ws = await this.insertWorkspaceIn(tx, { name: input.name, kind: input.kind ?? "team" });
+      await this.appendAuditIn(tx, ctx, {
+        workspaceId: ws.id,
+        action: "workspace.imported",
+        targetType: "workspace",
+        targetId: ws.id,
+        metadata: { kind: ws.kind, slug: ws.slug, owner: null },
+      });
+      return ws;
+    });
+  }
+
+  /**
    * The workspaces a user belongs to, with their role in each.
    *
    * SystemContext: this is what ANSWERS "which workspaces may you see", so it cannot be
