@@ -127,7 +127,7 @@ const interactiveFiles = artifacts(interactiveRun);
   await evalStore.setEvalStatus(ctx, crashedEval.id, "completed");
   artifacts(crashedRun);
 
-  const res = await sweepOrphanedEvalArtifacts(sys, evalStore, CKPT);
+  const res = await sweepOrphanedEvalArtifacts([ctx], evalStore, CKPT);
   check("startup sweep collects the crashed eval's leftovers", res.removed === 4, `removed ${res.removed}`);
   check("a RUNNING eval's checkpoints are left alone", liveFiles.every((p) => existsSync(p)));
   check("the interactive run is still untouched by the startup sweep",
@@ -136,7 +136,7 @@ const interactiveFiles = artifacts(interactiveRun);
 
 // --- never fatal --------------------------------------------------------------------------
 {
-  const missing = await sweepOrphanedEvalArtifacts(sys, evalStore, join(CKPT, "does-not-exist"));
+  const missing = await sweepOrphanedEvalArtifacts([ctx], evalStore, join(CKPT, "does-not-exist"));
   check("a missing checkpoint dir is a no-op, not a throw", missing.removed === 0);
 }
 

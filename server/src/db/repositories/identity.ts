@@ -211,6 +211,21 @@ export class IdentityRepository {
   }
 
   /**
+   * Every live workspace's id.
+   *
+   * For startup reconciliation, which has to visit all of them. `workspaces` deliberately
+   * carries no RLS policy — it is the table policies point AT — so this read works as the
+   * application role, which is the whole reason the sweeps go workspace-by-workspace rather
+   * than issuing one unscoped query that returns nothing in production.
+   */
+  async listWorkspaceIds(_ctx: SystemContext): Promise<string[]> {
+    const rows = await this.db.all<{ id: string }>(
+      `SELECT id FROM workspaces WHERE deleted_at IS NULL ORDER BY created_at ASC`,
+    );
+    return rows.map((r) => r.id);
+  }
+
+  /**
    * A workspace with no members yet.
    *
    * For the importer, and only for it. Every other path creates a workspace with an owner,

@@ -25,7 +25,7 @@
 
 import { randomUUID } from "node:crypto";
 import { asInt, asIntOrNull, jsonFromColumn, type Db, type Queryable } from "./db/db.ts";
-import { systemContextFor, type SystemContext, type TenantContext } from "./db/tenant.ts";
+import type { TenantContext } from "./db/tenant.ts";
 
 // --- status ------------------------------------------------------------------
 
@@ -336,21 +336,21 @@ export class DeployStore {
    * Mirrors the eval engine cancelling unfinished eval runs on boot.
    */
   /**
-   * Unscoped, deliberately, and it takes a SystemContext to say so.
+   * Settle this workspace's in-flight deploys. Called once per workspace at startup.
    *
-   * A restart has to settle every workspace's in-flight deploys, not one's. The workspace id
-   * comes back with each row so the write that follows is scoped again.
+   * Scoped, and it used to not be. An unscoped query returns nothing under RLS as the
+   * application role, so on the production configuration a deploy interrupted by a restart
+   * stayed "building" forever with nothing saying so — the exact state this exists to
+   * prevent. The caller walks the workspace list; `workspaces` carries no policy.
    */
-  async reconcileInterrupted(ctx: SystemContext): Promise<Deployment[]> {
-    // Unscoped on purpose — see the note on finishedEvalRunsAcrossWorkspaces. A restart
-    // settles every workspace's in-flight deploys, which the app role cannot see under RLS.
-    const stale = await this.db.all<Record<string, unknown>>(
-      `SELECT ${DEPLOY_COLUMNS}, workspace_id FROM deployments
-        WHERE status IN (${[...IN_FLIGHT].map(() => "?").join(",")})`,
-      [...IN_FLIGHT],
+  async reconcileInterrupted(ctx: TenantContext): Promise<Deployment[]> {
+    const stale = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT ${DEPLOY_COLUMNS} FROM deployments
+        WHERE workspace_id = ? AND status IN (${[...IN_FLIGHT].map(() => "?").join(",")})`,
+      [ctx.workspaceId, ...IN_FLIGHT],
     );
     for (const row of stale) {
-      await this.patch(systemContextFor(row["workspace_id"] as string, ctx.requestId), row["id"] as string, {
+      await this.patch(ctx, row["id"] as string, {
         status: "interrupted",
         error:
           "the Jaroku server restarted while this deploy was in flight. Anything already " +

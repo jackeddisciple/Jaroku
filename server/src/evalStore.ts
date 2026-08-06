@@ -25,7 +25,7 @@
 
 import { randomUUID } from "node:crypto";
 import { asInt, jsonFromColumn, type Db, type Queryable } from "./db/db.ts";
-import type { SystemContext, TenantContext } from "./db/tenant.ts";
+import type { TenantContext } from "./db/tenant.ts";
 
 // --- row shapes --------------------------------------------------------------
 
@@ -562,40 +562,35 @@ export class EvalStore {
   }
 
   /**
-   * Evals still in flight at startup — everything a restart needs to reconcile.
+   * Evals still in flight at startup — what a restart has to reconcile, for ONE workspace.
    *
-   * The one read here that is deliberately NOT workspace-scoped, and it takes a SystemContext
-   * to say so out loud. A restart has to reconcile every workspace's interrupted evals, not
-   * the one whichever context happened to be at hand; leaving another tenant's rows claiming
-   * to be running forever would be the bug, not the isolation. It returns the workspace id
-   * alongside each row so the caller can scope the writes that follow.
+   * Scoped, and it used to not be. An unscoped query here returns NOTHING under RLS as the
+   * application role, so on the production configuration the reconciliation silently did
+   * nothing and every interrupted eval stayed "running" forever — precisely the state it
+   * exists to prevent. The caller walks the workspace list instead; `workspaces` carries no
+   * policy, so that list is readable by the app role.
    */
-  async unfinishedEvalRuns(_ctx: SystemContext): Promise<(EvalRun & { workspace_id: string })[]> {
-    // Unscoped, so not through `q` — same administrative-connection note as the sweeper's.
-    return (await this.db.all<Record<string, unknown>>(
-      `SELECT ${EVAL_RUN_COLUMNS}, workspace_id FROM eval_runs WHERE status IN ('queued', 'running')`,
-    )).map((r) => ({
-      ...this.hydrateEvalRun(r),
-      workspace_id: r["workspace_id"] as string,
-    }));
+  async unfinishedEvalRuns(ctx: TenantContext): Promise<EvalRun[]> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT ${EVAL_RUN_COLUMNS} FROM eval_runs
+        WHERE workspace_id = ? AND status IN ('queued', 'running')`,
+      [ctx.workspaceId],
+    );
+    return rows.map((r) => this.hydrateEvalRun(r));
   }
 
   /**
-   * Finished evals across EVERY workspace, for the startup checkpoint sweep.
+   * Finished evals in ONE workspace, for the startup checkpoint sweep.
    *
-   * Deliberately unscoped, and takes a SystemContext to say so in the signature. The sweeper
-   * cleans a machine's disk, not a tenant's rows: scoping it to one workspace would leave
-   * every other tenant's blobs behind forever. It returns each row's workspace so the caller
-   * can scope the reads that follow it.
+   * The sweep still cleans a whole machine's disk; it just does it a workspace at a time,
+   * for the same reason `unfinishedEvalRuns` does. See that method.
    */
-  async finishedEvalRunsAcrossWorkspaces(
-    _ctx: SystemContext,
-    limit = 500,
-  ): Promise<{ id: string; workspace_id: string }[]> {
-    return this.db.all<{ id: string; workspace_id: string }>(
-      `SELECT id, workspace_id FROM eval_runs
-        WHERE status NOT IN ('queued', 'running') ORDER BY started_at DESC LIMIT ?`,
-      [limit],
+  async finishedEvalRuns(ctx: TenantContext, limit = 500): Promise<{ id: string }[]> {
+    return this.q(ctx).all<{ id: string }>(
+      `SELECT id FROM eval_runs
+        WHERE workspace_id = ? AND status NOT IN ('queued', 'running')
+        ORDER BY started_at DESC LIMIT ?`,
+      [ctx.workspaceId, limit],
     );
   }
 

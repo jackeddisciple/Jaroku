@@ -37,6 +37,7 @@ import { Planner } from "./planner.ts";
 import { Editor, editCount } from "./editor.ts";
 import { scanAgentDirectory } from "./agents.ts";
 import { AgentRepository } from "./db/repositories/agents.ts";
+import { IdentityRepository } from "./db/repositories/identity.ts";
 import { resolveDevTenancy, type DevTenancy } from "./devTenancy.ts";
 import { loadConnectors } from "./connectors.ts";
 import { isSafeAgentId, listProjectFiles } from "./projectFs.ts";
@@ -157,13 +158,21 @@ const rubricIdFor = async (ctx: TenantContext, datasetId: string): Promise<strin
 // An eval left 'running' by a shutdown has no orchestrator behind it any more. Mark those
 // interrupted at startup rather than leaving rows that claim to be in flight forever —
 // the jobs and whatever they spent stay on record and remain inspectable.
-// Every workspace's, not just this process's — a restart has to reconcile them all, and an
-// interrupted eval left claiming to be running forever is the bug the isolation would cause.
-for (const stale of await evalStore.unfinishedEvalRuns(systemContext(newRequestId()))) {
-  const ctx = systemContextFor(stale.workspace_id, newRequestId());
-  const cancelled = await evalStore.cancelQueuedJobs(ctx, stale.id, "server restarted before this job ran");
-  await evalStore.setEvalStatus(ctx, stale.id, "cancelled", "interrupted by a server restart");
-  console.log(`[eval] ${stale.id} was interrupted by a restart — ${cancelled} queued job(s) cancelled`);
+// EVERY WORKSPACE, one at a time.
+//
+// Not one unscoped query: under RLS as the application role — which is what a deployment
+// actually connects as — an unscoped query returns nothing, so the reconciliation silently
+// did nothing and interrupted evals stayed "running" forever. `workspaces` carries no policy
+// precisely so this list is readable, and each workspace is then reconciled in its own scope.
+const workspaceIds = await new IdentityRepository(db).listWorkspaceIds(systemContext(newRequestId()));
+const workspaceContexts = workspaceIds.map((id) => systemContextFor(id, newRequestId()));
+
+for (const ctx of workspaceContexts) {
+  for (const stale of await evalStore.unfinishedEvalRuns(ctx)) {
+    const cancelled = await evalStore.cancelQueuedJobs(ctx, stale.id, "server restarted before this job ran");
+    await evalStore.setEvalStatus(ctx, stale.id, "cancelled", "interrupted by a server restart");
+    console.log(`[eval] ${stale.id} was interrupted by a restart — ${cancelled} queued job(s) cancelled`);
+  }
 }
 
 // Catch checkpoint blobs from evals whose per-eval sweep never ran (a crash, a restart).
@@ -171,7 +180,7 @@ for (const stale of await evalStore.unfinishedEvalRuns(systemContext(newRequestI
 // is exactly the thing a user might come back to branch from, and is never swept.
 {
   const swept = await sweepOrphanedEvalArtifacts(
-    systemContext(newRequestId()),
+    workspaceContexts,
     evalStore,
     join(RUNTIME_DIR, ".checkpoints"),
   );
@@ -253,7 +262,10 @@ await syncAgents();
 // resources in the user's Railway account. A row still reading "building" after a restart is
 // not building — nothing is watching it — and the honest thing is to say so and point at the
 // dashboard, because whatever was already created is still there.
-for (const stale of await deployStore.reconcileInterrupted(systemContext(newRequestId()))) {
+// Per workspace, for the same reason the eval reconciliation is — see above.
+for (const stale of (
+  await Promise.all(workspaceContexts.map((ctx) => deployStore.reconcileInterrupted(ctx)))
+).flat()) {
   console.log(`[deploy] ${stale.id} (${stale.agent_id}) was interrupted by a restart`);
 }
 

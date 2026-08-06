@@ -166,7 +166,7 @@ const seed = (store: DeployStore, agentId = "a1", envKeys: string[] = []) =>
   const failed = await seed(store, "a3");
   await store.patch(ctx, failed.id, { status: "failed", error: "boom" });
 
-  const reconciled = await store.reconcileInterrupted(sys);
+  const reconciled = await store.reconcileInterrupted(ctx);
   check("only the in-flight row is reconciled",
     reconciled.length === 1 && reconciled[0]?.id === building.id);
   check("...and becomes interrupted", (await store.get(ctx, building.id))?.status === "interrupted");
@@ -180,7 +180,7 @@ const seed = (store: DeployStore, agentId = "a1", envKeys: string[] = []) =>
 
   check("a live deployment is untouched by a restart", (await store.get(ctx, live.id))?.status === "live");
   check("a failed one keeps its own reason", (await store.get(ctx, failed.id))?.error === "boom");
-  check("reconciling twice is a no-op", (await store.reconcileInterrupted(sys)).length === 0);
+  check("reconciling twice is a no-op", (await store.reconcileInterrupted(ctx)).length === 0);
 }
 
 // --- 6. logs are ordered, appendable and readable back ----------------------------------------

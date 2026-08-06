@@ -22,7 +22,7 @@
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { EvalStore } from "./evalStore.ts";
-import { systemContextFor, type SystemContext, type TenantContext } from "./db/tenant.ts";
+import type { TenantContext } from "./db/tenant.ts";
 
 export interface SweepResult {
   removed: number;
@@ -83,7 +83,7 @@ export async function sweepEvalArtifacts(
  * interactive run or something we don't understand, and neither is ours to delete.
  */
 export async function sweepOrphanedEvalArtifacts(
-  ctx: SystemContext,
+  contexts: TenantContext[],
   evalStore: EvalStore,
   checkpointDir: string,
 ): Promise<SweepResult> {
@@ -92,15 +92,14 @@ export async function sweepOrphanedEvalArtifacts(
 
   // Run ids belonging to evals that are over. An eval still in flight keeps its files.
   const finished = new Set<string>();
-  // Across every workspace, deliberately. A startup sweep that only collected one tenant's
-  // orphans would leave everyone else's checkpoint blobs on disk forever — the scope here is
-  // "this machine", which is what a SystemContext means.
-  for (const run of await evalStore.finishedEvalRunsAcrossWorkspaces(ctx, 500)) {
-    for (const job of await evalStore.jobsForEval(
-      systemContextFor(run.workspace_id, ctx.requestId),
-      run.id,
-    )) {
-      if (job.run_id) finished.add(job.run_id);
+  // A workspace at a time, across all of them. The sweep still cleans a whole machine's
+  // disk; it just cannot do that with one unscoped query, because under RLS as the
+  // application role an unscoped query returns nothing at all.
+  for (const ctx of contexts) {
+    for (const run of await evalStore.finishedEvalRuns(ctx, 500)) {
+      for (const job of await evalStore.jobsForEval(ctx, run.id)) {
+        if (job.run_id) finished.add(job.run_id);
+      }
     }
   }
   if (!finished.size) return out;
