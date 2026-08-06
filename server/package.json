@@ -8,6 +8,8 @@
     "dev": "tsx src/index.ts",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
+    "migrate": "tsx src/db/migrate.cli.ts",
+    "test:migrate": "tsx src/db/migrate.test.ts",
     "test:protocol": "tsx src/fileProtocol.test.ts",
     "test:plan": "tsx src/planProtocol.test.ts",
     "test:pricing": "tsx src/pricing.test.ts",

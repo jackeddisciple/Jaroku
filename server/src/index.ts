@@ -14,6 +14,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { RunPool } from "./runPool.ts";
 import { TraceStore } from "./store.ts";
+import { migrate } from "./db/migrate.ts";
+import { sqliteMigrationTarget } from "./db/sqlite.ts";
 import { EvalStore, type Rubric, type RubricCriterion } from "./evalStore.ts";
 import { EvalRunner } from "./evalRunner.ts";
 import { DEFAULT_CRITERIA } from "./judge/rubric.ts";
@@ -185,6 +187,18 @@ const editor = new Editor({
 // exists — the EvalRunnerDeps shape. Note `token`: a function, not a value, so the credential
 // is read from process.env at the moment of use and is never held by the manager.
 const deployStore = new DeployStore(store.connection());
+
+// Every store has now declared the tables it owns, so the schema is whole and migrations can
+// run against it. Boot-time apply is deliberate: a server whose code expects a column the
+// database does not have fails at the first query, on whichever request happens to arrive
+// first, rather than at startup where somebody is watching.
+//
+// The ordering is load-bearing in the other direction too. The store constructors are the
+// SQLite path's own DDL and predate this runner; migrations here ALTER what they created, so
+// they cannot run first. Postgres has no such constructors — its tables come from migrations
+// all the way down — and that asymmetry is the reason the two dialects have separate
+// directories rather than one set of portable files.
+await migrate(sqliteMigrationTarget(store.connection()), join(SERVER_DIR, "migrations", "sqlite"));
 
 // The same reasoning for deploys, with a sharper edge: a deploy in flight was creating real
 // resources in the user's Railway account. A row still reading "building" after a restart is
