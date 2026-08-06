@@ -38,7 +38,7 @@
 //     exactly the rug-pull this defends against.
 
 import { createHash, randomUUID } from "node:crypto";
-import type { Db, Queryable } from "./db/db.ts";
+import { jsonFromColumn, type Db, type Queryable } from "./db/db.ts";
 
 // --- row shapes --------------------------------------------------------------
 
@@ -216,26 +216,21 @@ export class McpStore {
   // `ensureColumn` helper from store.ts / evalStore.ts: CREATE TABLE IF NOT EXISTS never
   // alters an existing table.
 
-  private static parseJson<T>(v: unknown, fallback: T): T {
-    if (v === null || v === undefined) return fallback;
-    // Postgres jsonb arrives already parsed; SQLite TEXT arrives as a string.
-    if (typeof v !== "string") return v as T;
-    try {
-      return JSON.parse(v) as T;
-    } catch {
-      return fallback;
-    }
+  /** Dialect-aware, for the reason jsonFromColumn documents. */
+  private parseJson<T>(v: unknown, fallback: T): T {
+    const parsed = jsonFromColumn(this.db.dialect, v);
+    return parsed === null || typeof parsed === "string" ? fallback : (parsed as T);
   }
 
   private static hydrateServer(row: Record<string, unknown>): McpServer {
     return row as unknown as McpServer;
   }
 
-  private static hydrateTool(row: Record<string, unknown>): McpTool {
+  private hydrateTool(row: Record<string, unknown>): McpTool {
     return {
       ...row,
-      input_schema: McpStore.parseJson<Record<string, unknown>>(row["input_schema"], {}),
-      annotations: McpStore.parseJson<Record<string, unknown> | null>(row["annotations"], null),
+      input_schema: this.parseJson<Record<string, unknown>>(row["input_schema"], {}),
+      annotations: this.parseJson<Record<string, unknown> | null>(row["annotations"], null),
     } as McpTool;
   }
 
@@ -329,7 +324,7 @@ export class McpStore {
           [serverId],
         )
       : await this.db.all<Record<string, unknown>>(`SELECT * FROM mcp_tools ORDER BY server_id ASC, name ASC`);
-    return rows.map(McpStore.hydrateTool);
+    return rows.map((r) => this.hydrateTool(r));
   }
 
   async getTool(serverId: string, name: string): Promise<McpTool | null> {
@@ -337,7 +332,7 @@ export class McpStore {
       `SELECT * FROM mcp_tools WHERE server_id = ? AND name = ?`,
       [serverId, name],
     );
-    return row ? McpStore.hydrateTool(row) : null;
+    return row ? this.hydrateTool(row) : null;
   }
 
   /**

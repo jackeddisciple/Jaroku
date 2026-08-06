@@ -1,11 +1,11 @@
 // Persistence for runs + steps (doc §5.2 trace store).
 //
 // Goes through the `Db` interface rather than a driver, so the same code runs on SQLite
-// locally and Postgres hosted. JSON payload fields are stored as TEXT here and as jsonb
-// there; the hydration below is what keeps that difference invisible to everything above.
+// locally and Postgres hosted. JSON payload fields are stored as TEXT on one and `json` on
+// the other; the hydration below is what keeps that difference invisible to everything above.
 
 import { randomUUID } from "node:crypto";
-import { asInt, asIntOrNull, type Db, type Queryable } from "./db/db.ts";
+import { asInt, asIntOrNull, jsonFromColumn, type Db, type Queryable } from "./db/db.ts";
 import type { Run, Step } from "./types.ts";
 
 // A run plus a cheap derived step count, for the sidebar history list. The frozen Run
@@ -82,30 +82,24 @@ export class TraceStore {
     return JSON.stringify(v);
   }
 
-  // Inverse of `j`. On SQLite the payload columns are TEXT, so a row read straight back out
-  // carries JSON *strings* where the Step schema promises parsed values — a step replayed
-  // from history would then be a different shape than the same step streamed live. Parse on
-  // the way out so both paths hand consumers identical objects.
+  // Inverse of `j`, and the reason it takes the dialect rather than sniffing the value.
   //
-  // On Postgres the column is jsonb and the driver has already parsed it, so a non-string
-  // arrives here as the value it is and passes straight through. That is the whole reason
-  // this takes `unknown` rather than `string`: one function, both dialects, same output.
-  private static unj(v: unknown): unknown {
-    if (typeof v !== "string") return v ?? null;
-    try {
-      return JSON.parse(v);
-    } catch {
-      return v; // Not JSON (shouldn't happen) — hand back the raw text rather than throw.
-    }
-  }
-
-  private static hydrateStep(row: Record<string, unknown>): Step {
+  // On SQLite the payload columns are TEXT, so a row read straight back out carries JSON
+  // *strings* where the Step schema promises parsed values — a step replayed from history
+  // would then be a different shape than the same step streamed live. On Postgres the column
+  // is `json` and the driver has already parsed it.
+  //
+  // Deciding between those by looking at the value is the trap: a payload that IS the JSON
+  // string "123" comes back from Postgres as the JavaScript string `123`, and a parser that
+  // re-parses every string it sees would hand the consumer the number. See jsonFromColumn.
+  private hydrateStep(row: Record<string, unknown>): Step {
+    const d = this.db.dialect;
     return {
       ...row,
-      input: TraceStore.unj(row["input"]),
-      output: TraceStore.unj(row["output"]),
-      state_before: TraceStore.unj(row["state_before"]),
-      state_after: TraceStore.unj(row["state_after"]),
+      input: jsonFromColumn(d, row["input"]),
+      output: jsonFromColumn(d, row["output"]),
+      state_before: jsonFromColumn(d, row["state_before"]),
+      state_after: jsonFromColumn(d, row["state_after"]),
     } as Step;
   }
 
@@ -270,7 +264,7 @@ export class TraceStore {
       `SELECT * FROM steps WHERE run_id = ? ORDER BY seq ASC`,
       [runId],
     );
-    return rows.map(TraceStore.hydrateStep);
+    return rows.map((r) => this.hydrateStep(r));
   }
 
   async close(): Promise<void> {

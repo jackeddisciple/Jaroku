@@ -36,16 +36,23 @@ export async function runConformance(label: string, db: Db): Promise<Conformance
   const T = `conformance_${Math.random().toString(36).slice(2, 10)}`;
   console.log(`\n${label}`);
 
-  // Deliberately portable DDL: text, a nullable number, a nullable float. Everything this
-  // suite asserts is about values crossing the boundary, not about types either database is
-  // clever about — those get their own dialect-specific migrations.
+  // Deliberately portable DDL: text, a nullable number, a nullable float, a boolean.
+  // Everything this suite asserts is about values crossing the boundary, not about types
+  // either database is clever about — those get their own dialect-specific migrations.
+  //
+  // `flag` is declared `boolean` rather than `integer`, and the difference is not cosmetic.
+  // Postgres has a real boolean type and rejects a JS `true` bound into an integer column
+  // outright; SQLite has none and gives the declaration INTEGER affinity, storing 1 and 0.
+  // Writing this column as an integer and binding a boolean is therefore a query that works
+  // on one driver and errors on the other, which is precisely the class of bug this file
+  // exists to catch — and it caught this one.
   await db.exec(`
     CREATE TABLE ${T} (
       k      text PRIMARY KEY,
       n      integer,
       f      double precision,
       body   text,
-      flag   integer
+      flag   boolean
     );
   `);
 
@@ -172,27 +179,30 @@ export async function runConformance(label: string, db: Db): Promise<Conformance
       );
     }
 
-    // The reason `transaction` exists at all rather than a pair of exec calls. Nothing could
-    // interleave between BEGIN and COMMIT while the stores were synchronous; the callback is
-    // now an async function that can be suspended halfway, so a second transaction starting
-    // in that gap would have its work committed by the first one's COMMIT.
+    // Two transactions that overlap in time must both land, whole.
+    //
+    // Note what is NOT asserted: that they take turns. SQLite has one connection and has to
+    // serialise them; Postgres gives each its own and runs them at once. Both are correct,
+    // and a suite that demanded one shape would be testing an implementation rather than the
+    // contract. What both must deliver is that neither transaction loses work to the other's
+    // COMMIT — the failure mode a single connection has if nothing serialises it.
     {
-      const order: string[] = [];
       const a = db.transaction(async (tx) => {
-        order.push("a:begin");
         await tx.run(`INSERT INTO ${T} (k, n) VALUES (?, ?)`, ["par-a", 1]);
         await new Promise((r) => setTimeout(r, 25));
-        order.push("a:end");
+        await tx.run(`UPDATE ${T} SET n = ? WHERE k = ?`, [2, "par-a"]);
       });
       const b = db.transaction(async (tx) => {
-        order.push("b:begin");
         await tx.run(`INSERT INTO ${T} (k, n) VALUES (?, ?)`, ["par-b", 1]);
-        order.push("b:end");
       });
       await Promise.all([a, b]);
+      const rows = await db.all<{ k: string; n: unknown }>(
+        `SELECT k, n FROM ${T} WHERE k IN (?, ?) ORDER BY k`,
+        ["par-a", "par-b"],
+      );
       check(
-        order.join(",") === "a:begin,a:end,b:begin,b:end",
-        `overlapping transactions run one at a time (${order.join(",")})`,
+        rows.length === 2 && asInt(rows[0]?.n) === 2 && asInt(rows[1]?.n) === 1,
+        `overlapping transactions both commit in full (${JSON.stringify(rows)})`,
       );
     }
 

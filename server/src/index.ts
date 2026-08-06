@@ -15,7 +15,7 @@ import { dirname, join, resolve } from "node:path";
 import { RunPool } from "./runPool.ts";
 import { TraceStore } from "./store.ts";
 import { migrate } from "./db/migrate.ts";
-import { SqliteDb } from "./db/sqlite.ts";
+import { openDb } from "./db/open.ts";
 import { EvalStore, type Rubric, type RubricCriterion } from "./evalStore.ts";
 import { EvalRunner } from "./evalRunner.ts";
 import { DEFAULT_CRITERIA } from "./judge/rubric.ts";
@@ -66,9 +66,11 @@ if (loadedKeys.length) {
 // survive a restart — pending proposals are in-memory, so their staging dirs are orphans.
 rmSync(join(RUNTIME_DIR, "agents", ".staging"), { recursive: true, force: true });
 
-// One database, one connection, four stores. The driver is chosen here and nowhere else —
-// everything below this line talks to the `Db` interface and cannot tell which it got.
-const db = new SqliteDb(DB_PATH);
+// One database, four stores. The driver is chosen here and nowhere else — everything below
+// this line talks to the `Db` interface and cannot tell which it got. SQLite by default, so
+// `npm run dev` still needs nothing installed and nothing running.
+const db = openDb({ sqlitePath: DB_PATH });
+console.log(`[server] database: ${db.dialect}${db.dialect === "sqlite" ? ` (${DB_PATH})` : ""}`);
 const store = new TraceStore(db);
 await store.init();
 // Eval's control-plane tables live in the same database file, on the same connection

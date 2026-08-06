@@ -1,0 +1,14 @@
+-- 002_baseline — nothing to do on SQLite, and the file exists to say so.
+--
+-- The Postgres migration of this number creates runs, steps, the eval control plane, the MCP
+-- registry and the deploy records. On SQLite those tables are created by the store
+-- constructors — `TraceStore.init`, `EvalStore.init`, `McpStore.init`, `DeployStore.init` —
+-- which is where they have always been created, and where an existing jaroku.db already has
+-- them with no row anywhere saying so.
+--
+-- Moving that DDL here would mean either re-declaring tables the database already has, or
+-- inventing a way to decide whether a given file predates the runner. Leaving it where it is
+-- costs one comment and keeps the local path byte-identical to what it was.
+--
+-- From 003 onward the two dialects move together: every tenancy migration exists in both
+-- directories and does the same thing to the same tables.

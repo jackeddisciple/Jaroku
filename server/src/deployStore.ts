@@ -24,7 +24,7 @@
 //     someone remembered.
 
 import { randomUUID } from "node:crypto";
-import { asInt, asIntOrNull, type Db, type Queryable } from "./db/db.ts";
+import { asInt, asIntOrNull, jsonFromColumn, type Db, type Queryable } from "./db/db.ts";
 
 // --- status ------------------------------------------------------------------
 
@@ -199,17 +199,12 @@ export class DeployStore {
     return true;
   }
 
-  private static hydrate(row: Record<string, unknown>): Deployment {
-    let envKeys: string[] = [];
-    const raw = row["env_keys"];
-    try {
-      // SQLite stores TEXT and Postgres jsonb, so this arrives either as a string to parse
-      // or as the array itself.
-      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-      if (Array.isArray(parsed)) envKeys = parsed.filter((k): k is string => typeof k === "string");
-    } catch {
-      /* a row we cannot parse still describes a real deployment — show it with no keys */
-    }
+  private hydrate(row: Record<string, unknown>): Deployment {
+    // SQLite stores TEXT and Postgres `json`; jsonFromColumn is told which. A row whose
+    // env_keys cannot be read still describes a real deployment, so it is shown with none
+    // rather than hidden — the names are a convenience, the record is the point.
+    const parsed = jsonFromColumn(this.db.dialect, row["env_keys"]);
+    const envKeys = Array.isArray(parsed) ? parsed.filter((k): k is string => typeof k === "string") : [];
     return { ...(row as unknown as Deployment), env_keys: envKeys };
   }
 
@@ -354,14 +349,14 @@ export class DeployStore {
           "created still exists in your Railway account — check it there before retrying.",
       });
     }
-    return stale.map((r) => DeployStore.hydrate(r));
+    return stale.map((r) => this.hydrate(r));
   }
 
   // --- reads ---
 
   async get(id: string): Promise<Deployment | null> {
     const row = await this.db.get<Record<string, unknown>>("SELECT * FROM deployments WHERE id = ?", [id]);
-    return row ? DeployStore.hydrate(row) : null;
+    return row ? this.hydrate(row) : null;
   }
 
   /**
@@ -381,7 +376,7 @@ export class DeployStore {
     const rows = await this.db.all<Record<string, unknown>>(
       "SELECT * FROM deployments WHERE status != 'removed' ORDER BY created_at DESC, created_seq DESC",
     );
-    return rows.map((r) => DeployStore.hydrate(r));
+    return rows.map((r) => this.hydrate(r));
   }
 
   async listForAgent(agentId: string): Promise<Deployment[]> {

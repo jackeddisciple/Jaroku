@@ -24,7 +24,7 @@
 //     them apart.
 
 import { randomUUID } from "node:crypto";
-import { asInt, type Db, type Queryable } from "./db/db.ts";
+import { asInt, jsonFromColumn, type Db, type Queryable } from "./db/db.ts";
 
 // --- row shapes --------------------------------------------------------------
 
@@ -273,15 +273,13 @@ export class EvalStore {
     return true;
   }
 
-  private static parseJson<T>(v: unknown, fallback: T): T {
-    if (v === null || v === undefined) return fallback;
-    // Postgres jsonb arrives already parsed; SQLite TEXT arrives as a string.
-    if (typeof v !== "string") return v as T;
-    try {
-      return JSON.parse(v) as T;
-    } catch {
-      return fallback;
-    }
+  // Told which driver it is reading from rather than guessing from the value — see
+  // jsonFromColumn. Every column here holds an object or an array, so the string-scalar trap
+  // it defends against cannot arise; it goes through the same helper anyway, because "this
+  // one is safe by accident" is how the next column added here stops being safe.
+  private parseJson<T>(v: unknown, fallback: T): T {
+    const parsed = jsonFromColumn(this.db.dialect, v);
+    return parsed === null || typeof parsed === "string" ? fallback : (parsed as T);
   }
 
   // --- datasets --------------------------------------------------------------
@@ -414,8 +412,8 @@ export class EvalStore {
 
   // --- rubrics ---------------------------------------------------------------
 
-  private static hydrateRubric(row: Record<string, unknown>): Rubric {
-    return { ...row, criteria: EvalStore.parseJson<RubricCriterion[]>(row["criteria"], []) } as Rubric;
+  private hydrateRubric(row: Record<string, unknown>): Rubric {
+    return { ...row, criteria: this.parseJson<RubricCriterion[]>(row["criteria"], []) } as Rubric;
   }
 
   /** Insert or replace a rubric. `dataset_id: null` is the shared built-in default. */
@@ -447,7 +445,7 @@ export class EvalStore {
 
   async getRubric(rubricId: string): Promise<Rubric | undefined> {
     const row = await this.db.get<Record<string, unknown>>(`SELECT * FROM rubrics WHERE id = ?`, [rubricId]);
-    return row ? EvalStore.hydrateRubric(row) : undefined;
+    return row ? this.hydrateRubric(row) : undefined;
   }
 
   /** The rubric a dataset scores against, if it has customized one. */
@@ -456,13 +454,13 @@ export class EvalStore {
       `SELECT * FROM rubrics WHERE dataset_id = ? ORDER BY updated_at DESC LIMIT 1`,
       [datasetId],
     );
-    return row ? EvalStore.hydrateRubric(row) : undefined;
+    return row ? this.hydrateRubric(row) : undefined;
   }
 
   // --- eval runs -------------------------------------------------------------
 
-  private static hydrateEvalRun(row: Record<string, unknown>): EvalRun {
-    return { ...row, targets: EvalStore.parseJson<EvalTarget[]>(row["targets"], []) } as EvalRun;
+  private hydrateEvalRun(row: Record<string, unknown>): EvalRun {
+    return { ...row, targets: this.parseJson<EvalTarget[]>(row["targets"], []) } as EvalRun;
   }
 
   async createEvalRun(r: {
@@ -513,7 +511,7 @@ export class EvalStore {
 
   async getEvalRun(evalId: string): Promise<EvalRun | undefined> {
     const row = await this.db.get<Record<string, unknown>>(`SELECT * FROM eval_runs WHERE id = ?`, [evalId]);
-    return row ? EvalStore.hydrateEvalRun(row) : undefined;
+    return row ? this.hydrateEvalRun(row) : undefined;
   }
 
   async listEvalRuns(limit = 50): Promise<EvalRun[]> {
@@ -521,7 +519,7 @@ export class EvalStore {
       `SELECT * FROM eval_runs ORDER BY started_at DESC LIMIT ?`,
       [limit],
     );
-    return rows.map(EvalStore.hydrateEvalRun);
+    return rows.map((r) => this.hydrateEvalRun(r));
   }
 
   /** Evals still in flight at startup — everything a restart needs to reconcile. */
@@ -529,7 +527,7 @@ export class EvalStore {
     const rows = await this.db.all<Record<string, unknown>>(
       `SELECT * FROM eval_runs WHERE status IN ('queued', 'running')`,
     );
-    return rows.map(EvalStore.hydrateEvalRun);
+    return rows.map((r) => this.hydrateEvalRun(r));
   }
 
   // --- eval jobs -------------------------------------------------------------
@@ -710,7 +708,7 @@ export class EvalStore {
       (r) =>
         ({
           ...r,
-          per_criterion: EvalStore.parseJson<Record<string, number> | null>(r["per_criterion"], null),
+          per_criterion: this.parseJson<Record<string, number> | null>(r["per_criterion"], null),
         }) as EvalScore,
     );
   }

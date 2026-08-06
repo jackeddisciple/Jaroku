@@ -1,0 +1,34 @@
+# The local hosted stack.
+#
+# Nothing here is required to develop Jaroku. `npm run dev` still runs against SQLite with
+# nothing installed and nothing started — that is the free-development path the README is
+# built around and it does not change. This file is for working on the hosted path.
+#
+#   docker compose up -d postgres
+#   JAROKU_DB_DRIVER=postgres JAROKU_PG_URL=postgres://jaroku:jaroku@127.0.0.1:5433/jaroku \
+#     npm run dev        # (in server/)
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: jaroku-postgres
+    environment:
+      POSTGRES_USER: jaroku
+      POSTGRES_PASSWORD: jaroku
+      POSTGRES_DB: jaroku
+    ports:
+      # 5433, not 5432. Plenty of machines already have a Postgres on the default port, and
+      # a dev database that quietly attaches to the wrong server is a bad afternoon.
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - jaroku-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # `npm run migrate` against a server still starting up fails in a way that reads like a
+      # configuration problem, so the compose file answers the question itself.
+      test: ["CMD-SHELL", "pg_isready -U jaroku -d jaroku"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  jaroku-pgdata:

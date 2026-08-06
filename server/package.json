@@ -11,6 +11,8 @@
     "migrate": "tsx src/db/migrate.cli.ts",
     "test:migrate": "tsx src/db/migrate.test.ts",
     "test:db": "tsx src/db/sqlite.test.ts",
+    "test:db-postgres": "tsx src/db/postgres.test.ts",
+    "test:shape-parity": "tsx src/db/shapeParity.test.ts",
     "test:protocol": "tsx src/fileProtocol.test.ts",
     "test:plan": "tsx src/planProtocol.test.ts",
     "test:pricing": "tsx src/pricing.test.ts",
@@ -36,10 +38,12 @@
     "@anthropic-ai/sdk": "^0.112.4",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "diff": "^8.0.4",
+    "pg": "^8.22.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/pg": "^8.20.4",
     "@types/ws": "^8.5.12",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
