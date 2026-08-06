@@ -206,6 +206,10 @@ for (const ctx of workspaceContexts) {
     await evalStore.setEvalStatus(ctx, stale.id, "cancelled", "interrupted by a server restart");
     console.log(`[eval] ${stale.id} was interrupted by a restart — ${cancelled} queued job(s) cancelled`);
   }
+  // And the runs themselves, which nothing used to close. See reconcileInterruptedRuns.
+  for (const id of await store.reconcileInterruptedRuns(ctx)) {
+    console.log(`[manager] run ${id} was interrupted by a restart`);
+  }
 }
 
 // Catch checkpoint blobs from evals whose per-eval sweep never ran (a crash, a restart).

@@ -182,6 +182,40 @@ export class TraceStore {
     ]);
   }
 
+  /**
+   * Close out runs a restart interrupted, in ONE workspace. Returns what it closed.
+   *
+   * A run is marked `running` by the process supervising its subprocess, and that subprocess
+   * dies with the server. Nothing else ever revisits the row, so a crash mid-run left a run
+   * spinning in the sidebar permanently — no end, no error, and no way for the user to clear
+   * it. Interrupted evals and interrupted deployments were both already reconciled at boot;
+   * the runs underneath them were the case nobody wrote.
+   *
+   * `paused` is deliberately excluded. It looks equally unfinished and is not: a run halted at
+   * a boundary keeps its checkpoint precisely so it can be branched from later, which is why
+   * the eval artifact sweep spares interactive checkpoints too. Failing it here would delete
+   * the only reason it was kept.
+   *
+   * Safe at boot because the process has not started a run yet, so every `running` row it can
+   * see belongs to an earlier life. That stops being true the day two replicas share a
+   * database — the same caveat the eval and deploy reconciliations beside it already carry,
+   * and the same place it has to be solved: a lease naming the process that owns the run.
+   */
+  async reconcileInterruptedRuns(ctx: TenantContext): Promise<string[]> {
+    const rows = await this.q(ctx).all<{ id: string }>(
+      `SELECT id FROM runs WHERE workspace_id = ? AND status = 'running'`,
+      [ctx.workspaceId],
+    );
+    for (const r of rows) {
+      await this.q(ctx).run(
+        `UPDATE runs SET status = 'error', ended_at = ?, error = ?
+          WHERE id = ? AND workspace_id = ? AND status = 'running'`,
+        [new Date().toISOString(), "interrupted by a server restart", r.id, ctx.workspaceId],
+      );
+    }
+    return rows.map((r) => r.id);
+  }
+
   // The run's current highest seq — the offset a resumed subprocess continues its timeline from.
   async maxSeqForRun(ctx: TenantContext, runId: string): Promise<number> {
     const row = await this.q(ctx).get<{ m: unknown }>(

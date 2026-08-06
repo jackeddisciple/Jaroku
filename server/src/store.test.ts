@@ -160,6 +160,47 @@ const FROZEN_RUN_FIELDS = [
 const missingRun = FROZEN_RUN_FIELDS.filter((f) => !(f in runRow));
 check(missingRun.length === 0, `every schema-v1 Run field survives (missing: ${missingRun.join(", ") || "none"})`);
 
+// Runs a restart interrupted. Nothing used to close them, so a crash mid-run left a row
+// spinning in the sidebar forever — while interrupted evals and deployments were both
+// already reconciled at boot.
+console.log("\ninterrupted runs are closed out at boot");
+{
+  const stuck = randomUUID();
+  const paused = randomUUID();
+  const finished = randomUUID();
+  await store.upsertRun(A, run(stuck));
+  // `paused` is a STORAGE-ONLY status, cast exactly as index.ts casts it. Schema v1 names
+  // only running/completed/error, so widening RunStatus to admit it here would quietly
+  // change the frozen event contract to make a test compile.
+  await store.upsertRun(A, { ...run(paused), status: "paused" as Run["status"] });
+  await store.upsertRun(A, { ...run(finished), status: "completed", ended_at: new Date().toISOString() });
+  // Another workspace's interrupted run, to prove the sweep is scoped like everything else.
+  const otherStuck = randomUUID();
+  await store.upsertRun(B, run(otherStuck));
+
+  const closed = await store.reconcileInterruptedRuns(A);
+  check(closed.includes(stuck), "the interrupted run is reported");
+  check(!closed.includes(paused) && !closed.includes(finished),
+    "the paused and finished ones are not");
+  check(!closed.includes(otherStuck), "another workspace's interrupted run is NOT touched");
+
+  const after = new Map((await store.listRuns(A, 500)).map((r) => [r.id, r]));
+  const s = after.get(stuck);
+  check(s?.status === "error", `it is marked errored (${s?.status})`);
+  check(Boolean(s?.ended_at), "and given an end time, so the sidebar can stop spinning");
+  check(s?.error === "interrupted by a server restart", `with a reason (${JSON.stringify(s?.error)})`);
+
+  // A paused run is halted at a boundary and keeps its checkpoint so it can be branched from.
+  // Failing it here would destroy the only reason it was kept.
+  check((after.get(paused)?.status as string) === "paused",
+    `a paused run survives (${after.get(paused)?.status})`);
+  check(after.get(finished)?.status === "completed", "a finished run is untouched");
+  check((await store.getRun(B, otherStuck))?.status === "running", "and B's run is still B's business");
+
+  // Idempotent: booting twice must not rewrite what the first boot already closed.
+  check((await store.reconcileInterruptedRuns(A)).length === 0, "a second boot finds nothing left");
+}
+
 await store.close();
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
