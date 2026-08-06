@@ -92,11 +92,11 @@ export function slugifyServerId(input: string): string {
   return slug;
 }
 
-function uniqueServerId(store: McpStore, base: string): string {
-  if (!store.getServer(base)) return base;
+async function uniqueServerId(store: McpStore, base: string): Promise<string> {
+  if (!(await store.getServer(base))) return base;
   for (let n = 2; n < 1000; n++) {
     const candidate = `${base.slice(0, 28)}_${n}`;
-    if (!store.getServer(candidate)) return candidate;
+    if (!(await store.getServer(candidate))) return candidate;
   }
   return `${base.slice(0, 24)}_${Date.now() % 100000}`;
 }
@@ -168,31 +168,35 @@ export class McpRegistry {
     };
   }
 
-  view(server: McpServer): McpServerView {
+  async view(server: McpServer): Promise<McpServerView> {
+    const tools = await this.store.listTools(server.id);
     return {
       ...server,
       configured: this.configured(server),
-      tools: this.store.listTools(server.id).map((t) => this.viewTool(t)),
+      tools: tools.map((t) => this.viewTool(t)),
     };
   }
 
-  list(): McpServerView[] {
-    return this.store.listServers().map((s) => this.view(s));
+  async list(): Promise<McpServerView[]> {
+    const servers = await this.store.listServers();
+    const out: McpServerView[] = [];
+    for (const s of servers) out.push(await this.view(s));
+    return out;
   }
 
-  get(id: string): McpServerView | null {
-    const server = this.store.getServer(id);
+  async get(id: string): Promise<McpServerView | null> {
+    const server = await this.store.getServer(id);
     return server ? this.view(server) : null;
   }
 
   /** Every discovered tool across every server, for the selection UI and the prompt. */
-  allTools(): McpToolView[] {
-    return this.store.listTools().map((t) => this.viewTool(t));
+  async allTools(): Promise<McpToolView[]> {
+    return (await this.store.listTools()).map((t) => this.viewTool(t));
   }
 
   /** Resolve `"server/tool"` refs, dropping any that no longer exist. Least privilege. */
-  resolve(refs: string[]): McpToolView[] {
-    return this.store.resolveTools(refs).map((t) => this.viewTool(t));
+  async resolve(refs: string[]): Promise<McpToolView[]> {
+    return (await this.store.resolveTools(refs)).map((t) => this.viewTool(t));
   }
 
   // --- writes ----------------------------------------------------------------
@@ -216,10 +220,10 @@ export class McpRegistry {
         message: `"${requested}" is not a usable server id — lowercase letters, digits and underscores, starting with a letter`,
       };
     }
-    if (opts.id && this.store.getServer(opts.id)) {
+    if (opts.id && (await this.store.getServer(opts.id))) {
       return { ok: false, server: null, message: `a server called "${opts.id}" is already connected` };
     }
-    const id = opts.id ?? uniqueServerId(this.store, requested);
+    const id = opts.id ?? (await uniqueServerId(this.store, requested));
     const label = opts.label?.trim() || id;
 
     // A token the user just typed is written to runtime/.env under a derived name, then
@@ -252,7 +256,7 @@ export class McpRegistry {
     };
 
     if (!result.ok) {
-      this.store.upsertServer({
+      await this.store.upsertServer({
         ...base,
         server_name: null,
         server_version: null,
@@ -261,10 +265,10 @@ export class McpRegistry {
         last_error: result.error,
         discovered_at: null,
       });
-      return { ok: false, server: this.get(id), message: joinMessages(credentialWarning, result.error) };
+      return { ok: false, server: await this.get(id), message: joinMessages(credentialWarning, result.error) };
     }
 
-    this.store.upsertServer({
+    await this.store.upsertServer({
       ...base,
       server_name: result.server_name,
       server_version: result.server_version,
@@ -273,9 +277,13 @@ export class McpRegistry {
       last_error: null,
       discovered_at: null, // set by replaceTools, so the timestamp matches the list it stamps
     });
-    this.store.replaceTools(id, this.classifyAll(result));
+    await this.store.replaceTools(id, this.classifyAll(result));
 
-    return { ok: true, server: this.get(id), message: joinMessages(credentialWarning, truncationNote(result)) };
+    return {
+      ok: true,
+      server: await this.get(id),
+      message: joinMessages(credentialWarning, truncationNote(result)),
+    };
   }
 
   /**
@@ -286,17 +294,17 @@ export class McpRegistry {
    * tools vanished" is a much worse failure than a status line saying unreachable.
    */
   async rediscover(id: string): Promise<RegistrationResult> {
-    const server = this.store.getServer(id);
+    const server = await this.store.getServer(id);
     if (!server) return { ok: false, server: null, message: `no server called "${id}"` };
 
     const result = await discover({ endpoint: server.endpoint, token: this.token(server) });
 
     if (!result.ok) {
-      this.store.setServerStatus(id, result.status, result.error);
-      return { ok: false, server: this.get(id), message: result.error };
+      await this.store.setServerStatus(id, result.status, result.error);
+      return { ok: false, server: await this.get(id), message: result.error };
     }
 
-    this.store.upsertServer({
+    await this.store.upsertServer({
       ...server,
       server_name: result.server_name,
       server_version: result.server_version,
@@ -304,19 +312,23 @@ export class McpRegistry {
       status: "connected",
       last_error: null,
     });
-    this.store.replaceTools(id, this.classifyAll(result));
-    return { ok: true, server: this.get(id), message: truncationNote(result) };
+    await this.store.replaceTools(id, this.classifyAll(result));
+    return { ok: true, server: await this.get(id), message: truncationNote(result) };
   }
 
-  removeServer(id: string): boolean {
-    if (!this.store.getServer(id)) return false;
-    this.store.deleteServer(id);
+  async removeServer(id: string): Promise<boolean> {
+    if (!(await this.store.getServer(id))) return false;
+    await this.store.deleteServer(id);
     return true;
   }
 
   /** Record (or clear) a user's impact override. Stamped against the current schema. */
-  setToolImpact(serverId: string, toolName: string, override: McpImpact | null): McpToolView | null {
-    const updated = this.store.setToolImpactOverride(serverId, toolName, override);
+  async setToolImpact(
+    serverId: string,
+    toolName: string,
+    override: McpImpact | null,
+  ): Promise<McpToolView | null> {
+    const updated = await this.store.setToolImpactOverride(serverId, toolName, override);
     return updated ? this.viewTool(updated) : null;
   }
 
@@ -328,8 +340,11 @@ export class McpRegistry {
    * runtime/.env and from this process, so "disconnect this credential" is a real action
    * rather than an orphaned line in a file.
    */
-  setCredential(id: string, token: string | null): { result: RegistrationResult; warning: string | null } {
-    const server = this.store.getServer(id);
+  async setCredential(
+    id: string,
+    token: string | null,
+  ): Promise<{ result: RegistrationResult; warning: string | null }> {
+    const server = await this.store.getServer(id);
     if (!server) {
       return { result: { ok: false, server: null, message: `no server called "${id}"` }, warning: null };
     }
@@ -337,19 +352,23 @@ export class McpRegistry {
 
     if (token === null) {
       this.credentials?.clear(key);
-      this.store.setServerAuthEnvKey(id, null);
-      return { result: { ok: true, server: this.get(id), message: null }, warning: null };
+      await this.store.setServerAuthEnvKey(id, null);
+      return { result: { ok: true, server: await this.get(id), message: null }, warning: null };
     }
 
     const written = this.credentials?.set(key, token) ?? { ok: true, warning: null };
     if (!written.ok) {
       return {
-        result: { ok: false, server: this.get(id), message: written.warning ?? "could not store the credential" },
+        result: {
+          ok: false,
+          server: await this.get(id),
+          message: written.warning ?? "could not store the credential",
+        },
         warning: null,
       };
     }
-    this.store.setServerAuthEnvKey(id, key);
-    return { result: { ok: true, server: this.get(id), message: null }, warning: written.warning };
+    await this.store.setServerAuthEnvKey(id, key);
+    return { result: { ok: true, server: await this.get(id), message: null }, warning: written.warning };
   }
 
   private classifyAll(result: Extract<DiscoveryResult, { ok: true }>): DiscoveredTool[] {

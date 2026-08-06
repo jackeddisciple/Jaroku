@@ -20,6 +20,7 @@
 
 import type { TraceStore } from "./store.ts";
 import type { EvalStore, EvalTarget } from "./evalStore.ts";
+import { asInt } from "./db/db.ts";
 import { costFor, isPriced, round8 } from "./pricing.ts";
 import { JUDGE_MODEL } from "./judge/score.ts";
 
@@ -75,27 +76,27 @@ export interface EvalEstimate {
 }
 
 /** Mean input/output tokens per run for this agent on this model, from real history. */
-function measureRuns(
+async function measureRuns(
   store: TraceStore,
   agentId: string,
   model: string | null,
-): { input: number; output: number; runs: number } | null {
-  const db = store.connection();
+): Promise<{ input: number; output: number; runs: number } | null> {
   // Only completed runs: a crashed one is a partial sample and would drag the mean down,
   // which is the dangerous direction for an estimate.
-  const rows = db
-    .prepare(
-      `SELECT r.id AS run_id,
-              COALESCE(SUM(s.tokens), 0) AS tokens
-       FROM runs r
-       JOIN steps s ON s.run_id = r.id AND s.type = 'llm_call'
-       WHERE r.agent_id = ? AND r.status = 'completed'
-         ${model ? "AND r.model = ?" : "AND r.provider != 'fake'"}
-       GROUP BY r.id
-       ORDER BY r.started_at DESC
-       LIMIT 20`,
-    )
-    .all(...(model ? [agentId, model] : [agentId])) as { run_id: string; tokens: number }[];
+  const raw = await store.database().all<{ run_id: string; tokens: unknown }>(
+    `SELECT r.id AS run_id,
+            COALESCE(SUM(s.tokens), 0) AS tokens
+     FROM runs r
+     JOIN steps s ON s.run_id = r.id AND s.type = 'llm_call'
+     WHERE r.agent_id = ? AND r.status = 'completed'
+       ${model ? "AND r.model = ?" : "AND r.provider != 'fake'"}
+     GROUP BY r.id
+     ORDER BY MAX(r.started_at) DESC
+     LIMIT 20`,
+    model ? [agentId, model] : [agentId],
+  );
+  // SUM over an integer column is a bigint in Postgres and arrives as a string.
+  const rows = raw.map((r) => ({ run_id: r.run_id, tokens: asInt(r.tokens) }));
 
   const withTokens = rows.filter((r) => r.tokens > 0);
   if (!withTokens.length) return null;
@@ -113,12 +114,12 @@ function measureRuns(
   };
 }
 
-export function estimateEval(
+export async function estimateEval(
   store: TraceStore,
   evalStore: EvalStore,
   opts: { datasetId: string; agentId: string; targets: EvalTarget[]; judgeEnabled: boolean },
-): EvalEstimate {
-  const examples = evalStore.listExamples(opts.datasetId);
+): Promise<EvalEstimate> {
+  const examples = await evalStore.listExamples(opts.datasetId);
   const notes: string[] = [];
   const perTarget: TargetEstimate[] = [];
 
@@ -129,12 +130,12 @@ export function estimateEval(
     // Calibrate from this agent's real runs, preferring the same model.
     let basis: Basis = "default";
     let sample = { input: DEFAULT_INPUT_TOKENS, output: DEFAULT_OUTPUT_TOKENS, runs: 0 };
-    const sameModel = measureRuns(store, opts.agentId, t.model);
+    const sameModel = await measureRuns(store, opts.agentId, t.model);
     if (sameModel) {
       basis = "measured";
       sample = sameModel;
     } else {
-      const anyModel = measureRuns(store, opts.agentId, null);
+      const anyModel = await measureRuns(store, opts.agentId, null);
       if (anyModel) {
         // Token counts for the same graph are similar across models, but tokenizers differ
         // — say so rather than presenting it as measured.

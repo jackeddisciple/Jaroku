@@ -114,7 +114,10 @@ export interface DeployPlan {
  * what the deploy form renders, and it is the same function the start path re-checks against,
  * so the UI cannot show a green light for something the server will refuse.
  */
-export function planDeploy(deps: DeployManagerDeps, req: StartDeployRequest): DeployPlan {
+export async function planDeploy(
+  deps: DeployManagerDeps,
+  req: StartDeployRequest,
+): Promise<DeployPlan> {
   const problems: string[] = [];
   const warnings: string[] = [];
 
@@ -191,7 +194,7 @@ export function planDeploy(deps: DeployManagerDeps, req: StartDeployRequest): De
     secrets,
     problems,
     warnings,
-    redeploy: deps.store.reusableTarget(req.agentId) !== null,
+    redeploy: (await deps.store.reusableTarget(req.agentId)) !== null,
     cliVersion: cli.version,
   };
 }
@@ -229,7 +232,7 @@ export class DeployManager {
   async start(req: StartDeployRequest): Promise<{ deploymentId: string } | { error: string }> {
     if (this.active) return { error: "a deploy is already running" };
 
-    const plan = planDeploy(this.deps, req);
+    const plan = await planDeploy(this.deps, req);
     if (plan.problems.length) return { error: plan.problems.join(" · ") };
 
     const token = this.deps.token();
@@ -255,7 +258,7 @@ export class DeployManager {
       };
     }
 
-    const deployment = this.deps.store.create({
+    const deployment = await this.deps.store.create({
       agentId: req.agentId,
       provider: req.provider,
       model: req.model,
@@ -271,10 +274,10 @@ export class DeployManager {
     } catch (err) {
       // Anything that escaped drive() is a bug, not a deploy outcome — but the row still has
       // to settle, or it claims to be in flight forever.
-      this.fail(deployment.id, err instanceof Error ? err.message : String(err));
+      await this.fail(deployment.id, err instanceof Error ? err.message : String(err));
     } finally {
       this.active = null;
-      const final = this.deps.store.get(deployment.id);
+      const final = await this.deps.store.get(deployment.id);
       if (final) this.deps.onFinished(final);
       this.deps.onChanged();
     }
@@ -289,7 +292,7 @@ export class DeployManager {
     active.upload?.stop();
 
     // Past the upload, the build belongs to Railway and only Railway can stop it.
-    const row = this.deps.store.get(deploymentId);
+    const row = await this.deps.store.get(deploymentId);
     const token = this.deps.token();
     if (row?.railway_deployment_id && token) {
       try {
@@ -297,7 +300,7 @@ export class DeployManager {
       } catch {
         // A cancel that Railway would not accept is worth saying, not worth failing over:
         // the local record is already cancelled and the user is told to check the dashboard.
-        this.log(deploymentId, "building", "jaroku",
+        await this.log(deploymentId, "building", "jaroku",
           "could not cancel the build on Railway — check your dashboard.");
       }
     }
@@ -326,38 +329,38 @@ export class DeployManager {
 
     try {
       // --- package ---
-      this.stage(id, "packaging", "packaging");
+      await this.stage(id, "packaging", "packaging");
       const artifacts = writeDeployArtifacts({
         runtimeDir: this.deps.runtimeDir,
         agentId: req.agentId,
         provider: req.provider,
       });
-      this.log(id, "packaging", "jaroku",
+      await this.log(id, "packaging", "jaroku",
         `wrote ${artifacts.paths.join(", ")} · image installs ${artifacts.requires.join(", ")}`);
-      if (this.stopped(id)) return;
+      if (await this.stopped(id)) return;
 
       // --- provision ---
-      this.stage(id, "provisioning", "packaging");
+      await this.stage(id, "provisioning", "packaging");
       const api = new RailwayApi({ token, scrub });
       const target = await this.resolveTarget(id, api, req.agentId);
-      this.deps.store.patch(id, {
+      await this.deps.store.patch(id, {
         railway_project_id: target.projectId,
         railway_environment_id: target.environmentId,
         railway_service_id: target.serviceId,
       });
       this.deps.onChanged();
-      if (this.stopped(id)) return;
+      if (await this.stopped(id)) return;
 
       // --- variables ---
-      this.stage(id, "variables", "packaging");
+      await this.stage(id, "variables", "packaging");
       await api.upsertVariables(target, { ...Object.fromEntries(secretValues), ...host.env });
       // NAMES, never values. The names are already in the row; this line just says it happened.
-      this.log(id, "variables", "jaroku",
+      await this.log(id, "variables", "jaroku",
         `set ${[...secretValues.keys(), ...Object.keys(host.env)].sort().join(", ")} on Railway`);
-      if (this.stopped(id)) return;
+      if (await this.stopped(id)) return;
 
       // --- upload ---
-      this.stage(id, "uploading", "uploading");
+      await this.stage(id, "uploading", "uploading");
       const upload = new RailwayUpload();
       if (this.active) this.active.upload = upload;
       const result = await upload.run({
@@ -370,52 +373,52 @@ export class DeployManager {
           // Remembered so the buildLogs poll below does not show the same output a second
           // time — it is the same build's log, read a different way.
           if (this.streamedByCli.size < BUILD_LOG_MEMORY) this.streamedByCli.add(line);
-          this.log(id, "building", stream === "stderr" ? "build-err" : "build", scrub(line));
+          void this.log(id, "building", stream === "stderr" ? "build-err" : "build", scrub(line));
         },
       });
       if (this.active) this.active.upload = null;
 
       if (result.cancelled || this.active?.cancelled) {
-        this.settle(id, "cancelled", null);
+        await this.settle(id, "cancelled", null);
         return;
       }
       if (!result.ok) {
-        this.fail(id, scrub(result.error ?? "the upload failed"));
+        await this.fail(id, scrub(result.error ?? "the upload failed"));
         return;
       }
 
       // --- follow ---
-      this.stage(id, "building", "building");
+      await this.stage(id, "building", "building");
       const deployment = await this.follow(id, api, target, scrub);
       if (!deployment) return; // follow() has already settled the row
 
       // --- publish ---
-      this.stage(id, "publishing", "deploying");
+      await this.stage(id, "publishing", "deploying");
       const existing = await api.existingDomain(target.projectId, target.environmentId, target.serviceId);
       const url = existing ?? (await api.createDomain(target.serviceId, target.environmentId, SERVE_PORT));
-      this.deps.store.patch(id, { url });
+      await this.deps.store.patch(id, { url });
       // Exactly one row may claim to be live on a service. Two would be two different URLs
       // both described as the current one.
-      const replaced = this.deps.store.supersede(id, target.serviceId);
+      const replaced = await this.deps.store.supersede(id, target.serviceId);
       if (replaced) {
-        this.log(id, "publishing", "jaroku",
+        await this.log(id, "publishing", "jaroku",
           `replaced ${replaced} earlier deployment(s) on this service`);
       }
-      this.log(id, "publishing", "jaroku", `live at ${url}`);
+      await this.log(id, "publishing", "jaroku", `live at ${url}`);
       if (serveToken) {
         // NOT through log(). A log line is persisted to deployment_logs, and this token gates
         // an endpoint that spends the user's provider key — putting it in the database would
         // undo the one thing the whole secrets design is for. It goes out once, on the
         // channel, to whoever is watching, and lives on only in Railway's variable store.
         this.deps.onServeToken({ deploymentId: id, url, token: serveToken });
-        this.log(id, "publishing", "jaroku",
+        await this.log(id, "publishing", "jaroku",
           "a bearer token was generated and set on Railway. It is shown once, above — Jaroku " +
           "does not keep a copy.");
       } else {
-        this.log(id, "publishing", "jaroku",
+        await this.log(id, "publishing", "jaroku",
           "this endpoint has NO token — anyone with the URL can run the agent on your key.");
       }
-      this.settle(id, "live", null);
+      await this.settle(id, "live", null);
     } finally {
       // The whole reason the values were held. Cleared on every path out, including a throw.
       secretValues.clear();
@@ -437,7 +440,7 @@ export class DeployManager {
 
     while (Date.now() < deadline) {
       if (this.active?.cancelled) {
-        this.settle(id, "cancelled", null);
+        await this.settle(id, "cancelled", null);
         return null;
       }
       let deployments;
@@ -447,7 +450,7 @@ export class DeployManager {
         // A blip while watching is not a failed deploy. Say so and keep watching — the
         // deadline is what ends this, not one unlucky poll.
         const detail = err instanceof RailwayError ? err.message : String(err);
-        this.log(id, "building", "jaroku", scrub(`could not read the build status: ${detail}`));
+        await this.log(id, "building", "jaroku", scrub(`could not read the build status: ${detail}`));
         await sleep(FOLLOW_POLL_MS);
         continue;
       }
@@ -457,11 +460,11 @@ export class DeployManager {
         await sleep(FOLLOW_POLL_MS);
         continue;
       }
-      this.deps.store.patch(id, { railway_deployment_id: deployment.id });
+      await this.deps.store.patch(id, { railway_deployment_id: deployment.id });
 
       if (deployment.status !== lastStatus) {
         lastStatus = deployment.status;
-        this.log(id, "building", "jaroku", `Railway: ${deployment.status.toLowerCase()}`);
+        await this.log(id, "building", "jaroku", `Railway: ${deployment.status.toLowerCase()}`);
         if (deployment.status.toUpperCase() === "DEPLOYING") this.stage(id, "building", "deploying");
       }
 
@@ -470,7 +473,7 @@ export class DeployManager {
       try {
         for (const line of await api.buildLogs(deployment.id, BUILD_LOG_PAGE)) {
           if (this.seenBuildLine(line.timestamp, line.message)) continue;
-          this.log(id, "building", "build", scrub(line.message));
+          await this.log(id, "building", "build", scrub(line.message));
         }
       } catch {
         /* logs are a nicety; never fail a deploy because they could not be read */
@@ -478,7 +481,7 @@ export class DeployManager {
 
       if (isTerminalStatus(deployment.status)) {
         if (RAILWAY_TERMINAL_OK.has(deployment.status.toUpperCase())) return deployment;
-        this.fail(id, `Railway reported the deployment as ${deployment.status.toLowerCase()}`);
+        await this.fail(id, `Railway reported the deployment as ${deployment.status.toLowerCase()}`);
         return null;
       }
       await sleep(FOLLOW_POLL_MS);
@@ -487,7 +490,7 @@ export class DeployManager {
     // Deliberately not "failed". Nothing here knows that it failed — only that we stopped
     // watching, and telling someone their deploy failed when it may be about to come up is
     // how they end up deploying a second copy.
-    this.settle(
+    await this.settle(
       id,
       "interrupted",
       "stopped waiting for the build. It may still finish — check your Railway dashboard.",
@@ -516,22 +519,22 @@ export class DeployManager {
     api: RailwayApi,
     agentId: string,
   ): Promise<{ projectId: string; environmentId: string; serviceId: string }> {
-    const remembered = this.deps.store.reusableTarget(agentId);
+    const remembered = await this.deps.store.reusableTarget(agentId);
     if (remembered) {
       try {
         await api.deployments(remembered.projectId, remembered.serviceId, remembered.environmentId, 1);
-        this.log(id, "provisioning", "jaroku",
+        await this.log(id, "provisioning", "jaroku",
           "redeploying into the Railway service this agent already has — no second project");
         return remembered;
       } catch (err) {
         const detail = err instanceof RailwayError ? err.message : String(err);
-        this.log(id, "provisioning", "jaroku",
+        await this.log(id, "provisioning", "jaroku",
           `the Railway service this agent used is gone (${detail}); creating a new one`);
       }
     }
 
     const project = await api.createProject(this.projectName(agentId));
-    this.log(id, "provisioning", "jaroku", `created Railway project ${project.name}`);
+    await this.log(id, "provisioning", "jaroku", `created Railway project ${project.name}`);
     const service = await api.createService(project.id, agentId);
     return {
       projectId: project.id,
@@ -577,30 +580,30 @@ export class DeployManager {
   }
 
   /** Cancelled between steps? Settle the row and tell the caller to stop. */
-  private stopped(id: string): boolean {
+  private async stopped(id: string): Promise<boolean> {
     if (!this.active?.cancelled) return false;
-    this.settle(id, "cancelled", null);
+    await this.settle(id, "cancelled", null);
     return true;
   }
 
-  private stage(id: string, stage: DeployStage, status: DeployStatus): void {
-    this.deps.store.patch(id, { status });
+  private async stage(id: string, stage: DeployStage, status: DeployStatus): Promise<void> {
+    await this.deps.store.patch(id, { status });
     this.deps.onStage({ deploymentId: id, stage, status });
   }
 
-  private log(id: string, stage: string, stream: string, text: string): void {
-    const seq = this.deps.store.appendLog(id, stage, stream, text);
+  private async log(id: string, stage: string, stream: string, text: string): Promise<void> {
+    const seq = await this.deps.store.appendLog(id, stage, stream, text);
     this.deps.onLog({ deploymentId: id, seq, stage, stream, text });
   }
 
-  private settle(id: string, status: DeployStatus, error: string | null): void {
-    this.deps.store.patch(id, { status, error });
+  private async settle(id: string, status: DeployStatus, error: string | null): Promise<void> {
+    await this.deps.store.patch(id, { status, error });
     this.deps.onStage({ deploymentId: id, stage: "done", status });
-    if (error) this.log(id, "done", "jaroku", error);
+    if (error) await this.log(id, "done", "jaroku", error);
   }
 
-  private fail(id: string, message: string): void {
-    this.settle(id, "failed", message);
+  private async fail(id: string, message: string): Promise<void> {
+    await this.settle(id, "failed", message);
   }
 }
 

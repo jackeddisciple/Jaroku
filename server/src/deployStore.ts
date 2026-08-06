@@ -23,8 +23,8 @@
 //     broadcast, and in anything read back later — rather than in whichever of the three
 //     someone remembered.
 
-import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
+import { asInt, asIntOrNull, type Db, type Queryable } from "./db/db.ts";
 
 // --- status ------------------------------------------------------------------
 
@@ -141,13 +141,13 @@ const PATCHABLE: ReadonlySet<string> = new Set([
 const LOG_CAP = 2000;
 
 export class DeployStore {
-  // Shares TraceStore's handle: same file, single writer. See TraceStore.connection().
-  constructor(private db: DatabaseSync) {
-    this.migrate();
-  }
+  // Shares the trace store's database: same file, single writer. See TraceStore.database().
+  constructor(private db: Db) {}
 
-  private migrate(): void {
-    this.db.exec(`
+  /** SQLite only — on Postgres these tables come from the numbered migrations. */
+  async init(): Promise<void> {
+    if (this.db.dialect !== "sqlite") return;
+    await this.db.exec(`
       CREATE TABLE IF NOT EXISTS deployments (
         id                     TEXT PRIMARY KEY,
         agent_id               TEXT NOT NULL,
@@ -179,21 +179,36 @@ export class DeployStore {
       CREATE INDEX IF NOT EXISTS idx_deployments_agent  ON deployments(agent_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_deployments_status ON deployments(status);
     `);
+    // Insertion order, made explicit — see `list()` for why the tie-break matters.
+    //
+    // It used to be SQLite's hidden `rowid`, which does not exist in Postgres and has no
+    // stable equivalent there. Existing rows are backfilled FROM rowid, so no list reorders.
+    if (await this.ensureColumn("deployments", "created_seq", "INTEGER NOT NULL DEFAULT 0")) {
+      await this.db.exec(`UPDATE deployments SET created_seq = rowid`);
+    }
   }
 
-  // No additive migrations yet — these tables are new. When one is needed, copy the
-  // `ensureColumn` helper from store.ts:65 / evalStore.ts:257: CREATE TABLE IF NOT EXISTS
-  // never alters an existing table.
+  /**
+   * Idempotent ADD COLUMN — CREATE TABLE IF NOT EXISTS never alters an existing table.
+   * Returns whether it added one, so a caller can backfill only when it did.
+   */
+  private async ensureColumn(table: string, column: string, decl: string): Promise<boolean> {
+    const cols = await this.db.all<{ name: string }>(`PRAGMA table_info(${table})`);
+    if (cols.some((c) => c.name === column)) return false;
+    await this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
+    return true;
+  }
 
   private static hydrate(row: Record<string, unknown>): Deployment {
     let envKeys: string[] = [];
-    if (typeof row["env_keys"] === "string") {
-      try {
-        const parsed = JSON.parse(row["env_keys"]);
-        if (Array.isArray(parsed)) envKeys = parsed.filter((k): k is string => typeof k === "string");
-      } catch {
-        /* a row we cannot parse still describes a real deployment — show it with no keys */
-      }
+    const raw = row["env_keys"];
+    try {
+      // SQLite stores TEXT and Postgres jsonb, so this arrives either as a string to parse
+      // or as the array itself.
+      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (Array.isArray(parsed)) envKeys = parsed.filter((k): k is string => typeof k === "string");
+    } catch {
+      /* a row we cannot parse still describes a real deployment — show it with no keys */
     }
     return { ...(row as unknown as Deployment), env_keys: envKeys };
   }
@@ -206,7 +221,7 @@ export class DeployStore {
    * `queued` is the only status this can produce: the point of writing first is that the row
    * predates every resource, so it cannot claim to be further along than it is.
    */
-  create(opts: CreateDeployment): Deployment {
+  async create(opts: CreateDeployment): Promise<Deployment> {
     const now = nowIso();
     const row: Deployment = {
       id: randomUUID(),
@@ -226,16 +241,23 @@ export class DeployStore {
       updated_at: now,
       ended_at: null,
     };
-    this.db
-      .prepare(
+    // The sequence read and the insert are one transaction: two deploys started together
+    // would otherwise read the same maximum and claim the same position, which is exactly
+    // the tie `created_seq` exists to break.
+    await this.db.transaction(async (tx: Queryable) => {
+      const top = await tx.get<{ n: unknown }>(`SELECT COALESCE(MAX(created_seq), 0) AS n FROM deployments`);
+      await tx.run(
         `INSERT INTO deployments
-           (id, agent_id, target, status, url, provider, model, env_keys, created_at, updated_at)
-         VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        row.id, row.agent_id, row.target, row.status,
-        row.provider, row.model, JSON.stringify(row.env_keys), now, now,
+           (id, agent_id, target, status, url, provider, model, env_keys, created_at, updated_at,
+            created_seq)
+         VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+        [
+          row.id, row.agent_id, row.target, row.status,
+          row.provider, row.model, JSON.stringify(row.env_keys), now, now,
+          asInt(top?.n) + 1,
+        ],
       );
+    });
     return row;
   }
 
@@ -244,8 +266,8 @@ export class DeployStore {
    * row without an end time and an in-flight row with one are both lies the schema should not
    * be able to tell.
    */
-  patch(id: string, changes: DeploymentPatch): Deployment | null {
-    const current = this.get(id);
+  async patch(id: string, changes: DeploymentPatch): Promise<Deployment | null> {
+    const current = await this.get(id);
     if (!current) return null;
 
     const sets: string[] = ["updated_at = ?"];
@@ -273,7 +295,7 @@ export class DeployStore {
     }
 
     values.push(id);
-    this.db.prepare(`UPDATE deployments SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+    await this.db.run(`UPDATE deployments SET ${sets.join(", ")} WHERE id = ?`, values);
     return this.get(id);
   }
 
@@ -284,29 +306,31 @@ export class DeployStore {
    * secrets were, and a redaction step that lives here would be one somebody could bypass by
    * writing to the table directly.
    */
-  appendLog(deploymentId: string, stage: string, stream: string, text: string): number {
-    const row = this.db
-      .prepare("SELECT MAX(seq) AS max_seq FROM deployment_logs WHERE deployment_id = ?")
-      .get(deploymentId) as { max_seq: number | null } | undefined;
-    const seq = (row?.max_seq ?? -1) + 1;
-    this.db
-      .prepare(
+  async appendLog(deploymentId: string, stage: string, stream: string, text: string): Promise<number> {
+    // Read-then-insert in one transaction: build output arrives in bursts and two lines
+    // racing for the same seq would collide on the (deployment_id, seq) primary key.
+    return this.db.transaction(async (tx: Queryable) => {
+      const row = await tx.get<{ max_seq: unknown }>(
+        "SELECT MAX(seq) AS max_seq FROM deployment_logs WHERE deployment_id = ?",
+        [deploymentId],
+      );
+      const seq = (asIntOrNull(row?.max_seq) ?? -1) + 1;
+      await tx.run(
         `INSERT INTO deployment_logs (deployment_id, seq, ts, stage, stream, text)
          VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(deploymentId, seq, nowIso(), stage, stream, text);
+        [deploymentId, seq, nowIso(), stage, stream, text],
+      );
 
-    // A build log is diagnostic, not an archive. Trim the oldest rather than growing forever
-    // in a database whose other tables are traces the user actually goes back to.
-    if (seq > 0 && seq % 200 === 0) {
-      this.db
-        .prepare(
-          `DELETE FROM deployment_logs
-            WHERE deployment_id = ? AND seq <= ?`,
-        )
-        .run(deploymentId, seq - LOG_CAP);
-    }
-    return seq;
+      // A build log is diagnostic, not an archive. Trim the oldest rather than growing
+      // forever in a database whose other tables are traces the user actually goes back to.
+      if (seq > 0 && seq % 200 === 0) {
+        await tx.run(`DELETE FROM deployment_logs WHERE deployment_id = ? AND seq <= ?`, [
+          deploymentId,
+          seq - LOG_CAP,
+        ]);
+      }
+      return seq;
+    });
   }
 
   /**
@@ -317,14 +341,13 @@ export class DeployStore {
    * ("check your Railway dashboard"); leaving it claiming to be in flight forever is neither.
    * Mirrors the eval engine cancelling unfinished eval runs on boot.
    */
-  reconcileInterrupted(): Deployment[] {
-    const stale = this.db
-      .prepare(
-        `SELECT * FROM deployments WHERE status IN (${[...IN_FLIGHT].map(() => "?").join(",")})`,
-      )
-      .all(...IN_FLIGHT) as Record<string, unknown>[];
+  async reconcileInterrupted(): Promise<Deployment[]> {
+    const stale = await this.db.all<Record<string, unknown>>(
+      `SELECT * FROM deployments WHERE status IN (${[...IN_FLIGHT].map(() => "?").join(",")})`,
+      [...IN_FLIGHT],
+    );
     for (const row of stale) {
-      this.patch(row["id"] as string, {
+      await this.patch(row["id"] as string, {
         status: "interrupted",
         error:
           "the Jaroku server restarted while this deploy was in flight. Anything already " +
@@ -336,48 +359,49 @@ export class DeployStore {
 
   // --- reads ---
 
-  get(id: string): Deployment | null {
-    const row = this.db.prepare("SELECT * FROM deployments WHERE id = ?").get(id) as
-      | Record<string, unknown>
-      | undefined;
+  async get(id: string): Promise<Deployment | null> {
+    const row = await this.db.get<Record<string, unknown>>("SELECT * FROM deployments WHERE id = ?", [id]);
     return row ? DeployStore.hydrate(row) : null;
   }
 
   /**
    * Newest first. The whole list is small — one row per deploy the user has ever run.
    *
-   * `rowid DESC` breaks ties, and the tie is not hypothetical: created_at is an ISO string
-   * with millisecond resolution, and redeploying twice in the same millisecond (a test, a
-   * double-click, a retry loop) made "the most recent deployment" whichever row SQLite
-   * happened to return first. That is the value the sidebar shows and the Deploy panel
-   * selects, so a coin flip there is a row that reports the wrong status. rowid is insertion
-   * order and always ascends.
+   * `created_seq DESC` breaks ties, and the tie is not hypothetical: created_at is an ISO
+   * string with millisecond resolution, and redeploying twice in the same millisecond (a
+   * test, a double-click, a retry loop) made "the most recent deployment" whichever row the
+   * database happened to return first. That is the value the sidebar shows and the Deploy
+   * panel selects, so a coin flip there is a row that reports the wrong status.
+   *
+   * It used to be SQLite's `rowid`. That is not portable — Postgres has no stable physical
+   * row identifier — so insertion order became a column of its own rather than a property
+   * borrowed from one storage engine's internals.
    */
-  list(): Deployment[] {
-    const rows = this.db
-      .prepare("SELECT * FROM deployments WHERE status != 'removed' ORDER BY created_at DESC, rowid DESC")
-      .all() as Record<string, unknown>[];
+  async list(): Promise<Deployment[]> {
+    const rows = await this.db.all<Record<string, unknown>>(
+      "SELECT * FROM deployments WHERE status != 'removed' ORDER BY created_at DESC, created_seq DESC",
+    );
     return rows.map((r) => DeployStore.hydrate(r));
   }
 
-  listForAgent(agentId: string): Deployment[] {
-    return this.list().filter((d) => d.agent_id === agentId);
+  async listForAgent(agentId: string): Promise<Deployment[]> {
+    return (await this.list()).filter((d) => d.agent_id === agentId);
   }
 
   /**
    * The deployment that represents an agent's current state: the one in flight if there is
    * one, otherwise the most recent. What the sidebar's Deployed filter reads.
    */
-  currentForAgent(agentId: string): Deployment | null {
-    const mine = this.listForAgent(agentId);
+  async currentForAgent(agentId: string): Promise<Deployment | null> {
+    const mine = await this.listForAgent(agentId);
     return mine.find((d) => isInFlight(d.status)) ?? mine[0] ?? null;
   }
 
   /** Agent id → its current deployment. One query for a whole agent list. */
-  currentByAgent(): Map<string, Deployment> {
+  async currentByAgent(): Promise<Map<string, Deployment>> {
     const out = new Map<string, Deployment>();
     // list() is newest-first, so the first row seen for an agent is its most recent.
-    for (const d of this.list()) {
+    for (const d of await this.list()) {
       const existing = out.get(d.agent_id);
       if (!existing || (isInFlight(d.status) && !isInFlight(existing.status))) {
         out.set(d.agent_id, d);
@@ -396,8 +420,8 @@ export class DeployStore {
    * Rows that never got as far as provisioning have no ids and are skipped; `removed` is
    * skipped too, since detaching a record is the user saying they no longer want it followed.
    */
-  reusableTarget(agentId: string): RailwayTarget | null {
-    for (const d of this.listForAgent(agentId)) {
+  async reusableTarget(agentId: string): Promise<RailwayTarget | null> {
+    for (const d of await this.listForAgent(agentId)) {
       if (d.railway_project_id && d.railway_service_id && d.railway_environment_id) {
         return {
           projectId: d.railway_project_id,
@@ -416,29 +440,28 @@ export class DeployStore {
    * problem — it is two different URLs both described as the current one. Returns how many
    * were superseded.
    */
-  supersede(keepId: string, serviceId: string): number {
+  async supersede(keepId: string, serviceId: string): Promise<number> {
     let count = 0;
-    for (const d of this.list()) {
+    for (const d of await this.list()) {
       if (d.id === keepId || d.railway_service_id !== serviceId) continue;
       if (d.status !== "live") continue;
-      this.patch(d.id, { status: "superseded" });
+      await this.patch(d.id, { status: "superseded" });
       count++;
     }
     return count;
   }
 
-  logs(deploymentId: string, sinceSeq = -1): DeployLogLine[] {
-    return this.db
-      .prepare(
-        `SELECT * FROM deployment_logs
-          WHERE deployment_id = ? AND seq > ?
-          ORDER BY seq ASC`,
-      )
-      .all(deploymentId, sinceSeq) as unknown as DeployLogLine[];
+  async logs(deploymentId: string, sinceSeq = -1): Promise<DeployLogLine[]> {
+    return (await this.db.all(
+      `SELECT * FROM deployment_logs
+        WHERE deployment_id = ? AND seq > ?
+        ORDER BY seq ASC`,
+      [deploymentId, sinceSeq],
+    )) as unknown as DeployLogLine[];
   }
 
   /** Any deploy this process should consider itself to be running. */
-  inFlight(): Deployment[] {
-    return this.list().filter((d) => isInFlight(d.status));
+  async inFlight(): Promise<Deployment[]> {
+    return (await this.list()).filter((d) => isInFlight(d.status));
   }
 }

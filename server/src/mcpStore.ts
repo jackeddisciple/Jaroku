@@ -37,8 +37,8 @@
 //     third-party server quietly widening a tool it already talked you into trusting is
 //     exactly the rug-pull this defends against.
 
-import { DatabaseSync } from "node:sqlite";
 import { createHash, randomUUID } from "node:crypto";
+import type { Db, Queryable } from "./db/db.ts";
 
 // --- row shapes --------------------------------------------------------------
 
@@ -171,13 +171,13 @@ export function parseToolRef(ref: string): { serverId: string; toolName: string 
 // --- store -------------------------------------------------------------------
 
 export class McpStore {
-  // Shares TraceStore's handle: same file, single writer. See TraceStore.connection().
-  constructor(private db: DatabaseSync) {
-    this.migrate();
-  }
+  // Shares the trace store's database: same file, single writer. See TraceStore.database().
+  constructor(private db: Db) {}
 
-  private migrate(): void {
-    this.db.exec(`
+  /** SQLite only — on Postgres these tables come from the numbered migrations. */
+  async init(): Promise<void> {
+    if (this.db.dialect !== "sqlite") return;
+    await this.db.exec(`
       CREATE TABLE IF NOT EXISTS mcp_servers (
         id               TEXT PRIMARY KEY,
         label            TEXT NOT NULL,
@@ -213,11 +213,13 @@ export class McpStore {
   }
 
   // No additive migrations yet — these tables are new. When one is needed, copy the
-  // `ensureColumn` helper from store.ts:65 / evalStore.ts:257: CREATE TABLE IF NOT EXISTS
-  // never alters an existing table.
+  // `ensureColumn` helper from store.ts / evalStore.ts: CREATE TABLE IF NOT EXISTS never
+  // alters an existing table.
 
   private static parseJson<T>(v: unknown, fallback: T): T {
-    if (typeof v !== "string") return fallback;
+    if (v === null || v === undefined) return fallback;
+    // Postgres jsonb arrives already parsed; SQLite TEXT arrives as a string.
+    if (typeof v !== "string") return v as T;
     try {
       return JSON.parse(v) as T;
     } catch {
@@ -239,17 +241,13 @@ export class McpStore {
 
   // --- servers ---------------------------------------------------------------
 
-  listServers(): McpServer[] {
-    const rows = this.db
-      .prepare(`SELECT * FROM mcp_servers ORDER BY created_at ASC`)
-      .all() as Record<string, unknown>[];
+  async listServers(): Promise<McpServer[]> {
+    const rows = await this.db.all<Record<string, unknown>>(`SELECT * FROM mcp_servers ORDER BY created_at ASC`);
     return rows.map(McpStore.hydrateServer);
   }
 
-  getServer(id: string): McpServer | null {
-    const row = this.db.prepare(`SELECT * FROM mcp_servers WHERE id = ?`).get(id) as
-      | Record<string, unknown>
-      | undefined;
+  async getServer(id: string): Promise<McpServer | null> {
+    const row = await this.db.get<Record<string, unknown>>(`SELECT * FROM mcp_servers WHERE id = ?`, [id]);
     return row ? McpStore.hydrateServer(row) : null;
   }
 
@@ -257,33 +255,31 @@ export class McpStore {
    * Create or replace a server row. Re-registering an existing id keeps `created_at` so the
    * list doesn't reshuffle under a re-discovery.
    */
-  upsertServer(
+  async upsertServer(
     input: Omit<McpServer, "created_at"> & { created_at?: string },
-  ): McpServer {
-    const existing = this.getServer(input.id);
+  ): Promise<McpServer> {
+    const existing = await this.getServer(input.id);
     const row: McpServer = {
       ...input,
       created_at: input.created_at ?? existing?.created_at ?? nowIso(),
     };
-    this.db
-      .prepare(
-        `INSERT INTO mcp_servers
-           (id, label, endpoint, transport, auth_env_key, server_name, server_version,
-            protocol_version, status, last_error, discovered_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           label            = excluded.label,
-           endpoint         = excluded.endpoint,
-           transport        = excluded.transport,
-           auth_env_key     = excluded.auth_env_key,
-           server_name      = excluded.server_name,
-           server_version   = excluded.server_version,
-           protocol_version = excluded.protocol_version,
-           status           = excluded.status,
-           last_error       = excluded.last_error,
-           discovered_at    = excluded.discovered_at`,
-      )
-      .run(
+    await this.db.run(
+      `INSERT INTO mcp_servers
+         (id, label, endpoint, transport, auth_env_key, server_name, server_version,
+          protocol_version, status, last_error, discovered_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         label            = excluded.label,
+         endpoint         = excluded.endpoint,
+         transport        = excluded.transport,
+         auth_env_key     = excluded.auth_env_key,
+         server_name      = excluded.server_name,
+         server_version   = excluded.server_version,
+         protocol_version = excluded.protocol_version,
+         status           = excluded.status,
+         last_error       = excluded.last_error,
+         discovered_at    = excluded.discovered_at`,
+      [
         row.id,
         row.label,
         row.endpoint,
@@ -296,7 +292,8 @@ export class McpStore {
         row.last_error,
         row.discovered_at,
         row.created_at,
-      );
+      ],
+    );
     return row;
   }
 
@@ -307,46 +304,39 @@ export class McpStore {
    * Wiping them would break every agent scoped to them on a transient network blip, and
    * "the tools vanished" is a far worse failure than "the status says unreachable".
    */
-  setServerStatus(id: string, status: McpServerStatus, lastError: string | null): void {
-    this.db
-      .prepare(`UPDATE mcp_servers SET status = ?, last_error = ? WHERE id = ?`)
-      .run(status, lastError, id);
+  async setServerStatus(id: string, status: McpServerStatus, lastError: string | null): Promise<void> {
+    await this.db.run(`UPDATE mcp_servers SET status = ?, last_error = ? WHERE id = ?`, [status, lastError, id]);
   }
 
   /** Records the env var NAME. The value never passes through this module. */
-  setServerAuthEnvKey(id: string, envKey: string | null): void {
-    this.db.prepare(`UPDATE mcp_servers SET auth_env_key = ? WHERE id = ?`).run(envKey, id);
+  async setServerAuthEnvKey(id: string, envKey: string | null): Promise<void> {
+    await this.db.run(`UPDATE mcp_servers SET auth_env_key = ? WHERE id = ?`, [envKey, id]);
   }
 
-  deleteServer(id: string): void {
-    this.db.exec("BEGIN");
-    try {
-      this.db.prepare(`DELETE FROM mcp_tools WHERE server_id = ?`).run(id);
-      this.db.prepare(`DELETE FROM mcp_servers WHERE id = ?`).run(id);
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
+  async deleteServer(id: string): Promise<void> {
+    await this.db.transaction(async (tx: Queryable) => {
+      await tx.run(`DELETE FROM mcp_tools WHERE server_id = ?`, [id]);
+      await tx.run(`DELETE FROM mcp_servers WHERE id = ?`, [id]);
+    });
   }
 
   // --- tools -----------------------------------------------------------------
 
-  listTools(serverId?: string): McpTool[] {
+  async listTools(serverId?: string): Promise<McpTool[]> {
     const rows = serverId
-      ? (this.db
-          .prepare(`SELECT * FROM mcp_tools WHERE server_id = ? ORDER BY name ASC`)
-          .all(serverId) as Record<string, unknown>[])
-      : (this.db
-          .prepare(`SELECT * FROM mcp_tools ORDER BY server_id ASC, name ASC`)
-          .all() as Record<string, unknown>[]);
+      ? await this.db.all<Record<string, unknown>>(
+          `SELECT * FROM mcp_tools WHERE server_id = ? ORDER BY name ASC`,
+          [serverId],
+        )
+      : await this.db.all<Record<string, unknown>>(`SELECT * FROM mcp_tools ORDER BY server_id ASC, name ASC`);
     return rows.map(McpStore.hydrateTool);
   }
 
-  getTool(serverId: string, name: string): McpTool | null {
-    const row = this.db
-      .prepare(`SELECT * FROM mcp_tools WHERE server_id = ? AND name = ?`)
-      .get(serverId, name) as Record<string, unknown> | undefined;
+  async getTool(serverId: string, name: string): Promise<McpTool | null> {
+    const row = await this.db.get<Record<string, unknown>>(
+      `SELECT * FROM mcp_tools WHERE server_id = ? AND name = ?`,
+      [serverId, name],
+    );
     return row ? McpStore.hydrateTool(row) : null;
   }
 
@@ -357,12 +347,12 @@ export class McpStore {
    * A ref naming a removed server or a tool the server stopped advertising resolves to
    * nothing rather than to a guess.
    */
-  resolveTools(refs: string[]): McpTool[] {
+  async resolveTools(refs: string[]): Promise<McpTool[]> {
     const out: McpTool[] = [];
     for (const ref of refs) {
       const parsed = parseToolRef(ref);
       if (!parsed) continue;
-      const tool = this.getTool(parsed.serverId, parsed.toolName);
+      const tool = await this.getTool(parsed.serverId, parsed.toolName);
       if (tool) out.push(tool);
     }
     return out;
@@ -376,8 +366,8 @@ export class McpStore {
    * schema_hash they were made against. effectiveImpact() then decides whether that
    * judgement still applies — see the header note on schema_hash.
    */
-  replaceTools(serverId: string, discovered: DiscoveredTool[]): McpTool[] {
-    const previous = new Map(this.listTools(serverId).map((t) => [t.name, t]));
+  async replaceTools(serverId: string, discovered: DiscoveredTool[]): Promise<McpTool[]> {
+    const previous = new Map((await this.listTools(serverId)).map((t) => [t.name, t]));
     const at = nowIso();
     const rows: McpTool[] = discovered.map((d) => {
       const prior = previous.get(d.name);
@@ -397,39 +387,32 @@ export class McpStore {
       };
     });
 
-    this.db.exec("BEGIN");
-    try {
-      this.db.prepare(`DELETE FROM mcp_tools WHERE server_id = ?`).run(serverId);
-      const insert = this.db.prepare(
-        `INSERT INTO mcp_tools
-           (id, server_id, name, description, input_schema, schema_hash, impact,
-            impact_reason, impact_override, override_schema_hash, annotations, discovered_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      );
+    await this.db.transaction(async (tx: Queryable) => {
+      await tx.run(`DELETE FROM mcp_tools WHERE server_id = ?`, [serverId]);
       for (const r of rows) {
-        insert.run(
-          r.id,
-          r.server_id,
-          r.name,
-          r.description,
-          JSON.stringify(r.input_schema),
-          r.schema_hash,
-          r.impact,
-          r.impact_reason,
-          r.impact_override,
-          r.override_schema_hash,
-          r.annotations === null ? null : JSON.stringify(r.annotations),
-          r.discovered_at,
+        await tx.run(
+          `INSERT INTO mcp_tools
+             (id, server_id, name, description, input_schema, schema_hash, impact,
+              impact_reason, impact_override, override_schema_hash, annotations, discovered_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            r.id,
+            r.server_id,
+            r.name,
+            r.description,
+            JSON.stringify(r.input_schema),
+            r.schema_hash,
+            r.impact,
+            r.impact_reason,
+            r.impact_override,
+            r.override_schema_hash,
+            r.annotations === null ? null : JSON.stringify(r.annotations),
+            r.discovered_at,
+          ],
         );
       }
-      this.db
-        .prepare(`UPDATE mcp_servers SET discovered_at = ? WHERE id = ?`)
-        .run(at, serverId);
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
+      await tx.run(`UPDATE mcp_servers SET discovered_at = ? WHERE id = ?`, [at, serverId]);
+    });
     return rows;
   }
 
@@ -439,15 +422,18 @@ export class McpStore {
    * Stamped with the schema it was judged against. Passing null clears it outright — the
    * way back to "just use the classifier" is always one click, in both directions.
    */
-  setToolImpactOverride(serverId: string, name: string, override: McpImpact | null): McpTool | null {
-    const tool = this.getTool(serverId, name);
+  async setToolImpactOverride(
+    serverId: string,
+    name: string,
+    override: McpImpact | null,
+  ): Promise<McpTool | null> {
+    const tool = await this.getTool(serverId, name);
     if (!tool) return null;
-    this.db
-      .prepare(
-        `UPDATE mcp_tools SET impact_override = ?, override_schema_hash = ?
-           WHERE server_id = ? AND name = ?`,
-      )
-      .run(override, override === null ? null : tool.schema_hash, serverId, name);
+    await this.db.run(
+      `UPDATE mcp_tools SET impact_override = ?, override_schema_hash = ?
+         WHERE server_id = ? AND name = ?`,
+      [override, override === null ? null : tool.schema_hash, serverId, name],
+    );
     return this.getTool(serverId, name);
   }
 }

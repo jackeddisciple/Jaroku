@@ -591,14 +591,18 @@ export interface RelayOptions {
   // "loadRun", "listAgents", "loadAgentFiles", "loadAgentGraph", "listMcpServers" and
   // "listProviders" are answered locally; the rest are forwarded.
   onCommand?: (cmd: ForwardedCommand) => void;
-  listAgents?: () => unknown[];
+  // The database-backed reads return promises now; the filesystem-backed ones do not. Both
+  // shapes are accepted so a caller is not forced to wrap a synchronous answer in one.
+  listAgents?: () => unknown[] | Promise<unknown[]>;
   listAgentFiles?: (agentId: string) => unknown[];
   getAgentGraph?: (agentId: string) => Promise<unknown>;
-  listMcpServers?: () => unknown[];
+  listMcpServers?: () => unknown[] | Promise<unknown[]>;
   /** Which provider keys are set, by name. Never a value — see providers.ts. */
   listProviders?: () => unknown[];
   /** Every deployment, plus whether a Railway token is configured. Names only. */
-  listDeployments?: () => { deployments: unknown[]; railwayConfigured: boolean };
+  listDeployments?: () =>
+    | { deployments: unknown[]; railwayConfigured: boolean }
+    | Promise<{ deployments: unknown[]; railwayConfigured: boolean }>;
 }
 
 export class WsRelay {
@@ -617,16 +621,25 @@ export class WsRelay {
     this.wss.on("connection", (ws) => {
       this.clients.add(ws);
       // Snapshot: recent runs + the agent list so a reconnecting client isn't blank.
-      this.sendTo(ws, { channel: "history", runs: this.store.listRuns() });
-      this.sendTo(ws, { channel: "agents", agents: this.opts.listAgents?.() ?? [] });
-      this.sendTo(ws, { channel: "mcp", type: "servers", servers: this.opts.listMcpServers?.() ?? [] });
-      // Which providers are connected, so a first-run client knows on frame one whether it is
-      // looking at a configured install or an empty one.
-      this.sendTo(ws, { channel: "providers", type: "providers", providers: this.opts.listProviders?.() ?? [] });
-      // And what is deployed, so the sidebar's Deployed filter is right on frame one rather
-      // than after a round trip.
-      const deploySnapshot = this.opts.listDeployments?.() ?? { deployments: [], railwayConfigured: false };
-      this.sendTo(ws, { channel: "deploy", type: "deployments", ...deploySnapshot });
+      //
+      // Sent from one async block rather than five, so they still arrive in this order. A
+      // client that received `agents` before `history` would render a sidebar whose runs
+      // belong to agents it has not been told about yet.
+      void (async () => {
+        this.sendTo(ws, { channel: "history", runs: await this.store.listRuns() });
+        this.sendTo(ws, { channel: "agents", agents: (await this.opts.listAgents?.()) ?? [] });
+        this.sendTo(ws, { channel: "mcp", type: "servers", servers: (await this.opts.listMcpServers?.()) ?? [] });
+        // Which providers are connected, so a first-run client knows on frame one whether it
+        // is looking at a configured install or an empty one.
+        this.sendTo(ws, { channel: "providers", type: "providers", providers: this.opts.listProviders?.() ?? [] });
+        // And what is deployed, so the sidebar's Deployed filter is right on frame one rather
+        // than after a round trip.
+        const deploySnapshot = (await this.opts.listDeployments?.()) ?? {
+          deployments: [],
+          railwayConfigured: false,
+        };
+        this.sendTo(ws, { channel: "deploy", type: "deployments", ...deploySnapshot });
+      })().catch((err) => console.error("[relay] initial snapshot failed:", (err as Error).message));
 
       ws.on("message", (data) => {
         try {
@@ -675,10 +688,17 @@ export class WsRelay {
           } else if (msg.cmd === "explain" && typeof msg.agentId === "string" && typeof msg.question === "string") {
             this.onCommand?.(msg);
           } else if (msg.cmd === "listMcpServers") {
-            this.sendTo(ws, { channel: "mcp", type: "servers", servers: this.opts.listMcpServers?.() ?? [] });
+            void this.answer(ws, async () => ({
+              channel: "mcp",
+              type: "servers",
+              servers: (await this.opts.listMcpServers?.()) ?? [],
+            }));
           } else if (msg.cmd === "listDeployments") {
-            const snapshot = this.opts.listDeployments?.() ?? { deployments: [], railwayConfigured: false };
-            this.sendTo(ws, { channel: "deploy", type: "deployments", ...snapshot });
+            void this.answer(ws, async () => ({
+              channel: "deploy",
+              type: "deployments",
+              ...((await this.opts.listDeployments?.()) ?? { deployments: [], railwayConfigured: false }),
+            }));
           } else if (msg.cmd === "listProviders") {
             this.sendTo(ws, {
               channel: "providers",
@@ -702,14 +722,18 @@ export class WsRelay {
             // precise error on the "eval" channel rather than dropping the message here.
             this.onCommand?.(msg as EvalCommand);
           } else if (msg.cmd === "listAgents") {
-            this.sendTo(ws, { channel: "agents", agents: this.opts.listAgents?.() ?? [] });
+            void this.answer(ws, async () => ({
+              channel: "agents",
+              agents: (await this.opts.listAgents?.()) ?? [],
+            }));
           } else if (msg.cmd === "loadRun" && typeof msg.runId === "string") {
             // Answer only the requesting client with that run's steps (ordered by seq).
-            this.sendTo(ws, {
+            const runId = msg.runId;
+            void this.answer(ws, async () => ({
               channel: "runSteps",
-              runId: msg.runId,
-              steps: this.store.stepsForRun(msg.runId),
-            });
+              runId,
+              steps: await this.store.stepsForRun(runId),
+            }));
           }
         } catch {
           /* ignore malformed client messages */
@@ -740,6 +764,21 @@ export class WsRelay {
 
   private sendTo(ws: WebSocket, payload: unknown): void {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+  }
+
+  /**
+   * Answer one client with something a database has to be asked for.
+   *
+   * A read that throws must not take the socket down with it: the client asked a question,
+   * the answer is unavailable, and the connection is still good for every other question.
+   * `sendTo` already no-ops on a socket that closed while the query was in flight.
+   */
+  private async answer(ws: WebSocket, build: () => Promise<unknown>): Promise<void> {
+    try {
+      this.sendTo(ws, await build());
+    } catch (err) {
+      console.error("[relay] read failed:", (err as Error).message);
+    }
   }
 
   // Broadcast a trace event to every connected client.
@@ -830,8 +869,8 @@ export class WsRelay {
 
   // Push a refreshed run-history snapshot to everyone (e.g. after a branch is created, so the new
   // branch run appears in history without needing a run_start event of its own).
-  broadcastHistory(): void {
-    const msg = JSON.stringify({ channel: "history", runs: this.store.listRuns() });
+  async broadcastHistory(): Promise<void> {
+    const msg = JSON.stringify({ channel: "history", runs: await this.store.listRuns() });
     for (const ws of this.clients) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
     }
@@ -861,8 +900,8 @@ export class WsRelay {
   }
 
   // Push a refreshed agent list to everyone (after a generation lands).
-  broadcastAgents(): void {
-    const msg = JSON.stringify({ channel: "agents", agents: this.opts.listAgents?.() ?? [] });
+  async broadcastAgents(): Promise<void> {
+    const msg = JSON.stringify({ channel: "agents", agents: (await this.opts.listAgents?.()) ?? [] });
     for (const ws of this.clients) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
     }

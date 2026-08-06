@@ -15,7 +15,7 @@ import { dirname, join, resolve } from "node:path";
 import { RunPool } from "./runPool.ts";
 import { TraceStore } from "./store.ts";
 import { migrate } from "./db/migrate.ts";
-import { sqliteMigrationTarget } from "./db/sqlite.ts";
+import { SqliteDb } from "./db/sqlite.ts";
 import { EvalStore, type Rubric, type RubricCriterion } from "./evalStore.ts";
 import { EvalRunner } from "./evalRunner.ts";
 import { DEFAULT_CRITERIA } from "./judge/rubric.ts";
@@ -66,11 +66,16 @@ if (loadedKeys.length) {
 // survive a restart — pending proposals are in-memory, so their staging dirs are orphans.
 rmSync(join(RUNTIME_DIR, "agents", ".staging"), { recursive: true, force: true });
 
-const store = new TraceStore(DB_PATH);
+// One database, one connection, four stores. The driver is chosen here and nowhere else —
+// everything below this line talks to the `Db` interface and cannot tell which it got.
+const db = new SqliteDb(DB_PATH);
+const store = new TraceStore(db);
+await store.init();
 // Eval's control-plane tables live in the same database file, on the same connection
 // (single writer; aggregation JOINs eval_jobs against the frozen `steps` table). Nothing
 // here touches schema/events.md — an eval is a batch of ordinary runs.
-const evalStore = new EvalStore(store.connection());
+const evalStore = new EvalStore(store.database());
+await evalStore.init();
 // The MCP registry shares the same file and connection for the same reason: additive
 // control-plane tables beside the frozen schema, one writer. An MCP tool call is still an
 // ordinary tool_call Step and still goes through the trace store like everything else.
@@ -82,7 +87,9 @@ const evalStore = new EvalStore(store.connection());
 // secret going to the same file, and the rule is that there is exactly one path to it — so
 // they get the same writer object rather than two constructed from the same path.
 const credentials = fileCredentialWriter(join(RUNTIME_DIR, ".env"));
-const mcpRegistry = new McpRegistry(new McpStore(store.connection()), credentials);
+const mcpStore = new McpStore(store.database());
+await mcpStore.init();
+const mcpRegistry = new McpRegistry(mcpStore, credentials);
 // Slot 0 is the interactive run; the rest are the eval fan-out's. Modest by default —
 // each slot is a Python subprocess with a LangGraph import, and oversubscribing the machine
 // inflates every run's latency, which the comparison dashboard then reports as if it were
@@ -108,8 +115,8 @@ let evalRunner: EvalRunner;
 const DEFAULT_RUBRIC_ID = "rubric-default";
 
 /** The rubric a dataset scores against: its own if customized, else the built-in default. */
-function defaultRubric(): Rubric {
-  const shared = evalStore.getRubric(DEFAULT_RUBRIC_ID);
+async function defaultRubric(): Promise<Rubric> {
+  const shared = await evalStore.getRubric(DEFAULT_RUBRIC_ID);
   if (shared) return shared;
   return evalStore.putRubric({
     id: DEFAULT_RUBRIC_ID,
@@ -118,17 +125,17 @@ function defaultRubric(): Rubric {
     criteria: DEFAULT_CRITERIA,
   });
 }
-function rubricFor(datasetId: string): Rubric {
-  return evalStore.rubricForDataset(datasetId) ?? defaultRubric();
+async function rubricFor(datasetId: string): Promise<Rubric> {
+  return (await evalStore.rubricForDataset(datasetId)) ?? (await defaultRubric());
 }
-const rubricIdFor = (datasetId: string): string => rubricFor(datasetId).id;
+const rubricIdFor = async (datasetId: string): Promise<string> => (await rubricFor(datasetId)).id;
 
 // An eval left 'running' by a shutdown has no orchestrator behind it any more. Mark those
 // interrupted at startup rather than leaving rows that claim to be in flight forever —
 // the jobs and whatever they spent stay on record and remain inspectable.
-for (const stale of evalStore.unfinishedEvalRuns()) {
-  const cancelled = evalStore.cancelQueuedJobs(stale.id, "server restarted before this job ran");
-  evalStore.setEvalStatus(stale.id, "cancelled", "interrupted by a server restart");
+for (const stale of await evalStore.unfinishedEvalRuns()) {
+  const cancelled = await evalStore.cancelQueuedJobs(stale.id, "server restarted before this job ran");
+  await evalStore.setEvalStatus(stale.id, "cancelled", "interrupted by a server restart");
   console.log(`[eval] ${stale.id} was interrupted by a restart — ${cancelled} queued job(s) cancelled`);
 }
 
@@ -136,7 +143,7 @@ for (const stale of evalStore.unfinishedEvalRuns()) {
 // Only runs belonging to FINISHED eval jobs are touched — an interactive run's checkpoint
 // is exactly the thing a user might come back to branch from, and is never swept.
 {
-  const swept = sweepOrphanedEvalArtifacts(evalStore, join(RUNTIME_DIR, ".checkpoints"));
+  const swept = await sweepOrphanedEvalArtifacts(evalStore, join(RUNTIME_DIR, ".checkpoints"));
   if (swept.removed) {
     console.log(
       `[eval] swept ${swept.removed} orphaned checkpoint artifact(s) from earlier evals, ${fmtBytes(swept.bytesFreed)} freed`,
@@ -186,7 +193,8 @@ const editor = new Editor({
 // The manager gets its dependencies rather than importing them, so it has no idea a WebSocket
 // exists — the EvalRunnerDeps shape. Note `token`: a function, not a value, so the credential
 // is read from process.env at the moment of use and is never held by the manager.
-const deployStore = new DeployStore(store.connection());
+const deployStore = new DeployStore(store.database());
+await deployStore.init();
 
 // Every store has now declared the tables it owns, so the schema is whole and migrations can
 // run against it. Boot-time apply is deliberate: a server whose code expects a column the
@@ -198,13 +206,13 @@ const deployStore = new DeployStore(store.connection());
 // they cannot run first. Postgres has no such constructors — its tables come from migrations
 // all the way down — and that asymmetry is the reason the two dialects have separate
 // directories rather than one set of portable files.
-await migrate(sqliteMigrationTarget(store.connection()), join(SERVER_DIR, "migrations", "sqlite"));
+await migrate(db.migrationTarget(), join(SERVER_DIR, "migrations", db.dialect));
 
 // The same reasoning for deploys, with a sharper edge: a deploy in flight was creating real
 // resources in the user's Railway account. A row still reading "building" after a restart is
 // not building — nothing is watching it — and the honest thing is to say so and point at the
 // dashboard, because whatever was already created is still there.
-for (const stale of deployStore.reconcileInterrupted()) {
+for (const stale of await deployStore.reconcileInterrupted()) {
   console.log(`[deploy] ${stale.id} (${stale.agent_id}) was interrupted by a restart`);
 }
 
@@ -231,22 +239,24 @@ const deployDeps: DeployManagerDeps = {
   onChanged: () => {
     broadcastDeployments();
     // An agent's row in the sidebar carries its deployment, so the agent list is stale too.
-    relay.broadcastAgents();
+    void relay.broadcastAgents();
   },
 };
 
 const deployManager = new DeployManager(deployDeps);
 
 /** The full snapshot: every deployment, plus whether a Railway token is set. Names only. */
-function deploySnapshot(): { deployments: unknown[]; railwayConfigured: boolean } {
+async function deploySnapshot(): Promise<{ deployments: unknown[]; railwayConfigured: boolean }> {
   return {
-    deployments: deployStore.list(),
+    deployments: await deployStore.list(),
     railwayConfigured: Boolean(process.env[RAILWAY_ENV_KEY]),
   };
 }
 
 function broadcastDeployments(): void {
-  relay.broadcastDeploy({ type: "deployments", ...deploySnapshot() });
+  void deploySnapshot()
+    .then((snapshot) => relay.broadcastDeploy({ type: "deployments", ...snapshot }))
+    .catch((err) => console.error("[deploy] snapshot failed:", (err as Error).message));
 }
 
 /** Current on-disk files of an agent project, connector files flagged read-only. */
@@ -286,10 +296,10 @@ const relay = new WsRelay({
   port: PORT,
   store,
   clientHtmlPath: join(SERVER_DIR, "debug-client.html"),
-  listAgents: () => {
+  listAgents: async () => {
     // One query for the whole list, so the sidebar can show a deploy state per row without
     // N round trips. `deployment` is null for an agent that has never been deployed.
-    const deployed = deployStore.currentByAgent();
+    const deployed = await deployStore.currentByAgent();
     return listAgents(RUNTIME_DIR).map((a) => {
       const d = deployed.get(a.agent_id);
       return {
@@ -361,18 +371,19 @@ evalRunner = new EvalRunner({
     relay.broadcastEval({ type: "evalFinished", ...e });
     // The eval's runs are now in history like any other; refresh so drill-down can reach
     // them without a reconnect.
-    relay.broadcastHistory();
+    void relay.broadcastHistory();
     // No more jobs are coming: the judge reports done once its own queue drains.
     judge.seal(e.evalId);
     // Sweep the resumable-checkpoint blobs these runs left behind. The traces stay —
     // only the pause/resume machinery goes, and nobody resumes a finished eval job.
-    const swept = sweepEvalArtifacts(evalStore, CHECKPOINT_DIR, e.evalId);
-    if (swept.removed) {
-      console.log(
-        `[eval] ${e.evalId} swept ${swept.removed} checkpoint artifact(s), ${fmtBytes(swept.bytesFreed)} freed` +
-          (swept.failed ? ` (${swept.failed} could not be removed)` : ""),
-      );
-    }
+    void sweepEvalArtifacts(evalStore, CHECKPOINT_DIR, e.evalId).then((swept) => {
+      if (swept.removed) {
+        console.log(
+          `[eval] ${e.evalId} swept ${swept.removed} checkpoint artifact(s), ${fmtBytes(swept.bytesFreed)} freed` +
+            (swept.failed ? ` (${swept.failed} could not be removed)` : ""),
+        );
+      }
+    });
   },
 });
 
@@ -438,7 +449,10 @@ function clearConfirms(runId: string, reason: string, nonce?: string): void {
 }
 
 function broadcastMcpServers(): void {
-  relay.broadcastMcp({ type: "servers", servers: mcpRegistry.list() });
+  void mcpRegistry
+    .list()
+    .then((servers) => relay.broadcastMcp({ type: "servers", servers }))
+    .catch((err) => console.error("[mcp] snapshot failed:", (err as Error).message));
 }
 
 async function handleMcpCommand(cmd: McpCommand): Promise<void> {
@@ -476,7 +490,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         relay.broadcastMcp({
           type: "discovering",
           serverId: cmd.serverId,
-          endpoint: mcpRegistry.get(cmd.serverId)?.endpoint ?? "",
+          endpoint: (await mcpRegistry.get(cmd.serverId))?.endpoint ?? "",
         });
         const res = await mcpRegistry.rediscover(cmd.serverId);
         console.log(
@@ -493,7 +507,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
 
       case "removeMcpServer": {
         if (typeof cmd.serverId !== "string") return;
-        const removed = mcpRegistry.removeServer(cmd.serverId);
+        const removed = await mcpRegistry.removeServer(cmd.serverId);
         if (removed) console.log(`[mcp] removed ${cmd.serverId}`);
         broadcastMcpServers();
         if (!removed) {
@@ -526,7 +540,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
       case "setMcpServerAuth": {
         if (typeof cmd.serverId !== "string") return;
         const token = typeof cmd.token === "string" && cmd.token.length ? cmd.token : null;
-        const { result, warning } = mcpRegistry.setCredential(cmd.serverId, token);
+        const { result, warning } = await mcpRegistry.setCredential(cmd.serverId, token);
         if (!result.ok) {
           relay.broadcastMcp({ type: "error", message: result.message ?? "could not store the credential", serverId: cmd.serverId });
           return;
@@ -548,7 +562,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
       case "setMcpToolImpact": {
         if (typeof cmd.serverId !== "string" || typeof cmd.toolName !== "string") return;
         const impact = cmd.impact === "high" || cmd.impact === "low" ? cmd.impact : null;
-        const updated = mcpRegistry.setToolImpact(cmd.serverId, cmd.toolName, impact);
+        const updated = await mcpRegistry.setToolImpact(cmd.serverId, cmd.toolName, impact);
         if (!updated) {
           relay.broadcastMcp({
             type: "error",
@@ -719,7 +733,7 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
           relay.broadcastDeploy({ type: "error", message: "invalid agent id" });
           return;
         }
-        const plan = planDeploy(deployDeps, {
+        const plan = await planDeploy(deployDeps, {
           agentId: cmd.agentId,
           provider: typeof cmd.provider === "string" ? cmd.provider : "",
           model: typeof cmd.model === "string" ? cmd.model : "",
@@ -779,7 +793,7 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
           relay.broadcastDeploy({ type: "error", message: "no deployment id to forget" });
           return;
         }
-        const row = deployStore.get(target);
+        const row = await deployStore.get(target);
         if (!row) {
           relay.broadcastDeploy({ type: "error", message: "no such deployment" });
           return;
@@ -788,9 +802,9 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
           relay.broadcastDeploy({ type: "error", message: "that deploy is still running — cancel it first" });
           return;
         }
-        deployStore.patch(target, { status: "removed" });
+        await deployStore.patch(target, { status: "removed" });
         broadcastDeployments();
-        relay.broadcastAgents();
+        void relay.broadcastAgents();
         relay.broadcastDeploy({
           type: "notice",
           message: row.url
@@ -809,7 +823,7 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
         relay.broadcastDeploy({
           type: "logs",
           deploymentId: target,
-          lines: deployStore.logs(target, since),
+          lines: await deployStore.logs(target, since),
         });
         return;
       }
@@ -826,43 +840,47 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
 // the "eval" channel, the same shape a fresh `listDatasets` would return — so a client
 // never has to reconcile a partial update against local state.
 
-function broadcastDatasets(agentId: string | null): void {
+async function broadcastDatasets(agentId: string | null): Promise<void> {
   relay.broadcastEval({
     type: "datasets",
     agentId,
-    datasets: evalStore.listDatasets(agentId ?? undefined),
+    datasets: await evalStore.listDatasets(agentId ?? undefined),
   });
 }
 
-function broadcastDataset(datasetId: string): void {
-  relay.broadcastEval({ type: "dataset", datasetId, examples: evalStore.listExamples(datasetId) });
+async function broadcastDataset(datasetId: string): Promise<void> {
+  relay.broadcastEval({
+    type: "dataset",
+    datasetId,
+    examples: await evalStore.listExamples(datasetId),
+  });
 }
 
-function handleEvalCommand(cmd: ForwardedCommand): void {
+async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
   try {
     switch (cmd.cmd) {
       case "listDatasets":
-        broadcastDatasets(cmd.agentId ?? null);
+        await broadcastDatasets(cmd.agentId ?? null);
         return;
       case "loadDataset":
-        broadcastDataset(cmd.datasetId);
+        await broadcastDataset(cmd.datasetId);
         return;
       case "createDataset": {
-        const ds = evalStore.createDataset(cmd.agentId, cmd.name);
+        const ds = await evalStore.createDataset(cmd.agentId, cmd.name);
         console.log(`[eval] dataset "${ds.name}" created for ${cmd.agentId}`);
-        broadcastDatasets(cmd.agentId);
-        broadcastDataset(ds.id);
+        await broadcastDatasets(cmd.agentId);
+        await broadcastDataset(ds.id);
         return;
       }
       case "renameDataset": {
-        evalStore.renameDataset(cmd.datasetId, cmd.name);
-        broadcastDatasets(evalStore.getDataset(cmd.datasetId)?.agent_id ?? null);
+        await evalStore.renameDataset(cmd.datasetId, cmd.name);
+        await broadcastDatasets((await evalStore.getDataset(cmd.datasetId))?.agent_id ?? null);
         return;
       }
       case "deleteDataset": {
-        evalStore.deleteDataset(cmd.datasetId);
+        await evalStore.deleteDataset(cmd.datasetId);
         relay.broadcastEval({ type: "datasetDeleted", datasetId: cmd.datasetId });
-        broadcastDatasets(cmd.agentId);
+        await broadcastDatasets(cmd.agentId);
         return;
       }
       case "addExample": {
@@ -873,24 +891,24 @@ function handleEvalCommand(cmd: ForwardedCommand): void {
           relay.broadcastEval({ type: "error", datasetId: cmd.datasetId, message: "an example needs an input" });
           return;
         }
-        evalStore.addExample(cmd.datasetId, input, cmd.expected ?? null, cmd.notes ?? null);
-        broadcastDataset(cmd.datasetId);
-        broadcastDatasets(evalStore.getDataset(cmd.datasetId)?.agent_id ?? null);
+        await evalStore.addExample(cmd.datasetId, input, cmd.expected ?? null, cmd.notes ?? null);
+        await broadcastDataset(cmd.datasetId);
+        await broadcastDatasets((await evalStore.getDataset(cmd.datasetId))?.agent_id ?? null);
         return;
       }
       case "updateExample": {
-        evalStore.updateExample(cmd.exampleId, {
+        await evalStore.updateExample(cmd.exampleId, {
           ...(cmd.input !== undefined ? { input: cmd.input } : {}),
           ...(cmd.expected !== undefined ? { expected: cmd.expected } : {}),
           ...(cmd.notes !== undefined ? { notes: cmd.notes } : {}),
         });
-        broadcastDataset(cmd.datasetId);
+        await broadcastDataset(cmd.datasetId);
         return;
       }
       case "deleteExample": {
-        evalStore.deleteExample(cmd.exampleId);
-        broadcastDataset(cmd.datasetId);
-        broadcastDatasets(evalStore.getDataset(cmd.datasetId)?.agent_id ?? null);
+        await evalStore.deleteExample(cmd.exampleId);
+        await broadcastDataset(cmd.datasetId);
+        await broadcastDatasets((await evalStore.getDataset(cmd.datasetId))?.agent_id ?? null);
         return;
       }
       case "startEval": {
@@ -908,10 +926,10 @@ function handleEvalCommand(cmd: ForwardedCommand): void {
           relay.broadcastEval({ type: "error", message: `invalid agent id: ${cmd.agentId}` });
           return;
         }
-        const started = evalRunner.start({
+        const started = await evalRunner.start({
           datasetId: cmd.datasetId,
           agentId: cmd.agentId,
-          rubricId: rubricIdFor(cmd.datasetId),
+          rubricId: await rubricIdFor(cmd.datasetId),
           targets: cmd.targets ?? [],
           budgetUsd: cmd.budgetUsd ?? null,
         });
@@ -919,13 +937,13 @@ function handleEvalCommand(cmd: ForwardedCommand): void {
         return;
       }
       case "cancelEval": {
-        evalRunner.cancel(cmd.evalId);
+        await evalRunner.cancel(cmd.evalId);
         return;
       }
       case "estimateEval": {
         relay.broadcastEval({
           type: "estimate",
-          estimate: estimateEval(store, evalStore, {
+          estimate: await estimateEval(store, evalStore, {
             datasetId: cmd.datasetId,
             agentId: cmd.agentId,
             targets: cmd.targets ?? [],
@@ -935,7 +953,7 @@ function handleEvalCommand(cmd: ForwardedCommand): void {
         return;
       }
       case "loadEvalResults": {
-        const results = aggregateEval(evalStore, cmd.evalId);
+        const results = await aggregateEval(evalStore, cmd.evalId);
         if (!results) {
           relay.broadcastEval({ type: "error", message: "unknown eval" });
           return;
@@ -944,7 +962,7 @@ function handleEvalCommand(cmd: ForwardedCommand): void {
         return;
       }
       case "listEvals": {
-        const all = evalStore.listEvalRuns();
+        const all = await evalStore.listEvalRuns();
         relay.broadcastEval({
           type: "evals",
           evals: cmd.datasetId ? all.filter((e) => e.dataset_id === cmd.datasetId) : all,
@@ -952,7 +970,7 @@ function handleEvalCommand(cmd: ForwardedCommand): void {
         return;
       }
       case "loadRubric": {
-        const r = rubricFor(cmd.datasetId);
+        const r = await rubricFor(cmd.datasetId);
         relay.broadcastEval({
           type: "rubric", datasetId: cmd.datasetId, rubric: r, isDefault: r.dataset_id === null,
         });
@@ -973,8 +991,8 @@ function handleEvalCommand(cmd: ForwardedCommand): void {
           relay.broadcastEval({ type: "error", message: "a rubric needs at least one criterion with weight above zero" });
           return;
         }
-        const existing = evalStore.rubricForDataset(cmd.datasetId);
-        const saved = evalStore.putRubric({
+        const existing = await evalStore.rubricForDataset(cmd.datasetId);
+        const saved = await evalStore.putRubric({
           id: existing?.id,
           dataset_id: cmd.datasetId, // dataset-scoped: never overwrites the shared default
           name: cmd.name ?? existing?.name ?? "Custom",
@@ -990,17 +1008,17 @@ function handleEvalCommand(cmd: ForwardedCommand): void {
           relay.broadcastEval({ type: "error", message: "nothing to promote — the test input is empty" });
           return;
         }
-        const ds = evalStore.defaultDatasetFor(cmd.agentId, cmd.agentName);
+        const ds = await evalStore.defaultDatasetFor(cmd.agentId, cmd.agentName);
         // Adding the same input twice silently doubles what an eval over this dataset
         // costs, for zero extra signal. Report it instead.
-        const duplicate = evalStore.hasExampleWithInput(ds.id, input);
-        if (!duplicate) evalStore.addExample(ds.id, input, cmd.expected ?? null, null);
+        const duplicate = await evalStore.hasExampleWithInput(ds.id, input);
+        if (!duplicate) await evalStore.addExample(ds.id, input, cmd.expected ?? null, null);
         console.log(
           `[eval] promote → "${ds.name}"${duplicate ? " (already present)" : ""}: ${input.slice(0, 60)}`,
         );
         relay.broadcastEval({ type: "promoted", datasetId: ds.id, datasetName: ds.name, duplicate });
-        broadcastDatasets(cmd.agentId);
-        broadcastDataset(ds.id);
+        await broadcastDatasets(cmd.agentId);
+        await broadcastDataset(ds.id);
         return;
       }
     }
@@ -1020,19 +1038,53 @@ function handleEvalCommand(cmd: ForwardedCommand): void {
 // channel, because traceStore.applyEvent focuses activeRunId on every run_start and a
 // fan-out would yank the timeline away from whatever the user is reading. Drill-down loads
 // those runs on demand through the existing loadRun path.
+// INGESTION IS A QUEUE, and it has to be.
+//
+// Persisting used to be synchronous, so a stdout line was fully written before the next one
+// could be read: run_start landed before its steps, steps landed in seq order, and the
+// boundary that stamps them ran after the steps it stamps. None of that was arranged — it
+// was a property of the store being unable to yield.
+//
+// It can yield now. Left as bare calls, three things break at once and all of them quietly:
+// a step can be written before the run_start whose foreign key it needs, two steps can
+// commit out of order, and `setCheckpointUpto` can run before the steps it is meant to
+// stamp — which is not a display bug, it is a run you can no longer branch from, discovered
+// weeks later when somebody tries.
+//
+// So every write that must observe the arrival order goes on one chain, control-plane
+// writes included. The broadcast rides the same chain, which keeps "persist first, then
+// broadcast" true rather than merely intended.
+//
+// The queue is unbounded, which is correct for a local subprocess and is not a hosted
+// answer: a run that emits faster than the database accepts grows it without limit. Session
+// 4 caps bytes, lines and line length per run, and that is where the cap belongs — here it
+// would be a limit on a pipe nobody can flood.
+let ingestChain: Promise<void> = Promise.resolve();
+function ingest(work: () => Promise<void>): void {
+  ingestChain = ingestChain.then(work, work).catch((err) => {
+    console.error("[store] failed to persist event:", (err as Error)?.message ?? String(err));
+  });
+}
+
 pool.on("event", ({ runId, event }) => {
+  // Read synchronously: this flag gates whether a NEW run may start, and deferring it would
+  // leave a window in which the finished run still looks active.
   if (runId === activeRunId && event.kind === "run_end") runActive = false;
-  // Persist first (source of truth), then broadcast to live clients.
-  try {
-    if (event.kind === "run_start" || event.kind === "run_end") {
-      store.upsertRun(event.run);
-    } else if (event.kind === "step") {
-      store.insertStep(event.step);
+  ingest(async () => {
+    // Persist first (source of truth), then broadcast to live clients. A persist failure is
+    // logged and the event still goes out — the client showing a step the database lost is
+    // better than the client showing nothing and no one knowing why.
+    try {
+      if (event.kind === "run_start" || event.kind === "run_end") {
+        await store.upsertRun(event.run);
+      } else if (event.kind === "step") {
+        await store.insertStep(event.step);
+      }
+    } catch (err) {
+      console.error("[store] failed to persist event:", (err as Error).message);
     }
-  } catch (err) {
-    console.error("[store] failed to persist event:", (err as Error).message);
-  }
-  if (!isEvalRun(runId)) relay.broadcast(event);
+    if (!isEvalRun(runId)) relay.broadcast(event);
+  });
 });
 
 pool.on("parseError", ({ runId, line, error }) => {
@@ -1056,12 +1108,20 @@ pool.on("control", ({ ctrl }) => {
   const next = Array.isArray(ctrl.next) ? (ctrl.next as string[]) : [];
   try {
     if (ctrl.ctrl === "boundary") {
-      if (checkpointId && seqHigh >= 0) store.setCheckpointUpto(runId, seqHigh, checkpointId);
-      relay.broadcastDebug({ type: "boundary", runId, seq: seqHigh, next });
+      // On the ingest chain, behind the steps this stamps. A boundary that overtook them
+      // would stamp nothing, and the run would silently stop being branchable.
+      ingest(async () => {
+        if (checkpointId && seqHigh >= 0) await store.setCheckpointUpto(runId, seqHigh, checkpointId);
+        relay.broadcastDebug({ type: "boundary", runId, seq: seqHigh, next });
+      });
     } else if (ctrl.ctrl === "paused") {
+      // The id is recorded immediately — resume reads it, and a pause the process does not
+      // know about yet is a pause the user cannot undo. Only the status write is queued.
       pausedRunId = runId;
-      store.setRunStatus(runId, "paused");
-      relay.broadcastDebug({ type: "paused", runId, seq: seqHigh });
+      ingest(async () => {
+        await store.setRunStatus(runId, "paused");
+        relay.broadcastDebug({ type: "paused", runId, seq: seqHigh });
+      });
     } else if (ctrl.ctrl === "tool_confirm") {
       // A run has stopped before a high-impact MCP tool's first call. It is blocked right
       // now, on a timer, so this goes out immediately and unconditionally — including for
@@ -1152,7 +1212,7 @@ planner.on("error", (e) => {
   relay.broadcastGen({ type: "plan_error", message: e.message });
 });
 
-function planAgent(cmd: PlanAgentCommand): void {
+async function planAgent(cmd: PlanAgentCommand): Promise<void> {
   // A generation in flight owns the pipeline; planning the next agent mid-build would put two
   // plans and one generation on the same single-slot state.
   if (generating) {
@@ -1169,7 +1229,7 @@ function planAgent(cmd: PlanAgentCommand): void {
     // Resolved here rather than in the planner, so the planner keeps its single dependency
     // on the connector catalogue. Refs naming a server or tool that has since gone away
     // resolve to nothing rather than to a guess — the same posture as resolveSelected.
-    mcpTools: mcpRegistry.resolve(cmd.mcpTools ?? []),
+    mcpTools: await mcpRegistry.resolve(cmd.mcpTools ?? []),
     name: cmd.name,
     revisePlanId: cmd.revisePlanId,
   });
@@ -1180,7 +1240,7 @@ function planAgent(cmd: PlanAgentCommand): void {
 // event schema; a generation and a run are independent concerns that share only a socket.
 let generating = false;
 
-function generateAgent(cmd: GenerateCommand): void {
+async function generateAgent(cmd: GenerateCommand): Promise<void> {
   if (generating) {
     // On the planned path this must NOT be the plain "error" member: that one paints the
     // build pane as a failed generation, and the pending plan is still perfectly good. The
@@ -1242,7 +1302,9 @@ function generateAgent(cmd: GenerateCommand): void {
     // the manifest IS the agent's grant, and building with a smaller one than the user
     // approved produces an agent that silently cannot do what its plan promised.
     const approvedRefs = rec.mcpTools ?? [];
-    const stillThere = new Set(mcpRegistry.resolve(approvedRefs).map((t) => `${t.server_id}/${t.name}`));
+    const stillThere = new Set(
+      (await mcpRegistry.resolve(approvedRefs)).map((t) => `${t.server_id}/${t.name}`),
+    );
     const goneMcp = approvedRefs.filter((r) => !stillThere.has(r));
     if (goneMcp.length) {
       relay.broadcastGen({
@@ -1292,7 +1354,7 @@ function generateAgent(cmd: GenerateCommand): void {
         (planCost ? ` + $${planCost.toFixed(5)} plan = $${(planCost + (usage?.cost_usd ?? 0)).toFixed(5)}` : ""),
     );
     relay.broadcastGen({ type: "done", ...e });
-    relay.broadcastAgents();
+    void relay.broadcastAgents();
     cleanup();
   };
 
@@ -1311,8 +1373,8 @@ function generateAgent(cmd: GenerateCommand): void {
 
   // Resolved fresh at build time, so the manifest carries the schemas and impact ratings as
   // they stand now rather than as they stood when the plan was written.
-  const mcpTools = mcpRegistry.resolve(mcpRefs);
-  const mcpServers = mcpRegistry.list();
+  const mcpTools = await mcpRegistry.resolve(mcpRefs);
+  const mcpServers = await mcpRegistry.list();
   void generator.generate({
     runtimeDir: RUNTIME_DIR, prompt, connectors, mcpTools, mcpServers, name, plan, planUsage,
   });
@@ -1335,7 +1397,7 @@ editor.on("proposal", (e) => {
 editor.on("applied", (e) => {
   console.log(`[edit] applied v${e.version} to ${e.agentId}: ${e.summary}`);
   relay.broadcastEdit({ type: "applied", ...e });
-  relay.broadcastAgents();
+  void relay.broadcastAgents();
   relay.broadcastAgentFiles(e.agentId);
   // An edit may have changed the graph structure — invalidate and re-push.
   graphCache.delete(e.agentId);
@@ -1345,7 +1407,7 @@ editor.on("applied", (e) => {
 editor.on("undone", (e) => {
   console.log(`[edit] undid v${e.version} on ${e.agentId}`);
   relay.broadcastEdit({ type: "undone", ...e });
-  relay.broadcastAgents();
+  void relay.broadcastAgents();
   relay.broadcastAgentFiles(e.agentId);
   graphCache.delete(e.agentId);
   void relay.broadcastAgentGraph(e.agentId);
@@ -1412,12 +1474,12 @@ function pauseRun(runId: string): void {
 
 // Resume a paused run from its durable checkpoint: a fresh subprocess continues the SAME run id,
 // its seq starting where the paused segment left off (no run_start, no re-run of done nodes).
-function resumeRun(runId: string): void {
+async function resumeRun(runId: string): Promise<void> {
   if (pool.interactiveRunning) {
     console.log("[debug] resumeRun ignored — a run is already active");
     return;
   }
-  const run = store.getRun(runId);
+  const run = await store.getRun(runId);
   if (!run) {
     relay.broadcastDebug({ type: "error", runId, message: "unknown run" });
     return;
@@ -1428,9 +1490,9 @@ function resumeRun(runId: string): void {
     relay.broadcastDebug({ type: "error", runId, message: `run is ${run.status}, not paused` });
     return;
   }
-  const seqOffset = store.maxSeqForRun(runId) + 1;
+  const seqOffset = (await store.maxSeqForRun(runId)) + 1;
   clearControl(runId); // drop the pause request so it doesn't immediately re-pause
-  store.setRunStatus(runId, "running");
+  await store.setRunStatus(runId, "running");
   console.log(`[debug] resuming run ${runId} from seq ${seqOffset} (agent ${run.agent_id})`);
   const env: NodeJS.ProcessEnv = {
     JAROKU_RESUME_RUN_ID: runId,
@@ -1448,23 +1510,23 @@ function resumeRun(runId: string): void {
 // Fork a NEW run from a parent run's checkpoint at a step's node boundary, optionally with a
 // validated domain-field edit. The parent is only read: its checkpoint db is copied (never
 // written), and its step rows are copied verbatim into the branch — both stay fully inspectable.
-function branchRun(
+async function branchRun(
   fromRunId: string,
   atSeq: number,
   editNode?: string,
   editedState?: Record<string, unknown>,
-): void {
+): Promise<void> {
   if (pool.interactiveRunning) {
     relay.broadcastDebug({ type: "error", runId: fromRunId, message: "a run is active — stop it before branching" });
     return;
   }
-  const parent = store.getRun(fromRunId);
+  const parent = await store.getRun(fromRunId);
   if (!parent) {
     relay.broadcastDebug({ type: "error", runId: fromRunId, message: "unknown run to branch from" });
     return;
   }
   // Resolve the node boundary containing `atSeq` — we fork at a whole-node boundary, never mid-node.
-  const boundary = store.boundaryForStep(fromRunId, atSeq);
+  const boundary = await store.boundaryForStep(fromRunId, atSeq);
   const parentDb = join(CHECKPOINT_DIR, `${fromRunId}.sqlite`);
   if (!boundary || !existsSync(parentDb)) {
     relay.broadcastDebug({ type: "error", runId: fromRunId, message: "no durable checkpoint for that step (branching needs a checkpointed run)" });
@@ -1476,7 +1538,7 @@ function branchRun(
   try {
     // Copy the parent's step prefix (0..boundary) + a physical copy of its checkpoint db, so the
     // parent is never mutated and the branch is self-contained + independently inspectable.
-    store.copyRunPrefix(fromRunId, branchId, seqHigh, seqHigh);
+    await store.copyRunPrefix(fromRunId, branchId, seqHigh, seqHigh);
     copyFileSync(parentDb, join(CHECKPOINT_DIR, `${branchId}.sqlite`));
   } catch (err) {
     relay.broadcastDebug({ type: "error", runId: fromRunId, message: `branch prep failed: ${(err as Error).message}` });
@@ -1503,7 +1565,7 @@ function branchRun(
   activeRunId = branchId;
   pausedRunId = null;
   console.log(`[debug] branching ${fromRunId} @seq ${seqHigh} -> ${branchId} (agent ${parent.agent_id})`);
-  relay.broadcastHistory(); // surface the new branch run in history immediately
+  void relay.broadcastHistory(); // surface the new branch run in history immediately
   relay.broadcastDebug({ type: "branched", parentRunId: fromRunId, branchId, fromSeq: seqHigh });
   pool.startInteractive({ runId: branchId, runtimeDir: RUNTIME_DIR, agentId: parent.agent_id, env });
 }
@@ -1572,8 +1634,15 @@ if (process.env.JAROKU_NO_AUTORUN !== "1") {
 function shutdown(): void {
   console.log("\n[server] shutting down…");
   pool.stopAll();
-  store.close();
-  process.exit(0);
+  // Drain the ingest chain before closing. Events already read off a subprocess's stdout are
+  // events the user watched happen, and closing the database out from under the last few
+  // would lose the end of a trace that visibly ran. Bounded, so a wedged write cannot make
+  // Ctrl-C do nothing.
+  const drained = Promise.race([
+    ingestChain,
+    new Promise<void>((r) => setTimeout(r, 2000).unref?.()),
+  ]);
+  void drained.then(() => store.close()).finally(() => process.exit(0));
 }
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

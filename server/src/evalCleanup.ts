@@ -47,15 +47,15 @@ function artifactsFor(checkpointDir: string, runId: string): string[] {
  * Only touches runs recorded as this eval's jobs, so an interactive run can never be
  * caught in the sweep even if it happened to be executing at the same time.
  */
-export function sweepEvalArtifacts(
+export async function sweepEvalArtifacts(
   evalStore: EvalStore,
   checkpointDir: string,
   evalId: string,
-): SweepResult {
+): Promise<SweepResult> {
   const out: SweepResult = { removed: 0, bytesFreed: 0, failed: 0 };
   if (!existsSync(checkpointDir)) return out;
 
-  for (const job of evalStore.jobsForEval(evalId)) {
+  for (const job of await evalStore.jobsForEval(evalId)) {
     if (!job.run_id) continue;
     for (const path of artifactsFor(checkpointDir, job.run_id)) {
       if (!existsSync(path)) continue;
@@ -80,18 +80,18 @@ export function sweepEvalArtifacts(
  * checkpoint whose run id isn't an eval job's is left strictly alone — that's either an
  * interactive run or something we don't understand, and neither is ours to delete.
  */
-export function sweepOrphanedEvalArtifacts(
+export async function sweepOrphanedEvalArtifacts(
   evalStore: EvalStore,
   checkpointDir: string,
-): SweepResult {
+): Promise<SweepResult> {
   const out: SweepResult = { removed: 0, bytesFreed: 0, failed: 0 };
   if (!existsSync(checkpointDir)) return out;
 
   // Run ids belonging to evals that are over. An eval still in flight keeps its files.
   const finished = new Set<string>();
-  for (const run of evalStore.listEvalRuns(500)) {
+  for (const run of await evalStore.listEvalRuns(500)) {
     if (run.status === "queued" || run.status === "running") continue;
-    for (const job of evalStore.jobsForEval(run.id)) {
+    for (const job of await evalStore.jobsForEval(run.id)) {
       if (job.run_id) finished.add(job.run_id);
     }
   }

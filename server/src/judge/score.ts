@@ -128,38 +128,38 @@ export class JudgeScorer {
   }
 
   /** Record an unscored result. Never throws, never blames the provider. */
-  private markUnscored(evalId: string, job: EvalJob, reason: string): void {
-    this.deps.evalStore.putScore({ job_id: job.id, score: null, error: reason, judge_model: JUDGE_MODEL });
+  private async markUnscored(evalId: string, job: EvalJob, reason: string): Promise<void> {
+    await this.deps.evalStore.putScore({ job_id: job.id, score: null, error: reason, judge_model: JUDGE_MODEL });
     const p = this.pending.get(evalId);
     if (p) p.unscored++;
     this.deps.onScored({ evalId, jobId: job.id, score: null, error: reason });
   }
 
   private async scoreOne(evalId: string, job: EvalJob): Promise<void> {
-    const evalRun = this.deps.evalStore.getEvalRun(evalId);
+    const evalRun = await this.deps.evalStore.getEvalRun(evalId);
     if (!evalRun) return;
 
     // The judge is real spend. If the eval has already hit its ceiling, don't add to it.
-    if (evalRun.budget_usd !== null && this.deps.evalStore.trueSpend(evalId) >= evalRun.budget_usd) {
-      this.markUnscored(evalId, job, "not scored — the eval hit its budget ceiling");
+    if (evalRun.budget_usd !== null && (await this.deps.evalStore.trueSpend(evalId)) >= evalRun.budget_usd) {
+      await this.markUnscored(evalId, job, "not scored — the eval hit its budget ceiling");
       return;
     }
     if (!JudgeScorer.available()) {
       // The free dry-run path still produces a complete eval: every other column is real,
       // and the quality column says plainly why it's blank.
-      this.markUnscored(evalId, job, "not scored — no ANTHROPIC_API_KEY for the judge");
+      await this.markUnscored(evalId, job, "not scored — no ANTHROPIC_API_KEY for the judge");
       return;
     }
 
-    const example = this.deps.evalStore.getExample(job.example_id);
-    if (!example) { this.markUnscored(evalId, job, "the example no longer exists"); return; }
-    if (!job.run_id) { this.markUnscored(evalId, job, "the job has no run to score"); return; }
+    const example = await this.deps.evalStore.getExample(job.example_id);
+    if (!example) { await this.markUnscored(evalId, job, "the example no longer exists"); return; }
+    if (!job.run_id) { await this.markUnscored(evalId, job, "the job has no run to score"); return; }
 
-    const rubric = this.deps.evalStore.getRubric(evalRun.rubric_id);
+    const rubric = await this.deps.evalStore.getRubric(evalRun.rubric_id);
     const criteria: RubricCriterion[] = rubric?.criteria ?? [];
-    if (!criteria.length) { this.markUnscored(evalId, job, "the rubric has no criteria"); return; }
+    if (!criteria.length) { await this.markUnscored(evalId, job, "the rubric has no criteria"); return; }
 
-    const steps = this.deps.store.stepsForRun(job.run_id);
+    const steps = await this.deps.store.stepsForRun(job.run_id);
     const output = extractAgentOutput(steps);
     const prompt = buildJudgePrompt(
       { input: example.input, expected: example.expected, output: output.text },
@@ -181,10 +181,10 @@ export class JudgeScorer {
 
         // Judge spend is recorded BEFORE the verdict is parsed — the call was billed
         // whether or not its answer was usable.
-        this.recordJudgeCost(evalId, res.usage);
+        await this.recordJudgeCost(evalId, res.usage);
 
         if (res.stop_reason === "refusal") {
-          this.markUnscored(evalId, job, "the judge declined to grade this response");
+          await this.markUnscored(evalId, job, "the judge declined to grade this response");
           return;
         }
 
@@ -198,7 +198,7 @@ export class JudgeScorer {
           continue; // a malformed verdict is worth one more try
         }
 
-        this.deps.evalStore.putScore({
+        await this.deps.evalStore.putScore({
           job_id: job.id,
           score: parsed.verdict.score,
           per_criterion: parsed.verdict.perCriterion,
@@ -218,11 +218,11 @@ export class JudgeScorer {
     }
 
     // Rule 1 + 2: the run stays succeeded; only the quality cell is blank, and it says why.
-    this.markUnscored(evalId, job, `judge failed: ${lastError}`);
+    await this.markUnscored(evalId, job, `judge failed: ${lastError}`);
   }
 
   /** Accumulate judge spend on the EVAL, never on a provider (rule 3). */
-  private recordJudgeCost(evalId: string, usage: Anthropic.Usage | null | undefined): void {
+  private async recordJudgeCost(evalId: string, usage: Anthropic.Usage | null | undefined): Promise<void> {
     if (!usage) return;
     // The Anthropic SDK reports input_tokens EXCLUSIVE of the cached counts, so it maps
     // straight onto the uncached slot of the shared pricing math.
@@ -232,6 +232,6 @@ export class JudgeScorer {
       cacheReadTokens: usage.cache_read_input_tokens ?? 0,
       cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
     });
-    if (cost !== null) this.deps.evalStore.addJudgeCost(evalId, cost);
+    if (cost !== null) await this.deps.evalStore.addJudgeCost(evalId, cost);
   }
 }
