@@ -13,7 +13,8 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TraceStore } from "./store.ts";
-import { openTestSqlite } from "./db/testDb.ts";
+import { openTestSqlite, testContext } from "./db/testDb.ts";
+import { newRequestId, systemContext } from "./db/tenant.ts";
 import { EvalStore } from "./evalStore.ts";
 import { sweepEvalArtifacts, sweepOrphanedEvalArtifacts } from "./evalCleanup.ts";
 
@@ -30,6 +31,8 @@ const store = new TraceStore(db);
 await store.init();
 const evalStore = new EvalStore(store.database());
 await evalStore.init();
+const ctx = testContext();
+const sys = systemContext(newRequestId());
 
 /** Lay down the full artifact set a real run leaves behind. */
 function artifacts(runId: string): string[] {
@@ -43,24 +46,24 @@ function artifacts(runId: string): string[] {
   return paths;
 }
 
-const ds = await evalStore.createDataset("agent-c", "sweep");
-const ex = await evalStore.addExample(ds.id, "hello");
-const rubric = await evalStore.putRubric({ dataset_id: null, name: "r", criteria: [] });
+const ds = await evalStore.createDataset(ctx, "agent-c", "sweep");
+const ex = await evalStore.addExample(ctx, ds.id, "hello");
+const rubric = await evalStore.putRubric(ctx, { dataset_id: null, name: "r", criteria: [] });
 
 // An eval whose runs are finished, and an INTERACTIVE run that must survive untouched.
-const finishedEval = await evalStore.createEvalRun({
+const finishedEval = await evalStore.createEvalRun(ctx, {
   dataset_id: ds.id, agent_id: "agent-c", rubric_id: rubric.id,
   targets: [{ provider: "anthropic", model: "claude-haiku-4-5" }], budget_usd: null,
 });
-const jobs = await evalStore.createJobs(finishedEval.id, [
+const jobs = await evalStore.createJobs(ctx, finishedEval.id, [
   { example_id: ex.id, provider: "anthropic", model: "claude-haiku-4-5" },
   { example_id: ex.id, provider: "anthropic", model: "claude-haiku-4-5" },
 ]);
 const evalRun1 = randomUUID(), evalRun2 = randomUUID();
-await evalStore.markJobRunning(jobs[0]!.id, evalRun1, 0);
-await evalStore.markJobRunning(jobs[1]!.id, evalRun2, 0);
-await evalStore.finishJob(jobs[0]!.id, "succeeded", { cost_usd: 0.001 });
-await evalStore.finishJob(jobs[1]!.id, "succeeded", { cost_usd: 0.001 });
+await evalStore.markJobRunning(ctx, jobs[0]!.id, evalRun1, 0);
+await evalStore.markJobRunning(ctx, jobs[1]!.id, evalRun2, 0);
+await evalStore.finishJob(ctx, jobs[0]!.id, "succeeded", { cost_usd: 0.001 });
+await evalStore.finishJob(ctx, jobs[1]!.id, "succeeded", { cost_usd: 0.001 });
 artifacts(evalRun1);
 artifacts(evalRun2);
 
@@ -70,7 +73,7 @@ const interactiveFiles = artifacts(interactiveRun);
 
 // --- per-eval sweep --------------------------------------------------------------------
 {
-  const res = await sweepEvalArtifacts(evalStore, CKPT, finishedEval.id);
+  const res = await sweepEvalArtifacts(ctx, evalStore, CKPT, finishedEval.id);
   check("removes every artifact of the eval's runs", res.removed === 8, `removed ${res.removed}`);
   check("frees the bytes it reports", res.bytesFreed === 8 * 64, `${res.bytesFreed}`);
   check("eval checkpoint dbs are gone", !existsSync(join(CKPT, `${evalRun1}.sqlite`)));
@@ -83,14 +86,14 @@ const interactiveFiles = artifacts(interactiveRun);
     interactiveFiles.every((p) => existsSync(p)));
 
   // The traces themselves are not cleanup's business.
-  check("job rows survive the sweep", (await evalStore.jobsForEval(finishedEval.id)).length === 2);
+  check("job rows survive the sweep", (await evalStore.jobsForEval(ctx, finishedEval.id)).length === 2);
   check("job run_ids survive, so drill-down still resolves",
-    (await evalStore.jobsForEval(finishedEval.id)).every((j) => j.run_id !== null));
+    (await evalStore.jobsForEval(ctx, finishedEval.id)).every((j) => j.run_id !== null));
 }
 
 // --- idempotence -----------------------------------------------------------------------
 {
-  const again = await sweepEvalArtifacts(evalStore, CKPT, finishedEval.id);
+  const again = await sweepEvalArtifacts(ctx, evalStore, CKPT, finishedEval.id);
   check("sweeping twice removes nothing and fails nothing",
     again.removed === 0 && again.failed === 0);
 }
@@ -98,33 +101,33 @@ const interactiveFiles = artifacts(interactiveRun);
 // --- startup sweep of orphans ------------------------------------------------------------
 {
   // A second eval, still RUNNING: its checkpoints are live and must be left alone.
-  const liveEval = await evalStore.createEvalRun({
+  const liveEval = await evalStore.createEvalRun(ctx, {
     dataset_id: ds.id, agent_id: "agent-c", rubric_id: rubric.id,
     targets: [{ provider: "anthropic", model: "claude-haiku-4-5" }], budget_usd: null,
   });
-  await evalStore.setEvalStatus(liveEval.id, "running");
-  const [liveJob] = await evalStore.createJobs(liveEval.id, [
+  await evalStore.setEvalStatus(ctx, liveEval.id, "running");
+  const [liveJob] = await evalStore.createJobs(ctx, liveEval.id, [
     { example_id: ex.id, provider: "anthropic", model: "claude-haiku-4-5" },
   ]);
   const liveRun = randomUUID();
-  await evalStore.markJobRunning(liveJob!.id, liveRun, 0);
+  await evalStore.markJobRunning(ctx, liveJob!.id, liveRun, 0);
   const liveFiles = artifacts(liveRun);
 
   // A third eval that finished but whose sweep never ran (crash / restart).
-  const crashedEval = await evalStore.createEvalRun({
+  const crashedEval = await evalStore.createEvalRun(ctx, {
     dataset_id: ds.id, agent_id: "agent-c", rubric_id: rubric.id,
     targets: [{ provider: "anthropic", model: "claude-haiku-4-5" }], budget_usd: null,
   });
-  const [crashedJob] = await evalStore.createJobs(crashedEval.id, [
+  const [crashedJob] = await evalStore.createJobs(ctx, crashedEval.id, [
     { example_id: ex.id, provider: "anthropic", model: "claude-haiku-4-5" },
   ]);
   const crashedRun = randomUUID();
-  await evalStore.markJobRunning(crashedJob!.id, crashedRun, 0);
-  await evalStore.finishJob(crashedJob!.id, "succeeded", {});
-  await evalStore.setEvalStatus(crashedEval.id, "completed");
+  await evalStore.markJobRunning(ctx, crashedJob!.id, crashedRun, 0);
+  await evalStore.finishJob(ctx, crashedJob!.id, "succeeded", {});
+  await evalStore.setEvalStatus(ctx, crashedEval.id, "completed");
   artifacts(crashedRun);
 
-  const res = await sweepOrphanedEvalArtifacts(evalStore, CKPT);
+  const res = await sweepOrphanedEvalArtifacts(sys, evalStore, CKPT);
   check("startup sweep collects the crashed eval's leftovers", res.removed === 4, `removed ${res.removed}`);
   check("a RUNNING eval's checkpoints are left alone", liveFiles.every((p) => existsSync(p)));
   check("the interactive run is still untouched by the startup sweep",
@@ -133,7 +136,7 @@ const interactiveFiles = artifacts(interactiveRun);
 
 // --- never fatal --------------------------------------------------------------------------
 {
-  const missing = await sweepOrphanedEvalArtifacts(evalStore, join(CKPT, "does-not-exist"));
+  const missing = await sweepOrphanedEvalArtifacts(sys, evalStore, join(CKPT, "does-not-exist"));
   check("a missing checkpoint dir is a no-op, not a throw", missing.removed === 0);
 }
 

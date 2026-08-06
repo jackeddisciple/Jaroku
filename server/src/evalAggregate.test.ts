@@ -117,26 +117,26 @@ async function makeRun(opts: {
 
 // --- 5. comparison cost vs true spend ------------------------------------------------
 {
-  const ds = await evalStore.createDataset("agent-x", "cost cases");
-  const ex = await evalStore.addExample(ds.id, "hello");
-  const rubric = await evalStore.putRubric({ dataset_id: null, name: "r", criteria: [] });
-  const run = await evalStore.createEvalRun({
+  const ds = await evalStore.createDataset(ctx, "agent-x", "cost cases");
+  const ex = await evalStore.addExample(ctx, ds.id, "hello");
+  const rubric = await evalStore.putRubric(ctx, { dataset_id: null, name: "r", criteria: [] });
+  const run = await evalStore.createEvalRun(ctx, {
     dataset_id: ds.id, agent_id: "agent-x", rubric_id: rubric.id,
     targets: [{ provider: "anthropic", model: "claude-haiku-4-5" }],
     budget_usd: 1,
   });
-  const jobs = await evalStore.createJobs(run.id, [
+  const jobs = await evalStore.createJobs(ctx, run.id, [
     { example_id: ex.id, provider: "anthropic", model: "claude-haiku-4-5" },
     { example_id: ex.id, provider: "anthropic", model: "claude-haiku-4-5" },
     { example_id: ex.id, provider: "anthropic", model: "claude-haiku-4-5" },
   ]);
   // Two succeeded; one failed HALFWAY, so it spent money without producing a result.
-  await evalStore.finishJob(jobs[0]!.id, "succeeded", { cost_usd: 0.02, tokens: 1000, latency_ms: 1000 });
-  await evalStore.finishJob(jobs[1]!.id, "succeeded", { cost_usd: 0.04, tokens: 2000, latency_ms: 3000 });
-  await evalStore.finishJob(jobs[2]!.id, "failed", { cost_usd: 0.01, tokens: 500, latency_ms: 500, error: "rate limited" });
-  await evalStore.addJudgeCost(run.id, 0.005);
+  await evalStore.finishJob(ctx, jobs[0]!.id, "succeeded", { cost_usd: 0.02, tokens: 1000, latency_ms: 1000 });
+  await evalStore.finishJob(ctx, jobs[1]!.id, "succeeded", { cost_usd: 0.04, tokens: 2000, latency_ms: 3000 });
+  await evalStore.finishJob(ctx, jobs[2]!.id, "failed", { cost_usd: 0.01, tokens: 500, latency_ms: 500, error: "rate limited" });
+  await evalStore.addJudgeCost(ctx, run.id, 0.005);
 
-  const agg = (await aggregateEval(evalStore, run.id))!;
+  const agg = (await aggregateEval(ctx, evalStore, run.id))!;
   const p = agg.providers[0]!;
 
   check("comparison cost counts succeeded runs only",
@@ -158,19 +158,19 @@ async function makeRun(opts: {
 
 // --- 6. an unpriced leg is excluded from cost, but still reports quality --------------
 {
-  const ds = await evalStore.createDataset("agent-y", "unpriced");
-  const ex = await evalStore.addExample(ds.id, "hello");
-  const rubric = await evalStore.putRubric({ dataset_id: null, name: "r2", criteria: [] });
-  const run = await evalStore.createEvalRun({
+  const ds = await evalStore.createDataset(ctx, "agent-y", "unpriced");
+  const ex = await evalStore.addExample(ctx, ds.id, "hello");
+  const rubric = await evalStore.putRubric(ctx, { dataset_id: null, name: "r2", criteria: [] });
+  const run = await evalStore.createEvalRun(ctx, {
     dataset_id: ds.id, agent_id: "agent-y", rubric_id: rubric.id,
     targets: [{ provider: "mystery", model: "unreleased-x" }], budget_usd: null,
   });
-  const jobs = await evalStore.createJobs(run.id, [
+  const jobs = await evalStore.createJobs(ctx, run.id, [
     { example_id: ex.id, provider: "mystery", model: "unreleased-x" },
   ]);
-  await evalStore.finishJob(jobs[0]!.id, "succeeded", { cost_usd: null, tokens: 900, latency_ms: 700 });
+  await evalStore.finishJob(ctx, jobs[0]!.id, "succeeded", { cost_usd: null, tokens: 900, latency_ms: 700 });
 
-  const p = (await aggregateEval(evalStore, run.id))!.providers[0]!;
+  const p = (await aggregateEval(ctx, evalStore, run.id))!.providers[0]!;
   check("unpriced leg is flagged costUnknown", p.costUnknown === true);
   check("unpriced leg reports null cost, never 0", p.comparisonCostUsd === null);
   check("unpriced leg still reports latency and success",

@@ -132,18 +132,18 @@ export class JudgeScorer {
 
   /** Record an unscored result. Never throws, never blames the provider. */
   private async markUnscored(evalId: string, job: EvalJob, reason: string): Promise<void> {
-    await this.deps.evalStore.putScore({ job_id: job.id, score: null, error: reason, judge_model: JUDGE_MODEL });
+    await this.deps.evalStore.putScore(this.deps.context(), { job_id: job.id, score: null, error: reason, judge_model: JUDGE_MODEL });
     const p = this.pending.get(evalId);
     if (p) p.unscored++;
     this.deps.onScored({ evalId, jobId: job.id, score: null, error: reason });
   }
 
   private async scoreOne(evalId: string, job: EvalJob): Promise<void> {
-    const evalRun = await this.deps.evalStore.getEvalRun(evalId);
+    const evalRun = await this.deps.evalStore.getEvalRun(this.deps.context(), evalId);
     if (!evalRun) return;
 
     // The judge is real spend. If the eval has already hit its ceiling, don't add to it.
-    if (evalRun.budget_usd !== null && (await this.deps.evalStore.trueSpend(evalId)) >= evalRun.budget_usd) {
+    if (evalRun.budget_usd !== null && (await this.deps.evalStore.trueSpend(this.deps.context(), evalId)) >= evalRun.budget_usd) {
       await this.markUnscored(evalId, job, "not scored — the eval hit its budget ceiling");
       return;
     }
@@ -154,11 +154,11 @@ export class JudgeScorer {
       return;
     }
 
-    const example = await this.deps.evalStore.getExample(job.example_id);
+    const example = await this.deps.evalStore.getExample(this.deps.context(), job.example_id);
     if (!example) { await this.markUnscored(evalId, job, "the example no longer exists"); return; }
     if (!job.run_id) { await this.markUnscored(evalId, job, "the job has no run to score"); return; }
 
-    const rubric = await this.deps.evalStore.getRubric(evalRun.rubric_id);
+    const rubric = await this.deps.evalStore.getRubric(this.deps.context(), evalRun.rubric_id);
     const criteria: RubricCriterion[] = rubric?.criteria ?? [];
     if (!criteria.length) { await this.markUnscored(evalId, job, "the rubric has no criteria"); return; }
 
@@ -201,7 +201,7 @@ export class JudgeScorer {
           continue; // a malformed verdict is worth one more try
         }
 
-        await this.deps.evalStore.putScore({
+        await this.deps.evalStore.putScore(this.deps.context(), {
           job_id: job.id,
           score: parsed.verdict.score,
           per_criterion: parsed.verdict.perCriterion,
@@ -235,6 +235,6 @@ export class JudgeScorer {
       cacheReadTokens: usage.cache_read_input_tokens ?? 0,
       cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
     });
-    if (cost !== null) await this.deps.evalStore.addJudgeCost(evalId, cost);
+    if (cost !== null) await this.deps.evalStore.addJudgeCost(this.deps.context(), evalId, cost);
   }
 }

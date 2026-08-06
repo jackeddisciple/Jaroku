@@ -190,11 +190,15 @@ export interface EvalAggregate {
 }
 
 /** Roll every job up into the per-provider comparison plus the eval's spend totals. */
-export async function aggregateEval(evalStore: EvalStore, evalId: string): Promise<EvalAggregate | null> {
-  const evalRun = await evalStore.getEvalRun(evalId);
+export async function aggregateEval(
+  ctx: TenantContext,
+  evalStore: EvalStore,
+  evalId: string,
+): Promise<EvalAggregate | null> {
+  const evalRun = await evalStore.getEvalRun(ctx, evalId);
   if (!evalRun) return null;
-  const jobs = await evalStore.jobsForEval(evalId);
-  const scores = await evalStore.scoresForEval(evalId);
+  const jobs = await evalStore.jobsForEval(ctx, evalId);
+  const scores = await evalStore.scoresForEval(ctx, evalId);
   // jobId -> score. A row with a null score is UNSCORED (the judge failed or was skipped);
   // a row absent entirely was never judged. Neither is a zero.
   const scoreByJob = new Map<string, number | null>();
@@ -282,7 +286,7 @@ export async function aggregateEval(evalStore: EvalStore, evalId: string): Promi
     else jobsByExample.set(j.example_id, [j]);
   }
   const rows: ExampleRow[] = [];
-  for (const example of await evalStore.listExamples(evalRun.dataset_id)) {
+  for (const example of await evalStore.listExamples(ctx, evalRun.dataset_id)) {
     const cells = (jobsByExample.get(example.id) ?? []).map((j): ExampleCell => {
       const s = scoreRowByJob.get(j.id);
       return {

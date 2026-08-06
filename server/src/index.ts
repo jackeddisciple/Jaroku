@@ -16,7 +16,10 @@ import { RunPool } from "./runPool.ts";
 import { TraceStore } from "./store.ts";
 import { migrate } from "./db/migrate.ts";
 import { openDb } from "./db/open.ts";
-import { LOCAL_WORKSPACE_ID, newRequestId, systemContextFor, type TenantContext } from "./db/tenant.ts";
+import {
+  LOCAL_WORKSPACE_ID, newRequestId, systemContext, systemContextFor,
+  type TenantContext,
+} from "./db/tenant.ts";
 import { EvalStore, type Rubric, type RubricCriterion } from "./evalStore.ts";
 import { EvalRunner } from "./evalRunner.ts";
 import { DEFAULT_CRITERIA } from "./judge/rubric.ts";
@@ -132,33 +135,32 @@ const isEvalRun = (runId: string): boolean => evalRunIds.has(runId);
 // declared here and assigned below.
 let evalRunner: EvalRunner;
 
-// The shared built-in rubric every dataset falls back to until it customizes one. Seeded
-// from DEFAULT_CRITERIA but stored as ordinary data — the doc calls for an EDITABLE rubric,
-// and "correct" for a refund bot is not "correct" for a SQL agent.
-const DEFAULT_RUBRIC_ID = "rubric-default";
-
-/** The rubric a dataset scores against: its own if customized, else the built-in default. */
-async function defaultRubric(): Promise<Rubric> {
-  const shared = await evalStore.getRubric(DEFAULT_RUBRIC_ID);
-  if (shared) return shared;
-  return evalStore.putRubric({
-    id: DEFAULT_RUBRIC_ID,
-    dataset_id: null,
-    name: "Default",
-    criteria: DEFAULT_CRITERIA,
-  });
+/**
+ * The rubric a dataset scores against: its own if customized, else the workspace's default.
+ *
+ * There used to be a `DEFAULT_RUBRIC_ID` constant naming one row shared by everybody. One
+ * row shared by everybody is a cross-tenant object — two workspaces editing "the default
+ * rubric" would be editing each other's — so the default is now per workspace, identified by
+ * having no dataset rather than by a well-known id, and created on first use.
+ */
+async function rubricFor(ctx: TenantContext, datasetId: string): Promise<Rubric> {
+  return (
+    (await evalStore.rubricForDataset(ctx, datasetId)) ??
+    (await evalStore.defaultRubricFor(ctx, DEFAULT_CRITERIA))
+  );
 }
-async function rubricFor(datasetId: string): Promise<Rubric> {
-  return (await evalStore.rubricForDataset(datasetId)) ?? (await defaultRubric());
-}
-const rubricIdFor = async (datasetId: string): Promise<string> => (await rubricFor(datasetId)).id;
+const rubricIdFor = async (ctx: TenantContext, datasetId: string): Promise<string> =>
+  (await rubricFor(ctx, datasetId)).id;
 
 // An eval left 'running' by a shutdown has no orchestrator behind it any more. Mark those
 // interrupted at startup rather than leaving rows that claim to be in flight forever —
 // the jobs and whatever they spent stay on record and remain inspectable.
-for (const stale of await evalStore.unfinishedEvalRuns()) {
-  const cancelled = await evalStore.cancelQueuedJobs(stale.id, "server restarted before this job ran");
-  await evalStore.setEvalStatus(stale.id, "cancelled", "interrupted by a server restart");
+// Every workspace's, not just this process's — a restart has to reconcile them all, and an
+// interrupted eval left claiming to be running forever is the bug the isolation would cause.
+for (const stale of await evalStore.unfinishedEvalRuns(systemContext(newRequestId()))) {
+  const ctx = systemContextFor(stale.workspace_id, newRequestId());
+  const cancelled = await evalStore.cancelQueuedJobs(ctx, stale.id, "server restarted before this job ran");
+  await evalStore.setEvalStatus(ctx, stale.id, "cancelled", "interrupted by a server restart");
   console.log(`[eval] ${stale.id} was interrupted by a restart — ${cancelled} queued job(s) cancelled`);
 }
 
@@ -166,7 +168,11 @@ for (const stale of await evalStore.unfinishedEvalRuns()) {
 // Only runs belonging to FINISHED eval jobs are touched — an interactive run's checkpoint
 // is exactly the thing a user might come back to branch from, and is never swept.
 {
-  const swept = await sweepOrphanedEvalArtifacts(evalStore, join(RUNTIME_DIR, ".checkpoints"));
+  const swept = await sweepOrphanedEvalArtifacts(
+    systemContext(newRequestId()),
+    evalStore,
+    join(RUNTIME_DIR, ".checkpoints"),
+  );
   if (swept.removed) {
     console.log(
       `[eval] swept ${swept.removed} orphaned checkpoint artifact(s) from earlier evals, ${fmtBytes(swept.bytesFreed)} freed`,
@@ -390,7 +396,7 @@ evalRunner = new EvalRunner({
     judge.seal(e.evalId);
     // Sweep the resumable-checkpoint blobs these runs left behind. The traces stay —
     // only the pause/resume machinery goes, and nobody resumes a finished eval job.
-    void sweepEvalArtifacts(evalStore, CHECKPOINT_DIR, e.evalId).then((swept) => {
+    void sweepEvalArtifacts(serverContext(), evalStore, CHECKPOINT_DIR, e.evalId).then((swept) => {
       if (swept.removed) {
         console.log(
           `[eval] ${e.evalId} swept ${swept.removed} checkpoint artifact(s), ${fmtBytes(swept.bytesFreed)} freed` +
@@ -854,47 +860,48 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
 // the "eval" channel, the same shape a fresh `listDatasets` would return — so a client
 // never has to reconcile a partial update against local state.
 
-async function broadcastDatasets(agentId: string | null): Promise<void> {
+async function broadcastDatasets(ctx: TenantContext, agentId: string | null): Promise<void> {
   relay.broadcastEval({
     type: "datasets",
     agentId,
-    datasets: await evalStore.listDatasets(agentId ?? undefined),
+    datasets: await evalStore.listDatasets(ctx, agentId ?? undefined),
   });
 }
 
-async function broadcastDataset(datasetId: string): Promise<void> {
+async function broadcastDataset(ctx: TenantContext, datasetId: string): Promise<void> {
   relay.broadcastEval({
     type: "dataset",
     datasetId,
-    examples: await evalStore.listExamples(datasetId),
+    examples: await evalStore.listExamples(ctx, datasetId),
   });
 }
 
 async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
+  const ctx = serverContext();
   try {
     switch (cmd.cmd) {
       case "listDatasets":
-        await broadcastDatasets(cmd.agentId ?? null);
+        await broadcastDatasets(ctx, cmd.agentId ?? null);
         return;
       case "loadDataset":
-        await broadcastDataset(cmd.datasetId);
+        await broadcastDataset(ctx, cmd.datasetId);
         return;
       case "createDataset": {
-        const ds = await evalStore.createDataset(cmd.agentId, cmd.name);
+        const ds = await evalStore.createDataset(ctx, cmd.agentId, cmd.name);
         console.log(`[eval] dataset "${ds.name}" created for ${cmd.agentId}`);
-        await broadcastDatasets(cmd.agentId);
-        await broadcastDataset(ds.id);
+        await broadcastDatasets(ctx, cmd.agentId);
+        await broadcastDataset(ctx, ds.id);
         return;
       }
       case "renameDataset": {
-        await evalStore.renameDataset(cmd.datasetId, cmd.name);
-        await broadcastDatasets((await evalStore.getDataset(cmd.datasetId))?.agent_id ?? null);
+        await evalStore.renameDataset(ctx, cmd.datasetId, cmd.name);
+        await broadcastDatasets(ctx, (await evalStore.getDataset(ctx, cmd.datasetId))?.agent_id ?? null);
         return;
       }
       case "deleteDataset": {
-        await evalStore.deleteDataset(cmd.datasetId);
+        await evalStore.deleteDataset(ctx, cmd.datasetId);
         relay.broadcastEval({ type: "datasetDeleted", datasetId: cmd.datasetId });
-        await broadcastDatasets(cmd.agentId);
+        await broadcastDatasets(ctx, cmd.agentId);
         return;
       }
       case "addExample": {
@@ -905,24 +912,24 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
           relay.broadcastEval({ type: "error", datasetId: cmd.datasetId, message: "an example needs an input" });
           return;
         }
-        await evalStore.addExample(cmd.datasetId, input, cmd.expected ?? null, cmd.notes ?? null);
-        await broadcastDataset(cmd.datasetId);
-        await broadcastDatasets((await evalStore.getDataset(cmd.datasetId))?.agent_id ?? null);
+        await evalStore.addExample(ctx, cmd.datasetId, input, cmd.expected ?? null, cmd.notes ?? null);
+        await broadcastDataset(ctx, cmd.datasetId);
+        await broadcastDatasets(ctx, (await evalStore.getDataset(ctx, cmd.datasetId))?.agent_id ?? null);
         return;
       }
       case "updateExample": {
-        await evalStore.updateExample(cmd.exampleId, {
+        await evalStore.updateExample(ctx, cmd.exampleId, {
           ...(cmd.input !== undefined ? { input: cmd.input } : {}),
           ...(cmd.expected !== undefined ? { expected: cmd.expected } : {}),
           ...(cmd.notes !== undefined ? { notes: cmd.notes } : {}),
         });
-        await broadcastDataset(cmd.datasetId);
+        await broadcastDataset(ctx, cmd.datasetId);
         return;
       }
       case "deleteExample": {
-        await evalStore.deleteExample(cmd.exampleId);
-        await broadcastDataset(cmd.datasetId);
-        await broadcastDatasets((await evalStore.getDataset(cmd.datasetId))?.agent_id ?? null);
+        await evalStore.deleteExample(ctx, cmd.exampleId);
+        await broadcastDataset(ctx, cmd.datasetId);
+        await broadcastDatasets(ctx, (await evalStore.getDataset(ctx, cmd.datasetId))?.agent_id ?? null);
         return;
       }
       case "startEval": {
@@ -943,7 +950,7 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
         const started = await evalRunner.start({
           datasetId: cmd.datasetId,
           agentId: cmd.agentId,
-          rubricId: await rubricIdFor(cmd.datasetId),
+          rubricId: await rubricIdFor(ctx, cmd.datasetId),
           targets: cmd.targets ?? [],
           budgetUsd: cmd.budgetUsd ?? null,
         });
@@ -957,7 +964,7 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
       case "estimateEval": {
         relay.broadcastEval({
           type: "estimate",
-          estimate: await estimateEval(serverContext(), store, evalStore, {
+          estimate: await estimateEval(ctx, store, evalStore, {
             datasetId: cmd.datasetId,
             agentId: cmd.agentId,
             targets: cmd.targets ?? [],
@@ -967,7 +974,7 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
         return;
       }
       case "loadEvalResults": {
-        const results = await aggregateEval(evalStore, cmd.evalId);
+        const results = await aggregateEval(ctx, evalStore, cmd.evalId);
         if (!results) {
           relay.broadcastEval({ type: "error", message: "unknown eval" });
           return;
@@ -976,7 +983,7 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
         return;
       }
       case "listEvals": {
-        const all = await evalStore.listEvalRuns();
+        const all = await evalStore.listEvalRuns(ctx);
         relay.broadcastEval({
           type: "evals",
           evals: cmd.datasetId ? all.filter((e) => e.dataset_id === cmd.datasetId) : all,
@@ -984,7 +991,7 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
         return;
       }
       case "loadRubric": {
-        const r = await rubricFor(cmd.datasetId);
+        const r = await rubricFor(ctx, cmd.datasetId);
         relay.broadcastEval({
           type: "rubric", datasetId: cmd.datasetId, rubric: r, isDefault: r.dataset_id === null,
         });
@@ -1005,8 +1012,8 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
           relay.broadcastEval({ type: "error", message: "a rubric needs at least one criterion with weight above zero" });
           return;
         }
-        const existing = await evalStore.rubricForDataset(cmd.datasetId);
-        const saved = await evalStore.putRubric({
+        const existing = await evalStore.rubricForDataset(ctx, cmd.datasetId);
+        const saved = await evalStore.putRubric(ctx, {
           id: existing?.id,
           dataset_id: cmd.datasetId, // dataset-scoped: never overwrites the shared default
           name: cmd.name ?? existing?.name ?? "Custom",
@@ -1022,17 +1029,17 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
           relay.broadcastEval({ type: "error", message: "nothing to promote — the test input is empty" });
           return;
         }
-        const ds = await evalStore.defaultDatasetFor(cmd.agentId, cmd.agentName);
+        const ds = await evalStore.defaultDatasetFor(ctx, cmd.agentId, cmd.agentName);
         // Adding the same input twice silently doubles what an eval over this dataset
         // costs, for zero extra signal. Report it instead.
-        const duplicate = await evalStore.hasExampleWithInput(ds.id, input);
-        if (!duplicate) await evalStore.addExample(ds.id, input, cmd.expected ?? null, null);
+        const duplicate = await evalStore.hasExampleWithInput(ctx, ds.id, input);
+        if (!duplicate) await evalStore.addExample(ctx, ds.id, input, cmd.expected ?? null, null);
         console.log(
           `[eval] promote → "${ds.name}"${duplicate ? " (already present)" : ""}: ${input.slice(0, 60)}`,
         );
         relay.broadcastEval({ type: "promoted", datasetId: ds.id, datasetName: ds.name, duplicate });
-        await broadcastDatasets(cmd.agentId);
-        await broadcastDataset(ds.id);
+        await broadcastDatasets(ctx, cmd.agentId);
+        await broadcastDataset(ctx, ds.id);
         return;
       }
     }

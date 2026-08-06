@@ -22,6 +22,7 @@
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { EvalStore } from "./evalStore.ts";
+import { systemContextFor, type SystemContext, type TenantContext } from "./db/tenant.ts";
 
 export interface SweepResult {
   removed: number;
@@ -48,6 +49,7 @@ function artifactsFor(checkpointDir: string, runId: string): string[] {
  * caught in the sweep even if it happened to be executing at the same time.
  */
 export async function sweepEvalArtifacts(
+  ctx: TenantContext,
   evalStore: EvalStore,
   checkpointDir: string,
   evalId: string,
@@ -55,7 +57,7 @@ export async function sweepEvalArtifacts(
   const out: SweepResult = { removed: 0, bytesFreed: 0, failed: 0 };
   if (!existsSync(checkpointDir)) return out;
 
-  for (const job of await evalStore.jobsForEval(evalId)) {
+  for (const job of await evalStore.jobsForEval(ctx, evalId)) {
     if (!job.run_id) continue;
     for (const path of artifactsFor(checkpointDir, job.run_id)) {
       if (!existsSync(path)) continue;
@@ -81,6 +83,7 @@ export async function sweepEvalArtifacts(
  * interactive run or something we don't understand, and neither is ours to delete.
  */
 export async function sweepOrphanedEvalArtifacts(
+  ctx: SystemContext,
   evalStore: EvalStore,
   checkpointDir: string,
 ): Promise<SweepResult> {
@@ -89,9 +92,14 @@ export async function sweepOrphanedEvalArtifacts(
 
   // Run ids belonging to evals that are over. An eval still in flight keeps its files.
   const finished = new Set<string>();
-  for (const run of await evalStore.listEvalRuns(500)) {
-    if (run.status === "queued" || run.status === "running") continue;
-    for (const job of await evalStore.jobsForEval(run.id)) {
+  // Across every workspace, deliberately. A startup sweep that only collected one tenant's
+  // orphans would leave everyone else's checkpoint blobs on disk forever — the scope here is
+  // "this machine", which is what a SystemContext means.
+  for (const run of await evalStore.finishedEvalRunsAcrossWorkspaces(ctx, 500)) {
+    for (const job of await evalStore.jobsForEval(
+      systemContextFor(run.workspace_id, ctx.requestId),
+      run.id,
+    )) {
       if (job.run_id) finished.add(job.run_id);
     }
   }

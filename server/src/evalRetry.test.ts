@@ -12,7 +12,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TraceStore } from "./store.ts";
-import { openTestSqlite } from "./db/testDb.ts";
+import { openTestSqlite, testContext } from "./db/testDb.ts";
 import { EvalStore } from "./evalStore.ts";
 import { aggregateEval } from "./evalAggregate.ts";
 import { isTransientFailure } from "./evalRunner.ts";
@@ -68,31 +68,32 @@ const check = (name: string, ok: boolean, detail = "") => {
   await store.init();
   const evalStore = new EvalStore(store.database());
   await evalStore.init();
+  const ctx = testContext();
 
-  const ds = await evalStore.createDataset("agent-r", "retries");
-  const ex = await evalStore.addExample(ds.id, "hello");
-  const rubric = await evalStore.putRubric({ dataset_id: null, name: "r", criteria: [] });
-  const run = await evalStore.createEvalRun({
+  const ds = await evalStore.createDataset(ctx, "agent-r", "retries");
+  const ex = await evalStore.addExample(ctx, ds.id, "hello");
+  const rubric = await evalStore.putRubric(ctx, { dataset_id: null, name: "r", criteria: [] });
+  const run = await evalStore.createEvalRun(ctx, {
     dataset_id: ds.id, agent_id: "agent-r", rubric_id: rubric.id,
     targets: [{ provider: "anthropic", model: "claude-haiku-4-5" }], budget_usd: null,
   });
-  const [job] = await evalStore.createJobs(run.id, [
+  const [job] = await evalStore.createJobs(ctx, run.id, [
     { example_id: ex.id, provider: "anthropic", model: "claude-haiku-4-5" },
   ]);
 
   // Attempt 1 burns tokens, then rate-limits.
-  await evalStore.finishJob(job!.id, "failed", { cost_usd: 0.03, error: "rate limit" });
-  await evalStore.retryJob(job!.id, 1, new Date(Date.now() + 1000));
+  await evalStore.finishJob(ctx, job!.id, "failed", { cost_usd: 0.03, error: "rate limit" });
+  await evalStore.retryJob(ctx, job!.id, 1, new Date(Date.now() + 1000));
   // Attempt 2 succeeds, more cheaply.
-  await evalStore.finishJob(job!.id, "succeeded", { cost_usd: 0.02, tokens: 900, latency_ms: 800 });
+  await evalStore.finishJob(ctx, job!.id, "succeeded", { cost_usd: 0.02, tokens: 900, latency_ms: 800 });
 
-  const after = (await evalStore.getJob(job!.id))!;
+  const after = (await evalStore.getJob(ctx, job!.id))!;
   check("comparison cost is the FINAL attempt only", after.cost_usd === 0.02, `got ${after.cost_usd}`);
   check("cumulative spend keeps the failed attempt", after.spent_usd === 0.05, `got ${after.spent_usd}`);
-  const spend = await evalStore.trueSpend(run.id);
+  const spend = await evalStore.trueSpend(ctx, run.id);
   check("trueSpend uses the cumulative column", Math.abs(spend - 0.05) < 1e-9, `got ${spend}`);
 
-  const p = (await aggregateEval(evalStore, run.id))!.providers[0]!;
+  const p = (await aggregateEval(ctx, evalStore, run.id))!.providers[0]!;
   check("dashboard compares on the final attempt", p.comparisonCostUsd === 0.02);
   check("dashboard bills for both attempts", p.spentUsd === 0.05);
   check("attempt count recorded", after.attempt === 1);
@@ -109,38 +110,39 @@ const check = (name: string, ok: boolean, detail = "") => {
   await store.init();
   const evalStore = new EvalStore(store.database());
   await evalStore.init();
+  const ctx = testContext();
 
-  const ds = await evalStore.createDataset("agent-b", "budget");
-  const ex = await evalStore.addExample(ds.id, "hello");
-  const rubric = await evalStore.putRubric({ dataset_id: null, name: "r", criteria: [] });
-  const run = await evalStore.createEvalRun({
+  const ds = await evalStore.createDataset(ctx, "agent-b", "budget");
+  const ex = await evalStore.addExample(ctx, ds.id, "hello");
+  const rubric = await evalStore.putRubric(ctx, { dataset_id: null, name: "r", criteria: [] });
+  const run = await evalStore.createEvalRun(ctx, {
     dataset_id: ds.id, agent_id: "agent-b", rubric_id: rubric.id,
     targets: [{ provider: "anthropic", model: "claude-haiku-4-5" }], budget_usd: 0.10,
   });
-  const jobs = await evalStore.createJobs(run.id, Array.from({ length: 5 }, () => ({
+  const jobs = await evalStore.createJobs(ctx, run.id, Array.from({ length: 5 }, () => ({
     example_id: ex.id, provider: "anthropic", model: "claude-haiku-4-5",
   })));
 
   // Two jobs FAIL after spending. Their cost is invisible to the comparison figure — which
   // is exactly why the ceiling must not use it.
-  await evalStore.finishJob(jobs[0]!.id, "failed", { cost_usd: 0.05, error: "rate limit" });
-  await evalStore.finishJob(jobs[1]!.id, "failed", { cost_usd: 0.06, error: "rate limit" });
+  await evalStore.finishJob(ctx, jobs[0]!.id, "failed", { cost_usd: 0.05, error: "rate limit" });
+  await evalStore.finishJob(ctx, jobs[1]!.id, "failed", { cost_usd: 0.06, error: "rate limit" });
 
-  const agg = (await aggregateEval(evalStore, run.id))!;
-  const spend = await evalStore.trueSpend(run.id);
+  const agg = (await aggregateEval(ctx, evalStore, run.id))!;
+  const spend = await evalStore.trueSpend(ctx, run.id);
   check("comparison figure sees none of the failed spend", agg.providers[0]!.comparisonCostUsd === 0);
   check("true spend sees all of it", Math.abs(spend - 0.11) < 1e-9, `got ${spend}`);
   check("true spend has crossed the ceiling the comparison figure would have missed",
     spend >= 0.10 && (agg.providers[0]!.comparisonCostUsd ?? 0) < 0.10);
 
   // The abort path: queued work is cancelled so nothing further is started.
-  const cancelled = await evalStore.cancelQueuedJobs(run.id, "budget ceiling reached");
-  await evalStore.setEvalStatus(run.id, "aborted_over_budget", "over budget");
+  const cancelled = await evalStore.cancelQueuedJobs(ctx, run.id, "budget ceiling reached");
+  await evalStore.setEvalStatus(ctx, run.id, "aborted_over_budget", "over budget");
   check("remaining jobs cancelled on abort", cancelled === 3, `cancelled ${cancelled}`);
-  check("no job left queued", (await evalStore.jobsForEval(run.id)).every((j) => j.status !== "queued"));
+  check("no job left queued", (await evalStore.jobsForEval(ctx, run.id)).every((j) => j.status !== "queued"));
   check("eval records WHY it stopped",
-    (await evalStore.getEvalRun(run.id))!.status === "aborted_over_budget");
-  const spendAfter = await evalStore.trueSpend(run.id);
+    (await evalStore.getEvalRun(ctx, run.id))!.status === "aborted_over_budget");
+  const spendAfter = await evalStore.trueSpend(ctx, run.id);
   check("cancelling adds no further spend",
     Math.abs(spendAfter - 0.11) < 1e-9, `got ${spendAfter}`);
 

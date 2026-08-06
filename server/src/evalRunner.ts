@@ -163,7 +163,7 @@ export class EvalRunner {
    * nothing is worse than an error, because it renders as a dashboard full of blanks.
    */
   async start(req: StartEvalRequest): Promise<{ evalId: string } | { error: string }> {
-    const examples = await this.deps.evalStore.listExamples(req.datasetId);
+    const examples = await this.deps.evalStore.listExamples(this.deps.context(), req.datasetId);
     if (!examples.length) return { error: "that dataset has no examples" };
     if (!req.targets.length) return { error: "pick at least one provider to compare" };
 
@@ -174,7 +174,7 @@ export class EvalRunner {
       req.targets.map((t) => ({ example_id: ex.id, provider: t.provider, model: t.model })),
     );
 
-    const evalRun = await this.deps.evalStore.createEvalRun({
+    const evalRun = await this.deps.evalStore.createEvalRun(this.deps.context(), {
       dataset_id: req.datasetId,
       agent_id: req.agentId,
       rubric_id: req.rubricId,
@@ -183,8 +183,8 @@ export class EvalRunner {
     });
     // Rows first, dispatch second. If the process dies right here, the eval is recoverable
     // rather than a set of runs nothing points at.
-    await this.deps.evalStore.createJobs(evalRun.id, spec);
-    await this.deps.evalStore.setEvalStatus(evalRun.id, "running");
+    await this.deps.evalStore.createJobs(this.deps.context(), evalRun.id, spec);
+    await this.deps.evalStore.setEvalStatus(this.deps.context(), evalRun.id, "running");
 
     this.live.set(evalRun.id, {
       evalId: evalRun.id,
@@ -214,7 +214,7 @@ export class EvalRunner {
     if (!live) return;
     live.cancelled = true;
     if (live.retryTimer) { clearTimeout(live.retryTimer); live.retryTimer = null; }
-    await this.deps.evalStore.cancelQueuedJobs(evalId, "cancelled");
+    await this.deps.evalStore.cancelQueuedJobs(this.deps.context(), evalId, "cancelled");
     for (const runId of live.runToJob.keys()) this.deps.pool.stop(runId);
     console.log(`[eval] ${evalId} cancelled`);
   }
@@ -239,11 +239,11 @@ export class EvalRunner {
     // completion, so the final total can exceed the ceiling by at most the cost of the
     // runs already going. Stopping mid-run would spend the money and throw away the result.
     if (!live.cancelled && (await this.overBudget(evalId))) {
-      const cancelled = await this.deps.evalStore.cancelQueuedJobs(evalId, "budget ceiling reached");
+      const cancelled = await this.deps.evalStore.cancelQueuedJobs(this.deps.context(), evalId, "budget ceiling reached");
       live.cancelled = true;
-      const spent = await this.deps.evalStore.trueSpend(evalId);
-      const ceiling = (await this.deps.evalStore.getEvalRun(evalId))?.budget_usd;
-      await this.deps.evalStore.setEvalStatus(
+      const spent = await this.deps.evalStore.trueSpend(this.deps.context(), evalId);
+      const ceiling = (await this.deps.evalStore.getEvalRun(this.deps.context(), evalId))?.budget_usd;
+      await this.deps.evalStore.setEvalStatus(this.deps.context(), 
         evalId,
         "aborted_over_budget",
         `stopped after $${spent.toFixed(4)} of a $${ceiling?.toFixed(4)} budget`,
@@ -251,7 +251,7 @@ export class EvalRunner {
       console.log(`[eval] ${evalId} hit its budget ceiling — ${cancelled} queued job(s) cancelled`);
     }
 
-    const jobs = await this.deps.evalStore.jobsForEval(evalId);
+    const jobs = await this.deps.evalStore.jobsForEval(this.deps.context(), evalId);
     if (!live.cancelled) {
       const now = Date.now();
       for (const job of jobs) {
@@ -272,9 +272,9 @@ export class EvalRunner {
 
   /** True when this eval has spent at or past its ceiling. No ceiling => never true. */
   private async overBudget(evalId: string): Promise<boolean> {
-    const budget = (await this.deps.evalStore.getEvalRun(evalId))?.budget_usd;
+    const budget = (await this.deps.evalStore.getEvalRun(this.deps.context(), evalId))?.budget_usd;
     if (budget === null || budget === undefined) return false;
-    return (await this.deps.evalStore.trueSpend(evalId)) >= budget;
+    return (await this.deps.evalStore.trueSpend(this.deps.context(), evalId)) >= budget;
   }
 
   /**
@@ -292,7 +292,7 @@ export class EvalRunner {
     if (live.cancelled) return;
 
     const now = Date.now();
-    const waiting = (await this.deps.evalStore.jobsForEval(evalId))
+    const waiting = (await this.deps.evalStore.jobsForEval(this.deps.context(), evalId))
       .filter((j) => j.status === "queued" && j.retry_not_before)
       .map((j) => Date.parse(j.retry_not_before!))
       .filter((t) => t > now);
@@ -307,21 +307,21 @@ export class EvalRunner {
   }
 
   private async dispatch(live: Live, job: EvalJob): Promise<void> {
-    const example = await this.deps.evalStore.getExample(job.example_id);
+    const example = await this.deps.evalStore.getExample(this.deps.context(), job.example_id);
     if (!example) {
       // The example was deleted after the eval was queued. Record it rather than skipping
       // silently — a missing cell in the dashboard needs a reason.
-      await this.deps.evalStore.finishJob(job.id, "failed", { error: "example no longer exists" });
+      await this.deps.evalStore.finishJob(this.deps.context(), job.id, "failed", { error: "example no longer exists" });
       return;
     }
 
-    const evalRun = (await this.deps.evalStore.getEvalRun(live.evalId))!;
+    const evalRun = (await this.deps.evalStore.getEvalRun(this.deps.context(), live.evalId))!;
     const runId = randomUUID();
     live.runToJob.set(runId, job.id);
     this.jobToEval.set(job.id, live.evalId);
     live.inFlight.set(job.provider, (live.inFlight.get(job.provider) ?? 0) + 1);
     this.deps.markEvalRun(runId, true);
-    await this.deps.evalStore.markJobRunning(job.id, runId, job.attempt);
+    await this.deps.evalStore.markJobRunning(this.deps.context(), job.id, runId, job.attempt);
 
     const started = this.deps.pool.tryStart({
       runId,
@@ -343,7 +343,7 @@ export class EvalRunner {
       live.runToJob.delete(runId);
       live.inFlight.set(job.provider, Math.max(0, (live.inFlight.get(job.provider) ?? 1) - 1));
       this.deps.markEvalRun(runId, false);
-      await this.deps.evalStore.requeueJob(job.id);
+      await this.deps.evalStore.requeueJob(this.deps.context(), job.id);
     }
   }
 
@@ -359,7 +359,7 @@ export class EvalRunner {
     live.runToJob.delete(runId);
     this.deps.markEvalRun(runId, false);
 
-    const job = await this.deps.evalStore.getJob(jobId);
+    const job = await this.deps.evalStore.getJob(this.deps.context(), jobId);
     if (job) live.inFlight.set(job.provider, Math.max(0, (live.inFlight.get(job.provider) ?? 1) - 1));
 
     // The run row is the source of truth for what happened — the runner brackets every
@@ -388,7 +388,7 @@ export class EvalRunner {
       job?.model ?? run?.model ?? "",
     );
 
-    await this.deps.evalStore.finishJob(jobId, status as "succeeded" | "failed" | "timed_out", {
+    await this.deps.evalStore.finishJob(this.deps.context(), jobId, status as "succeeded" | "failed" | "timed_out", {
       error,
       cost_usd: metrics.cost_usd,
       tokens: metrics.tokens,
@@ -410,12 +410,12 @@ export class EvalRunner {
     if (retryable) {
       // Exponential backoff: a rate limit retried immediately is a rate limit again.
       const delay = RETRY_BASE_MS * 2 ** (attempt - 1);
-      await this.deps.evalStore.retryJob(jobId, attempt, new Date(Date.now() + delay));
+      await this.deps.evalStore.retryJob(this.deps.context(), jobId, attempt, new Date(Date.now() + delay));
       console.log(
         `[eval] job ${jobId.slice(0, 8)} attempt ${attempt}/${MAX_ATTEMPTS} in ${delay}ms — ${error}`,
       );
     } else {
-      const finished = await this.deps.evalStore.getJob(jobId);
+      const finished = await this.deps.evalStore.getJob(this.deps.context(), jobId);
       if (finished) this.deps.onJobFinished?.(finished);
     }
 
@@ -424,7 +424,7 @@ export class EvalRunner {
   }
 
   private async counts(evalId: string) {
-    const jobs = await this.deps.evalStore.jobsForEval(evalId);
+    const jobs = await this.deps.evalStore.jobsForEval(this.deps.context(), evalId);
     const by = (s: string) => jobs.filter((j) => j.status === s).length;
     const terminal = jobs.filter(
       (j) => j.status !== "queued" && j.status !== "running",
@@ -452,10 +452,10 @@ export class EvalRunner {
     this.live.delete(evalId);
     // A budget abort already recorded its own status and reason; don't overwrite it with
     // the generic "cancelled", which would lose why the eval stopped.
-    const current = (await this.deps.evalStore.getEvalRun(evalId))?.status;
+    const current = (await this.deps.evalStore.getEvalRun(this.deps.context(), evalId))?.status;
     const status =
       current === "aborted_over_budget" ? current : live.cancelled ? "cancelled" : "completed";
-    if (current !== "aborted_over_budget") await this.deps.evalStore.setEvalStatus(evalId, status);
+    if (current !== "aborted_over_budget") await this.deps.evalStore.setEvalStatus(this.deps.context(), evalId, status);
     console.log(
       `[eval] ${evalId} ${status} — ${c.total - c.failed}/${c.total} succeeded, ${c.failed} failed`,
     );

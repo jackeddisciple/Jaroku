@@ -122,7 +122,7 @@ export async function estimateEval(
   evalStore: EvalStore,
   opts: { datasetId: string; agentId: string; targets: EvalTarget[]; judgeEnabled: boolean },
 ): Promise<EvalEstimate> {
-  const examples = await evalStore.listExamples(opts.datasetId);
+  const examples = await evalStore.listExamples(ctx, opts.datasetId);
   const notes: string[] = [];
   const perTarget: TargetEstimate[] = [];
 
