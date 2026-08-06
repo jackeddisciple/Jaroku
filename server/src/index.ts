@@ -38,7 +38,8 @@ import {
 import { Generator, type UsageSummary } from "./generator.ts";
 import { Planner } from "./planner.ts";
 import { Editor, editCount } from "./editor.ts";
-import { listAgents } from "./agents.ts";
+import { scanAgentDirectory } from "./agents.ts";
+import { AgentRepository } from "./db/repositories/agents.ts";
 import { loadConnectors } from "./connectors.ts";
 import { isSafeAgentId, listProjectFiles } from "./projectFs.ts";
 import { introspectGraph, type GraphResult } from "./graphIntrospect.ts";
@@ -225,6 +226,28 @@ const editor = new Editor({
 const deployStore = new DeployStore(store.database());
 await deployStore.init();
 
+// The agent list is a table now; the directory is the cache it describes. Reconciled at boot
+// and again whenever a generation, an apply or an undo changes what is on disk — those are
+// the only three things that do.
+const agentRepo = new AgentRepository(store.database());
+async function syncAgents(): Promise<void> {
+  await agentRepo.syncFromDisk(
+    serverContext(),
+    scanAgentDirectory(RUNTIME_DIR).map((a) => ({
+      slug: a.agent_id,
+      display_name: a.name,
+      description: a.description,
+      connectors: a.connectors,
+      mcp_tools: a.mcp_tools,
+      required_env: a.required_env,
+      default_provider: a.default_provider,
+      hand_written: a.hand_written,
+      created_at: a.created_at,
+    })),
+  );
+}
+await syncAgents();
+
 // The same reasoning for deploys, with a sharper edge: a deploy in flight was creating real
 // resources in the user's Railway account. A row still reading "building" after a restart is
 // not building — nothing is watching it — and the honest thing is to say so and point at the
@@ -316,14 +339,28 @@ const relay = new WsRelay({
   context: serverContext,
   clientHtmlPath: join(SERVER_DIR, "debug-client.html"),
   listAgents: async () => {
+    const ctx = serverContext();
     // One query for the whole list, so the sidebar can show a deploy state per row without
     // N round trips. `deployment` is null for an agent that has never been deployed.
-    const deployed = await deployStore.currentByAgent(serverContext());
-    return listAgents(RUNTIME_DIR).map((a) => {
-      const d = deployed.get(a.agent_id);
+    const deployed = await deployStore.currentByAgent(ctx);
+    // `runnable` and `edit_count` stay disk-derived: one is "does agent.py exist", the other
+    // counts history snapshots. Both become object-store reads in Session 3; neither is
+    // something the table can answer today without lying.
+    const onDisk = new Map(scanAgentDirectory(RUNTIME_DIR).map((a) => [a.agent_id, a]));
+    return (await agentRepo.list(ctx)).map((a) => {
+      const d = deployed.get(a.slug);
       return {
-        ...a,
-        edit_count: editCount(RUNTIME_DIR, a.agent_id),
+        agent_id: a.slug,
+        name: a.display_name ?? a.slug,
+        description: a.description ?? "",
+        connectors: a.connectors,
+        mcp_tools: a.mcp_tools,
+        required_env: a.required_env,
+        default_provider: a.default_provider,
+        created_at: a.created_at,
+        hand_written: a.hand_written,
+        runnable: onDisk.get(a.slug)?.runnable ?? false,
+        edit_count: editCount(RUNTIME_DIR, a.slug),
         deployment: d ? { id: d.id, status: d.status, url: d.url } : null,
       };
     });
@@ -1380,7 +1417,7 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
         (planCost ? ` + $${planCost.toFixed(5)} plan = $${(planCost + (usage?.cost_usd ?? 0)).toFixed(5)}` : ""),
     );
     relay.broadcastGen({ type: "done", ...e });
-    void relay.broadcastAgents();
+    void syncAgents().then(() => relay.broadcastAgents());
     cleanup();
   };
 
@@ -1424,7 +1461,7 @@ editor.on("proposal", (e) => {
 editor.on("applied", (e) => {
   console.log(`[edit] applied v${e.version} to ${e.agentId}: ${e.summary}`);
   relay.broadcastEdit({ type: "applied", ...e });
-  void relay.broadcastAgents();
+  void syncAgents().then(() => relay.broadcastAgents());
   relay.broadcastAgentFiles(e.agentId);
   // An edit may have changed the graph structure — invalidate and re-push.
   graphCache.delete(e.agentId);
@@ -1434,7 +1471,7 @@ editor.on("applied", (e) => {
 editor.on("undone", (e) => {
   console.log(`[edit] undid v${e.version} on ${e.agentId}`);
   relay.broadcastEdit({ type: "undone", ...e });
-  void relay.broadcastAgents();
+  void syncAgents().then(() => relay.broadcastAgents());
   relay.broadcastAgentFiles(e.agentId);
   graphCache.delete(e.agentId);
   void relay.broadcastAgentGraph(e.agentId);

@@ -1,8 +1,12 @@
-// Agent registry — what the sidebar lists. Reads runtime/agents/<id>/jaroku.json.
+// Scanning runtime/agents/ — what is on disk, and only that.
 //
-// Directories are the source of truth (a user can drop a project in by hand); jaroku.json
-// only supplies metadata. Anything hidden or non-package-shaped is skipped, which is what
-// keeps the .staging/ working directory out of the UI.
+// This used to BE the agent registry. It is now the disk half of one: the `agents` table is
+// authoritative (see db/repositories/agents.ts) and this produces the rows to reconcile it
+// against. A user can still drop a project in by hand and have it appear, which is why the
+// reconciliation runs disk → table rather than the other way round on this side.
+//
+// jaroku.json supplies metadata; the directory supplies existence. Anything hidden or
+// non-package-shaped is skipped, which is what keeps .staging/ out of the UI.
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -27,7 +31,7 @@ export interface AgentSummary {
   runnable: boolean;
 }
 
-export function listAgents(runtimeDir: string): AgentSummary[] {
+export function scanAgentDirectory(runtimeDir: string): AgentSummary[] {
   const root = join(runtimeDir, "agents");
   if (!existsSync(root)) return [];
 
