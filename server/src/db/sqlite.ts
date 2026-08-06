@@ -155,7 +155,12 @@ export class SqliteDb implements Db {
     };
   }
 
+  /** Idempotent, for the same reason the Postgres driver's is. */
+  private closed = false;
+
   async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
     this.db.close();
   }
 

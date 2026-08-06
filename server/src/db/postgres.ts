@@ -332,7 +332,19 @@ export class PostgresDb implements Db {
     await this.pool.query("SELECT 1");
   }
 
+  /**
+   * Idempotent, because a double close is not an error worth throwing over.
+   *
+   * `pool.end()` raises "Called end on pool more than once", and shutdown paths converge:
+   * a store closes the database it was handed, and so does whoever handed it over. Making
+   * the second call a no-op is cheaper than making every caller remember which of them owns
+   * the connection.
+   */
+  private closed = false;
+
   async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
     await this.pool.end();
   }
 }
