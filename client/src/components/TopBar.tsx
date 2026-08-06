@@ -132,9 +132,13 @@ export function TopBar() {
 
   return (
     <div className="flex h-11 shrink-0 items-center gap-3 border-b border-hair px-4">
-      {/* brand */}
-      <JarokuGlyph />
-      <span className="text-ink font-semibold">Jaroku</span>
+      {/* brand — the mark alone, no wordmark beside it. A logo that has to be captioned with
+          its own name is a logo the product doesn't trust, and the name is already on the tab.
+          Sized up from the inline default because it is now carrying the slot by itself, and
+          labelled because the glyph is aria-hidden: the brand still has to reach a reader. */}
+      <span role="img" aria-label="Jaroku" className="flex items-center text-ink">
+        <JarokuGlyph size={18} />
+      </span>
 
       {/* active agent + status */}
       {agent && (
