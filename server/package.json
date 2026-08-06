@@ -18,6 +18,7 @@
     "test:trace": "tsx src/store.test.ts",
     "test:rls": "tsx src/db/rls.test.ts",
     "test:db-boundary": "tsx src/db/boundary.test.ts",
+    "test:tenancy": "tsx src/tenancy.test.ts",
     "test:protocol": "tsx src/fileProtocol.test.ts",
     "test:plan": "tsx src/planProtocol.test.ts",
     "test:pricing": "tsx src/pricing.test.ts",
