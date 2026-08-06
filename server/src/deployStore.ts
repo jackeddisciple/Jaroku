@@ -25,6 +25,7 @@
 
 import { randomUUID } from "node:crypto";
 import { asInt, asIntOrNull, jsonFromColumn, type Db, type Queryable } from "./db/db.ts";
+import { systemContextFor, type SystemContext, type TenantContext } from "./db/tenant.ts";
 
 // --- status ------------------------------------------------------------------
 
@@ -137,6 +138,12 @@ const PATCHABLE: ReadonlySet<string> = new Set([
   "railway_project_id", "railway_service_id", "railway_environment_id", "railway_deployment_id",
 ]);
 
+// Explicit column lists — a deployment goes onto the deploy channel, and workspace_id has no
+// business there.
+const DEPLOY_COLUMNS = `id, agent_id, target, status, url, provider, model, env_keys,
+                        railway_project_id, railway_service_id, railway_environment_id,
+                        railway_deployment_id, error, created_at, updated_at, ended_at`;
+
 /** How much of a deploy's log is kept. A build log is diagnostic, not an archive. */
 const LOG_CAP = 2000;
 
@@ -185,7 +192,7 @@ export class DeployStore {
    * `queued` is the only status this can produce: the point of writing first is that the row
    * predates every resource, so it cannot claim to be further along than it is.
    */
-  async create(opts: CreateDeployment): Promise<Deployment> {
+  async create(ctx: TenantContext, opts: CreateDeployment): Promise<Deployment> {
     const now = nowIso();
     const row: Deployment = {
       id: randomUUID(),
@@ -209,14 +216,17 @@ export class DeployStore {
     // would otherwise read the same maximum and claim the same position, which is exactly
     // the tie `created_seq` exists to break.
     await this.db.transaction(async (tx: Queryable) => {
-      const top = await tx.get<{ n: unknown }>(`SELECT COALESCE(MAX(created_seq), 0) AS n FROM deployments`);
+      const top = await tx.get<{ n: unknown }>(
+        `SELECT COALESCE(MAX(created_seq), 0) AS n FROM deployments WHERE workspace_id = ?`,
+        [ctx.workspaceId],
+      );
       await tx.run(
         `INSERT INTO deployments
-           (id, agent_id, target, status, url, provider, model, env_keys, created_at, updated_at,
-            created_seq)
-         VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+           (id, workspace_id, agent_id, target, status, url, provider, model, env_keys,
+            created_at, updated_at, created_seq)
+         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
         [
-          row.id, row.agent_id, row.target, row.status,
+          row.id, ctx.workspaceId, row.agent_id, row.target, row.status,
           row.provider, row.model, JSON.stringify(row.env_keys), now, now,
           asInt(top?.n) + 1,
         ],
@@ -230,8 +240,8 @@ export class DeployStore {
    * row without an end time and an in-flight row with one are both lies the schema should not
    * be able to tell.
    */
-  async patch(id: string, changes: DeploymentPatch): Promise<Deployment | null> {
-    const current = await this.get(id);
+  async patch(ctx: TenantContext, id: string, changes: DeploymentPatch): Promise<Deployment | null> {
+    const current = await this.get(ctx, id);
     if (!current) return null;
 
     const sets: string[] = ["updated_at = ?"];
@@ -258,9 +268,12 @@ export class DeployStore {
       values.push(terminal ? (current.ended_at ?? nowIso()) : null);
     }
 
-    values.push(id);
-    await this.db.run(`UPDATE deployments SET ${sets.join(", ")} WHERE id = ?`, values);
-    return this.get(id);
+    values.push(id, ctx.workspaceId);
+    await this.db.run(
+      `UPDATE deployments SET ${sets.join(", ")} WHERE id = ? AND workspace_id = ?`,
+      values,
+    );
+    return this.get(ctx, id);
   }
 
   /**
@@ -270,28 +283,34 @@ export class DeployStore {
    * secrets were, and a redaction step that lives here would be one somebody could bypass by
    * writing to the table directly.
    */
-  async appendLog(deploymentId: string, stage: string, stream: string, text: string): Promise<number> {
+  async appendLog(
+    ctx: TenantContext,
+    deploymentId: string,
+    stage: string,
+    stream: string,
+    text: string,
+  ): Promise<number> {
     // Read-then-insert in one transaction: build output arrives in bursts and two lines
     // racing for the same seq would collide on the (deployment_id, seq) primary key.
     return this.db.transaction(async (tx: Queryable) => {
       const row = await tx.get<{ max_seq: unknown }>(
-        "SELECT MAX(seq) AS max_seq FROM deployment_logs WHERE deployment_id = ?",
-        [deploymentId],
+        "SELECT MAX(seq) AS max_seq FROM deployment_logs WHERE deployment_id = ? AND workspace_id = ?",
+        [deploymentId, ctx.workspaceId],
       );
       const seq = (asIntOrNull(row?.max_seq) ?? -1) + 1;
       await tx.run(
-        `INSERT INTO deployment_logs (deployment_id, seq, ts, stage, stream, text)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [deploymentId, seq, nowIso(), stage, stream, text],
+        `INSERT INTO deployment_logs (workspace_id, deployment_id, seq, ts, stage, stream, text)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [ctx.workspaceId, deploymentId, seq, nowIso(), stage, stream, text],
       );
 
       // A build log is diagnostic, not an archive. Trim the oldest rather than growing
       // forever in a database whose other tables are traces the user actually goes back to.
       if (seq > 0 && seq % 200 === 0) {
-        await tx.run(`DELETE FROM deployment_logs WHERE deployment_id = ? AND seq <= ?`, [
-          deploymentId,
-          seq - LOG_CAP,
-        ]);
+        await tx.run(
+          `DELETE FROM deployment_logs WHERE deployment_id = ? AND workspace_id = ? AND seq <= ?`,
+          [deploymentId, ctx.workspaceId, seq - LOG_CAP],
+        );
       }
       return seq;
     });
@@ -305,13 +324,20 @@ export class DeployStore {
    * ("check your Railway dashboard"); leaving it claiming to be in flight forever is neither.
    * Mirrors the eval engine cancelling unfinished eval runs on boot.
    */
-  async reconcileInterrupted(): Promise<Deployment[]> {
+  /**
+   * Unscoped, deliberately, and it takes a SystemContext to say so.
+   *
+   * A restart has to settle every workspace's in-flight deploys, not one's. The workspace id
+   * comes back with each row so the write that follows is scoped again.
+   */
+  async reconcileInterrupted(ctx: SystemContext): Promise<Deployment[]> {
     const stale = await this.db.all<Record<string, unknown>>(
-      `SELECT * FROM deployments WHERE status IN (${[...IN_FLIGHT].map(() => "?").join(",")})`,
+      `SELECT ${DEPLOY_COLUMNS}, workspace_id FROM deployments
+        WHERE status IN (${[...IN_FLIGHT].map(() => "?").join(",")})`,
       [...IN_FLIGHT],
     );
     for (const row of stale) {
-      await this.patch(row["id"] as string, {
+      await this.patch(systemContextFor(row["workspace_id"] as string, ctx.requestId), row["id"] as string, {
         status: "interrupted",
         error:
           "the Jaroku server restarted while this deploy was in flight. Anything already " +
@@ -323,8 +349,11 @@ export class DeployStore {
 
   // --- reads ---
 
-  async get(id: string): Promise<Deployment | null> {
-    const row = await this.db.get<Record<string, unknown>>("SELECT * FROM deployments WHERE id = ?", [id]);
+  async get(ctx: TenantContext, id: string): Promise<Deployment | null> {
+    const row = await this.db.get<Record<string, unknown>>(
+      `SELECT ${DEPLOY_COLUMNS} FROM deployments WHERE id = ? AND workspace_id = ?`,
+      [id, ctx.workspaceId],
+    );
     return row ? this.hydrate(row) : null;
   }
 
@@ -341,31 +370,34 @@ export class DeployStore {
    * row identifier — so insertion order became a column of its own rather than a property
    * borrowed from one storage engine's internals.
    */
-  async list(): Promise<Deployment[]> {
+  async list(ctx: TenantContext): Promise<Deployment[]> {
     const rows = await this.db.all<Record<string, unknown>>(
-      "SELECT * FROM deployments WHERE status != 'removed' ORDER BY created_at DESC, created_seq DESC",
+      `SELECT ${DEPLOY_COLUMNS} FROM deployments
+        WHERE workspace_id = ? AND status != 'removed'
+        ORDER BY created_at DESC, created_seq DESC`,
+      [ctx.workspaceId],
     );
     return rows.map((r) => this.hydrate(r));
   }
 
-  async listForAgent(agentId: string): Promise<Deployment[]> {
-    return (await this.list()).filter((d) => d.agent_id === agentId);
+  async listForAgent(ctx: TenantContext, agentId: string): Promise<Deployment[]> {
+    return (await this.list(ctx)).filter((d) => d.agent_id === agentId);
   }
 
   /**
    * The deployment that represents an agent's current state: the one in flight if there is
    * one, otherwise the most recent. What the sidebar's Deployed filter reads.
    */
-  async currentForAgent(agentId: string): Promise<Deployment | null> {
-    const mine = await this.listForAgent(agentId);
+  async currentForAgent(ctx: TenantContext, agentId: string): Promise<Deployment | null> {
+    const mine = await this.listForAgent(ctx, agentId);
     return mine.find((d) => isInFlight(d.status)) ?? mine[0] ?? null;
   }
 
   /** Agent id → its current deployment. One query for a whole agent list. */
-  async currentByAgent(): Promise<Map<string, Deployment>> {
+  async currentByAgent(ctx: TenantContext): Promise<Map<string, Deployment>> {
     const out = new Map<string, Deployment>();
     // list() is newest-first, so the first row seen for an agent is its most recent.
-    for (const d of await this.list()) {
+    for (const d of await this.list(ctx)) {
       const existing = out.get(d.agent_id);
       if (!existing || (isInFlight(d.status) && !isInFlight(existing.status))) {
         out.set(d.agent_id, d);
@@ -384,8 +416,8 @@ export class DeployStore {
    * Rows that never got as far as provisioning have no ids and are skipped; `removed` is
    * skipped too, since detaching a record is the user saying they no longer want it followed.
    */
-  async reusableTarget(agentId: string): Promise<RailwayTarget | null> {
-    for (const d of await this.listForAgent(agentId)) {
+  async reusableTarget(ctx: TenantContext, agentId: string): Promise<RailwayTarget | null> {
+    for (const d of await this.listForAgent(ctx, agentId)) {
       if (d.railway_project_id && d.railway_service_id && d.railway_environment_id) {
         return {
           projectId: d.railway_project_id,
@@ -404,28 +436,28 @@ export class DeployStore {
    * problem — it is two different URLs both described as the current one. Returns how many
    * were superseded.
    */
-  async supersede(keepId: string, serviceId: string): Promise<number> {
+  async supersede(ctx: TenantContext, keepId: string, serviceId: string): Promise<number> {
     let count = 0;
-    for (const d of await this.list()) {
+    for (const d of await this.list(ctx)) {
       if (d.id === keepId || d.railway_service_id !== serviceId) continue;
       if (d.status !== "live") continue;
-      await this.patch(d.id, { status: "superseded" });
+      await this.patch(ctx, d.id, { status: "superseded" });
       count++;
     }
     return count;
   }
 
-  async logs(deploymentId: string, sinceSeq = -1): Promise<DeployLogLine[]> {
+  async logs(ctx: TenantContext, deploymentId: string, sinceSeq = -1): Promise<DeployLogLine[]> {
     return (await this.db.all(
-      `SELECT * FROM deployment_logs
-        WHERE deployment_id = ? AND seq > ?
+      `SELECT deployment_id, seq, ts, stage, stream, text FROM deployment_logs
+        WHERE deployment_id = ? AND workspace_id = ? AND seq > ?
         ORDER BY seq ASC`,
-      [deploymentId, sinceSeq],
+      [deploymentId, ctx.workspaceId, sinceSeq],
     )) as unknown as DeployLogLine[];
   }
 
   /** Any deploy this process should consider itself to be running. */
-  async inFlight(): Promise<Deployment[]> {
-    return (await this.list()).filter((d) => isInFlight(d.status));
+  async inFlight(ctx: TenantContext): Promise<Deployment[]> {
+    return (await this.list(ctx)).filter((d) => isInFlight(d.status));
   }
 }

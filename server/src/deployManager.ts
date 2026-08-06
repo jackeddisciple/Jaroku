@@ -34,6 +34,7 @@ import { isSafeAgentId } from "./projectFs.ts";
 import { RailwayApi, RailwayError, RAILWAY_ENV_KEY, isTerminalStatus, RAILWAY_TERMINAL_OK } from "./railwayApi.ts";
 import { checkRailwayCli, RailwayUpload } from "./railwayCli.ts";
 import { numberFromEnv } from "./env.ts";
+import type { TenantContext } from "./db/tenant.ts";
 
 /** The port serve.py binds, and the port the public domain is pointed at. */
 const SERVE_PORT = 8080;
@@ -58,6 +59,8 @@ export type DeployStage =
 export interface DeployManagerDeps {
   runtimeDir: string;
   store: DeployStore;
+  /** The workspace this deploy belongs to. Read at the moment of use, like `token`. */
+  context: () => TenantContext;
   /** The agent's Railway token, read at the moment of use. Never held by this class. */
   token: () => string | undefined;
   /** True while a run or an eval job is reading this agent's files. Blocks packaging. */
@@ -194,7 +197,7 @@ export async function planDeploy(
     secrets,
     problems,
     warnings,
-    redeploy: (await deps.store.reusableTarget(req.agentId)) !== null,
+    redeploy: (await deps.store.reusableTarget(deps.context(), req.agentId)) !== null,
     cliVersion: cli.version,
   };
 }
@@ -258,7 +261,7 @@ export class DeployManager {
       };
     }
 
-    const deployment = await this.deps.store.create({
+    const deployment = await this.deps.store.create(this.deps.context(), {
       agentId: req.agentId,
       provider: req.provider,
       model: req.model,
@@ -277,7 +280,7 @@ export class DeployManager {
       await this.fail(deployment.id, err instanceof Error ? err.message : String(err));
     } finally {
       this.active = null;
-      const final = await this.deps.store.get(deployment.id);
+      const final = await this.deps.store.get(this.deps.context(), deployment.id);
       if (final) this.deps.onFinished(final);
       this.deps.onChanged();
     }
@@ -292,7 +295,7 @@ export class DeployManager {
     active.upload?.stop();
 
     // Past the upload, the build belongs to Railway and only Railway can stop it.
-    const row = await this.deps.store.get(deploymentId);
+    const row = await this.deps.store.get(this.deps.context(), deploymentId);
     const token = this.deps.token();
     if (row?.railway_deployment_id && token) {
       try {
@@ -343,7 +346,7 @@ export class DeployManager {
       await this.stage(id, "provisioning", "packaging");
       const api = new RailwayApi({ token, scrub });
       const target = await this.resolveTarget(id, api, req.agentId);
-      await this.deps.store.patch(id, {
+      await this.deps.store.patch(this.deps.context(), id, {
         railway_project_id: target.projectId,
         railway_environment_id: target.environmentId,
         railway_service_id: target.serviceId,
@@ -396,10 +399,10 @@ export class DeployManager {
       await this.stage(id, "publishing", "deploying");
       const existing = await api.existingDomain(target.projectId, target.environmentId, target.serviceId);
       const url = existing ?? (await api.createDomain(target.serviceId, target.environmentId, SERVE_PORT));
-      await this.deps.store.patch(id, { url });
+      await this.deps.store.patch(this.deps.context(), id, { url });
       // Exactly one row may claim to be live on a service. Two would be two different URLs
       // both described as the current one.
-      const replaced = await this.deps.store.supersede(id, target.serviceId);
+      const replaced = await this.deps.store.supersede(this.deps.context(), id, target.serviceId);
       if (replaced) {
         await this.log(id, "publishing", "jaroku",
           `replaced ${replaced} earlier deployment(s) on this service`);
@@ -460,7 +463,7 @@ export class DeployManager {
         await sleep(FOLLOW_POLL_MS);
         continue;
       }
-      await this.deps.store.patch(id, { railway_deployment_id: deployment.id });
+      await this.deps.store.patch(this.deps.context(), id, { railway_deployment_id: deployment.id });
 
       if (deployment.status !== lastStatus) {
         lastStatus = deployment.status;
@@ -519,7 +522,7 @@ export class DeployManager {
     api: RailwayApi,
     agentId: string,
   ): Promise<{ projectId: string; environmentId: string; serviceId: string }> {
-    const remembered = await this.deps.store.reusableTarget(agentId);
+    const remembered = await this.deps.store.reusableTarget(this.deps.context(), agentId);
     if (remembered) {
       try {
         await api.deployments(remembered.projectId, remembered.serviceId, remembered.environmentId, 1);
@@ -587,17 +590,17 @@ export class DeployManager {
   }
 
   private async stage(id: string, stage: DeployStage, status: DeployStatus): Promise<void> {
-    await this.deps.store.patch(id, { status });
+    await this.deps.store.patch(this.deps.context(), id, { status });
     this.deps.onStage({ deploymentId: id, stage, status });
   }
 
   private async log(id: string, stage: string, stream: string, text: string): Promise<void> {
-    const seq = await this.deps.store.appendLog(id, stage, stream, text);
+    const seq = await this.deps.store.appendLog(this.deps.context(), id, stage, stream, text);
     this.deps.onLog({ deploymentId: id, seq, stage, stream, text });
   }
 
   private async settle(id: string, status: DeployStatus, error: string | null): Promise<void> {
-    await this.deps.store.patch(id, { status, error });
+    await this.deps.store.patch(this.deps.context(), id, { status, error });
     this.deps.onStage({ deploymentId: id, stage: "done", status });
     if (error) await this.log(id, "done", "jaroku", error);
   }

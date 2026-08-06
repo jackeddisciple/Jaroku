@@ -229,7 +229,7 @@ await deployStore.init();
 // resources in the user's Railway account. A row still reading "building" after a restart is
 // not building — nothing is watching it — and the honest thing is to say so and point at the
 // dashboard, because whatever was already created is still there.
-for (const stale of await deployStore.reconcileInterrupted()) {
+for (const stale of await deployStore.reconcileInterrupted(systemContext(newRequestId()))) {
   console.log(`[deploy] ${stale.id} (${stale.agent_id}) was interrupted by a restart`);
 }
 
@@ -237,6 +237,7 @@ for (const stale of await deployStore.reconcileInterrupted()) {
 const deployDeps: DeployManagerDeps = {
   runtimeDir: RUNTIME_DIR,
   store: deployStore,
+  context: serverContext,
   token: () => process.env[RAILWAY_ENV_KEY],
   // The same pool-aware check the editor uses, and for a sharper version of the reason:
   // deploying WRITES into the project, so doing it while a subprocess is importing those
@@ -265,7 +266,7 @@ const deployManager = new DeployManager(deployDeps);
 /** The full snapshot: every deployment, plus whether a Railway token is set. Names only. */
 async function deploySnapshot(): Promise<{ deployments: unknown[]; railwayConfigured: boolean }> {
   return {
-    deployments: await deployStore.list(),
+    deployments: await deployStore.list(serverContext()),
     railwayConfigured: Boolean(process.env[RAILWAY_ENV_KEY]),
   };
 }
@@ -317,7 +318,7 @@ const relay = new WsRelay({
   listAgents: async () => {
     // One query for the whole list, so the sidebar can show a deploy state per row without
     // N round trips. `deployment` is null for an agent that has never been deployed.
-    const deployed = await deployStore.currentByAgent();
+    const deployed = await deployStore.currentByAgent(serverContext());
     return listAgents(RUNTIME_DIR).map((a) => {
       const d = deployed.get(a.agent_id);
       return {
@@ -700,6 +701,7 @@ function deploymentIdOf(value: unknown): string | null {
 }
 
 async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
+  const ctx = serverContext();
   try {
     switch (cmd.cmd) {
       case "setRailwayToken": {
@@ -814,7 +816,7 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
           relay.broadcastDeploy({ type: "error", message: "no deployment id to forget" });
           return;
         }
-        const row = await deployStore.get(target);
+        const row = await deployStore.get(ctx, target);
         if (!row) {
           relay.broadcastDeploy({ type: "error", message: "no such deployment" });
           return;
@@ -823,7 +825,7 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
           relay.broadcastDeploy({ type: "error", message: "that deploy is still running — cancel it first" });
           return;
         }
-        await deployStore.patch(target, { status: "removed" });
+        await deployStore.patch(ctx, target, { status: "removed" });
         broadcastDeployments();
         void relay.broadcastAgents();
         relay.broadcastDeploy({
@@ -844,7 +846,7 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
         relay.broadcastDeploy({
           type: "logs",
           deploymentId: target,
-          lines: await deployStore.logs(target, since),
+          lines: await deployStore.logs(ctx, target, since),
         });
         return;
       }
