@@ -16,10 +16,7 @@ import { RunPool } from "./runPool.ts";
 import { TraceStore } from "./store.ts";
 import { migrate } from "./db/migrate.ts";
 import { openDb } from "./db/open.ts";
-import {
-  LOCAL_WORKSPACE_ID, newRequestId, systemContext, systemContextFor,
-  type TenantContext,
-} from "./db/tenant.ts";
+import { newRequestId, systemContext, systemContextFor, type TenantContext } from "./db/tenant.ts";
 import { EvalStore, type Rubric, type RubricCriterion } from "./evalStore.ts";
 import { EvalRunner } from "./evalRunner.ts";
 import { DEFAULT_CRITERIA } from "./judge/rubric.ts";
@@ -40,6 +37,7 @@ import { Planner } from "./planner.ts";
 import { Editor, editCount } from "./editor.ts";
 import { scanAgentDirectory } from "./agents.ts";
 import { AgentRepository } from "./db/repositories/agents.ts";
+import { resolveDevTenancy, type DevTenancy } from "./devTenancy.ts";
 import { loadConnectors } from "./connectors.ts";
 import { isSafeAgentId, listProjectFiles } from "./projectFs.ts";
 import { introspectGraph, type GraphResult } from "./graphIntrospect.ts";
@@ -79,15 +77,17 @@ console.log(`[server] database: ${db.dialect}${db.dialect === "sqlite" ? ` (${DB
 
 // THE WORKSPACE THIS PROCESS ACTS IN.
 //
-// Every store method takes a TenantContext, and until there is authentication there is one
-// context: the local workspace migration 004 created and backfilled every pre-tenancy row
-// into. A single-user install is a workspace with one member who has not signed in yet.
+// Resolved once at boot and announced, because a server that silently decides which tenant it
+// is acting as is the thing this session exists to make impossible — and this is the last
+// place it still happens. `serverContext()` mints a fresh context per call rather than
+// sharing one: the request id correlates a log line, an audit row and a trace, and a
+// process-wide singleton would make every one of them read as the same request.
 //
-// Deliberately a function rather than a constant, and deliberately minted per call rather
-// than shared. The requestId is what correlates a log line, an audit row and a trace, so a
-// process-wide singleton would make every one of them read as the same request. Session 2
-// replaces the body; nothing above it changes.
-const serverContext = (): TenantContext => systemContextFor(LOCAL_WORKSPACE_ID, newRequestId());
+// Session 2 replaces the resolution with a verified JWT and a membership lookup. The shape
+// does not change — a request arrives, a workspace is resolved for it, and everything
+// downstream takes that context as a parameter.
+let devTenancy: DevTenancy;
+const serverContext = (): TenantContext => devTenancy.context();
 
 // MIGRATIONS FIRST, before a single store is built.
 //
@@ -96,6 +96,7 @@ const serverContext = (): TenantContext => systemContextFor(LOCAL_WORKSPACE_ID, 
 // does not have should fail at startup, where somebody is watching, rather than at the first
 // request that happens to touch it.
 await migrate(db.migrationTarget(), join(SERVER_DIR, "migrations", db.dialect));
+devTenancy = await resolveDevTenancy(db);
 
 const store = new TraceStore(db);
 await store.init();
@@ -287,15 +288,17 @@ const deployDeps: DeployManagerDeps = {
 const deployManager = new DeployManager(deployDeps);
 
 /** The full snapshot: every deployment, plus whether a Railway token is set. Names only. */
-async function deploySnapshot(): Promise<{ deployments: unknown[]; railwayConfigured: boolean }> {
+async function deploySnapshot(
+  ctx: TenantContext,
+): Promise<{ deployments: unknown[]; railwayConfigured: boolean }> {
   return {
-    deployments: await deployStore.list(serverContext()),
+    deployments: await deployStore.list(ctx),
     railwayConfigured: Boolean(process.env[RAILWAY_ENV_KEY]),
   };
 }
 
 function broadcastDeployments(): void {
-  void deploySnapshot()
+  void deploySnapshot(serverContext())
     .then((snapshot) => relay.broadcastDeploy({ type: "deployments", ...snapshot }))
     .catch((err) => console.error("[deploy] snapshot failed:", (err as Error).message));
 }
@@ -336,10 +339,8 @@ function agentGraph(agentId: string): Promise<GraphResult> {
 const relay = new WsRelay({
   port: PORT,
   store,
-  context: serverContext,
   clientHtmlPath: join(SERVER_DIR, "debug-client.html"),
-  listAgents: async () => {
-    const ctx = serverContext();
+  listAgents: async (ctx) => {
     // One query for the whole list, so the sidebar can show a deploy state per row without
     // N round trips. `deployment` is null for an agent that has never been deployed.
     const deployed = await deployStore.currentByAgent(ctx);
@@ -365,14 +366,20 @@ const relay = new WsRelay({
       };
     });
   },
-  listAgentFiles: agentProjectFiles,
-  getAgentGraph: agentGraph,
-  listMcpServers: () => mcpRegistry.list(serverContext()),
+  // The socket's own context, resolved when it connected — see RelayOptions.contextFor.
+  contextFor: () => serverContext(),
+  // These two still read a global directory rather than a scoped table, which is the honest
+  // limit of Session 1: runtime/agents/ is one namespace for every workspace, and Session 3's
+  // object store is what makes the key itself workspace-scoped. They take the context now so
+  // that when the storage moves, the signature does not.
+  listAgentFiles: (_ctx, agentId) => agentProjectFiles(agentId),
+  getAgentGraph: (_ctx, agentId) => agentGraph(agentId),
+  listMcpServers: (ctx) => mcpRegistry.list(ctx),
   // By name only. The client learns THAT a key is set, never what it is.
   listProviders: () => providerStatus(),
   // Same: env_keys are names, railwayConfigured is a boolean. No value crosses this.
-  listDeployments: () => deploySnapshot(),
-  onCommand: (cmd: ForwardedCommand) => {
+  listDeployments: (ctx) => deploySnapshot(ctx),
+  onCommand: (cmd: ForwardedCommand, _ctx: TenantContext) => {
     if (cmd.cmd === "run") runAgent(cmd.input, cmd.provider, cmd.model, cmd.agentId);
     else if (cmd.cmd === "generate") generateAgent(cmd);
     else if (cmd.cmd === "planAgent") planAgent(cmd);

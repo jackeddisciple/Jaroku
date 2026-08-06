@@ -589,30 +589,35 @@ export interface RelayOptions {
   port: number;
   store: TraceStore;
   /**
-   * The workspace a read is answered in.
+   * The workspace a SOCKET acts in, resolved when it connects.
    *
-   * A stopgap shaped like the thing that replaces it. Today it is the server's one context;
-   * in Session 2 it becomes per-socket, resolved from the ticket the client presented, and
-   * this signature does not change. What matters now is that the relay can no longer read
-   * the trace store without naming a scope — the query that used to be `listRuns()` is the
-   * single most dangerous line in the pre-tenancy design, because the relay answers reads
-   * locally and a broadcast is the one thing a tenant boundary cannot survive.
+   * The relay answers reads locally rather than forwarding them, which is correct for a
+   * single-user localhost app and a data breach in a hosted one — every `loadRun`,
+   * `listAgents` and `listMcpServers` was a query with no scope and an answer sent to
+   * whoever asked. Now the scope is resolved once per connection and every read and every
+   * forwarded command carries it.
+   *
+   * Per socket rather than per process, which is the shape Session 2 needs: there it is
+   * resolved from the single-use ticket the client presented, and nothing else here changes.
+   * A workspace switch is a NEW socket, deliberately, because a switch that mutated a live
+   * one would have to reason about the reads already in flight on it.
    */
-  context: () => TenantContext;
+  contextFor: (req: IncomingMessage) => TenantContext | Promise<TenantContext>;
   clientHtmlPath: string;
   // "loadRun", "listAgents", "loadAgentFiles", "loadAgentGraph", "listMcpServers" and
   // "listProviders" are answered locally; the rest are forwarded.
-  onCommand?: (cmd: ForwardedCommand) => void;
-  // The database-backed reads return promises now; the filesystem-backed ones do not. Both
-  // shapes are accepted so a caller is not forced to wrap a synchronous answer in one.
-  listAgents?: () => unknown[] | Promise<unknown[]>;
-  listAgentFiles?: (agentId: string) => unknown[];
-  getAgentGraph?: (agentId: string) => Promise<unknown>;
-  listMcpServers?: () => unknown[] | Promise<unknown[]>;
+  onCommand?: (cmd: ForwardedCommand, ctx: TenantContext) => void;
+  // Every database-backed read takes the asking socket's context. The filesystem-backed ones
+  // do not yet — they read a global directory, which Session 3's object store fixes by
+  // making the key itself workspace-scoped.
+  listAgents?: (ctx: TenantContext) => unknown[] | Promise<unknown[]>;
+  listAgentFiles?: (ctx: TenantContext, agentId: string) => unknown[];
+  getAgentGraph?: (ctx: TenantContext, agentId: string) => Promise<unknown>;
+  listMcpServers?: (ctx: TenantContext) => unknown[] | Promise<unknown[]>;
   /** Which provider keys are set, by name. Never a value — see providers.ts. */
   listProviders?: () => unknown[];
   /** Every deployment, plus whether a Railway token is configured. Names only. */
-  listDeployments?: () =>
+  listDeployments?: (ctx: TenantContext) =>
     | { deployments: unknown[]; railwayConfigured: boolean }
     | Promise<{ deployments: unknown[]; railwayConfigured: boolean }>;
 }
@@ -620,8 +625,17 @@ export interface RelayOptions {
 export class WsRelay {
   private wss: WebSocketServer;
   private clients = new Set<WebSocket>();
+  /**
+   * Each socket's workspace.
+   *
+   * Broadcasts are the reason this is a map rather than one value. A broadcast goes to every
+   * connected client, and every one of them is in some workspace — so a snapshot built once
+   * and sent to all of them is a cross-tenant read wearing a different hat. See
+   * `broadcastHistory` and `broadcastAgents`, which now build per recipient.
+   */
+  private contexts = new Map<WebSocket, TenantContext>();
   private store: TraceStore;
-  private onCommand?: (cmd: ForwardedCommand) => void;
+  private onCommand?: (cmd: ForwardedCommand, ctx: TenantContext) => void;
 
   constructor(private opts: RelayOptions) {
     this.store = opts.store;
@@ -630,23 +644,31 @@ export class WsRelay {
     const http = createServer((req, res) => this.serveStatic(req, res));
     this.wss = new WebSocketServer({ server: http });
 
-    this.wss.on("connection", (ws) => {
+    this.wss.on("connection", (ws, req) => {
       this.clients.add(ws);
+      // Resolved once, here, and held for the life of the socket. Every read this connection
+      // asks for and every command it forwards is answered in this workspace and no other.
+      const pending = Promise.resolve(this.opts.contextFor(req));
+      pending.then((ctx) => this.contexts.set(ws, ctx)).catch(() => {});
+      const withContext = async (fn: (ctx: TenantContext) => Promise<void> | void): Promise<void> => {
+        await fn(await pending);
+      };
       // Snapshot: recent runs + the agent list so a reconnecting client isn't blank.
       //
       // Sent from one async block rather than five, so they still arrive in this order. A
       // client that received `agents` before `history` would render a sidebar whose runs
       // belong to agents it has not been told about yet.
       void (async () => {
-        this.sendTo(ws, { channel: "history", runs: await this.store.listRuns(this.opts.context()) });
-        this.sendTo(ws, { channel: "agents", agents: (await this.opts.listAgents?.()) ?? [] });
-        this.sendTo(ws, { channel: "mcp", type: "servers", servers: (await this.opts.listMcpServers?.()) ?? [] });
+        const ctx = await pending;
+        this.sendTo(ws, { channel: "history", runs: await this.store.listRuns(ctx) });
+        this.sendTo(ws, { channel: "agents", agents: (await this.opts.listAgents?.(ctx)) ?? [] });
+        this.sendTo(ws, { channel: "mcp", type: "servers", servers: (await this.opts.listMcpServers?.(ctx)) ?? [] });
         // Which providers are connected, so a first-run client knows on frame one whether it
         // is looking at a configured install or an empty one.
         this.sendTo(ws, { channel: "providers", type: "providers", providers: this.opts.listProviders?.() ?? [] });
         // And what is deployed, so the sidebar's Deployed filter is right on frame one rather
         // than after a round trip.
-        const deploySnapshot = (await this.opts.listDeployments?.()) ?? {
+        const deploySnapshot = (await this.opts.listDeployments?.(ctx)) ?? {
           deployments: [],
           railwayConfigured: false,
         };
@@ -658,31 +680,33 @@ export class WsRelay {
           const msg = JSON.parse(data.toString()) as ClientCommand;
           if (!msg || typeof msg.cmd !== "string") return;
           if (msg.cmd === "run") {
-            this.onCommand?.(msg);
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "generate" && typeof msg.prompt === "string") {
-            this.onCommand?.(msg);
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "planAgent" && typeof msg.prompt === "string") {
-            this.onCommand?.(msg);
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "discardPlan" && typeof msg.planId === "string") {
-            this.onCommand?.(msg);
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "edit" && typeof msg.agentId === "string" && typeof msg.instruction === "string") {
-            this.onCommand?.(msg);
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "applyEdit" && typeof msg.proposalId === "string") {
-            this.onCommand?.(msg);
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "undoEdit" && typeof msg.agentId === "string") {
-            this.onCommand?.(msg);
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "discardEdit" && typeof msg.proposalId === "string") {
-            this.onCommand?.(msg);
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "loadAgentFiles" && typeof msg.agentId === "string") {
-            this.sendTo(ws, {
+            const agentId = msg.agentId;
+            void this.answer(ws, async (ctx) => ({
               channel: "agentFiles",
-              agentId: msg.agentId,
-              files: this.opts.listAgentFiles?.(msg.agentId) ?? [],
-            });
+              agentId,
+              files: this.opts.listAgentFiles?.(ctx, agentId) ?? [],
+            }), pending);
           } else if (msg.cmd === "loadAgentGraph" && typeof msg.agentId === "string") {
             // Async: spawn introspection, then answer only the requesting client.
             const agentId = msg.agentId;
-            void Promise.resolve(this.opts.getAgentGraph?.(agentId))
+            void pending
+              .then((ctx) => this.opts.getAgentGraph?.(ctx, agentId))
               .then((graph) => this.sendTo(ws, { channel: "graph", agentId, graph: graph ?? null }))
               .catch((err) =>
                 this.sendTo(ws, {
@@ -692,25 +716,25 @@ export class WsRelay {
                 }),
               );
           } else if (msg.cmd === "pauseRun" && typeof msg.runId === "string") {
-            this.onCommand?.(msg);
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "resumeRun" && typeof msg.runId === "string") {
-            this.onCommand?.(msg);
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "branchRun" && typeof msg.fromRunId === "string" && typeof msg.atSeq === "number") {
-            this.onCommand?.(msg);
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "explain" && typeof msg.agentId === "string" && typeof msg.question === "string") {
-            this.onCommand?.(msg);
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "listMcpServers") {
-            void this.answer(ws, async () => ({
+            void this.answer(ws, async (ctx) => ({
               channel: "mcp",
               type: "servers",
-              servers: (await this.opts.listMcpServers?.()) ?? [],
-            }));
+              servers: (await this.opts.listMcpServers?.(ctx)) ?? [],
+            }), pending);
           } else if (msg.cmd === "listDeployments") {
-            void this.answer(ws, async () => ({
+            void this.answer(ws, async (ctx) => ({
               channel: "deploy",
               type: "deployments",
-              ...((await this.opts.listDeployments?.()) ?? { deployments: [], railwayConfigured: false }),
-            }));
+              ...((await this.opts.listDeployments?.(ctx)) ?? { deployments: [], railwayConfigured: false }),
+            }), pending);
           } else if (msg.cmd === "listProviders") {
             this.sendTo(ws, {
               channel: "providers",
@@ -720,39 +744,48 @@ export class WsRelay {
           } else if (DEPLOY_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the deploy manager and can answer with a
             // precise error on the "deploy" channel rather than dropping the message here.
-            this.onCommand?.(msg as DeployChannelCommand);
+            void withContext((ctx) => this.onCommand?.(msg as DeployChannelCommand, ctx));
           } else if (PROVIDER_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the credential writer and can answer with a
             // precise error on the "providers" channel rather than dropping the message here.
-            this.onCommand?.(msg as ProviderCommand);
+            void withContext((ctx) => this.onCommand?.(msg as ProviderCommand, ctx));
           } else if (MCP_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the registry and can answer with a
             // precise error on the "mcp" channel rather than dropping the message here.
-            this.onCommand?.(msg as McpCommand);
+            void withContext((ctx) => this.onCommand?.(msg as McpCommand, ctx));
           } else if (EVAL_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the eval store and can answer with a
             // precise error on the "eval" channel rather than dropping the message here.
-            this.onCommand?.(msg as EvalCommand);
+            void withContext((ctx) => this.onCommand?.(msg as EvalCommand, ctx));
           } else if (msg.cmd === "listAgents") {
-            void this.answer(ws, async () => ({
+            void this.answer(ws, async (ctx) => ({
               channel: "agents",
-              agents: (await this.opts.listAgents?.()) ?? [],
-            }));
+              agents: (await this.opts.listAgents?.(ctx)) ?? [],
+            }), pending);
           } else if (msg.cmd === "loadRun" && typeof msg.runId === "string") {
             // Answer only the requesting client with that run's steps (ordered by seq).
             const runId = msg.runId;
-            void this.answer(ws, async () => ({
+            // The read that used to be the hole: `loadRun` took an id from the client and
+            // answered with that run's steps, with nothing checking whose run it was. Scoped
+            // now, so an id belonging to another workspace resolves to an empty list.
+            void this.answer(ws, async (ctx) => ({
               channel: "runSteps",
               runId,
-              steps: await this.store.stepsForRun(this.opts.context(), runId),
-            }));
+              steps: await this.store.stepsForRun(ctx, runId),
+            }), pending);
           }
         } catch {
           /* ignore malformed client messages */
         }
       });
-      ws.on("close", () => this.clients.delete(ws));
-      ws.on("error", () => this.clients.delete(ws));
+      ws.on("close", () => {
+        this.clients.delete(ws);
+        this.contexts.delete(ws);
+      });
+      ws.on("error", () => {
+        this.clients.delete(ws);
+        this.contexts.delete(ws);
+      });
     });
 
     http.listen(opts.port, () => {
@@ -785,9 +818,13 @@ export class WsRelay {
    * the answer is unavailable, and the connection is still good for every other question.
    * `sendTo` already no-ops on a socket that closed while the query was in flight.
    */
-  private async answer(ws: WebSocket, build: () => Promise<unknown>): Promise<void> {
+  private async answer(
+    ws: WebSocket,
+    build: (ctx: TenantContext) => Promise<unknown>,
+    pending: Promise<TenantContext>,
+  ): Promise<void> {
     try {
-      this.sendTo(ws, await build());
+      this.sendTo(ws, await build(await pending));
     } catch (err) {
       console.error("[relay] read failed:", (err as Error).message);
     }
@@ -881,41 +918,58 @@ export class WsRelay {
 
   // Push a refreshed run-history snapshot to everyone (e.g. after a branch is created, so the new
   // branch run appears in history without needing a run_start event of its own).
+  /**
+   * Push a refreshed history to each client, IN ITS OWN WORKSPACE.
+   *
+   * One query whose result went to everybody was the shape of every broadcast here, and it is
+   * the one thing a tenant boundary cannot survive. Per recipient now — more queries, and the
+   * only correct number of them.
+   */
   async broadcastHistory(): Promise<void> {
-    const msg = JSON.stringify({ channel: "history", runs: await this.store.listRuns(this.opts.context()) });
+    await this.perClient(async (ws, ctx) => {
+      this.sendTo(ws, { channel: "history", runs: await this.store.listRuns(ctx) });
+    });
+  }
+
+  /** Run `fn` once per connected client, with that client's own context. */
+  private async perClient(fn: (ws: WebSocket, ctx: TenantContext) => Promise<void>): Promise<void> {
     for (const ws of this.clients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      const ctx = this.contexts.get(ws);
+      if (!ctx) continue; // still resolving; its initial snapshot will carry the answer
+      try {
+        await fn(ws, ctx);
+      } catch (err) {
+        console.error("[relay] broadcast failed:", (err as Error).message);
+      }
     }
   }
 
   // Push an agent's current on-disk files to everyone (after an apply or undo, so the
   // Code tab reflects what will actually run).
   broadcastAgentFiles(agentId: string): void {
-    const msg = JSON.stringify({
-      channel: "agentFiles",
-      agentId,
-      files: this.opts.listAgentFiles?.(agentId) ?? [],
+    void this.perClient(async (ws, ctx) => {
+      this.sendTo(ws, {
+        channel: "agentFiles",
+        agentId,
+        files: this.opts.listAgentFiles?.(ctx, agentId) ?? [],
+      });
     });
-    for (const ws of this.clients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-    }
   }
 
   // Push a refreshed graph to everyone (after an apply/undo, whose edit may have changed the
   // agent's topology). Recomputes via the same introspection path.
   async broadcastAgentGraph(agentId: string): Promise<void> {
-    const graph = (await this.opts.getAgentGraph?.(agentId)) ?? null;
-    const msg = JSON.stringify({ channel: "graph", agentId, graph });
-    for (const ws of this.clients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-    }
+    await this.perClient(async (ws, ctx) => {
+      const graph = (await this.opts.getAgentGraph?.(ctx, agentId)) ?? null;
+      this.sendTo(ws, { channel: "graph", agentId, graph });
+    });
   }
 
   // Push a refreshed agent list to everyone (after a generation lands).
   async broadcastAgents(): Promise<void> {
-    const msg = JSON.stringify({ channel: "agents", agents: (await this.opts.listAgents?.()) ?? [] });
-    for (const ws of this.clients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-    }
+    await this.perClient(async (ws, ctx) => {
+      this.sendTo(ws, { channel: "agents", agents: (await this.opts.listAgents?.(ctx)) ?? [] });
+    });
   }
 }
