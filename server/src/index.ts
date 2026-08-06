@@ -134,6 +134,39 @@ const planner = new Planner();
 const evalRunIds = new Set<string>();
 const isEvalRun = (runId: string): boolean => evalRunIds.has(runId);
 
+// WHICH WORKSPACE A RUN BELONGS TO.
+//
+// A run outlives the command that started it: its events arrive on the pool's stdout minutes
+// later, and every one of them has to be persisted and broadcast in the workspace of the
+// person who asked for it — not in whatever context the ingest handler happens to reach for.
+// Recorded when the run is dispatched, dropped when the subprocess exits.
+//
+// The fallback is the server's own context, which covers the two runs nobody asked for: the
+// startup autorun, and any run whose id somehow reaches ingestion without having been
+// dispatched here.
+const runWorkspaces = new Map<string, TenantContext>();
+function contextForRun(runId: string): TenantContext {
+  return runWorkspaces.get(runId) ?? serverContext();
+}
+
+// The same problem for the three orchestrators, which emit through callbacks registered once
+// at boot and therefore have no argument to carry a context on.
+//
+// An eval is keyed, because several can be recorded even though only one runs at a time. A
+// build and a deploy are single variables, because the app enforces one of each in flight —
+// `generating`, and `deployManager.busy`, both of which refuse a second outright.
+//
+// Getting this wrong is no longer harmless. Before the broadcasts were scoped, an eval
+// started by one workspace was announced to everybody, which was a leak; now it would be
+// announced to ONE workspace, and if that is the wrong one the person who started it never
+// hears about their own eval.
+const evalWorkspaces = new Map<string, TenantContext>();
+const contextForEval = (evalId: string): TenantContext => evalWorkspaces.get(evalId) ?? serverContext();
+let buildContext: TenantContext | null = null;
+let deployContext: TenantContext | null = null;
+const contextForBuild = (): TenantContext => buildContext ?? serverContext();
+const contextForDeploy = (): TenantContext => deployContext ?? serverContext();
+
 // The orchestrator. Constructed after the relay exists (it broadcasts progress), so it's
 // declared here and assigned below.
 let evalRunner: EvalRunner;
@@ -273,17 +306,17 @@ for (const stale of (
 const deployDeps: DeployManagerDeps = {
   runtimeDir: RUNTIME_DIR,
   store: deployStore,
-  context: serverContext,
+  context: contextForDeploy,
   token: () => process.env[RAILWAY_ENV_KEY],
   // The same pool-aware check the editor uses, and for a sharper version of the reason:
   // deploying WRITES into the project, so doing it while a subprocess is importing those
   // files would change code out from under a run in flight.
   agentBusy: () => runActive || pool.busy,
-  onStage: (e) => relay.broadcastDeploy(serverContext(), { type: "stage", ...e }),
-  onLog: (e) => relay.broadcastDeploy(serverContext(), { type: "log", ...e }),
-  onServeToken: (e) => relay.broadcastDeploy(serverContext(), { type: "serveToken", ...e }),
+  onStage: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "stage", ...e }),
+  onLog: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "log", ...e }),
+  onServeToken: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "serveToken", ...e }),
   onFinished: (d) =>
-    relay.broadcastDeploy(serverContext(), {
+    relay.broadcastDeploy(contextForDeploy(), {
       type: "finished",
       deploymentId: d.id,
       status: d.status,
@@ -310,8 +343,8 @@ async function deploySnapshot(
 }
 
 function broadcastDeployments(): void {
-  void deploySnapshot(serverContext())
-    .then((snapshot) => relay.broadcastDeploy(serverContext(), { type: "deployments", ...snapshot }))
+  void relay
+    .broadcastDeployments()
     .catch((err) => console.error("[deploy] snapshot failed:", (err as Error).message));
 }
 
@@ -391,23 +424,28 @@ const relay = new WsRelay({
   listProviders: () => providerStatus(),
   // Same: env_keys are names, railwayConfigured is a boolean. No value crosses this.
   listDeployments: (ctx) => deploySnapshot(ctx),
-  onCommand: (cmd: ForwardedCommand, _ctx: TenantContext) => {
-    if (cmd.cmd === "run") runAgent(cmd.input, cmd.provider, cmd.model, cmd.agentId);
-    else if (cmd.cmd === "generate") generateAgent(cmd);
-    else if (cmd.cmd === "planAgent") planAgent(cmd);
+  // THE ASKING SOCKET'S WORKSPACE, forwarded rather than discarded.
+  //
+  // The relay resolves a context per connection; before this it was thrown away here and
+  // every handler reached for the server's own instead. With one workspace the two are the
+  // same object, which is exactly why it would have gone unnoticed until it was not.
+  onCommand: (cmd: ForwardedCommand, ctx: TenantContext) => {
+    if (cmd.cmd === "run") runAgent(ctx, cmd.input, cmd.provider, cmd.model, cmd.agentId);
+    else if (cmd.cmd === "generate") generateAgent(ctx, cmd);
+    else if (cmd.cmd === "planAgent") planAgent(ctx, cmd);
     else if (cmd.cmd === "discardPlan") planner.discard(cmd.planId);
-    else if (cmd.cmd === "edit") editAgent(cmd.agentId, cmd.instruction);
+    else if (cmd.cmd === "edit") editAgent(ctx, cmd.agentId, cmd.instruction);
     else if (cmd.cmd === "applyEdit") editor.apply(cmd.proposalId);
     else if (cmd.cmd === "undoEdit") editor.undo(cmd.agentId);
     else if (cmd.cmd === "discardEdit") editor.discard(cmd.proposalId);
-    else if (cmd.cmd === "pauseRun") pauseRun(cmd.runId);
-    else if (cmd.cmd === "resumeRun") resumeRun(cmd.runId);
-    else if (cmd.cmd === "branchRun") branchRun(cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState);
-    else if (cmd.cmd === "explain") explainAgent(cmd);
-    else if (MCP_COMMAND_NAMES.has(cmd.cmd)) void handleMcpCommand(cmd as McpCommand);
-    else if (DEPLOY_COMMAND_NAMES.has(cmd.cmd)) void handleDeployCommand(cmd as DeployChannelCommand);
-    else if (PROVIDER_COMMAND_NAMES.has(cmd.cmd)) void handleProviderCommand(cmd as ProviderCommand);
-    else handleEvalCommand(cmd);
+    else if (cmd.cmd === "pauseRun") pauseRun(ctx, cmd.runId);
+    else if (cmd.cmd === "resumeRun") void resumeRun(ctx, cmd.runId);
+    else if (cmd.cmd === "branchRun") void branchRun(ctx, cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState);
+    else if (cmd.cmd === "explain") explainAgent(ctx, cmd);
+    else if (MCP_COMMAND_NAMES.has(cmd.cmd)) void handleMcpCommand(ctx, cmd as McpCommand);
+    else if (DEPLOY_COMMAND_NAMES.has(cmd.cmd)) void handleDeployCommand(ctx, cmd as DeployChannelCommand);
+    else if (PROVIDER_COMMAND_NAMES.has(cmd.cmd)) void handleProviderCommand(ctx, cmd as ProviderCommand);
+    else void handleEvalCommand(ctx, cmd);
   },
 });
 
@@ -421,10 +459,10 @@ const judge = new JudgeScorer({
   store,
   evalStore,
   context: serverContext,
-  onScored: (e) => relay.broadcastEval(serverContext(), { type: "scored", ...e }),
+  onScored: (e) => relay.broadcastEval(contextForEval(e.evalId), { type: "scored", ...e }),
   onScoringFinished: (e) => {
     console.log(`[eval] ${e.evalId} scoring done — ${e.scored} scored, ${e.unscored} unscored`);
-    relay.broadcastEval(serverContext(), { type: "scoringFinished", ...e });
+    relay.broadcastEval(contextForEval(e.evalId), { type: "scoringFinished", ...e });
   },
 });
 
@@ -432,20 +470,21 @@ evalRunner = new EvalRunner({
   pool,
   store,
   evalStore,
-  context: serverContext,
+  // One eval runs at a time, so this is the eval in flight.
+  context: () => contextForEval(evalRunner?.activeEvalIds()[0] ?? ""),
   runtimeDir: RUNTIME_DIR,
   // An eval job's run persists like any other but stays off the live "trace" channel.
   markEvalRun: (runId, isEval) => {
     if (isEval) evalRunIds.add(runId);
     else evalRunIds.delete(runId);
   },
-  onStarted: (e) => relay.broadcastEval(serverContext(), { type: "evalStarted", ...e }),
-  onProgress: (p) => relay.broadcastEval(serverContext(), { type: "evalProgress", ...p }),
+  onStarted: (e) => relay.broadcastEval(contextForEval(e.evalId), { type: "evalStarted", ...e }),
+  onProgress: (p) => relay.broadcastEval(contextForEval(p.evalId), { type: "evalProgress", ...p }),
   // Score as results land rather than in a batch at the end, so the quality column fills in
   // alongside the rest of the row instead of appearing all at once minutes later.
   onJobFinished: (job) => judge.enqueue(job.eval_id, job),
   onFinished: (e) => {
-    relay.broadcastEval(serverContext(), { type: "evalFinished", ...e });
+    relay.broadcastEval(contextForEval(e.evalId), { type: "evalFinished", ...e });
     // The eval's runs are now in history like any other; refresh so drill-down can reach
     // them without a reconnect.
     void relay.broadcastHistory();
@@ -453,7 +492,7 @@ evalRunner = new EvalRunner({
     judge.seal(e.evalId);
     // Sweep the resumable-checkpoint blobs these runs left behind. The traces stay —
     // only the pause/resume machinery goes, and nobody resumes a finished eval job.
-    void sweepEvalArtifacts(serverContext(), evalStore, CHECKPOINT_DIR, e.evalId).then((swept) => {
+    void sweepEvalArtifacts(contextForEval(e.evalId), evalStore, CHECKPOINT_DIR, e.evalId).then((swept) => {
       if (swept.removed) {
         console.log(
           `[eval] ${e.evalId} swept ${swept.removed} checkpoint artifact(s), ${fmtBytes(swept.bytesFreed)} freed` +
@@ -521,29 +560,27 @@ function clearConfirms(runId: string, reason: string, nonce?: string): void {
     if (nonce !== undefined && p.nonce !== nonce) continue;
     pendingConfirms.delete(key);
     rmSync(approvalFile(p.runId, p.nonce), { force: true });
-    relay.broadcastMcp(serverContext(), { type: "confirmResolved", runId: p.runId, nonce: p.nonce, verdict: reason });
+    relay.broadcastMcp(contextForRun(p.runId), { type: "confirmResolved", runId: p.runId, nonce: p.nonce, verdict: reason });
   }
 }
 
 function broadcastMcpServers(): void {
-  void mcpRegistry
-    .list(serverContext())
-    .then((servers) => relay.broadcastMcp(serverContext(), { type: "servers", servers }))
+  void relay
+    .broadcastMcpServers()
     .catch((err) => console.error("[mcp] snapshot failed:", (err as Error).message));
 }
 
-async function handleMcpCommand(cmd: McpCommand): Promise<void> {
-  const ctx = serverContext();
+async function handleMcpCommand(ctx: TenantContext, cmd: McpCommand): Promise<void> {
   try {
     switch (cmd.cmd) {
       case "addMcpServer": {
         if (typeof cmd.endpoint !== "string" || !cmd.endpoint.trim()) {
-          relay.broadcastMcp(serverContext(), { type: "error", message: "an endpoint is required" });
+          relay.broadcastMcp(ctx, { type: "error", message: "an endpoint is required" });
           return;
         }
         // A handshake against someone else's server takes as long as it takes. Saying so
         // is the difference between "connecting" and "the button did nothing".
-        relay.broadcastMcp(serverContext(), { type: "discovering", serverId: null, endpoint: cmd.endpoint });
+        relay.broadcastMcp(ctx, { type: "discovering", serverId: null, endpoint: cmd.endpoint });
         const added = await mcpRegistry.addServer(ctx, {
           endpoint: cmd.endpoint,
           label: cmd.label,
@@ -556,16 +593,16 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         );
         broadcastMcpServers();
         if (!added.ok && added.message) {
-          relay.broadcastMcp(serverContext(), { type: "error", message: added.message, ...(added.server ? { serverId: added.server.id } : {}) });
+          relay.broadcastMcp(ctx, { type: "error", message: added.message, ...(added.server ? { serverId: added.server.id } : {}) });
         } else if (added.message && added.server) {
-          relay.broadcastMcp(serverContext(), { type: "notice", message: added.message, serverId: added.server.id });
+          relay.broadcastMcp(ctx, { type: "notice", message: added.message, serverId: added.server.id });
         }
         return;
       }
 
       case "rediscoverMcpServer": {
         if (typeof cmd.serverId !== "string") return;
-        relay.broadcastMcp(serverContext(), {
+        relay.broadcastMcp(ctx, {
           type: "discovering",
           serverId: cmd.serverId,
           endpoint: (await mcpRegistry.get(ctx, cmd.serverId))?.endpoint ?? "",
@@ -576,9 +613,9 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         );
         broadcastMcpServers();
         if (!res.ok && res.message) {
-          relay.broadcastMcp(serverContext(), { type: "error", message: res.message, serverId: cmd.serverId });
+          relay.broadcastMcp(ctx, { type: "error", message: res.message, serverId: cmd.serverId });
         } else if (res.message) {
-          relay.broadcastMcp(serverContext(), { type: "notice", message: res.message, serverId: cmd.serverId });
+          relay.broadcastMcp(ctx, { type: "notice", message: res.message, serverId: cmd.serverId });
         }
         return;
       }
@@ -589,7 +626,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         if (removed) console.log(`[mcp] removed ${cmd.serverId}`);
         broadcastMcpServers();
         if (!removed) {
-          relay.broadcastMcp(serverContext(), { type: "error", message: `no server called "${cmd.serverId}"` });
+          relay.broadcastMcp(ctx, { type: "error", message: `no server called "${cmd.serverId}"` });
         }
         return;
       }
@@ -602,7 +639,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         if (!pending) {
           // Already answered, timed out, or the run died. Saying so beats silence: two
           // people clicking the same modal should not both think they decided it.
-          relay.broadcastMcp(serverContext(), {
+          relay.broadcastMcp(ctx, {
             type: "error",
             message: "that confirmation is no longer waiting — the run moved on without it",
           });
@@ -611,7 +648,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         pendingConfirms.delete(key);
         writeApproval(cmd.runId, cmd.nonce, verdict);
         console.log(`[mcp] ${pending.server}/${pending.tool} — ${verdict}`);
-        relay.broadcastMcp(serverContext(), { type: "confirmResolved", runId: cmd.runId, nonce: cmd.nonce, verdict });
+        relay.broadcastMcp(ctx, { type: "confirmResolved", runId: cmd.runId, nonce: cmd.nonce, verdict });
         return;
       }
 
@@ -620,19 +657,19 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         const token = typeof cmd.token === "string" && cmd.token.length ? cmd.token : null;
         const { result, warning } = await mcpRegistry.setCredential(ctx, cmd.serverId, token);
         if (!result.ok) {
-          relay.broadcastMcp(serverContext(), { type: "error", message: result.message ?? "could not store the credential", serverId: cmd.serverId });
+          relay.broadcastMcp(ctx, { type: "error", message: result.message ?? "could not store the credential", serverId: cmd.serverId });
           return;
         }
         // Log that a credential changed, never which value it changed to.
         console.log(`[mcp] ${cmd.serverId} credential ${token ? "set" : "cleared"}`);
         // A stored credential is only useful if it works, so prove it immediately rather
         // than leaving the server sitting in auth_required until someone clicks refresh.
-        relay.broadcastMcp(serverContext(), { type: "discovering", serverId: cmd.serverId, endpoint: result.server?.endpoint ?? "" });
+        relay.broadcastMcp(ctx, { type: "discovering", serverId: cmd.serverId, endpoint: result.server?.endpoint ?? "" });
         const retried = await mcpRegistry.rediscover(ctx, cmd.serverId);
         broadcastMcpServers();
-        if (warning) relay.broadcastMcp(serverContext(), { type: "notice", message: warning, serverId: cmd.serverId });
+        if (warning) relay.broadcastMcp(ctx, { type: "notice", message: warning, serverId: cmd.serverId });
         if (!retried.ok && retried.message) {
-          relay.broadcastMcp(serverContext(), { type: "error", message: retried.message, serverId: cmd.serverId });
+          relay.broadcastMcp(ctx, { type: "error", message: retried.message, serverId: cmd.serverId });
         }
         return;
       }
@@ -642,7 +679,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
         const impact = cmd.impact === "high" || cmd.impact === "low" ? cmd.impact : null;
         const updated = await mcpRegistry.setToolImpact(ctx, cmd.serverId, cmd.toolName, impact);
         if (!updated) {
-          relay.broadcastMcp(serverContext(), {
+          relay.broadcastMcp(ctx, {
             type: "error",
             message: `no tool "${cmd.toolName}" on "${cmd.serverId}"`,
             serverId: cmd.serverId,
@@ -659,7 +696,7 @@ async function handleMcpCommand(cmd: McpCommand): Promise<void> {
   } catch (err) {
     const message = (err as Error)?.message ?? String(err);
     console.error(`[mcp] ${cmd.cmd} failed: ${message}`);
-    relay.broadcastMcp(serverContext(), { type: "error", message: `${cmd.cmd} failed: ${message}` });
+    relay.broadcastMcp(ctx, { type: "error", message: `${cmd.cmd} failed: ${message}` });
   }
 }
 
@@ -679,7 +716,7 @@ function broadcastProviders(): void {
   relay.broadcastProviders({ type: "providers", providers: providerStatus() });
 }
 
-async function handleProviderCommand(cmd: ProviderCommand): Promise<void> {
+async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): Promise<void> {
   try {
     if (!isProviderId(cmd.provider)) {
       // Named rather than echoed: `cmd.provider` is client-supplied and about to be rendered.
@@ -756,8 +793,7 @@ function deploymentIdOf(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 && value.length <= 64 ? value : null;
 }
 
-async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
-  const ctx = serverContext();
+async function handleDeployCommand(ctx: TenantContext, cmd: DeployChannelCommand): Promise<void> {
   try {
     switch (cmd.cmd) {
       case "setRailwayToken": {
@@ -770,17 +806,17 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
         }
         const token = typeof cmd.token === "string" ? cmd.token.trim() : "";
         if (!token) {
-          relay.broadcastDeploy(serverContext(), { type: "error", message: "no token was entered" });
+          relay.broadcastDeploy(ctx, { type: "error", message: "no token was entered" });
           return;
         }
         const written = credentials.set(RAILWAY_ENV_KEY, token);
         if (!written.ok) {
-          relay.broadcastDeploy(serverContext(), { type: "error", message: written.warning ?? "could not store that token" });
+          relay.broadcastDeploy(ctx, { type: "error", message: written.warning ?? "could not store that token" });
           return;
         }
         console.log(`[deploy] Railway token set (${RAILWAY_ENV_KEY})`);
         broadcastDeployments();
-        if (written.warning) relay.broadcastDeploy(serverContext(), { type: "notice", message: written.warning });
+        if (written.warning) relay.broadcastDeploy(ctx, { type: "notice", message: written.warning });
         return;
       }
 
@@ -788,13 +824,13 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
         // Writes nothing, by design — see TestRailwayTokenCommand.
         const token = typeof cmd.token === "string" ? cmd.token.trim() : "";
         if (!token) {
-          relay.broadcastDeploy(serverContext(), { type: "testResult", ok: false, message: "no token was entered" });
+          relay.broadcastDeploy(ctx, { type: "testResult", ok: false, message: "no token was entered" });
           return;
         }
         try {
           const { projectCount } = await new RailwayApi({ token }).verify();
           console.log("[deploy] Railway token tested — ok");
-          relay.broadcastDeploy(serverContext(), {
+          relay.broadcastDeploy(ctx, {
             type: "testResult",
             ok: true,
             message: projectCount ? "connected" : "connected — no projects yet",
@@ -802,14 +838,14 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
         } catch (err) {
           const detail = err instanceof RailwayError ? err.message : String(err);
           console.log("[deploy] Railway token tested — rejected");
-          relay.broadcastDeploy(serverContext(), { type: "testResult", ok: false, message: detail });
+          relay.broadcastDeploy(ctx, { type: "testResult", ok: false, message: detail });
         }
         return;
       }
 
       case "planDeploy": {
         if (!isSafeAgentId(cmd.agentId)) {
-          relay.broadcastDeploy(serverContext(), { type: "error", message: "invalid agent id" });
+          relay.broadcastDeploy(ctx, { type: "error", message: "invalid agent id" });
           return;
         }
         const plan = await planDeploy(deployDeps, {
@@ -818,7 +854,7 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
           model: typeof cmd.model === "string" ? cmd.model : "",
           envKeys: [],
         });
-        relay.broadcastDeploy(serverContext(), {
+        relay.broadcastDeploy(ctx, {
           type: "plan",
           agentId: plan.agentId,
           secrets: plan.secrets,
@@ -830,12 +866,13 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
       }
 
       case "deploy": {
+        deployContext = ctx;
         if (!isSafeAgentId(cmd.agentId)) {
-          relay.broadcastDeploy(serverContext(), { type: "error", message: "invalid agent id" });
+          relay.broadcastDeploy(ctx, { type: "error", message: "invalid agent id" });
           return;
         }
         if (deployManager.busy) {
-          relay.broadcastDeploy(serverContext(), { type: "error", message: "a deploy is already running" });
+          relay.broadcastDeploy(ctx, { type: "error", message: "a deploy is already running" });
           return;
         }
         const envKeys = Array.isArray(cmd.envKeys)
@@ -849,14 +886,14 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
           allowMissing: cmd.allowMissing === true,
           publicEndpoint: cmd.publicEndpoint === true,
         });
-        if ("error" in result) relay.broadcastDeploy(serverContext(), { type: "error", message: result.error });
+        if ("error" in result) relay.broadcastDeploy(ctx, { type: "error", message: result.error });
         return;
       }
 
       case "cancelDeploy": {
         const target = deploymentIdOf(cmd.deploymentId);
         if (!target) {
-          relay.broadcastDeploy(serverContext(), { type: "error", message: "no deployment id to cancel" });
+          relay.broadcastDeploy(ctx, { type: "error", message: "no deployment id to cancel" });
           return;
         }
         await deployManager.cancel(target);
@@ -869,22 +906,22 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
         // notice says where the real thing still is.
         const target = deploymentIdOf(cmd.deploymentId);
         if (!target) {
-          relay.broadcastDeploy(serverContext(), { type: "error", message: "no deployment id to forget" });
+          relay.broadcastDeploy(ctx, { type: "error", message: "no deployment id to forget" });
           return;
         }
         const row = await deployStore.get(ctx, target);
         if (!row) {
-          relay.broadcastDeploy(serverContext(), { type: "error", message: "no such deployment" });
+          relay.broadcastDeploy(ctx, { type: "error", message: "no such deployment" });
           return;
         }
         if (deployManager.activeId === target) {
-          relay.broadcastDeploy(serverContext(), { type: "error", message: "that deploy is still running — cancel it first" });
+          relay.broadcastDeploy(ctx, { type: "error", message: "that deploy is still running — cancel it first" });
           return;
         }
         await deployStore.patch(ctx, target, { status: "removed" });
         broadcastDeployments();
         void relay.broadcastAgents();
-        relay.broadcastDeploy(serverContext(), {
+        relay.broadcastDeploy(ctx, {
           type: "notice",
           message: row.url
             ? `removed from Jaroku. The service is still running at ${row.url} — delete it in Railway if you want it gone.`
@@ -899,7 +936,7 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
         // A non-finite `since` would come back out of SQLite as a comparison against NaN and
         // quietly return nothing, which reads as "this deploy produced no output".
         const since = Number.isFinite(cmd.sinceSeq) ? Number(cmd.sinceSeq) : -1;
-        relay.broadcastDeploy(serverContext(), {
+        relay.broadcastDeploy(ctx, {
           type: "logs",
           deploymentId: target,
           lines: await deployStore.logs(ctx, target, since),
@@ -910,7 +947,7 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
   } catch (err) {
     const message = (err as Error)?.message ?? String(err);
     console.error(`[deploy] ${cmd.cmd} failed: ${message}`);
-    relay.broadcastDeploy(serverContext(), { type: "error", message: `${cmd.cmd} failed: ${message}` });
+    relay.broadcastDeploy(ctx, { type: "error", message: `${cmd.cmd} failed: ${message}` });
   }
 }
 
@@ -920,7 +957,7 @@ async function handleDeployCommand(cmd: DeployChannelCommand): Promise<void> {
 // never has to reconcile a partial update against local state.
 
 async function broadcastDatasets(ctx: TenantContext, agentId: string | null): Promise<void> {
-  relay.broadcastEval(serverContext(), {
+  relay.broadcastEval(ctx, {
     type: "datasets",
     agentId,
     datasets: await evalStore.listDatasets(ctx, agentId ?? undefined),
@@ -928,15 +965,14 @@ async function broadcastDatasets(ctx: TenantContext, agentId: string | null): Pr
 }
 
 async function broadcastDataset(ctx: TenantContext, datasetId: string): Promise<void> {
-  relay.broadcastEval(serverContext(), {
+  relay.broadcastEval(ctx, {
     type: "dataset",
     datasetId,
     examples: await evalStore.listExamples(ctx, datasetId),
   });
 }
 
-async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
-  const ctx = serverContext();
+async function handleEvalCommand(ctx: TenantContext, cmd: ForwardedCommand): Promise<void> {
   try {
     switch (cmd.cmd) {
       case "listDatasets":
@@ -1006,6 +1042,8 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
           relay.broadcastEval(ctx, { type: "error", message: `invalid agent id: ${cmd.agentId}` });
           return;
         }
+        // Recorded before dispatch: its progress arrives on callbacks that have no context
+        // of their own, and it belongs to whoever pressed the button.
         const started = await evalRunner.start({
           datasetId: cmd.datasetId,
           agentId: cmd.agentId,
@@ -1014,6 +1052,7 @@ async function handleEvalCommand(cmd: ForwardedCommand): Promise<void> {
           budgetUsd: cmd.budgetUsd ?? null,
         });
         if ("error" in started) relay.broadcastEval(ctx, { type: "error", message: started.error });
+        else evalWorkspaces.set(started.evalId, ctx);
         return;
       }
       case "cancelEval": {
@@ -1150,31 +1189,36 @@ pool.on("event", ({ runId, event }) => {
   // Read synchronously: this flag gates whether a NEW run may start, and deferring it would
   // leave a window in which the finished run still looks active.
   if (runId === activeRunId && event.kind === "run_end") runActive = false;
+  // The workspace of whoever asked for this run — recorded at dispatch, not read from
+  // whatever context is nearest. A run's events arrive minutes after the command that
+  // started it, and they belong to the person who started it.
+  const runCtx = contextForRun(runId);
   ingest(async () => {
     // Persist first (source of truth), then broadcast to live clients. A persist failure is
     // logged and the event still goes out — the client showing a step the database lost is
     // better than the client showing nothing and no one knowing why.
     try {
       if (event.kind === "run_start" || event.kind === "run_end") {
-        await store.upsertRun(serverContext(), event.run);
+        await store.upsertRun(runCtx, event.run);
       } else if (event.kind === "step") {
-        await store.insertStep(serverContext(), event.step);
+        await store.insertStep(runCtx, event.step);
       }
     } catch (err) {
       console.error("[store] failed to persist event:", (err as Error).message);
     }
-    if (!isEvalRun(runId)) relay.broadcastTrace(serverContext(), event);
+    if (!isEvalRun(runId)) relay.broadcastTrace(runCtx, event);
   });
 });
 
 pool.on("parseError", ({ runId, line, error }) => {
   console.error(`[manager] non-event stdout line (${error}):`, line.slice(0, 200));
-  if (!isEvalRun(runId)) relay.broadcastLog(serverContext(), "parseError", `${error}: ${line.slice(0, 200)}`);
+  if (!isEvalRun(runId)) relay.broadcastLog(contextForRun(runId), "parseError", `${error}: ${line.slice(0, 200)}`);
 });
 
 pool.on("stderr", ({ runId, line }) => {
   console.error("[agent]", line);
-  if (!isEvalRun(runId)) relay.broadcastLog(serverContext(), "stderr", line);
+  // An agent's stderr is its workspace's: it can carry a stack trace over the user's own data.
+  if (!isEvalRun(runId)) relay.broadcastLog(contextForRun(runId), "stderr", line);
 });
 
 // Debug-depth control events (off the trace stream). A `boundary` correlates the durable
@@ -1186,23 +1230,24 @@ pool.on("control", ({ ctrl }) => {
   const seqHigh = typeof ctrl.seq_high === "number" ? ctrl.seq_high : -1;
   const checkpointId = typeof ctrl.checkpoint_id === "string" ? ctrl.checkpoint_id : null;
   const next = Array.isArray(ctrl.next) ? (ctrl.next as string[]) : [];
+  const runCtx = contextForRun(runId);
   try {
     if (ctrl.ctrl === "boundary") {
       // On the ingest chain, behind the steps this stamps. A boundary that overtook them
       // would stamp nothing, and the run would silently stop being branchable.
       ingest(async () => {
         if (checkpointId && seqHigh >= 0) {
-          await store.setCheckpointUpto(serverContext(), runId, seqHigh, checkpointId);
+          await store.setCheckpointUpto(runCtx, runId, seqHigh, checkpointId);
         }
-        relay.broadcastDebug(serverContext(), { type: "boundary", runId, seq: seqHigh, next });
+        relay.broadcastDebug(runCtx, { type: "boundary", runId, seq: seqHigh, next });
       });
     } else if (ctrl.ctrl === "paused") {
       // The id is recorded immediately — resume reads it, and a pause the process does not
       // know about yet is a pause the user cannot undo. Only the status write is queued.
       pausedRunId = runId;
       ingest(async () => {
-        await store.setRunStatus(serverContext(), runId, "paused");
-        relay.broadcastDebug(serverContext(), { type: "paused", runId, seq: seqHigh });
+        await store.setRunStatus(runCtx, runId, "paused");
+        relay.broadcastDebug(runCtx, { type: "paused", runId, seq: seqHigh });
       });
     } else if (ctrl.ctrl === "tool_confirm") {
       // A run has stopped before a high-impact MCP tool's first call. It is blocked right
@@ -1217,7 +1262,7 @@ pool.on("control", ({ ctrl }) => {
         runId, nonce, server, tool, requestedAt: Date.now(),
       });
       console.log(`[mcp] ${runId} is waiting for confirmation of ${server}/${tool}`);
-      relay.broadcastMcp(serverContext(), {
+      relay.broadcastMcp(runCtx, {
         type: "confirmRequest",
         runId,
         nonce,
@@ -1261,6 +1306,9 @@ pool.on("exit", ({ runId, code, signal, timedOut }) => {
     // subprocess is gone.
     activeRunId = null;
   }
+  // A paused run is coming back — resume re-registers it, and dropping it here would send
+  // the resumed segment's events to the server's workspace instead of its own.
+  if (runId !== pausedRunId) runWorkspaces.delete(runId);
   console.log(
     `[manager] agent exited (run=${runId} code=${code} signal=${signal}${timedOut ? " TIMED OUT" : ""})`,
   );
@@ -1274,9 +1322,9 @@ pool.on("exit", ({ runId, code, signal, timedOut }) => {
 // Every failure here goes out as plan_error, never as the gen channel's plain "error". That
 // one is wired to buildStore.fail() on the client and paints the build pane as a failed
 // generation — which, at plan time, would be reporting a failure that never happened.
-planner.on("started", (e) => relay.broadcastGen(serverContext(), { type: "plan_started", ...e }));
-planner.on("delta", (e) => relay.broadcastGen(serverContext(), { type: "plan_delta", ...e }));
-planner.on("discarded", (e) => relay.broadcastGen(serverContext(), { type: "plan_discarded", ...e }));
+planner.on("started", (e) => relay.broadcastGen(contextForBuild(), { type: "plan_started", ...e }));
+planner.on("delta", (e) => relay.broadcastGen(contextForBuild(), { type: "plan_delta", ...e }));
+planner.on("discarded", (e) => relay.broadcastGen(contextForBuild(), { type: "plan_discarded", ...e }));
 
 planner.on("plan", (e) => {
   const usage = e.usage as { cost_usd?: number; output_tokens?: number };
@@ -1286,19 +1334,20 @@ planner.on("plan", (e) => {
       `$${(usage?.cost_usd ?? 0).toFixed(5)}`,
   );
   for (const w of e.warnings) console.log(`  ! ${w}`);
-  relay.broadcastGen(serverContext(), { type: "plan", ...e });
+  relay.broadcastGen(contextForBuild(), { type: "plan", ...e });
 });
 
 planner.on("error", (e) => {
   console.error(`[plan] failed: ${e.message}`);
-  relay.broadcastGen(serverContext(), { type: "plan_error", message: e.message });
+  relay.broadcastGen(contextForBuild(), { type: "plan_error", message: e.message });
 });
 
-async function planAgent(cmd: PlanAgentCommand): Promise<void> {
+async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<void> {
+  buildContext = ctx;
   // A generation in flight owns the pipeline; planning the next agent mid-build would put two
   // plans and one generation on the same single-slot state.
   if (generating) {
-    relay.broadcastGen(serverContext(), { type: "plan_error", message: "a generation is already in progress" });
+    relay.broadcastGen(contextForBuild(), { type: "plan_error", message: "a generation is already in progress" });
     return;
   }
   console.log(
@@ -1311,7 +1360,7 @@ async function planAgent(cmd: PlanAgentCommand): Promise<void> {
     // Resolved here rather than in the planner, so the planner keeps its single dependency
     // on the connector catalogue. Refs naming a server or tool that has since gone away
     // resolve to nothing rather than to a guess — the same posture as resolveSelected.
-    mcpTools: await mcpRegistry.resolve(serverContext(), cmd.mcpTools ?? []),
+    mcpTools: await mcpRegistry.resolve(ctx, cmd.mcpTools ?? []),
     name: cmd.name,
     revisePlanId: cmd.revisePlanId,
   });
@@ -1322,18 +1371,19 @@ async function planAgent(cmd: PlanAgentCommand): Promise<void> {
 // event schema; a generation and a run are independent concerns that share only a socket.
 let generating = false;
 
-async function generateAgent(cmd: GenerateCommand): Promise<void> {
+async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<void> {
+  buildContext = ctx;
   if (generating) {
     // On the planned path this must NOT be the plain "error" member: that one paints the
     // build pane as a failed generation, and the pending plan is still perfectly good. The
     // check also comes before take(), so a refused click doesn't spend the plan.
     if (cmd.planId) {
-      relay.broadcastGen(serverContext(), {
+      relay.broadcastGen(contextForBuild(), {
         type: "plan_error",
         message: "a generation is already in progress — this plan is still here when it finishes",
       });
     } else {
-      relay.broadcastGen(serverContext(), { type: "error", message: "a generation is already in progress" });
+      relay.broadcastGen(contextForBuild(), { type: "error", message: "a generation is already in progress" });
     }
     return;
   }
@@ -1355,7 +1405,7 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
       // Never fall through to an unplanned generation here. The user approved a specific
       // plan; quietly building something they never reviewed is the exact failure this gate
       // exists to prevent.
-      relay.broadcastGen(serverContext(), {
+      relay.broadcastGen(contextForBuild(), {
         type: "plan_error",
         message: "that plan is no longer available — describe the agent again",
       });
@@ -1370,7 +1420,7 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
     const known = new Set(loadConnectors(RUNTIME_DIR).map((c) => c.id));
     const missing = (rec.connectors ?? []).filter((id) => !known.has(id));
     if (missing.length) {
-      relay.broadcastGen(serverContext(), {
+      relay.broadcastGen(contextForBuild(), {
         type: "plan_error",
         message:
           `the plan uses ${missing.join(", ")}, which ${missing.length > 1 ? "are" : "is"} no ` +
@@ -1385,11 +1435,11 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
     // approved produces an agent that silently cannot do what its plan promised.
     const approvedRefs = rec.mcpTools ?? [];
     const stillThere = new Set(
-      (await mcpRegistry.resolve(serverContext(), approvedRefs)).map((t) => `${t.server_id}/${t.name}`),
+      (await mcpRegistry.resolve(ctx, approvedRefs)).map((t) => `${t.server_id}/${t.name}`),
     );
     const goneMcp = approvedRefs.filter((r) => !stillThere.has(r));
     if (goneMcp.length) {
-      relay.broadcastGen(serverContext(), {
+      relay.broadcastGen(contextForBuild(), {
         type: "plan_error",
         message:
           `the plan uses the MCP tool${goneMcp.length > 1 ? "s" : ""} ${goneMcp.join(", ")}, which ` +
@@ -1408,11 +1458,11 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
 
   generating = true;
   console.log(`[gen] generating${plan ? " from an approved plan" : ""} — "${prompt.slice(0, 80)}"`);
-  relay.broadcastGen(serverContext(), { type: "started", prompt });
+  relay.broadcastGen(contextForBuild(), { type: "started", prompt });
 
-  const onStart = (e: { path: string }) => relay.broadcastGen(serverContext(), { type: "file_start", ...e });
-  const onDelta = (e: { path: string; text: string }) => relay.broadcastGen(serverContext(), { type: "file_delta", ...e });
-  const onEnd = (e: { path: string }) => relay.broadcastGen(serverContext(), { type: "file_end", ...e });
+  const onStart = (e: { path: string }) => relay.broadcastGen(contextForBuild(), { type: "file_start", ...e });
+  const onDelta = (e: { path: string; text: string }) => relay.broadcastGen(contextForBuild(), { type: "file_delta", ...e });
+  const onEnd = (e: { path: string }) => relay.broadcastGen(contextForBuild(), { type: "file_end", ...e });
 
   const cleanup = () => {
     generating = false;
@@ -1435,7 +1485,7 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
         // understate it every single time.
         (planCost ? ` + $${planCost.toFixed(5)} plan = $${(planCost + (usage?.cost_usd ?? 0)).toFixed(5)}` : ""),
     );
-    relay.broadcastGen(serverContext(), { type: "done", ...e });
+    relay.broadcastGen(contextForBuild(), { type: "done", ...e });
     void syncAgents().then(() => relay.broadcastAgents());
     cleanup();
   };
@@ -1443,7 +1493,7 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
   const onError = (e: { message: string; problems?: string[] }) => {
     console.error(`[gen] failed: ${e.message}`);
     for (const p of e.problems ?? []) console.error(`  - ${p}`);
-    relay.broadcastGen(serverContext(), { type: "error", ...e });
+    relay.broadcastGen(contextForBuild(), { type: "error", ...e });
     cleanup();
   };
 
@@ -1455,7 +1505,7 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
 
   // Resolved fresh at build time, so the manifest carries the schemas and impact ratings as
   // they stand now rather than as they stood when the plan was written.
-  const genCtx = serverContext();
+  const genCtx = ctx;
   const mcpTools = await mcpRegistry.resolve(genCtx, mcpRefs);
   const mcpServers = await mcpRegistry.list(genCtx);
   void generator.generate({
@@ -1466,20 +1516,20 @@ async function generateAgent(cmd: GenerateCommand): Promise<void> {
 // --- editing (fix loop) -----------------------------------------------------
 // Streams into the "edit" channel. Like generation, nothing here touches the trace store
 // or the frozen event schema. Listeners are permanent — every event carries its ids.
-editor.on("file_start", (e) => relay.broadcastEdit(serverContext(), { type: "file_start", ...e }));
-editor.on("file_delta", (e) => relay.broadcastEdit(serverContext(), { type: "file_delta", ...e }));
-editor.on("file_end", (e) => relay.broadcastEdit(serverContext(), { type: "file_end", ...e }));
+editor.on("file_start", (e) => relay.broadcastEdit(contextForBuild(), { type: "file_start", ...e }));
+editor.on("file_delta", (e) => relay.broadcastEdit(contextForBuild(), { type: "file_delta", ...e }));
+editor.on("file_end", (e) => relay.broadcastEdit(contextForBuild(), { type: "file_end", ...e }));
 
 editor.on("proposal", (e) => {
   console.log(
     `[edit] proposal for ${e.agentId} — ${e.files.length} file(s): ${e.summary}`,
   );
-  relay.broadcastEdit(serverContext(), { type: "proposal", ...e });
+  relay.broadcastEdit(contextForBuild(), { type: "proposal", ...e });
 });
 
 editor.on("applied", (e) => {
   console.log(`[edit] applied v${e.version} to ${e.agentId}: ${e.summary}`);
-  relay.broadcastEdit(serverContext(), { type: "applied", ...e });
+  relay.broadcastEdit(contextForBuild(), { type: "applied", ...e });
   void syncAgents().then(() => relay.broadcastAgents());
   relay.broadcastAgentFiles(e.agentId);
   // An edit may have changed the graph structure — invalidate and re-push.
@@ -1489,29 +1539,36 @@ editor.on("applied", (e) => {
 
 editor.on("undone", (e) => {
   console.log(`[edit] undid v${e.version} on ${e.agentId}`);
-  relay.broadcastEdit(serverContext(), { type: "undone", ...e });
+  relay.broadcastEdit(contextForBuild(), { type: "undone", ...e });
   void syncAgents().then(() => relay.broadcastAgents());
   relay.broadcastAgentFiles(e.agentId);
   graphCache.delete(e.agentId);
   void relay.broadcastAgentGraph(e.agentId);
 });
 
-editor.on("discarded", (e) => relay.broadcastEdit(serverContext(), { type: "discarded", ...e }));
+editor.on("discarded", (e) => relay.broadcastEdit(contextForBuild(), { type: "discarded", ...e }));
 
 editor.on("error", (e) => {
   console.error(`[edit] failed: ${e.message}`);
   for (const p of e.problems ?? []) console.error(`  - ${p}`);
-  relay.broadcastEdit(serverContext(), { type: "error", ...e });
+  relay.broadcastEdit(contextForBuild(), { type: "error", ...e });
 });
 
-function editAgent(agentId: string, instruction: string): void {
+function editAgent(ctx: TenantContext, agentId: string, instruction: string): void {
+  buildContext = ctx;
   console.log(`[edit] ${agentId} — "${instruction.slice(0, 80)}"`);
-  relay.broadcastEdit(serverContext(), { type: "started", agentId, instruction });
+  relay.broadcastEdit(contextForBuild(), { type: "started", agentId, instruction });
   void editor.propose(agentId, instruction);
 }
 
 // --- run trigger ------------------------------------------------------------
-function runAgent(input?: string, provider?: string, model?: string, agentId?: string): void {
+function runAgent(
+  ctx: TenantContext,
+  input?: string,
+  provider?: string,
+  model?: string,
+  agentId?: string,
+): void {
   if (pool.interactiveRunning) {
     console.log("[manager] agent already running; ignoring run request");
     return;
@@ -1523,7 +1580,7 @@ function runAgent(input?: string, provider?: string, model?: string, agentId?: s
   // history that the sidebar renders like any other. Refuse it here instead.
   if (agentId !== undefined && !isSafeAgentId(agentId)) {
     console.log(`[manager] refusing run — invalid agent id ${JSON.stringify(agentId)}`);
-    relay.broadcastDebug(serverContext(), { type: "error", message: `invalid agent id: ${agentId}` });
+    relay.broadcastDebug(ctx, { type: "error", message: `invalid agent id: ${agentId}` });
     return;
   }
   // Mint the run id server-side so we can address the run (e.g. pause it) before run_start races
@@ -1542,11 +1599,12 @@ function runAgent(input?: string, provider?: string, model?: string, agentId?: s
   runActive = true;
   activeRunId = runId;
   pausedRunId = null;
+  runWorkspaces.set(runId, ctx);
   pool.startInteractive({ runId, runtimeDir: RUNTIME_DIR, input, agentId, env });
 }
 
 // Pause the live run at its next node boundary (the runner honours the control file there).
-function pauseRun(runId: string): void {
+function pauseRun(ctx: TenantContext, runId: string): void {
   if (!runActive || activeRunId !== runId) {
     console.log(`[debug] pauseRun ignored — ${runId} is not the active run`);
     return;
@@ -1557,7 +1615,7 @@ function pauseRun(runId: string): void {
 
 // Resume a paused run from its durable checkpoint: a fresh subprocess continues the SAME run id,
 // its seq starting where the paused segment left off (no run_start, no re-run of done nodes).
-async function resumeRun(runId: string): Promise<void> {
+async function resumeRun(ctx: TenantContext, runId: string): Promise<void> {
   // WAIT FOR THE SLOT, rather than refusing the moment it looks busy.
   //
   // A pause is announced when the runner writes its control line; the subprocess exits a
@@ -1578,23 +1636,23 @@ async function resumeRun(runId: string): Promise<void> {
         ? "another run is active — stop it before resuming this one"
         : "the previous run has not finished shutting down yet — try again in a moment";
     console.log(`[debug] resumeRun refused for ${runId}: ${message}`);
-    relay.broadcastDebug(serverContext(), { type: "error", runId, message });
+    relay.broadcastDebug(ctx, { type: "error", runId, message });
     return;
   }
-  const run = await store.getRun(serverContext(), runId);
+  const run = await store.getRun(ctx, runId);
   if (!run) {
-    relay.broadcastDebug(serverContext(), { type: "error", runId, message: "unknown run" });
+    relay.broadcastDebug(ctx, { type: "error", runId, message: "unknown run" });
     return;
   }
   // 'paused' is a store-only status (never an emitted event), so it's outside the frozen
   // RunStatus mirror — compare as a plain string rather than widening that type.
   if ((run.status as string) !== "paused") {
-    relay.broadcastDebug(serverContext(), { type: "error", runId, message: `run is ${run.status}, not paused` });
+    relay.broadcastDebug(ctx, { type: "error", runId, message: `run is ${run.status}, not paused` });
     return;
   }
-  const seqOffset = (await store.maxSeqForRun(serverContext(), runId)) + 1;
+  const seqOffset = (await store.maxSeqForRun(ctx, runId)) + 1;
   clearControl(runId); // drop the pause request so it doesn't immediately re-pause
-  await store.setRunStatus(serverContext(), runId, "running");
+  await store.setRunStatus(ctx, runId, "running");
   console.log(`[debug] resuming run ${runId} from seq ${seqOffset} (agent ${run.agent_id})`);
   const env: NodeJS.ProcessEnv = {
     JAROKU_RESUME_RUN_ID: runId,
@@ -1605,7 +1663,8 @@ async function resumeRun(runId: string): Promise<void> {
   runActive = true;
   activeRunId = runId;
   pausedRunId = null;
-  relay.broadcastDebug(serverContext(), { type: "resumed", runId, seqOffset });
+  runWorkspaces.set(runId, ctx);
+  relay.broadcastDebug(ctx, { type: "resumed", runId, seqOffset });
   pool.startInteractive({ runId, runtimeDir: RUNTIME_DIR, agentId: run.agent_id, env });
 }
 
@@ -1613,25 +1672,26 @@ async function resumeRun(runId: string): Promise<void> {
 // validated domain-field edit. The parent is only read: its checkpoint db is copied (never
 // written), and its step rows are copied verbatim into the branch — both stay fully inspectable.
 async function branchRun(
+  ctx: TenantContext,
   fromRunId: string,
   atSeq: number,
   editNode?: string,
   editedState?: Record<string, unknown>,
 ): Promise<void> {
   if (pool.interactiveRunning) {
-    relay.broadcastDebug(serverContext(), { type: "error", runId: fromRunId, message: "a run is active — stop it before branching" });
+    relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: "a run is active — stop it before branching" });
     return;
   }
-  const parent = await store.getRun(serverContext(), fromRunId);
+  const parent = await store.getRun(ctx, fromRunId);
   if (!parent) {
-    relay.broadcastDebug(serverContext(), { type: "error", runId: fromRunId, message: "unknown run to branch from" });
+    relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: "unknown run to branch from" });
     return;
   }
   // Resolve the node boundary containing `atSeq` — we fork at a whole-node boundary, never mid-node.
-  const boundary = await store.boundaryForStep(serverContext(), fromRunId, atSeq);
+  const boundary = await store.boundaryForStep(ctx, fromRunId, atSeq);
   const parentDb = join(CHECKPOINT_DIR, `${fromRunId}.sqlite`);
   if (!boundary || !existsSync(parentDb)) {
-    relay.broadcastDebug(serverContext(), { type: "error", runId: fromRunId, message: "no durable checkpoint for that step (branching needs a checkpointed run)" });
+    relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: "no durable checkpoint for that step (branching needs a checkpointed run)" });
     return;
   }
 
@@ -1640,10 +1700,10 @@ async function branchRun(
   try {
     // Copy the parent's step prefix (0..boundary) + a physical copy of its checkpoint db, so the
     // parent is never mutated and the branch is self-contained + independently inspectable.
-    await store.copyRunPrefix(serverContext(), fromRunId, branchId, seqHigh, seqHigh);
+    await store.copyRunPrefix(ctx, fromRunId, branchId, seqHigh, seqHigh);
     copyFileSync(parentDb, join(CHECKPOINT_DIR, `${branchId}.sqlite`));
   } catch (err) {
-    relay.broadcastDebug(serverContext(), { type: "error", runId: fromRunId, message: `branch prep failed: ${(err as Error).message}` });
+    relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: `branch prep failed: ${(err as Error).message}` });
     return;
   }
 
@@ -1666,9 +1726,12 @@ async function branchRun(
   runActive = true;
   activeRunId = branchId;
   pausedRunId = null;
+  // The branch belongs to the same workspace as its parent, which is the one that could see
+  // the parent in order to branch from it.
+  runWorkspaces.set(branchId, ctx);
   console.log(`[debug] branching ${fromRunId} @seq ${seqHigh} -> ${branchId} (agent ${parent.agent_id})`);
   void relay.broadcastHistory(); // surface the new branch run in history immediately
-  relay.broadcastDebug(serverContext(), { type: "branched", parentRunId: fromRunId, branchId, fromSeq: seqHigh });
+  relay.broadcastDebug(ctx, { type: "branched", parentRunId: fromRunId, branchId, fromSeq: seqHigh });
   pool.startInteractive({ runId: branchId, runtimeDir: RUNTIME_DIR, agentId: parent.agent_id, env });
 }
 
@@ -1711,25 +1774,27 @@ function buildExplainContext(cmd: ExplainCommand): string {
   return [head, `System prompt:\n${prompt.slice(0, 1500)}`, `Tools:\n${tools}`].join("\n\n");
 }
 
-function explainAgent(cmd: ExplainCommand): void {
+function explainAgent(ctx: TenantContext, cmd: ExplainCommand): void {
+  buildContext = ctx;
   if (explaining) {
-    relay.broadcastReply(serverContext(), { type: "error", agentId: cmd.agentId, message: "already answering — one at a time" });
+    relay.broadcastReply(contextForBuild(), { type: "error", agentId: cmd.agentId, message: "already answering — one at a time" });
     return;
   }
   explaining = true;
-  relay.broadcastReply(serverContext(), { type: "started", agentId: cmd.agentId, question: cmd.question });
+  relay.broadcastReply(contextForBuild(), { type: "started", agentId: cmd.agentId, question: cmd.question });
   const context = buildExplainContext(cmd);
   void streamExplain(context, cmd.question, {
-    onDelta: (text) => relay.broadcastReply(serverContext(), { type: "delta", agentId: cmd.agentId, text }),
-    onDone: () => { explaining = false; relay.broadcastReply(serverContext(), { type: "done", agentId: cmd.agentId }); },
-    onError: (message) => { explaining = false; relay.broadcastReply(serverContext(), { type: "error", agentId: cmd.agentId, message }); },
+    onDelta: (text) => relay.broadcastReply(contextForBuild(), { type: "delta", agentId: cmd.agentId, text }),
+    onDone: () => { explaining = false; relay.broadcastReply(contextForBuild(), { type: "done", agentId: cmd.agentId }); },
+    onError: (message) => { explaining = false; relay.broadcastReply(contextForBuild(), { type: "error", agentId: cmd.agentId, message }); },
   });
 }
 
 // Kick off one run on startup unless suppressed (set JAROKU_NO_AUTORUN=1 to just serve).
 if (process.env.JAROKU_NO_AUTORUN !== "1") {
   // Small delay so the relay is listening before the first events land.
-  setTimeout(() => runAgent(), 300);
+  // Nobody asked for this one, so it runs in the server's own workspace.
+  setTimeout(() => runAgent(serverContext()), 300);
 }
 
 // --- graceful shutdown ------------------------------------------------------
