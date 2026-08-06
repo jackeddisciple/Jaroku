@@ -52,11 +52,14 @@ export class SqliteDb implements Db {
     // streaming steps in while the UI reads history back out.
     this.db.exec("PRAGMA journal_mode = WAL;");
     // Wait for a lock rather than failing instantly. `npm run migrate` against a running
-    // `npm run dev` is an ordinary thing to do, and SQLITE_BUSY is a worse answer than a
-    // pause. Foreign keys stay OFF, as they have always been here — turning them on now
-    // would be a behaviour change dressed as a refactor, and the existing database has rows
-    // that predate any of them being enforced.
+    // `npm run dev` is an ordinary thing to do, and SQLITE_BUSY is a worse answer than a pause.
     this.db.exec("PRAGMA busy_timeout = 5000;");
+    // FOREIGN KEYS ARE ON, and not by our choosing: `node:sqlite` enables them by default,
+    // unlike the sqlite3 CLI and unlike what this comment used to claim. Worth knowing because
+    // it changes what a migration may do — a table rebuild has to use `defer_foreign_keys`,
+    // since dropping a parent while a child still references it fails. See migration 006.
+    // They are left on: turning them off now would relax a constraint the database has in fact
+    // been enforcing all along.
   }
 
   async all<T = DbRow>(sql: string, params: readonly unknown[] = []): Promise<T[]> {
