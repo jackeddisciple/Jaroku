@@ -10,6 +10,7 @@ import type { TraceStore } from "./store.ts";
 import type { TenantContext } from "./db/tenant.ts";
 import type { TraceEvent } from "./types.ts";
 import type { Router } from "./http/router.ts";
+import { can, capabilityFor } from "./auth/capabilities.ts";
 
 export type RunCommand = {
   cmd: "run";
@@ -614,6 +615,45 @@ export type SocketAuthorizer = (
   req: IncomingMessage,
 ) => TenantContext | SocketSession | Promise<TenantContext | SocketSession>;
 
+/**
+ * Which channel a command's answer — including a refusal — belongs on.
+ *
+ * A client listens per channel. A "you may not do that" broadcast on the wrong one is
+ * indistinguishable from nothing arriving, so the panel that made the request sits waiting
+ * while an unrelated one shows an error about something it never asked for.
+ *
+ * The default is `log`, deliberately visible rather than silent: every channel below is a
+ * feature's own, and a command with no feature is still worth a line the user can see.
+ */
+export const COMMAND_CHANNEL: Record<string, string> = {
+  // These five answer on channels whose payload IS the data — `trace`, `agents`, `agentFiles`,
+  // `graph`, `runSteps` — and none of those has an error shape a client would recognise.
+  // Inventing one would mean teaching five stores to distinguish a refusal from a snapshot, so
+  // their refusals go to `log`, which the status bar already renders. Listed explicitly rather
+  // than left to the fallback: "log because that is right" and "log because nobody decided"
+  // must not look the same.
+  run: "log", loadRun: "log", listAgents: "log", loadAgentFiles: "log", loadAgentGraph: "log",
+
+  planAgent: "gen", discardPlan: "gen", generate: "gen",
+  edit: "edit", applyEdit: "edit", undoEdit: "edit", discardEdit: "edit",
+  pauseRun: "debug", resumeRun: "debug", branchRun: "debug",
+  explain: "reply",
+  createDataset: "eval", renameDataset: "eval", deleteDataset: "eval", listDatasets: "eval",
+  loadDataset: "eval", addExample: "eval", updateExample: "eval", deleteExample: "eval",
+  promoteTestInput: "eval", startEval: "eval", cancelEval: "eval", loadRubric: "eval",
+  saveRubric: "eval", loadEvalResults: "eval", listEvals: "eval", estimateEval: "eval",
+  listMcpServers: "mcp", addMcpServer: "mcp", removeMcpServer: "mcp", rediscoverMcpServer: "mcp",
+  setMcpServerAuth: "mcp", setMcpToolImpact: "mcp", resolveMcpConfirm: "mcp",
+  listProviders: "providers", setProviderKey: "providers", testProviderKey: "providers",
+  listDeployments: "deploy", planDeploy: "deploy", deploy: "deploy", cancelDeploy: "deploy",
+  forgetDeployment: "deploy", loadDeployLogs: "deploy", setRailwayToken: "deploy",
+  testRailwayToken: "deploy",
+};
+
+export function channelFor(cmd: string): string {
+  return Object.prototype.hasOwnProperty.call(COMMAND_CHANNEL, cmd) ? COMMAND_CHANNEL[cmd]! : "log";
+}
+
 /** A refusal with an HTTP status, for the upgrade path. */
 export class UpgradeRefused extends Error {
   constructor(
@@ -785,6 +825,77 @@ export class WsRelay {
         try {
           const msg = JSON.parse(data.toString()) as ClientCommand;
           if (!msg || typeof msg.cmd !== "string") return;
+          // AUTHORISATION, BEFORE ANYTHING ELSE LOOKS AT THE MESSAGE.
+          //
+          // The socket already proved which workspace it acts in — that was the ticket. This is
+          // the second question: whether the ROLE it holds there may do this particular thing.
+          // It happens here, once, rather than in fifty handlers, and a command with no
+          // capability is refused rather than allowed, so a command added without an entry in
+          // the matrix fails loudly instead of arriving ungated.
+          void this.authorized(ws, msg.cmd, pending).then((allowed) => {
+            if (allowed) this.dispatch(ws, msg, pending);
+          });
+        } catch {
+          /* ignore malformed client messages */
+        }
+      });
+      const forget = (): void => {
+        this.clients.delete(ws);
+        this.contexts.delete(ws);
+        this.sessions.delete(ws);
+      };
+      ws.on("close", forget);
+      ws.on("error", forget);
+    });
+
+    this.http.listen(opts.port, () => {
+      console.log(`[relay] http+ws listening on http://localhost:${opts.port}`);
+    });
+  }
+
+  /**
+   * May this socket's role run this command?
+   *
+   * A refusal is ANSWERED, on the channel the command belongs to, rather than dropped. A
+   * client that silently gets nothing back cannot tell "you may not" from "the server is
+   * broken", and the UI's only honest response to the second is to keep waiting.
+   */
+  private async authorized(ws: WebSocket, cmd: string, pending: Promise<TenantContext>): Promise<boolean> {
+    let ctx: TenantContext;
+    try {
+      ctx = await pending;
+    } catch {
+      return false;
+    }
+    const capability = capabilityFor(cmd);
+    if (!capability) {
+      // Unclassified is refused, not allowed. `test:capabilities` asserts this cannot happen
+      // for any command the relay knows, so reaching here means a command was added without a
+      // decision about who may run it — and defaulting that to "anyone" is the hole.
+      console.warn(`[relay] refused unclassified command "${cmd}"`);
+      this.sendTo(ws, {
+        channel: channelFor(cmd),
+        type: "error",
+        message: `"${cmd}" is not a command this server authorises`,
+      });
+      return false;
+    }
+    if (can(ctx.role, capability)) return true;
+    this.sendTo(ws, {
+      channel: channelFor(cmd),
+      type: "error",
+      message: `a ${ctx.role} cannot do this — it needs ${capability}`,
+    });
+    return false;
+  }
+
+  /** Route an authorised command: answered locally, or forwarded to the app. */
+  private dispatch(ws: WebSocket, msg: ClientCommand, pending: Promise<TenantContext>): void {
+    const withContext = async (fn: (ctx: TenantContext) => Promise<void> | void): Promise<void> => {
+      await fn(await pending);
+    };
+    try {
+      {
           if (msg.cmd === "run") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "generate" && typeof msg.prompt === "string") {
@@ -880,22 +991,10 @@ export class WsRelay {
               steps: await this.store.stepsForRun(ctx, runId),
             }), pending);
           }
-        } catch {
-          /* ignore malformed client messages */
-        }
-      });
-      const forget = (): void => {
-        this.clients.delete(ws);
-        this.contexts.delete(ws);
-        this.sessions.delete(ws);
-      };
-      ws.on("close", forget);
-      ws.on("error", forget);
-    });
-
-    this.http.listen(opts.port, () => {
-      console.log(`[relay] http+ws listening on http://localhost:${opts.port}`);
-    });
+      }
+    } catch {
+      /* a command whose shape does not match; the switch above dropped it */
+    }
   }
 
   /**
@@ -1078,13 +1177,22 @@ export class WsRelay {
     this.broadcastTo(ctx, { channel: "deploy", ...event });
   }
 
-  // Broadcast a provider-credential event. Separate channel by design — see ProviderEvent.
-  // Nothing on it ever carries a key: `configured` says a named variable is set.
-  broadcastProviders(event: ProviderEvent): void {
-    const msg = JSON.stringify({ channel: "providers", ...event });
-    for (const ws of this.clients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-    }
+  /**
+   * Broadcast a provider-credential event. Separate channel by design — see ProviderEvent.
+   *
+   * SCOPED, like every other broadcast. This was the last one that went to every connected
+   * client regardless of workspace, and Session 1 left it that way because provider keys live
+   * in one `runtime/.env` and genuinely are process-wide. That is still true of the VALUES —
+   * and it is exactly why the message must not be — because "anthropic is configured" is a
+   * fact about the install that a workspace has no business being told by another workspace's
+   * admin pressing Save. Worse, a `testResult` or a `notice` is the answer to somebody else's
+   * click, arriving in a panel nobody opened.
+   *
+   * Session 6 makes keys per-workspace via the SecretStore, at which point this is not a
+   * courtesy but a hard boundary. The shape is already right for it.
+   */
+  broadcastProviders(ctx: TenantContext, event: ProviderEvent): void {
+    this.broadcastTo(ctx, { channel: "providers", ...event });
   }
 
   // Push a refreshed run-history snapshot to everyone (e.g. after a branch is created, so the new

@@ -22,6 +22,7 @@ import {
   type Capability,
 } from "./capabilities.ts";
 import type { TenantContext, Role } from "../db/tenant.ts";
+import { COMMAND_CHANNEL, channelFor } from "../wsRelay.ts";
 
 let failures = 0;
 const check = (ok: boolean, msg: string): void => {
@@ -139,6 +140,21 @@ console.log("\nevery command the relay accepts is classified");
   // Every capability in the vocabulary is reachable from some role, or it is decoration.
   const unreachable = CAPABILITIES.filter((c) => !can("owner", c));
   check(unreachable.length === 0, `every capability is held by someone (${unreachable.join(", ") || "all reachable"})`);
+
+  // ...and every command has a channel to be REFUSED on. A refusal broadcast to the wrong
+  // channel is indistinguishable from no answer at all: the panel that asked waits forever
+  // while an unrelated one shows an error about something it never did.
+  // Explicit presence, not "does not equal log". Five commands legitimately refuse on `log`
+  // because their own channels carry data rather than errors — and "log because that is right"
+  // must not be indistinguishable from "log because nobody decided".
+  const homeless = [...commands].filter((c) => !Object.prototype.hasOwnProperty.call(COMMAND_CHANNEL, c));
+  check(
+    homeless.length === 0,
+    `every relay command names the channel its refusal goes to (undecided: ${homeless.join(", ") || "none"})`,
+  );
+  const staleChannels = Object.keys(COMMAND_CHANNEL).filter((c) => !commands.has(c));
+  check(staleChannels.length === 0, `no channel entry names a dropped command (${staleChannels.join(", ") || "none"})`);
+  check(channelFor("no-such-command") === "log", "an unknown command falls back to `log` — visible, not silent");
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

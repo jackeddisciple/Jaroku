@@ -801,15 +801,15 @@ async function handleMcpCommand(ctx: TenantContext, cmd: McpCommand): Promise<vo
 
 const PROVIDER_COMMAND_NAMES = new Set(["setProviderKey", "testProviderKey"]);
 
-function broadcastProviders(): void {
-  relay.broadcastProviders({ type: "providers", providers: providerStatus() });
+function broadcastProviders(ctx: TenantContext): void {
+  relay.broadcastProviders(ctx, { type: "providers", providers: providerStatus() });
 }
 
 async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): Promise<void> {
   try {
     if (!isProviderId(cmd.provider)) {
       // Named rather than echoed: `cmd.provider` is client-supplied and about to be rendered.
-      relay.broadcastProviders({
+      relay.broadcastProviders(ctx, {
         type: "error",
         message: `"${String(cmd.provider).slice(0, 32)}" is not a provider you can connect — expected anthropic or openai`,
       });
@@ -818,7 +818,7 @@ async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): 
     const provider = cmd.provider;
     const key = typeof cmd.key === "string" ? cmd.key.trim() : "";
     if (!key) {
-      relay.broadcastProviders({ type: "error", message: "no key was entered", provider });
+      relay.broadcastProviders(ctx, { type: "error", message: "no key was entered", provider });
       return;
     }
 
@@ -827,7 +827,7 @@ async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): 
       // The outcome, never the input. A failure message comes from the provider and names the
       // status, not the credential.
       console.log(`[providers] ${provider} key tested — ${result.ok ? "ok" : "rejected"}`);
-      relay.broadcastProviders({ type: "testResult", provider, ok: result.ok, message: result.message });
+      relay.broadcastProviders(ctx, { type: "testResult", provider, ok: result.ok, message: result.message });
       return;
     }
 
@@ -835,7 +835,7 @@ async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): 
     // `set` and nowhere else in this function.
     const written = credentials.set(PROVIDER_ENV_KEY[provider], key);
     if (!written.ok) {
-      relay.broadcastProviders({
+      relay.broadcastProviders(ctx, {
         type: "error",
         message: written.warning ?? "could not store that key",
         provider,
@@ -844,16 +844,16 @@ async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): 
     }
     // Names only, exactly as loadRuntimeEnv logs them on the way in.
     console.log(`[providers] ${provider} key set (${PROVIDER_ENV_KEY[provider]})`);
-    broadcastProviders();
+    broadcastProviders(ctx);
     // A key shadowed by the server's own shell works now and reverts on restart. Saying so is
     // the difference between a puzzling regression tomorrow and a sentence today.
     if (written.warning) {
-      relay.broadcastProviders({ type: "notice", message: written.warning, provider });
+      relay.broadcastProviders(ctx, { type: "notice", message: written.warning, provider });
     }
   } catch (err) {
     const message = (err as Error)?.message ?? String(err);
     console.error(`[providers] ${cmd.cmd} failed: ${message}`);
-    relay.broadcastProviders({ type: "error", message: `${cmd.cmd} failed: ${message}` });
+    relay.broadcastProviders(ctx, { type: "error", message: `${cmd.cmd} failed: ${message}` });
   }
 }
 
