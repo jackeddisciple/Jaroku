@@ -27,6 +27,7 @@
     "test:jwt": "tsx src/auth/jwt.test.ts",
     "test:session": "tsx src/auth/session.test.ts",
     "test:resolve": "tsx src/auth/resolve.test.ts",
+    "test:capabilities": "tsx src/auth/capabilities.test.ts",
     "test:protocol": "tsx src/fileProtocol.test.ts",
     "test:plan": "tsx src/planProtocol.test.ts",
     "test:pricing": "tsx src/pricing.test.ts",
