@@ -23,6 +23,7 @@
     "test:tenancy": "tsx src/tenancy.test.ts",
     "test:relay": "tsx src/wsRelay.test.ts",
     "test:http": "tsx src/http/router.test.ts",
+    "test:jwks": "tsx src/auth/jwks.test.ts",
     "test:protocol": "tsx src/fileProtocol.test.ts",
     "test:plan": "tsx src/planProtocol.test.ts",
     "test:pricing": "tsx src/pricing.test.ts",
