@@ -35,3 +35,9 @@ jaroku-product-documentation*.md
 
 # Debug-depth checkpoints (durable LangGraph checkpoints per run; control-plane, not tracked)
 runtime/.checkpoints/
+
+# The local development issuer's signing key. Real, chmod 600, and never anybody else's —
+# it exists so `npm run dev` has authentication without a cloud account, and it must not
+# travel with the repository. See server/src/auth/config.ts for why this is a real issuer
+# rather than a flag that skips verification.
+server/.devauth.json

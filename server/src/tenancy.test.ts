@@ -4,8 +4,10 @@
 // be able to READ, MUTATE or ENUMERATE anything of B's — and a workspace id forged into a
 // payload must be ignored in favour of the context.
 //
-// It grows. Session 2 adds token-level attacks (expired, cross-workspace ticket, revoked
-// membership, replay); Session 3 adds object keys, presigned URLs and checkpoint threads;
+// It grew. Session 2 added token-level attacks — expired, forged, replayed, cross-workspace,
+// revoked-mid-socket — which live in `auth/attacks.test.ts` and are invoked from here rather
+// than given their own script: the spec makes THIS suite the gate for every later session, and
+// a second script somebody can forget to run is not a gate. Session 3 adds object keys,
 // Session 4 adds run tokens and sandbox reach. The rule is that a session does not merge
 // until this file covers what it added, which is why the coverage assertion at the bottom
 // fails when a store grows a method nothing here exercises.
@@ -20,7 +22,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import type { Db } from "./db/db.ts";
 import { migrate } from "./db/migrate.ts";
@@ -33,6 +35,8 @@ import { TraceStore } from "./store.ts";
 import { EvalStore } from "./evalStore.ts";
 import { McpStore } from "./mcpStore.ts";
 import { DeployStore } from "./deployStore.ts";
+import { DbTicketStore } from "./db/repositories/tickets.ts";
+import { attackSuite } from "./auth/attacks.test.ts";
 import type { Run, Step } from "./types.ts";
 
 let failures = 0;
@@ -263,6 +267,8 @@ async function suite(label: string, db: Db): Promise<void> {
 
   // --- the sentinel ------------------------------------------------------------
 
+  await attackSuite(db, check, label);
+
   console.log("  · no unreachable rows");
 
   const TENANT_TABLES = ["runs", "steps", "datasets", "eval_jobs", "mcp_servers", "deployments"];
@@ -359,10 +365,38 @@ const SCOPED_API: Record<string, string[]> = {
     "currentByAgent", "reusableTarget", "supersede", "logs", "inFlight",
   ],
   AgentRepository: ["list", "bySlug", "byId", "upsertFromDisk", "syncFromDisk", "addVersion"],
+  // Session 2. These decide who can see a workspace AT ALL, so a cross-tenant bug in any of
+  // them is worse than one in the stores above — it does not leak a row, it hands over the
+  // whole workspace.
+  //
+  // The lookup primitives are deliberately absent: `membership`, `workspaceById`,
+  // `workspacesForUser` and `userByExternalId` take an AnyContext and answer questions ACROSS
+  // workspaces by design — they are what the resolver uses to decide a scope, so scoping them
+  // to one would be circular. They are covered by test:resolve, which asserts the decisions
+  // they feed.
+  IdentityRepository: [
+    "listMembers", "addMember", "removeMember", "setMemberRole",
+    "createInvite", "listInvites", "revokeInvite", "acceptInvite", "listAudit",
+  ],
+  // `sweep` is deliberately absent: it deletes EXPIRED rows across every workspace, which is
+  // maintenance rather than a scoped operation, and asserting it "cannot reach another
+  // workspace" would be asserting the opposite of what it is for. tickets.test.ts covers it.
+  DbTicketStore: ["issue", "consume", "revoke"],
 };
 
+/**
+ * The suite's source — BOTH files.
+ *
+ * The attack half lives in `auth/attacks.test.ts` and is invoked from here, so a method
+ * exercised there is exercised by this suite. Reading only this file would report the whole
+ * Session 2 surface as uncovered and push somebody to duplicate assertions to satisfy a
+ * counter, which is the opposite of what the coverage rule is for.
+ */
 function readSuiteSource(): string {
-  return readFileSync(fileURLToPath(import.meta.url), "utf8");
+  const here = fileURLToPath(import.meta.url);
+  return [here, join(dirname(here), "auth", "attacks.test.ts")]
+    .map((f) => readFileSync(f, "utf8"))
+    .join("\n");
 }
 
 // --- the methods coverage demands, exercised where the assertions above did not -----------

@@ -17,7 +17,7 @@ import WebSocket from "ws";
 import { openTestSqlite } from "./db/testDb.ts";
 import { newRequestId, systemContextFor, type TenantContext } from "./db/tenant.ts";
 import { TraceStore } from "./store.ts";
-import { WsRelay, type ForwardedCommand } from "./wsRelay.ts";
+import { WsRelay, CLOSE_RECONNECT, CLOSE_UNAUTHORISED, type ForwardedCommand, type SessionVerdict } from "./wsRelay.ts";
 import type { Run, Step } from "./types.ts";
 
 let failures = 0;
@@ -71,6 +71,8 @@ const runB = await seed(ctxB, "b");
 // produces from a ticket. Everything below asks whether the rest of the system honours it.
 let connections = 0;
 const commandLog: { cmd: string; workspaceId: string }[] = [];
+/** What the next revalidation should conclude, per workspace. Set by the tests below. */
+const verdicts = new Map<string, SessionVerdict>();
 const PORT = 4507;
 
 /** Which workspace owns which agent. The agents table answers this for real. */
@@ -80,7 +82,9 @@ const relay = new WsRelay({
   port: PORT,
   store,
   clientHtmlPath: "/dev/null",
-  contextFor: () => (connections++ === 0 ? ctxA : ctxB),
+  // A is an owner, B a plain member. Session 1 only needed two workspaces; Session 2 needs
+  // two ROLES as well, so the same two sockets can answer both questions this file asks.
+  contextFor: () => (connections++ === 0 ? { ...ctxA, role: "owner" as const } : { ...ctxB, role: "member" as const }),
   listAgents: async (ctx) => [{ agent_id: ctx.workspaceId === A ? "agent_a" : "agent_b" }],
   // Modelled on the real wiring rather than answering unconditionally: an agent's source is
   // read from a global directory BY ID, so the implementation has to check that the caller's
@@ -101,6 +105,10 @@ const relay = new WsRelay({
   onCommand: (cmd: ForwardedCommand, ctx: TenantContext) => {
     commandLog.push({ cmd: cmd.cmd, workspaceId: ctx.workspaceId });
   },
+  // Driven by hand below rather than by a timer: what is under test is the DECISION, and a
+  // suite that waits sixty seconds to see it is a suite nobody runs.
+  revalidate: async (session) => verdicts.get(session.context.workspaceId) ?? { ok: true, role: session.context.role },
+  revalidateMs: 60_000,
 });
 
 interface Client {
@@ -108,6 +116,8 @@ interface Client {
   inbox: Record<string, unknown>[];
   send: (o: unknown) => void;
   want: (pred: (m: any) => boolean, label: string) => Promise<any>;
+  /** The close code, once it arrives. A client can miss the last frame; it cannot miss this. */
+  closed: () => number | null;
 }
 
 async function connect(): Promise<Client> {
@@ -120,10 +130,13 @@ async function connect(): Promise<Client> {
       /* ignore */
     }
   });
+  let closeCode: number | null = null;
+  ws.on("close", (code) => { closeCode = code; });
   await new Promise((r) => ws.once("open", r));
   return {
     ws,
     inbox,
+    closed: () => closeCode,
     send: (o) => ws.send(JSON.stringify(o)),
     want: async (pred, label) => {
       for (let i = 0; i < 100; i++) {
@@ -261,6 +274,129 @@ console.log("\nbroadcasts are built per recipient");
   const tb = b.inbox.slice(beforeB3).filter((m: any) => m.channel === "trace");
   check(ta.length === 1, `A receives the trace event for its own run (${ta.length})`);
   check(tb.length === 0, `B receives none of another workspace's trace (${tb.length})`);
+}
+
+console.log("\nthe socket's ROLE decides what it may do");
+{
+  // The scope question is "whose rows"; this is the other one — "may this role do this at
+  // all". B is a member, so it builds and runs agents and touches nothing that commits the
+  // workspace to money, a third party, or a public URL.
+  commandLog.length = 0;
+  b.send({ cmd: "setProviderKey", provider: "anthropic", key: "sk-ant-should-never-be-written" });
+  const refused: any = await b.want(
+    (m) => m.channel === "providers" && m.type === "error",
+    "B refused a provider key",
+  );
+  check(/member/.test(refused.message), "a member storing a provider key is refused");
+  check(/provider:manage/.test(refused.message), "...naming the capability it needed");
+  await sleep(300);
+  check(
+    commandLog.length === 0,
+    `...and the command NEVER REACHED THE APP (${commandLog.length}) — a refusal that forwards first has already written the key`,
+  );
+
+  b.send({ cmd: "addMcpServer", endpoint: "https://mcp.example/x" });
+  const mcpRefusal: any = await b.want((m) => m.channel === "mcp" && m.type === "error", "B refused an MCP server");
+  check(/mcp:manage/.test(mcpRefusal.message), "a member connecting an MCP server is refused ON THE MCP CHANNEL");
+
+  b.send({ cmd: "deploy", agentId: "agent_b", provider: "anthropic", model: "m", envKeys: [] });
+  const deployRefusal: any = await b.want((m) => m.channel === "deploy" && m.type === "error", "B refused a deploy");
+  check(/deploy:manage/.test(deployRefusal.message), "...and a deploy, on the deploy channel");
+
+  // A refusal has to arrive where the panel that asked is listening. Anywhere else and the
+  // panel waits forever while an unrelated one shows somebody else's error.
+  check(
+    refused.channel === "providers" && mcpRefusal.channel === "mcp" && deployRefusal.channel === "deploy",
+    "each refusal lands on the channel its command belongs to",
+  );
+
+  // ...and the same member is not obstructed from doing the product's actual job.
+  commandLog.length = 0;
+  b.send({ cmd: "run", input: "x", agentId: "agent_b" });
+  b.send({ cmd: "edit", agentId: "agent_b", instruction: "add a tool" });
+  await sleep(500);
+  check(commandLog.length === 2, `a member still runs and edits agents (${commandLog.length}/2)`);
+
+  // An owner does what a member may not.
+  commandLog.length = 0;
+  a.send({ cmd: "setProviderKey", provider: "anthropic", key: "sk-ant-x" });
+  await sleep(400);
+  check(commandLog.some((c) => c.cmd === "setProviderKey"), "an owner's provider key reaches the app");
+
+  // A command nothing has classified is refused rather than allowed. The default matters more
+  // than any single entry: it is what a command added in a later session gets for free.
+  b.send({ cmd: "somethingNobodyClassified" });
+  const unknown: any = await b.want((m) => m.channel === "log" && m.type === "error", "unclassified refusal");
+  check(/not a command this server authorises/.test(unknown.message), "an unclassified command is REFUSED, not allowed");
+}
+
+console.log("\nprovider state is per workspace too");
+{
+  // The last broadcast that went to every client regardless of workspace. "anthropic is
+  // configured" is a fact one workspace has no business learning because another workspace's
+  // admin pressed Save.
+  const beforeA = a.inbox.length;
+  const beforeB = b.inbox.length;
+  relay.broadcastProviders(ctxA, { type: "notice", message: "for A only" });
+  await sleep(300);
+  const pa = a.inbox.slice(beforeA).filter((m: any) => m.channel === "providers" && m.type === "notice");
+  const pb = b.inbox.slice(beforeB).filter((m: any) => m.channel === "providers" && m.type === "notice");
+  check(pa.length === 1, `A receives its own provider notice (${pa.length})`);
+  check(pb.length === 0, `B receives none of A's (${pb.length})`);
+}
+
+console.log("\na socket does not outlive the membership that authorised it");
+{
+  // The gap this closes: every HTTP request re-presents its token, but a socket is checked
+  // once at the upgrade and then runs for as long as a tab is open — eight hours later still
+  // acting on a membership revoked in the first ten minutes.
+
+  // A role change does NOT close the connection. It is still legitimately theirs; what
+  // changed is what it may do, and the capability check reads the context on every command.
+  verdicts.set(B, { ok: true, role: "admin" });
+  const beforeRole = b.inbox.length;
+  await relay.revalidateAll();
+  await sleep(200);
+  const roleEvent = b.inbox.slice(beforeRole).find((m: any) => m.channel === "session" && m.type === "role_changed") as any;
+  check(roleEvent?.role === "admin", "a promotion arrives on the session channel");
+  check(b.ws.readyState === WebSocket.OPEN, "...without closing the socket — a role change is not an interruption");
+
+  // ...and it is the ENFORCEMENT, not a notification: the same socket may now do what it
+  // could not a moment ago.
+  commandLog.length = 0;
+  b.send({ cmd: "addMcpServer", endpoint: "https://mcp.example/y" });
+  await sleep(400);
+  check(
+    commandLog.some((c) => c.cmd === "addMcpServer"),
+    "...and the promoted socket may now do what it was refused before, on the SAME connection",
+  );
+
+  // A failed re-check must not close anything. A database blip signing every user out turns a
+  // hiccup into an outage — the same rule the JWKS cache follows.
+  verdicts.set(B, { get ok(): never { throw new Error("database is down"); } } as never);
+  await relay.revalidateAll();
+  await sleep(200);
+  check(b.ws.readyState === WebSocket.OPEN, "a revalidation that THROWS leaves the socket open");
+  verdicts.delete(B);
+
+  // Revocation does close it, with the code that says "sign in again".
+  verdicts.set(B, { ok: false, reason: "revoked" });
+  const beforeRevoke = b.inbox.length;
+  await relay.revalidateAll();
+  await sleep(400);
+  const revoked = b.inbox.slice(beforeRevoke).find((m: any) => m.channel === "session" && m.type === "revoked") as any;
+  check(!!revoked, "a revoked membership is announced on the session channel");
+  check(b.ws.readyState !== WebSocket.OPEN, "...and the socket is closed, not merely warned");
+  check(b.closed() === CLOSE_UNAUTHORISED, `...with the sign-in-again close code (${b.closed()})`);
+
+  // A deleted workspace is a different instruction: reconnect elsewhere, do not sign in again.
+  verdicts.set(A, { ok: false, reason: "workspace_gone" });
+  const beforeGone = a.inbox.length;
+  await relay.revalidateAll();
+  await sleep(400);
+  const gone = a.inbox.slice(beforeGone).find((m: any) => m.channel === "session" && m.type === "workspace_changed") as any;
+  check(!!gone, "a workspace that no longer exists is announced as workspace_changed, not revoked");
+  check(a.closed() === CLOSE_RECONNECT, `...with the reconnect close code (${a.closed()})`);
 }
 
 a.ws.close();

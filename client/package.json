@@ -14,7 +14,9 @@
     "test:inline-code": "../server/node_modules/.bin/tsx src/lib/inlineCode.test.ts",
     "test:title": "../server/node_modules/.bin/tsx src/lib/title.test.ts",
     "test:export": "../server/node_modules/.bin/tsx src/lib/evalExport.test.ts",
-    "test:csv": "../server/node_modules/.bin/tsx src/lib/csv.test.ts"
+    "test:csv": "../server/node_modules/.bin/tsx src/lib/csv.test.ts",
+    "test:auth": "../server/node_modules/.bin/tsx src/lib/auth.test.ts",
+    "test:reset": "../server/node_modules/.bin/tsx src/store/reset.test.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",

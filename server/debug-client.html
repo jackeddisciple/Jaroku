@@ -114,13 +114,52 @@
       $("runinfo").textContent = kind === "run_start" ? "running…" : run.status;
     }
 
+    // A socket now needs a single-use ticket, and a ticket needs a bearer token. This page
+    // does the whole exchange itself rather than relying on JAROKU_DEV_AUTH=1, so the
+    // dependency-free fallback client keeps working out of the box AND exercises the same
+    // three requests the React client makes. Against a real auth provider there is no
+    // dev-login route, and it says so instead of failing as a network error.
+    let token = null;
+    async function post(path, body, bearer) {
+      const res = await fetch(path, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
+        body: JSON.stringify(body || {}),
+      });
+      if (!res.ok) throw new Error(`${path} → ${res.status} ${(await res.text()).slice(0, 200)}`);
+      return res.json();
+    }
+    async function ticket() {
+      if (!token) {
+        const login = await post("/v1/auth/dev-login", { email: "debug-client@localhost", name: "Debug client" });
+        token = login.token;
+        await post("/v1/auth/session", {}, token);
+      }
+      return (await post("/v1/ws-ticket", {}, token)).ticket;
+    }
+
     let ws;
-    function connect() {
-      ws = new WebSocket(`ws://${location.host}`);
+    async function connect() {
+      let t;
+      try {
+        t = await ticket();
+      } catch (err) {
+        // A 404 here means provider mode: there is no local issuer, so there is no way for a
+        // page with no sign-in to get a token. Say that rather than retry forever.
+        token = null;
+        $("status").textContent = /404/.test(String(err))
+          ? "this server uses a real auth provider — sign in through the React client at :5173"
+          : `could not get a ticket: ${err.message}`;
+        setTimeout(connect, 3000);
+        return;
+      }
+      ws = new WebSocket(`ws://${location.host}/?ticket=${encodeURIComponent(t)}`);
       ws.onopen = () => { $("dot").classList.add("on"); $("status").textContent = "connected"; };
       ws.onclose = () => {
         $("dot").classList.remove("on"); $("status").textContent = "disconnected — retrying…";
-        setTimeout(connect, 1000); // reconnect
+        // A ticket is single-use, so a reconnect gets a fresh one. Dropping the token too on
+        // the assumption it expired would re-login every blip; `ticket()` re-mints on 401.
+        setTimeout(connect, 1000);
       };
       ws.onmessage = (m) => {
         const msg = JSON.parse(m.data);
@@ -135,7 +174,7 @@
         }
       };
     }
-    connect();
+    void connect();
 
     $("run").onclick = () => {
       stepsEl.innerHTML = "";

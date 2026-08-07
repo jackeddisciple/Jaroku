@@ -10,6 +10,7 @@
 // Share still has no backend, and is still an honest stub.
 
 import { useEffect, useRef } from "react";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher.tsx";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useProviderStore } from "../store/providerStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
@@ -150,6 +151,11 @@ export function TopBar() {
       )}
 
       <div className="ml-auto flex items-center gap-2">
+        {/* Which workspace this tab is in, and the way out of it. Furthest left of the right
+            group because it is the widest scope on screen: everything to its right is a fact
+            about one workspace, and this is which one. */}
+        <WorkspaceSwitcher />
+
         {/* The provider chip, now also the way in to the keys behind it. */}
         <ProviderMenu provider={provider} model={model} />
 

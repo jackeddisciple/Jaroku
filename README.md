@@ -50,6 +50,7 @@ of the repo and run yourself.
 - [Tests](#tests)
 - [Developing for free (fixtures)](#developing-for-free-fixtures)
 - [The tenancy model](#the-tenancy-model)
+- [Authentication and membership](#authentication-and-membership)
 - [Where data lives](#where-data-lives)
 - [Security notes](#security-notes)
 - [Troubleshooting](#troubleshooting)
@@ -184,11 +185,15 @@ cd server && npm run dev
 cd client && npm run dev
 ```
 
-Open **http://localhost:5173**.
+Open **http://localhost:5173** and sign in. With no auth provider configured the server runs
+its own [local issuer](#the-local-issuer): the sign-in screen asks for an email address and no
+password, mints a real token, and everything downstream verifies it exactly as it would a
+provider's. No cloud account, no Redis, no Docker.
 
 There is also a dependency-free fallback UI served directly by the relay at
 **http://localhost:4317** (`server/debug-client.html`) — useful for confirming the pipeline
-is alive without running Vite.
+is alive without running Vite. It performs the same three-request exchange the React client
+does, so it works out of the box in local mode.
 
 On startup the server fires one run of the hand-written fixture agent so you see a live trace
 immediately. Set `JAROKU_NO_AUTORUN=1` to suppress it.
@@ -303,7 +308,10 @@ jaroku/
 │       └── example_agent/     # hand-written reference implementation of the contract
 │
 ├── server/                    # Node/TypeScript: the control plane
+│   ├── migrations/            # forward-only, checksummed, one numbering, two dialects
 │   ├── src/                   # (see "The Node server" below)
+│   │   ├── auth/              # who is asking, and what they may do
+│   │   └── http/              # the small HTTP surface beside the socket
 │   ├── fixtures/              # recorded model responses for free development
 │   │   └── mcp/mockServer.ts  # a fixture MCP server, so all of it is testable for free
 │   ├── debug-client.html      # dependency-free fallback UI on :4317
@@ -509,7 +517,21 @@ exists so a fresh checkout has something to run before anything has been generat
 | File | Responsibility |
 |---|---|
 | `index.ts` | Wires the pipeline: RunPool → TraceStore → WsRelay. Owns run lifecycle, pause/resume/branch, and the eval command surface. |
-| `wsRelay.ts` | HTTP + WebSocket transport. Serves the fallback client, defines every command and channel type. Answers reads locally, forwards mutations to the app. |
+| `wsRelay.ts` | HTTP + WebSocket transport. Serves the fallback client, defines every command and channel type. Authorises the upgrade, capability-checks every command, answers reads locally, forwards mutations to the app. |
+| `http/router.ts` | The HTTP surface: one error shape, a body cap on everything, a request id on every response, and a log line that redacts anything that grants access. |
+| `http/health.ts` | `/healthz` (liveness, touches nothing) and `/readyz` (readiness, probes the database under a deadline). Two different questions. |
+| `auth/config.ts` | Which issuer this server trusts — or, with none configured, the local one. Refuses to start under `NODE_ENV=production`. |
+| `auth/jwks.ts` | The issuer's signing keys, cached, with a rate-limited forced refresh and negative caching. Asymmetric keys only. |
+| `auth/jwt.ts` | Compact-JWS verification. `alg: "none"` and every symmetric algorithm are absent from the allow-list rather than branched around. |
+| `auth/localIssuer.ts` | The development issuer: real RS256, real tokens, no password. |
+| `auth/verifier.ts` | Bearer token → `AuthContext`. Distinguishes "this token is bad" from "we cannot check it right now". |
+| `auth/resolve.ts` | `AuthContext` + a requested workspace → `TenantContext`, from a membership row and nowhere else. The line between authenticated and authorised. |
+| `auth/capabilities.ts` | The role matrix, as data, plus the command → capability map a test proves exhaustive. |
+| `auth/tickets.ts` | The single-use, hashed, thirty-second credential a socket is opened with. |
+| `auth/origin.ts` | The origin allowlist. WebSockets are not covered by CORS; this is the CSWSH defence. |
+| `auth/socketAuth.ts` | What the relay calls to decide whether a socket may exist, and in which workspace. |
+| `auth/session.ts` | `/v1/auth/*`, `/v1/ws-ticket` and `/v1/invites/accept`. |
+| `db/repositories/tickets.ts` | The ticket store that works across replicas: the delete is the decision. |
 | `processManager.ts` | Spawns the Python subprocess, reads stdout line-by-line, parses each line as a trace event. Survives non-zero exit, mid-run crash, and garbled lines. |
 | `runPool.ts` | N process managers. **Slot 0 is reserved for the interactive run**; the rest are lent to the eval fan-out. Adds per-run attribution and optional deadlines. |
 | `store.ts` | SQLite trace store (`runs`, `steps`) via built-in `node:sqlite`. JSON payloads are TEXT, parsed on the way out so live and replayed steps are identical shapes. |
@@ -1438,6 +1460,8 @@ frozen event schema, and everything added since rides beside it.
 | `eval` | Datasets, examples, rubrics, eval progress, scores, results, estimates |
 | `mcp` | MCP registry snapshots, discovery progress, and the first-use confirmation request |
 | `deploy` | Deployment snapshots, the pre-deploy plan, live stage transitions, scrubbed build-log lines, and the one-shot serve token |
+| `session` | The only channel about the CONNECTION rather than the work: `expiring`, `expired`, `revoked`, `workspace_changed`, `role_changed` |
+| `members` | Who is in the workspace, who has been invited, and the one-shot invite link |
 | `providers` | Which provider keys are set (`configured: true/false`, by name) and test results |
 | `reply` | Streaming "explain" answers |
 | `log` | stderr lines and parse errors, for visibility |
@@ -1454,7 +1478,15 @@ frozen event schema, and everything added since rides beside it.
 `setMcpServerAuth` · `setMcpToolImpact` · `resolveMcpConfirm` · and the provider set:
 `listProviders` · `setProviderKey` · `testProviderKey` · and the deploy set: `listDeployments` · `planDeploy` ·
 `deploy` · `cancelDeploy` · `forgetDeployment` · `loadDeployLogs` · `setRailwayToken` ·
-`testRailwayToken`
+`testRailwayToken` · and the membership set: `listMembers` · `inviteMember` · `revokeInvite` ·
+`setMemberRole` · `removeMember`
+
+Accepting an invitation is deliberately **not** a command: the accepter is not a member yet, so
+there is no socket scoped to the workspace they are joining. It is `POST /v1/invites/accept`.
+
+**Every command is capability-checked at the door**, before it reaches the app — see
+[roles](#roles-as-data). A refusal is answered on the channel the command belongs to, and a
+command with no capability is refused rather than allowed.
 
 `setProviderKey` and `testProviderKey` are two commands rather than one on purpose: the test
 proves a key authenticates and writes **nothing**, so "Test connection" cannot put a credential
@@ -1465,7 +1497,23 @@ Reads are answered locally by the relay (only the requesting client); mutations 
 to the app, which answers by broadcasting the affected snapshot — the same shape a fresh read
 would return, so a client never has to reconcile a partial update against local state.
 
-The client reconnects automatically with a 1-second backoff, and re-requests what it needs.
+A socket is opened with a **single-use ticket** rather than a token — see [why the ticket
+exists](#why-the-ticket-exists) — and the `Origin` is checked before the handshake. The client
+reconnects with an exponential, jittered backoff, re-requesting what it needs; a refusal (401/403)
+stops the loop and shows sign-in instead.
+
+There is also a small HTTP surface beside the socket, which is where the credential exchange has
+to happen because a browser cannot put a header on a WebSocket:
+
+| Route | Purpose |
+|---|---|
+| `GET /healthz` | Liveness. Touches nothing — a probe that checks a dependency turns one database blip into every instance restarting at once |
+| `GET /readyz` | Readiness. Probes the database under a deadline |
+| `POST /v1/auth/session` | Token → account + the workspaces you may act in. Provisions on first sight |
+| `POST /v1/ws-ticket` | A single-use, 30-second, workspace-scoped ticket for one socket |
+| `POST /v1/invites/accept` | Redeem an invitation |
+| `GET /v1/auth/jwks.json` | The **local issuer's** public key. Absent in provider mode |
+| `POST /v1/auth/dev-login` | Mint a local token. Absent in provider mode |
 
 ---
 
@@ -1479,7 +1527,13 @@ The client reconnects automatically with a 1-second backoff, and re-requests wha
 | `JAROKU_DB` | `server/jaroku.db` | SQLite file. Everything, not just traces — see [where data lives](#where-data-lives) |
 | `JAROKU_DB_DRIVER` | `sqlite` | `sqlite` \| `postgres`. Refuses anything else rather than falling back |
 | `JAROKU_PG_URL` | — | Jaroku's own Postgres. Deliberately **not** `DATABASE_URL`, which is the credential the Postgres *connector* reads — reusing it would point every agent's `pg_query` at the control plane |
-| `JAROKU_DEV_WORKSPACE` | the local workspace | Which workspace this process acts in until there is authentication. Announced at boot |
+| `JAROKU_DEV_WORKSPACE` | the local workspace | Which workspace the server acts in **on its own behalf** — the startup run, the sweepers, the restart reconciliations. Announced at boot |
+| `JAROKU_AUTH_ISSUER` | — | Your OIDC issuer. **Unset runs the local issuer**, which refuses `NODE_ENV=production` |
+| `JAROKU_AUTH_AUDIENCE` | `jaroku` | The `aud` a token must carry |
+| `JAROKU_AUTH_JWKS_URL` | `<issuer>/.well-known/jwks.json` | Where the signing keys live |
+| `JAROKU_ALLOWED_ORIGINS` | the local dev origins | Comma-separated origin allowlist for the WebSocket upgrade. **Required in production** — see [why the origin check is not optional](#why-the-origin-check-is-not-optional) |
+| `JAROKU_DEV_AUTH` | — | `1` opens sockets with **no credential at all**, in the dev workspace. Refuses `NODE_ENV=production` |
+| `JAROKU_DEV_AUTH_KEY` | `server/.devauth.json` | Where the local issuer's signing key is kept (`chmod 600`, gitignored) |
 | `JAROKU_NO_AUTORUN` | — | Set to `1` to skip the startup run |
 | `JAROKU_EVAL_CONCURRENCY` | `4` | Pool slots. Slot 0 is always the interactive run |
 | `JAROKU_LIMIT_<PROVIDER>` | `16` (fake) / `2` (real) | Per-provider concurrent-run cap, e.g. `JAROKU_LIMIT_ANTHROPIC=4` |
@@ -1604,10 +1658,23 @@ npm run migrate          # apply pending migrations and exit
 
 # tenancy — see "The tenancy model"
 npm run test:tenancy     # two workspaces; neither can read, mutate or enumerate the other's
+npm run test:acceptance  # Session 2's gate: two accounts using the app AT THE SAME TIME
+npm run test:channels    # every WS channel, audited for workspace scoping — see below
 npm run test:db-boundary # no driver outside src/db/; every store method takes a context first
 npm run test:rls         # the policies, exercised: forced, write-checked, fail-closed unscoped
 npm run test:trace       # trace scoping, and that workspace_id never reaches an emitted event
 npm run test:identity    # users, workspaces, memberships, audit
+npm run test:driver      # the driver choice, and the two combinations it refuses to boot on
+
+# auth — see "Authentication and membership"
+npm run test:http        # the HTTP layer: error envelope, body caps, log redaction
+npm run test:jwks        # key caching, forced refresh with a leash, symmetric keys refused
+npm run test:jwt         # alg:none, algorithm confusion, wrong issuer/audience, expiry, skew
+npm run test:session     # first-sight provisioning, concurrent sign-in, workspace adoption
+npm run test:resolve     # membership lookup, denial auditing, the cache's staleness window
+npm run test:capabilities # the role matrix, and that every relay command is classified
+npm run test:tickets     # single use under concurrency, hashing, the origin allowlist
+npm run test:members     # invite / accept / role / remove, and the last-owner guard
 
 # the database boundary
 npm run test:migrate     # forward-only, checksummed, transactional, refuses an edited file
@@ -1646,6 +1713,8 @@ npm run test:title       # title truncation (never mid-word)
 npm run test:deploy-store # the deploy panel's state, and the races it has to survive
 npm run test:export      # CSV/JSON export preserves every caveat
 npm run test:csv         # RFC-4180 quoting
+npm run test:auth        # retry vs stop: the one decision the socket layer must not get wrong
+npm run test:reset       # NO store retains a row across a workspace switch
 ```
 
 The client's test scripts invoke `../server/node_modules/.bin/tsx`, so install the server's
@@ -1699,9 +1768,8 @@ plan. The planner logs a loud warning for exactly this reason.
 
 Jaroku is becoming a hosted, multi-tenant product. Session 1 of that migration is done: every
 row in the system belongs to a **workspace**, and it is structurally difficult to write a query
-that crosses one. There is no authentication yet — a dev context supplies a fixed workspace, so
-the whole app works end to end exactly as before — but the shape everything else will hang off
-is in place.
+that crosses one. Session 2 is done too — see [authentication and
+membership](#authentication-and-membership) for who decides *whose* workspace a request is in.
 
 **The local path is untouched and stays the default.** `npm run dev` needs nothing installed and
 nothing running: SQLite, the fixtures, the mock MCP server, no Postgres, no Docker.
@@ -1796,7 +1864,43 @@ policy unconditionally, and nothing in the schema would tell you. Migration `009
 
 SQLite has no RLS and no roles, so on that driver there is no second wall: the repository layer is
 the whole of the enforcement. That is acceptable for what SQLite is here — one person, one machine
-— and it is why `npm run test:tenancy` runs there too.
+— and it is why `npm run test:tenancy` runs there too, and why the driver
+[refuses to boot in production](#what-session-2-deliberately-did-not-do).
+
+### Every channel, not just the ones somebody noticed
+
+RLS guards what a *query* returns. Nothing there guards what the server **pushes** — and a
+WebSocket relay's whole job is pushing. The stale-broadcast bug has now been found twice by
+hand, and finding them one at a time as somebody happens to notice is not the same as knowing
+there are none left.
+
+So `npm run test:channels` enumerates rather than remembers. It reads `wsRelay.ts` for every
+`channel:` it can emit and `COMMAND_CHANNEL` for every channel an answer can land on, and fails
+when one of them is not classified as either tenant data or connection state. **A channel added
+in a later session appears in that list automatically**, so it cannot arrive unclassified.
+
+There are exactly two correct ways to send, and a third that is the bug:
+
+| | |
+|---|---|
+| `broadcastTo(ctx, …)` | filtered by `workspaceId` ✓ |
+| `perClient(…)` | payload rebuilt per recipient ✓ |
+| one payload, every socket | **this is the bug** ✗ |
+
+The suite asserts structurally that every sender uses one of the first two, then puts two live
+sockets in two workspaces behind it and fires every channel to prove it.
+
+**The scope belongs to the operation, not to the process.** The subtler half of the same bug is
+one layer up, where the app chooses *which* context to hand the relay. A single `buildContext`
+covered planning, generation, editing and explaining — four subsystems with four independent
+locks, so two can be in flight at once and one variable cannot hold both answers. Worse, it was
+assigned *before* the busy guard, so a request that was **refused** still repointed it: workspace
+B's rejected `generate` redirected workspace A's still-streaming source code into B's build pane.
+
+Each now has its own scope, claimed only once its operation has actually started, and a refusal
+is answered to whoever asked rather than through the scope. `test:channels` asserts both
+properties by reading `index.ts`, because the ordering is the whole of the fix and nothing about
+it is visible at a type level.
 
 ### Adding a table
 
@@ -1838,9 +1942,11 @@ the projects still live on this machine's disk until Session 3 moves them to an 
 
 ### What Session 1 deliberately did not do
 
-- **No authentication.** `JAROKU_DEV_WORKSPACE` names the workspace this process acts in, loudly,
-  at boot. Session 2 replaces the resolution with a verified JWT and a membership lookup; nothing
-  below it changes.
+- ~~**No authentication.**~~ Done in Session 2 — see [authentication and
+  membership](#authentication-and-membership). Session 1's prediction held exactly: the shape did
+  not change, only the resolution became real. `JAROKU_DEV_WORKSPACE` still names the workspace
+  the server acts in **on its own behalf** — the startup run, the sweepers, the restart
+  reconciliations — because work nobody triggered still needs a scope.
 - **The filesystem is still one namespace.** Agent slugs are unique per workspace in the *table*,
   but two workspaces with a `support_bot` would still collide on `runtime/agents/support_bot/`.
   Session 3's object store fixes that with keys built from the workspace id and the agent uuid.
@@ -1852,12 +1958,344 @@ the projects still live on this machine's disk until Session 3 moves them to an 
 
 ---
 
+## Authentication and membership
+
+Session 2 of the hosted migration. There are now real users, real sessions, and a client that
+cannot see anything it is not a member of. Session 1 put a `workspace_id` on every row; this is
+what decides *whose* workspace a request is in.
+
+**The local path is still the default and still needs nothing.** `npm run dev` starts with no
+Postgres, no Redis, no Docker and no cloud account — and, importantly, with authentication
+*on*. See [the local issuer](#the-local-issuer) for why that is not a contradiction.
+
+### The shape
+
+```
+  browser                                    server
+     │                                          │
+     │  1. token from the issuer ───────────▶   verified against cached JWKS
+     │                                          iss · aud · exp · nbf · signature
+     │
+     │  2. POST /v1/auth/session ───────────▶   sub → users.external_id
+     │     Authorization: Bearer <token>        first sight? create user + personal workspace
+     │     ◀─── user, workspaces, role          all inside one transaction
+     │
+     │  3. POST /v1/ws-ticket ──────────────▶   membership lookup for the workspace asked for
+     │     { workspaceId }                      refuse (403 + audit row) if not a member
+     │     ◀─── single-use ticket, 30s
+     │
+     │  4. wss://…/ws?ticket=… ─────────────▶   Origin checked, ticket consumed (once)
+     │                                          socket is scoped for its whole life
+     │                                          re-checked every 60s against membership
+```
+
+Four requests where there used to be one, and each exists for a reason the next one cannot
+cover. Nothing below step 4 can be talked into a different workspace: a socket's scope was
+decided by a `workspace_members` row before the handshake, and there is no message that changes
+it. **Switching workspace is a new socket**, deliberately.
+
+### Provider-agnostic, on purpose
+
+The server verifies an OIDC JWT against a JWKS URL and maps `sub` to `users.external_id`. That
+is what Clerk, Auth0, Okta, Cognito and Supabase Auth all issue, so pointing this at any of them
+is three environment variables and no code:
+
+```bash
+JAROKU_AUTH_ISSUER=https://your-app.clerk.accounts.dev
+JAROKU_AUTH_AUDIENCE=jaroku
+JAROKU_AUTH_JWKS_URL=https://your-app.clerk.accounts.dev/.well-known/jwks.json   # optional
+```
+
+There is no vendor SDK in the request path, so D3 is a config value rather than a rewrite. The
+JWKS cache is the usual shape and for the usual reasons: a TTL so the provider's latency is not
+this server's latency, a **forced refresh on an unknown `kid`** so rotation works, and a **rate
+limit on that refresh** because `kid` comes off an unverified token header — "re-fetch on unknown
+kid" with no leash is a remote trigger that makes this server hammer its own auth provider on
+demand. A failed refresh **keeps the keys it already had**, exactly as a failed MCP discovery
+keeps its tool list.
+
+**A token that cannot be verified because the ISSUER is down is a 503, not a 401.** A 401 there
+would sign every user out of a working session because a third party had a bad minute, and the
+client's socket layer branches on precisely that distinction.
+
+### The local issuer
+
+With no issuer configured, the server runs one: an RS256 key pair generated at boot, published
+at its own `/v1/auth/jwks.json`, minting real tokens that go through the **same** verifier, the
+same JWKS fetch, the same `iss`/`aud`/`exp` checks.
+
+This is deliberately not a flag that skips verification. A bypass would mean the path exercised
+on every developer's machine every day is a *different* path from the one that runs in
+production — so the code that actually matters is the code nobody runs, and the day it breaks is
+the day it is in front of users.
+
+What is missing locally is a password, not a signature: `POST /v1/auth/dev-login` takes an email
+and hands back a token for it. That is exactly as dangerous as it sounds, which is why it says
+so at every boot and **refuses to start under `NODE_ENV=production`**. The signing key is
+persisted to `server/.devauth.json` (`chmod 600`, gitignored) so a `tsx` restart does not sign
+you out — the predictable alternative is somebody reaching for a bypass to stop being logged out.
+
+### Why the ticket exists
+
+A browser **cannot set an `Authorization` header on a WebSocket**. The two things people reach
+for instead are both wrong:
+
+| Approach | Why not |
+|---|---|
+| Long-lived JWT in the query string | Lands in access logs, proxy logs and `Referer` headers, and stays there for as long as logs are kept |
+| A cookie | WebSockets are **not covered by CORS**, and a cookie is attached to an upgrade from *any* origin — which is cross-site WebSocket hijacking |
+
+So the thing that does go in the URL is worth nothing thirty seconds later and worth nothing
+twice. A ticket is 256 bits of `randomBytes`, **stored as a SHA-256 digest** so a copy of the
+table is not a set of credentials, scoped to one workspace, and **consumed atomically** — the
+redemption is a `DELETE` whose row count is the decision, so exactly one caller wins even when
+two race on different replicas.
+
+Backed by Postgres rather than Redis, and that is a considered deviation from the spec: there is
+no Redis client in this codebase until Session 5 introduces one for the queues, and a
+`DELETE`-that-returns-a-count has exactly the property `GETDEL` was wanted for. `RedisTicketStore`
+drops in behind the same interface when it lands. `MemoryTicketStore` is the local default.
+
+### Why the origin check is not optional
+
+**WebSockets are not covered by CORS.** This surprises people, and the surprise *is* the
+vulnerability. A browser will not let `evil.example` read a cross-origin `fetch` response without
+the server's permission — but `new WebSocket("wss://jaroku.example/ws")` from a page on
+`evil.example` connects, with the user's browser doing the connecting, and no CORS check applies
+because the handshake is not a CORS request.
+
+The `Origin` header is the actual defence: browsers set it on every upgrade and script cannot
+forge it. So it is checked **before** the ticket, and a failure is an HTTP 403 on the raw socket
+rather than an opened-then-closed connection.
+
+- **A missing `Origin` is allowed**, and that is correct rather than a loophole. Browsers always
+  send one; `curl`, the `ws` library, the test suites and the fallback debug client do not.
+  Refusing it would break every non-browser client while stopping no attack — an attacker with a
+  non-browser client can send any origin they like, so the header only ever *means* anything when
+  it comes from a browser, and a browser always sends it. What stops that case is the ticket,
+  which is a credential rather than a claim.
+- **A literal `null` origin is refused.** That is a sandboxed iframe or a `file://` page — an
+  opaque origin, which is exactly the one not to trust.
+- `JAROKU_ALLOWED_ORIGINS` is **required in production**. Unset there is a decision nobody made,
+  and guessing gives either "nothing can connect" or "anything can", so the server refuses to
+  start instead.
+
+### Roles, as data
+
+Three roles, one table, one check. Scattered `if (ctx.role !== "owner")` across fifty command
+handlers is how you get a hole, and the hole is always in the handler nobody thought about.
+
+| Role | May |
+|---|---|
+| **member** | Build, run, edit, pause, branch and evaluate agents; answer an MCP confirmation on their own run; read members, providers, MCP servers and deployments |
+| **admin** | Everything a member may, plus connect MCP servers, store provider keys, and deploy |
+| **owner** | Everything an admin may, plus manage membership, the workspace, and billing |
+
+The split follows one question: **does this change what the workspace *is*, or what is *in* it?**
+Building and running agents is the product, and every member does it. Connecting a third-party
+MCP server, storing a provider key, or putting an agent on a public URL commits the whole
+workspace to something — money, an external dependency, an internet-facing endpoint.
+
+The roles are **nested** rather than three copied lists, so a new member capability is
+automatically an admin's and an owner's. `npm run test:capabilities` reads `wsRelay.ts` and fails
+when a command exists with no capability, so one added in a later session cannot arrive ungated —
+**unclassified is refused, not allowed**.
+
+A refusal is answered **on the channel the asking panel is listening to**, and it happens at the
+door: a command that would be refused never reaches the app, because a refusal that forwards
+first has already written the key.
+
+### Membership
+
+| Action | Who | Notes |
+|---|---|---|
+| Invite | owner | The link is shown **once** — only a hash is stored, and there is no email sender here |
+| Accept | the invitee | `POST /v1/invites/accept`, not a socket command: the accepter is not a member yet, so there is no socket scoped to the workspace they are joining |
+| Change role | owner | Refuses to demote the **last** owner |
+| Remove | owner | Refuses to remove the last owner. Kills their outstanding tickets, and their open sockets close on the next re-check |
+
+Every one of them writes an `audit_log` row **inside the transaction that makes the change**, so
+there is no path that alters membership without a record of who did it.
+
+The invite token is `<workspace_id>.<secret>`, and the workspace id in it **authorises nothing**:
+it selects which rows to search so the query can be scoped, and the 256-bit secret is the whole
+of the proof. That is what lets `workspace_invites` keep an RLS policy while still being readable
+by somebody with no membership at all — the trick `ws_tickets` could not use, which is why that
+table is policy-free and holds nothing but a digest, an id and a role for thirty seconds.
+
+### A socket must not outlive its membership
+
+Every HTTP request re-presents its token and is re-checked. **A socket is checked once, at the
+upgrade**, and would then run for as long as a browser tab is open — still acting on a membership
+that may have been revoked in its first ten minutes. Nothing about the socket itself would ever
+notice.
+
+So every open socket is re-checked on a timer, and told the outcome on a `session` channel:
+
+| Event | What happens |
+|---|---|
+| `expiring` | The token has under five minutes left. A **warning**, not a close — cutting somebody off mid-generation would be the server causing the outage it is warning about |
+| `expired` | Closed, with the "sign in again" close code |
+| `revoked` | No longer a member. Closed immediately |
+| `workspace_changed` | The workspace itself is gone. Closed with the **reconnect** code — a different instruction |
+| `role_changed` | Still a member, at a different role. The socket **stays open** and re-authorises against the new one |
+
+A role change is applied in place because the connection is still legitimately theirs; what
+changed is what it may do, and the capability check reads the socket's live context on every
+command. That is the enforcement, not a notification.
+
+The distinction is worth a test rather than a sentence, and `test:tenancy` has one: a socket
+that **handshakes as an admin** — from a real membership row, not a stale capture — is demoted
+mid-session and immediately re-sends the exact command it just succeeded at. It is refused, and
+the command never reaches the app. Connecting as a member and demoting from there would prove
+nothing: a server reading the handshake context would refuse it too, and the test would pass for
+the opposite of the right reason.
+
+**A failed re-check does not close anything.** The database being briefly unavailable is our
+problem, and signing every user out over it would turn a blip into an outage — the same reasoning
+the JWKS cache applies to a failed refresh.
+
+The membership decision is cached for **30 seconds**, positives and negatives both (without the
+negative, guessing workspace ids is a database round trip per guess). That staleness window is a
+real security property rather than a tuning detail, so it is stated: between a revocation and the
+cache expiring, a request on another replica may still be authorised at the old role. Every
+membership mutation invalidates explicitly, which makes it exact on the replica that made the
+change; Session 5's Redis pub/sub is what makes it exact everywhere.
+
+### The client
+
+`lib/socket.ts` makes one distinction that everything else depends on, because "disconnected" and
+"unauthorised" arrive at a browser looking identical — a request fails, a socket closes:
+
+- **retryable** — offline, a 5xx, a 429, a dropped socket. Back off (exponential, jittered,
+  capped) and try again. The backoff is reset by a connection that *opened*, not one that was
+  attempted.
+- **not retryable** — a 401 or a 403. **Stop**, and show the sign-in screen.
+
+Getting that backwards produces the worst behaviour this client is capable of: retrying a 401
+every second, forever, behind a spinner, while the user has no idea they need to sign in.
+
+**Every store fully resets on a workspace switch.** A perfectly-scoped server still leaks if the
+browser keeps the rows — a `traceStore` still holding the previous workspace's step payloads is a
+cross-tenant leak in the UI, and those payloads contain email content, database output and Slack
+messages. The reset happens *before* the new socket opens, so there is no window in which the new
+workspace's first snapshot merges into the previous one's rows.
+
+`npm run test:reset` reads the store **directory** and fails when a store exists that is neither
+reset nor explicitly excluded — because the leak that actually happens is not in a store somebody
+tested, it is in the one added six months later that nobody wired in.
+
+**A store is memory; `localStorage` is not**, and that was this suite's blind spot. The last test
+input per agent was remembered under `jaroku.input.<agent>` — keyed by slug alone, and slugs
+[stopped being globally unique](#the-one-exception-to-the-frozen-schema) in Session 1. Two
+workspaces with a same-named agent on one browser meant one tenant's last input loading into the
+other's composer, and `R` re-running it. A test input is whatever the user typed to drive the
+agent: a real customer email, a real order id. It survived not just a switch but a sign-out,
+which no store reset could reach.
+
+The key now carries the workspace, read inside `inputKey` rather than passed in, so every call
+site is scoped by construction. Sign-out sweeps the prefix as well, for the browser two people
+share. And `test:reset` now audits **every `jaroku.*` key the client writes**, found by reading
+the source rather than from a list, and fails when one is classified as neither workspace-scoped
+nor non-tenant — the same enumerate-don't-remember discipline as the
+[channel audit](#every-channel-not-just-the-ones-somebody-noticed).
+
+### CORS, and why it is here rather than in Session 8
+
+The client is served by Vite on `:5173` and this server answers on `:4317`, so **every request
+the browser makes here is cross-origin** — the whole sign-in exchange included. Without an
+`Access-Control-Allow-Origin` the browser blocks the *response*, `fetch` rejects with a bare
+"Failed to fetch", and there is no way to sign in at all.
+
+The allowlist is [the socket's](#why-the-origin-check-is-not-optional), unchanged and not a
+second copy: one list decides both who may open a socket and who may read an HTTP response, so
+the answer to "may this origin talk to us" cannot depend on which transport asked. The origin is
+**echoed by name, never `*`** — a wildcard is not shorthand for a list, it is the absence of one
+— and there is deliberately no `Access-Control-Allow-Credentials`, because this server
+authenticates with a bearer header and never a cookie.
+
+Note that CORS and the socket's `Origin` check defend against opposite things and neither
+replaces the other. CORS asks the *browser* not to hand a response to script from another
+origin; the origin check is the *server* refusing the connection outright, because WebSockets
+are not covered by CORS at all.
+
+The failing responses carry the headers too. A 401 a browser cannot read arrives at the client
+as "could not reach the server", which inverts the one decision `lib/socket.ts` exists to get
+right — retry, or stop and show sign-in.
+
+Session 8 still owns the rest of the posture: CSP, HSTS, `Referrer-Policy`, per-route rate
+limits. This is the part Session 2 cannot work without.
+
+### The gate: two people, one server, at the same time
+
+`npm run test:acceptance` is Session 2's acceptance criterion, run rather than described: **two
+real accounts, two real workspaces, both using the app simultaneously against one server,
+neither able to observe the other by any command, socket, or timing.**
+
+It is a separate suite from the attack one because it catches different failures. An attack asks
+*can I reach across the boundary if I try*; this asks *does the server keep two ordinary sessions
+apart while it is busy* — and the answers differ wherever per-operation state lives in a
+module-level variable. No adversarial test would have provoked the build-scope leak above,
+because the attacker's move there is to do something entirely legitimate in their own workspace
+at the wrong moment.
+
+Both accounts sign in through the real three-request exchange, open real sockets, and then run
+overlapping scripts of ordinary work — list, run, load, list again — with the suite asserting the
+overlap actually happened rather than assuming it. Then:
+
+- **command** — every answer either of them received is their own, and neither inbox contains the
+  other's agent id or workspace id anywhere.
+- **socket** — the unbidden traffic too: the live trace and history pushes one person's run
+  causes while the other has a socket open.
+- **timing** — naming a run id that is real *in the other workspace* returns a byte-identical
+  answer to naming an invented one, and costs the same. The bound is a ratio rather than a
+  threshold: this does not claim to defeat a lab-grade timing attack, it asserts there is no
+  order-of-magnitude oracle, which is what a scoped-versus-unscoped query produces and what
+  would be exploitable over a network.
+
+### The threat model
+
+What each layer stops, what it explicitly does not, and why the two decisions that look like
+over-engineering are not: **[`server/src/auth/THREAT-MODEL.md`](server/src/auth/THREAT-MODEL.md)**.
+
+Worth reading before touching anything in `server/src/auth/`. In particular it is where the
+sentence "WebSockets are not covered by CORS" is written down with its consequences, because
+that is the fact a future cleanup will not know.
+
+### What Session 2 deliberately did not do
+
+- **No Redis.** Tickets and the membership cache are Postgres- and process-backed. Session 5
+  introduces the Redis client with the queues that need it, and both drop in behind existing
+  interfaces.
+- **No vendor SDK in the client.** Sign-in is the local issuer's form or a message pointing at
+  the configured provider. Wiring a provider's React SDK is a client-side change with no server
+  consequence.
+- **No email.** An invite link is shown once to the inviter, who sends it however they like.
+- **Provider keys are still process-wide.** `runtime/.env` is one file, so "anthropic is
+  configured" is a fact about the install. The `providers` channel is scoped per workspace
+  already, so the shape is right for Session 6's per-workspace `SecretStore`.
+- **`users.external_id` is `COLLATE NOCASE` on SQLite and case-sensitive on Postgres.** An auth
+  provider's `sub` is opaque and case-sensitive, so two subs differing only in case are two
+  people on Postgres and one on SQLite. Harmless where SQLite is used — one person, one machine —
+  but a genuine driver disagreement, and fixing it needs a table rebuild.
+
+  Rather than leave that merely *unlikely* in production, **the server refuses to boot on
+  SQLite under `NODE_ENV=production`** — the same refusal the local issuer and the dev tenancy
+  middleware already make about themselves. The rebuild is still owed; this makes the
+  discrepancy structurally unreachable in the meantime rather than improbable. The second
+  reason is the larger one anyway: RLS is the backstop the whole tenancy model leans on and it
+  exists only on Postgres, so SQLite in production is a deployment with the backstop silently
+  absent. `npm run test:driver`.
+
+---
+
 ## Where data lives
 
 | Path | What | Tracked? |
 |---|---|---|
-| browser `localStorage` | `jaroku.onboarding` (first-run progress) and `jaroku.input.<agent>` (last test input). UI-only; deleting either loses nothing that matters | n/a |
-| `server/jaroku.db` | The local database. Identity (`users`, `workspaces`, `workspace_members`, `audit_log`) + agents (`agents`, `agent_versions`) + traces (`runs`, `steps`) + eval control plane (`datasets`, `dataset_examples`, `rubrics`, `eval_runs`, `eval_jobs`, `eval_scores`) + MCP registry (`mcp_servers`, `mcp_tools`) + deploy records (`deployments`, `deployment_logs`). Every one of them carries a `workspace_id` | No |
+| browser `localStorage` | `jaroku.token` (the bearer token), `jaroku.workspace` (the last workspace), `jaroku.onboarding` (first-run progress), `jaroku.input.<agent>` (last test input). Deleting the first two signs you out; the rest lose nothing that matters | n/a |
+| `server/.devauth.json` | The **local issuer's** RS256 signing key, `chmod 600`. Only exists when no `JAROKU_AUTH_ISSUER` is set | No |
+| `server/jaroku.db` | The local database. Identity (`users`, `workspaces`, `workspace_members`, `workspace_invites`, `ws_tickets`, `audit_log`) + agents (`agents`, `agent_versions`) + traces (`runs`, `steps`) + eval control plane (`datasets`, `dataset_examples`, `rubrics`, `eval_runs`, `eval_jobs`, `eval_scores`) + MCP registry (`mcp_servers`, `mcp_tools`) + deploy records (`deployments`, `deployment_logs`). Every one of them carries a `workspace_id` | No |
 | Postgres (`JAROKU_PG_URL`) | The same schema, hosted, with RLS. Selected by `JAROKU_DB_DRIVER=postgres`; see [the tenancy model](#the-tenancy-model) | No |
 | `runtime/agents/<id>/` | A generated agent project — yours, editable, portable | No (except `example_agent`) |
 | `runtime/agents/.staging/` | In-flight generations and edit proposals. Cleared on server start — a proposal interrupted by a shutdown is an orphan | No |
@@ -1923,10 +2361,30 @@ back to branch from.
 - **High-impact MCP tools are refused in a deployed container.** There is nobody there to ask,
   and the bridge's per-run grant is process-global — one approval would leak across every later
   request. Deployed agents run with `JAROKU_MCP_CONFIRM=require`.
-- **The server binds to localhost.** It has no authentication and is not built to be exposed
-  to a network. Don't put it on one. A *deployed agent* deliberately binds `0.0.0.0`, because a
-  service nothing can reach is not a service — which is exactly why the bearer token above is
-  not optional.
+- **The server authenticates every request and every socket.** A verified OIDC token, a
+  membership lookup, a single-use ticket, an origin allowlist, and a capability check at the
+  door — see [authentication and membership](#authentication-and-membership). What it does
+  *not* yet have is the rest of the hosted posture: rate limits, security headers, a WAF and
+  abuse detection are Session 8, and the sandbox that stops model-written Python running on the
+  control plane is Session 4. **So it still binds localhost and should still not be put on a
+  network.** That sentence used to be true because there was no authentication; it is now true
+  because authentication is not the whole of it.
+- **`JAROKU_DEV_AUTH=1` and the local issuer are development facilities**, and both refuse to
+  start under `NODE_ENV=production`. The first opens sockets with no credential at all; the
+  second mints real, verifiable tokens for any address with no password. Both announce
+  themselves at every boot.
+- **Nothing that grants access reaches a log.** The ws-ticket rides in a query string because a
+  browser has nowhere else to put it, and the request logger redacts it by name — along with
+  `token`, `key`, `code` and `access_token`. Tickets and invitations are stored as SHA-256
+  digests, so a copy of either table is not a set of usable credentials.
+- **A cross-tenant attempt is a recorded security event.** Asking to act in a workspace you are
+  not a member of writes an `audit_log` row naming who tried and from where. It is deliberately
+  *not* recorded when the workspace does not exist at all — a scan of random uuids would
+  otherwise be an unbounded write against the table whose whole job is recording the attempts
+  that matter — and the refusal message is identical either way, so it cannot be used as an
+  existence oracle.
+- **A *deployed agent* deliberately binds `0.0.0.0`**, because a service nothing can reach is
+  not a service — which is exactly why its bearer token is not optional.
 
 ---
 
@@ -1987,6 +2445,32 @@ Usually a credential the container does not have. The deploy warns before it sta
 variable is unset locally, but you can proceed past that — a connector template *raises* when it
 is unconfigured (rule 7), so a missing key is a failed request rather than a degraded one. Set it
 in Railway's variables and redeploy.
+
+**The app shows a sign-in screen and I never set up an auth provider**
+That is the [local issuer](#the-local-issuer). Type any email address; there is no password. It
+exists so the code that authenticates you locally is the same code that authenticates a user in
+production, rather than a flag that skips it.
+
+**"open this socket with a ticket from POST /v1/ws-ticket"**
+Something connected to the WebSocket without doing the credential exchange first. The React
+client and the fallback debug client both do it; a `wscat` or a script will not. Either do the
+exchange, or set `JAROKU_DEV_AUTH=1` — which opens sockets with no credential at all, says so at
+boot, and refuses to start under `NODE_ENV=production`.
+
+**A socket is refused with 403 "origin not allowed"**
+The page's origin is not in `JAROKU_ALLOWED_ORIGINS`. Unset, that defaults to the Vite dev server
+and the relay's own port. WebSockets are not covered by CORS, so this check is the actual
+cross-site-hijacking defence and is not optional — see [why](#why-the-origin-check-is-not-optional).
+
+**Signing in says my email "already belongs to a different sign-in"**
+`users.email` is unique, and that address is held by a different provider `sub` — usually because
+the auth provider changed, or two are configured at once. It is a sentence rather than a stack
+trace precisely because there is nothing automatic that can safely resolve it.
+
+**Everything disappeared after I switched workspace**
+That is the switch working. Every store is emptied before the new socket opens, because a
+`traceStore` still holding the previous workspace's payloads is a cross-tenant leak in the UI
+even when the server behaved perfectly.
 
 **Branching says "no durable checkpoint for that step"**
 That run predates checkpointing, or its checkpoint was swept (which happens for finished eval

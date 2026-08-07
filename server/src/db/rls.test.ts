@@ -176,6 +176,11 @@ try {
     "runs", "steps", "datasets", "dataset_examples", "rubrics", "eval_runs", "eval_jobs",
     "eval_scores", "mcp_servers", "mcp_tools", "deployments", "deployment_logs", "agents",
     "agent_versions",
+    // Session 2. It keeps its policy even though the person redeeming an invite is not yet a
+    // member — the token carries the workspace id, so the lookup is scoped and the secret is
+    // what proves it. See migration 012 for why that was worth the trouble when `ws_tickets`
+    // could not do it.
+    "workspace_invites",
   ];
   const guarded = await db.all<{ relname: string; relrowsecurity: boolean; relforcerowsecurity: boolean }>(
     `SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class
@@ -193,9 +198,15 @@ try {
   const unpolicied = TENANT_TABLES.filter((t) => !policies.some((p) => p.tablename === t));
   check(unpolicied.length === 0, `and a tenant_isolation policy on each (missing: ${unpolicied.join(", ") || "none"})`);
 
-  // And the two that must NOT have one, because a policy on either would break the thing that
-  // makes every other policy work. See the migration.
-  const exempt = ["audit_log", "workspace_members"];
+  // And the three that must NOT have one, because a policy on any of them would break the
+  // thing that makes every other policy work. See migrations 009 and 010.
+  //
+  // `ws_tickets` is the Session 2 addition, and it is the same argument as workspace_members:
+  // a policy reads `app.workspace_id`, and redeeming a ticket is the operation that PRODUCES
+  // that value. Scoping the lookup by the answer it is computing would return nothing, every
+  // time. Issuing is fully scoped — the repository takes a TenantContext — and the rows hold
+  // a digest, an id and a role for thirty seconds.
+  const exempt = ["audit_log", "workspace_members", "ws_tickets"];
   const wrongly = exempt.filter((t) => policies.some((p) => p.tablename === t));
   check(
     wrongly.length === 0,

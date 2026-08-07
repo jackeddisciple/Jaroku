@@ -30,14 +30,26 @@ import {
   type GenerateCommand,
   type McpCommand,
   type PlanAgentCommand,
+  type MemberCommand,
   type ProviderCommand,
 } from "./wsRelay.ts";
+import { Router } from "./http/router.ts";
+import { healthz, readyz } from "./http/health.ts";
+import { AUTH_ENV, resolveAuthConfig } from "./auth/config.ts";
+import { LocalIssuer } from "./auth/localIssuer.ts";
+import { TokenVerifier } from "./auth/verifier.ts";
+import { sessionRoutes } from "./auth/session.ts";
+import { ContextResolver } from "./auth/resolve.ts";
+import { resolveOriginPolicy } from "./auth/origin.ts";
+import { resolveSocketAuth } from "./auth/socketAuth.ts";
+import { DbTicketStore } from "./db/repositories/tickets.ts";
 import { Generator, type UsageSummary } from "./generator.ts";
 import { Planner } from "./planner.ts";
 import { Editor, editCount } from "./editor.ts";
 import { scanAgentDirectory } from "./agents.ts";
 import { AgentRepository } from "./db/repositories/agents.ts";
 import { IdentityRepository } from "./db/repositories/identity.ts";
+import { isMemberRole } from "./db/tenant.ts";
 import { resolveDevTenancy, type DevTenancy } from "./devTenancy.ts";
 import { loadConnectors } from "./connectors.ts";
 import { isSafeAgentId, listProjectFiles } from "./projectFs.ts";
@@ -162,9 +174,31 @@ function contextForRun(runId: string): TenantContext {
 // hears about their own eval.
 const evalWorkspaces = new Map<string, TenantContext>();
 const contextForEval = (evalId: string): TenantContext => evalWorkspaces.get(evalId) ?? serverContext();
-let buildContext: TenantContext | null = null;
+
+// ONE SCOPE PER SINGLE-FLIGHT SUBSYSTEM, and never one shared between them.
+//
+// These used to be a single `buildContext` covering planning, generation, editing and
+// explaining, and it leaked across tenants in two independent ways:
+//
+//   * IT WAS ASSIGNED BEFORE THE BUSY GUARD. Workspace B sending a `generate` that was
+//     REFUSED still repointed the variable at B — and workspace A's generation, still
+//     streaming, then broadcast the rest of its source code into B's build pane.
+//   * IT WAS SHARED BY SUBSYSTEMS THAT RUN CONCURRENTLY. `generating`, `editor.inFlight`,
+//     `explaining` and `deployManager.busy` are four separate locks, so A generating while B
+//     edits is entirely legal — and one variable cannot hold both answers.
+//
+// So each gets its own, and each is claimed only once its operation has actually STARTED,
+// after every guard that could refuse it. A refusal is broadcast to the context of whoever
+// asked, which is always in hand at the point of refusal and never needs a variable at all.
+let planContext: TenantContext | null = null;
+let genContext: TenantContext | null = null;
+let editContext: TenantContext | null = null;
+let replyContext: TenantContext | null = null;
 let deployContext: TenantContext | null = null;
-const contextForBuild = (): TenantContext => buildContext ?? serverContext();
+const contextForPlan = (): TenantContext => planContext ?? serverContext();
+const contextForGen = (): TenantContext => genContext ?? serverContext();
+const contextForEdit = (): TenantContext => editContext ?? serverContext();
+const contextForReply = (): TenantContext => replyContext ?? serverContext();
 const contextForDeploy = (): TenantContext => deployContext ?? serverContext();
 
 // The orchestrator. Constructed after the relay exists (it broadcasts progress), so it's
@@ -385,9 +419,65 @@ function agentGraph(agentId: string): Promise<GraphResult> {
   return pending;
 }
 
+// THE HTTP SURFACE.
+//
+// New in Session 2, and it exists for one structural reason: a browser cannot put an
+// `Authorization` header on a WebSocket, so a credential has to be exchanged over HTTP before
+// the socket is opened at all. `/healthz` and `/readyz` come along because a process that is
+// about to be put behind a load balancer needs to be able to say whether it is alive and
+// whether it should be sent traffic, and those are different questions — see http/health.ts.
+// Resolved before the router, because the router needs it: the same allowlist decides which
+// origins may open a SOCKET and which may read an HTTP RESPONSE. The client is served by Vite
+// on another port, so every request it makes here is cross-origin — without this the browser
+// blocks the response to the sign-in exchange and the app cannot sign anybody in at all.
+const originPolicy = resolveOriginPolicy();
+const router = new Router({ cors: originPolicy });
+router.get("/healthz", healthz());
+router.get(
+  "/readyz",
+  readyz({ dialect: db.dialect, probe: () => db.get(`SELECT 1 AS ok`) }),
+);
+
+// AUTHENTICATION.
+//
+// Provider-agnostic OIDC: three environment variables point this at Clerk, Auth0, Okta or
+// anything else that publishes a JWKS, and nothing in the request path is vendor-specific.
+// With none of them set it runs its own issuer instead of skipping verification, so the code
+// that authenticates a developer every day is the code that authenticates a user in
+// production. See auth/config.ts — it is loud about which of the two it is doing.
+const authConfig = resolveAuthConfig(PORT);
+const localIssuer =
+  authConfig.mode === "local"
+    ? new LocalIssuer(
+        process.env[AUTH_ENV.devKeyPath] ?? join(SERVER_DIR, ".devauth.json"),
+        authConfig.audience,
+      )
+    : undefined;
+const tokenVerifier = new TokenVerifier(authConfig);
+const identityRepo = new IdentityRepository(db);
+const contextResolver = new ContextResolver({ identity: identityRepo });
+// Backed by the database rather than a Map, and rather than Redis. A ticket issued by one
+// replica has to be consumable by another, which rules out the Map; and `DELETE … RETURNING`
+// against the Postgres already here has exactly the property GETDEL was wanted for. Session 5
+// puts Redis behind the same interface when it introduces a client for the queues.
+const ticketStore = new DbTicketStore(db);
+for (const route of sessionRoutes({
+  config: authConfig,
+  verifier: tokenVerifier,
+  identity: identityRepo,
+  localIssuer,
+  tickets: ticketStore,
+  resolver: contextResolver,
+})) {
+  if (route.method === "GET") router.get(route.path, route.handler);
+  else router.post(route.path, route.handler);
+}
+
 const relay = new WsRelay({
   port: PORT,
   store,
+  router,
+  originPolicy,
   clientHtmlPath: join(SERVER_DIR, "debug-client.html"),
   listAgents: async (ctx) => {
     // One query for the whole list, so the sidebar can show a deploy state per row without
@@ -415,8 +505,35 @@ const relay = new WsRelay({
       };
     });
   },
-  // The socket's own context, resolved when it connected — see RelayOptions.contextFor.
-  contextFor: () => serverContext(),
+  // THE SOCKET'S OWN CONTEXT, resolved when it connected.
+  //
+  // Session 1 handed every connection the one workspace this process acts in. It now redeems a
+  // single-use ticket that an authenticated HTTP request minted after a membership check, so a
+  // socket's scope was decided by a `workspace_members` row and cannot be argued with
+  // afterwards. `JAROKU_DEV_AUTH=1` is the loud, production-refusing way back to the old
+  // behaviour — see auth/socketAuth.ts.
+  contextFor: resolveSocketAuth({ tickets: ticketStore, devContext: () => serverContext() }),
+  // A SOCKET IS THE ONE THING HERE WITH NO NATURAL EXPIRY.
+  //
+  // Every HTTP request re-presents its token and is re-checked. A socket is checked once, at
+  // the upgrade, and would then run for as long as a browser tab is open — still acting on a
+  // membership that may have been revoked in its first ten minutes. This asks again, once a
+  // minute, and it is the only thing in the system that ever notices.
+  revalidate: async (session) => {
+    // The workspace first, because "it is gone" and "you were removed from it" send a client
+    // to different places: one reconnects elsewhere, the other signs in again.
+    const ctx = systemContext(newRequestId());
+    const workspace = await identityRepo.workspaceById(ctx, session.context.workspaceId);
+    if (!workspace) return { ok: false, reason: "workspace_gone" };
+    // A socket with no user is the JAROKU_DEV_AUTH path or server-side work; there is no
+    // membership to re-check, and inventing a failure would close a connection nothing
+    // authorised in the first place.
+    if (!session.context.actorUserId) return { ok: true, role: session.context.role };
+    // Around the cache on purpose — a cached positive is exactly what a revocation has to be
+    // seen past. See ContextResolver.stillAMember.
+    const role = await contextResolver.stillAMember(session.context, ctx.requestId);
+    return role ? { ok: true, role } : { ok: false, reason: "revoked" };
+  },
   // These two still read a global directory rather than a scoped table, which is the honest
   // limit of Session 1: runtime/agents/ is one namespace for every workspace, and Session 3's
   // object store is what makes the key itself workspace-scoped. They take the context now so
@@ -466,6 +583,7 @@ const relay = new WsRelay({
     else if (MCP_COMMAND_NAMES.has(cmd.cmd)) void handleMcpCommand(ctx, cmd as McpCommand);
     else if (DEPLOY_COMMAND_NAMES.has(cmd.cmd)) void handleDeployCommand(ctx, cmd as DeployChannelCommand);
     else if (PROVIDER_COMMAND_NAMES.has(cmd.cmd)) void handleProviderCommand(ctx, cmd as ProviderCommand);
+    else if (MEMBER_COMMAND_NAMES.has(cmd.cmd)) void handleMemberCommand(ctx, cmd as MemberCommand);
     else void handleEvalCommand(ctx, cmd);
   },
 });
@@ -733,15 +851,15 @@ async function handleMcpCommand(ctx: TenantContext, cmd: McpCommand): Promise<vo
 
 const PROVIDER_COMMAND_NAMES = new Set(["setProviderKey", "testProviderKey"]);
 
-function broadcastProviders(): void {
-  relay.broadcastProviders({ type: "providers", providers: providerStatus() });
+function broadcastProviders(ctx: TenantContext): void {
+  relay.broadcastProviders(ctx, { type: "providers", providers: providerStatus() });
 }
 
 async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): Promise<void> {
   try {
     if (!isProviderId(cmd.provider)) {
       // Named rather than echoed: `cmd.provider` is client-supplied and about to be rendered.
-      relay.broadcastProviders({
+      relay.broadcastProviders(ctx, {
         type: "error",
         message: `"${String(cmd.provider).slice(0, 32)}" is not a provider you can connect — expected anthropic or openai`,
       });
@@ -750,7 +868,7 @@ async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): 
     const provider = cmd.provider;
     const key = typeof cmd.key === "string" ? cmd.key.trim() : "";
     if (!key) {
-      relay.broadcastProviders({ type: "error", message: "no key was entered", provider });
+      relay.broadcastProviders(ctx, { type: "error", message: "no key was entered", provider });
       return;
     }
 
@@ -759,7 +877,7 @@ async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): 
       // The outcome, never the input. A failure message comes from the provider and names the
       // status, not the credential.
       console.log(`[providers] ${provider} key tested — ${result.ok ? "ok" : "rejected"}`);
-      relay.broadcastProviders({ type: "testResult", provider, ok: result.ok, message: result.message });
+      relay.broadcastProviders(ctx, { type: "testResult", provider, ok: result.ok, message: result.message });
       return;
     }
 
@@ -767,7 +885,7 @@ async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): 
     // `set` and nowhere else in this function.
     const written = credentials.set(PROVIDER_ENV_KEY[provider], key);
     if (!written.ok) {
-      relay.broadcastProviders({
+      relay.broadcastProviders(ctx, {
         type: "error",
         message: written.warning ?? "could not store that key",
         provider,
@@ -776,16 +894,128 @@ async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): 
     }
     // Names only, exactly as loadRuntimeEnv logs them on the way in.
     console.log(`[providers] ${provider} key set (${PROVIDER_ENV_KEY[provider]})`);
-    broadcastProviders();
+    broadcastProviders(ctx);
     // A key shadowed by the server's own shell works now and reverts on restart. Saying so is
     // the difference between a puzzling regression tomorrow and a sentence today.
     if (written.warning) {
-      relay.broadcastProviders({ type: "notice", message: written.warning, provider });
+      relay.broadcastProviders(ctx, { type: "notice", message: written.warning, provider });
     }
   } catch (err) {
     const message = (err as Error)?.message ?? String(err);
     console.error(`[providers] ${cmd.cmd} failed: ${message}`);
-    relay.broadcastProviders({ type: "error", message: `${cmd.cmd} failed: ${message}` });
+    relay.broadcastProviders(ctx, { type: "error", message: `${cmd.cmd} failed: ${message}` });
+  }
+}
+
+// --- membership: commands ---------------------------------------------------
+//
+// Who may act in this workspace, and as what. Every mutation here writes an `audit_log` row
+// inside the same transaction that makes the change — the repository does it, so there is no
+// path that alters membership without a record of who did it.
+//
+// The invite LINK is the only credential this file ever sends a browser besides the deploy
+// bearer token, and it takes the same shape for the same reason: there is no email sender in
+// this product, only a hash is stored, so the one message that carries it is the only chance
+// anybody has to see it. It goes to the socket that asked, not to the workspace — broadcasting
+// it would hand the link to every admin with a tab open.
+
+const MEMBER_COMMAND_NAMES = new Set([
+  "listMembers", "inviteMember", "revokeInvite", "setMemberRole", "removeMember",
+]);
+
+async function broadcastMembers(ctx: TenantContext): Promise<void> {
+  const [members, invites] = await Promise.all([
+    identityRepo.listMembers(ctx),
+    identityRepo.listInvites(ctx),
+  ]);
+  relay.broadcastMembers(ctx, { type: "members", members, invites });
+}
+
+async function handleMemberCommand(ctx: TenantContext, cmd: MemberCommand): Promise<void> {
+  try {
+    if (cmd.cmd === "listMembers") {
+      await broadcastMembers(ctx);
+      return;
+    }
+
+    if (cmd.cmd === "inviteMember") {
+      const role = cmd.role;
+      if (!isMemberRole(role)) {
+        relay.broadcastMembers(ctx, {
+          type: "error",
+          message: `"${String(role).slice(0, 24)}" is not a role — expected owner, admin or member`,
+        });
+        return;
+      }
+      const result = await identityRepo.createInvite(ctx, { email: String(cmd.email ?? ""), role });
+      if ("error" in result) {
+        relay.broadcastMembers(ctx, { type: "error", message: result.error });
+        return;
+      }
+      console.log(`[members] invited ${result.invite.email} as ${role}`);
+      // To the asking socket only. It is a credential.
+      relay.sendMembers(ctx, ctx.requestId, {
+        type: "inviteLink",
+        email: result.invite.email,
+        role,
+        token: result.token,
+        expiresAt: result.invite.expires_at,
+      });
+      await broadcastMembers(ctx);
+      return;
+    }
+
+    if (cmd.cmd === "revokeInvite") {
+      const ok = await identityRepo.revokeInvite(ctx, String(cmd.inviteId ?? ""));
+      if (!ok) {
+        relay.broadcastMembers(ctx, { type: "error", message: "that invitation is already gone" });
+        return;
+      }
+      await broadcastMembers(ctx);
+      return;
+    }
+
+    if (cmd.cmd === "setMemberRole") {
+      const role = cmd.role;
+      if (!isMemberRole(role)) {
+        relay.broadcastMembers(ctx, { type: "error", message: `"${String(role).slice(0, 24)}" is not a role` });
+        return;
+      }
+      const result = await identityRepo.setMemberRole(ctx, String(cmd.userId ?? ""), role);
+      if (!result.ok) {
+        relay.broadcastMembers(ctx, { type: "error", message: result.reason ?? "could not change that role" });
+        return;
+      }
+      // The membership cache is what every later request reads, and it holds positives for
+      // thirty seconds. Exact here rather than waiting it out: a demotion that takes half a
+      // minute to bite is a demotion that did not happen when somebody pressed the button.
+      contextResolver.invalidate(ctx.workspaceId, String(cmd.userId));
+      await broadcastMembers(ctx);
+      // ...and the sockets that user already has open pick the new role up on the next
+      // revalidation tick, in place, without being disconnected. See relay.revalidateAll.
+      return;
+    }
+
+    if (cmd.cmd === "removeMember") {
+      const userId = String(cmd.userId ?? "");
+      const result = await identityRepo.removeMember(ctx, userId);
+      if (!result.ok) {
+        relay.broadcastMembers(ctx, { type: "error", message: result.reason ?? "could not remove that member" });
+        return;
+      }
+      contextResolver.invalidate(ctx.workspaceId, userId);
+      // Their outstanding tickets die with the membership. A ticket minted a second before the
+      // removal is otherwise good for another thirty seconds — a small window, and one that
+      // opens a socket which then lives until the next revalidation tick.
+      await ticketStore.revoke(ctx.workspaceId, userId);
+      console.log(`[members] removed ${userId} from ${ctx.workspaceId}`);
+      await broadcastMembers(ctx);
+      return;
+    }
+  } catch (err) {
+    const message = (err as Error)?.message ?? String(err);
+    console.error(`[members] ${cmd.cmd} failed: ${message}`);
+    relay.broadcastMembers(ctx, { type: "error", message: `${cmd.cmd} failed: ${message}` });
   }
 }
 
@@ -887,7 +1117,6 @@ async function handleDeployCommand(ctx: TenantContext, cmd: DeployChannelCommand
       }
 
       case "deploy": {
-        deployContext = ctx;
         if (!isSafeAgentId(cmd.agentId)) {
           relay.broadcastDeploy(ctx, { type: "error", message: "invalid agent id" });
           return;
@@ -896,6 +1125,10 @@ async function handleDeployCommand(ctx: TenantContext, cmd: DeployChannelCommand
           relay.broadcastDeploy(ctx, { type: "error", message: "a deploy is already running" });
           return;
         }
+        // Claimed only now that the deploy is certain to start. Assigned before these guards, a
+        // REFUSED deploy redirected the running one's build log — scrubbed of secrets, but
+        // still another workspace's build output — into the refuser's deploy panel.
+        deployContext = ctx;
         const envKeys = Array.isArray(cmd.envKeys)
           ? (cmd.envKeys as unknown[]).filter((k): k is string => typeof k === "string")
           : [];
@@ -1343,9 +1576,9 @@ pool.on("exit", ({ runId, code, signal, timedOut }) => {
 // Every failure here goes out as plan_error, never as the gen channel's plain "error". That
 // one is wired to buildStore.fail() on the client and paints the build pane as a failed
 // generation — which, at plan time, would be reporting a failure that never happened.
-planner.on("started", (e) => relay.broadcastGen(contextForBuild(), { type: "plan_started", ...e }));
-planner.on("delta", (e) => relay.broadcastGen(contextForBuild(), { type: "plan_delta", ...e }));
-planner.on("discarded", (e) => relay.broadcastGen(contextForBuild(), { type: "plan_discarded", ...e }));
+planner.on("started", (e) => relay.broadcastGen(contextForPlan(), { type: "plan_started", ...e }));
+planner.on("delta", (e) => relay.broadcastGen(contextForPlan(), { type: "plan_delta", ...e }));
+planner.on("discarded", (e) => relay.broadcastGen(contextForPlan(), { type: "plan_discarded", ...e }));
 
 planner.on("plan", (e) => {
   const usage = e.usage as { cost_usd?: number; output_tokens?: number };
@@ -1355,22 +1588,30 @@ planner.on("plan", (e) => {
       `$${(usage?.cost_usd ?? 0).toFixed(5)}`,
   );
   for (const w of e.warnings) console.log(`  ! ${w}`);
-  relay.broadcastGen(contextForBuild(), { type: "plan", ...e });
+  relay.broadcastGen(contextForPlan(), { type: "plan", ...e });
 });
 
 planner.on("error", (e) => {
   console.error(`[plan] failed: ${e.message}`);
-  relay.broadcastGen(contextForBuild(), { type: "plan_error", message: e.message });
+  relay.broadcastGen(contextForPlan(), { type: "plan_error", message: e.message });
 });
 
 async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<void> {
-  buildContext = ctx;
   // A generation in flight owns the pipeline; planning the next agent mid-build would put two
   // plans and one generation on the same single-slot state.
+  //
+  // REFUSED TO THE ASKER, and the plan scope is not touched: a refusal belongs to whoever
+  // asked, and repointing the scope here would send the in-flight plan's remaining deltas to
+  // them instead of to the workspace that started it.
   if (generating) {
-    relay.broadcastGen(contextForBuild(), { type: "plan_error", message: "a generation is already in progress" });
+    relay.broadcastGen(ctx, { type: "plan_error", message: "a generation is already in progress" });
     return;
   }
+  if (planner.inFlight) {
+    relay.broadcastGen(ctx, { type: "plan_error", message: "a plan is already being written" });
+    return;
+  }
+  planContext = ctx;
   console.log(
     `[plan] planning${cmd.revisePlanId ? " (revision)" : ""} — "${cmd.prompt.slice(0, 80)}"`,
   );
@@ -1393,21 +1634,25 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
 let generating = false;
 
 async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<void> {
-  buildContext = ctx;
   if (generating) {
     // On the planned path this must NOT be the plain "error" member: that one paints the
     // build pane as a failed generation, and the pending plan is still perfectly good. The
     // check also comes before take(), so a refused click doesn't spend the plan.
+    //
+    // Answered to `ctx` — the asker — and NOT via the generation scope, which still belongs to
+    // the workspace whose build is running. This refusal repointing that scope is precisely
+    // how one tenant's generated source ended up streaming into another's build pane.
     if (cmd.planId) {
-      relay.broadcastGen(contextForBuild(), {
+      relay.broadcastGen(ctx, {
         type: "plan_error",
         message: "a generation is already in progress — this plan is still here when it finishes",
       });
     } else {
-      relay.broadcastGen(contextForBuild(), { type: "error", message: "a generation is already in progress" });
+      relay.broadcastGen(ctx, { type: "error", message: "a generation is already in progress" });
     }
     return;
   }
+  genContext = ctx;
 
   // The confirmed plan, if there is one. Everything downstream comes from the RECORD, not
   // from this command: the composer draft and the plan card's Generate button are separate
@@ -1426,7 +1671,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
       // Never fall through to an unplanned generation here. The user approved a specific
       // plan; quietly building something they never reviewed is the exact failure this gate
       // exists to prevent.
-      relay.broadcastGen(contextForBuild(), {
+      relay.broadcastGen(contextForGen(), {
         type: "plan_error",
         message: "that plan is no longer available — describe the agent again",
       });
@@ -1441,7 +1686,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     const known = new Set(loadConnectors(RUNTIME_DIR).map((c) => c.id));
     const missing = (rec.connectors ?? []).filter((id) => !known.has(id));
     if (missing.length) {
-      relay.broadcastGen(contextForBuild(), {
+      relay.broadcastGen(contextForGen(), {
         type: "plan_error",
         message:
           `the plan uses ${missing.join(", ")}, which ${missing.length > 1 ? "are" : "is"} no ` +
@@ -1460,7 +1705,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     );
     const goneMcp = approvedRefs.filter((r) => !stillThere.has(r));
     if (goneMcp.length) {
-      relay.broadcastGen(contextForBuild(), {
+      relay.broadcastGen(contextForGen(), {
         type: "plan_error",
         message:
           `the plan uses the MCP tool${goneMcp.length > 1 ? "s" : ""} ${goneMcp.join(", ")}, which ` +
@@ -1479,11 +1724,11 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
 
   generating = true;
   console.log(`[gen] generating${plan ? " from an approved plan" : ""} — "${prompt.slice(0, 80)}"`);
-  relay.broadcastGen(contextForBuild(), { type: "started", prompt });
+  relay.broadcastGen(contextForGen(), { type: "started", prompt });
 
-  const onStart = (e: { path: string }) => relay.broadcastGen(contextForBuild(), { type: "file_start", ...e });
-  const onDelta = (e: { path: string; text: string }) => relay.broadcastGen(contextForBuild(), { type: "file_delta", ...e });
-  const onEnd = (e: { path: string }) => relay.broadcastGen(contextForBuild(), { type: "file_end", ...e });
+  const onStart = (e: { path: string }) => relay.broadcastGen(contextForGen(), { type: "file_start", ...e });
+  const onDelta = (e: { path: string; text: string }) => relay.broadcastGen(contextForGen(), { type: "file_delta", ...e });
+  const onEnd = (e: { path: string }) => relay.broadcastGen(contextForGen(), { type: "file_end", ...e });
 
   const cleanup = () => {
     generating = false;
@@ -1506,7 +1751,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
         // understate it every single time.
         (planCost ? ` + $${planCost.toFixed(5)} plan = $${(planCost + (usage?.cost_usd ?? 0)).toFixed(5)}` : ""),
     );
-    relay.broadcastGen(contextForBuild(), { type: "done", ...e });
+    relay.broadcastGen(contextForGen(), { type: "done", ...e });
     void syncAgents().then(() => relay.broadcastAgents());
     cleanup();
   };
@@ -1514,7 +1759,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   const onError = (e: { message: string; problems?: string[] }) => {
     console.error(`[gen] failed: ${e.message}`);
     for (const p of e.problems ?? []) console.error(`  - ${p}`);
-    relay.broadcastGen(contextForBuild(), { type: "error", ...e });
+    relay.broadcastGen(contextForGen(), { type: "error", ...e });
     cleanup();
   };
 
@@ -1537,48 +1782,56 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
 // --- editing (fix loop) -----------------------------------------------------
 // Streams into the "edit" channel. Like generation, nothing here touches the trace store
 // or the frozen event schema. Listeners are permanent — every event carries its ids.
-editor.on("file_start", (e) => relay.broadcastEdit(contextForBuild(), { type: "file_start", ...e }));
-editor.on("file_delta", (e) => relay.broadcastEdit(contextForBuild(), { type: "file_delta", ...e }));
-editor.on("file_end", (e) => relay.broadcastEdit(contextForBuild(), { type: "file_end", ...e }));
+editor.on("file_start", (e) => relay.broadcastEdit(contextForEdit(), { type: "file_start", ...e }));
+editor.on("file_delta", (e) => relay.broadcastEdit(contextForEdit(), { type: "file_delta", ...e }));
+editor.on("file_end", (e) => relay.broadcastEdit(contextForEdit(), { type: "file_end", ...e }));
 
 editor.on("proposal", (e) => {
   console.log(
     `[edit] proposal for ${e.agentId} — ${e.files.length} file(s): ${e.summary}`,
   );
-  relay.broadcastEdit(contextForBuild(), { type: "proposal", ...e });
+  relay.broadcastEdit(contextForEdit(), { type: "proposal", ...e });
 });
 
 editor.on("applied", (e) => {
   console.log(`[edit] applied v${e.version} to ${e.agentId}: ${e.summary}`);
-  relay.broadcastEdit(contextForBuild(), { type: "applied", ...e });
+  relay.broadcastEdit(contextForEdit(), { type: "applied", ...e });
   void syncAgents().then(() => relay.broadcastAgents());
-  relay.broadcastAgentFiles(e.agentId);
+  relay.broadcastAgentFiles(contextForEdit(), e.agentId);
   // An edit may have changed the graph structure — invalidate and re-push.
   graphCache.delete(e.agentId);
-  void relay.broadcastAgentGraph(e.agentId);
+  void relay.broadcastAgentGraph(contextForEdit(), e.agentId);
 });
 
 editor.on("undone", (e) => {
   console.log(`[edit] undid v${e.version} on ${e.agentId}`);
-  relay.broadcastEdit(contextForBuild(), { type: "undone", ...e });
+  relay.broadcastEdit(contextForEdit(), { type: "undone", ...e });
   void syncAgents().then(() => relay.broadcastAgents());
-  relay.broadcastAgentFiles(e.agentId);
+  relay.broadcastAgentFiles(contextForEdit(), e.agentId);
   graphCache.delete(e.agentId);
-  void relay.broadcastAgentGraph(e.agentId);
+  void relay.broadcastAgentGraph(contextForEdit(), e.agentId);
 });
 
-editor.on("discarded", (e) => relay.broadcastEdit(contextForBuild(), { type: "discarded", ...e }));
+editor.on("discarded", (e) => relay.broadcastEdit(contextForEdit(), { type: "discarded", ...e }));
 
 editor.on("error", (e) => {
   console.error(`[edit] failed: ${e.message}`);
   for (const p of e.problems ?? []) console.error(`  - ${p}`);
-  relay.broadcastEdit(contextForBuild(), { type: "error", ...e });
+  relay.broadcastEdit(contextForEdit(), { type: "error", ...e });
 });
 
 function editAgent(ctx: TenantContext, agentId: string, instruction: string): void {
-  buildContext = ctx;
+  // Refused here rather than inside `propose`, so the refusal is answered to the asker and the
+  // edit scope is left pointing at the workspace whose edit is actually running. The editor
+  // refuses a second edit either way; what this adds is that a refused one cannot redirect the
+  // in-flight edit's diff — which is another workspace's source — to whoever asked second.
+  if (editor.inFlight) {
+    relay.broadcastEdit(ctx, { type: "error", message: "an edit is already in progress", agentId });
+    return;
+  }
+  editContext = ctx;
   console.log(`[edit] ${agentId} — "${instruction.slice(0, 80)}"`);
-  relay.broadcastEdit(contextForBuild(), { type: "started", agentId, instruction });
+  relay.broadcastEdit(contextForEdit(), { type: "started", agentId, instruction });
   void editor.propose(agentId, instruction);
 }
 
@@ -1796,18 +2049,20 @@ function buildExplainContext(cmd: ExplainCommand): string {
 }
 
 function explainAgent(ctx: TenantContext, cmd: ExplainCommand): void {
-  buildContext = ctx;
   if (explaining) {
-    relay.broadcastReply(contextForBuild(), { type: "error", agentId: cmd.agentId, message: "already answering — one at a time" });
+    // To the asker, not to the scope: the answer still streaming belongs to somebody else, and
+    // an explanation quotes the agent's system prompt and tool source back to the reader.
+    relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId, message: "already answering — one at a time" });
     return;
   }
+  replyContext = ctx;
   explaining = true;
-  relay.broadcastReply(contextForBuild(), { type: "started", agentId: cmd.agentId, question: cmd.question });
+  relay.broadcastReply(contextForReply(), { type: "started", agentId: cmd.agentId, question: cmd.question });
   const context = buildExplainContext(cmd);
   void streamExplain(context, cmd.question, {
-    onDelta: (text) => relay.broadcastReply(contextForBuild(), { type: "delta", agentId: cmd.agentId, text }),
-    onDone: () => { explaining = false; relay.broadcastReply(contextForBuild(), { type: "done", agentId: cmd.agentId }); },
-    onError: (message) => { explaining = false; relay.broadcastReply(contextForBuild(), { type: "error", agentId: cmd.agentId, message }); },
+    onDelta: (text) => relay.broadcastReply(contextForReply(), { type: "delta", agentId: cmd.agentId, text }),
+    onDone: () => { explaining = false; relay.broadcastReply(contextForReply(), { type: "done", agentId: cmd.agentId }); },
+    onError: (message) => { explaining = false; relay.broadcastReply(contextForReply(), { type: "error", agentId: cmd.agentId, message }); },
   });
 }
 

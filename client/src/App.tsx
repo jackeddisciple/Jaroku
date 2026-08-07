@@ -6,6 +6,7 @@ import { StatusBar } from "./components/StatusBar.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { TopBar } from "./components/TopBar.tsx";
 import { CodeOverlay } from "./components/CodeOverlay.tsx";
+import { SignIn } from "./components/SignIn.tsx";
 import { McpConfirmModal } from "./components/McpConfirmModal.tsx";
 import { ComposerColumn } from "./components/onboarding/ComposerColumn.tsx";
 import { ConnectProviderStep } from "./components/onboarding/ConnectProviderStep.tsx";
@@ -13,11 +14,13 @@ import { WelcomeStep } from "./components/onboarding/WelcomeStep.tsx";
 import { useOnboarding } from "./components/onboarding/useOnboarding.ts";
 import { sendLoadAgentFiles, startSocket } from "./lib/socket.ts";
 import { useBuildStore } from "./store/buildStore.ts";
+import { useSessionStore } from "./store/sessionStore.ts";
 import { useTraceStore } from "./store/traceStore.ts";
 
 export function App() {
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const connected = useTraceStore((s) => s.connection === "open");
+  const sessionStatus = useSessionStore((s) => s.status);
 
   // First run. Everything below is the normal app once `phase` is "complete", which it is for
   // every session after the first — see components/onboarding/useOnboarding.ts.
@@ -32,6 +35,16 @@ export function App() {
   useEffect(() => {
     if (activeAgentId && connected) sendLoadAgentFiles(activeAgentId);
   }, [activeAgentId, connected]);
+
+  // BEFORE EVERYTHING, INCLUDING ONBOARDING. There is no session, so there is no workspace,
+  // and every screen below this line — the welcome step included — is a view of one
+  // workspace's data. Rendering any of it would mean showing a first-run flow to somebody who
+  // may well have been using the product for months in an account they are not signed into.
+  //
+  // Only `signed_out` gets this. `connecting` deliberately does not: a dropped network must
+  // not throw a sign-in form over a working session, which is precisely the "retry vs stop"
+  // distinction lib/socket.ts exists to keep straight.
+  if (sessionStatus === "signed_out") return <SignIn />;
 
   // Steps 1 and 2 replace the layout entirely rather than covering it. Neither has anything to
   // say about an agent, a run or a trace, so mounting three empty columns underneath them

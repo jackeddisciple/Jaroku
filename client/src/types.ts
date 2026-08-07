@@ -584,7 +584,25 @@ export type DeployMessage =
 
 // --- server → client channel messages (see server/src/wsRelay.ts) ---
 
+// The session channel: the only one about the CONNECTION rather than the work. Every message
+// on it means this connection is over or about to be — see server/src/wsRelay.ts SessionEvent.
+export type SessionMessage =
+  | { channel: "session"; type: "expiring"; expiresAt: number }
+  | { channel: "session"; type: "expired" }
+  | { channel: "session"; type: "revoked"; message: string }
+  | { channel: "session"; type: "workspace_changed"; message: string }
+  | { channel: "session"; type: "role_changed"; role: string };
+
+/** Membership. Full snapshots, except `inviteLink`, which carries a credential once. */
+export type MemberMessage =
+  | { channel: "members"; type: "members"; members: unknown[]; invites: unknown[] }
+  | { channel: "members"; type: "inviteLink"; email: string; role: string; token: string; expiresAt: string }
+  | { channel: "members"; type: "error"; message: string }
+  | { channel: "members"; type: "notice"; message: string };
+
 export type ServerMessage =
+  | SessionMessage
+  | MemberMessage
   | { channel: "history"; runs: RunSummary[] }
   | { channel: "trace"; event: TraceEvent }
   | { channel: "runSteps"; runId: string; steps: Step[] }
@@ -611,6 +629,13 @@ export type ServerMessage =
 // --- client → server commands ---
 
 export type ClientCommand =
+  // Membership. `acceptInvite` is deliberately absent: the accepter is not a member yet, so
+  // they have no socket scoped to the workspace they are joining — it is POST /v1/invites/accept.
+  | { cmd: "listMembers" }
+  | { cmd: "inviteMember"; email: string; role: string }
+  | { cmd: "revokeInvite"; inviteId: string }
+  | { cmd: "setMemberRole"; userId: string; role: string }
+  | { cmd: "removeMember"; userId: string }
   | { cmd: "run"; input?: string; provider?: string; model?: string; agentId?: string }
   | { cmd: "loadRun"; runId: string }
   // `mcpTools` is per-TOOL (`"server/tool"` refs), never per-server: a connected server's

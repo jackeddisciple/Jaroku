@@ -105,6 +105,17 @@ export class Planner extends EventEmitter<PlannerEvents> {
   }
 
   /**
+   * Whether a plan is being written, readable from outside.
+   *
+   * `plan()` refuses a second one anyway; this is what lets the CALLER refuse first, so that a
+   * refused request never repoints the workspace scope the in-flight plan's deltas are being
+   * broadcast to. See `planContext` in index.ts.
+   */
+  get inFlight(): boolean {
+    return this.busy;
+  }
+
+  /**
    * Consume the pending plan. Returns null if the id doesn't match — a stale card in another
    * tab, or a second click on a plan already spent. The caller must treat that as a refusal,
    * never as "generate without the plan": the user approved a specific plan, and silently

@@ -3,11 +3,14 @@
 // run history snapshot; thereafter it receives live events as they arrive.
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { Socket } from "node:net";
 import { readFile } from "node:fs/promises";
 import { WebSocketServer, WebSocket } from "ws";
 import type { TraceStore } from "./store.ts";
 import type { TenantContext } from "./db/tenant.ts";
 import type { TraceEvent } from "./types.ts";
+import type { Router } from "./http/router.ts";
+import { can, capabilityFor } from "./auth/capabilities.ts";
 
 export type RunCommand = {
   cmd: "run";
@@ -311,6 +314,48 @@ const MCP_COMMANDS = new Set([
   "setMcpServerAuth", "resolveMcpConfirm",
 ]);
 
+// Membership. Who may act in this workspace, and as what.
+//
+// Forwarded like every other mutation, and grouped so the switch stays readable. Reads are
+// forwarded too rather than answered locally, which is a departure from `listAgents` and
+// `listMcpServers` — those are lists of things the workspace owns, and this is a list of
+// PEOPLE, with their email addresses. The relay holds no identity repository and should not
+// grow one; the app answers on the `members` channel.
+//
+// Accepting an invite is deliberately NOT here. The accepter is not a member yet, so they have
+// no socket scoped to the workspace they are joining — it is `POST /v1/invites/accept`, over
+// HTTP, with a bearer token and nothing else. See auth/session.ts.
+export type ListMembersCommand = { cmd: "listMembers" };
+export type InviteMemberCommand = { cmd: "inviteMember"; email: string; role: string };
+export type RevokeInviteCommand = { cmd: "revokeInvite"; inviteId: string };
+export type SetMemberRoleCommand = { cmd: "setMemberRole"; userId: string; role: string };
+export type RemoveMemberCommand = { cmd: "removeMember"; userId: string };
+
+export type MemberCommand =
+  | ListMembersCommand
+  | InviteMemberCommand
+  | RevokeInviteCommand
+  | SetMemberRoleCommand
+  | RemoveMemberCommand;
+
+const MEMBER_COMMANDS = new Set([
+  "listMembers", "inviteMember", "revokeInvite", "setMemberRole", "removeMember",
+]);
+
+// The members channel. Every mutation answers with a full snapshot, the same discipline the
+// eval, MCP, provider and deploy channels follow — a client replaces rather than merges, so it
+// can never hold a half-applied view of who is in the workspace.
+//
+// `inviteLink` is the exception, and it is the second credential this file ever sends to a
+// browser (the first is the deploy bearer token). It is shown once because there is no email
+// sender here to hand it to, and only a hash of it is stored — so this message is the only
+// chance anybody has to see it, exactly like `serveToken`.
+export type MemberEvent =
+  | { type: "members"; members: unknown[]; invites: unknown[] }
+  | { type: "inviteLink"; email: string; role: string; token: string; expiresAt: string }
+  | { type: "error"; message: string }
+  | { type: "notice"; message: string };
+
 // Unified composer "explain": a prose answer about a step / node / the agent, built from
 // in-context data — the one genuinely-new composer intent (no code change).
 export type ExplainSubject =
@@ -341,7 +386,8 @@ export type ClientCommand =
   | ProviderCommand
   | ListProvidersCommand
   | DeployChannelCommand
-  | ListDeploymentsCommand;
+  | ListDeploymentsCommand
+  | MemberCommand;
 
 /** Eval-channel commands, grouped so the forwarding switch stays readable. */
 export type EvalCommand =
@@ -386,7 +432,8 @@ export type ForwardedCommand =
   | EvalCommand
   | McpCommand
   | ProviderCommand
-  | DeployChannelCommand;
+  | DeployChannelCommand
+  | MemberCommand;
 
 // Generation rides its own channel, deliberately parallel to "trace". It never enters the
 // trace store or the event schema — schema/events.md v1 stays frozen.
@@ -578,12 +625,166 @@ export type DeployEvent =
   | { type: "error"; message: string; deploymentId?: string }
   | { type: "notice"; message: string; deploymentId?: string };
 
+// The session channel: the only one that is about the CONNECTION rather than about the work.
+//
+// It exists because a WebSocket is the one thing in this system with no natural expiry. An
+// HTTP request presents a token and is checked; a socket is checked once, at the upgrade, and
+// then lives for as long as a browser tab is open. Eight hours later it is still acting on a
+// membership that may have been revoked in the first ten minutes, and nothing about the socket
+// itself would ever notice.
+//
+// So a socket is re-checked on a timer, and what it is told is one of these. Every one of them
+// means "this connection is over, open a new one" — a client that wants to keep working gets a
+// fresh token and a fresh ticket, which puts it back through the whole membership check.
+export type SessionEvent =
+  // The token behind this socket is close to expiring. The client should refresh and
+  // reconnect at its convenience, rather than being cut off mid-generation.
+  | { type: "expiring"; expiresAt: number }
+  | { type: "expired" }
+  // No longer a member. The socket closes immediately: it is not a warning.
+  | { type: "revoked"; message: string }
+  // The workspace itself is gone. Distinct from `revoked` because the client's move is
+  // different — reconnect into another workspace it belongs to, rather than sign in again.
+  | { type: "workspace_changed"; message: string }
+  // Still a member, at a different role. The socket stays open and re-authorises against the
+  // new one; a demotion does not need to interrupt somebody mid-sentence, it needs to stop
+  // them doing the thing they no longer may.
+  | { type: "role_changed"; role: string };
+
+/**
+ * Why a socket was closed, in the 4000–4999 application range.
+ *
+ * The event above says it in words, but a client can miss the last frame before a close — so
+ * the code carries the same decision in the one place that is guaranteed to arrive. The
+ * distinction the client needs is exactly one bit: reconnect, or stop and show sign-in.
+ */
+export const CLOSE_UNAUTHORISED = 4001;
+export const CLOSE_RECONNECT = 4002;
+
 export type DebugEvent =
   | { type: "paused"; runId: string; seq: number }
   | { type: "resumed"; runId: string; seqOffset: number }
   | { type: "boundary"; runId: string; seq: number; next: string[] }
   | { type: "branched"; parentRunId: string; branchId: string; fromSeq: number }
   | { type: "error"; runId?: string; message: string };
+
+/**
+ * What a socket is, once it has been let in.
+ *
+ * The context is the scope every read and every forwarded command is answered in. `expiresAt`
+ * is the token's expiry, carried so the revalidation timer can end a socket whose credential
+ * has run out rather than letting it live until somebody closes the tab.
+ */
+export interface SocketSession {
+  context: TenantContext;
+  /** Unix seconds, or null when the socket was opened without a token (the dev path). */
+  expiresAt?: number | null;
+  userId?: string | null;
+}
+
+/**
+ * Decide whether an upgrade is allowed, and in which workspace.
+ *
+ * THROWING REFUSES THE CONNECTION. That is the contract, and it is why this returns a session
+ * rather than taking a callback: a socket that opens and is then closed has already been
+ * counted, has already had a snapshot queued for it, and looks to a client exactly like a
+ * server that dropped the connection. A refusal has to happen before the handshake completes,
+ * and it has to be an HTTP status the client can read.
+ */
+export type SocketAuthorizer = (
+  req: IncomingMessage,
+) => TenantContext | SocketSession | Promise<TenantContext | SocketSession>;
+
+/**
+ * Which channel a command's answer — including a refusal — belongs on.
+ *
+ * A client listens per channel. A "you may not do that" broadcast on the wrong one is
+ * indistinguishable from nothing arriving, so the panel that made the request sits waiting
+ * while an unrelated one shows an error about something it never asked for.
+ *
+ * The default is `log`, deliberately visible rather than silent: every channel below is a
+ * feature's own, and a command with no feature is still worth a line the user can see.
+ */
+export const COMMAND_CHANNEL: Record<string, string> = {
+  // These five answer on channels whose payload IS the data — `trace`, `agents`, `agentFiles`,
+  // `graph`, `runSteps` — and none of those has an error shape a client would recognise.
+  // Inventing one would mean teaching five stores to distinguish a refusal from a snapshot, so
+  // their refusals go to `log`, which the status bar already renders. Listed explicitly rather
+  // than left to the fallback: "log because that is right" and "log because nobody decided"
+  // must not look the same.
+  run: "log", loadRun: "log", listAgents: "log", loadAgentFiles: "log", loadAgentGraph: "log",
+
+  planAgent: "gen", discardPlan: "gen", generate: "gen",
+  edit: "edit", applyEdit: "edit", undoEdit: "edit", discardEdit: "edit",
+  pauseRun: "debug", resumeRun: "debug", branchRun: "debug",
+  explain: "reply",
+  createDataset: "eval", renameDataset: "eval", deleteDataset: "eval", listDatasets: "eval",
+  loadDataset: "eval", addExample: "eval", updateExample: "eval", deleteExample: "eval",
+  promoteTestInput: "eval", startEval: "eval", cancelEval: "eval", loadRubric: "eval",
+  saveRubric: "eval", loadEvalResults: "eval", listEvals: "eval", estimateEval: "eval",
+  listMcpServers: "mcp", addMcpServer: "mcp", removeMcpServer: "mcp", rediscoverMcpServer: "mcp",
+  setMcpServerAuth: "mcp", setMcpToolImpact: "mcp", resolveMcpConfirm: "mcp",
+  listProviders: "providers", setProviderKey: "providers", testProviderKey: "providers",
+  listMembers: "members", inviteMember: "members", revokeInvite: "members",
+  setMemberRole: "members", removeMember: "members",
+  listDeployments: "deploy", planDeploy: "deploy", deploy: "deploy", cancelDeploy: "deploy",
+  forgetDeployment: "deploy", loadDeployLogs: "deploy", setRailwayToken: "deploy",
+  testRailwayToken: "deploy",
+};
+
+export function channelFor(cmd: string): string {
+  return Object.prototype.hasOwnProperty.call(COMMAND_CHANNEL, cmd) ? COMMAND_CHANNEL[cmd]! : "log";
+}
+
+/** What a re-check of an open socket concluded. */
+export type SessionVerdict =
+  | { ok: true; role: TenantContext["role"] }
+  | { ok: false; reason: "revoked" | "workspace_gone" };
+
+/** How close to expiry a token gets before the client is told to refresh. */
+export const EXPIRY_WARNING_S = 300;
+
+/** A refusal with an HTTP status, for the upgrade path. */
+export class UpgradeRefused extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "UpgradeRefused";
+  }
+}
+
+const asSession = (v: TenantContext | SocketSession): SocketSession =>
+  "context" in v ? v : { context: v, expiresAt: null, userId: v.actorUserId };
+
+/**
+ * Where the upgrade handler leaves its answer for the connection handler.
+ *
+ * A symbol rather than a string property, so nothing that iterates a request's own keys —
+ * a logger, a serialiser — can pick up a resolved session and put it somewhere.
+ */
+const SESSION = Symbol("jaroku.socketSession");
+type AuthorizedRequest = IncomingMessage & { [SESSION]?: SocketSession };
+
+/**
+ * Refuse an upgrade with a status the client can read, then close.
+ *
+ * Written by hand because at this point there is no `ServerResponse` — the socket has been
+ * detached from the HTTP server for the handshake. The body is plain text: a client that got
+ * this far is reading a status line, and nothing here is machine-parsed.
+ */
+function refuseUpgrade(socket: Socket, status: number, message: string): void {
+  const reason = status === 403 ? "Forbidden" : status === 401 ? "Unauthorized" : "Bad Request";
+  const body = `${message}\n`;
+  socket.write(
+    `HTTP/1.1 ${status} ${reason}\r\n` +
+      `content-type: text/plain; charset=utf-8\r\n` +
+      `content-length: ${Buffer.byteLength(body)}\r\n` +
+      `connection: close\r\n\r\n${body}`,
+  );
+  socket.destroy();
+}
 
 export interface RelayOptions {
   port: number;
@@ -602,8 +803,22 @@ export interface RelayOptions {
    * A workspace switch is a NEW socket, deliberately, because a switch that mutated a live
    * one would have to reason about the reads already in flight on it.
    */
-  contextFor: (req: IncomingMessage) => TenantContext | Promise<TenantContext>;
+  contextFor: SocketAuthorizer;
+  /**
+   * Which `Origin` values may open a socket. Absent means every one, which is only correct
+   * for a test — see auth/origin.ts for why this is not optional in front of a browser.
+   */
+  originPolicy?: { allows(origin: string | undefined): boolean };
   clientHtmlPath: string;
+  /**
+   * The HTTP surface, in front of the static fallback client.
+   *
+   * A browser cannot put an `Authorization` header on a WebSocket, so the credential exchange
+   * has to happen over HTTP before the socket exists — which is why this server grew a real
+   * HTTP side at all. The router answers what it claims and reports what it does not, so
+   * `GET /` stays the debug client without the router needing to know that.
+   */
+  router?: Router;
   // "loadRun", "listAgents", "loadAgentFiles", "loadAgentGraph", "listMcpServers" and
   // "listProviders" are answered locally; the rest are forwarded.
   onCommand?: (cmd: ForwardedCommand, ctx: TenantContext) => void;
@@ -617,6 +832,16 @@ export interface RelayOptions {
   listMcpServers?: (ctx: TenantContext) => unknown[] | Promise<unknown[]>;
   /** Which provider keys are set, by name. Never a value — see providers.ts. */
   listProviders?: () => unknown[];
+  /**
+   * Re-check an open socket's session. Called on a timer; absent means never.
+   *
+   * The relay deliberately knows nothing about memberships or tokens — it asks, and acts on
+   * the answer. That keeps the identity layer in one place and means this file has no reason
+   * to import a repository.
+   */
+  revalidate?: (session: SocketSession) => Promise<SessionVerdict>;
+  /** How often to ask. Default 60s; a socket lives hours, so this is not a hot path. */
+  revalidateMs?: number;
   /** Every deployment, plus whether a Railway token is configured. Names only. */
   listDeployments?: (ctx: TenantContext) =>
     | { deployments: unknown[]; railwayConfigured: boolean }
@@ -636,6 +861,11 @@ export class WsRelay {
    * `broadcastHistory` and `broadcastAgents`, which now build per recipient.
    */
   private contexts = new Map<WebSocket, TenantContext>();
+  /** The fuller picture per socket: who, and when their credential runs out. */
+  private sessions = new Map<WebSocket, SocketSession>();
+  /** Sockets already told their token is nearly out, so they are told once and not per tick. */
+  private warned = new WeakSet<WebSocket>();
+  private revalidator?: ReturnType<typeof setInterval>;
   private store: TraceStore;
   private onCommand?: (cmd: ForwardedCommand, ctx: TenantContext) => void;
 
@@ -643,14 +873,31 @@ export class WsRelay {
     this.store = opts.store;
     this.onCommand = opts.onCommand;
 
-    this.http = createServer((req, res) => this.serveStatic(req, res));
-    this.wss = new WebSocketServer({ server: this.http });
+    this.http = createServer((req, res) => {
+      void this.serveHttp(req, res);
+    });
+    // `noServer`, not `server`. With `server` the library completes the handshake and the only
+    // way to refuse is to close an already-open socket — which the client cannot distinguish
+    // from a network drop, and which its reconnect loop then retries forever. Doing the
+    // upgrade by hand means a refusal is an HTTP status the client can read and act on.
+    this.wss = new WebSocketServer({ noServer: true });
+    this.http.on("upgrade", (req, socket, head) => {
+      void this.upgrade(req, socket as Socket, head);
+    });
 
     this.wss.on("connection", (ws, req) => {
       this.clients.add(ws);
       // Resolved once, here, and held for the life of the socket. Every read this connection
       // asks for and every command it forwards is answered in this workspace and no other.
-      const pending = Promise.resolve(this.opts.contextFor(req));
+      //
+      // By the time this fires the authoriser has already run and succeeded in `upgrade` —
+      // this reads its answer out of the request rather than asking again, so a ticket is
+      // consumed exactly once per connection.
+      const authorized = (req as AuthorizedRequest)[SESSION];
+      const pending: Promise<TenantContext> = authorized
+        ? Promise.resolve(authorized.context)
+        : Promise.resolve(asSession(this.opts.contextFor(req) as TenantContext)).then((s) => s.context);
+      if (authorized) this.sessions.set(ws, authorized);
       pending.then((ctx) => this.contexts.set(ws, ctx)).catch(() => {});
       const withContext = async (fn: (ctx: TenantContext) => Promise<void> | void): Promise<void> => {
         await fn(await pending);
@@ -681,6 +928,184 @@ export class WsRelay {
         try {
           const msg = JSON.parse(data.toString()) as ClientCommand;
           if (!msg || typeof msg.cmd !== "string") return;
+          // AUTHORISATION, BEFORE ANYTHING ELSE LOOKS AT THE MESSAGE.
+          //
+          // The socket already proved which workspace it acts in — that was the ticket. This is
+          // the second question: whether the ROLE it holds there may do this particular thing.
+          // It happens here, once, rather than in fifty handlers, and a command with no
+          // capability is refused rather than allowed, so a command added without an entry in
+          // the matrix fails loudly instead of arriving ungated.
+          void this.authorized(ws, msg.cmd, pending).then((allowed) => {
+            if (allowed) this.dispatch(ws, msg, pending);
+          });
+        } catch {
+          /* ignore malformed client messages */
+        }
+      });
+      const forget = (): void => {
+        this.clients.delete(ws);
+        this.contexts.delete(ws);
+        this.sessions.delete(ws);
+      };
+      ws.on("close", forget);
+      ws.on("error", forget);
+    });
+
+    this.http.listen(opts.port, () => {
+      console.log(`[relay] http+ws listening on http://localhost:${opts.port}`);
+    });
+
+    if (opts.revalidate) {
+      this.revalidator = setInterval(() => {
+        void this.revalidateAll();
+      }, opts.revalidateMs ?? 60_000);
+      // The process must still be able to exit. A timer that keeps Node alive turns every
+      // test that forgets to close a relay into a hang, and turns SIGTERM into a wait.
+      this.revalidator.unref?.();
+    }
+  }
+
+  /**
+   * Re-check every open socket, and end the ones that should no longer be open.
+   *
+   * WHAT THIS CATCHES that nothing else does: a socket authorised eight hours ago on a
+   * membership revoked seven hours ago. Every HTTP request re-checks; a socket is checked once,
+   * at the upgrade, and then never again by anything.
+   *
+   * The membership read goes AROUND the resolver's cache — see `stillAMember`. A cached
+   * positive is precisely what a revocation needs to see past, and this runs once a minute per
+   * socket, which is not a load worth caching away.
+   */
+  async revalidateAll(): Promise<void> {
+    const revalidate = this.opts.revalidate;
+    if (!revalidate) return;
+    const nowS = Math.floor(Date.now() / 1000);
+
+    for (const [ws, session] of [...this.sessions]) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      try {
+        // Expiry first, because it needs no query and because a socket whose credential has
+        // run out should not cost a database round trip to close.
+        if (typeof session.expiresAt === "number") {
+          if (nowS >= session.expiresAt) {
+            this.endSession(ws, { type: "expired" }, CLOSE_UNAUTHORISED);
+            continue;
+          }
+          if (session.expiresAt - nowS <= EXPIRY_WARNING_S && !this.warned.has(ws)) {
+            // A warning, not a close. Cutting somebody off mid-generation because their token
+            // has four minutes left would be the server creating the outage it is warning
+            // about. Once per socket, or a client gets one of these every minute.
+            this.warned.add(ws);
+            this.sendTo(ws, { channel: "session", type: "expiring", expiresAt: session.expiresAt });
+          }
+        }
+
+        const verdict = await revalidate(session);
+        if (!verdict.ok) {
+          if (verdict.reason === "workspace_gone") {
+            this.endSession(
+              ws,
+              { type: "workspace_changed", message: "that workspace no longer exists" },
+              CLOSE_RECONNECT,
+            );
+          } else {
+            this.endSession(
+              ws,
+              { type: "revoked", message: "your access to this workspace was removed" },
+              CLOSE_UNAUTHORISED,
+            );
+          }
+          continue;
+        }
+        if (verdict.role !== session.context.role) {
+          // A role change does NOT close the socket. The connection is still legitimately
+          // theirs; what changed is what it may do, and the capability check at the door reads
+          // this context on every command — so updating it here is the whole of the
+          // enforcement. Interrupting the connection would be theatre.
+          const updated: TenantContext = { ...session.context, role: verdict.role };
+          this.sessions.set(ws, { ...session, context: updated });
+          this.contexts.set(ws, updated);
+          this.sendTo(ws, { channel: "session", type: "role_changed", role: verdict.role });
+        }
+      } catch (err) {
+        // A failed re-check does NOT close the socket. The database being briefly unavailable
+        // is our problem, and signing every user out over it would turn a blip into an outage —
+        // the same reasoning the JWKS cache applies to a failed refresh. The next tick asks
+        // again, sixty seconds from now.
+        console.error("[relay] session revalidation failed:", (err as Error).message);
+      }
+    }
+  }
+
+  /** Tell the socket why, then close it with a code that survives a dropped frame. */
+  private endSession(ws: WebSocket, event: SessionEvent, code: number): void {
+    this.sendTo(ws, { channel: "session", ...event });
+    console.log(`[relay] closing a socket: ${event.type}`);
+    // A beat, so the frame above is written before the close. `ws.close()` flushes queued
+    // frames, but the client still has to process the message — and the close code carries the
+    // same decision, so nothing is lost if it does not.
+    setTimeout(() => ws.close(code, event.type), 20);
+  }
+
+  /**
+   * May this socket's role run this command?
+   *
+   * A refusal is ANSWERED, on the channel the command belongs to, rather than dropped. A
+   * client that silently gets nothing back cannot tell "you may not" from "the server is
+   * broken", and the UI's only honest response to the second is to keep waiting.
+   */
+  private async authorized(ws: WebSocket, cmd: string, pending: Promise<TenantContext>): Promise<boolean> {
+    let ctx: TenantContext;
+    try {
+      ctx = await this.contextOf(ws, pending);
+    } catch {
+      return false;
+    }
+    const capability = capabilityFor(cmd);
+    if (!capability) {
+      // Unclassified is refused, not allowed. `test:capabilities` asserts this cannot happen
+      // for any command the relay knows, so reaching here means a command was added without a
+      // decision about who may run it — and defaulting that to "anyone" is the hole.
+      console.warn(`[relay] refused unclassified command "${cmd}"`);
+      this.sendTo(ws, {
+        channel: channelFor(cmd),
+        type: "error",
+        message: `"${cmd}" is not a command this server authorises`,
+      });
+      return false;
+    }
+    if (can(ctx.role, capability)) return true;
+    this.sendTo(ws, {
+      channel: channelFor(cmd),
+      type: "error",
+      message: `a ${ctx.role} cannot do this — it needs ${capability}`,
+    });
+    return false;
+  }
+
+  /**
+   * The socket's CURRENT context, not the one it connected with.
+   *
+   * These differ exactly when revalidation has changed a role mid-connection, and reading the
+   * captured one there would make a promotion or demotion a notification rather than an
+   * enforcement — the client would be told its role changed while every command it sent was
+   * still judged against the old one. The map is authoritative from the moment the upgrade
+   * resolves; the promise is only for the handful of milliseconds before that.
+   */
+  private async contextOf(ws: WebSocket, pending: Promise<TenantContext>): Promise<TenantContext> {
+    return this.contexts.get(ws) ?? (await pending);
+  }
+
+  /** Route an authorised command: answered locally, or forwarded to the app. */
+  private dispatch(ws: WebSocket, msg: ClientCommand, pending: Promise<TenantContext>): void {
+    // Every branch below resolves through this, so a forwarded command carries the role the
+    // socket holds NOW — the same one `authorized` just judged it against.
+    const live = this.contextOf(ws, pending);
+    const withContext = async (fn: (ctx: TenantContext) => Promise<void> | void): Promise<void> => {
+      await fn(await live);
+    };
+    try {
+      {
           if (msg.cmd === "run") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "generate" && typeof msg.prompt === "string") {
@@ -703,11 +1128,11 @@ export class WsRelay {
               channel: "agentFiles",
               agentId,
               files: (await this.opts.listAgentFiles?.(ctx, agentId)) ?? [],
-            }), pending);
+            }), live);
           } else if (msg.cmd === "loadAgentGraph" && typeof msg.agentId === "string") {
             // Async: spawn introspection, then answer only the requesting client.
             const agentId = msg.agentId;
-            void pending
+            void live
               .then((ctx) => this.opts.getAgentGraph?.(ctx, agentId))
               .then((graph) => this.sendTo(ws, { channel: "graph", agentId, graph: graph ?? null }))
               .catch((err) =>
@@ -730,13 +1155,13 @@ export class WsRelay {
               channel: "mcp",
               type: "servers",
               servers: (await this.opts.listMcpServers?.(ctx)) ?? [],
-            }), pending);
+            }), live);
           } else if (msg.cmd === "listDeployments") {
             void this.answer(ws, async (ctx) => ({
               channel: "deploy",
               type: "deployments",
               ...((await this.opts.listDeployments?.(ctx)) ?? { deployments: [], railwayConfigured: false }),
-            }), pending);
+            }), live);
           } else if (msg.cmd === "listProviders") {
             this.sendTo(ws, {
               channel: "providers",
@@ -755,6 +1180,10 @@ export class WsRelay {
             // Shape-checked in the app, which owns the registry and can answer with a
             // precise error on the "mcp" channel rather than dropping the message here.
             void withContext((ctx) => this.onCommand?.(msg as McpCommand, ctx));
+          } else if (MEMBER_COMMANDS.has(msg.cmd)) {
+            // Shape-checked in the app, which owns the identity repository and can answer with
+            // a precise error on the "members" channel rather than dropping the message here.
+            void withContext((ctx) => this.onCommand?.(msg as MemberCommand, ctx));
           } else if (EVAL_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the eval store and can answer with a
             // precise error on the "eval" channel rather than dropping the message here.
@@ -763,7 +1192,7 @@ export class WsRelay {
             void this.answer(ws, async (ctx) => ({
               channel: "agents",
               agents: (await this.opts.listAgents?.(ctx)) ?? [],
-            }), pending);
+            }), live);
           } else if (msg.cmd === "loadRun" && typeof msg.runId === "string") {
             // Answer only the requesting client with that run's steps (ordered by seq).
             const runId = msg.runId;
@@ -774,29 +1203,60 @@ export class WsRelay {
               channel: "runSteps",
               runId,
               steps: await this.store.stepsForRun(ctx, runId),
-            }), pending);
+            }), live);
           }
-        } catch {
-          /* ignore malformed client messages */
-        }
-      });
-      ws.on("close", () => {
-        this.clients.delete(ws);
-        this.contexts.delete(ws);
-      });
-      ws.on("error", () => {
-        this.clients.delete(ws);
-        this.contexts.delete(ws);
-      });
-    });
+      }
+    } catch {
+      /* a command whose shape does not match; the switch above dropped it */
+    }
+  }
 
-    this.http.listen(opts.port, () => {
-      console.log(`[relay] http+ws listening on http://localhost:${opts.port}`);
+  /**
+   * Decide, before the handshake, whether this connection may exist.
+   *
+   * Two gates, in this order and for different attackers:
+   *
+   *   THE ORIGIN, first, because it is free and because it is the cross-site-hijacking defence.
+   *   WebSockets are not covered by CORS, so a page on another origin can open one against
+   *   this server with the user's browser doing the connecting. See auth/origin.ts.
+   *
+   *   THE TICKET, second, because it costs a database round trip. The authoriser consumes it,
+   *   and consuming is single-use — so a refusal here has already burned the ticket, which is
+   *   correct: a ticket presented to a rejected upgrade must never work on a second attempt.
+   *
+   * A refusal is an HTTP response on the raw socket. `ws` is never handed the connection at
+   * all, so nothing counts it, nothing snapshots to it, and the client reads a status.
+   */
+  private async upgrade(req: IncomingMessage, socket: Socket, head: Buffer): Promise<void> {
+    const origin = req.headers.origin;
+    if (this.opts.originPolicy && !this.opts.originPolicy.allows(origin)) {
+      console.warn(`[relay] refused a socket from origin ${JSON.stringify(origin)}`);
+      return refuseUpgrade(socket, 403, "origin not allowed");
+    }
+    let session: SocketSession;
+    try {
+      session = asSession(await this.opts.contextFor(req));
+    } catch (err) {
+      const status = err instanceof UpgradeRefused ? err.status : 401;
+      // The message is the authoriser's, and everything that reaches here was written in this
+      // codebase for a person to read — never a driver's or a third party's.
+      return refuseUpgrade(socket, status, (err as Error).message || "not authorised");
+    }
+    (req as AuthorizedRequest)[SESSION] = session;
+    this.wss.handleUpgrade(req, socket, head, (ws) => {
+      this.wss.emit("connection", ws, req);
     });
   }
 
+  /** The router first, then the static fallback client, then 404. */
+  private async serveHttp(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (this.opts.router && (await this.opts.router.handle(req, res))) return;
+    await this.serveStatic(req, res);
+  }
+
   private async serveStatic(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (req.url === "/" || req.url === "/index.html") {
+    const path = (req.url ?? "/").split("?")[0];
+    if (path === "/" || path === "/index.html") {
       try {
         const html = await readFile(this.opts.clientHtmlPath);
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -854,9 +1314,11 @@ export class WsRelay {
 
   /** Stop listening. For tests; the server itself runs until the process does. */
   async close(): Promise<void> {
+    if (this.revalidator) clearInterval(this.revalidator);
     for (const ws of this.clients) ws.close();
     this.clients.clear();
     this.contexts.clear();
+    this.sessions.clear();
     await new Promise<void>((resolve) => this.wss.close(() => resolve()));
     await new Promise<void>((resolve) => this.http.close(() => resolve()));
   }
@@ -930,13 +1392,42 @@ export class WsRelay {
     this.broadcastTo(ctx, { channel: "deploy", ...event });
   }
 
-  // Broadcast a provider-credential event. Separate channel by design — see ProviderEvent.
-  // Nothing on it ever carries a key: `configured` says a named variable is set.
-  broadcastProviders(event: ProviderEvent): void {
-    const msg = JSON.stringify({ channel: "providers", ...event });
-    for (const ws of this.clients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+  /** Broadcast a membership event to the workspace it concerns. See MemberEvent. */
+  broadcastMembers(ctx: TenantContext, event: MemberEvent): void {
+    this.broadcastTo(ctx, { channel: "members", ...event });
+  }
+
+  /**
+   * Send a membership event to ONE socket.
+   *
+   * For `inviteLink`, which carries a credential. Broadcasting it would hand the link to every
+   * admin with a tab open, when exactly one person asked for it and is about to send it on.
+   */
+  sendMembers(ctx: TenantContext, requestId: string, event: MemberEvent): void {
+    for (const [ws, session] of this.sessions) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (session.context.workspaceId !== ctx.workspaceId) continue;
+      if (session.context.requestId !== requestId) continue;
+      this.sendTo(ws, { channel: "members", ...event });
     }
+  }
+
+  /**
+   * Broadcast a provider-credential event. Separate channel by design — see ProviderEvent.
+   *
+   * SCOPED, like every other broadcast. This was the last one that went to every connected
+   * client regardless of workspace, and Session 1 left it that way because provider keys live
+   * in one `runtime/.env` and genuinely are process-wide. That is still true of the VALUES —
+   * and it is exactly why the message must not be — because "anthropic is configured" is a
+   * fact about the install that a workspace has no business being told by another workspace's
+   * admin pressing Save. Worse, a `testResult` or a `notice` is the answer to somebody else's
+   * click, arriving in a panel nobody opened.
+   *
+   * Session 6 makes keys per-workspace via the SecretStore, at which point this is not a
+   * courtesy but a hard boundary. The shape is already right for it.
+   */
+  broadcastProviders(ctx: TenantContext, event: ProviderEvent): void {
+    this.broadcastTo(ctx, { channel: "providers", ...event });
   }
 
   // Push a refreshed run-history snapshot to everyone (e.g. after a branch is created, so the new
@@ -968,23 +1459,37 @@ export class WsRelay {
     }
   }
 
-  // Push an agent's current on-disk files to everyone (after an apply or undo, so the
-  // Code tab reflects what will actually run).
-  broadcastAgentFiles(agentId: string): void {
-    void this.perClient(async (ws, ctx) => {
+  /**
+   * Push an agent's current files to the workspace that owns it, after an apply or undo.
+   *
+   * SCOPED, and not merely per recipient. `perClient` alone rebuilds the payload with each
+   * client's own context, so no other workspace ever received the FILES — but every one of
+   * them still received the message, and the message names the agent. Slugs are chosen by
+   * users, so that is one tenant learning that another has an agent called
+   * `acme_invoice_reconciler`, pushed to them unasked every time it is edited.
+   *
+   * The context is the editing workspace's, so this reaches exactly the clients entitled to
+   * know the edit happened.
+   */
+  broadcastAgentFiles(ctx: TenantContext, agentId: string): void {
+    void this.perClient(async (ws, clientCtx) => {
+      if (clientCtx.workspaceId !== ctx.workspaceId) return;
       this.sendTo(ws, {
         channel: "agentFiles",
         agentId,
-        files: (await this.opts.listAgentFiles?.(ctx, agentId)) ?? [],
+        files: (await this.opts.listAgentFiles?.(clientCtx, agentId)) ?? [],
       });
     });
   }
 
-  // Push a refreshed graph to everyone (after an apply/undo, whose edit may have changed the
-  // agent's topology). Recomputes via the same introspection path.
-  async broadcastAgentGraph(agentId: string): Promise<void> {
-    await this.perClient(async (ws, ctx) => {
-      const graph = (await this.opts.getAgentGraph?.(ctx, agentId)) ?? null;
+  /**
+   * Push a refreshed graph to the workspace that owns the agent, after an apply or undo whose
+   * edit may have changed its topology. Scoped for the reason `broadcastAgentFiles` is.
+   */
+  async broadcastAgentGraph(ctx: TenantContext, agentId: string): Promise<void> {
+    await this.perClient(async (ws, clientCtx) => {
+      if (clientCtx.workspaceId !== ctx.workspaceId) return;
+      const graph = (await this.opts.getAgentGraph?.(clientCtx, agentId)) ?? null;
       this.sendTo(ws, { channel: "graph", agentId, graph });
     });
   }
