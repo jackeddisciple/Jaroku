@@ -1459,23 +1459,37 @@ export class WsRelay {
     }
   }
 
-  // Push an agent's current on-disk files to everyone (after an apply or undo, so the
-  // Code tab reflects what will actually run).
-  broadcastAgentFiles(agentId: string): void {
-    void this.perClient(async (ws, ctx) => {
+  /**
+   * Push an agent's current files to the workspace that owns it, after an apply or undo.
+   *
+   * SCOPED, and not merely per recipient. `perClient` alone rebuilds the payload with each
+   * client's own context, so no other workspace ever received the FILES — but every one of
+   * them still received the message, and the message names the agent. Slugs are chosen by
+   * users, so that is one tenant learning that another has an agent called
+   * `acme_invoice_reconciler`, pushed to them unasked every time it is edited.
+   *
+   * The context is the editing workspace's, so this reaches exactly the clients entitled to
+   * know the edit happened.
+   */
+  broadcastAgentFiles(ctx: TenantContext, agentId: string): void {
+    void this.perClient(async (ws, clientCtx) => {
+      if (clientCtx.workspaceId !== ctx.workspaceId) return;
       this.sendTo(ws, {
         channel: "agentFiles",
         agentId,
-        files: (await this.opts.listAgentFiles?.(ctx, agentId)) ?? [],
+        files: (await this.opts.listAgentFiles?.(clientCtx, agentId)) ?? [],
       });
     });
   }
 
-  // Push a refreshed graph to everyone (after an apply/undo, whose edit may have changed the
-  // agent's topology). Recomputes via the same introspection path.
-  async broadcastAgentGraph(agentId: string): Promise<void> {
-    await this.perClient(async (ws, ctx) => {
-      const graph = (await this.opts.getAgentGraph?.(ctx, agentId)) ?? null;
+  /**
+   * Push a refreshed graph to the workspace that owns the agent, after an apply or undo whose
+   * edit may have changed its topology. Scoped for the reason `broadcastAgentFiles` is.
+   */
+  async broadcastAgentGraph(ctx: TenantContext, agentId: string): Promise<void> {
+    await this.perClient(async (ws, clientCtx) => {
+      if (clientCtx.workspaceId !== ctx.workspaceId) return;
+      const graph = (await this.opts.getAgentGraph?.(clientCtx, agentId)) ?? null;
       this.sendTo(ws, { channel: "graph", agentId, graph });
     });
   }

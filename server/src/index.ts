@@ -174,9 +174,31 @@ function contextForRun(runId: string): TenantContext {
 // hears about their own eval.
 const evalWorkspaces = new Map<string, TenantContext>();
 const contextForEval = (evalId: string): TenantContext => evalWorkspaces.get(evalId) ?? serverContext();
-let buildContext: TenantContext | null = null;
+
+// ONE SCOPE PER SINGLE-FLIGHT SUBSYSTEM, and never one shared between them.
+//
+// These used to be a single `buildContext` covering planning, generation, editing and
+// explaining, and it leaked across tenants in two independent ways:
+//
+//   * IT WAS ASSIGNED BEFORE THE BUSY GUARD. Workspace B sending a `generate` that was
+//     REFUSED still repointed the variable at B — and workspace A's generation, still
+//     streaming, then broadcast the rest of its source code into B's build pane.
+//   * IT WAS SHARED BY SUBSYSTEMS THAT RUN CONCURRENTLY. `generating`, `editor.inFlight`,
+//     `explaining` and `deployManager.busy` are four separate locks, so A generating while B
+//     edits is entirely legal — and one variable cannot hold both answers.
+//
+// So each gets its own, and each is claimed only once its operation has actually STARTED,
+// after every guard that could refuse it. A refusal is broadcast to the context of whoever
+// asked, which is always in hand at the point of refusal and never needs a variable at all.
+let planContext: TenantContext | null = null;
+let genContext: TenantContext | null = null;
+let editContext: TenantContext | null = null;
+let replyContext: TenantContext | null = null;
 let deployContext: TenantContext | null = null;
-const contextForBuild = (): TenantContext => buildContext ?? serverContext();
+const contextForPlan = (): TenantContext => planContext ?? serverContext();
+const contextForGen = (): TenantContext => genContext ?? serverContext();
+const contextForEdit = (): TenantContext => editContext ?? serverContext();
+const contextForReply = (): TenantContext => replyContext ?? serverContext();
 const contextForDeploy = (): TenantContext => deployContext ?? serverContext();
 
 // The orchestrator. Constructed after the relay exists (it broadcasts progress), so it's
@@ -1095,7 +1117,6 @@ async function handleDeployCommand(ctx: TenantContext, cmd: DeployChannelCommand
       }
 
       case "deploy": {
-        deployContext = ctx;
         if (!isSafeAgentId(cmd.agentId)) {
           relay.broadcastDeploy(ctx, { type: "error", message: "invalid agent id" });
           return;
@@ -1104,6 +1125,10 @@ async function handleDeployCommand(ctx: TenantContext, cmd: DeployChannelCommand
           relay.broadcastDeploy(ctx, { type: "error", message: "a deploy is already running" });
           return;
         }
+        // Claimed only now that the deploy is certain to start. Assigned before these guards, a
+        // REFUSED deploy redirected the running one's build log — scrubbed of secrets, but
+        // still another workspace's build output — into the refuser's deploy panel.
+        deployContext = ctx;
         const envKeys = Array.isArray(cmd.envKeys)
           ? (cmd.envKeys as unknown[]).filter((k): k is string => typeof k === "string")
           : [];
@@ -1551,9 +1576,9 @@ pool.on("exit", ({ runId, code, signal, timedOut }) => {
 // Every failure here goes out as plan_error, never as the gen channel's plain "error". That
 // one is wired to buildStore.fail() on the client and paints the build pane as a failed
 // generation — which, at plan time, would be reporting a failure that never happened.
-planner.on("started", (e) => relay.broadcastGen(contextForBuild(), { type: "plan_started", ...e }));
-planner.on("delta", (e) => relay.broadcastGen(contextForBuild(), { type: "plan_delta", ...e }));
-planner.on("discarded", (e) => relay.broadcastGen(contextForBuild(), { type: "plan_discarded", ...e }));
+planner.on("started", (e) => relay.broadcastGen(contextForPlan(), { type: "plan_started", ...e }));
+planner.on("delta", (e) => relay.broadcastGen(contextForPlan(), { type: "plan_delta", ...e }));
+planner.on("discarded", (e) => relay.broadcastGen(contextForPlan(), { type: "plan_discarded", ...e }));
 
 planner.on("plan", (e) => {
   const usage = e.usage as { cost_usd?: number; output_tokens?: number };
@@ -1563,22 +1588,30 @@ planner.on("plan", (e) => {
       `$${(usage?.cost_usd ?? 0).toFixed(5)}`,
   );
   for (const w of e.warnings) console.log(`  ! ${w}`);
-  relay.broadcastGen(contextForBuild(), { type: "plan", ...e });
+  relay.broadcastGen(contextForPlan(), { type: "plan", ...e });
 });
 
 planner.on("error", (e) => {
   console.error(`[plan] failed: ${e.message}`);
-  relay.broadcastGen(contextForBuild(), { type: "plan_error", message: e.message });
+  relay.broadcastGen(contextForPlan(), { type: "plan_error", message: e.message });
 });
 
 async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<void> {
-  buildContext = ctx;
   // A generation in flight owns the pipeline; planning the next agent mid-build would put two
   // plans and one generation on the same single-slot state.
+  //
+  // REFUSED TO THE ASKER, and the plan scope is not touched: a refusal belongs to whoever
+  // asked, and repointing the scope here would send the in-flight plan's remaining deltas to
+  // them instead of to the workspace that started it.
   if (generating) {
-    relay.broadcastGen(contextForBuild(), { type: "plan_error", message: "a generation is already in progress" });
+    relay.broadcastGen(ctx, { type: "plan_error", message: "a generation is already in progress" });
     return;
   }
+  if (planner.inFlight) {
+    relay.broadcastGen(ctx, { type: "plan_error", message: "a plan is already being written" });
+    return;
+  }
+  planContext = ctx;
   console.log(
     `[plan] planning${cmd.revisePlanId ? " (revision)" : ""} — "${cmd.prompt.slice(0, 80)}"`,
   );
@@ -1601,21 +1634,25 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
 let generating = false;
 
 async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<void> {
-  buildContext = ctx;
   if (generating) {
     // On the planned path this must NOT be the plain "error" member: that one paints the
     // build pane as a failed generation, and the pending plan is still perfectly good. The
     // check also comes before take(), so a refused click doesn't spend the plan.
+    //
+    // Answered to `ctx` — the asker — and NOT via the generation scope, which still belongs to
+    // the workspace whose build is running. This refusal repointing that scope is precisely
+    // how one tenant's generated source ended up streaming into another's build pane.
     if (cmd.planId) {
-      relay.broadcastGen(contextForBuild(), {
+      relay.broadcastGen(ctx, {
         type: "plan_error",
         message: "a generation is already in progress — this plan is still here when it finishes",
       });
     } else {
-      relay.broadcastGen(contextForBuild(), { type: "error", message: "a generation is already in progress" });
+      relay.broadcastGen(ctx, { type: "error", message: "a generation is already in progress" });
     }
     return;
   }
+  genContext = ctx;
 
   // The confirmed plan, if there is one. Everything downstream comes from the RECORD, not
   // from this command: the composer draft and the plan card's Generate button are separate
@@ -1634,7 +1671,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
       // Never fall through to an unplanned generation here. The user approved a specific
       // plan; quietly building something they never reviewed is the exact failure this gate
       // exists to prevent.
-      relay.broadcastGen(contextForBuild(), {
+      relay.broadcastGen(contextForGen(), {
         type: "plan_error",
         message: "that plan is no longer available — describe the agent again",
       });
@@ -1649,7 +1686,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     const known = new Set(loadConnectors(RUNTIME_DIR).map((c) => c.id));
     const missing = (rec.connectors ?? []).filter((id) => !known.has(id));
     if (missing.length) {
-      relay.broadcastGen(contextForBuild(), {
+      relay.broadcastGen(contextForGen(), {
         type: "plan_error",
         message:
           `the plan uses ${missing.join(", ")}, which ${missing.length > 1 ? "are" : "is"} no ` +
@@ -1668,7 +1705,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     );
     const goneMcp = approvedRefs.filter((r) => !stillThere.has(r));
     if (goneMcp.length) {
-      relay.broadcastGen(contextForBuild(), {
+      relay.broadcastGen(contextForGen(), {
         type: "plan_error",
         message:
           `the plan uses the MCP tool${goneMcp.length > 1 ? "s" : ""} ${goneMcp.join(", ")}, which ` +
@@ -1687,11 +1724,11 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
 
   generating = true;
   console.log(`[gen] generating${plan ? " from an approved plan" : ""} — "${prompt.slice(0, 80)}"`);
-  relay.broadcastGen(contextForBuild(), { type: "started", prompt });
+  relay.broadcastGen(contextForGen(), { type: "started", prompt });
 
-  const onStart = (e: { path: string }) => relay.broadcastGen(contextForBuild(), { type: "file_start", ...e });
-  const onDelta = (e: { path: string; text: string }) => relay.broadcastGen(contextForBuild(), { type: "file_delta", ...e });
-  const onEnd = (e: { path: string }) => relay.broadcastGen(contextForBuild(), { type: "file_end", ...e });
+  const onStart = (e: { path: string }) => relay.broadcastGen(contextForGen(), { type: "file_start", ...e });
+  const onDelta = (e: { path: string; text: string }) => relay.broadcastGen(contextForGen(), { type: "file_delta", ...e });
+  const onEnd = (e: { path: string }) => relay.broadcastGen(contextForGen(), { type: "file_end", ...e });
 
   const cleanup = () => {
     generating = false;
@@ -1714,7 +1751,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
         // understate it every single time.
         (planCost ? ` + $${planCost.toFixed(5)} plan = $${(planCost + (usage?.cost_usd ?? 0)).toFixed(5)}` : ""),
     );
-    relay.broadcastGen(contextForBuild(), { type: "done", ...e });
+    relay.broadcastGen(contextForGen(), { type: "done", ...e });
     void syncAgents().then(() => relay.broadcastAgents());
     cleanup();
   };
@@ -1722,7 +1759,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   const onError = (e: { message: string; problems?: string[] }) => {
     console.error(`[gen] failed: ${e.message}`);
     for (const p of e.problems ?? []) console.error(`  - ${p}`);
-    relay.broadcastGen(contextForBuild(), { type: "error", ...e });
+    relay.broadcastGen(contextForGen(), { type: "error", ...e });
     cleanup();
   };
 
@@ -1745,48 +1782,56 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
 // --- editing (fix loop) -----------------------------------------------------
 // Streams into the "edit" channel. Like generation, nothing here touches the trace store
 // or the frozen event schema. Listeners are permanent — every event carries its ids.
-editor.on("file_start", (e) => relay.broadcastEdit(contextForBuild(), { type: "file_start", ...e }));
-editor.on("file_delta", (e) => relay.broadcastEdit(contextForBuild(), { type: "file_delta", ...e }));
-editor.on("file_end", (e) => relay.broadcastEdit(contextForBuild(), { type: "file_end", ...e }));
+editor.on("file_start", (e) => relay.broadcastEdit(contextForEdit(), { type: "file_start", ...e }));
+editor.on("file_delta", (e) => relay.broadcastEdit(contextForEdit(), { type: "file_delta", ...e }));
+editor.on("file_end", (e) => relay.broadcastEdit(contextForEdit(), { type: "file_end", ...e }));
 
 editor.on("proposal", (e) => {
   console.log(
     `[edit] proposal for ${e.agentId} — ${e.files.length} file(s): ${e.summary}`,
   );
-  relay.broadcastEdit(contextForBuild(), { type: "proposal", ...e });
+  relay.broadcastEdit(contextForEdit(), { type: "proposal", ...e });
 });
 
 editor.on("applied", (e) => {
   console.log(`[edit] applied v${e.version} to ${e.agentId}: ${e.summary}`);
-  relay.broadcastEdit(contextForBuild(), { type: "applied", ...e });
+  relay.broadcastEdit(contextForEdit(), { type: "applied", ...e });
   void syncAgents().then(() => relay.broadcastAgents());
-  relay.broadcastAgentFiles(e.agentId);
+  relay.broadcastAgentFiles(contextForEdit(), e.agentId);
   // An edit may have changed the graph structure — invalidate and re-push.
   graphCache.delete(e.agentId);
-  void relay.broadcastAgentGraph(e.agentId);
+  void relay.broadcastAgentGraph(contextForEdit(), e.agentId);
 });
 
 editor.on("undone", (e) => {
   console.log(`[edit] undid v${e.version} on ${e.agentId}`);
-  relay.broadcastEdit(contextForBuild(), { type: "undone", ...e });
+  relay.broadcastEdit(contextForEdit(), { type: "undone", ...e });
   void syncAgents().then(() => relay.broadcastAgents());
-  relay.broadcastAgentFiles(e.agentId);
+  relay.broadcastAgentFiles(contextForEdit(), e.agentId);
   graphCache.delete(e.agentId);
-  void relay.broadcastAgentGraph(e.agentId);
+  void relay.broadcastAgentGraph(contextForEdit(), e.agentId);
 });
 
-editor.on("discarded", (e) => relay.broadcastEdit(contextForBuild(), { type: "discarded", ...e }));
+editor.on("discarded", (e) => relay.broadcastEdit(contextForEdit(), { type: "discarded", ...e }));
 
 editor.on("error", (e) => {
   console.error(`[edit] failed: ${e.message}`);
   for (const p of e.problems ?? []) console.error(`  - ${p}`);
-  relay.broadcastEdit(contextForBuild(), { type: "error", ...e });
+  relay.broadcastEdit(contextForEdit(), { type: "error", ...e });
 });
 
 function editAgent(ctx: TenantContext, agentId: string, instruction: string): void {
-  buildContext = ctx;
+  // Refused here rather than inside `propose`, so the refusal is answered to the asker and the
+  // edit scope is left pointing at the workspace whose edit is actually running. The editor
+  // refuses a second edit either way; what this adds is that a refused one cannot redirect the
+  // in-flight edit's diff — which is another workspace's source — to whoever asked second.
+  if (editor.inFlight) {
+    relay.broadcastEdit(ctx, { type: "error", message: "an edit is already in progress", agentId });
+    return;
+  }
+  editContext = ctx;
   console.log(`[edit] ${agentId} — "${instruction.slice(0, 80)}"`);
-  relay.broadcastEdit(contextForBuild(), { type: "started", agentId, instruction });
+  relay.broadcastEdit(contextForEdit(), { type: "started", agentId, instruction });
   void editor.propose(agentId, instruction);
 }
 
@@ -2004,18 +2049,20 @@ function buildExplainContext(cmd: ExplainCommand): string {
 }
 
 function explainAgent(ctx: TenantContext, cmd: ExplainCommand): void {
-  buildContext = ctx;
   if (explaining) {
-    relay.broadcastReply(contextForBuild(), { type: "error", agentId: cmd.agentId, message: "already answering — one at a time" });
+    // To the asker, not to the scope: the answer still streaming belongs to somebody else, and
+    // an explanation quotes the agent's system prompt and tool source back to the reader.
+    relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId, message: "already answering — one at a time" });
     return;
   }
+  replyContext = ctx;
   explaining = true;
-  relay.broadcastReply(contextForBuild(), { type: "started", agentId: cmd.agentId, question: cmd.question });
+  relay.broadcastReply(contextForReply(), { type: "started", agentId: cmd.agentId, question: cmd.question });
   const context = buildExplainContext(cmd);
   void streamExplain(context, cmd.question, {
-    onDelta: (text) => relay.broadcastReply(contextForBuild(), { type: "delta", agentId: cmd.agentId, text }),
-    onDone: () => { explaining = false; relay.broadcastReply(contextForBuild(), { type: "done", agentId: cmd.agentId }); },
-    onError: (message) => { explaining = false; relay.broadcastReply(contextForBuild(), { type: "error", agentId: cmd.agentId, message }); },
+    onDelta: (text) => relay.broadcastReply(contextForReply(), { type: "delta", agentId: cmd.agentId, text }),
+    onDone: () => { explaining = false; relay.broadcastReply(contextForReply(), { type: "done", agentId: cmd.agentId }); },
+    onError: (message) => { explaining = false; relay.broadcastReply(contextForReply(), { type: "error", agentId: cmd.agentId, message }); },
   });
 }
 

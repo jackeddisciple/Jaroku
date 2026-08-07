@@ -140,6 +140,19 @@ export class Editor extends EventEmitter<EditorEvents> {
     super();
   }
 
+  /**
+   * Whether an edit is in flight, readable from outside.
+   *
+   * `propose` refuses a second one anyway, so this is not the guard — it is what lets the
+   * CALLER refuse first. The editor's events go out on a channel scoped to one workspace, and
+   * the caller is what remembers which; a refused edit that has already repointed that memory
+   * has handed the in-flight edit's diff to whoever asked second. See `editContext` in
+   * index.ts.
+   */
+  get inFlight(): boolean {
+    return this.busy;
+  }
+
   private fail(e: EditorEvents["error"][0]): void {
     this.emit("error", e);
   }
