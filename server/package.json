@@ -22,6 +22,7 @@
     "test:rls": "tsx src/db/rls.test.ts",
     "test:db-boundary": "tsx src/db/boundary.test.ts",
     "test:tenancy": "tsx src/tenancy.test.ts",
+    "test:acceptance": "tsx src/acceptance.test.ts",
     "test:relay": "tsx src/wsRelay.test.ts",
     "test:channels": "tsx src/channels.test.ts",
     "test:http": "tsx src/http/router.test.ts",
