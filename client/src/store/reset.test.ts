@@ -13,7 +13,7 @@
 //
 //   npm run test:reset
 
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { NOT_WORKSPACE_SCOPED, WORKSPACE_STORES, resetWorkspaceStores } from "./reset.ts";
@@ -26,6 +26,8 @@ import { useMcpStore } from "./mcpStore.ts";
 import { useMemberStore } from "./memberStore.ts";
 import { useProviderStore } from "./providerStore.ts";
 import { useTraceStore } from "./traceStore.ts";
+import { useSessionStore } from "./sessionStore.ts";
+import { inputKey, INPUT_KEY_PREFIX } from "./uiStore.ts";
 
 let failures = 0;
 const check = (ok: boolean, msg: string): void => {
@@ -38,6 +40,23 @@ const check = (ok: boolean, msg: string): void => {
 
 /** The string that must not survive. Distinctive enough to find anywhere in a serialised store. */
 const TENANT_A = "workspace-a-secret-payload";
+
+// A localStorage, because there is no browser here. Enough of the API for the audit below, and
+// deliberately not a dependency: the thing under test is which KEY is written, not what a real
+// implementation does with it.
+if (typeof (globalThis as { localStorage?: unknown }).localStorage === "undefined") {
+  const map = new Map<string, string>();
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    get length(): number {
+      return map.size;
+    },
+    key: (i: number): string | null => [...map.keys()][i] ?? null,
+    getItem: (k: string): string | null => map.get(k) ?? null,
+    setItem: (k: string, v: string): void => void map.set(k, String(v)),
+    removeItem: (k: string): void => void map.delete(k),
+    clear: (): void => map.clear(),
+  };
+}
 
 console.log("\nfilling every store with one workspace's data");
 {
@@ -125,6 +144,65 @@ console.log("\nevery store is accounted for");
       NOT_WORKSPACE_SCOPED.includes("uiStore"),
     `only sessionStore and uiStore are excluded (${NOT_WORKSPACE_SCOPED.join(", ")})`,
   );
+}
+
+console.log("\nand so is everything the browser keeps");
+{
+  // THE BLIND SPOT THIS SUITE HAD. Everything above audits STORES, and a store is memory —
+  // it dies on the reset and again on the reload. localStorage does neither, and the leak that
+  // actually shipped was there: `jaroku.input.<agent>` remembered the last test input keyed by
+  // agent slug alone, and slugs stopped being globally unique in Session 1. Two workspaces with
+  // a same-named agent on one browser meant one tenant's last input loaded into the other's
+  // composer, surviving not just a switch but a sign-out.
+  //
+  // `resetWorkspaceStores` could never have caught it and neither could the directory scan
+  // above, because localStorage is not a store. So: read the source for every `jaroku.` key the
+  // client writes, and require each to be classified.
+  const src = fileURLToPath(new URL("..", import.meta.url));
+  const files = readdirSync(src, { recursive: true }).filter(
+    (f) => (f.endsWith(".ts") || f.endsWith(".tsx")) && !f.includes("node_modules"),
+  );
+  check(files.length > 20, `read the client source (${files.length} files)`);
+  const keys = new Set<string>();
+  for (const f of files) {
+    for (const m of readFileSync(`${src}/${f}`, "utf8").matchAll(/["'`]jaroku\.([a-z]+)/g)) {
+      keys.add(`jaroku.${m[1]!}`);
+    }
+  }
+
+  /** Keys whose VALUE belongs to one workspace. Each must carry a workspace id in the key. */
+  const WORKSPACE_SCOPED = new Set(["jaroku.input"]);
+  /** Keys that hold nothing a workspace owns. Each is a decision, not an oversight. */
+  const NOT_TENANT_DATA = new Set([
+    "jaroku.token",      // the bearer token — the account's, not a workspace's, and cleared on sign-out
+    "jaroku.workspace",  // WHICH workspace, not anything in one. Cleared on sign-out
+    "jaroku.onboarding", // first-run progress: a step name and a list of hint ids
+  ]);
+
+  const unclassified = [...keys].filter((k) => !WORKSPACE_SCOPED.has(k) && !NOT_TENANT_DATA.has(k));
+  check(
+    unclassified.length === 0,
+    `every jaroku.* browser key is classified (${keys.size} found; unclassified: ${unclassified.join(", ") || "none"})`,
+  );
+
+  // ...and the workspace-scoped ones actually carry the workspace, rather than being trusted to.
+  useSessionStore.setState({ workspaceId: "ws-AAA" } as never);
+  const inA = inputKey("support_bot");
+  useSessionStore.setState({ workspaceId: "ws-BBB" } as never);
+  const inB = inputKey("support_bot");
+  check(inA !== inB, "the SAME agent slug in two workspaces gets two different keys");
+  check(inA.includes("ws-AAA") && inB.includes("ws-BBB"), "...each naming its own workspace");
+  check(inA.startsWith(INPUT_KEY_PREFIX) && inB.startsWith(INPUT_KEY_PREFIX), "...under the prefix the sign-out sweep uses");
+
+  // The leak, end to end: A remembers an input, B must not read it back.
+  useSessionStore.setState({ workspaceId: "ws-AAA" } as never);
+  localStorage.setItem(inputKey("support_bot"), TENANT_A);
+  useSessionStore.setState({ workspaceId: "ws-BBB" } as never);
+  check(
+    (localStorage.getItem(inputKey("support_bot")) ?? "") !== TENANT_A,
+    "a remembered test input does NOT cross to a same-named agent in another workspace",
+  );
+  localStorage.removeItem(`${INPUT_KEY_PREFIX}ws-AAA.support_bot`);
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

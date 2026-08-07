@@ -12,6 +12,9 @@
 
 declare module "node:fs" {
   export function readdirSync(path: string): string[];
+  /** Recursive, for the browser-storage audit: it reads every source file looking for keys. */
+  export function readdirSync(path: string, options: { recursive: true }): string[];
+  export function readFileSync(path: string, encoding: "utf8"): string;
 }
 
 declare module "node:url" {

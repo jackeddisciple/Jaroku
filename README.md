@@ -2185,6 +2185,21 @@ workspace's first snapshot merges into the previous one's rows.
 reset nor explicitly excluded — because the leak that actually happens is not in a store somebody
 tested, it is in the one added six months later that nobody wired in.
 
+**A store is memory; `localStorage` is not**, and that was this suite's blind spot. The last test
+input per agent was remembered under `jaroku.input.<agent>` — keyed by slug alone, and slugs
+[stopped being globally unique](#the-one-exception-to-the-frozen-schema) in Session 1. Two
+workspaces with a same-named agent on one browser meant one tenant's last input loading into the
+other's composer, and `R` re-running it. A test input is whatever the user typed to drive the
+agent: a real customer email, a real order id. It survived not just a switch but a sign-out,
+which no store reset could reach.
+
+The key now carries the workspace, read inside `inputKey` rather than passed in, so every call
+site is scoped by construction. Sign-out sweeps the prefix as well, for the browser two people
+share. And `test:reset` now audits **every `jaroku.*` key the client writes**, found by reading
+the source rather than from a list, and fails when one is classified as neither workspace-scoped
+nor non-tenant — the same enumerate-don't-remember discipline as the
+[channel audit](#every-channel-not-just-the-ones-somebody-noticed).
+
 ### CORS, and why it is here rather than in Session 8
 
 The client is served by Vite on `:5173` and this server answers on `:4317`, so **every request

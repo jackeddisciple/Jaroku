@@ -4,6 +4,7 @@
 // and build stores, which own real data; this is ephemeral view state only.
 
 import { create } from "zustand";
+import { useSessionStore } from "./sessionStore.ts";
 
 export type RightTab = "graph" | "trace" | "evals" | "mcp" | "deploy" | "code";
 
@@ -13,9 +14,27 @@ export type RightTab = "graph" | "trace" | "evals" | "mcp" | "deploy" | "code";
 export type ComposerMode = "chat" | "test";
 
 // Test-input persistence (doc §4.7.6): the last input per agent is remembered so R re-runs it
-// instantly and the palette's re-run reads it. Keyed by agent, in localStorage — the single
-// source of truth for "the last input sent in Test mode" (no component owns it).
-export const inputKey = (agentId: string | null): string => `jaroku.input.${agentId ?? "_"}`;
+// instantly and the palette's re-run reads it. In localStorage — the single source of truth for
+// "the last input sent in Test mode" (no component owns it).
+//
+// KEYED BY WORKSPACE AS WELL AS AGENT, and that is a tenancy requirement rather than tidiness.
+// Agent slugs stopped being globally unique in Session 1 — they are unique PER WORKSPACE — so
+// `jaroku.input.support_bot` named two different agents belonging to two different tenants, and
+// BuildPane loads it straight into the composer when the agent changes. Two workspaces with a
+// same-named agent on one browser meant one tenant's last test input appearing in the other's
+// composer, and `R` re-running it. A test input is whatever the user typed to drive the agent: a
+// real customer email, a real order id.
+//
+// It reads the workspace HERE rather than taking it as a parameter, so every call site is
+// scoped by construction and one added later cannot forget. `resetWorkspaceStores` cannot help
+// with this: localStorage is not a store, which is exactly why `test:reset` could not see it.
+export const inputKey = (agentId: string | null): string => {
+  const workspaceId = useSessionStore.getState().workspaceId;
+  return `jaroku.input.${workspaceId ?? "_"}.${agentId ?? "_"}`;
+};
+
+/** The prefix every remembered test input shares, for the sweep on sign-out. */
+export const INPUT_KEY_PREFIX = "jaroku.input.";
 
 // --- first-run onboarding ----------------------------------------------------------------
 //

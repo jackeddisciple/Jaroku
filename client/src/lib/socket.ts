@@ -13,6 +13,7 @@ import { useDeployStore } from "../store/deployStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useMemberStore } from "../store/memberStore.ts";
 import { resetWorkspaceStores } from "../store/reset.ts";
+import { INPUT_KEY_PREFIX } from "../store/uiStore.ts";
 import {
   fetchSession, fetchTicket, socketUrl, storeToken, storeWorkspace, storedToken, storedWorkspace,
   type AuthFailure,
@@ -373,8 +374,35 @@ export function signOut(): void {
   // The same reasoning as a workspace switch: the rows in these stores belong to a workspace,
   // and the next person to sign in at this browser must not find them.
   resetWorkspaceStores();
+  forgetRememberedInputs();
   storeToken(null);
   useSessionStore.getState().signOut();
+}
+
+/**
+ * Drop every remembered test input.
+ *
+ * The stores are memory and die with the reset above; these are localStorage and outlive not
+ * just a workspace switch but the whole session, which is a longer life than the sentence
+ * "the next person to sign in at this browser must not find them" allows. Keying them by
+ * workspace (see uiStore.inputKey) stops one tenant READING another's; this is the other half,
+ * for the browser two people share.
+ *
+ * A sweep by prefix rather than a list, because the keys are per agent and there is no register
+ * of which ones were written.
+ */
+function forgetRememberedInputs(): void {
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(INPUT_KEY_PREFIX)) doomed.push(key);
+    }
+    // Collected first, then removed: removing during the walk reindexes it and skips keys.
+    for (const key of doomed) localStorage.removeItem(key);
+  } catch {
+    /* private browsing — see lib/auth.ts storedToken */
+  }
 }
 
 export function stopSocket(): void {
