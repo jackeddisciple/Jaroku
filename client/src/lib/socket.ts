@@ -12,8 +12,9 @@ import { useProviderStore } from "../store/providerStore.ts";
 import { useDeployStore } from "../store/deployStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useMemberStore } from "../store/memberStore.ts";
+import { resetWorkspaceStores } from "../store/reset.ts";
 import {
-  fetchSession, fetchTicket, socketUrl, storeWorkspace, storedToken, storedWorkspace,
+  fetchSession, fetchTicket, socketUrl, storeToken, storeWorkspace, storedToken, storedWorkspace,
   type AuthFailure,
 } from "./auth.ts";
 import type {
@@ -367,6 +368,15 @@ export function startSocket(): void {
  * acts in was decided by the ticket it was opened with, and there is no message that could
  * change it.
  */
+export function signOut(): void {
+  stopSocket();
+  // The same reasoning as a workspace switch: the rows in these stores belong to a workspace,
+  // and the next person to sign in at this browser must not find them.
+  resetWorkspaceStores();
+  storeToken(null);
+  useSessionStore.getState().signOut();
+}
+
 export function stopSocket(): void {
   stopped = true;
   started = false;
@@ -384,6 +394,30 @@ export function stopSocket(): void {
 /** Close, then open again — in whatever workspace the session store now names. */
 export function restartSocket(): void {
   stopSocket();
+  startSocket();
+}
+
+/**
+ * Switch workspace.
+ *
+ * A NEW SOCKET, not a message on the current one. Simpler, and impossible to get subtly wrong:
+ * the workspace a socket acts in was decided by the ticket it was opened with, so there is no
+ * message that could change it and nothing to reason about regarding reads already in flight.
+ *
+ * The stores are emptied BEFORE the new socket opens, and that ordering is the security part.
+ * Resetting afterwards would leave a window — however short — in which the new workspace's
+ * first snapshot merges into the previous one's rows, and a UI that briefly showed both is a
+ * UI that showed one tenant the other's data. See store/reset.ts.
+ */
+export function switchWorkspace(workspaceId: string): void {
+  const session = useSessionStore.getState();
+  if (session.workspaceId === workspaceId) return;
+  if (!session.workspaces.some((w) => w.id === workspaceId)) return;
+
+  stopSocket();
+  resetWorkspaceStores();
+  storeWorkspace(workspaceId);
+  useSessionStore.setState({ workspaceId, status: "connecting", message: null });
   startSocket();
 }
 
