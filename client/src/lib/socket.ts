@@ -10,16 +10,30 @@ import { useEvalStore } from "../store/evalStore.ts";
 import { useMcpStore } from "../store/mcpStore.ts";
 import { useProviderStore } from "../store/providerStore.ts";
 import { useDeployStore } from "../store/deployStore.ts";
+import { useSessionStore } from "../store/sessionStore.ts";
+import { useMemberStore } from "../store/memberStore.ts";
+import {
+  fetchSession, fetchTicket, socketUrl, storeWorkspace, storedToken, storedWorkspace,
+  type AuthFailure,
+} from "./auth.ts";
 import type {
   ClientCommand, EvalTarget, ExplainSubject, McpConfirmVerdict, McpImpact, ProviderId,
   RubricCriterion, ServerMessage,
 } from "../types.ts";
 
-const WS_URL = import.meta.env.VITE_JAROKU_WS ?? `ws://localhost:4317`;
 const RECONNECT_MS = 1000;
+/** The ceiling on backoff. Long enough to be kind to a server that is down, short enough that
+ *  a laptop coming out of sleep does not sit disconnected for a minute. */
+const MAX_RECONNECT_MS = 15_000;
+/** The server's close code for "stop, sign in again" — see wsRelay.CLOSE_UNAUTHORISED. */
+const CLOSE_UNAUTHORISED = 4001;
 
 let ws: WebSocket | null = null;
 let started = false;
+/** Set by an explicit stop (sign-out, workspace switch), so nothing reconnects behind it. */
+let stopped = false;
+/** Consecutive failed attempts. Reset by a socket that OPENS, not by one that was tried. */
+let attempt = 0;
 
 function dispatch(msg: ServerMessage): void {
   const s = useTraceStore.getState();
@@ -188,6 +202,34 @@ function dispatch(msg: ServerMessage): void {
       else if (msg.type === "notice") d.setNotice(msg.message);
       break;
     }
+    case "session": {
+      // The only channel that is about the CONNECTION rather than the work. Every message on
+      // it means the connection is over or about to be — see wsRelay's SessionEvent.
+      const sess = useSessionStore.getState();
+      if (msg.type === "expiring") sess.setExpiring(true);
+      else if (msg.type === "expired") sess.signOut("your session expired");
+      else if (msg.type === "revoked") sess.signOut(msg.message);
+      else if (msg.type === "workspace_changed") {
+        // Not a sign-out: they are still signed in, the workspace they were in is gone. Drop
+        // the remembered one so the reconnect lands in a workspace they still belong to.
+        storeWorkspace(null);
+        sess.setStatus("connecting", msg.message);
+      } else if (msg.type === "role_changed") {
+        // The socket stays open at the new role. Reflect it so the UI stops offering what the
+        // server would now refuse — the enforcement is the server's, this is honesty.
+        const { workspaces, workspaceId } = sess;
+        sess.setWorkspaces(workspaces.map((w) => (w.id === workspaceId ? { ...w, role: msg.role } : w)));
+      }
+      break;
+    }
+    case "members": {
+      const m = useMemberStore.getState();
+      if (msg.type === "members") m.setMembers(msg.members, msg.invites);
+      else if (msg.type === "inviteLink") m.setInviteLink(msg);
+      else if (msg.type === "error") m.setError(msg.message);
+      else if (msg.type === "notice") m.setNotice(msg.message);
+      break;
+    }
     case "reply": {
       // Unified composer "explain": a streaming prose answer in the conversation (chatStore).
       const c = useChatStore.getState();
@@ -200,11 +242,69 @@ function dispatch(msg: ServerMessage): void {
   }
 }
 
-function connect(): void {
+/**
+ * Open a socket, which is now three requests rather than one.
+ *
+ * A WebSocket cannot carry an `Authorization` header, so the credential is exchanged over HTTP
+ * first: token → session → ticket → socket. See lib/auth.ts for why each step exists.
+ *
+ * THE HARD DISTINCTION THIS FUNCTION EXISTS TO MAKE. "Disconnected" and "unauthorised" arrive
+ * at a WebSocket client looking exactly the same — the socket closes — and treating the second
+ * as the first produces the worst possible behaviour: a client that retries a 401 every second,
+ * forever, behind a spinner, while the user has no idea they need to sign in. So a refusal
+ * STOPS the loop and shows the sign-in screen; everything else backs off and tries again.
+ */
+async function connect(): Promise<void> {
+  if (stopped) return;
+  const session = useSessionStore.getState();
   useTraceStore.getState().setConnection("connecting");
-  ws = new WebSocket(WS_URL);
 
-  ws.onopen = () => useTraceStore.getState().setConnection("open");
+  const token = storedToken();
+  if (!token) {
+    // Never signed in, or signed out. Not an error and not worth retrying.
+    session.setStatus("signed_out");
+    useTraceStore.getState().setConnection("closed");
+    return;
+  }
+
+  let ticket: string;
+  try {
+    // The session is refreshed on every connect rather than cached: it is what tells us the
+    // workspace list and the token's expiry, and both can have changed while the socket was
+    // down — a membership added, a role changed, a token renewed in another tab.
+    const view = await fetchSession(token);
+    const wanted = useSessionStore.getState().workspaceId ?? storedWorkspace();
+    // A remembered workspace this account is not in — because they signed in as somebody else,
+    // or were removed while away — falls back to the default rather than 403ing on every
+    // attempt. Falling back is not a security decision: the server checks membership either way.
+    const target = view.workspaces.some((w) => w.id === wanted) ? wanted! : view.defaultWorkspaceId;
+    const issued = await fetchTicket(token, target);
+    useSessionStore.getState().applySession(view, issued.workspaceId);
+    storeWorkspace(issued.workspaceId);
+    ticket = issued.ticket;
+  } catch (err) {
+    const failure = err as AuthFailure;
+    if (!failure.retryable) {
+      // 401 or 403. The token is bad, or this account may not be here. Stop.
+      useSessionStore.getState().signOut(failure.message);
+      useTraceStore.getState().setConnection("closed");
+      return;
+    }
+    useSessionStore.getState().setStatus("connecting", failure.message);
+    useTraceStore.getState().setConnection("closed");
+    scheduleReconnect();
+    return;
+  }
+
+  ws = new WebSocket(socketUrl(ticket));
+
+  ws.onopen = () => {
+    // A connection that stayed open is what resets the backoff, not one that was merely
+    // attempted — otherwise a server refusing every socket is retried at full speed forever.
+    attempt = 0;
+    useTraceStore.getState().setConnection("open");
+    useSessionStore.getState().setStatus("ready");
+  };
 
   ws.onmessage = (ev) => {
     try {
@@ -214,21 +314,77 @@ function connect(): void {
     }
   };
 
-  ws.onclose = () => {
+  ws.onclose = (ev) => {
     useTraceStore.getState().setConnection("closed");
     ws = null;
-    setTimeout(connect, RECONNECT_MS); // auto-reconnect
+    if (stopped) return;
+    if (ev.code === CLOSE_UNAUTHORISED) {
+      // The server told us why on the `session` channel a moment ago, and the code is here in
+      // case that frame did not land. Either way: stop, do not retry.
+      const state = useSessionStore.getState();
+      if (state.status !== "signed_out") state.signOut(state.message ?? "your session ended");
+      return;
+    }
+    // CLOSE_RECONNECT and every ordinary drop take the same path: get a new ticket and try
+    // again. A ticket is single-use, so a reconnect is always a fresh exchange.
+    scheduleReconnect();
   };
 
   // On error the socket also fires close; let close drive reconnection.
   ws.onerror = () => ws?.close();
 }
 
+/**
+ * Back off, so a server that is down is not hit once a second by every open tab.
+ *
+ * The original client retried at a flat one second, which was right when the server was a
+ * subprocess on the same machine. It is not right against a hosted one: a restart brings every
+ * client back simultaneously, and the flat interval keeps them synchronised. Exponential with
+ * jitter, capped, and reset only by a connection that actually opened.
+ */
+function scheduleReconnect(): void {
+  if (stopped) return;
+  const backoff = Math.min(RECONNECT_MS * 2 ** attempt, MAX_RECONNECT_MS);
+  attempt++;
+  // Jitter, or every client that dropped together comes back together.
+  const delay = backoff * (0.7 + Math.random() * 0.6);
+  setTimeout(() => void connect(), delay);
+}
+
 /** Start the singleton connection once (safe under React StrictMode double-invoke). */
 export function startSocket(): void {
   if (started) return;
   started = true;
-  connect();
+  stopped = false;
+  void connect();
+}
+
+/**
+ * Close the socket and stop reconnecting.
+ *
+ * For signing out and for switching workspace. A switch is a NEW socket rather than a message
+ * on the current one — simpler, and impossible to get subtly wrong: the workspace a socket
+ * acts in was decided by the ticket it was opened with, and there is no message that could
+ * change it.
+ */
+export function stopSocket(): void {
+  stopped = true;
+  started = false;
+  attempt = 0;
+  const open = ws;
+  ws = null;
+  try {
+    open?.close();
+  } catch {
+    /* already closing */
+  }
+  useTraceStore.getState().setConnection("closed");
+}
+
+/** Close, then open again — in whatever workspace the session store now names. */
+export function restartSocket(): void {
+  stopSocket();
+  startSocket();
 }
 
 function send(cmd: ClientCommand): void {
@@ -457,6 +613,27 @@ export function sendSetRailwayToken(token: string | null): void {
 export function sendTestRailwayToken(token: string): void {
   useDeployStore.getState().startTest();
   send({ cmd: "testRailwayToken", token });
+}
+
+// --- membership ------------------------------------------------------------
+// Answered on the "members" channel with a full snapshot, the same discipline as every other
+// control-plane channel. `inviteLink` is the exception: it carries a credential, is sent only
+// to the socket that asked, and is never stored — see wsRelay's MemberEvent.
+
+export function sendListMembers(): void {
+  send({ cmd: "listMembers" });
+}
+export function sendInviteMember(email: string, role: string): void {
+  send({ cmd: "inviteMember", email, role });
+}
+export function sendRevokeInvite(inviteId: string): void {
+  send({ cmd: "revokeInvite", inviteId });
+}
+export function sendSetMemberRole(userId: string, role: string): void {
+  send({ cmd: "setMemberRole", userId, role });
+}
+export function sendRemoveMember(userId: string): void {
+  send({ cmd: "removeMember", userId });
 }
 
 // --- eval: dataset CRUD ----------------------------------------------------

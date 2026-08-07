@@ -1,0 +1,107 @@
+// Who is signed in, and which workspace this tab is acting in.
+//
+// A store of its own rather than a corner of `uiStore`, for the reason the other stores are
+// separated: uiStore owns view intent — which tab is showing, whether the composer is in Test
+// mode — and none of that has a correctness requirement. This one decides whether anything is
+// shown at all, and it is the store every other store gets RESET from when a workspace
+// changes. Folding it into uiStore would put the reset trigger inside the thing being reset.
+//
+// THE STATUS IS THE POINT. Five states, and the two that matter most are the two that look
+// identical if you are not careful:
+//
+//   `connecting`  — we are trying. Keep trying. This is a dropped network, a server restart,
+//                   a laptop lid. It resolves itself and the UI should say so quietly.
+//   `signed_out`  — we are not allowed. STOP trying, and show the sign-in screen. Retrying a
+//                   401 forever behind a spinner is the failure this distinction exists to
+//                   prevent, and it is the one the spec calls out by name.
+//
+// Nothing here holds a token. The token lives in lib/auth.ts, which is the only module that
+// reads or writes it — a store that held it would put a credential in every devtools snapshot
+// of the React tree.
+
+import { create } from "zustand";
+import { storeWorkspace, type SessionUser, type SessionView, type SessionWorkspace } from "../lib/auth.ts";
+
+export type SessionStatus =
+  /** Nothing has happened yet. The first paint, before the token is even read. */
+  | "unknown"
+  /** Trying: acquiring a session, fetching a ticket, opening a socket. Retryable. */
+  | "connecting"
+  /** A session and an open socket. The app is usable. */
+  | "ready"
+  /** Not allowed, or never signed in. The sign-in screen, and no retry loop. */
+  | "signed_out"
+  /** Something failed in a way that is worth saying out loud and worth retrying. */
+  | "error";
+
+interface SessionState {
+  status: SessionStatus;
+  user: SessionUser | null;
+  workspaces: SessionWorkspace[];
+  /** The workspace this tab acts in. One socket, one workspace, for the tab's whole life. */
+  workspaceId: string | null;
+  /** Unix seconds, from the token. Drives the "your session is ending" notice. */
+  expiresAt: number | null;
+  /** Set when the server said the session is nearly over, so the UI can offer to renew. */
+  expiring: boolean;
+  message: string | null;
+  /** Whether this server offers the local dev sign-in, so the screen knows what to render. */
+  localIssuer: boolean;
+
+  setStatus: (status: SessionStatus, message?: string | null) => void;
+  applySession: (view: SessionView, workspaceId: string) => void;
+  setWorkspaces: (workspaces: SessionWorkspace[]) => void;
+  setLocalIssuer: (available: boolean) => void;
+  setExpiring: (expiring: boolean) => void;
+  signOut: (message?: string | null) => void;
+  /** The role this tab holds in its current workspace, or null. Drives what the UI offers. */
+  role: () => string | null;
+}
+
+export const useSessionStore = create<SessionState>((set, get) => ({
+  status: "unknown",
+  user: null,
+  workspaces: [],
+  workspaceId: null,
+  expiresAt: null,
+  expiring: false,
+  message: null,
+  localIssuer: false,
+
+  setStatus: (status, message = null) => set({ status, message }),
+
+  applySession: (view, workspaceId) =>
+    set({
+      user: view.user,
+      workspaces: view.workspaces,
+      workspaceId,
+      expiresAt: view.expiresAt,
+      // A fresh session is a fresh token, so whatever the last one was warning about is over.
+      expiring: false,
+      message: null,
+    }),
+
+  setWorkspaces: (workspaces) => set({ workspaces }),
+  setLocalIssuer: (localIssuer) => set({ localIssuer }),
+  setExpiring: (expiring) => set({ expiring }),
+
+  signOut: (message = null) => {
+    // The remembered workspace goes too. Signing out and back in as somebody else must not
+    // land in the previous account's workspace and get a 403 nobody can explain.
+    storeWorkspace(null);
+    set({
+      status: "signed_out",
+      user: null,
+      workspaces: [],
+      workspaceId: null,
+      expiresAt: null,
+      expiring: false,
+      message,
+    });
+  },
+
+  role: () => {
+    const { workspaceId, workspaces } = get();
+    return workspaces.find((w) => w.id === workspaceId)?.role ?? null;
+  },
+}));
