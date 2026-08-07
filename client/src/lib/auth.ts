@@ -49,6 +49,16 @@ export interface SessionUser {
   id: string;
   email: string;
   displayName: string | null;
+  /**
+   * Whether this PERSON has finished first-run onboarding.
+   *
+   * From the server, because "is this user new" and "is this browser new" are different
+   * questions and the flow only ever wanted the first. Answered from `localStorage`, a new
+   * account on a used browser skipped onboarding entirely — inheriting whatever step the
+   * previous person stopped on — and a returning user on a second device was walked through a
+   * welcome screen for a product they use daily.
+   */
+  onboarded: boolean;
 }
 
 export interface SessionWorkspace {
@@ -170,6 +180,17 @@ export async function devSignIn(email: string, name?: string): Promise<string> {
 /** Exchange the stored token for the account and its workspaces. Provisions on first sight. */
 export async function fetchSession(token: string): Promise<SessionView> {
   return post<SessionView>("/v1/auth/session", {}, token);
+}
+
+/**
+ * Record that the caller has finished onboarding.
+ *
+ * Sends no user id — the only person it can mark is whoever holds the token, which is why
+ * there is nothing here to get wrong. Idempotent on the server, so a second tab or a re-render
+ * firing it again is not a problem worth guarding here.
+ */
+export async function markOnboarded(token: string): Promise<void> {
+  await post<{ onboarded: boolean }>("/v1/auth/onboarded", {}, token);
 }
 
 /**

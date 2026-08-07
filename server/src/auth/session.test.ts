@@ -135,6 +135,46 @@ async function suite(driver: string, db: Db): Promise<void> {
     );
   }
 
+  console.log("  · onboarding is a fact about the PERSON");
+  {
+    // Migration 013. The flow used to be gated on a browser-local flag, which answered "is this
+    // BROWSER new" — so a second account on a used machine skipped onboarding entirely and a
+    // returning user in a private window was welcomed to a product they already use. The server
+    // is the only place that can answer the question actually being asked.
+    const { token } = issuer.mint({ email: `onb-${label}@example.com` });
+    const fresh = await post(base, "/v1/auth/session", token);
+    check(fresh.json?.user?.onboarded === false, "a brand-new account has NOT onboarded");
+
+    const marked = await post(base, "/v1/auth/onboarded", token);
+    check(marked.status === 200 && marked.json?.onboarded === true, `finishing it is recorded (${marked.status})`);
+
+    const again = await post(base, "/v1/auth/session", token);
+    check(again.json?.user?.onboarded === true, "...and the NEXT sign-in knows — on any browser, any device");
+
+    // Idempotent, because the client can fire it from an effect that a second tab, a
+    // re-render or a reload each re-runs. The first time is the one that means anything: a
+    // column that moved would record the most recent visit rather than the first.
+    const first = await db.get<{ onboarded_at: string }>(
+      `SELECT onboarded_at FROM users WHERE email = ?`, [`onb-${label}@example.com`],
+    );
+    await post(base, "/v1/auth/onboarded", token);
+    const after = await db.get<{ onboarded_at: string }>(
+      `SELECT onboarded_at FROM users WHERE email = ?`, [`onb-${label}@example.com`],
+    );
+    check(
+      first?.onboarded_at === after?.onboarded_at,
+      "marking it twice does not move the timestamp — it records the FIRST time, not the latest",
+    );
+
+    // It is the caller's own flag and nobody else's. There is no user id in the body precisely
+    // so that there is none to forge, and a second account is unaffected by the first's call.
+    const other = issuer.mint({ email: `onb-other-${label}@example.com` });
+    const otherView = await post(base, "/v1/auth/session", other.token);
+    check(otherView.json?.user?.onboarded === false, "another account is untouched by somebody else finishing");
+
+    check((await post(base, "/v1/auth/onboarded")).status === 401, "and it takes a token like everything else");
+  }
+
   console.log("  · concurrent first sight");
   {
     // The real case: the client asks for a session and a ws-ticket in the same tick, and a

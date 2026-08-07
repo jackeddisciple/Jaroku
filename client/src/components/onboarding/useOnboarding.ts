@@ -11,8 +11,9 @@
 import { useEffect, useRef } from "react";
 import { useBuildStore } from "../../store/buildStore.ts";
 import { useChatStore } from "../../store/chatStore.ts";
+import { useSessionStore } from "../../store/sessionStore.ts";
 import { useTraceStore } from "../../store/traceStore.ts";
-import { hasOnboardingRecord, useUiStore } from "../../store/uiStore.ts";
+import { useUiStore } from "../../store/uiStore.ts";
 
 /** The four onboarding views, plus the one that means "the normal app". */
 export type OnboardingPhase = "welcome" | "provider" | "prompt" | "run" | "complete";
@@ -25,15 +26,6 @@ export type OnboardingPhase = "welcome" | "provider" | "prompt" | "run" | "compl
  */
 export const EXAMPLE_AGENT_ID = "example_agent";
 
-/**
- * Whether anything was stored BEFORE this session started.
- *
- * Read once at module load rather than at call time, because the first thing the flow does is
- * write — after that, `hasOnboardingRecord()` is true for reasons that say nothing about
- * whether the user had been here before.
- */
-const HAD_RECORD_AT_LOAD = hasOnboardingRecord();
-
 export interface Onboarding {
   phase: OnboardingPhase;
   /** Step 4's progressive reveal: the left column, then the right one. */
@@ -42,8 +34,19 @@ export interface Onboarding {
 }
 
 export function useOnboarding(): Onboarding {
-  const complete = useUiStore((s) => s.onboardingComplete);
+  // THE GATE IS THE ACCOUNT'S, not the browser's. `user.onboarded` comes from the server on
+  // every sign-in, so a person is offered this once ever rather than once per machine — and a
+  // second account on a machine that has already been through it is not silently skipped past.
+  const userId = useSessionStore((s) => s.user?.id ?? null);
+  const complete = useSessionStore((s) => s.user?.onboarded ?? false);
   const step = useUiStore((s) => s.onboardingStep);
+
+  // Where THIS person got to, re-read whenever the signed-in account changes. Without it the
+  // store still holds the previous user's step, which is the browser-shaped bug one level in.
+  const loadOnboarding = useUiStore((s) => s.loadOnboarding);
+  useEffect(() => {
+    loadOnboarding();
+  }, [userId, loadOnboarding]);
 
   const agents = useBuildStore((s) => s.agents);
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
@@ -53,19 +56,28 @@ export function useOnboarding(): Onboarding {
   const threads = useChatStore((s) => s.threads);
   const runs = useTraceStore((s) => s.runs);
 
-  // --- an instance that has clearly been used before ------------------------------------
+  // --- a workspace that has clearly been used before ------------------------------------
   //
-  // Onboarding is gated on a browser-local flag, so an existing user upgrading into this build
-  // has no flag and would be met by a Welcome screen for a product they already use.
+  // Everybody provisioned before migration 013 has `onboarded_at = NULL`, because there was no
+  // truthful backfill: the only record of who had onboarded was in browsers the migration
+  // cannot reach. So without this, every existing user meets a Welcome screen for a product
+  // they already use.
   //
   // A generated agent is the signal, because it is the one thing that cannot be there by
   // accident: a fresh clone ships `example_agent` and nothing else (.gitignore keeps
   // `runtime/agents/*` out except that one), and the boot autorun creates a run without
   // creating an agent. So "an agent that is not the shipped one exists" means somebody built
-  // something here.
+  // something in this workspace.
+  //
+  // It reads the AGENT LIST, which is workspace-scoped, so it also covers the case the chosen
+  // model wants: somebody joining a colleague's established workspace is not walked through an
+  // introduction to a product that workspace is visibly already using.
+  //
+  // `settled` guards the ref rather than the write — `completeOnboarding` is idempotent on both
+  // sides — so this fires once per mount rather than once per agent-list update.
   const settled = useRef(false);
   useEffect(() => {
-    if (settled.current || complete || HAD_RECORD_AT_LOAD) return;
+    if (settled.current || complete) return;
     if (agents.length === 0) return; // the snapshot has not landed yet
     if (agents.some((a) => a.agent_id !== EXAMPLE_AGENT_ID)) {
       settled.current = true;

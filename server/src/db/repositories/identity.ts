@@ -22,6 +22,14 @@ export interface User {
   display_name: string | null;
   created_at: string;
   deleted_at: string | null;
+  /**
+   * When this PERSON finished first-run onboarding, or null if they have not.
+   *
+   * On the user rather than on a membership because onboarding teaches somebody what the
+   * product is, which is learned once by a person and not once per workspace they join. See
+   * migration 013.
+   */
+  onboarded_at: string | null;
 }
 
 export type WorkspaceKind = "personal" | "team";
@@ -144,7 +152,7 @@ export class IdentityRepository {
 
   async userByExternalId(_ctx: SystemContext, externalId: string): Promise<User | undefined> {
     return this.db.get<User>(
-      `SELECT id, external_id, email, display_name, created_at, deleted_at
+      `SELECT id, external_id, email, display_name, created_at, deleted_at, onboarded_at
          FROM users WHERE external_id = ? AND deleted_at IS NULL`,
       [externalId],
     );
@@ -152,10 +160,40 @@ export class IdentityRepository {
 
   async userById(_ctx: AnyContext, id: string): Promise<User | undefined> {
     return this.db.get<User>(
-      `SELECT id, external_id, email, display_name, created_at, deleted_at
+      `SELECT id, external_id, email, display_name, created_at, deleted_at, onboarded_at
          FROM users WHERE id = ? AND deleted_at IS NULL`,
       [id],
     );
+  }
+
+  /**
+   * Record that this person has finished first-run onboarding.
+   *
+   * IDEMPOTENT VIA `onboarded_at IS NULL`, and that is the whole of the concurrency handling.
+   * The client calls this from a `useEffect` that a second tab, a re-render or a reload can
+   * each fire again, and the first time is the one that means anything — without the guard, a
+   * reload a month later would rewrite the timestamp and the column would record the most
+   * recent visit rather than the first, which is the opposite of what it is for.
+   *
+   * Takes a user id rather than a TenantContext: this is a fact about a PERSON, and the
+   * workspace they happen to be in when they finish is not part of it. It is the one write in
+   * this repository that is deliberately not workspace-scoped, which is why it is here beside
+   * the other two user-level reads rather than among the membership mutations below.
+   *
+   * Returns the timestamp now in force — the caller's, or the one already there.
+   */
+  async markOnboarded(_ctx: AnyContext, userId: string): Promise<string | null> {
+    const at = nowIso();
+    await this.db.run(
+      `UPDATE users SET onboarded_at = ?
+        WHERE id = ? AND deleted_at IS NULL AND onboarded_at IS NULL`,
+      [at, userId],
+    );
+    const row = await this.db.get<{ onboarded_at: string | null }>(
+      `SELECT onboarded_at FROM users WHERE id = ? AND deleted_at IS NULL`,
+      [userId],
+    );
+    return row?.onboarded_at ?? null;
   }
 
   /**
@@ -180,7 +218,7 @@ export class IdentityRepository {
   ): Promise<{ user: User; workspace: Workspace; created: boolean }> {
     return this.db.transaction(async (tx) => {
       const existing = await tx.get<User>(
-        `SELECT id, external_id, email, display_name, created_at, deleted_at
+        `SELECT id, external_id, email, display_name, created_at, deleted_at, onboarded_at
            FROM users WHERE external_id = ? AND deleted_at IS NULL`,
         [input.externalId],
       );
@@ -207,6 +245,7 @@ export class IdentityRepository {
         display_name: input.displayName?.trim() || null,
         created_at: nowIso(),
         deleted_at: null,
+        onboarded_at: null,
       };
       const inserted = await tx.run(
         `INSERT INTO users (id, external_id, email, display_name, created_at)
@@ -218,7 +257,7 @@ export class IdentityRepository {
         // Somebody else provisioned this `sub` between the SELECT and here. Their row is the
         // real one; ours was never written.
         const winner = await tx.get<User>(
-          `SELECT id, external_id, email, display_name, created_at, deleted_at
+          `SELECT id, external_id, email, display_name, created_at, deleted_at, onboarded_at
              FROM users WHERE external_id = ? AND deleted_at IS NULL`,
           [input.externalId],
         );

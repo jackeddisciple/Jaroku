@@ -65,7 +65,21 @@ export async function authenticate(req: HttpRequest, verifier: TokenVerifier): P
 
 /** What a client learns about itself. Ids and roles; no tokens, no keys, no other tenants. */
 export interface SessionView {
-  user: { id: string; email: string; displayName: string | null };
+  user: {
+    id: string;
+    email: string;
+    displayName: string | null;
+    /**
+     * Whether this PERSON has been shown the product before.
+     *
+     * Here rather than in the browser, because "is this user new" and "is this browser new"
+     * are different questions and only the first one is the one being asked. The client used
+     * to answer it from `localStorage`, which meant a new account on a used browser skipped
+     * onboarding and a returning user on a second device was walked through it again. See
+     * migration 013.
+     */
+    onboarded: boolean;
+  };
   workspaces: { id: string; slug: string; name: string; kind: string; role: string }[];
   /** Where a client with no stored preference should start. Always one it belongs to. */
   defaultWorkspaceId: string;
@@ -80,6 +94,7 @@ export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" 
   if (deps.tickets && deps.resolver) {
     routes.push({ path: "/v1/ws-ticket", method: "POST", handler: ticketHandler(deps) });
   }
+  routes.push({ path: "/v1/auth/onboarded", method: "POST", handler: onboardedHandler(deps) });
   routes.push({ path: "/v1/invites/accept", method: "POST", handler: acceptInviteHandler(deps) });
   if (deps.localIssuer) {
     routes.push({ path: "/v1/auth/jwks.json", method: "GET", handler: jwksHandler(deps.localIssuer) });
@@ -136,6 +151,10 @@ function sessionHandler(deps: SessionDeps): Handler {
         id: provisioned.user.id,
         email: provisioned.user.email,
         displayName: provisioned.user.display_name,
+        // A boolean, not the timestamp. The client's only question is whether to show the
+        // flow; WHEN somebody onboarded is for whoever reads the funnel, and a date on the
+        // wire is a date somebody eventually renders.
+        onboarded: provisioned.user.onboarded_at !== null,
       },
       workspaces: memberships.map((w) => ({
         id: w.id,
@@ -194,6 +213,35 @@ async function adoptOrphans(
  * then inherits that scope and can never be talked into another one — a switch is a new
  * socket, which is a new ticket, which is a new membership check.
  */
+/**
+ * "I have finished onboarding." A fact about the caller, and only ever about the caller.
+ *
+ * NO USER ID IN THE BODY, and that is the whole of the authorisation story: the only person
+ * this can mark is whoever presented the token, so there is no id to forge because there is no
+ * id to send. A route that accepted one would need a rule about who may mark whom, and the only
+ * correct rule is "nobody" — so the parameter should not exist.
+ *
+ * Not a socket command, for the reason accepting an invitation is not one: this is a fact about
+ * a PERSON rather than about anything in a workspace, so scoping it to one would describe it
+ * wrongly. The capability matrix would also have to grow an entry meaning "yourself", which is
+ * not a capability.
+ *
+ * Idempotent in the repository, because the client can fire this more than once — a second tab,
+ * a re-render, a reload — and only the first time means anything.
+ */
+function onboardedHandler(deps: SessionDeps): Handler {
+  return async (req) => {
+    const auth = await authenticate(req, deps.verifier);
+    const sys = systemContext(req.requestId);
+    const user = await deps.identity.userByExternalId(sys, auth.subject);
+    // A verified token for somebody with no row: a session against an account deleted
+    // mid-flight, not a malformed request, and there is nothing to mark.
+    if (!user) throw forbidden("this account no longer exists");
+    const at = await deps.identity.markOnboarded(sys, user.id);
+    return { body: { onboarded: at !== null } };
+  };
+}
+
 function ticketHandler(deps: SessionDeps): Handler {
   const tickets = deps.tickets!;
   const resolver = deps.resolver!;

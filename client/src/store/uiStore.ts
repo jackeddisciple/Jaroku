@@ -38,18 +38,23 @@ export const INPUT_KEY_PREFIX = "jaroku.input.";
 
 // --- first-run onboarding ----------------------------------------------------------------
 //
-// UI-only state, and that is why it lives here rather than anywhere else. Which screen a
-// first-run user is on has no correctness requirement the way traceStore's ordering does —
-// getting it wrong shows the wrong panel, not a trace that lies — so it belongs in the store
-// that owns view intent and nowhere else.
+// WHETHER somebody has onboarded is NOT here. It is `sessionStore.user.onboarded`, from the
+// server, because it is a fact about a PERSON and this store is a browser. Answered here it
+// answered the wrong question — "has this BROWSER seen the app" — so a new account on a used
+// machine skipped the flow and inherited whatever step the last person stopped on, while a
+// returning user in a private window was welcomed to a product they use daily. See migration
+// 013 and `useOnboarding`.
 //
-// Persisted with raw localStorage under a `jaroku.` key, which is the precedent this file
-// already set with `inputKey` above. No persist middleware: the app has no such dependency and
-// three fields do not justify introducing one.
+// WHAT IS STILL HERE is where somebody is UP TO: which of the four screens, and which one-time
+// hints have been shown. That genuinely is view state — it only means anything while an
+// onboarding is unfinished, it is worth surviving a reload mid-flow, and it is not worth a
+// round trip per step.
 //
-// All three share ONE key rather than three, so a half-written onboarding state is not
-// representable — you cannot end up "complete but on step 2" because the parts were written
-// separately.
+// KEYED BY USER, for the reason `inputKey` above is keyed by workspace: two accounts share a
+// browser, and the second must not resume the first's progress. A key nobody has written yet
+// reads as the default, which is exactly right for somebody new.
+//
+// Both fields share ONE key rather than two, so a half-written state is not representable.
 
 export type OnboardingStep = "welcome" | "provider" | "prompt" | "run";
 
@@ -57,54 +62,49 @@ export type OnboardingStep = "welcome" | "provider" | "prompt" | "run";
  *  second hint later is data rather than another field. */
 export type HintId = "trace";
 
-const ONBOARDING_KEY = "jaroku.onboarding";
+/** The prefix every per-user onboarding record shares. */
+export const ONBOARDING_KEY_PREFIX = "jaroku.onboarding.";
 
-interface OnboardingState {
-  complete: boolean;
+const onboardingKey = (userId: string | null): string => `${ONBOARDING_KEY_PREFIX}${userId ?? "_"}`;
+
+interface OnboardingProgress {
   step: OnboardingStep;
   hintsShown: string[];
 }
 
-const DEFAULT_ONBOARDING: OnboardingState = { complete: false, step: "welcome", hintsShown: [] };
+const DEFAULT_PROGRESS: OnboardingProgress = { step: "welcome", hintsShown: [] };
 
-function readOnboarding(): OnboardingState {
+function readProgress(userId: string | null): OnboardingProgress {
   try {
-    const raw = localStorage.getItem(ONBOARDING_KEY);
-    if (!raw) return DEFAULT_ONBOARDING;
-    const parsed = JSON.parse(raw) as Partial<OnboardingState>;
+    const raw = localStorage.getItem(onboardingKey(userId));
+    if (!raw) return DEFAULT_PROGRESS;
+    const parsed = JSON.parse(raw) as Partial<OnboardingProgress>;
     return {
       // Field by field, because this is user-editable storage that survives across versions:
       // a blob written by an older build (or by hand) must degrade to the default rather than
       // put `undefined` where the app expects a step name.
-      complete: parsed.complete === true,
       step: parsed.step === "provider" || parsed.step === "prompt" || parsed.step === "run"
         ? parsed.step
         : "welcome",
       hintsShown: Array.isArray(parsed.hintsShown) ? parsed.hintsShown.filter((h) => typeof h === "string") : [],
     };
   } catch {
-    // Storage can be unavailable (private mode, a locked-down browser). Onboarding showing
-    // again is a far better failure than the app refusing to start.
-    return DEFAULT_ONBOARDING;
+    // Storage can be unavailable (private mode, a locked-down browser). Starting the flow at
+    // the beginning is a far better failure than the app refusing to start.
+    return DEFAULT_PROGRESS;
   }
 }
 
-function writeOnboarding(state: OnboardingState): void {
+function writeProgress(userId: string | null, state: OnboardingProgress): void {
   try {
-    localStorage.setItem(ONBOARDING_KEY, JSON.stringify(state));
+    localStorage.setItem(onboardingKey(userId), JSON.stringify(state));
   } catch {
-    /* see readOnboarding — an unwritable store must not break the session in progress */
+    /* see readProgress — an unwritable store must not break the session in progress */
   }
 }
 
-/** Whether anything has been recorded yet, i.e. this browser has never seen the app. */
-export function hasOnboardingRecord(): boolean {
-  try {
-    return localStorage.getItem(ONBOARDING_KEY) !== null;
-  } catch {
-    return false;
-  }
-}
+/** Whoever is signed in, or null before the session lands. Read at call time, never captured. */
+const currentUserId = (): string | null => useSessionStore.getState().user?.id ?? null;
 
 export const RUN_PROVIDERS = [
   { id: "fake", label: "Dry run (free)", models: ["fake-dry-run"] },
@@ -160,18 +160,22 @@ interface UiState {
   providerPanelOpen: boolean;
   setProviderPanel: (v: boolean) => void;
 
-  // First run. `onboardingComplete` is the single gate App reads; `onboardingStep` is only
-  // consulted while it is false, and exists so a reload mid-flow resumes where the user was
-  // rather than starting them over at Welcome.
-  onboardingComplete: boolean;
+  // First run. WHETHER it is over is `sessionStore.user.onboarded`, not here — see the note
+  // above the reader. `onboardingStep` is only consulted while that is false, and exists so a
+  // reload mid-flow resumes where the user was rather than starting them over at Welcome.
   onboardingStep: OnboardingStep;
   onboardingHintsShown: string[];
+  /** Re-read the signed-in user's progress. Called when the session lands or the user changes. */
+  loadOnboarding: () => void;
   setOnboardingStep: (step: OnboardingStep) => void;
   completeOnboarding: () => void;
   markHintShown: (id: HintId) => void;
 }
 
-const onboarding = readOnboarding();
+// The default, not a read. At module load there is no session yet, so there is no user to read
+// FOR — `loadOnboarding` runs once the session lands. Reading here is what made the previous
+// person's progress the starting point for the next one.
+const onboarding = DEFAULT_PROGRESS;
 
 export const useUiStore = create<UiState>((set) => ({
   paletteOpen: false,
@@ -208,34 +212,38 @@ export const useUiStore = create<UiState>((set) => ({
   providerPanelOpen: false,
   setProviderPanel: (providerPanelOpen) => set({ providerPanelOpen }),
 
-  onboardingComplete: onboarding.complete,
   onboardingStep: onboarding.step,
   onboardingHintsShown: onboarding.hintsShown,
 
-  // Each setter writes the whole blob back. Cheap (three fields, on a user action), and it
-  // means there is no path where memory and storage disagree about which step you are on.
+  loadOnboarding: () => {
+    const progress = readProgress(currentUserId());
+    set({ onboardingStep: progress.step, onboardingHintsShown: progress.hintsShown });
+  },
+
+  // Each setter writes the whole blob back. Cheap (two fields, on a user action), and it means
+  // there is no path where memory and storage disagree about which step you are on.
   setOnboardingStep: (step) =>
     set((s) => {
-      if (s.onboardingComplete || s.onboardingStep === step) return {};
-      writeOnboarding({ complete: false, step, hintsShown: s.onboardingHintsShown });
+      if (s.onboardingStep === step) return {};
+      writeProgress(currentUserId(), { step, hintsShown: s.onboardingHintsShown });
       return { onboardingStep: step };
     }),
 
-  completeOnboarding: () =>
-    set((s) => {
-      if (s.onboardingComplete) return {};
-      // The step is kept rather than cleared. It costs nothing and it is the difference
-      // between "finished" and "finished, and here is where they came in" if this ever needs
-      // to be looked at.
-      writeOnboarding({ complete: true, step: s.onboardingStep, hintsShown: s.onboardingHintsShown });
-      return { onboardingComplete: true };
-    }),
+  // The step is kept rather than cleared: it costs nothing, and it is the difference between
+  // "finished" and "finished, and here is where they came in".
+  //
+  // The FACT of being finished goes to the session store, which owns it and tells the server.
+  // Writing it here as well would be two answers to one question, and the local one would win
+  // on the machine where it was written and lose everywhere else.
+  completeOnboarding: () => {
+    useSessionStore.getState().markOnboarded();
+  },
 
   markHintShown: (id) =>
     set((s) => {
       if (s.onboardingHintsShown.includes(id)) return {};
       const hintsShown = [...s.onboardingHintsShown, id];
-      writeOnboarding({ complete: s.onboardingComplete, step: s.onboardingStep, hintsShown });
+      writeProgress(currentUserId(), { step: s.onboardingStep, hintsShown });
       return { onboardingHintsShown: hintsShown };
     }),
 }));

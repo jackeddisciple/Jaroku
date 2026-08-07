@@ -27,7 +27,7 @@ import { useMemberStore } from "./memberStore.ts";
 import { useProviderStore } from "./providerStore.ts";
 import { useTraceStore } from "./traceStore.ts";
 import { useSessionStore } from "./sessionStore.ts";
-import { inputKey, INPUT_KEY_PREFIX } from "./uiStore.ts";
+import { inputKey, INPUT_KEY_PREFIX, useUiStore } from "./uiStore.ts";
 
 let failures = 0;
 const check = (ok: boolean, msg: string): void => {
@@ -176,7 +176,11 @@ console.log("\nand so is everything the browser keeps");
   const NOT_TENANT_DATA = new Set([
     "jaroku.token",      // the bearer token — the account's, not a workspace's, and cleared on sign-out
     "jaroku.workspace",  // WHICH workspace, not anything in one. Cleared on sign-out
-    "jaroku.onboarding", // first-run progress: a step name and a list of hint ids
+    // First-run progress: a step name and a list of hint ids, and nothing else — WHETHER
+    // somebody has onboarded is the server's answer now (users.onboarded_at). Keyed by user
+    // rather than swept on sign-out, so a returning person resumes an unfinished flow instead
+    // of restarting it, and the next person at this browser does not inherit it.
+    "jaroku.onboarding",
   ]);
 
   const unclassified = [...keys].filter((k) => !WORKSPACE_SCOPED.has(k) && !NOT_TENANT_DATA.has(k));
@@ -203,6 +207,27 @@ console.log("\nand so is everything the browser keeps");
     "a remembered test input does NOT cross to a same-named agent in another workspace",
   );
   localStorage.removeItem(`${INPUT_KEY_PREFIX}ws-AAA.support_bot`);
+
+  // The same shape one level up: onboarding PROGRESS is per user, so two accounts sharing a
+  // browser do not resume each other's flow. (Whether onboarding is finished is not here at
+  // all — it is users.onboarded_at, which is the point of migration 013.)
+  useSessionStore.setState({ user: { id: "user-1", email: "a@x", displayName: null, onboarded: false } } as never);
+  useUiStore.getState().setOnboardingStep("run");
+  check(useUiStore.getState().onboardingStep === "run", "one user reaches onboarding step 'run'");
+
+  useSessionStore.setState({ user: { id: "user-2", email: "b@x", displayName: null, onboarded: false } } as never);
+  useUiStore.getState().loadOnboarding();
+  check(
+    useUiStore.getState().onboardingStep === "welcome",
+    "a DIFFERENT account on the same browser starts at 'welcome' rather than inheriting it",
+  );
+
+  useSessionStore.setState({ user: { id: "user-1", email: "a@x", displayName: null, onboarded: false } } as never);
+  useUiStore.getState().loadOnboarding();
+  check(
+    useUiStore.getState().onboardingStep === "run",
+    "...and the first one resumes where they actually were",
+  );
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

@@ -1,0 +1,39 @@
+-- 013_user_onboarding — whether this PERSON has been shown the product before.
+--
+-- WHY A COLUMN AND NOT A BROWSER FLAG. First-run onboarding was gated on
+-- `localStorage["jaroku.onboarding"]`, which was exactly right when Jaroku was one user on one
+-- machine: the browser and the account were the same fact. Session 2 made them different facts
+-- and left the gate reading the wrong one, so "is this user new" actually answered "is this
+-- BROWSER new":
+--
+--   * a new account signing in on a browser that had already onboarded skipped the flow
+--     entirely, and inherited whatever step the previous person had stopped on;
+--   * an existing user on a second device, or in a private window, was walked through a
+--     welcome screen for a product they use daily;
+--   * two accounts on one machine — which is the whole point of Session 2 — meant the second
+--     one never onboarded.
+--
+-- The server already knows the answer. First-sight provisioning is the moment a person becomes
+-- known to this system, so the fact belongs beside the row that provisioning creates.
+--
+-- ON users, NOT ON workspace_members, and that is the decision this file encodes. Onboarding
+-- teaches somebody what the product IS — what a plan gate is, what a trace shows. That is
+-- learned once by a person, not once per workspace they are a member of. Somebody accepting an
+-- invitation to a colleague's workspace is not new to Jaroku and must not be told they are.
+--
+-- It follows that this is the ONE user-level fact of its kind, and it stays that way: anything
+-- that turns out to be true of a workspace rather than of a person — whether a provider key is
+-- configured, what plan it is on — belongs on workspaces and is answered by the panels that
+-- already answer it, not by widening this into a second, parallel notion of "set up".
+--
+-- NULLABLE, and null means "has not finished". A boolean would answer the question this gates
+-- on and nothing else; a timestamp additionally says WHEN, which is the first thing anybody
+-- asks of a signup funnel and is free to record now and impossible to backfill later.
+--
+-- EXISTING ROWS GET NULL, so everybody already provisioned is offered onboarding once. That is
+-- the right way round: showing a returning user one extra welcome screen they can click past
+-- is a smaller harm than silently skipping it for somebody who has genuinely never seen the
+-- product, and there is no truthful backfill available — the only record of who had onboarded
+-- was in browsers this migration cannot reach.
+
+ALTER TABLE users ADD COLUMN onboarded_at timestamptz;

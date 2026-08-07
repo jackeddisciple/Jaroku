@@ -219,9 +219,15 @@ four screens, then gets out of the way permanently.
 Reaching `run_end` ends onboarding. The three-column app is then just the same layout with the
 last two columns mounted — no reload, no reset, and it never appears again.
 
-State lives in `localStorage` under `jaroku.onboarding` (`onboardingComplete`,
-`onboardingStep`, `onboardingHintsShown`). Delete that key to see it again. An install that
-already has a generated agent in `runtime/agents/` is treated as onboarded and skips it.
+**Whether you have onboarded is a fact about your account**, not about this browser:
+`users.onboarded_at`, reported as `user.onboarded` on `/v1/auth/session`. So it follows you to a
+second device and it does not follow the *machine* to the next person who signs in on it — see
+[onboarding belongs to the person](#onboarding-belongs-to-the-person-not-the-browser) for why
+that distinction had to be made explicit.
+
+Where you are *up to* stays local, under `jaroku.onboarding.<user id>` (`onboardingStep`,
+`onboardingHintsShown`), so a reload mid-flow resumes rather than restarting. A workspace that
+already contains a generated agent is treated as onboarded and skips it.
 
 ---
 
@@ -2226,6 +2232,40 @@ right — retry, or stop and show sign-in.
 Session 8 still owns the rest of the posture: CSP, HSTS, `Referrer-Policy`, per-route rate
 limits. This is the part Session 2 cannot work without.
 
+### Onboarding belongs to the person, not the browser
+
+The [first-run flow](#first-run) was gated on `localStorage`, which was exactly right when
+Jaroku was one user on one machine: the browser and the account were the same fact. Real
+accounts made them different facts and left the gate reading the wrong one, so "is this user
+new" actually answered **"is this browser new"**:
+
+- a new account signing in on a browser that had already onboarded skipped the flow entirely,
+  and inherited whatever step the previous person stopped on;
+- an existing user on a second device, or in a private window, was walked through a welcome
+  screen for a product they use daily;
+- two accounts on one machine — which is the whole point of this session — meant the second one
+  never onboarded.
+
+`users.onboarded_at` answers it instead, reported as `user.onboarded` on `/v1/auth/session` and
+set by `POST /v1/auth/onboarded`. That route **takes no user id**, which is the whole of its
+authorisation story: the only person it can mark is whoever presented the token, so there is
+nothing to forge because there is nothing to send. It is idempotent, because the client fires it
+from an effect a second tab or a reload can re-run, and the column records the *first* time
+rather than the latest.
+
+**On `users`, not on `workspace_members`.** Onboarding teaches somebody what the product *is* —
+what a plan gate is, what a trace shows — and that is learned once by a person, not once per
+workspace they join. Somebody accepting an invitation to a colleague's workspace is not new to
+Jaroku and must not be told they are.
+
+What stays in the browser is *where somebody is up to*: the step and the one-time hints, keyed
+by user id so two accounts sharing a machine do not resume each other's flow. Existing rows get
+`NULL`, so everybody provisioned before the migration is offered onboarding once — there is no
+truthful backfill, since the only record of who had onboarded was in browsers the migration
+cannot reach, and one extra welcome screen is a smaller harm than silently skipping it for
+somebody genuinely new. A workspace that already contains a generated agent short-circuits it
+anyway.
+
 ### The gate: two people, one server, at the same time
 
 `npm run test:acceptance` is Session 2's acceptance criterion, run rather than described: **two
@@ -2293,7 +2333,7 @@ that is the fact a future cleanup will not know.
 
 | Path | What | Tracked? |
 |---|---|---|
-| browser `localStorage` | `jaroku.token` (the bearer token), `jaroku.workspace` (the last workspace), `jaroku.onboarding` (first-run progress), `jaroku.input.<agent>` (last test input). Deleting the first two signs you out; the rest lose nothing that matters | n/a |
+| browser `localStorage` | `jaroku.token` (the bearer token), `jaroku.workspace` (the last workspace), `jaroku.onboarding.<user id>` (where a person is up to in the first-run flow — *whether* they finished it is `users.onboarded_at`, on the server), `jaroku.input.<workspace id>.<agent>` (last test input). Both of the last two are keyed so a browser two people share never hands one's data to the other. Deleting the first two signs you out; the rest lose nothing that matters | n/a |
 | `server/.devauth.json` | The **local issuer's** RS256 signing key, `chmod 600`. Only exists when no `JAROKU_AUTH_ISSUER` is set | No |
 | `server/jaroku.db` | The local database. Identity (`users`, `workspaces`, `workspace_members`, `workspace_invites`, `ws_tickets`, `audit_log`) + agents (`agents`, `agent_versions`) + traces (`runs`, `steps`) + eval control plane (`datasets`, `dataset_examples`, `rubrics`, `eval_runs`, `eval_jobs`, `eval_scores`) + MCP registry (`mcp_servers`, `mcp_tools`) + deploy records (`deployments`, `deployment_logs`). Every one of them carries a `workspace_id` | No |
 | Postgres (`JAROKU_PG_URL`) | The same schema, hosted, with RLS. Selected by `JAROKU_DB_DRIVER=postgres`; see [the tenancy model](#the-tenancy-model) | No |

@@ -20,7 +20,14 @@
 // of the React tree.
 
 import { create } from "zustand";
-import { storeWorkspace, type SessionUser, type SessionView, type SessionWorkspace } from "../lib/auth.ts";
+import {
+  markOnboarded as markOnboardedOnServer,
+  storedToken,
+  storeWorkspace,
+  type SessionUser,
+  type SessionView,
+  type SessionWorkspace,
+} from "../lib/auth.ts";
 
 export type SessionStatus =
   /** Nothing has happened yet. The first paint, before the token is even read. */
@@ -53,6 +60,8 @@ interface SessionState {
   setWorkspaces: (workspaces: SessionWorkspace[]) => void;
   setLocalIssuer: (available: boolean) => void;
   setExpiring: (expiring: boolean) => void;
+  /** Record that this person has finished onboarding, here and on the server. */
+  markOnboarded: () => void;
   signOut: (message?: string | null) => void;
   /** The role this tab holds in its current workspace, or null. Drives what the UI offers. */
   role: () => string | null;
@@ -84,6 +93,21 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setWorkspaces: (workspaces) => set({ workspaces }),
   setLocalIssuer: (localIssuer) => set({ localIssuer }),
   setExpiring: (expiring) => set({ expiring }),
+
+  markOnboarded: () => {
+    const { user } = get();
+    if (!user || user.onboarded) return;
+    // Locally first, so the app moves on at the moment the loop closed. Waiting for the round
+    // trip would hold somebody on the last onboarding screen after the thing it was waiting
+    // for has visibly happened.
+    set({ user: { ...user, onboarded: true } });
+    const token = storedToken();
+    if (!token) return;
+    // Nothing is retried and nothing is surfaced. The worst case is being offered onboarding
+    // once more on the next sign-in, which is a smaller harm than an error about a flag —
+    // and it is the same direction the migration chose for existing rows.
+    void markOnboardedOnServer(token).catch(() => {});
+  },
 
   signOut: (message = null) => {
     // The remembered workspace goes too. Signing out and back in as somebody else must not
