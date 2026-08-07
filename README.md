@@ -1658,10 +1658,13 @@ npm run migrate          # apply pending migrations and exit
 
 # tenancy — see "The tenancy model"
 npm run test:tenancy     # two workspaces; neither can read, mutate or enumerate the other's
+npm run test:acceptance  # Session 2's gate: two accounts using the app AT THE SAME TIME
+npm run test:channels    # every WS channel, audited for workspace scoping — see below
 npm run test:db-boundary # no driver outside src/db/; every store method takes a context first
 npm run test:rls         # the policies, exercised: forced, write-checked, fail-closed unscoped
 npm run test:trace       # trace scoping, and that workspace_id never reaches an emitted event
 npm run test:identity    # users, workspaces, memberships, audit
+npm run test:driver      # the driver choice, and the two combinations it refuses to boot on
 
 # auth — see "Authentication and membership"
 npm run test:http        # the HTTP layer: error envelope, body caps, log redaction
@@ -1861,7 +1864,43 @@ policy unconditionally, and nothing in the schema would tell you. Migration `009
 
 SQLite has no RLS and no roles, so on that driver there is no second wall: the repository layer is
 the whole of the enforcement. That is acceptable for what SQLite is here — one person, one machine
-— and it is why `npm run test:tenancy` runs there too.
+— and it is why `npm run test:tenancy` runs there too, and why the driver
+[refuses to boot in production](#what-session-2-deliberately-did-not-do).
+
+### Every channel, not just the ones somebody noticed
+
+RLS guards what a *query* returns. Nothing there guards what the server **pushes** — and a
+WebSocket relay's whole job is pushing. The stale-broadcast bug has now been found twice by
+hand, and finding them one at a time as somebody happens to notice is not the same as knowing
+there are none left.
+
+So `npm run test:channels` enumerates rather than remembers. It reads `wsRelay.ts` for every
+`channel:` it can emit and `COMMAND_CHANNEL` for every channel an answer can land on, and fails
+when one of them is not classified as either tenant data or connection state. **A channel added
+in a later session appears in that list automatically**, so it cannot arrive unclassified.
+
+There are exactly two correct ways to send, and a third that is the bug:
+
+| | |
+|---|---|
+| `broadcastTo(ctx, …)` | filtered by `workspaceId` ✓ |
+| `perClient(…)` | payload rebuilt per recipient ✓ |
+| one payload, every socket | **this is the bug** ✗ |
+
+The suite asserts structurally that every sender uses one of the first two, then puts two live
+sockets in two workspaces behind it and fires every channel to prove it.
+
+**The scope belongs to the operation, not to the process.** The subtler half of the same bug is
+one layer up, where the app chooses *which* context to hand the relay. A single `buildContext`
+covered planning, generation, editing and explaining — four subsystems with four independent
+locks, so two can be in flight at once and one variable cannot hold both answers. Worse, it was
+assigned *before* the busy guard, so a request that was **refused** still repointed it: workspace
+B's rejected `generate` redirected workspace A's still-streaming source code into B's build pane.
+
+Each now has its own scope, claimed only once its operation has actually started, and a refusal
+is answered to whoever asked rather than through the scope. `test:channels` asserts both
+properties by reading `index.ts`, because the ordering is the whole of the fix and nothing about
+it is visible at a type level.
 
 ### Adding a table
 
@@ -2105,6 +2144,13 @@ A role change is applied in place because the connection is still legitimately t
 changed is what it may do, and the capability check reads the socket's live context on every
 command. That is the enforcement, not a notification.
 
+The distinction is worth a test rather than a sentence, and `test:tenancy` has one: a socket
+that **handshakes as an admin** — from a real membership row, not a stale capture — is demoted
+mid-session and immediately re-sends the exact command it just succeeded at. It is refused, and
+the command never reaches the app. Connecting as a member and demoting from there would prove
+nothing: a server reading the handshake context would refuse it too, and the test would pass for
+the opposite of the right reason.
+
 **A failed re-check does not close anything.** The database being briefly unavailable is our
 problem, and signing every user out over it would turn a blip into an outage — the same reasoning
 the JWKS cache applies to a failed refresh.
@@ -2139,6 +2185,59 @@ workspace's first snapshot merges into the previous one's rows.
 reset nor explicitly excluded — because the leak that actually happens is not in a store somebody
 tested, it is in the one added six months later that nobody wired in.
 
+### CORS, and why it is here rather than in Session 8
+
+The client is served by Vite on `:5173` and this server answers on `:4317`, so **every request
+the browser makes here is cross-origin** — the whole sign-in exchange included. Without an
+`Access-Control-Allow-Origin` the browser blocks the *response*, `fetch` rejects with a bare
+"Failed to fetch", and there is no way to sign in at all.
+
+The allowlist is [the socket's](#why-the-origin-check-is-not-optional), unchanged and not a
+second copy: one list decides both who may open a socket and who may read an HTTP response, so
+the answer to "may this origin talk to us" cannot depend on which transport asked. The origin is
+**echoed by name, never `*`** — a wildcard is not shorthand for a list, it is the absence of one
+— and there is deliberately no `Access-Control-Allow-Credentials`, because this server
+authenticates with a bearer header and never a cookie.
+
+Note that CORS and the socket's `Origin` check defend against opposite things and neither
+replaces the other. CORS asks the *browser* not to hand a response to script from another
+origin; the origin check is the *server* refusing the connection outright, because WebSockets
+are not covered by CORS at all.
+
+The failing responses carry the headers too. A 401 a browser cannot read arrives at the client
+as "could not reach the server", which inverts the one decision `lib/socket.ts` exists to get
+right — retry, or stop and show sign-in.
+
+Session 8 still owns the rest of the posture: CSP, HSTS, `Referrer-Policy`, per-route rate
+limits. This is the part Session 2 cannot work without.
+
+### The gate: two people, one server, at the same time
+
+`npm run test:acceptance` is Session 2's acceptance criterion, run rather than described: **two
+real accounts, two real workspaces, both using the app simultaneously against one server,
+neither able to observe the other by any command, socket, or timing.**
+
+It is a separate suite from the attack one because it catches different failures. An attack asks
+*can I reach across the boundary if I try*; this asks *does the server keep two ordinary sessions
+apart while it is busy* — and the answers differ wherever per-operation state lives in a
+module-level variable. No adversarial test would have provoked the build-scope leak above,
+because the attacker's move there is to do something entirely legitimate in their own workspace
+at the wrong moment.
+
+Both accounts sign in through the real three-request exchange, open real sockets, and then run
+overlapping scripts of ordinary work — list, run, load, list again — with the suite asserting the
+overlap actually happened rather than assuming it. Then:
+
+- **command** — every answer either of them received is their own, and neither inbox contains the
+  other's agent id or workspace id anywhere.
+- **socket** — the unbidden traffic too: the live trace and history pushes one person's run
+  causes while the other has a socket open.
+- **timing** — naming a run id that is real *in the other workspace* returns a byte-identical
+  answer to naming an invented one, and costs the same. The bound is a ratio rather than a
+  threshold: this does not claim to defeat a lab-grade timing attack, it asserts there is no
+  order-of-magnitude oracle, which is what a scoped-versus-unscoped query produces and what
+  would be exploitable over a network.
+
 ### The threat model
 
 What each layer stops, what it explicitly does not, and why the two decisions that look like
@@ -2164,6 +2263,14 @@ that is the fact a future cleanup will not know.
   provider's `sub` is opaque and case-sensitive, so two subs differing only in case are two
   people on Postgres and one on SQLite. Harmless where SQLite is used — one person, one machine —
   but a genuine driver disagreement, and fixing it needs a table rebuild.
+
+  Rather than leave that merely *unlikely* in production, **the server refuses to boot on
+  SQLite under `NODE_ENV=production`** — the same refusal the local issuer and the dev tenancy
+  middleware already make about themselves. The rebuild is still owed; this makes the
+  discrepancy structurally unreachable in the meantime rather than improbable. The second
+  reason is the larger one anyway: RLS is the backstop the whole tenancy model leans on and it
+  exists only on Postgres, so SQLite in production is a deployment with the backstop silently
+  absent. `npm run test:driver`.
 
 ---
 
