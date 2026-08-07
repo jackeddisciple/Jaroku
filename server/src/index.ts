@@ -404,7 +404,12 @@ function agentGraph(agentId: string): Promise<GraphResult> {
 // the socket is opened at all. `/healthz` and `/readyz` come along because a process that is
 // about to be put behind a load balancer needs to be able to say whether it is alive and
 // whether it should be sent traffic, and those are different questions — see http/health.ts.
-const router = new Router();
+// Resolved before the router, because the router needs it: the same allowlist decides which
+// origins may open a SOCKET and which may read an HTTP RESPONSE. The client is served by Vite
+// on another port, so every request it makes here is cross-origin — without this the browser
+// blocks the response to the sign-in exchange and the app cannot sign anybody in at all.
+const originPolicy = resolveOriginPolicy();
+const router = new Router({ cors: originPolicy });
 router.get("/healthz", healthz());
 router.get(
   "/readyz",
@@ -434,7 +439,6 @@ const contextResolver = new ContextResolver({ identity: identityRepo });
 // against the Postgres already here has exactly the property GETDEL was wanted for. Session 5
 // puts Redis behind the same interface when it introduces a client for the queues.
 const ticketStore = new DbTicketStore(db);
-const originPolicy = resolveOriginPolicy();
 for (const route of sessionRoutes({
   config: authConfig,
   verifier: tokenVerifier,

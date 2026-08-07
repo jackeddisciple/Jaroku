@@ -11,7 +11,7 @@
 
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { HttpError, MAX_BODY_BYTES, Router, badRequest } from "./router.ts";
+import { HttpError, MAX_BODY_BYTES, Router, badRequest, unauthorized } from "./router.ts";
 import { healthz, readyz } from "./health.ts";
 
 let failures = 0;
@@ -57,7 +57,7 @@ async function call(
   path: string,
   body?: string | Record<string, unknown>,
   headers: Record<string, string> = {},
-): Promise<{ status: number; json: any; text: string; requestId: string | null }> {
+): Promise<{ status: number; json: any; text: string; requestId: string | null; res: Response }> {
   const res = await fetch(`${base}${path}`, {
     method,
     body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body),
@@ -70,7 +70,7 @@ async function call(
   } catch {
     /* not JSON — some assertions want exactly that */
   }
-  return { status: res.status, json, text, requestId: res.headers.get("x-request-id") };
+  return { status: res.status, json, text, requestId: res.headers.get("x-request-id"), res };
 }
 
 console.log("\nrouting");
@@ -176,6 +176,95 @@ console.log("\nlogging");
   await fetch(`http://127.0.0.1:${(server2.address() as AddressInfo).port}/healthz`);
   check(logged.length === 0, "the default logger stays quiet about /healthz — a probe at 1 Hz is not information");
   await new Promise<void>((r) => server2.close(() => r()));
+}
+
+console.log("\nCORS");
+{
+  // The client is served by Vite on another port, so every request a browser makes to this
+  // server is cross-origin. Without these headers the browser blocks the RESPONSE and `fetch`
+  // rejects with a bare "Failed to fetch" — which is what the app did until this existed, and
+  // which no suite here could see, because `tsx` has no same-origin policy to enforce.
+  //
+  // So this asserts the headers rather than the behaviour, and says plainly that a passing run
+  // is not the same as having opened the app in a browser.
+  const allowed = "http://localhost:5173";
+  const corsRouter = new Router({
+    log: () => {},
+    quiet: () => true,
+    cors: { allows: (o) => o === undefined || o === allowed },
+  });
+  corsRouter.get("/healthz", healthz());
+  corsRouter.post("/v1/thing", () => ({ body: { ok: true } }));
+  corsRouter.post("/v1/refuses", () => {
+    throw unauthorized("nope");
+  });
+  const corsHttp = createServer((req, res) => {
+    void corsRouter.handle(req, res).then((handled) => {
+      if (!handled) res.writeHead(404).end("no");
+    });
+  });
+  await new Promise<void>((r) => corsHttp.listen(0, "127.0.0.1", r));
+  const corsBase = `http://127.0.0.1:${(corsHttp.address() as AddressInfo).port}`;
+  const hit = (method: string, path: string, headers: Record<string, string> = {}): Promise<Response> =>
+    fetch(`${corsBase}${path}`, { method, headers });
+
+  const good = await hit("GET", "/healthz", { origin: allowed });
+  check(good.headers.get("access-control-allow-origin") === allowed, "an allowed origin is told so, by name");
+  check(good.headers.get("vary") === "origin", "...with vary: origin, so no cache serves one origin's answer to another");
+  check(
+    good.headers.get("access-control-allow-origin") !== "*",
+    "...and never with a wildcard, which is the absence of an allowlist rather than a shorthand for one",
+  );
+  check(
+    (good.headers.get("access-control-expose-headers") ?? "").includes("x-request-id"),
+    "...and the request id is readable, which is the whole reason it is on the response",
+  );
+  check(
+    good.headers.get("access-control-allow-credentials") === null,
+    "no allow-credentials: this server authenticates with a bearer header, never a cookie",
+  );
+
+  const hostile = await hit("GET", "/healthz", { origin: "https://evil.example" });
+  check(
+    hostile.headers.get("access-control-allow-origin") === null,
+    "an origin that is not on the list is given no permission at all",
+  );
+
+  const preflight = await hit("OPTIONS", "/v1/thing", {
+    origin: allowed,
+    "access-control-request-method": "POST",
+  });
+  check(preflight.status === 204, `a preflight is answered (${preflight.status})`);
+  check(preflight.headers.get("access-control-allow-methods") === "POST", "...naming the verbs the path actually answers");
+  check(
+    (preflight.headers.get("access-control-allow-headers") ?? "").includes("authorization"),
+    "...and permitting the Authorization header, without which nothing here can be called",
+  );
+  check(Number(preflight.headers.get("access-control-max-age")) > 0, "...and cacheable, so it is not a round trip per request");
+
+  const hostilePreflight = await hit("OPTIONS", "/v1/thing", {
+    origin: "https://evil.example",
+    "access-control-request-method": "POST",
+  });
+  check(
+    hostilePreflight.headers.get("access-control-allow-methods") === null,
+    "a preflight from an origin not on the list is refused the permission it asked for",
+  );
+
+  // The one that is easy to miss, and the one that breaks the client's most important
+  // decision: a 401 the browser cannot READ becomes "could not reach the server", so the
+  // socket layer retries forever instead of showing the sign-in screen.
+  const refused = await hit("POST", "/v1/refuses", { origin: allowed });
+  check(refused.status === 401, "a handler's refusal still refuses");
+  check(
+    refused.headers.get("access-control-allow-origin") === allowed,
+    "...and a FAILING response carries the headers too, or the client cannot tell 401 from offline",
+  );
+
+  const nothingHere = await hit("OPTIONS", "/v1/not-a-route", { origin: allowed });
+  check(nothingHere.status === 404, "a preflight for a path that does not exist still 404s rather than answering");
+
+  await new Promise<void>((r) => corsHttp.close(() => r()));
 }
 
 await new Promise<void>((r) => http.close(() => r()));

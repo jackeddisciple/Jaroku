@@ -30,12 +30,47 @@
 //   the only place a browser can put anything on a WebSocket URL. It is single-use and lives
 //   thirty seconds, but a value that grants a session must not sit in an access log for a year
 //   anyway, so the logger redacts it by name.
+//
+//   AND CORS, FROM THE SAME ALLOWLIST THE SOCKET USES. The client is served by Vite on :5173
+//   and this server answers on :4317, so every request the browser makes here is cross-origin —
+//   `/v1/auth/dev-login`, `/v1/auth/session`, `/v1/ws-ticket`, all of them. Without a
+//   `Access-Control-Allow-Origin` the browser blocks the RESPONSE, `fetch` rejects with a bare
+//   "Failed to fetch", and the client cannot sign in at all. That is not a hypothetical: it is
+//   what the app did until this was added, and no test suite saw it because the suites run
+//   under `tsx`, where there is no browser to enforce a same-origin policy.
+//
+//   The allowlist is `auth/origin.ts`'s, unchanged and not a second copy. Two lists of
+//   permitted origins would drift, and the day they do the answer to "may this origin talk to
+//   us" depends on which transport asked.
+//
+//   Note that CORS and the socket's Origin check protect against opposite things and neither
+//   replaces the other. CORS asks the BROWSER not to reveal a response to script from another
+//   origin; the socket's check is the server refusing the connection outright, because — as
+//   auth/origin.ts says at length — WebSockets are not covered by CORS at all.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { newRequestId } from "../db/tenant.ts";
 
 /** Query parameters whose values must never reach a log line. */
 const REDACTED_PARAMS = new Set(["ticket", "token", "key", "access_token", "code"]);
+
+/**
+ * What the router needs to know about origins. Structurally `auth/origin.ts`'s `OriginPolicy`,
+ * declared as its own shape so the HTTP layer does not import the auth layer for one predicate.
+ */
+export interface CorsPolicy {
+  allows(origin: string | undefined): boolean;
+}
+
+/** The request headers a browser is allowed to send here. `authorization` is the whole point. */
+const ALLOWED_REQUEST_HEADERS = "authorization, content-type";
+
+/**
+ * How long a browser may cache a preflight. Ten minutes: long enough that a session/ticket
+ * exchange is not three round trips instead of two, short enough that changing the allowlist
+ * takes effect within a coffee break.
+ */
+const PREFLIGHT_MAX_AGE_S = 600;
 
 /** The largest body any route here accepts. A token is ~1 KB; a workspace id is 36 bytes. */
 export const MAX_BODY_BYTES = 64 * 1024;
@@ -101,16 +136,24 @@ export interface RouterOptions {
   log?: (line: string) => void;
   /** Requests to answer without a log line. `/healthz` at 1 Hz is not information. */
   quiet?: (path: string) => boolean;
+  /**
+   * Which origins may read a response. Absent means no CORS headers at all, which is right for
+   * a same-origin caller and for every non-browser client — `curl` and the test suites do not
+   * consult them.
+   */
+  cors?: CorsPolicy;
 }
 
 export class Router {
   private routes: Route[] = [];
   private log: (line: string) => void;
   private quiet: (path: string) => boolean;
+  private cors?: CorsPolicy;
 
   constructor(opts: RouterOptions = {}) {
     this.log = opts.log ?? ((line) => console.log(line));
     this.quiet = opts.quiet ?? ((path) => path === "/healthz");
+    this.cors = opts.cors;
   }
 
   get(path: string, handler: Handler): this {
@@ -131,6 +174,35 @@ export class Router {
     return this.routes.some((r) => r.path === path);
   }
 
+  /** The verbs a path actually answers, for the preflight. Never a guessed wildcard. */
+  private methodsFor(path: string): string[] {
+    return [...new Set(this.routes.filter((r) => r.path === path).map((r) => r.method))];
+  }
+
+  /**
+   * The CORS headers for one request, or none.
+   *
+   * ECHOED, never `*`. The allowlist is a list of specific origins, and answering `*` would
+   * grant every one of them plus everything else — a wildcard is not an abbreviation for the
+   * list, it is the absence of one. `vary: origin` because the answer differs per origin and a
+   * cache that missed that would serve one origin's permission to another.
+   *
+   * NO `access-control-allow-credentials`. This server authenticates with a bearer token in a
+   * header, never a cookie, so nothing needs it — and it is the header that would make the
+   * origin allowlist load-bearing against CSRF rather than merely tidy.
+   */
+  private corsHeaders(origin: string | undefined): Record<string, string> {
+    if (!this.cors || !origin) return {};
+    if (!this.cors.allows(origin)) return { vary: "origin" };
+    return {
+      "access-control-allow-origin": origin,
+      // So a client can report the id of the request that failed, which is the entire reason
+      // it is on the response.
+      "access-control-expose-headers": "x-request-id",
+      vary: "origin",
+    };
+  }
+
   /**
    * Answer a request, or report that no route matched so the caller can fall through.
    *
@@ -141,6 +213,31 @@ export class Router {
     const url = new URL(raw.url ?? "/", `http://${raw.headers.host ?? "localhost"}`);
     const path = url.pathname;
     const method = (raw.method ?? "GET").toUpperCase();
+    const origin = header(raw, "origin");
+
+    // Preflight, before route lookup: a browser sends OPTIONS with no credential and no body,
+    // and it is asking about a route rather than invoking one. Answered only for paths this
+    // router actually claims, so an OPTIONS to nowhere still falls through to the 404 and a
+    // preflight cannot be used to enumerate what does not exist.
+    if (method === "OPTIONS" && this.claims(path)) {
+      const allowed = this.cors?.allows(origin) ?? false;
+      const requestId = newRequestId();
+      // Without the allow headers the browser fails the preflight and never sends the real
+      // request — which is the refusal. A 204 either way keeps the two cases indistinguishable
+      // to a non-browser prober.
+      this.respond(res, requestId, 204, undefined, {
+        ...(allowed && origin
+          ? {
+              "access-control-allow-methods": this.methodsFor(path).join(", "),
+              "access-control-allow-headers": ALLOWED_REQUEST_HEADERS,
+              "access-control-max-age": String(PREFLIGHT_MAX_AGE_S),
+            }
+          : {}),
+        ...this.corsHeaders(origin),
+      });
+      return true;
+    }
+
     const route = this.routes.find((r) => r.path === path && r.method === method);
     if (!route) {
       if (!this.claims(path)) return false;
@@ -148,18 +245,22 @@ export class Router {
       // method" and "there is nothing here" send a client looking in different places.
       this.respond(res, newRequestId(), 405, {
         error: { code: "method_not_allowed", message: `${method} is not allowed on ${path}` },
-      });
+      }, this.corsHeaders(origin));
       return true;
     }
 
     const requestId = newRequestId();
     const started = Date.now();
     const req = this.request(raw, url, path, method, requestId);
+    // On every answer below, including the failures. A 401 a browser cannot READ is a client
+    // that shows "could not reach the server" for "your token expired" — which is exactly the
+    // retry-versus-stop distinction lib/socket.ts is built around, defeated at the last step.
+    const cors = this.corsHeaders(origin);
     let status = 500;
     try {
       const out = await route.handler(req);
       status = out.status ?? (out.body === undefined ? 204 : 200);
-      this.respond(res, requestId, status, out.body, out.headers);
+      this.respond(res, requestId, status, out.body, { ...cors, ...out.headers });
     } catch (err) {
       const e = err as Partial<HttpError>;
       status = typeof e?.status === "number" ? e.status : 500;
@@ -169,7 +270,7 @@ export class Router {
       // anything else is a bug, and its text describes the inside of the server.
       const message = status < 500 ? String((err as Error).message) : "the server failed to handle that";
       if (status >= 500) console.error(`[http] ${requestId} ${method} ${path}:`, err);
-      this.respond(res, requestId, status, { error: { code, message } });
+      this.respond(res, requestId, status, { error: { code, message } }, cors);
     }
     if (!this.quiet(path)) {
       this.log(`[http] ${requestId} ${method} ${this.redact(url)} ${status} ${Date.now() - started}ms`);
@@ -235,6 +336,12 @@ export class Router {
       },
     };
   }
+}
+
+/** One request header, flattened. Node gives an array for headers that may repeat. */
+function header(raw: IncomingMessage, name: string): string | undefined {
+  const v = raw.headers[name];
+  return Array.isArray(v) ? v[0] : v;
 }
 
 /**
