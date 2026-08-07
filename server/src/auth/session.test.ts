@@ -27,6 +27,8 @@ import { JwksClient } from "./jwks.ts";
 import { TokenVerifier } from "./verifier.ts";
 import { LocalIssuer } from "./localIssuer.ts";
 import { sessionRoutes } from "./session.ts";
+import { memoryTicketStore } from "./tickets.ts";
+import { ContextResolver } from "./resolve.ts";
 import { DEFAULT_AUDIENCE, LOCAL_ISSUER, type AuthConfig } from "./config.ts";
 
 let failures = 0;
@@ -57,6 +59,11 @@ async function serve(db: Db, mode: AuthConfig["mode"]): Promise<{ base: string; 
     verifier: new TokenVerifier(config, new JwksClient({ url: jwksUrl })),
     identity: new IdentityRepository(db),
     localIssuer: mode === "local" ? issuer : undefined,
+    // The ticket route only exists once there is somewhere to put a ticket. Memory-backed
+    // here: the Db-backed one has its own suite, and what this file is asking is whether the
+    // route agrees with /v1/auth/session about which workspace a client is in.
+    tickets: memoryTicketStore(),
+    resolver: new ContextResolver({ identity: new IdentityRepository(db), log: () => {} }),
     log: () => {},
   })) {
     if (route.method === "GET") router.get(route.path, route.handler);
@@ -181,6 +188,42 @@ async function suite(driver: string, db: Db): Promise<void> {
       !second.json?.workspaces?.some((w: any) => w.id === orphan.id),
       "...and the next user does not, because it is owned now",
     );
+
+    // An adopted workspace stops being `personal`. Without this the heir owns two personal
+    // workspaces, and every rule that says "their personal one" has two answers — which is
+    // exactly what made /v1/auth/session and /v1/ws-ticket disagree about the default.
+    const adopted = view.json.workspaces.find((w: any) => w.id === orphan.id);
+    check(adopted?.kind === "team", `an adopted workspace becomes a team, not a second personal one (${adopted?.kind})`);
+    const personals = view.json.workspaces.filter((w: any) => w.kind === "personal");
+    check(personals.length === 1, `...so a user has exactly one personal workspace (${personals.length})`);
+    check(
+      view.json.defaultWorkspaceId === personals[0]?.id,
+      "...and the default is that one, not whichever the database returned first",
+    );
+  }
+
+  console.log("  · the default a socket gets is the default the client was told");
+  {
+    // The two used to be computed separately, and the symptom was a UI showing one workspace's
+    // name above another workspace's runs.
+    const { token } = issuer.mint({ email: `agree-${label}@example.com` });
+    const view = await post(base, "/v1/auth/session", token);
+    const ticket = await post(base, "/v1/ws-ticket", token);
+    check(ticket.status === 200, `a ws-ticket is issued (${ticket.status})`);
+    check(
+      ticket.json?.workspaceId === view.json?.defaultWorkspaceId,
+      `a ticket asked for with no workspace lands in the reported default ` +
+        `(${ticket.json?.workspaceId} vs ${view.json?.defaultWorkspaceId})`,
+    );
+
+    const explicit = await post(base, "/v1/ws-ticket", token, { workspaceId: view.json.workspaces[0].id });
+    check(explicit.json?.workspaceId === view.json.workspaces[0].id, "...and asking for one you belong to honours it");
+
+    const notMine = await post(base, "/v1/ws-ticket", token, { workspaceId: "00000000-0000-4000-8000-00000000dead" });
+    check(notMine.status === 403, "...while asking for one you do not is refused, before a ticket exists");
+
+    const noToken = await post(base, "/v1/ws-ticket");
+    check(noToken.status === 401, "a ticket cannot be had without a token at all");
   }
 
   await server.close();

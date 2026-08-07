@@ -20,7 +20,7 @@
 
 import { forbidden, unauthorized, type Handler, type HttpRequest } from "../http/router.ts";
 import { newRequestId, systemContext } from "../db/tenant.ts";
-import { IdentityConflictError, type IdentityRepository } from "../db/repositories/identity.ts";
+import { IdentityConflictError, defaultWorkspace, type IdentityRepository } from "../db/repositories/identity.ts";
 import { AuthError, TokenVerifier, type AuthContext } from "./verifier.ts";
 import type { LocalIssuer } from "./localIssuer.ts";
 import type { AuthConfig } from "./config.ts";
@@ -126,8 +126,10 @@ function sessionHandler(deps: SessionDeps): Handler {
     // half-provisioned repair path also used to be.
     if (memberships.length === 0) throw forbidden("this account belongs to no workspace");
 
-    const preferred =
-      memberships.find((w) => w.id === provisioned.workspace.id) ?? memberships[0]!;
+    // The shared rule, not "the one provisioning happened to return". Those differ the moment
+    // a user owns more than one workspace, and the socket resolves through the shared rule —
+    // so reporting anything else here tells the client a default its own socket will not use.
+    const preferred = defaultWorkspace(memberships) ?? memberships[0]!;
     const view: SessionView = {
       user: {
         id: provisioned.user.id,

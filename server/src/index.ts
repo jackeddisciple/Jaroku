@@ -40,6 +40,7 @@ import { TokenVerifier } from "./auth/verifier.ts";
 import { sessionRoutes } from "./auth/session.ts";
 import { ContextResolver } from "./auth/resolve.ts";
 import { resolveOriginPolicy } from "./auth/origin.ts";
+import { resolveSocketAuth } from "./auth/socketAuth.ts";
 import { DbTicketStore } from "./db/repositories/tickets.ts";
 import { Generator, type UsageSummary } from "./generator.ts";
 import { Planner } from "./planner.ts";
@@ -476,8 +477,14 @@ const relay = new WsRelay({
       };
     });
   },
-  // The socket's own context, resolved when it connected — see RelayOptions.contextFor.
-  contextFor: () => serverContext(),
+  // THE SOCKET'S OWN CONTEXT, resolved when it connected.
+  //
+  // Session 1 handed every connection the one workspace this process acts in. It now redeems a
+  // single-use ticket that an authenticated HTTP request minted after a membership check, so a
+  // socket's scope was decided by a `workspace_members` row and cannot be argued with
+  // afterwards. `JAROKU_DEV_AUTH=1` is the loud, production-refusing way back to the old
+  // behaviour — see auth/socketAuth.ts.
+  contextFor: resolveSocketAuth({ tickets: ticketStore, devContext: () => serverContext() }),
   // These two still read a global directory rather than a scoped table, which is the honest
   // limit of Session 1: runtime/agents/ is one namespace for every workspace, and Session 3's
   // object store is what makes the key itself workspace-scoped. They take the context now so

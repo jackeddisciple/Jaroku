@@ -46,6 +46,27 @@ export interface Membership {
 /** A workspace plus what the asking user may do in it. What a workspace switcher renders. */
 export type WorkspaceMembership = Workspace & { role: MemberRole };
 
+/**
+ * Which workspace a request with no stated preference acts in.
+ *
+ * ONE RULE, IN ONE PLACE, because there are two callers and they must not disagree.
+ * `/v1/auth/session` tells a client what its default is and `/v1/ws-ticket` scopes a socket
+ * when the client does not say — and when those two picked differently, the UI showed one
+ * workspace's name above another workspace's runs. That is not a rendering bug; it is two
+ * answers to the same question.
+ *
+ * Their personal workspace, which `adoptWorkspace` guarantees there is at most one of.
+ * Otherwise the oldest they belong to, which is stable across calls in a way "the first row
+ * the database happened to return" is not.
+ */
+export function defaultWorkspace<T extends { kind: WorkspaceKind; created_at: string }>(
+  memberships: readonly T[],
+): T | undefined {
+  const personal = memberships.filter((w) => w.kind === "personal");
+  const pool = personal.length > 0 ? personal : memberships;
+  return [...pool].sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+}
+
 export interface AuditEntry {
   id: number;
   workspace_id: string | null;
@@ -225,11 +246,25 @@ export class IdentityRepository {
     );
   }
 
-  /** Make `userId` the owner of a workspace that has none. A no-op if it already has one. */
+  /**
+   * Make `userId` the owner of a workspace that has none. A no-op if it already has one.
+   *
+   * IT ALSO STOPS BEING `personal`. Migration 004's `Local` workspace — the one every
+   * pre-tenancy row was backfilled into — was created as `personal` because at the time there
+   * was one user and the distinction did not bite. Adopting it as-is gives its new owner TWO
+   * personal workspaces, and every rule that says "their personal one" then has two answers:
+   * `/v1/auth/session` picked one, `/v1/ws-ticket` picked the other, and the client was told
+   * its workspace was Ada's while its socket was scoped to Local.
+   *
+   * A workspace somebody inherits is not their personal workspace, so it becomes a team. That
+   * makes "exactly one personal workspace per user" true, which is what lets there be a single
+   * rule for which one is the default.
+   */
   async adoptWorkspace(ctx: SystemContext, workspaceId: string, userId: string): Promise<boolean> {
     return this.db.transaction(async (tx) => {
       const held = await tx.get(`SELECT 1 AS x FROM workspace_members WHERE workspace_id = ?`, [workspaceId]);
       if (held) return false;
+      await tx.run(`UPDATE workspaces SET kind = 'team' WHERE id = ? AND kind = 'personal'`, [workspaceId]);
       await this.insertMemberIn(tx, workspaceId, userId, "owner");
       await this.appendAuditIn(tx, ctx, {
         workspaceId,

@@ -1,14 +1,19 @@
-// The workspace this process acts in, until there is authentication.
+// The workspace this process acts in ON ITS OWN BEHALF.
 //
-// Session 2 replaces every line of this with a real one: a JWT verified against the auth
-// provider's JWKS, a membership lookup, a per-socket ticket. What matters now is that the
-// SHAPE is already right — a request arrives, a workspace is resolved for it, and everything
-// downstream takes that context as a parameter. When the resolution becomes real, nothing
-// below it changes.
+// Session 2 took this off the request path, and Session 1's prediction held: the SHAPE did not
+// change. A connection arrives, a workspace is resolved for it, everything downstream takes
+// that context as a parameter — only the resolution became real, and it now lives in
+// auth/socketAuth.ts, where it redeems a ticket minted after a membership check.
 //
-// It is loud on purpose. A server that silently decides which tenant it is acting as is the
-// thing this whole session exists to make impossible, and the one place it is still allowed
-// to happen should say so every time it starts.
+// What is left here is the workspace for work NOBODY TRIGGERED, which is a real and permanent
+// category rather than a leftover: the startup run, the checkpoint sweep, the reconciliation of
+// evals and deploys a restart interrupted. None of those has a user, and giving them a
+// TenantContext with a made-up actor would make "the server did this" indistinguishable from
+// "somebody did this". It is also what `JAROKU_DEV_AUTH=1` hands to a socket that presents no
+// ticket — see auth/socketAuth.ts, which refuses to start under NODE_ENV=production.
+//
+// It stays loud. A server that silently decides which tenant it is acting as is the thing this
+// session exists to make impossible, and this is the one place it still does.
 
 import { IdentityRepository, slugify } from "./db/repositories/identity.ts";
 import {
@@ -46,8 +51,9 @@ export async function resolveDevTenancy(db: Db, log: (m: string) => void = conso
   if (!requested) {
     const local = await identity.workspaceById(sys, LOCAL_WORKSPACE_ID);
     log(
-      `[tenancy] no authentication yet — acting as workspace "${local?.slug ?? "local"}" ` +
-        `(${LOCAL_WORKSPACE_ID}). Set ${DEV_WORKSPACE_ENV} to use another.`,
+      `[tenancy] server-side work runs in workspace "${local?.slug ?? "local"}" ` +
+        `(${LOCAL_WORKSPACE_ID}). Set ${DEV_WORKSPACE_ENV} to use another. ` +
+        `Requests and sockets resolve their own workspace — see auth/socketAuth.ts.`,
     );
     return {
       workspaceId: LOCAL_WORKSPACE_ID,
@@ -66,8 +72,8 @@ export async function resolveDevTenancy(db: Db, log: (m: string) => void = conso
   }
   const id = ws.id;
   log(
-    `[tenancy] no authentication yet — acting as workspace "${ws.slug}" (${id}), ` +
-      `from ${DEV_WORKSPACE_ENV}.`,
+    `[tenancy] server-side work runs in workspace "${ws.slug}" (${id}), from ${DEV_WORKSPACE_ENV}. ` +
+      `Requests and sockets resolve their own workspace — see auth/socketAuth.ts.`,
   );
   return { workspaceId: id, slug: ws.slug, context: () => systemContextFor(id, newRequestId()) };
 }
