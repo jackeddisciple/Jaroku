@@ -51,8 +51,41 @@ The shortest list, with the tests that defend them:
 | A high-impact MCP call stops for confirmation; timing out denies | `test:mcp-isolation` |
 | No secret is written anywhere that outlives a run, or returned to a browser | `test:env-writer`, `test:deploy-secrets` |
 | `workspace_id` never appears in an emitted event | `test:trace` |
+| `alg: "none"` and symmetric algorithms can never verify a token | `test:jwt` |
+| A ws-ticket works exactly once, even when two sockets race for it | `test:tickets` |
+| A socket cannot outlive the membership that authorised it | `test:relay`, `test:tenancy` |
+| No client store retains a row across a workspace switch | `test:reset` |
 
 ## Commits
 
 Every commit leaves `npm run typecheck` green on both `server/` and `client/`, and leaves the
 existing suites passing. A commit that breaks a test is not a working commit.
+
+## A new command needs a capability and a channel
+
+Roles are data in one module, checked in one place — see
+[roles](README.md#roles-as-data). A WebSocket command added without an entry in
+`COMMAND_CAPABILITY` is **refused**, not allowed, and `npm run test:capabilities` fails the
+build rather than letting it arrive ungated. It reads `wsRelay.ts` directly, so the list cannot
+pass by being out of date.
+
+Two entries, both in the same commit as the command:
+
+1. `COMMAND_CAPABILITY` in `server/src/auth/capabilities.ts` — which capability it needs. Deciding
+   that means looking at every other capability at once, which is the point of the table.
+2. `COMMAND_CHANNEL` in `server/src/wsRelay.ts` — where its **refusal** goes. A refusal on the
+   wrong channel is indistinguishable from no answer: the panel that asked waits forever while an
+   unrelated one shows an error about something it never did. `log` is a legitimate answer for a
+   command whose own channel carries data rather than errors — but it has to be written down, so
+   "log because that is right" and "log because nobody decided" cannot look the same.
+
+## A new client store must reset on a workspace switch
+
+A perfectly-scoped server still leaks if the browser keeps the rows. Every store that holds
+workspace data is emptied when the workspace changes, *before* the new socket opens — see
+`client/src/store/reset.ts`.
+
+`npm run test:reset` reads the store **directory** and fails when a store is neither reset nor
+named in the short list of deliberate exclusions. Add a store, add it to `WORKSPACE_STORES`. If
+it genuinely holds nothing a workspace owns, say so in `NOT_WORKSPACE_SCOPED` and expect to
+justify it — the list is two entries long and the test asserts its exact contents.
