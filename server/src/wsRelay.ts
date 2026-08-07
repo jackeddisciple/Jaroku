@@ -314,6 +314,48 @@ const MCP_COMMANDS = new Set([
   "setMcpServerAuth", "resolveMcpConfirm",
 ]);
 
+// Membership. Who may act in this workspace, and as what.
+//
+// Forwarded like every other mutation, and grouped so the switch stays readable. Reads are
+// forwarded too rather than answered locally, which is a departure from `listAgents` and
+// `listMcpServers` — those are lists of things the workspace owns, and this is a list of
+// PEOPLE, with their email addresses. The relay holds no identity repository and should not
+// grow one; the app answers on the `members` channel.
+//
+// Accepting an invite is deliberately NOT here. The accepter is not a member yet, so they have
+// no socket scoped to the workspace they are joining — it is `POST /v1/invites/accept`, over
+// HTTP, with a bearer token and nothing else. See auth/session.ts.
+export type ListMembersCommand = { cmd: "listMembers" };
+export type InviteMemberCommand = { cmd: "inviteMember"; email: string; role: string };
+export type RevokeInviteCommand = { cmd: "revokeInvite"; inviteId: string };
+export type SetMemberRoleCommand = { cmd: "setMemberRole"; userId: string; role: string };
+export type RemoveMemberCommand = { cmd: "removeMember"; userId: string };
+
+export type MemberCommand =
+  | ListMembersCommand
+  | InviteMemberCommand
+  | RevokeInviteCommand
+  | SetMemberRoleCommand
+  | RemoveMemberCommand;
+
+const MEMBER_COMMANDS = new Set([
+  "listMembers", "inviteMember", "revokeInvite", "setMemberRole", "removeMember",
+]);
+
+// The members channel. Every mutation answers with a full snapshot, the same discipline the
+// eval, MCP, provider and deploy channels follow — a client replaces rather than merges, so it
+// can never hold a half-applied view of who is in the workspace.
+//
+// `inviteLink` is the exception, and it is the second credential this file ever sends to a
+// browser (the first is the deploy bearer token). It is shown once because there is no email
+// sender here to hand it to, and only a hash of it is stored — so this message is the only
+// chance anybody has to see it, exactly like `serveToken`.
+export type MemberEvent =
+  | { type: "members"; members: unknown[]; invites: unknown[] }
+  | { type: "inviteLink"; email: string; role: string; token: string; expiresAt: string }
+  | { type: "error"; message: string }
+  | { type: "notice"; message: string };
+
 // Unified composer "explain": a prose answer about a step / node / the agent, built from
 // in-context data — the one genuinely-new composer intent (no code change).
 export type ExplainSubject =
@@ -344,7 +386,8 @@ export type ClientCommand =
   | ProviderCommand
   | ListProvidersCommand
   | DeployChannelCommand
-  | ListDeploymentsCommand;
+  | ListDeploymentsCommand
+  | MemberCommand;
 
 /** Eval-channel commands, grouped so the forwarding switch stays readable. */
 export type EvalCommand =
@@ -389,7 +432,8 @@ export type ForwardedCommand =
   | EvalCommand
   | McpCommand
   | ProviderCommand
-  | DeployChannelCommand;
+  | DeployChannelCommand
+  | MemberCommand;
 
 // Generation rides its own channel, deliberately parallel to "trace". It never enters the
 // trace store or the event schema — schema/events.md v1 stays frozen.
@@ -681,6 +725,8 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   listMcpServers: "mcp", addMcpServer: "mcp", removeMcpServer: "mcp", rediscoverMcpServer: "mcp",
   setMcpServerAuth: "mcp", setMcpToolImpact: "mcp", resolveMcpConfirm: "mcp",
   listProviders: "providers", setProviderKey: "providers", testProviderKey: "providers",
+  listMembers: "members", inviteMember: "members", revokeInvite: "members",
+  setMemberRole: "members", removeMember: "members",
   listDeployments: "deploy", planDeploy: "deploy", deploy: "deploy", cancelDeploy: "deploy",
   forgetDeployment: "deploy", loadDeployLogs: "deploy", setRailwayToken: "deploy",
   testRailwayToken: "deploy",
@@ -1134,6 +1180,10 @@ export class WsRelay {
             // Shape-checked in the app, which owns the registry and can answer with a
             // precise error on the "mcp" channel rather than dropping the message here.
             void withContext((ctx) => this.onCommand?.(msg as McpCommand, ctx));
+          } else if (MEMBER_COMMANDS.has(msg.cmd)) {
+            // Shape-checked in the app, which owns the identity repository and can answer with
+            // a precise error on the "members" channel rather than dropping the message here.
+            void withContext((ctx) => this.onCommand?.(msg as MemberCommand, ctx));
           } else if (EVAL_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the eval store and can answer with a
             // precise error on the "eval" channel rather than dropping the message here.
@@ -1340,6 +1390,26 @@ export class WsRelay {
   /** Broadcast a deploy event. Separate channel by design — see DeployEvent. */
   broadcastDeploy(ctx: TenantContext, event: DeployEvent): void {
     this.broadcastTo(ctx, { channel: "deploy", ...event });
+  }
+
+  /** Broadcast a membership event to the workspace it concerns. See MemberEvent. */
+  broadcastMembers(ctx: TenantContext, event: MemberEvent): void {
+    this.broadcastTo(ctx, { channel: "members", ...event });
+  }
+
+  /**
+   * Send a membership event to ONE socket.
+   *
+   * For `inviteLink`, which carries a credential. Broadcasting it would hand the link to every
+   * admin with a tab open, when exactly one person asked for it and is about to send it on.
+   */
+  sendMembers(ctx: TenantContext, requestId: string, event: MemberEvent): void {
+    for (const [ws, session] of this.sessions) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (session.context.workspaceId !== ctx.workspaceId) continue;
+      if (session.context.requestId !== requestId) continue;
+      this.sendTo(ws, { channel: "members", ...event });
+    }
   }
 
   /**

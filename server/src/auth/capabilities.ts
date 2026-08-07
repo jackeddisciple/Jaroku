@@ -176,6 +176,13 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   setProviderKey: "provider:manage",
   testProviderKey: "provider:manage",
 
+  // membership
+  listMembers: "member:read",
+  inviteMember: "member:manage",
+  revokeInvite: "member:manage",
+  setMemberRole: "member:manage",
+  removeMember: "member:manage",
+
   // deploy
   listDeployments: "deploy:read",
   loadDeployLogs: "deploy:read",

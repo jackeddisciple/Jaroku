@@ -18,7 +18,7 @@
 // workspace list is what the caller MAY act in, computed from membership rows — never echoed
 // back from anything the client sent.
 
-import { forbidden, unauthorized, type Handler, type HttpRequest } from "../http/router.ts";
+import { badRequest, forbidden, unauthorized, type Handler, type HttpRequest } from "../http/router.ts";
 import { newRequestId, systemContext } from "../db/tenant.ts";
 import { IdentityConflictError, defaultWorkspace, type IdentityRepository } from "../db/repositories/identity.ts";
 import { AuthError, TokenVerifier, type AuthContext } from "./verifier.ts";
@@ -80,6 +80,7 @@ export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" 
   if (deps.tickets && deps.resolver) {
     routes.push({ path: "/v1/ws-ticket", method: "POST", handler: ticketHandler(deps) });
   }
+  routes.push({ path: "/v1/invites/accept", method: "POST", handler: acceptInviteHandler(deps) });
   if (deps.localIssuer) {
     routes.push({ path: "/v1/auth/jwks.json", method: "GET", handler: jwksHandler(deps.localIssuer) });
     routes.push({ path: "/v1/auth/dev-login", method: "POST", handler: devLoginHandler(deps) });
@@ -212,6 +213,64 @@ function ticketHandler(deps: SessionDeps): Handler {
         expiresAt: issued.expiresAt,
         workspaceId: session.context.workspaceId,
         role: session.role,
+      },
+    };
+  };
+}
+
+/**
+ * Redeem an invitation, becoming a member.
+ *
+ * THE ONE MEMBERSHIP OPERATION THAT CANNOT GO OVER A SOCKET, and the reason is structural: a
+ * socket is scoped to a workspace by a ticket, a ticket is minted after a membership check, and
+ * the person accepting an invitation is by definition not a member yet. There is no connection
+ * they could send this down.
+ *
+ * So it is HTTP, authenticated by the same bearer token as everything else, and the invitation
+ * token is the second credential — one proves who you are, the other that you were asked. The
+ * account is provisioned first if this is also their first sight, so a link in an email works
+ * for somebody who has never used the product.
+ */
+function acceptInviteHandler(deps: SessionDeps): Handler {
+  const log = deps.log ?? console.log;
+  return async (req) => {
+    const auth = await authenticate(req, deps.verifier);
+    if (!auth.email) throw forbidden("your identity provider did not supply a verified email address");
+    const body = await req.json<{ token?: unknown }>();
+    const token = typeof body.token === "string" ? body.token.trim() : "";
+    if (!token) throw badRequest("give the invitation token");
+
+    const sys = systemContext(req.requestId);
+    // Provision first. An invitation is often somebody's first contact with the product, and
+    // requiring them to have signed in once already would make the link fail for exactly the
+    // people it was sent to.
+    const provisioned = await deps.identity.provisionUser(sys, {
+      externalId: auth.subject,
+      email: auth.email,
+      displayName: auth.displayName,
+    });
+
+    const result = await deps.identity.acceptInvite(sys, token, {
+      id: provisioned.user.id,
+      email: provisioned.user.email,
+    });
+    if (!result.ok) throw forbidden(result.reason);
+
+    log(`[members] ${provisioned.user.email} accepted an invite to ${result.workspace.slug} as ${result.role}`);
+    const memberships = await deps.identity.workspacesForUser(sys, provisioned.user.id);
+    return {
+      body: {
+        workspace: { id: result.workspace.id, slug: result.workspace.slug, name: result.workspace.name },
+        role: result.role,
+        // The full list, so a client can render its switcher without a second round trip —
+        // and so the workspace it just joined is visibly in it.
+        workspaces: memberships.map((w) => ({
+          id: w.id,
+          slug: w.slug,
+          name: w.name,
+          kind: w.kind,
+          role: w.role,
+        })),
       },
     };
   };

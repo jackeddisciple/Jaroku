@@ -176,6 +176,11 @@ try {
     "runs", "steps", "datasets", "dataset_examples", "rubrics", "eval_runs", "eval_jobs",
     "eval_scores", "mcp_servers", "mcp_tools", "deployments", "deployment_logs", "agents",
     "agent_versions",
+    // Session 2. It keeps its policy even though the person redeeming an invite is not yet a
+    // member — the token carries the workspace id, so the lookup is scoped and the secret is
+    // what proves it. See migration 012 for why that was worth the trouble when `ws_tickets`
+    // could not do it.
+    "workspace_invites",
   ];
   const guarded = await db.all<{ relname: string; relrowsecurity: boolean; relforcerowsecurity: boolean }>(
     `SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class

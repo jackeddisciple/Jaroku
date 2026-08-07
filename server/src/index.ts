@@ -30,6 +30,7 @@ import {
   type GenerateCommand,
   type McpCommand,
   type PlanAgentCommand,
+  type MemberCommand,
   type ProviderCommand,
 } from "./wsRelay.ts";
 import { Router } from "./http/router.ts";
@@ -48,6 +49,7 @@ import { Editor, editCount } from "./editor.ts";
 import { scanAgentDirectory } from "./agents.ts";
 import { AgentRepository } from "./db/repositories/agents.ts";
 import { IdentityRepository } from "./db/repositories/identity.ts";
+import { isMemberRole } from "./db/tenant.ts";
 import { resolveDevTenancy, type DevTenancy } from "./devTenancy.ts";
 import { loadConnectors } from "./connectors.ts";
 import { isSafeAgentId, listProjectFiles } from "./projectFs.ts";
@@ -555,6 +557,7 @@ const relay = new WsRelay({
     else if (MCP_COMMAND_NAMES.has(cmd.cmd)) void handleMcpCommand(ctx, cmd as McpCommand);
     else if (DEPLOY_COMMAND_NAMES.has(cmd.cmd)) void handleDeployCommand(ctx, cmd as DeployChannelCommand);
     else if (PROVIDER_COMMAND_NAMES.has(cmd.cmd)) void handleProviderCommand(ctx, cmd as ProviderCommand);
+    else if (MEMBER_COMMAND_NAMES.has(cmd.cmd)) void handleMemberCommand(ctx, cmd as MemberCommand);
     else void handleEvalCommand(ctx, cmd);
   },
 });
@@ -875,6 +878,118 @@ async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): 
     const message = (err as Error)?.message ?? String(err);
     console.error(`[providers] ${cmd.cmd} failed: ${message}`);
     relay.broadcastProviders(ctx, { type: "error", message: `${cmd.cmd} failed: ${message}` });
+  }
+}
+
+// --- membership: commands ---------------------------------------------------
+//
+// Who may act in this workspace, and as what. Every mutation here writes an `audit_log` row
+// inside the same transaction that makes the change — the repository does it, so there is no
+// path that alters membership without a record of who did it.
+//
+// The invite LINK is the only credential this file ever sends a browser besides the deploy
+// bearer token, and it takes the same shape for the same reason: there is no email sender in
+// this product, only a hash is stored, so the one message that carries it is the only chance
+// anybody has to see it. It goes to the socket that asked, not to the workspace — broadcasting
+// it would hand the link to every admin with a tab open.
+
+const MEMBER_COMMAND_NAMES = new Set([
+  "listMembers", "inviteMember", "revokeInvite", "setMemberRole", "removeMember",
+]);
+
+async function broadcastMembers(ctx: TenantContext): Promise<void> {
+  const [members, invites] = await Promise.all([
+    identityRepo.listMembers(ctx),
+    identityRepo.listInvites(ctx),
+  ]);
+  relay.broadcastMembers(ctx, { type: "members", members, invites });
+}
+
+async function handleMemberCommand(ctx: TenantContext, cmd: MemberCommand): Promise<void> {
+  try {
+    if (cmd.cmd === "listMembers") {
+      await broadcastMembers(ctx);
+      return;
+    }
+
+    if (cmd.cmd === "inviteMember") {
+      const role = cmd.role;
+      if (!isMemberRole(role)) {
+        relay.broadcastMembers(ctx, {
+          type: "error",
+          message: `"${String(role).slice(0, 24)}" is not a role — expected owner, admin or member`,
+        });
+        return;
+      }
+      const result = await identityRepo.createInvite(ctx, { email: String(cmd.email ?? ""), role });
+      if ("error" in result) {
+        relay.broadcastMembers(ctx, { type: "error", message: result.error });
+        return;
+      }
+      console.log(`[members] invited ${result.invite.email} as ${role}`);
+      // To the asking socket only. It is a credential.
+      relay.sendMembers(ctx, ctx.requestId, {
+        type: "inviteLink",
+        email: result.invite.email,
+        role,
+        token: result.token,
+        expiresAt: result.invite.expires_at,
+      });
+      await broadcastMembers(ctx);
+      return;
+    }
+
+    if (cmd.cmd === "revokeInvite") {
+      const ok = await identityRepo.revokeInvite(ctx, String(cmd.inviteId ?? ""));
+      if (!ok) {
+        relay.broadcastMembers(ctx, { type: "error", message: "that invitation is already gone" });
+        return;
+      }
+      await broadcastMembers(ctx);
+      return;
+    }
+
+    if (cmd.cmd === "setMemberRole") {
+      const role = cmd.role;
+      if (!isMemberRole(role)) {
+        relay.broadcastMembers(ctx, { type: "error", message: `"${String(role).slice(0, 24)}" is not a role` });
+        return;
+      }
+      const result = await identityRepo.setMemberRole(ctx, String(cmd.userId ?? ""), role);
+      if (!result.ok) {
+        relay.broadcastMembers(ctx, { type: "error", message: result.reason ?? "could not change that role" });
+        return;
+      }
+      // The membership cache is what every later request reads, and it holds positives for
+      // thirty seconds. Exact here rather than waiting it out: a demotion that takes half a
+      // minute to bite is a demotion that did not happen when somebody pressed the button.
+      contextResolver.invalidate(ctx.workspaceId, String(cmd.userId));
+      await broadcastMembers(ctx);
+      // ...and the sockets that user already has open pick the new role up on the next
+      // revalidation tick, in place, without being disconnected. See relay.revalidateAll.
+      return;
+    }
+
+    if (cmd.cmd === "removeMember") {
+      const userId = String(cmd.userId ?? "");
+      const result = await identityRepo.removeMember(ctx, userId);
+      if (!result.ok) {
+        relay.broadcastMembers(ctx, { type: "error", message: result.reason ?? "could not remove that member" });
+        return;
+      }
+      contextResolver.invalidate(ctx.workspaceId, userId);
+      // Their outstanding tickets die with the membership. A ticket minted a second before the
+      // removal is otherwise good for another thirty seconds — a small window, and one that
+      // opens a socket which then lives until the next revalidation tick.
+      await ticketStore.revoke(ctx.workspaceId, userId);
+      console.log(`[members] removed ${userId} from ${ctx.workspaceId}`);
+      await broadcastMembers(ctx);
+      return;
+    }
+  } catch (err) {
+    const message = (err as Error)?.message ?? String(err);
+    console.error(`[members] ${cmd.cmd} failed: ${message}`);
+    relay.broadcastMembers(ctx, { type: "error", message: `${cmd.cmd} failed: ${message}` });
   }
 }
 
