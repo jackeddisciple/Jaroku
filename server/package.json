@@ -12,6 +12,7 @@
     "import": "tsx src/db/import.cli.ts",
     "test:migrate": "tsx src/db/migrate.test.ts",
     "test:db": "tsx src/db/sqlite.test.ts",
+    "test:driver": "tsx src/db/driver.test.ts",
     "test:db-postgres": "tsx src/db/postgres.test.ts",
     "test:shape-parity": "tsx src/db/shapeParity.test.ts",
     "test:payloads": "tsx src/db/payloads.test.ts",
