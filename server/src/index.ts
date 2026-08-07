@@ -485,6 +485,27 @@ const relay = new WsRelay({
   // afterwards. `JAROKU_DEV_AUTH=1` is the loud, production-refusing way back to the old
   // behaviour — see auth/socketAuth.ts.
   contextFor: resolveSocketAuth({ tickets: ticketStore, devContext: () => serverContext() }),
+  // A SOCKET IS THE ONE THING HERE WITH NO NATURAL EXPIRY.
+  //
+  // Every HTTP request re-presents its token and is re-checked. A socket is checked once, at
+  // the upgrade, and would then run for as long as a browser tab is open — still acting on a
+  // membership that may have been revoked in its first ten minutes. This asks again, once a
+  // minute, and it is the only thing in the system that ever notices.
+  revalidate: async (session) => {
+    // The workspace first, because "it is gone" and "you were removed from it" send a client
+    // to different places: one reconnects elsewhere, the other signs in again.
+    const ctx = systemContext(newRequestId());
+    const workspace = await identityRepo.workspaceById(ctx, session.context.workspaceId);
+    if (!workspace) return { ok: false, reason: "workspace_gone" };
+    // A socket with no user is the JAROKU_DEV_AUTH path or server-side work; there is no
+    // membership to re-check, and inventing a failure would close a connection nothing
+    // authorised in the first place.
+    if (!session.context.actorUserId) return { ok: true, role: session.context.role };
+    // Around the cache on purpose — a cached positive is exactly what a revocation has to be
+    // seen past. See ContextResolver.stillAMember.
+    const role = await contextResolver.stillAMember(session.context, ctx.requestId);
+    return role ? { ok: true, role } : { ok: false, reason: "revoked" };
+  },
   // These two still read a global directory rather than a scoped table, which is the honest
   // limit of Session 1: runtime/agents/ is one namespace for every workspace, and Session 3's
   // object store is what makes the key itself workspace-scoped. They take the context now so

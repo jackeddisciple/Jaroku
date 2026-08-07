@@ -66,7 +66,7 @@ async function storeSuite(label: string, store: TicketStore, ctx: TenantContext,
     check((await store.consume("../../etc/passwd")) === null, "a path is refused on shape");
     check((await store.consume("a".repeat(500))) === null, "an absurdly long one is refused on shape");
 
-    const expired = await store.issue(ctx, -1);
+    const expired = await store.issue(ctx, { ttlS: -1 });
     check((await store.consume(expired.ticket)) === null, "an expired ticket is refused");
   }
 
@@ -91,8 +91,8 @@ async function storeSuite(label: string, store: TicketStore, ctx: TenantContext,
     // The guarantee, rather than a count. `DbTicketStore.issue` sweeps opportunistically, so
     // by the time an explicit sweep runs it may have nothing left to do — asserting "it
     // removed two" would fail on the store that is keeping itself cleanest.
-    const stale = await store.issue(ctx, -1);
-    await store.issue(ctx, -1);
+    const stale = await store.issue(ctx, { ttlS: -1 });
+    await store.issue(ctx, { ttlS: -1 });
     await store.sweep();
     check((await store.sweep()) === 0, "after a sweep, nothing expired is left to sweep");
     check((await store.consume(stale.ticket)) === null, "...and a swept ticket is gone rather than merely stale");

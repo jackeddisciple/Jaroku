@@ -16,7 +16,7 @@
 // `Db` interface's `run()` reports rows affected and not rows returned, and one spelling that
 // is correct on both drivers beats two that are each correct on one.
 
-import type { Db } from "../db.ts";
+import { asIntOrNull, type Db } from "../db.ts";
 import type { Role, SystemContext, TenantContext } from "../tenant.ts";
 import {
   TICKET_TTL_S,
@@ -34,18 +34,23 @@ export class DbTicketStore implements TicketStore {
     private now: () => number = () => Date.now(),
   ) {}
 
-  async issue(ctx: TenantContext, ttlS = TICKET_TTL_S): Promise<IssuedTicket> {
+  async issue(
+    ctx: TenantContext,
+    opts: { ttlS?: number; tokenExpiresAt?: number | null } = {},
+  ): Promise<IssuedTicket> {
     const raw = mintTicketValue();
-    const expiresAt = this.now() + ttlS * 1000;
+    const expiresAt = this.now() + (opts.ttlS ?? TICKET_TTL_S) * 1000;
     await this.db.run(
-      `INSERT INTO ws_tickets (token_hash, workspace_id, user_id, role, expires_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO ws_tickets
+         (token_hash, workspace_id, user_id, role, expires_at, token_expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         hashTicket(raw),
         ctx.workspaceId,
         ctx.actorUserId,
         ctx.role,
         new Date(expiresAt).toISOString(),
+        opts.tokenExpiresAt ?? null,
         new Date(this.now()).toISOString(),
       ],
     );
@@ -73,8 +78,10 @@ export class DbTicketStore implements TicketStore {
         user_id: string | null;
         role: string;
         expires_at: string;
+        token_expires_at: number | string | null;
       }>(
-        `SELECT workspace_id, user_id, role, expires_at FROM ws_tickets WHERE token_hash = ?`,
+        `SELECT workspace_id, user_id, role, expires_at, token_expires_at
+           FROM ws_tickets WHERE token_hash = ?`,
         [hash],
       );
       if (!row) return null;
@@ -90,6 +97,9 @@ export class DbTicketStore implements TicketStore {
         userId: row.user_id,
         role: row.role as Role,
         expiresAt,
+        // asIntOrNull, not `Number(...) || null`: Postgres hands a bigint back as a string,
+        // and an expiry of 0 is not the same as an absent one.
+        tokenExpiresAt: asIntOrNull(row.token_expires_at),
       };
     });
   }

@@ -203,7 +203,9 @@ function ticketHandler(deps: SessionDeps): Handler {
     // Throws 403 and writes an audit row if they are not a member. Nothing below this line
     // sees a workspace id the client chose.
     const session = await resolver.resolve(auth, requested, req.requestId, req.ip);
-    const issued = await tickets.issue(session.context);
+    // The token's expiry travels with the ticket, so the socket it opens knows when its
+    // credential runs out. Nothing downstream of the upgrade ever sees a token again.
+    const issued = await tickets.issue(session.context, { tokenExpiresAt: auth.expiresAt });
     return {
       body: {
         ticket: issued.ticket,

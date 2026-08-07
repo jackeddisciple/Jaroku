@@ -17,7 +17,7 @@ import WebSocket from "ws";
 import { openTestSqlite } from "./db/testDb.ts";
 import { newRequestId, systemContextFor, type TenantContext } from "./db/tenant.ts";
 import { TraceStore } from "./store.ts";
-import { WsRelay, type ForwardedCommand } from "./wsRelay.ts";
+import { WsRelay, CLOSE_RECONNECT, CLOSE_UNAUTHORISED, type ForwardedCommand, type SessionVerdict } from "./wsRelay.ts";
 import type { Run, Step } from "./types.ts";
 
 let failures = 0;
@@ -71,6 +71,8 @@ const runB = await seed(ctxB, "b");
 // produces from a ticket. Everything below asks whether the rest of the system honours it.
 let connections = 0;
 const commandLog: { cmd: string; workspaceId: string }[] = [];
+/** What the next revalidation should conclude, per workspace. Set by the tests below. */
+const verdicts = new Map<string, SessionVerdict>();
 const PORT = 4507;
 
 /** Which workspace owns which agent. The agents table answers this for real. */
@@ -103,6 +105,10 @@ const relay = new WsRelay({
   onCommand: (cmd: ForwardedCommand, ctx: TenantContext) => {
     commandLog.push({ cmd: cmd.cmd, workspaceId: ctx.workspaceId });
   },
+  // Driven by hand below rather than by a timer: what is under test is the DECISION, and a
+  // suite that waits sixty seconds to see it is a suite nobody runs.
+  revalidate: async (session) => verdicts.get(session.context.workspaceId) ?? { ok: true, role: session.context.role },
+  revalidateMs: 60_000,
 });
 
 interface Client {
@@ -110,6 +116,8 @@ interface Client {
   inbox: Record<string, unknown>[];
   send: (o: unknown) => void;
   want: (pred: (m: any) => boolean, label: string) => Promise<any>;
+  /** The close code, once it arrives. A client can miss the last frame; it cannot miss this. */
+  closed: () => number | null;
 }
 
 async function connect(): Promise<Client> {
@@ -122,10 +130,13 @@ async function connect(): Promise<Client> {
       /* ignore */
     }
   });
+  let closeCode: number | null = null;
+  ws.on("close", (code) => { closeCode = code; });
   await new Promise((r) => ws.once("open", r));
   return {
     ws,
     inbox,
+    closed: () => closeCode,
     send: (o) => ws.send(JSON.stringify(o)),
     want: async (pred, label) => {
       for (let i = 0; i < 100; i++) {
@@ -332,6 +343,60 @@ console.log("\nprovider state is per workspace too");
   const pb = b.inbox.slice(beforeB).filter((m: any) => m.channel === "providers" && m.type === "notice");
   check(pa.length === 1, `A receives its own provider notice (${pa.length})`);
   check(pb.length === 0, `B receives none of A's (${pb.length})`);
+}
+
+console.log("\na socket does not outlive the membership that authorised it");
+{
+  // The gap this closes: every HTTP request re-presents its token, but a socket is checked
+  // once at the upgrade and then runs for as long as a tab is open — eight hours later still
+  // acting on a membership revoked in the first ten minutes.
+
+  // A role change does NOT close the connection. It is still legitimately theirs; what
+  // changed is what it may do, and the capability check reads the context on every command.
+  verdicts.set(B, { ok: true, role: "admin" });
+  const beforeRole = b.inbox.length;
+  await relay.revalidateAll();
+  await sleep(200);
+  const roleEvent = b.inbox.slice(beforeRole).find((m: any) => m.channel === "session" && m.type === "role_changed") as any;
+  check(roleEvent?.role === "admin", "a promotion arrives on the session channel");
+  check(b.ws.readyState === WebSocket.OPEN, "...without closing the socket — a role change is not an interruption");
+
+  // ...and it is the ENFORCEMENT, not a notification: the same socket may now do what it
+  // could not a moment ago.
+  commandLog.length = 0;
+  b.send({ cmd: "addMcpServer", endpoint: "https://mcp.example/y" });
+  await sleep(400);
+  check(
+    commandLog.some((c) => c.cmd === "addMcpServer"),
+    "...and the promoted socket may now do what it was refused before, on the SAME connection",
+  );
+
+  // A failed re-check must not close anything. A database blip signing every user out turns a
+  // hiccup into an outage — the same rule the JWKS cache follows.
+  verdicts.set(B, { get ok(): never { throw new Error("database is down"); } } as never);
+  await relay.revalidateAll();
+  await sleep(200);
+  check(b.ws.readyState === WebSocket.OPEN, "a revalidation that THROWS leaves the socket open");
+  verdicts.delete(B);
+
+  // Revocation does close it, with the code that says "sign in again".
+  verdicts.set(B, { ok: false, reason: "revoked" });
+  const beforeRevoke = b.inbox.length;
+  await relay.revalidateAll();
+  await sleep(400);
+  const revoked = b.inbox.slice(beforeRevoke).find((m: any) => m.channel === "session" && m.type === "revoked") as any;
+  check(!!revoked, "a revoked membership is announced on the session channel");
+  check(b.ws.readyState !== WebSocket.OPEN, "...and the socket is closed, not merely warned");
+  check(b.closed() === CLOSE_UNAUTHORISED, `...with the sign-in-again close code (${b.closed()})`);
+
+  // A deleted workspace is a different instruction: reconnect elsewhere, do not sign in again.
+  verdicts.set(A, { ok: false, reason: "workspace_gone" });
+  const beforeGone = a.inbox.length;
+  await relay.revalidateAll();
+  await sleep(400);
+  const gone = a.inbox.slice(beforeGone).find((m: any) => m.channel === "session" && m.type === "workspace_changed") as any;
+  check(!!gone, "a workspace that no longer exists is announced as workspace_changed, not revoked");
+  check(a.closed() === CLOSE_RECONNECT, `...with the reconnect close code (${a.closed()})`);
 }
 
 a.ws.close();

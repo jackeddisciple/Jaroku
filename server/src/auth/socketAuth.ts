@@ -89,7 +89,10 @@ export function resolveSocketAuth(opts: SocketAuthOptions): (req: IncomingMessag
         // rather than to the HTTP request that happened to mint its ticket.
         requestId: newRequestId(),
       },
-      expiresAt: null,
+      // Unix seconds, from the token that bought this ticket. The relay's revalidation timer
+      // is the only reader: a socket whose credential has run out is closed rather than left
+      // to live until somebody closes the tab.
+      expiresAt: redeemed.tokenExpiresAt,
       userId: redeemed.userId,
     };
   };

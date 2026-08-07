@@ -33,8 +33,17 @@ export interface Ticket {
   workspaceId: string;
   userId: string | null;
   role: Role;
-  /** Unix milliseconds. */
+  /** Unix milliseconds. When the TICKET stops being redeemable. */
   expiresAt: number;
+  /**
+   * Unix SECONDS: when the token that bought this ticket expires, or null if there was none.
+   *
+   * Carried through because it is the only moment the two are in the same place. A socket
+   * outlives the request that opened it by hours, and without this it has no idea when the
+   * credential behind it ran out — which is exactly the gap the revalidation timer exists to
+   * close. The ticket's own thirty seconds are unrelated and much shorter.
+   */
+  tokenExpiresAt: number | null;
 }
 
 export interface IssuedTicket {
@@ -51,7 +60,7 @@ export interface TicketStore {
    * already resolved to it — the membership check happens before this is reached, and there is
    * no argument here that could ask for a different one.
    */
-  issue(ctx: TenantContext, ttlS?: number): Promise<IssuedTicket>;
+  issue(ctx: TenantContext, opts?: { ttlS?: number; tokenExpiresAt?: number | null }): Promise<IssuedTicket>;
   /**
    * Redeem a ticket, exactly once.
    *
@@ -103,14 +112,15 @@ export function digestsMatch(a: string, b: string): boolean {
 export function memoryTicketStore(now: () => number = () => Date.now()): TicketStore {
   const tickets = new Map<string, Ticket>();
   return {
-    async issue(ctx, ttlS = TICKET_TTL_S) {
+    async issue(ctx, opts = {}) {
       const raw = mintTicketValue();
-      const expiresAt = now() + ttlS * 1000;
+      const expiresAt = now() + (opts.ttlS ?? TICKET_TTL_S) * 1000;
       tickets.set(hashTicket(raw), {
         workspaceId: ctx.workspaceId,
         userId: ctx.actorUserId,
         role: ctx.role,
         expiresAt,
+        tokenExpiresAt: opts.tokenExpiresAt ?? null,
       });
       return { ticket: raw, expiresAt };
     },

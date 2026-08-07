@@ -581,6 +581,42 @@ export type DeployEvent =
   | { type: "error"; message: string; deploymentId?: string }
   | { type: "notice"; message: string; deploymentId?: string };
 
+// The session channel: the only one that is about the CONNECTION rather than about the work.
+//
+// It exists because a WebSocket is the one thing in this system with no natural expiry. An
+// HTTP request presents a token and is checked; a socket is checked once, at the upgrade, and
+// then lives for as long as a browser tab is open. Eight hours later it is still acting on a
+// membership that may have been revoked in the first ten minutes, and nothing about the socket
+// itself would ever notice.
+//
+// So a socket is re-checked on a timer, and what it is told is one of these. Every one of them
+// means "this connection is over, open a new one" — a client that wants to keep working gets a
+// fresh token and a fresh ticket, which puts it back through the whole membership check.
+export type SessionEvent =
+  // The token behind this socket is close to expiring. The client should refresh and
+  // reconnect at its convenience, rather than being cut off mid-generation.
+  | { type: "expiring"; expiresAt: number }
+  | { type: "expired" }
+  // No longer a member. The socket closes immediately: it is not a warning.
+  | { type: "revoked"; message: string }
+  // The workspace itself is gone. Distinct from `revoked` because the client's move is
+  // different — reconnect into another workspace it belongs to, rather than sign in again.
+  | { type: "workspace_changed"; message: string }
+  // Still a member, at a different role. The socket stays open and re-authorises against the
+  // new one; a demotion does not need to interrupt somebody mid-sentence, it needs to stop
+  // them doing the thing they no longer may.
+  | { type: "role_changed"; role: string };
+
+/**
+ * Why a socket was closed, in the 4000–4999 application range.
+ *
+ * The event above says it in words, but a client can miss the last frame before a close — so
+ * the code carries the same decision in the one place that is guaranteed to arrive. The
+ * distinction the client needs is exactly one bit: reconnect, or stop and show sign-in.
+ */
+export const CLOSE_UNAUTHORISED = 4001;
+export const CLOSE_RECONNECT = 4002;
+
 export type DebugEvent =
   | { type: "paused"; runId: string; seq: number }
   | { type: "resumed"; runId: string; seqOffset: number }
@@ -653,6 +689,14 @@ export const COMMAND_CHANNEL: Record<string, string> = {
 export function channelFor(cmd: string): string {
   return Object.prototype.hasOwnProperty.call(COMMAND_CHANNEL, cmd) ? COMMAND_CHANNEL[cmd]! : "log";
 }
+
+/** What a re-check of an open socket concluded. */
+export type SessionVerdict =
+  | { ok: true; role: TenantContext["role"] }
+  | { ok: false; reason: "revoked" | "workspace_gone" };
+
+/** How close to expiry a token gets before the client is told to refresh. */
+export const EXPIRY_WARNING_S = 300;
 
 /** A refusal with an HTTP status, for the upgrade path. */
 export class UpgradeRefused extends Error {
@@ -742,6 +786,16 @@ export interface RelayOptions {
   listMcpServers?: (ctx: TenantContext) => unknown[] | Promise<unknown[]>;
   /** Which provider keys are set, by name. Never a value — see providers.ts. */
   listProviders?: () => unknown[];
+  /**
+   * Re-check an open socket's session. Called on a timer; absent means never.
+   *
+   * The relay deliberately knows nothing about memberships or tokens — it asks, and acts on
+   * the answer. That keeps the identity layer in one place and means this file has no reason
+   * to import a repository.
+   */
+  revalidate?: (session: SocketSession) => Promise<SessionVerdict>;
+  /** How often to ask. Default 60s; a socket lives hours, so this is not a hot path. */
+  revalidateMs?: number;
   /** Every deployment, plus whether a Railway token is configured. Names only. */
   listDeployments?: (ctx: TenantContext) =>
     | { deployments: unknown[]; railwayConfigured: boolean }
@@ -763,6 +817,9 @@ export class WsRelay {
   private contexts = new Map<WebSocket, TenantContext>();
   /** The fuller picture per socket: who, and when their credential runs out. */
   private sessions = new Map<WebSocket, SocketSession>();
+  /** Sockets already told their token is nearly out, so they are told once and not per tick. */
+  private warned = new WeakSet<WebSocket>();
+  private revalidator?: ReturnType<typeof setInterval>;
   private store: TraceStore;
   private onCommand?: (cmd: ForwardedCommand, ctx: TenantContext) => void;
 
@@ -851,6 +908,97 @@ export class WsRelay {
     this.http.listen(opts.port, () => {
       console.log(`[relay] http+ws listening on http://localhost:${opts.port}`);
     });
+
+    if (opts.revalidate) {
+      this.revalidator = setInterval(() => {
+        void this.revalidateAll();
+      }, opts.revalidateMs ?? 60_000);
+      // The process must still be able to exit. A timer that keeps Node alive turns every
+      // test that forgets to close a relay into a hang, and turns SIGTERM into a wait.
+      this.revalidator.unref?.();
+    }
+  }
+
+  /**
+   * Re-check every open socket, and end the ones that should no longer be open.
+   *
+   * WHAT THIS CATCHES that nothing else does: a socket authorised eight hours ago on a
+   * membership revoked seven hours ago. Every HTTP request re-checks; a socket is checked once,
+   * at the upgrade, and then never again by anything.
+   *
+   * The membership read goes AROUND the resolver's cache — see `stillAMember`. A cached
+   * positive is precisely what a revocation needs to see past, and this runs once a minute per
+   * socket, which is not a load worth caching away.
+   */
+  async revalidateAll(): Promise<void> {
+    const revalidate = this.opts.revalidate;
+    if (!revalidate) return;
+    const nowS = Math.floor(Date.now() / 1000);
+
+    for (const [ws, session] of [...this.sessions]) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      try {
+        // Expiry first, because it needs no query and because a socket whose credential has
+        // run out should not cost a database round trip to close.
+        if (typeof session.expiresAt === "number") {
+          if (nowS >= session.expiresAt) {
+            this.endSession(ws, { type: "expired" }, CLOSE_UNAUTHORISED);
+            continue;
+          }
+          if (session.expiresAt - nowS <= EXPIRY_WARNING_S && !this.warned.has(ws)) {
+            // A warning, not a close. Cutting somebody off mid-generation because their token
+            // has four minutes left would be the server creating the outage it is warning
+            // about. Once per socket, or a client gets one of these every minute.
+            this.warned.add(ws);
+            this.sendTo(ws, { channel: "session", type: "expiring", expiresAt: session.expiresAt });
+          }
+        }
+
+        const verdict = await revalidate(session);
+        if (!verdict.ok) {
+          if (verdict.reason === "workspace_gone") {
+            this.endSession(
+              ws,
+              { type: "workspace_changed", message: "that workspace no longer exists" },
+              CLOSE_RECONNECT,
+            );
+          } else {
+            this.endSession(
+              ws,
+              { type: "revoked", message: "your access to this workspace was removed" },
+              CLOSE_UNAUTHORISED,
+            );
+          }
+          continue;
+        }
+        if (verdict.role !== session.context.role) {
+          // A role change does NOT close the socket. The connection is still legitimately
+          // theirs; what changed is what it may do, and the capability check at the door reads
+          // this context on every command — so updating it here is the whole of the
+          // enforcement. Interrupting the connection would be theatre.
+          const updated: TenantContext = { ...session.context, role: verdict.role };
+          this.sessions.set(ws, { ...session, context: updated });
+          this.contexts.set(ws, updated);
+          this.sendTo(ws, { channel: "session", type: "role_changed", role: verdict.role });
+        }
+      } catch (err) {
+        // A failed re-check does NOT close the socket. The database being briefly unavailable
+        // is our problem, and signing every user out over it would turn a blip into an outage —
+        // the same reasoning the JWKS cache applies to a failed refresh. The next tick asks
+        // again, sixty seconds from now.
+        console.error("[relay] session revalidation failed:", (err as Error).message);
+      }
+    }
+  }
+
+  /** Tell the socket why, then close it with a code that survives a dropped frame. */
+  private endSession(ws: WebSocket, event: SessionEvent, code: number): void {
+    this.sendTo(ws, { channel: "session", ...event });
+    console.log(`[relay] closing a socket: ${event.type}`);
+    // A beat, so the frame above is written before the close. `ws.close()` flushes queued
+    // frames, but the client still has to process the message — and the close code carries the
+    // same decision, so nothing is lost if it does not.
+    setTimeout(() => ws.close(code, event.type), 20);
   }
 
   /**
@@ -863,7 +1011,7 @@ export class WsRelay {
   private async authorized(ws: WebSocket, cmd: string, pending: Promise<TenantContext>): Promise<boolean> {
     let ctx: TenantContext;
     try {
-      ctx = await pending;
+      ctx = await this.contextOf(ws, pending);
     } catch {
       return false;
     }
@@ -889,10 +1037,26 @@ export class WsRelay {
     return false;
   }
 
+  /**
+   * The socket's CURRENT context, not the one it connected with.
+   *
+   * These differ exactly when revalidation has changed a role mid-connection, and reading the
+   * captured one there would make a promotion or demotion a notification rather than an
+   * enforcement — the client would be told its role changed while every command it sent was
+   * still judged against the old one. The map is authoritative from the moment the upgrade
+   * resolves; the promise is only for the handful of milliseconds before that.
+   */
+  private async contextOf(ws: WebSocket, pending: Promise<TenantContext>): Promise<TenantContext> {
+    return this.contexts.get(ws) ?? (await pending);
+  }
+
   /** Route an authorised command: answered locally, or forwarded to the app. */
   private dispatch(ws: WebSocket, msg: ClientCommand, pending: Promise<TenantContext>): void {
+    // Every branch below resolves through this, so a forwarded command carries the role the
+    // socket holds NOW — the same one `authorized` just judged it against.
+    const live = this.contextOf(ws, pending);
     const withContext = async (fn: (ctx: TenantContext) => Promise<void> | void): Promise<void> => {
-      await fn(await pending);
+      await fn(await live);
     };
     try {
       {
@@ -918,11 +1082,11 @@ export class WsRelay {
               channel: "agentFiles",
               agentId,
               files: (await this.opts.listAgentFiles?.(ctx, agentId)) ?? [],
-            }), pending);
+            }), live);
           } else if (msg.cmd === "loadAgentGraph" && typeof msg.agentId === "string") {
             // Async: spawn introspection, then answer only the requesting client.
             const agentId = msg.agentId;
-            void pending
+            void live
               .then((ctx) => this.opts.getAgentGraph?.(ctx, agentId))
               .then((graph) => this.sendTo(ws, { channel: "graph", agentId, graph: graph ?? null }))
               .catch((err) =>
@@ -945,13 +1109,13 @@ export class WsRelay {
               channel: "mcp",
               type: "servers",
               servers: (await this.opts.listMcpServers?.(ctx)) ?? [],
-            }), pending);
+            }), live);
           } else if (msg.cmd === "listDeployments") {
             void this.answer(ws, async (ctx) => ({
               channel: "deploy",
               type: "deployments",
               ...((await this.opts.listDeployments?.(ctx)) ?? { deployments: [], railwayConfigured: false }),
-            }), pending);
+            }), live);
           } else if (msg.cmd === "listProviders") {
             this.sendTo(ws, {
               channel: "providers",
@@ -978,7 +1142,7 @@ export class WsRelay {
             void this.answer(ws, async (ctx) => ({
               channel: "agents",
               agents: (await this.opts.listAgents?.(ctx)) ?? [],
-            }), pending);
+            }), live);
           } else if (msg.cmd === "loadRun" && typeof msg.runId === "string") {
             // Answer only the requesting client with that run's steps (ordered by seq).
             const runId = msg.runId;
@@ -989,7 +1153,7 @@ export class WsRelay {
               channel: "runSteps",
               runId,
               steps: await this.store.stepsForRun(ctx, runId),
-            }), pending);
+            }), live);
           }
       }
     } catch {
@@ -1100,6 +1264,7 @@ export class WsRelay {
 
   /** Stop listening. For tests; the server itself runs until the process does. */
   async close(): Promise<void> {
+    if (this.revalidator) clearInterval(this.revalidator);
     for (const ws of this.clients) ws.close();
     this.clients.clear();
     this.contexts.clear();
