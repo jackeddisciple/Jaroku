@@ -24,6 +24,8 @@ import { IdentityConflictError, type IdentityRepository } from "../db/repositori
 import { AuthError, TokenVerifier, type AuthContext } from "./verifier.ts";
 import type { LocalIssuer } from "./localIssuer.ts";
 import type { AuthConfig } from "./config.ts";
+import type { TicketStore } from "./tickets.ts";
+import type { ContextResolver } from "./resolve.ts";
 
 export interface SessionDeps {
   config: AuthConfig;
@@ -31,6 +33,9 @@ export interface SessionDeps {
   identity: IdentityRepository;
   /** Present only in local mode. Its absence is what makes the dev routes not exist. */
   localIssuer?: LocalIssuer;
+  /** Present once there are sockets to authorise — see `/v1/ws-ticket` below. */
+  tickets?: TicketStore;
+  resolver?: ContextResolver;
   log?: (m: string) => void;
 }
 
@@ -72,6 +77,9 @@ export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" 
   const routes: { path: string; method: "GET" | "POST"; handler: Handler }[] = [
     { path: "/v1/auth/session", method: "POST", handler: sessionHandler(deps) },
   ];
+  if (deps.tickets && deps.resolver) {
+    routes.push({ path: "/v1/ws-ticket", method: "POST", handler: ticketHandler(deps) });
+  }
   if (deps.localIssuer) {
     routes.push({ path: "/v1/auth/jwks.json", method: "GET", handler: jwksHandler(deps.localIssuer) });
     routes.push({ path: "/v1/auth/dev-login", method: "POST", handler: devLoginHandler(deps) });
@@ -168,6 +176,41 @@ async function adoptOrphans(
       log(`[auth] adopted the unowned workspace "${ws.slug}" (${ws.id}) — local development only`);
     }
   }
+}
+
+/**
+ * Exchange a bearer token for a single-use ticket to open one socket with.
+ *
+ * The whole of the WebSocket credential problem is here. A browser cannot put a header on a
+ * WebSocket, so something has to go in the URL; a long-lived JWT there lands in access logs
+ * forever, and a cookie makes the upgrade a cross-site-request target. What goes in the URL
+ * instead is worth nothing thirty seconds later and worth nothing twice.
+ *
+ * The workspace is resolved through the SAME membership lookup every other request uses, so
+ * a ticket for a workspace can only be minted by somebody who is a member of it. The socket
+ * then inherits that scope and can never be talked into another one — a switch is a new
+ * socket, which is a new ticket, which is a new membership check.
+ */
+function ticketHandler(deps: SessionDeps): Handler {
+  const tickets = deps.tickets!;
+  const resolver = deps.resolver!;
+  return async (req) => {
+    const auth = await authenticate(req, deps.verifier);
+    const body = await req.json<{ workspaceId?: unknown }>();
+    const requested = typeof body.workspaceId === "string" && body.workspaceId ? body.workspaceId : null;
+    // Throws 403 and writes an audit row if they are not a member. Nothing below this line
+    // sees a workspace id the client chose.
+    const session = await resolver.resolve(auth, requested, req.requestId, req.ip);
+    const issued = await tickets.issue(session.context);
+    return {
+      body: {
+        ticket: issued.ticket,
+        expiresAt: issued.expiresAt,
+        workspaceId: session.context.workspaceId,
+        role: session.role,
+      },
+    };
+  };
 }
 
 function jwksHandler(issuer: LocalIssuer): Handler {

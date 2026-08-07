@@ -3,6 +3,7 @@
 // run history snapshot; thereafter it receives live events as they arrive.
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { Socket } from "node:net";
 import { readFile } from "node:fs/promises";
 import { WebSocketServer, WebSocket } from "ws";
 import type { TraceStore } from "./store.ts";
@@ -586,6 +587,75 @@ export type DebugEvent =
   | { type: "branched"; parentRunId: string; branchId: string; fromSeq: number }
   | { type: "error"; runId?: string; message: string };
 
+/**
+ * What a socket is, once it has been let in.
+ *
+ * The context is the scope every read and every forwarded command is answered in. `expiresAt`
+ * is the token's expiry, carried so the revalidation timer can end a socket whose credential
+ * has run out rather than letting it live until somebody closes the tab.
+ */
+export interface SocketSession {
+  context: TenantContext;
+  /** Unix seconds, or null when the socket was opened without a token (the dev path). */
+  expiresAt?: number | null;
+  userId?: string | null;
+}
+
+/**
+ * Decide whether an upgrade is allowed, and in which workspace.
+ *
+ * THROWING REFUSES THE CONNECTION. That is the contract, and it is why this returns a session
+ * rather than taking a callback: a socket that opens and is then closed has already been
+ * counted, has already had a snapshot queued for it, and looks to a client exactly like a
+ * server that dropped the connection. A refusal has to happen before the handshake completes,
+ * and it has to be an HTTP status the client can read.
+ */
+export type SocketAuthorizer = (
+  req: IncomingMessage,
+) => TenantContext | SocketSession | Promise<TenantContext | SocketSession>;
+
+/** A refusal with an HTTP status, for the upgrade path. */
+export class UpgradeRefused extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "UpgradeRefused";
+  }
+}
+
+const asSession = (v: TenantContext | SocketSession): SocketSession =>
+  "context" in v ? v : { context: v, expiresAt: null, userId: v.actorUserId };
+
+/**
+ * Where the upgrade handler leaves its answer for the connection handler.
+ *
+ * A symbol rather than a string property, so nothing that iterates a request's own keys —
+ * a logger, a serialiser — can pick up a resolved session and put it somewhere.
+ */
+const SESSION = Symbol("jaroku.socketSession");
+type AuthorizedRequest = IncomingMessage & { [SESSION]?: SocketSession };
+
+/**
+ * Refuse an upgrade with a status the client can read, then close.
+ *
+ * Written by hand because at this point there is no `ServerResponse` — the socket has been
+ * detached from the HTTP server for the handshake. The body is plain text: a client that got
+ * this far is reading a status line, and nothing here is machine-parsed.
+ */
+function refuseUpgrade(socket: Socket, status: number, message: string): void {
+  const reason = status === 403 ? "Forbidden" : status === 401 ? "Unauthorized" : "Bad Request";
+  const body = `${message}\n`;
+  socket.write(
+    `HTTP/1.1 ${status} ${reason}\r\n` +
+      `content-type: text/plain; charset=utf-8\r\n` +
+      `content-length: ${Buffer.byteLength(body)}\r\n` +
+      `connection: close\r\n\r\n${body}`,
+  );
+  socket.destroy();
+}
+
 export interface RelayOptions {
   port: number;
   store: TraceStore;
@@ -603,7 +673,12 @@ export interface RelayOptions {
    * A workspace switch is a NEW socket, deliberately, because a switch that mutated a live
    * one would have to reason about the reads already in flight on it.
    */
-  contextFor: (req: IncomingMessage) => TenantContext | Promise<TenantContext>;
+  contextFor: SocketAuthorizer;
+  /**
+   * Which `Origin` values may open a socket. Absent means every one, which is only correct
+   * for a test — see auth/origin.ts for why this is not optional in front of a browser.
+   */
+  originPolicy?: { allows(origin: string | undefined): boolean };
   clientHtmlPath: string;
   /**
    * The HTTP surface, in front of the static fallback client.
@@ -646,6 +721,8 @@ export class WsRelay {
    * `broadcastHistory` and `broadcastAgents`, which now build per recipient.
    */
   private contexts = new Map<WebSocket, TenantContext>();
+  /** The fuller picture per socket: who, and when their credential runs out. */
+  private sessions = new Map<WebSocket, SocketSession>();
   private store: TraceStore;
   private onCommand?: (cmd: ForwardedCommand, ctx: TenantContext) => void;
 
@@ -656,13 +733,28 @@ export class WsRelay {
     this.http = createServer((req, res) => {
       void this.serveHttp(req, res);
     });
-    this.wss = new WebSocketServer({ server: this.http });
+    // `noServer`, not `server`. With `server` the library completes the handshake and the only
+    // way to refuse is to close an already-open socket — which the client cannot distinguish
+    // from a network drop, and which its reconnect loop then retries forever. Doing the
+    // upgrade by hand means a refusal is an HTTP status the client can read and act on.
+    this.wss = new WebSocketServer({ noServer: true });
+    this.http.on("upgrade", (req, socket, head) => {
+      void this.upgrade(req, socket as Socket, head);
+    });
 
     this.wss.on("connection", (ws, req) => {
       this.clients.add(ws);
       // Resolved once, here, and held for the life of the socket. Every read this connection
       // asks for and every command it forwards is answered in this workspace and no other.
-      const pending = Promise.resolve(this.opts.contextFor(req));
+      //
+      // By the time this fires the authoriser has already run and succeeded in `upgrade` —
+      // this reads its answer out of the request rather than asking again, so a ticket is
+      // consumed exactly once per connection.
+      const authorized = (req as AuthorizedRequest)[SESSION];
+      const pending: Promise<TenantContext> = authorized
+        ? Promise.resolve(authorized.context)
+        : Promise.resolve(asSession(this.opts.contextFor(req) as TenantContext)).then((s) => s.context);
+      if (authorized) this.sessions.set(ws, authorized);
       pending.then((ctx) => this.contexts.set(ws, ctx)).catch(() => {});
       const withContext = async (fn: (ctx: TenantContext) => Promise<void> | void): Promise<void> => {
         await fn(await pending);
@@ -792,18 +884,54 @@ export class WsRelay {
           /* ignore malformed client messages */
         }
       });
-      ws.on("close", () => {
+      const forget = (): void => {
         this.clients.delete(ws);
         this.contexts.delete(ws);
-      });
-      ws.on("error", () => {
-        this.clients.delete(ws);
-        this.contexts.delete(ws);
-      });
+        this.sessions.delete(ws);
+      };
+      ws.on("close", forget);
+      ws.on("error", forget);
     });
 
     this.http.listen(opts.port, () => {
       console.log(`[relay] http+ws listening on http://localhost:${opts.port}`);
+    });
+  }
+
+  /**
+   * Decide, before the handshake, whether this connection may exist.
+   *
+   * Two gates, in this order and for different attackers:
+   *
+   *   THE ORIGIN, first, because it is free and because it is the cross-site-hijacking defence.
+   *   WebSockets are not covered by CORS, so a page on another origin can open one against
+   *   this server with the user's browser doing the connecting. See auth/origin.ts.
+   *
+   *   THE TICKET, second, because it costs a database round trip. The authoriser consumes it,
+   *   and consuming is single-use — so a refusal here has already burned the ticket, which is
+   *   correct: a ticket presented to a rejected upgrade must never work on a second attempt.
+   *
+   * A refusal is an HTTP response on the raw socket. `ws` is never handed the connection at
+   * all, so nothing counts it, nothing snapshots to it, and the client reads a status.
+   */
+  private async upgrade(req: IncomingMessage, socket: Socket, head: Buffer): Promise<void> {
+    const origin = req.headers.origin;
+    if (this.opts.originPolicy && !this.opts.originPolicy.allows(origin)) {
+      console.warn(`[relay] refused a socket from origin ${JSON.stringify(origin)}`);
+      return refuseUpgrade(socket, 403, "origin not allowed");
+    }
+    let session: SocketSession;
+    try {
+      session = asSession(await this.opts.contextFor(req));
+    } catch (err) {
+      const status = err instanceof UpgradeRefused ? err.status : 401;
+      // The message is the authoriser's, and everything that reaches here was written in this
+      // codebase for a person to read — never a driver's or a third party's.
+      return refuseUpgrade(socket, status, (err as Error).message || "not authorised");
+    }
+    (req as AuthorizedRequest)[SESSION] = session;
+    this.wss.handleUpgrade(req, socket, head, (ws) => {
+      this.wss.emit("connection", ws, req);
     });
   }
 
@@ -876,6 +1004,7 @@ export class WsRelay {
     for (const ws of this.clients) ws.close();
     this.clients.clear();
     this.contexts.clear();
+    this.sessions.clear();
     await new Promise<void>((resolve) => this.wss.close(() => resolve()));
     await new Promise<void>((resolve) => this.http.close(() => resolve()));
   }

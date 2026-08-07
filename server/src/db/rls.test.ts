@@ -193,9 +193,15 @@ try {
   const unpolicied = TENANT_TABLES.filter((t) => !policies.some((p) => p.tablename === t));
   check(unpolicied.length === 0, `and a tenant_isolation policy on each (missing: ${unpolicied.join(", ") || "none"})`);
 
-  // And the two that must NOT have one, because a policy on either would break the thing that
-  // makes every other policy work. See the migration.
-  const exempt = ["audit_log", "workspace_members"];
+  // And the three that must NOT have one, because a policy on any of them would break the
+  // thing that makes every other policy work. See migrations 009 and 010.
+  //
+  // `ws_tickets` is the Session 2 addition, and it is the same argument as workspace_members:
+  // a policy reads `app.workspace_id`, and redeeming a ticket is the operation that PRODUCES
+  // that value. Scoping the lookup by the answer it is computing would return nothing, every
+  // time. Issuing is fully scoped — the repository takes a TenantContext — and the rows hold
+  // a digest, an id and a role for thirty seconds.
+  const exempt = ["audit_log", "workspace_members", "ws_tickets"];
   const wrongly = exempt.filter((t) => policies.some((p) => p.tablename === t));
   check(
     wrongly.length === 0,

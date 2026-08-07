@@ -38,6 +38,9 @@ import { AUTH_ENV, resolveAuthConfig } from "./auth/config.ts";
 import { LocalIssuer } from "./auth/localIssuer.ts";
 import { TokenVerifier } from "./auth/verifier.ts";
 import { sessionRoutes } from "./auth/session.ts";
+import { ContextResolver } from "./auth/resolve.ts";
+import { resolveOriginPolicy } from "./auth/origin.ts";
+import { DbTicketStore } from "./db/repositories/tickets.ts";
 import { Generator, type UsageSummary } from "./generator.ts";
 import { Planner } from "./planner.ts";
 import { Editor, editCount } from "./editor.ts";
@@ -422,11 +425,20 @@ const localIssuer =
     : undefined;
 const tokenVerifier = new TokenVerifier(authConfig);
 const identityRepo = new IdentityRepository(db);
+const contextResolver = new ContextResolver({ identity: identityRepo });
+// Backed by the database rather than a Map, and rather than Redis. A ticket issued by one
+// replica has to be consumable by another, which rules out the Map; and `DELETE … RETURNING`
+// against the Postgres already here has exactly the property GETDEL was wanted for. Session 5
+// puts Redis behind the same interface when it introduces a client for the queues.
+const ticketStore = new DbTicketStore(db);
+const originPolicy = resolveOriginPolicy();
 for (const route of sessionRoutes({
   config: authConfig,
   verifier: tokenVerifier,
   identity: identityRepo,
   localIssuer,
+  tickets: ticketStore,
+  resolver: contextResolver,
 })) {
   if (route.method === "GET") router.get(route.path, route.handler);
   else router.post(route.path, route.handler);
@@ -436,6 +448,7 @@ const relay = new WsRelay({
   port: PORT,
   store,
   router,
+  originPolicy,
   clientHtmlPath: join(SERVER_DIR, "debug-client.html"),
   listAgents: async (ctx) => {
     // One query for the whole list, so the sidebar can show a deploy state per row without
