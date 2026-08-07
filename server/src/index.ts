@@ -34,6 +34,10 @@ import {
 } from "./wsRelay.ts";
 import { Router } from "./http/router.ts";
 import { healthz, readyz } from "./http/health.ts";
+import { AUTH_ENV, resolveAuthConfig } from "./auth/config.ts";
+import { LocalIssuer } from "./auth/localIssuer.ts";
+import { TokenVerifier } from "./auth/verifier.ts";
+import { sessionRoutes } from "./auth/session.ts";
 import { Generator, type UsageSummary } from "./generator.ts";
 import { Planner } from "./planner.ts";
 import { Editor, editCount } from "./editor.ts";
@@ -400,6 +404,33 @@ router.get(
   "/readyz",
   readyz({ dialect: db.dialect, probe: () => db.get(`SELECT 1 AS ok`) }),
 );
+
+// AUTHENTICATION.
+//
+// Provider-agnostic OIDC: three environment variables point this at Clerk, Auth0, Okta or
+// anything else that publishes a JWKS, and nothing in the request path is vendor-specific.
+// With none of them set it runs its own issuer instead of skipping verification, so the code
+// that authenticates a developer every day is the code that authenticates a user in
+// production. See auth/config.ts — it is loud about which of the two it is doing.
+const authConfig = resolveAuthConfig(PORT);
+const localIssuer =
+  authConfig.mode === "local"
+    ? new LocalIssuer(
+        process.env[AUTH_ENV.devKeyPath] ?? join(SERVER_DIR, ".devauth.json"),
+        authConfig.audience,
+      )
+    : undefined;
+const tokenVerifier = new TokenVerifier(authConfig);
+const identityRepo = new IdentityRepository(db);
+for (const route of sessionRoutes({
+  config: authConfig,
+  verifier: tokenVerifier,
+  identity: identityRepo,
+  localIssuer,
+})) {
+  if (route.method === "GET") router.get(route.path, route.handler);
+  else router.post(route.path, route.handler);
+}
 
 const relay = new WsRelay({
   port: PORT,

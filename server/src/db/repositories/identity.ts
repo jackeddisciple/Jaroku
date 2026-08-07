@@ -61,6 +61,20 @@ export interface AuditEntry {
 const nowIso = (): string => new Date().toISOString();
 
 /**
+ * Two identities want the same row, and only one may have it.
+ *
+ * Its own type because the caller's answer is a sentence to a person, not a retry: a unique
+ * violation surfacing as a 500 tells somebody their sign-in is broken, when what happened is
+ * that their address is already spoken for by a different provider account.
+ */
+export class IdentityConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "IdentityConflictError";
+  }
+}
+
+/**
  * A workspace slug from a display name.
  *
  * Slugs appear in URLs, so this is deliberately narrow: lowercase, digits, hyphens, starting
@@ -114,9 +128,13 @@ export class IdentityRepository {
    * row with no workspace signs in successfully and then has nowhere to go, and no later
    * request will notice, because "does this user exist" already answers yes.
    *
-   * Idempotent because the first two requests of a session race: a browser that opens the
-   * app in two tabs makes both, and the loser must find the winner's user rather than fail
-   * on the unique index. That is checked inside the transaction and again on conflict.
+   * Idempotent because the first two requests of a session race, and they really do: the
+   * client asks for a session and a ws-ticket in the same tick, and a browser with the app
+   * open in two tabs doubles that again. The SELECT-then-INSERT below is not enough on its
+   * own — on Postgres the two transactions run on different connections, both see no row and
+   * both insert, and one dies on the unique index. So the insert is `ON CONFLICT DO NOTHING`
+   * and the row is read back afterwards: the loser of the race finds the winner's user and
+   * returns it, rather than failing a sign-in because it was simultaneous with itself.
    */
   async provisionUser(
     ctx: SystemContext,
@@ -128,18 +146,20 @@ export class IdentityRepository {
            FROM users WHERE external_id = ? AND deleted_at IS NULL`,
         [input.externalId],
       );
-      if (existing) {
-        const ws = await this.personalWorkspaceIn(tx, existing.id);
-        // A user with no personal workspace is the half-provisioned state this transaction
-        // exists to prevent — but an account that predates this code, or one whose creation
-        // was interrupted, can be in it. Finish the job rather than hand back a broken pair.
-        if (ws) return { user: existing, workspace: ws, created: false };
-        const repaired = await this.insertWorkspaceIn(tx, {
-          name: input.displayName?.trim() || input.email,
-          kind: "personal",
-        });
-        await this.insertMemberIn(tx, repaired.id, existing.id, "owner");
-        return { user: existing, workspace: repaired, created: false };
+      if (existing) return this.withPersonalWorkspace(tx, existing, input);
+
+      // `users.email` is UNIQUE, so an address already held by a DIFFERENT `sub` cannot be
+      // taken. That is not a race, it is a person whose provider changed (or two providers
+      // configured at once), and it needs a sentence rather than a unique-violation stack
+      // trace — nothing downstream can do anything useful with the latter.
+      const emailTaken = await tx.get<{ external_id: string }>(
+        `SELECT external_id FROM users WHERE email = ? AND deleted_at IS NULL`,
+        [input.email],
+      );
+      if (emailTaken && emailTaken.external_id !== input.externalId) {
+        throw new IdentityConflictError(
+          `${input.email} already belongs to a different sign-in on this server`,
+        );
       }
 
       const user: User = {
@@ -150,11 +170,24 @@ export class IdentityRepository {
         created_at: nowIso(),
         deleted_at: null,
       };
-      await tx.run(
+      const inserted = await tx.run(
         `INSERT INTO users (id, external_id, email, display_name, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (external_id) DO NOTHING`,
         [user.id, user.external_id, user.email, user.display_name, user.created_at],
       );
+      if (inserted.changes === 0) {
+        // Somebody else provisioned this `sub` between the SELECT and here. Their row is the
+        // real one; ours was never written.
+        const winner = await tx.get<User>(
+          `SELECT id, external_id, email, display_name, created_at, deleted_at
+             FROM users WHERE external_id = ? AND deleted_at IS NULL`,
+          [input.externalId],
+        );
+        if (!winner) throw new Error(`could not provision ${input.externalId}`);
+        return this.withPersonalWorkspace(tx, winner, input);
+      }
+
       const workspace = await this.insertWorkspaceIn(tx, {
         name: user.display_name || user.email,
         kind: "personal",
@@ -170,6 +203,66 @@ export class IdentityRepository {
       });
       return { user, workspace, created: true };
     });
+  }
+
+  /**
+   * Every workspace with no members at all.
+   *
+   * There is exactly one way to produce one: the importer, and the dev-tenancy resolver, both
+   * of which create a workspace before anybody has signed in — see `createWorkspaceUnowned`,
+   * which promises this adoption. A workspace nobody can administer is a dead end, so the
+   * first sign-in on a local install claims them and the user's own data is where they left
+   * it. It is never done in provider mode; see session.ts for why that would be an
+   * escalation from "can sign up" to "owns the imported data".
+   */
+  async unownedWorkspaces(_ctx: SystemContext): Promise<Workspace[]> {
+    return this.db.all<Workspace>(
+      `SELECT w.id, w.slug, w.name, w.kind, w.plan, w.created_at, w.deleted_at
+         FROM workspaces w
+        WHERE w.deleted_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM workspace_members m WHERE m.workspace_id = w.id)
+        ORDER BY w.created_at ASC`,
+    );
+  }
+
+  /** Make `userId` the owner of a workspace that has none. A no-op if it already has one. */
+  async adoptWorkspace(ctx: SystemContext, workspaceId: string, userId: string): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      const held = await tx.get(`SELECT 1 AS x FROM workspace_members WHERE workspace_id = ?`, [workspaceId]);
+      if (held) return false;
+      await this.insertMemberIn(tx, workspaceId, userId, "owner");
+      await this.appendAuditIn(tx, ctx, {
+        workspaceId,
+        actorUserId: userId,
+        action: "workspace.adopted",
+        targetType: "workspace",
+        targetId: workspaceId,
+        metadata: { reason: "first sign-in on a local install" },
+      });
+      return true;
+    });
+  }
+
+  /**
+   * A user plus their personal workspace, creating the workspace if it is somehow missing.
+   *
+   * The missing case is the half-provisioned state the transaction exists to prevent — but an
+   * account that predates this code, or one whose creation was interrupted, can be in it.
+   * Finish the job rather than hand back a broken pair.
+   */
+  private async withPersonalWorkspace(
+    tx: Queryable,
+    user: User,
+    input: { email: string; displayName?: string | null },
+  ): Promise<{ user: User; workspace: Workspace; created: boolean }> {
+    const ws = await this.personalWorkspaceIn(tx, user.id);
+    if (ws) return { user, workspace: ws, created: false };
+    const repaired = await this.insertWorkspaceIn(tx, {
+      name: input.displayName?.trim() || input.email,
+      kind: "personal",
+    });
+    await this.insertMemberIn(tx, repaired.id, user.id, "owner");
+    return { user, workspace: repaired, created: false };
   }
 
   // --- workspaces ------------------------------------------------------------
