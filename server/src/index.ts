@@ -32,6 +32,8 @@ import {
   type PlanAgentCommand,
   type ProviderCommand,
 } from "./wsRelay.ts";
+import { Router } from "./http/router.ts";
+import { healthz, readyz } from "./http/health.ts";
 import { Generator, type UsageSummary } from "./generator.ts";
 import { Planner } from "./planner.ts";
 import { Editor, editCount } from "./editor.ts";
@@ -385,9 +387,24 @@ function agentGraph(agentId: string): Promise<GraphResult> {
   return pending;
 }
 
+// THE HTTP SURFACE.
+//
+// New in Session 2, and it exists for one structural reason: a browser cannot put an
+// `Authorization` header on a WebSocket, so a credential has to be exchanged over HTTP before
+// the socket is opened at all. `/healthz` and `/readyz` come along because a process that is
+// about to be put behind a load balancer needs to be able to say whether it is alive and
+// whether it should be sent traffic, and those are different questions — see http/health.ts.
+const router = new Router();
+router.get("/healthz", healthz());
+router.get(
+  "/readyz",
+  readyz({ dialect: db.dialect, probe: () => db.get(`SELECT 1 AS ok`) }),
+);
+
 const relay = new WsRelay({
   port: PORT,
   store,
+  router,
   clientHtmlPath: join(SERVER_DIR, "debug-client.html"),
   listAgents: async (ctx) => {
     // One query for the whole list, so the sidebar can show a deploy state per row without

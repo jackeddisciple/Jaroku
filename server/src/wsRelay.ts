@@ -8,6 +8,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { TraceStore } from "./store.ts";
 import type { TenantContext } from "./db/tenant.ts";
 import type { TraceEvent } from "./types.ts";
+import type { Router } from "./http/router.ts";
 
 export type RunCommand = {
   cmd: "run";
@@ -604,6 +605,15 @@ export interface RelayOptions {
    */
   contextFor: (req: IncomingMessage) => TenantContext | Promise<TenantContext>;
   clientHtmlPath: string;
+  /**
+   * The HTTP surface, in front of the static fallback client.
+   *
+   * A browser cannot put an `Authorization` header on a WebSocket, so the credential exchange
+   * has to happen over HTTP before the socket exists — which is why this server grew a real
+   * HTTP side at all. The router answers what it claims and reports what it does not, so
+   * `GET /` stays the debug client without the router needing to know that.
+   */
+  router?: Router;
   // "loadRun", "listAgents", "loadAgentFiles", "loadAgentGraph", "listMcpServers" and
   // "listProviders" are answered locally; the rest are forwarded.
   onCommand?: (cmd: ForwardedCommand, ctx: TenantContext) => void;
@@ -643,7 +653,9 @@ export class WsRelay {
     this.store = opts.store;
     this.onCommand = opts.onCommand;
 
-    this.http = createServer((req, res) => this.serveStatic(req, res));
+    this.http = createServer((req, res) => {
+      void this.serveHttp(req, res);
+    });
     this.wss = new WebSocketServer({ server: this.http });
 
     this.wss.on("connection", (ws, req) => {
@@ -795,8 +807,15 @@ export class WsRelay {
     });
   }
 
+  /** The router first, then the static fallback client, then 404. */
+  private async serveHttp(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (this.opts.router && (await this.opts.router.handle(req, res))) return;
+    await this.serveStatic(req, res);
+  }
+
   private async serveStatic(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (req.url === "/" || req.url === "/index.html") {
+    const path = (req.url ?? "/").split("?")[0];
+    if (path === "/" || path === "/index.html") {
       try {
         const html = await readFile(this.opts.clientHtmlPath);
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
