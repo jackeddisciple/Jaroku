@@ -290,6 +290,90 @@ export async function attackSuite(
     const refused = await teamSocket.want((m) => m.channel === "mcp" && m.type === "error", "mcp refusal");
     check(/member/.test(refused.message), "a member's socket is refused an admin command");
 
+    // --- DEMOTION, MID-SESSION, ON THE SAME SOCKET -----------------------------------------
+    //
+    // The capability check reads the socket's LIVE context rather than the one it connected
+    // with, and that mechanism is tested elsewhere. This is the behaviour that mechanism
+    // exists for, which is a different question: somebody who HOLDS a privileged capability,
+    // is demoted while their tab is open, and immediately does the privileged thing.
+    //
+    // The failure it rules out is the plausible one — a demotion that arrives as a
+    // NOTIFICATION. The client is told its role changed, the server keeps judging commands
+    // against the role captured at the handshake, and a just-demoted admin goes on connecting
+    // third-party servers to the workspace for as long as they leave the tab open. Nothing
+    // about the socket would look wrong, and the audit log would show an admin doing admin
+    // things.
+    //
+    // Promote first, then connect a FRESH socket, so its handshake resolves the admin role
+    // from a real membership row. That matters: demoting a socket that was only ever a member
+    // proves nothing, because a server reading the stale handshake context would refuse the
+    // command anyway and the test would pass for the opposite of the right reason. Here the
+    // captured context IS admin, so a refusal can only come from reading the live one.
+    await stack.identity.setMemberRole(ownerCtx, bob!.id, "admin");
+    stack.resolver.invalidate(team.id, bob!.id);
+
+    const adminTicket = await post(stack.base, "/v1/ws-ticket", bobToken, { workspaceId: team.id });
+    const adminSocket = await open(stack, adminTicket.json.ticket);
+    check(adminSocket !== null, "promoted to admin, Bob opens a socket that HANDSHAKES as admin");
+
+    if (adminSocket) {
+      stack.commands.length = 0;
+      adminSocket.send({ cmd: "addMcpServer", endpoint: "https://mcp.example/allowed" });
+      await sleep(400);
+      check(
+        stack.commands.some((c) => c.cmd === "addMcpServer"),
+        "...and holds the privileged capability on it",
+      );
+
+      // Now take it away, with that socket still open and still holding an admin handshake.
+      await stack.identity.setMemberRole(ownerCtx, bob!.id, "member");
+      stack.resolver.invalidate(team.id, bob!.id);
+      await stack.relay.revalidateAll();
+      await sleep(300);
+
+      const demotedTo = adminSocket.inbox.find(
+        (m) => m.channel === "session" && m.type === "role_changed" && m.role === "member",
+      );
+      check(!!demotedTo, "a DEMOTION to member reaches the open socket");
+      check(
+        adminSocket.ws.readyState === WebSocket.OPEN,
+        "...and does not close it — the connection is still legitimately theirs",
+      );
+
+      // The whole point. Same socket, same command, immediately after the demotion.
+      stack.commands.length = 0;
+      const beforeRefusal = adminSocket.inbox.length;
+      adminSocket.send({ cmd: "addMcpServer", endpoint: "https://mcp.example/denied" });
+      // Caught rather than thrown. The regression this guards against — enforcement reading
+      // the handshake context instead of the live one — produces NO refusal at all, and a
+      // suite that dies on a timeout reports "timeout" where it should report which
+      // security property just stopped holding.
+      const afterDemotion = await adminSocket
+        .want((m) => m.channel === "mcp" && m.type === "error", "refusal after demotion", beforeRefusal)
+        .catch(() => null);
+      check(
+        !!afterDemotion && /member/.test(afterDemotion.message) && /mcp:manage/.test(afterDemotion.message),
+        "A DEMOTED ADMIN IS REFUSED THAT EXACT COMMAND ON THE STILL-OPEN SOCKET" +
+          (afterDemotion ? "" : " — NO REFUSAL ARRIVED: the demotion is a notification, not enforcement"),
+      );
+      await sleep(300);
+      check(
+        stack.commands.length === 0,
+        `...and it NEVER REACHED THE APP (${stack.commands.length}) — a refusal that forwards first has already connected the server`,
+      );
+
+      // The demotion is narrow: it removes what admin added and nothing a member holds. A
+      // demotion that quietly took the product away with the privilege would be its own bug.
+      stack.commands.length = 0;
+      adminSocket.send({ cmd: "run", input: "x", agentId: "still_allowed" });
+      await sleep(400);
+      check(
+        stack.commands.some((c) => c.cmd === "run"),
+        "...while the same socket still does what a member may",
+      );
+      adminSocket.close();
+    }
+
     // Now revoke, with the socket still open. This is the case nothing else catches: every
     // HTTP request re-checks, and a socket is checked once at the upgrade.
     await stack.identity.removeMember(ownerCtx, bob!.id);
@@ -430,7 +514,15 @@ interface Socket {
   inbox: any[];
   send: (o: unknown) => void;
   close: () => void;
-  want: (pred: (m: any) => boolean, label: string) => Promise<any>;
+  /**
+   * The first message matching `pred`, waiting for it to arrive.
+   *
+   * `from` skips everything already in the inbox, which matters whenever the same assertion is
+   * made twice on one socket: an "mcp error" search that starts at zero keeps finding the
+   * FIRST refusal, so a test that demotes somebody and re-asks would pass on a server that
+   * never answered the second question at all.
+   */
+  want: (pred: (m: any) => boolean, label: string, from?: number) => Promise<any>;
 }
 
 /** Connect and keep the socket, for the assertions that need to talk on it. */
@@ -456,9 +548,9 @@ async function open(stack: Stack, ticket: string): Promise<Socket | null> {
     inbox,
     send: (o) => ws.send(JSON.stringify(o)),
     close: () => ws.close(),
-    want: async (pred, label) => {
+    want: async (pred, label, from = 0) => {
       for (let i = 0; i < 80; i++) {
-        const hit = inbox.find(pred);
+        const hit = inbox.slice(from).find(pred);
         if (hit) return hit;
         await sleep(50);
       }
