@@ -1,8 +1,8 @@
 # Security Policy
 
 Jaroku runs generated code, holds provider API keys, and stores traces whose payloads contain
-whatever an agent touched — mailbox contents, database rows, prompts. A vulnerability here is
-not abstract, and reports are treated accordingly.
+whatever an agent touched: mailbox contents, database rows, prompts. A vulnerability here is not
+abstract, and reports are treated accordingly.
 
 This document describes what is in scope, how to report a vulnerability privately, what happens
 after you do, and what is already known and therefore not a finding.
@@ -12,7 +12,7 @@ after you do, and what is already known and therefore not a finding.
 - [What happens next](#what-happens-next)
 - [Supported versions](#supported-versions)
 - [Scope](#scope)
-- [Known limitations — please do not report these](#known-limitations--please-do-not-report-these)
+- [Known limitations that are not findings](#known-limitations-that-are-not-findings)
 - [Severity](#severity)
 - [Coordinated disclosure](#coordinated-disclosure)
 - [Safe harbour](#safe-harbour)
@@ -31,16 +31,16 @@ Use either private channel:
 
 | Channel | How |
 |---|---|
-| **Email** (preferred) | **adarshhchoudhary1@gmail.com** — subject line prefixed `[SECURITY] Jaroku:` |
+| **Email** (preferred) | **adarshhchoudhary1@gmail.com**, with the subject line prefixed `[SECURITY] Jaroku:` |
 | **GitHub** | [Private vulnerability reporting](https://github.com/jackeddisciple/jaroku/security/advisories/new) on `jackeddisciple/jaroku` |
 
-Report in English. If a public disclosure is already in motion elsewhere and you cannot wait,
-say so in the first line of your report along with the date, so the fix can be sequenced against
-it rather than discovered afterwards.
+Report in English. If a public disclosure is already in motion elsewhere and you cannot wait, say
+so in the first line of your report along with the date, so the fix can be sequenced against it
+rather than discovered afterwards.
 
 If you believe you have found a live compromise of a running instance rather than a flaw in the
-code — active exfiltration, a leaked key in the wild — write `ACTIVE INCIDENT` in the subject
-line and include the time window and what you observed.
+code (active exfiltration, a leaked key in the wild), write `ACTIVE INCIDENT` in the subject line
+and include the time window and what you observed.
 
 ---
 
@@ -49,22 +49,22 @@ line and include the time window and what you observed.
 A report that can be reproduced is a report that can be fixed. The more of the following it
 carries, the faster that happens:
 
-1. **A one-sentence summary** of the flaw and its impact — what an attacker gains, and as whom.
-2. **Affected component and version** — the release tag or commit SHA, and the file paths if you
+1. **A one-sentence summary** of the flaw and its impact: what an attacker gains, and as whom.
+2. **Affected component and version.** The release tag or commit SHA, plus the file paths if you
    have them (`server/src/auth/…`, `runtime/jaroku_runner/…`, `client/src/store/…`).
 3. **Reproduction steps**, precise enough to follow from a clean `git clone`: configuration,
    environment variables, the exact requests, payloads or socket frames, and the observed result
-   versus the expected one.
-4. **A proof of concept** — a script, a `curl` invocation, a minimal patch to a test. Please keep
-   it to the minimum that demonstrates the issue.
-5. **Impact assessment** — cross-tenant read or write, credential disclosure, remote code
+   against the expected one.
+4. **A proof of concept.** A script, a `curl` invocation, or a minimal patch to a test. Please
+   keep it to the minimum that demonstrates the issue.
+5. **Impact assessment.** Cross-tenant read or write, credential disclosure, remote code
    execution beyond what generation already implies, privilege escalation across the role matrix,
    denial of service, and who has to be authenticated for it to work.
 6. **Any mitigation you know of**, including configuration that avoids the problem.
 7. **How you would like to be credited**, or that you would prefer not to be.
 
 Redact real secrets from logs and screenshots before attaching them. If a live key of yours was
-exposed while testing, rotate it — do not send it.
+exposed while testing, rotate it. Do not send it.
 
 ---
 
@@ -81,15 +81,15 @@ communication, not a support contract:
 | Fix or documented mitigation for critical and high severity | **target 30 days** from triage |
 | Fix or documented mitigation for medium and low severity | **target 90 days**, or the next release |
 
-You will be told which of these applies to your report, and told again if a date is going to
-slip and why. If you have not heard anything within 5 days, please resend — assume the mail was
+You will be told which of these applies to your report, and told again if a date is going to slip
+and why. If you have not heard anything within 5 days, please resend, and assume the mail was
 lost rather than ignored.
 
-When a fix ships you will get the commit or release it landed in, and the advisory text before
-it is published, so you can correct anything the write-up gets wrong about your finding.
+When a fix ships you will get the commit or release it landed in, and the advisory text before it
+is published, so you can correct anything the write-up gets wrong about your finding.
 
 A report that turns out not to be a vulnerability still gets an answer explaining why. If that
-reasoning is wrong, say so — the second look is worth more than the first.
+reasoning is wrong, say so. The second look is worth more than the first.
 
 ---
 
@@ -114,54 +114,54 @@ Before reporting, confirm the issue still reproduces on the default branch. See
 
 Anything in this repository, and anything it produces:
 
-- **The Node control plane** (`server/`) — the HTTP surface, the WebSocket relay, the migration
-  runner, the repositories.
-- **Authentication, membership and tenancy** (`server/src/auth/`, `server/src/tenancy.ts`) —
-  OIDC token verification, the ws-ticket exchange, the origin check, the capability matrix,
-  row-level security and any cross-workspace read or write.
-- **The Python runtime** (`runtime/`) — the runner, the interceptor, the stdout guard, the
+- **The Node control plane** (`server/`): the HTTP surface, the WebSocket relay, the migration
+  runner and the repositories.
+- **Authentication, membership and tenancy** (`server/src/auth/`, `server/src/tenancy.ts`): OIDC
+  token verification, the ws-ticket exchange, the origin check, the capability matrix, row-level
+  security, and any cross-workspace read or write.
+- **The Python runtime** (`runtime/`): the runner, the interceptor, the stdout guard and the
   checkpointed debug driver.
-- **Reviewed connectors** (`runtime/tool_templates/`) — in particular the Postgres connector's
+- **Reviewed connectors** (`runtime/tool_templates/`), in particular the Postgres connector's
   read-only guarantees, the Gmail connector's drafts-only behaviour, and SQL injection in
   generated tool code.
-- **The MCP bridge** — anything that lets a third-party MCP server exceed the grant in an
-  agent's manifest, bypass the high-impact confirmation, or reach a credential value.
-- **Credential handling** — any path by which a provider key, an MCP token, a Railway token, a
+- **The MCP bridge.** Anything that lets a third-party MCP server exceed the grant in an agent's
+  manifest, bypass the high-impact confirmation, or reach a credential value.
+- **Credential handling.** Any path by which a provider key, an MCP token, a Railway token, a
   ws-ticket or an invitation reaches a log line, a database column, a generated project, a build
   log, or a browser.
-- **The build and fix pipelines** — path traversal, escape from the staging directory, anything
-  that lands unvalidated code without the review step.
-- **Deploys** — the deployed agent's bearer check, secret scrubbing in build logs, and anything
-  a `.dockerignore` miss would put in an image.
-- **The React client** (`client/`) — XSS, token handling, and any store that survives a
-  workspace switch with the previous workspace's rows in it.
-- **Supply chain** — a dependency with a known CVE that Jaroku actually reaches, or a build step
+- **The build and fix pipelines.** Path traversal, escape from the staging directory, and
+  anything that lands unvalidated code without the review step.
+- **Deploys.** The deployed agent's bearer check, secret scrubbing in build logs, and anything a
+  `.dockerignore` miss would put in an image.
+- **The React client** (`client/`): XSS, token handling, and any store that survives a workspace
+  switch with the previous workspace's rows in it.
+- **Supply chain.** A dependency with a known CVE that Jaroku actually reaches, or a build step
   that fetches something unpinned.
 
 ### Out of scope
 
-- The **hosting platforms themselves** — Railway, the OIDC provider you configure, GitHub. Report
+- The **hosting platforms themselves** (Railway, the OIDC provider you configure, GitHub). Report
   those to their own programmes.
 - **Third-party MCP servers.** Jaroku treats them as untrusted by design; a malicious MCP server
   behaving maliciously is the modelled case, not a bug. A way for one to *exceed* its grant is.
-- Findings that require **physical access to the host, a local privileged shell, or a
-  compromised developer machine**.
+- Findings that require **physical access to the host, a local privileged shell, or a compromised
+  developer machine**.
 - **Social engineering**, phishing, or attacks on the maintainer.
 - **Automated scanner output with no demonstrated impact**, missing hardening headers on
   endpoints that already have a documented limitation, version fingerprinting, or best-practice
   advice with no attack behind it.
-- **Denial of service by volume** against a local instance — see the note on rate limiting below.
-- Anything reachable **only** because an operator ignored an explicit warning the software
-  prints at boot (`JAROKU_DEV_AUTH=1`, `JAROKU_SERVE_PUBLIC=1`).
+- **Denial of service by volume** against a local instance. See the note on rate limiting below.
+- Anything reachable **only** because an operator ignored an explicit warning the software prints
+  at boot (`JAROKU_DEV_AUTH=1`, `JAROKU_SERVE_PUBLIC=1`).
 
 ---
 
-## Known limitations — please do not report these
+## Known limitations that are not findings
 
 These are documented, deliberate, and already scheduled. They are stated in
 [the threat model](server/src/auth/THREAT-MODEL.md) and in the README's
 [Security notes](README.md#security-notes). A report that restates one of them will be closed
-with a pointer here — but a report that *breaks past* one, or shows the stated boundary is not
+with a pointer here. A report that *breaks past* one, or that shows the stated boundary is not
 where the code actually draws it, is very much wanted.
 
 - **Model-written Python executes on the control plane.** Validation imports the staged project
@@ -175,7 +175,7 @@ where the code actually draws it, is very much wanted.
   user. A concrete XSS *vector* is in scope; the general observation is not.
 - **A compromised OIDC issuer is trusted.** If the issuer signs a token for the wrong person,
   this server believes it. That is the trust implied by choosing an issuer.
-- **Membership revocation has a bounded staleness window** — thirty seconds, cross-replica.
+- **Membership revocation has a bounded staleness window** of thirty seconds across replicas.
   Revocation is exact on the replica that performed it.
 - **Prompt injection is not solved.** Framing MCP output is not a defence and is not claimed to
   be. An agent's blast radius is bounded by its grants; that is the mitigation.
@@ -193,8 +193,8 @@ point and then adjusted for what this system actually holds. Two adjustments are
 - **Cross-tenant access is rated up.** Any path that lets one workspace read or write another's
   rows is treated as high or critical regardless of how narrow the window is, because the asset
   is regulated data belonging to someone who never consented.
-- **Credential disclosure is rated up.** Provider keys are spendable, MCP tokens reach third-party
-  systems, and a Railway token is someone's hosting account.
+- **Credential disclosure is rated up.** Provider keys are spendable, MCP tokens reach
+  third-party systems, and a Railway token is someone's hosting account.
 
 | Severity | Shape of it |
 |---|---|
@@ -211,8 +211,8 @@ The request is simple: **give the fix time to exist before the exploit is public
 
 - Please hold public disclosure until a fix has shipped, or **90 days** from acknowledgement,
   whichever comes first.
-- If a fix is going to take longer than 90 days, you will be told why before day 90 and asked —
-  not told — whether you are willing to extend.
+- If a fix is going to take longer than 90 days, you will be told why before day 90, and asked
+  whether you are willing to extend rather than simply informed that the date has moved.
 - If a vulnerability is already being exploited in the wild, that clock does not apply. Say so
   and the timeline becomes as short as the fix can be made.
 - Advisories are published through
@@ -235,16 +235,16 @@ pursued over it, provided that you:
 - report promptly and privately through a channel above;
 - give the coordinated disclosure window above a chance to run.
 
-This authorisation covers this project only. It cannot waive the rights of third parties — your
-OIDC provider, your hosting account, an MCP server operator — so do not test their systems in the
-course of testing this one. If you are unsure whether something is in bounds, ask by email first;
-a question is always in bounds.
+This authorisation covers this project only. It cannot waive the rights of third parties such as
+your OIDC provider, your hosting account, or an MCP server operator, so do not test their systems
+in the course of testing this one. If you are unsure whether something is in bounds, ask by email
+first; a question is always in bounds.
 
 ---
 
 ## Recognition
 
-There is **no paid bug bounty** — this is an open-source project with no security budget, and
+There is **no paid bug bounty.** This is an open-source project with no security budget, and
 saying so plainly is fairer than leaving it implied.
 
 What is offered instead:
@@ -252,8 +252,8 @@ What is offered instead:
 - **Credit in the security advisory and in [CHANGELOG.md](CHANGELOG.md)**, in whatever name or
   handle you choose, or anonymity if you prefer it.
 - **A named acknowledgement in the release notes** for the version carrying the fix.
-- **Public confirmation of the timeline** — when you reported, when it was fixed — for anyone
-  who needs to demonstrate responsible disclosure practice.
+- **Public confirmation of the timeline** (when you reported, when it was fixed) for anyone who
+  needs to demonstrate responsible disclosure practice.
 
 Tell the maintainer which you want in your report; the default is credited by the name on the
 report, and no name is published without asking first.
@@ -279,7 +279,7 @@ one is mostly configuration:
   `.dockerignore`d; keep it that way, and check any image you build.
 - **Scope every provider and connector key to the minimum it needs**, and give agents the
   narrowest MCP grant that works. The manifest is the grant.
-- **Rotate the deployed agent's bearer token** if it was ever shown on a shared screen — it is
+- **Rotate the deployed agent's bearer token** if it was ever shown on a shared screen. It is
   displayed once, by design.
 - **Read an MCP server's tools before granting them.** Jaroku badges them as unreviewed because
   nobody here has reviewed them; you are the reviewer.
