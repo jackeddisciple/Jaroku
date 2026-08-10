@@ -7,10 +7,12 @@
 // It grew. Session 2 added token-level attacks — expired, forged, replayed, cross-workspace,
 // revoked-mid-socket — which live in `auth/attacks.test.ts` and are invoked from here rather
 // than given their own script: the spec makes THIS suite the gate for every later session, and
-// a second script somebody can forget to run is not a gate. Session 3 adds object keys,
-// Session 4 adds run tokens and sandbox reach. The rule is that a session does not merge
-// until this file covers what it added, which is why the coverage assertion at the bottom
-// fails when a store grows a method nothing here exercises.
+// a second script somebody can forget to run is not a gate. Session 3 added STORAGE: object
+// keys, presigned URLs, version pointers, credential names and checkpoint threads, all of which
+// live outside the tables the earlier assertions cover and none of which RLS reaches. Session 4
+// adds run tokens and sandbox reach. The rule is that a session does not merge until this file
+// covers what it added, which is why the coverage assertion at the bottom fails when a store
+// grows a method nothing here exercises.
 //
 // Runs on both drivers. On Postgres RLS is a second wall behind everything asserted here; on
 // SQLite this layer is the only wall, which is exactly why the suite matters more there.
@@ -18,7 +20,7 @@
 //   npm run test:tenancy
 //   JAROKU_PG_URL=postgres://… npm run test:tenancy    # runs it twice
 
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -38,6 +40,12 @@ import { DeployStore } from "./deployStore.ts";
 import { DbTicketStore } from "./db/repositories/tickets.ts";
 import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
 import { attackSuite } from "./auth/attacks.test.ts";
+import { FsObjectStore } from "./storage/fsObjectStore.ts";
+import { ProjectStore } from "./storage/projectStore.ts";
+import { agentVersionKey, workspacePrefix } from "./storage/keys.ts";
+import { OBJECT_ROUTE_PREFIX, objectRoutes } from "./http/objects.ts";
+import type { HttpRequest } from "./http/router.ts";
+import { checkpointThreadId, workspaceThreadPrefix } from "./checkpoints/threads.ts";
 import type { Run, Step } from "./types.ts";
 
 let failures = 0;
@@ -410,6 +418,164 @@ function readSuiteSource(): string {
     .join("\n");
 }
 
+/**
+ * Session 3: everything that is not a row.
+ *
+ * The assertions above are about queries, and RLS is the wall behind them. None of that reaches
+ * an object key, a presigned URL, or a checkpoint thread — those are separated by the KEY and by
+ * the code that builds one, so each needs its own attempt to cross the boundary.
+ */
+async function storageIsolation(db: Db): Promise<void> {
+  console.log("  · storage: keys, URLs, versions and threads");
+
+  const identity = new IdentityRepository(db);
+  const agents = new AgentRepository(db);
+  const mkWorkspace = async (label: string): Promise<TenantContext> => {
+    const ws = await identity.createWorkspaceUnowned(systemContext(newRequestId()), {
+      name: `storage ${label} ${randomUUID().slice(0, 6)}`,
+    });
+    return systemContextFor(ws.id, newRequestId());
+  };
+  const A = await mkWorkspace("a");
+  const B = await mkWorkspace("b");
+
+  const root = mkdtempSync(join(tmpdir(), "jaroku-tenancy-objects-"));
+  const signingKey = randomBytes(32);
+  const objects = new FsObjectStore({ root, signingKey });
+  const projects = new ProjectStore(objects, agents);
+
+  try {
+    // Both workspaces hold an agent with the SAME slug and the same file paths, which is the
+    // case Session 1's per-workspace uniqueness made possible and nothing had yet exercised
+    // against real bytes.
+    const mine = await agents.upsertFromDisk(A, { slug: "support_bot" });
+    const theirs = await agents.upsertFromDisk(B, { slug: "support_bot" });
+    await projects.publish(A, mine.id, [{ path: "agent.py", content: "# A's code\n" }], { source: "generation" });
+    await projects.publish(B, theirs.id, [{ path: "agent.py", content: "# B's code\n" }], { source: "generation" });
+
+    // --- object keys ----------------------------------------------------------------
+    check(
+      (await projects.readVersion(A, theirs.id, 2)).length === 0,
+      "A cannot read B's agent version by uuid",
+    );
+    check(
+      (await objects.list(workspacePrefix(A.workspaceId))).every((o) => !o.key.includes(theirs.id)),
+      "and none of B's objects sit under A's prefix",
+    );
+    check(
+      (await objects.get(agentVersionKey(A.workspaceId, mine.id, 2, "agent.py"))).toString() === "# A's code\n",
+      "...while each workspace's own key resolves to its own bytes",
+    );
+    let forgedKey = false;
+    try {
+      // The forged-payload case, at the storage layer: a key naming another workspace, built by
+      // hand rather than by the builders. It has to be refused for being outside the keyspace
+      // the caller can name, not merely return nothing.
+      await objects.get(`ws/${A.workspaceId}/../${B.workspaceId}/agents/${theirs.id}/v2/agent.py`);
+    } catch {
+      forgedKey = true;
+    }
+    check(forgedKey, "a key that traverses out of A's prefix is refused, not resolved");
+
+    // --- version pointers -----------------------------------------------------------
+    const beforeUndo = (await agents.bySlug(B, "support_bot"))!.current_version;
+    check((await agents.undoVersion(A, theirs.id)) === null, "A cannot move B's version pointer");
+    check(
+      (await agents.bySlug(B, "support_bot"))!.current_version === beforeUndo,
+      "...and it is where B left it",
+    );
+    const dest = join(root, "materialised");
+    let materialiseRefused = true;
+    try {
+      materialiseRefused = (await projects.materialise(A, theirs.id, 2, dest)).length === 0;
+    } catch {
+      materialiseRefused = true;
+    }
+    check(materialiseRefused, "A cannot materialise B's version onto a disk it controls");
+
+    // --- presigned URLs -------------------------------------------------------------
+    //
+    // The leaked-URL case the spec asks for by name. The URL is VALID — minted by this server,
+    // correctly signed, unexpired — and is presented by a request authenticated for the other
+    // workspace. A signature proves where a URL came from; it does not prove who is holding it.
+    const leaked = await projects.presignFile(A, mine.id, 2, "agent.py");
+    const routes = objectRoutes({
+      objects,
+      signingKey,
+      workspaceFor: async (req) => req.header("x-test-workspace") ?? null,
+    });
+    const get = routes.find((r) => r.method === "GET")!.handler;
+    const asRequest = (url: string, workspace: string | null): HttpRequest => {
+      const parsed = new URL(url, "http://jaroku.invalid");
+      return {
+        requestId: newRequestId(),
+        method: "GET",
+        path: parsed.pathname,
+        url: parsed,
+        raw: {} as never,
+        ip: null,
+        header: (name) => (name.toLowerCase() === "x-test-workspace" ? workspace ?? undefined : undefined),
+        json: async () => ({}) as never,
+        buffer: async () => Buffer.alloc(0),
+      };
+    };
+
+    const byOwner = await get(asRequest(leaked.url, A.workspaceId));
+    check(
+      Buffer.isBuffer(byOwner.body) && byOwner.body.toString() === "# A's code\n",
+      "a presigned URL works for a request scoped to the workspace it names",
+    );
+
+    let refusedForB = false;
+    try {
+      await get(asRequest(leaked.url, B.workspaceId));
+    } catch (err) {
+      refusedForB = (err as { status?: number }).status === 403;
+    }
+    check(refusedForB, "...and is refused for a B-scoped request, even though the signature is valid");
+
+    // A URL with no credential at all still works — that is what a presigned URL IS, and the
+    // sandbox in Session 4 depends on it. Asserted so the rule above is not mistaken for
+    // "credentials are required", which would be a different and incompatible design.
+    const anonymous = await get(asRequest(leaked.url, null));
+    check(
+      Buffer.isBuffer(anonymous.body),
+      "...while a request carrying no credential redeems it, which is what presigning is for",
+    );
+
+    let refusedTamper = false;
+    try {
+      const other = agentVersionKey(B.workspaceId, theirs.id, 2, "agent.py");
+      await get(asRequest(`${OBJECT_ROUTE_PREFIX}${encodeURIComponent(other)}${new URL(leaked.url, "http://x.invalid").search}`, null));
+    } catch (err) {
+      refusedTamper = (err as { status?: number }).status === 403;
+    }
+    check(refusedTamper, "and repointing a valid URL at B's key does not verify");
+
+    // --- checkpoint threads ----------------------------------------------------------
+    //
+    // No RLS reaches the langgraph schema, so the thread name is the whole of the separation.
+    const runId = randomUUID();
+    check(
+      checkpointThreadId(A.workspaceId, runId, "postgres") !==
+        checkpointThreadId(B.workspaceId, runId, "postgres"),
+      "one run id in two workspaces is two different checkpoint threads",
+    );
+    check(
+      !checkpointThreadId(B.workspaceId, runId, "postgres").startsWith(workspaceThreadPrefix(A.workspaceId)),
+      "...and B's thread is outside the prefix A's sweep walks",
+    );
+
+    // --- credential names --------------------------------------------------------------
+    const refs = new SecretRefRepository(db);
+    await refs.markConfigured(B, { name: "THEIR_TOKEN", provider: "mcp" });
+    check((await refs.get(A, "THEIR_TOKEN")) === undefined, "A cannot see that B has a credential configured");
+    check((await refs.list(A)).every((r) => r.name !== "THEIR_TOKEN"), "...by name or by listing");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 // --- the methods coverage demands, exercised where the assertions above did not -----------
 
 async function remainder(db: Db): Promise<void> {
@@ -525,6 +691,7 @@ const tmp = mkdtempSync(join(tmpdir(), "jaroku-tenancy-"));
   try {
     await suite("SqliteDb", db);
     await remainder(db);
+    await storageIsolation(db);
   } finally {
     await db.close();
   }
@@ -534,6 +701,7 @@ rmSync(tmp, { recursive: true, force: true });
 await withScratchPostgres(async (db) => {
   await suite("PostgresDb", db);
   await remainder(db);
+  await storageIsolation(db);
 });
 
 coverage();
