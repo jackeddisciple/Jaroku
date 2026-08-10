@@ -369,7 +369,7 @@ const SCOPED_API: Record<string, string[]> = {
   // a WHERE on this table, and a missing join would be invisible in a single-tenant test.
   AgentRepository: [
     "list", "bySlug", "byId", "create", "upsertFromDisk", "syncFromDisk", "addVersion",
-    "plannedNextVersion", "version", "versions", "undoVersion",
+    "plannedNextVersion", "version", "versions", "undoVersion", "editCounts",
   ],
   // Session 2. These decide who can see a workspace AT ALL, so a cross-tenant bug in any of
   // them is worse than one in the stores above — it does not leak a row, it hands over the
@@ -485,6 +485,8 @@ async function remainder(db: Db): Promise<void> {
   await agents.create(B.ctx, { id: randomUUID(), slug: "shared_name" });
   check((await agents.bySlug(B.ctx, "shared_name"))!.id !== sameSlug, "create gives each workspace its own agent for one slug");
   check((await agents.byId(B.ctx, sameSlug)) === undefined, "...and B cannot resolve A's uuid");
+
+  check(!(await agents.editCounts(A.ctx)).has(theirAgent.id), "editCounts counts none of B's edits");
 
   let plannedRefused = false;
   try {

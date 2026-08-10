@@ -373,6 +373,30 @@ export class AgentRepository {
   }
 
   /**
+   * How many applied edits each agent in this workspace still has behind it.
+   *
+   * What drives whether Undo is offered at all. It used to be a count of directories under
+   * `runtime/agents/.history/<slug>/`, which is a question only the machine that applied the
+   * edit could answer; it is now a count of rows, which every replica can.
+   *
+   * ONE QUERY FOR THE WHOLE WORKSPACE, keyed by agent uuid, because the sidebar renders this
+   * for every agent at once and the alternative is a round trip per row — the same reasoning
+   * `DeployStore.currentByAgent` follows.
+   *
+   * `undone_at IS NULL` is the linear history: an undone edit is not one you can undo again.
+   */
+  async editCounts(ctx: TenantContext): Promise<Map<string, number>> {
+    const rows = await this.q(ctx).all<{ agent_id: unknown; n: unknown }>(
+      `SELECT v.agent_id AS agent_id, COUNT(*) AS n
+         FROM agent_versions v JOIN agents a ON a.id = v.agent_id
+        WHERE a.workspace_id = ? AND v.source = 'edit' AND v.undone_at IS NULL
+        GROUP BY v.agent_id`,
+      [ctx.workspaceId],
+    );
+    return new Map(rows.map((r) => [String(r.agent_id), asInt(r.n, 0)]));
+  }
+
+  /**
    * Move `current_version` back one, and take the version it left behind off the line.
    *
    * The undo. Not a copy of anything: the previous version's objects were never touched, so

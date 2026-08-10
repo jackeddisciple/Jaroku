@@ -45,7 +45,7 @@ import { resolveSocketAuth } from "./auth/socketAuth.ts";
 import { DbTicketStore } from "./db/repositories/tickets.ts";
 import { Generator, type UsageSummary } from "./generator.ts";
 import { Planner } from "./planner.ts";
-import { Editor, editCount } from "./editor.ts";
+import { Editor } from "./editor.ts";
 import { scanAgentDirectory } from "./agents.ts";
 import { AgentRepository } from "./db/repositories/agents.ts";
 import { IdentityRepository } from "./db/repositories/identity.ts";
@@ -308,15 +308,6 @@ function clearControl(runId: string): void {
   rmSync(controlFile(runId), { force: true });
 }
 
-const editor = new Editor({
-  runtimeDir: RUNTIME_DIR,
-  // Pool-aware, not just interactive-aware: an eval job is reading the agent's files from
-  // a subprocess right now, and rewriting them mid-flight would make the trace describe
-  // code that never ran. `pool.busy` covers every slot.
-  canMutate: () =>
-    runActive || pool.busy ? "cannot modify the agent while a run is in progress" : null,
-});
-
 // --- deploy -----------------------------------------------------------------
 // Control-plane, beside the frozen schema, exactly like the eval and MCP stores. A deploy is
 // not an agent run: nothing here goes near `runs`, `steps`, or the trace channel.
@@ -343,6 +334,19 @@ const projects = new ProjectStore(objects, agentRepo);
 // than beside the run pool because it needs both of the two things above it: the table that
 // says which agents exist, and the store that says what they contain.
 const generator = new Generator({ runtimeDir: RUNTIME_DIR, agents: agentRepo, projects });
+
+// The fix loop, for the same reason: an edit reads the current version out of the store and
+// applies by publishing the next one.
+const editor = new Editor({
+  runtimeDir: RUNTIME_DIR,
+  agents: agentRepo,
+  projects,
+  // Pool-aware, not just interactive-aware: an eval job is reading the agent's files from
+  // a subprocess right now, and rewriting them mid-flight would make the trace describe
+  // code that never ran. `pool.busy` covers every slot.
+  canMutate: () =>
+    runActive || pool.busy ? "cannot modify the agent while a run is in progress" : null,
+});
 
 /**
  * Publish anything on disk that has never been published.
@@ -615,9 +619,11 @@ const relay = new WsRelay({
     // One query for the whole list, so the sidebar can show a deploy state per row without
     // N round trips. `deployment` is null for an agent that has never been deployed.
     const deployed = await deployStore.currentByAgent(ctx);
-    // `runnable` and `edit_count` stay disk-derived: one is "does agent.py exist", the other
-    // counts history snapshots. Both become object-store reads in Session 3; neither is
-    // something the table can answer today without lying.
+    // `edit_count` is a count of rows now, not of directories under `.history/` — one query
+    // for the whole workspace, so the sidebar does not cost a round trip per agent. `runnable`
+    // is still "does this project have an agent.py", which the version manifest answers for a
+    // published agent and the disk answers for one somebody dropped in by hand.
+    const edits = await agentRepo.editCounts(ctx);
     const onDisk = new Map(scanAgentDirectory(RUNTIME_DIR).map((a) => [a.agent_id, a]));
     return (await agentRepo.list(ctx)).map((a) => {
       const d = deployed.get(a.slug);
@@ -632,7 +638,7 @@ const relay = new WsRelay({
         created_at: a.created_at,
         hand_written: a.hand_written,
         runnable: onDisk.get(a.slug)?.runnable ?? false,
-        edit_count: editCount(RUNTIME_DIR, a.slug),
+        edit_count: edits.get(a.id) ?? 0,
         deployment: d ? { id: d.id, status: d.status, url: d.url } : null,
       };
     });
@@ -705,9 +711,9 @@ const relay = new WsRelay({
     else if (cmd.cmd === "planAgent") planAgent(ctx, cmd);
     else if (cmd.cmd === "discardPlan") planner.discard(cmd.planId);
     else if (cmd.cmd === "edit") editAgent(ctx, cmd.agentId, cmd.instruction);
-    else if (cmd.cmd === "applyEdit") editor.apply(cmd.proposalId);
-    else if (cmd.cmd === "undoEdit") editor.undo(cmd.agentId);
-    else if (cmd.cmd === "discardEdit") editor.discard(cmd.proposalId);
+    else if (cmd.cmd === "applyEdit") void editor.apply(cmd.proposalId);
+    else if (cmd.cmd === "undoEdit") void editor.undo(ctx, cmd.agentId);
+    else if (cmd.cmd === "discardEdit") void editor.discard(cmd.proposalId);
     else if (cmd.cmd === "pauseRun") pauseRun(ctx, cmd.runId);
     else if (cmd.cmd === "resumeRun") void resumeRun(ctx, cmd.runId);
     else if (cmd.cmd === "branchRun") void branchRun(ctx, cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState);
@@ -1964,7 +1970,7 @@ function editAgent(ctx: TenantContext, agentId: string, instruction: string): vo
   editContext = ctx;
   console.log(`[edit] ${agentId} — "${instruction.slice(0, 80)}"`);
   relay.broadcastEdit(contextForEdit(), { type: "started", agentId, instruction });
-  void editor.propose(agentId, instruction);
+  void editor.propose(ctx, agentId, instruction);
 }
 
 // --- run trigger ------------------------------------------------------------

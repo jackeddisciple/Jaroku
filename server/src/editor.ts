@@ -2,37 +2,53 @@
 // proposal -> Apply / Undo. The AI never silently edits files.
 //
 // Safety properties this module is responsible for (🟡 read-every-line):
-//   * A proposal lives in agents/.staging/<id>__edit/ — a full copy of the project with the
-//     model's files applied — and the live project is untouched until an explicit Apply.
-//   * The same validation contract as generation runs on the merged project. A proposal
-//     that fails validation is discarded, never applyable.
+//   * A proposal lives in the object store under a STAGING ID — the current version's files
+//     with the model's applied on top — and the live version is untouched until an explicit
+//     Apply. Nothing about a pending proposal is on any machine's disk.
+//   * The same validation contract as generation runs on the merged project. A proposal that
+//     fails validation is discarded, never applyable.
 //   * Reviewed connector templates, jaroku.json, and the top-level __init__.py are hard
 //     read-only: the stream is rejected the moment the model opens one.
-//   * Apply snapshots the current project into agents/.history/<id>/v<n>/ first, then
-//     atomic-swaps. Undo restores the latest snapshot the same way. Linear history.
-//   * Path confinement (safeRelativePath) applies to every emitted path, and agentId is
-//     validated so a client-supplied id cannot traverse out of agents/.
+//   * Apply publishes a new VERSION and moves the pointer. Undo moves the pointer back and
+//     marks the version it left behind. Linear history, and neither one copies a project.
+//   * Path confinement (safeObjectPath) applies to every emitted path, and agentId is
+//     validated so a client-supplied id cannot name anything but an agent.
+//
+// WHAT CHANGED IN SESSION 3, AND WHAT IT COSTS. Apply used to snapshot the project into
+// `.history/<id>/v<n>/` and rename a staging directory over the live one; Undo restored the
+// snapshot and popped an entry out of `history.json`. Every part of that lived on the machine
+// that ran it, so an edit applied by one replica could not be undone by another, and a
+// container restart lost the history.
+//
+// The honest cost of the move: history begins at the import. An installation that already had
+// applied edits keeps its `.history/` directory on disk, and it is no longer what Undo reads —
+// the first version is the project as it stood when it was imported, and Undo is offered for
+// edits applied after that. Nothing is lost from the project itself; what is lost is the
+// ability to step back through edits made before the migration, which is not a thing a hosted
+// replica could ever have done.
 
 import { EventEmitter } from "node:events";
-import { existsSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { structuredPatch } from "diff";
 import { anthropicClient, emptyUsage, summarizeUsage, type UsageSummary } from "./claude.ts";
 import { loadConnectors, type Connector } from "./connectors.ts";
 import { FileProtocolParser, type ProtocolEvent } from "./fileProtocol.ts";
-import { agentsDir, replayFixture, safeRelativePath } from "./generator.ts";
-import {
-  atomicSwap, copyProject, DEPLOY_ARTIFACTS, isSafeAgentId, listProjectFiles, readOnlyPaths,
-} from "./projectFs.ts";
+import { agentsDir, replayFixture } from "./generator.ts";
+import { DEPLOY_ARTIFACTS, isSafeAgentId, readOnlyPaths } from "./projectFs.ts";
 import { buildEditSystemPrompt, buildEditUserPrompt } from "./prompt.ts";
 import type { McpToolView } from "./mcpRegistry.ts";
 import { validateProject } from "./validator.ts";
 import { BRIDGE_FILE, MANIFEST_FILE, type Manifest } from "./mcpManifest.ts";
+import type { AgentRepository, VersionFileStat } from "./db/repositories/agents.ts";
+import type { TenantContext } from "./db/tenant.ts";
+import { newStagingId, safeObjectPath } from "./storage/keys.ts";
+import type { ProjectStore, StoredFile } from "./storage/projectStore.ts";
 
 export const EDIT_MODEL = process.env.JAROKU_EDIT_MODEL ?? "claude-haiku-4-5";
 const MAX_TOKENS = 16000;
-const HISTORY_DIRNAME = ".history";
 
 export interface FileDiffHunk {
   oldStart: number;
@@ -48,14 +64,6 @@ export interface FileDiff {
   additions: number;
   deletions: number;
   hunks: FileDiffHunk[];
-}
-
-interface HistoryEntry {
-  version: number;
-  instruction: string;
-  summary: string;
-  files: { path: string; status: string; additions: number; deletions: number }[];
-  applied_at: string;
 }
 
 export interface EditorEvents {
@@ -74,15 +82,29 @@ export interface EditorEvents {
 
 interface PendingProposal {
   proposalId: string;
+  /**
+   * The context the proposal was made in, carried rather than re-derived.
+   *
+   * Apply arrives as its own command and could in principle come from a different socket. The
+   * version it publishes must land in the workspace whose files were diffed, not in whatever
+   * scope happens to be asking — which is the same reason a run carries its workspace from
+   * dispatch to ingestion.
+   */
+  ctx: TenantContext;
+  /** The uuid. Object keys are built from it, and it is what a version hangs off. */
+  agentUuid: string;
+  /** The slug, for the events and for the local materialisation. A display concern. */
   agentId: string;
-  staging: string;
+  stagingId: string;
   instruction: string;
   summary: string;
   files: FileDiff[];
 }
 
-export interface EditorOptions {
+export interface EditorDeps {
   runtimeDir: string;
+  agents: AgentRepository;
+  projects: ProjectStore;
   /** Returns a refusal message when the project must not be mutated right now (e.g. a run
    *  of it is in flight), or null when mutation is fine. */
   canMutate?: () => string | null;
@@ -96,47 +118,21 @@ export interface EditorOptions {
 }
 
 /** An agent's own manifest, or undefined when it was granted no MCP tools. */
-function readProjectManifest(projectDir: string): Manifest | undefined {
-  const path = join(projectDir, MANIFEST_FILE);
-  if (!existsSync(path)) return undefined;
+function readManifest(files: Map<string, string>): Manifest | undefined {
+  const raw = files.get(MANIFEST_FILE);
+  if (!raw) return undefined;
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as Manifest;
+    return JSON.parse(raw) as Manifest;
   } catch {
     return undefined;
   }
-}
-
-function historyDir(runtimeDir: string, agentId: string): string {
-  return join(agentsDir(runtimeDir), HISTORY_DIRNAME, agentId);
-}
-
-function readHistory(runtimeDir: string, agentId: string): HistoryEntry[] {
-  const path = join(historyDir(runtimeDir, agentId), "history.json");
-  if (!existsSync(path)) return [];
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8"));
-    return Array.isArray(parsed) ? (parsed as HistoryEntry[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeHistory(runtimeDir: string, agentId: string, entries: HistoryEntry[]): void {
-  const dir = historyDir(runtimeDir, agentId);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "history.json"), JSON.stringify(entries, null, 2) + "\n", "utf8");
-}
-
-/** How many applied edits an agent has (drives Undo availability across reloads). */
-export function editCount(runtimeDir: string, agentId: string): number {
-  return isSafeAgentId(agentId) ? readHistory(runtimeDir, agentId).length : 0;
 }
 
 export class Editor extends EventEmitter<EditorEvents> {
   private pending = new Map<string, PendingProposal>();
   private busy = false;
 
-  constructor(private readonly opts: EditorOptions) {
+  constructor(private readonly opts: EditorDeps) {
     super();
   }
 
@@ -157,29 +153,37 @@ export class Editor extends EventEmitter<EditorEvents> {
     this.emit("error", e);
   }
 
-  async propose(agentId: string, instruction: string): Promise<void> {
+  async propose(ctx: TenantContext, agentId: string, instruction: string): Promise<void> {
     if (this.busy) {
       this.fail({ message: "an edit is already in progress", agentId });
       return;
     }
     this.busy = true;
-    const { runtimeDir } = this.opts;
-    const staging = join(agentsDir(runtimeDir), ".staging", `${agentId}__edit`);
+    const { runtimeDir, agents, projects } = this.opts;
+    const stagingId = newStagingId();
+    let agentUuid = "";
+    const scratch = join(tmpdir(), `jaroku-edit-${stagingId}`);
 
     try {
       if (!isSafeAgentId(agentId)) throw new Error(`invalid agent id: ${agentId}`);
-      const target = join(agentsDir(runtimeDir), agentId);
-      if (!existsSync(join(target, "agent.py"))) {
-        throw new Error(`agent "${agentId}" was not found (or has no agent.py)`);
+      // The membership check AND the uuid lookup, in one. An agent another workspace owns is
+      // simply not found here, which is the answer a caller asking for one should get.
+      const agent = await agents.bySlug(ctx, agentId);
+      if (!agent) throw new Error(`agent "${agentId}" was not found`);
+      agentUuid = agent.id;
+
+      const current = await projects.readCurrent(ctx, agent.id, agent.current_version);
+      const currentFiles = new Map(current.map((f) => [f.path, f.content]));
+      if (!currentFiles.has("agent.py")) {
+        throw new Error(`agent "${agentId}" has no published agent.py to edit`);
       }
 
-      // A new request supersedes any pending proposal for this agent — its staging copy
-      // was diffed against files that may be about to change meaning.
-      this.discardForAgent(agentId);
+      // A new request supersedes any pending proposal for this agent — its staged copy was
+      // diffed against files that may be about to change meaning.
+      await this.discardForAgent(agentId);
 
-      const meta = this.readMeta(target);
       const all = loadConnectors(runtimeDir);
-      const installed = all.filter((c) => (meta.connectors ?? []).includes(c.id));
+      const installed = all.filter((c) => agent.connectors.includes(c.id));
       const installedFiles = installed.map((c) => `tools/${c.file}`);
       // The emit-block covers every catalog connector filename, installed or not, so the
       // model can never introduce a file masquerading as a reviewed template.
@@ -191,21 +195,16 @@ export class Editor extends EventEmitter<EditorEvents> {
       const blocked = readOnlyPaths(all.map((c) => `tools/${c.file}`));
 
       // Read before the model touches anything: whether THIS agent already survives a raising tool.
-      const hadToolErrorHandling = /handle_tool_errors\s*=\s*True/.test(
-        readFileSync(join(target, "agent.py"), "utf8"),
-      );
+      const hadToolErrorHandling = /handle_tool_errors\s*=\s*True/.test(currentFiles.get("agent.py") ?? "");
 
-      copyProject(target, staging);
-
-      const editable = listProjectFiles(target, installedFiles).filter((f) => !f.readOnly);
-      const recent = readHistory(runtimeDir, agentId)
-        .slice(-3)
-        .map((h) => ({ instruction: h.instruction, summary: h.summary }));
+      // The staged project starts as a copy of the current VERSION — the same starting point
+      // `copyProject` produced, assembled from the store instead of from a directory.
+      const staged = new Map(currentFiles);
 
       const buffers = new Map<string, string>();
       const onEvent = (event: ProtocolEvent) => {
         if (event.type === "file_start") {
-          const safe = safeRelativePath(staging, event.path);
+          const safe = safeObjectPath(event.path);
           if (!safe) throw new Error(`refusing unsafe path: ${event.path}`);
           if (blocked.has(safe)) {
             // Each message names the right next move rather than just refusing. The MCP
@@ -215,7 +214,7 @@ export class Editor extends EventEmitter<EditorEvents> {
             // The deploy artifacts get theirs for the same shape of reason: they are
             // regenerated from jaroku.json on every deploy, so an edit to them would be
             // silently discarded even if it were allowed.
-            const isMcp = safe === "mcp_tools.json" || safe === "tools/mcp_bridge.py";
+            const isMcp = safe === MANIFEST_FILE || safe === BRIDGE_FILE;
             const isDeploy = DEPLOY_ARTIFACTS.has(safe);
             throw new Error(
               isMcp
@@ -238,19 +237,27 @@ export class Editor extends EventEmitter<EditorEvents> {
           buffers.set(event.path, (buffers.get(event.path) ?? "") + event.text);
           this.emit("file_delta", { path: event.path, text: event.text });
         } else {
-          // Write on close, into the staged copy — the live project is never touched here.
-          const safe = safeRelativePath(staging, event.path)!;
-          const targetFile = join(staging, safe);
-          mkdirSync(dirname(targetFile), { recursive: true });
-          writeFileSync(targetFile, buffers.get(event.path) ?? "", "utf8");
+          // Recorded on close, into the staged copy — the live version is never touched here.
+          const safe = safeObjectPath(event.path)!;
+          staged.set(safe, buffers.get(event.path) ?? "");
           this.emit("file_end", { path: safe });
         }
       };
       const parser = new FileProtocolParser(onEvent);
 
+      const editable = [...currentFiles.entries()]
+        .filter(([path]) => !blocked.has(path))
+        .map(([path, content]) => ({ path, content }))
+        .sort((a, b) => a.path.localeCompare(b.path));
+      const recent = (await agents.versions(ctx, agent.id))
+        .filter((v) => v.source === "edit")
+        .slice(0, 3)
+        .reverse()
+        .map((v) => ({ instruction: v.instruction ?? "", summary: v.summary ?? "" }));
+
       let usage = emptyUsage();
       const fixture = process.env.JAROKU_EDIT_FIXTURE;
-      if (fixture && existsSync(fixture)) {
+      if (fixture && (await import("node:fs")).existsSync(fixture)) {
         // Replay is global and agent-agnostic — an edit fixture recorded against one
         // agent will be replayed verbatim against ANY agent, which looks exactly like
         // a bizarre model hallucination if you've forgotten the env var is set. Say so.
@@ -272,7 +279,7 @@ export class Editor extends EventEmitter<EditorEvents> {
           (chunk) => parser.push(chunk),
           (u) => (usage = u),
         );
-        if (fixture) writeFileSync(fixture, raw, "utf8"); // record for future free replays
+        if (fixture) (await import("node:fs")).writeFileSync(fixture, raw, "utf8");
       }
 
       const protocolError = parser.finish({ allowEmpty: true });
@@ -285,31 +292,45 @@ export class Editor extends EventEmitter<EditorEvents> {
       const emitted = [...new Set(parser.files)];
       if (emitted.length === 0) {
         // A valid no-op: the model declined (rule E5) and said why in the summary.
-        rmSync(staging, { recursive: true, force: true });
         this.emit("proposal", {
           proposalId: randomUUID(), agentId, instruction, summary, files: [], usage,
         });
         return;
       }
 
-      // The staged copy is now current-project + model files: validate it exactly as a
-      // fresh generation would be. Failure means the proposal is never applyable.
-      const result = await validateProject(staging, {
+      const files = this.diffEmitted(currentFiles, staged, emitted);
+      if (files.length === 0) {
+        // Everything the model re-emitted was byte-identical — nothing to apply.
+        this.emit("proposal", {
+          proposalId: randomUUID(), agentId, instruction, summary, files: [], usage,
+        });
+        return;
+      }
+
+      // The staged copy is now current-version + model files. Into the store under a staging
+      // id, then validated exactly as a fresh generation would be — from the store, so what is
+      // checked is what would be published.
+      for (const path of [...staged.keys()].sort()) {
+        await projects.putStaging(ctx, agent.id, stagingId, { path, content: staged.get(path)! });
+      }
+      await projects.materialiseStaging(ctx, agent.id, stagingId, scratch);
+
+      const result = await validateProject(scratch, {
         runtimeDir,
         // The bridge is reviewed code copied in verbatim, so it is excluded from the
         // model-output lints for the same reason a connector template is.
-        connectorFiles: [...installedFiles, ...(existsSync(join(target, BRIDGE_FILE)) ? [BRIDGE_FILE] : [])],
+        connectorFiles: [...installedFiles, ...(currentFiles.has(BRIDGE_FILE) ? [BRIDGE_FILE] : [])],
         connectorToolNames: installed.flatMap((c) => c.tools.map((t) => t.name)),
         // The agent's existing grant, read from its own manifest rather than from the
         // registry: an edit is validated against what this project actually has.
-        mcpTools: readProjectManifest(target),
+        mcpTools: readManifest(currentFiles),
         // Don't-regress, not a new requirement: only demanded of an agent that already had it.
         // Agents generated before the connector templates started raising carry swallowing copies
         // of those templates, are internally consistent, and must stay editable.
         requireToolErrorHandling: hadToolErrorHandling,
       });
       if (!result.ok) {
-        rmSync(staging, { recursive: true, force: true });
+        await projects.discardStaging(ctx, agent.id, stagingId);
         this.fail({
           message: "the proposed edit failed validation and was discarded",
           problems: result.problems,
@@ -318,29 +339,27 @@ export class Editor extends EventEmitter<EditorEvents> {
         return;
       }
 
-      const files = this.diffEmitted(target, staging, emitted);
-      if (files.length === 0) {
-        // Everything the model re-emitted was byte-identical — nothing to apply.
-        rmSync(staging, { recursive: true, force: true });
-        this.emit("proposal", {
-          proposalId: randomUUID(), agentId, instruction, summary, files: [], usage,
-        });
-        return;
-      }
-
       const proposalId = randomUUID();
-      this.pending.set(proposalId, { proposalId, agentId, staging, instruction, summary, files });
+      this.pending.set(proposalId, {
+        proposalId, ctx, agentUuid: agent.id, agentId, stagingId, instruction, summary, files,
+      });
       this.emit("proposal", { proposalId, agentId, instruction, summary, files, usage });
     } catch (err) {
-      rmSync(staging, { recursive: true, force: true });
+      if (agentUuid) await this.opts.projects.discardStaging(ctx, agentUuid, stagingId).catch(() => {});
       this.fail({ message: (err as Error).message, agentId });
     } finally {
+      rmSync(scratch, { recursive: true, force: true });
       this.busy = false;
     }
   }
 
-  /** Apply a pending proposal: snapshot the current project, then atomic-swap it in. */
-  apply(proposalId: string): void {
+  /**
+   * Apply a pending proposal: publish its staging copy as the next version.
+   *
+   * No snapshot, because there is nothing to snapshot — the version this replaces was written
+   * once and is never rewritten, so it is still exactly where Undo will point.
+   */
+  async apply(proposalId: string): Promise<void> {
     const rec = this.pending.get(proposalId);
     if (!rec) {
       this.fail({ message: "that proposal is no longer available", proposalId });
@@ -352,40 +371,27 @@ export class Editor extends EventEmitter<EditorEvents> {
       return;
     }
 
-    const { runtimeDir } = this.opts;
-    const target = join(agentsDir(runtimeDir), rec.agentId);
-    const entries = readHistory(runtimeDir, rec.agentId);
-    const version = entries.length + 1;
-    const snapshot = join(historyDir(runtimeDir, rec.agentId), `v${version}`);
-
     try {
-      copyProject(target, snapshot); // what Undo will restore
-      atomicSwap(rec.staging, target);
+      const { version } = await this.opts.projects.publishStaging(rec.ctx, rec.agentUuid, rec.stagingId, {
+        source: "edit",
+        instruction: rec.instruction,
+        summary: rec.summary,
+        fileStats: rec.files.map(
+          (f): VersionFileStat => ({
+            path: f.path, status: f.status, additions: f.additions, deletions: f.deletions,
+          }),
+        ),
+      });
+      await this.materialise(rec.ctx, rec.agentUuid, version, rec.agentId);
+      this.pending.delete(proposalId);
+      this.emit("applied", { proposalId, agentId: rec.agentId, version, summary: rec.summary });
     } catch (err) {
-      rmSync(snapshot, { recursive: true, force: true });
       this.fail({ message: `apply failed: ${(err as Error).message}`, proposalId, agentId: rec.agentId });
-      return;
     }
-
-    // Record only after the swap succeeded — an orphan snapshot dir is harmless; a history
-    // entry pointing at files that never landed is not.
-    entries.push({
-      version,
-      instruction: rec.instruction,
-      summary: rec.summary,
-      files: rec.files.map((f) => ({
-        path: f.path, status: f.status, additions: f.additions, deletions: f.deletions,
-      })),
-      applied_at: new Date().toISOString(),
-    });
-    writeHistory(runtimeDir, rec.agentId, entries);
-
-    this.pending.delete(proposalId);
-    this.emit("applied", { proposalId, agentId: rec.agentId, version, summary: rec.summary });
   }
 
-  /** Revert the last applied edit: restore snapshot v<n>, pop the history entry. */
-  undo(agentId: string): void {
+  /** Revert the last applied edit: move the pointer back, and mark what it left behind. */
+  async undo(ctx: TenantContext, agentId: string): Promise<void> {
     if (!isSafeAgentId(agentId)) {
       this.fail({ message: `invalid agent id: ${agentId}`, agentId });
       return;
@@ -396,66 +402,74 @@ export class Editor extends EventEmitter<EditorEvents> {
       return;
     }
 
-    const { runtimeDir } = this.opts;
-    const entries = readHistory(runtimeDir, agentId);
-    const last = entries[entries.length - 1];
-    if (!last) {
+    const agent = await this.opts.agents.bySlug(ctx, agentId);
+    if (!agent) {
+      this.fail({ message: `agent "${agentId}" was not found`, agentId });
+      return;
+    }
+    // Read BEFORE the undo: afterwards this version is marked and no longer on the line, and
+    // the event has to name what was reverted rather than what is now current.
+    const reverting = await this.opts.agents.version(ctx, agent.id, agent.current_version);
+
+    // Any pending proposal was diffed against the files being reverted — drop it.
+    await this.discardForAgent(agentId);
+
+    const moved = await this.opts.agents.undoVersion(ctx, agent.id);
+    if (!moved) {
       this.fail({ message: "nothing to undo — no applied edits", agentId });
       return;
     }
-    const snapshot = join(historyDir(runtimeDir, agentId), `v${last.version}`);
-    if (!existsSync(snapshot)) {
-      this.fail({ message: `history snapshot v${last.version} is missing`, agentId });
-      return;
-    }
-
-    // Any pending proposal was diffed against the files being reverted — drop it.
-    this.discardForAgent(agentId);
-
     try {
-      atomicSwap(snapshot, join(agentsDir(runtimeDir), agentId));
+      await this.materialise(ctx, agent.id, moved.to, agentId);
     } catch (err) {
       this.fail({ message: `undo failed: ${(err as Error).message}`, agentId });
       return;
     }
-    entries.pop();
-    writeHistory(runtimeDir, agentId, entries);
-    this.emit("undone", { agentId, version: last.version, summary: last.summary });
+    this.emit("undone", {
+      agentId,
+      version: moved.from,
+      summary: reverting?.summary ?? "the last applied edit",
+    });
   }
 
   /** Drop a pending proposal without applying it. */
-  discard(proposalId: string): void {
+  async discard(proposalId: string): Promise<void> {
     const rec = this.pending.get(proposalId);
     if (!rec) return; // already gone — discarding twice is not an error
-    rmSync(rec.staging, { recursive: true, force: true });
     this.pending.delete(proposalId);
+    await this.opts.projects.discardStaging(rec.ctx, rec.agentUuid, rec.stagingId).catch(() => {});
     this.emit("discarded", { proposalId, agentId: rec.agentId });
   }
 
-  private discardForAgent(agentId: string): void {
+  private async discardForAgent(agentId: string): Promise<void> {
     for (const rec of [...this.pending.values()]) {
-      if (rec.agentId === agentId) this.discard(rec.proposalId);
+      if (rec.agentId === agentId) await this.discard(rec.proposalId);
     }
   }
 
-  private readMeta(target: string): { connectors?: string[] } {
-    const path = join(target, "jaroku.json");
-    if (!existsSync(path)) return {};
-    try {
-      return JSON.parse(readFileSync(path, "utf8")) as { connectors?: string[] };
-    } catch {
-      return {};
-    }
+  /**
+   * Write a version into `runtime/agents/<slug>/`.
+   *
+   * The local run path still imports `agents.<slug>.agent` from a real directory, so a version
+   * that becomes current has to appear there. This is a CACHE of the version, not the version:
+   * Session 4 replaces it with a sandbox fetching the objects, and this call goes away with it.
+   */
+  private async materialise(ctx: TenantContext, agentUuid: string, version: number, slug: string): Promise<void> {
+    await this.opts.projects.materialise(ctx, agentUuid, version, join(agentsDir(this.opts.runtimeDir), slug));
   }
 
-  private diffEmitted(currentDir: string, stagingDir: string, emitted: string[]): FileDiff[] {
+  private diffEmitted(
+    current: Map<string, string>,
+    staged: Map<string, string>,
+    emitted: string[],
+  ): FileDiff[] {
     const out: FileDiff[] = [];
     for (const path of emitted) {
-      const safe = safeRelativePath(stagingDir, path);
+      const safe = safeObjectPath(path);
       if (!safe) continue; // already rejected during streaming
-      const oldPath = join(currentDir, safe);
-      const oldContent = existsSync(oldPath) ? readFileSync(oldPath, "utf8") : null;
-      const newContent = readFileSync(join(stagingDir, safe), "utf8");
+      const oldContent = current.get(safe) ?? null;
+      const newContent = staged.get(safe);
+      if (newContent === undefined) continue;
       if (oldContent === newContent) continue; // re-emitted unchanged: not part of the diff
 
       const patch = structuredPatch(safe, safe, oldContent ?? "", newContent, "", "", { context: 3 });
@@ -483,7 +497,7 @@ export class Editor extends EventEmitter<EditorEvents> {
     req: {
       agentId: string;
       instruction: string;
-      files: { path: string; content: string }[];
+      files: StoredFile[];
       connectors: Connector[];
       mcpTools: McpToolView[];
       history: { instruction: string; summary: string }[];

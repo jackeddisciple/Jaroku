@@ -25,6 +25,7 @@
     "test:objects": "tsx src/storage/objects.test.ts",
     "test:project-store": "tsx src/storage/projectStore.test.ts",
     "test:generation": "tsx src/generation.test.ts",
+    "test:edit-versions": "tsx src/editVersions.test.ts",
     "test:tenancy": "tsx src/tenancy.test.ts",
     "test:acceptance": "tsx src/acceptance.test.ts",
     "test:relay": "tsx src/wsRelay.test.ts",
