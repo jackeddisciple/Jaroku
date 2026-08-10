@@ -72,8 +72,18 @@ const ALLOWED_REQUEST_HEADERS = "authorization, content-type";
  */
 const PREFLIGHT_MAX_AGE_S = 600;
 
-/** The largest body any route here accepts. A token is ~1 KB; a workspace id is 36 bytes. */
+/** The largest JSON body any route here accepts. A token is ~1 KB; a workspace id is 36 bytes. */
 export const MAX_BODY_BYTES = 64 * 1024;
+
+/**
+ * The largest binary body, which is a different question with a different answer.
+ *
+ * The object route accepts a presigned PUT, and what it accepts is an agent's file — capped at
+ * 200 KB by projectFs for the same reasons — or an eval export. Sharing the JSON cap would make
+ * a 300 KB export unwritable; sharing an unbounded read would make one request an outage. So it
+ * is its own number, larger and still a number.
+ */
+export const MAX_BINARY_BODY_BYTES = 16 * 1024 * 1024;
 
 /**
  * A failure with a status and a code the client can branch on.
@@ -113,9 +123,21 @@ export interface HttpRequest {
   header(name: string): string | undefined;
   /** The JSON body, size-capped. `{}` when there is no body — absent is not an error here. */
   json<T = Record<string, unknown>>(): Promise<T>;
+  /** The body as bytes, capped separately. For the one route whose payload is not JSON. */
+  buffer(): Promise<Buffer>;
 }
 
-/** What a handler returns. `body` is serialised as JSON; `undefined` means 204. */
+/**
+ * What a handler returns.
+ *
+ * `body` is serialised as JSON, EXCEPT when it is a Buffer, which is written through untouched
+ * with whatever `headers` says its content type is. That exception exists for exactly one route
+ * — the object route serves an agent's file — and it is an exception rather than a second
+ * response type because everything else about answering a request is identical, down to the
+ * request id header and the CORS decision.
+ *
+ * `undefined` means 204.
+ */
 export interface HttpResponse {
   status?: number;
   body?: unknown;
@@ -126,8 +148,18 @@ export type Handler = (req: HttpRequest) => Promise<HttpResponse> | HttpResponse
 
 interface Route {
   method: string;
-  /** Exact path. No parameters: nothing in this session's surface needs one. */
+  /**
+   * The path, matched exactly — or, when `prefix` is set, as a leading string.
+   *
+   * Session 2's routes were all exact, and the comment here said nothing needed a parameter.
+   * Session 3 does: an object is addressed BY ITS KEY, and a key is not a fixed string. It
+   * arrives percent-encoded as one segment (see storage/presign.ts, which encodes the slashes
+   * deliberately so nothing between here and the handler can resolve a `..` inside it), so a
+   * prefix match plus one decode is the whole of the routing it needs — and no path-pattern
+   * language has to be invented for one route.
+   */
   path: string;
+  prefix?: boolean;
   handler: Handler;
 }
 
@@ -164,19 +196,33 @@ export class Router {
     return this.add("POST", path, handler);
   }
 
+  put(path: string, handler: Handler): this {
+    return this.add("PUT", path, handler);
+  }
+
+  /** Everything under `prefix`, for a route whose tail is data rather than a path. */
+  prefixRoute(method: "GET" | "PUT", prefix: string, handler: Handler): this {
+    this.routes.push({ method, path: prefix, prefix: true, handler });
+    return this;
+  }
+
   private add(method: string, path: string, handler: Handler): this {
     this.routes.push({ method, path, handler });
     return this;
   }
 
+  private matches(route: Route, path: string): boolean {
+    return route.prefix ? path.startsWith(route.path) : route.path === path;
+  }
+
   /** Does any route claim this path, under any method? Drives 404 vs 405. */
   private claims(path: string): boolean {
-    return this.routes.some((r) => r.path === path);
+    return this.routes.some((r) => this.matches(r, path));
   }
 
   /** The verbs a path actually answers, for the preflight. Never a guessed wildcard. */
   private methodsFor(path: string): string[] {
-    return [...new Set(this.routes.filter((r) => r.path === path).map((r) => r.method))];
+    return [...new Set(this.routes.filter((r) => this.matches(r, path)).map((r) => r.method))];
   }
 
   /**
@@ -238,7 +284,11 @@ export class Router {
       return true;
     }
 
-    const route = this.routes.find((r) => r.path === path && r.method === method);
+    // Exact routes are searched before prefix ones, so a prefix can never shadow a specific
+    // path that happens to sit underneath it.
+    const route =
+      this.routes.find((r) => !r.prefix && r.path === path && r.method === method) ??
+      this.routes.find((r) => r.prefix && this.matches(r, path) && r.method === method);
     if (!route) {
       if (!this.claims(path)) return false;
       // The path exists under another verb. 405 rather than 404, because "you used the wrong
@@ -303,6 +353,17 @@ export class Router {
       res.writeHead(status, base).end();
       return;
     }
+    // A Buffer is the payload, not a thing to describe as one. See HttpResponse.
+    if (Buffer.isBuffer(body)) {
+      res
+        .writeHead(status, {
+          "content-type": "application/octet-stream",
+          ...base,
+          "content-length": String(body.length),
+        })
+        .end(body);
+      return;
+    }
     const payload =
       body !== null && typeof body === "object" && "error" in (body as object)
         ? { error: { ...(body as { error: object }).error, requestId } }
@@ -319,6 +380,7 @@ export class Router {
     requestId: string,
   ): HttpRequest {
     let parsed: Promise<unknown> | null = null;
+    let bytes: Promise<Buffer> | null = null;
     return {
       requestId,
       method,
@@ -334,6 +396,10 @@ export class Router {
         parsed ??= readJson(raw);
         return parsed as Promise<T>;
       },
+      buffer: (): Promise<Buffer> => {
+        bytes ??= readBytes(raw);
+        return bytes;
+      },
     };
   }
 }
@@ -342,6 +408,23 @@ export class Router {
 function header(raw: IncomingMessage, name: string): string | undefined {
   const v = raw.headers[name];
   return Array.isArray(v) ? v[0] : v;
+}
+
+/** Read a body as bytes, against the binary cap. Same header-then-reality rule as readJson. */
+async function readBytes(raw: IncomingMessage): Promise<Buffer> {
+  const declared = Number(raw.headers["content-length"] ?? 0);
+  if (Number.isFinite(declared) && declared > MAX_BINARY_BODY_BYTES) {
+    throw tooLarge(`request body over ${MAX_BINARY_BODY_BYTES} bytes`);
+  }
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of raw) {
+    const buf = chunk as Buffer;
+    size += buf.length;
+    if (size > MAX_BINARY_BODY_BYTES) throw tooLarge(`request body over ${MAX_BINARY_BODY_BYTES} bytes`);
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks);
 }
 
 /**

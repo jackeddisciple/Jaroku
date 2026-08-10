@@ -23,6 +23,7 @@
     "test:db-boundary": "tsx src/db/boundary.test.ts",
     "test:object-keys": "tsx src/storage/keys.test.ts",
     "test:objects": "tsx src/storage/objects.test.ts",
+    "test:project-store": "tsx src/storage/projectStore.test.ts",
     "test:tenancy": "tsx src/tenancy.test.ts",
     "test:acceptance": "tsx src/acceptance.test.ts",
     "test:relay": "tsx src/wsRelay.test.ts",

@@ -364,7 +364,13 @@ const SCOPED_API: Record<string, string[]> = {
     "create", "patch", "appendLog", "get", "list", "listForAgent", "currentForAgent",
     "currentByAgent", "reusableTarget", "supersede", "logs", "inFlight",
   ],
-  AgentRepository: ["list", "bySlug", "byId", "upsertFromDisk", "syncFromDisk", "addVersion"],
+  // Session 3. `agent_versions` has no workspace_id of its own — it hangs off `agents`, whose
+  // uuid is already workspace-scoped — so every one of these is scoped by a JOIN rather than by
+  // a WHERE on this table, and a missing join would be invisible in a single-tenant test.
+  AgentRepository: [
+    "list", "bySlug", "byId", "upsertFromDisk", "syncFromDisk", "addVersion",
+    "plannedNextVersion", "version", "versions", "undoVersion",
+  ],
   // Session 2. These decide who can see a workspace AT ALL, so a cross-tenant bug in any of
   // them is worse than one in the stores above — it does not leak a row, it hands over the
   // whole workspace.
@@ -458,6 +464,27 @@ async function remainder(db: Db): Promise<void> {
   check((await agents.bySlug(A.ctx, "support_bot"))!.current_version === 2, "addVersion bumps my own agent");
   await agents.syncFromDisk(A.ctx, [{ slug: "support_bot" }]);
   check((await agents.bySlug(B.ctx, "support_bot")) !== undefined, "syncFromDisk never soft-deletes B's agents");
+
+  // Session 3: an agent's VERSIONS. Every one of these is scoped through the agent rather than
+  // by a column of its own, which is exactly the shape that fails quietly if the join is
+  // dropped — the query still runs, and it returns another workspace's history.
+  const theirAgent = (await agents.bySlug(B.ctx, "support_bot"))!;
+  await agents.addVersion(B.ctx, theirAgent.id, { "agent.py": { sha256: "b", bytes: 2 } }, { source: "edit" });
+  check((await agents.version(A.ctx, theirAgent.id, 2)) === undefined, "version cannot read B's version row");
+  check((await agents.versions(A.ctx, theirAgent.id)).length === 0, "versions lists none of B's");
+  check((await agents.versions(A.ctx, theirAgent.id, true)).length === 0, "...including the undone ones");
+  check((await agents.undoVersion(A.ctx, theirAgent.id)) === null, "undoVersion refuses B's agent");
+  check(
+    (await agents.bySlug(B.ctx, "support_bot"))!.current_version === 2,
+    "...leaving B's pointer where it was",
+  );
+  let plannedRefused = false;
+  try {
+    await agents.plannedNextVersion(A.ctx, theirAgent.id);
+  } catch {
+    plannedRefused = true;
+  }
+  check(plannedRefused, "plannedNextVersion refuses an agent uuid from B rather than answering 1");
 }
 
 // --- run it -------------------------------------------------------------------------------

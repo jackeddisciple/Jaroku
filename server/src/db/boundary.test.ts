@@ -101,6 +101,7 @@ const EXEMPT: Record<string, string> = {
   ensureColumn: "an additive ALTER for a database that predates a column",
   hydrate: "pure row-shaping",
   hydrateStep: "pure row-shaping",
+  hydrateVersion: "pure row-shaping",
   hydrateRubric: "pure row-shaping",
   hydrateEvalRun: "pure row-shaping",
   hydrateTool: "pure row-shaping",

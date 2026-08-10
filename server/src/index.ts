@@ -52,7 +52,11 @@ import { IdentityRepository } from "./db/repositories/identity.ts";
 import { isMemberRole } from "./db/tenant.ts";
 import { resolveDevTenancy, type DevTenancy } from "./devTenancy.ts";
 import { loadConnectors } from "./connectors.ts";
-import { isSafeAgentId, listProjectFiles } from "./projectFs.ts";
+import { isSafeAgentId, listProjectFiles, readOnlyPaths, type ProjectFile } from "./projectFs.ts";
+import { openObjectStore } from "./storage/open.ts";
+import { resolveSigningKey } from "./storage/presign.ts";
+import { filesFromDirectory, ProjectStore } from "./storage/projectStore.ts";
+import { objectRoutes } from "./http/objects.ts";
 import { introspectGraph, type GraphResult } from "./graphIntrospect.ts";
 import { streamExplain } from "./explainer.ts";
 import type { DeployChannelCommand, ExplainCommand } from "./wsRelay.ts";
@@ -87,6 +91,23 @@ rmSync(join(RUNTIME_DIR, "agents", ".staging"), { recursive: true, force: true }
 // `npm run dev` still needs nothing installed and nothing running.
 const db = openDb({ sqlitePath: DB_PATH });
 console.log(`[server] database: ${db.dialect}${db.dialect === "sqlite" ? ` (${DB_PATH})` : ""}`);
+
+// AND ONE OBJECT STORE, chosen here and nowhere else, exactly like the driver above.
+//
+// An agent's files stop being a directory this process owns and become objects keyed by
+// workspace and agent uuid. Locally that is still a directory — runtime/.objects/ — because
+// `npm run dev` has to keep needing nothing installed and nothing running; hosted it is R2 or
+// S3, and the application cannot tell which it got. See storage/open.ts for why `fs` refuses to
+// run under NODE_ENV=production.
+const OBJECT_SIGNING_KEY_PATH = process.env.JAROKU_OBJECT_KEY_PATH ?? join(SERVER_DIR, ".objectkey");
+const objectSigningKey = resolveSigningKey(OBJECT_SIGNING_KEY_PATH);
+const objects = openObjectStore({
+  runtimeDir: RUNTIME_DIR,
+  signingKeyPath: OBJECT_SIGNING_KEY_PATH,
+});
+console.log(
+  `[server] object store: ${objects.kind}${objects.kind === "fs" ? ` (${join(RUNTIME_DIR, ".objects")})` : ""}`,
+);
 
 // THE WORKSPACE THIS PROCESS ACTS IN.
 //
@@ -311,6 +332,49 @@ await deployStore.init();
 // and again whenever a generation, an apply or an undo changes what is on disk — those are
 // the only three things that do.
 const agentRepo = new AgentRepository(store.database());
+
+// THE FILES, AS VERSIONS.
+//
+// `agents` says which agents exist; this says what each one CONTAINS, at which version, as
+// immutable objects. Session 3's whole point: a generation on one replica and the edit that
+// follows on another are reading the same bytes, because neither of them is reading a disk.
+const projects = new ProjectStore(objects, agentRepo);
+
+/**
+ * Publish anything on disk that has never been published.
+ *
+ * Every agent that existed before this session is a directory and nothing else, so the first
+ * read through the object store would find an empty project. This is the one-way bridge:
+ * disk → objects, once per agent, recorded as `source: "import"` because that is honestly what
+ * it is. Idempotent — an agent whose current version is already materialised is skipped — so it
+ * runs at every boot and does work only the first time.
+ */
+async function importAgentFiles(ctx: TenantContext): Promise<void> {
+  const connectors = loadConnectors(RUNTIME_DIR);
+  for (const agent of await agentRepo.list(ctx)) {
+    const dir = join(RUNTIME_DIR, "agents", agent.slug);
+    if (!isSafeAgentId(agent.slug) || !existsSync(dir)) continue;
+    const connectorFiles = connectors.filter((c) => agent.connectors.includes(c.id)).map((c) => `tools/${c.file}`);
+    const onDisk = listProjectFiles(dir, connectorFiles);
+    try {
+      const result = await projects.importFromDirectory(
+        ctx,
+        agent.id,
+        agent.current_version,
+        filesFromDirectory(dir, onDisk.map((f) => f.path)),
+      );
+      if (result.imported) {
+        console.log(`[objects] imported ${agent.slug} as v${result.version} (${onDisk.length} file(s))`);
+      }
+    } catch (err) {
+      // A project that will not import is a project that still runs from disk. Refusing to
+      // boot over it would make one unreadable file take the whole server down, and the local
+      // path this session is required not to break is exactly the one still reading that disk.
+      console.warn(`[objects] could not import ${agent.slug}: ${(err as Error).message}`);
+    }
+  }
+}
+
 async function syncAgents(): Promise<void> {
   await agentRepo.syncFromDisk(
     serverContext(),
@@ -328,6 +392,7 @@ async function syncAgents(): Promise<void> {
   );
 }
 await syncAgents();
+await importAgentFiles(serverContext());
 
 // The same reasoning for deploys, with a sharper edge: a deploy in flight was creating real
 // resources in the user's Railway account. A row still reading "building" after a restart is
@@ -386,22 +451,57 @@ function broadcastDeployments(): void {
     .catch((err) => console.error("[deploy] snapshot failed:", (err as Error).message));
 }
 
-/** Current on-disk files of an agent project, connector files flagged read-only. */
-function agentProjectFiles(agentId: string): unknown[] {
+/**
+ * An agent project's files at its CURRENT VERSION, connector files flagged read-only.
+ *
+ * Read from the object store rather than from `runtime/agents/<slug>/`, which is the change
+ * this session is for: a replica that has never run this agent, and has nothing of it on disk,
+ * answers this identically to the one that generated it.
+ *
+ * The disk is still the fallback, and stays one for as long as the local path exists. Two
+ * things legitimately land there without a version row: a project a user drops in by hand
+ * between boots, and one whose import failed. Both should still be readable — the alternative
+ * is a file list that is empty for a project the user can see in their editor.
+ */
+async function agentProjectFiles(ctx: TenantContext, agentId: string): Promise<ProjectFile[]> {
   if (!isSafeAgentId(agentId)) return [];
+  const agent = await agentRepo.bySlug(ctx, agentId);
+
+  // The read-only set is per project: host-owned files always, plus the connector templates
+  // this agent actually has installed. Derived from the row when there is one, and from
+  // jaroku.json otherwise, so both paths flag the same files.
+  const connectorIds = agent?.connectors ?? readDiskConnectors(agentId);
+  const connectorFiles = loadConnectors(RUNTIME_DIR)
+    .filter((c) => connectorIds.includes(c.id))
+    .map((c) => `tools/${c.file}`);
+
+  if (agent) {
+    try {
+      const stored = await projects.readCurrent(ctx, agent.id, agent.current_version);
+      if (stored.length) {
+        const readOnly = readOnlyPaths(connectorFiles);
+        return stored.map((f) => ({ path: f.path, content: f.content, readOnly: readOnly.has(f.path) }));
+      }
+    } catch (err) {
+      console.warn(`[objects] falling back to disk for ${agentId}: ${(err as Error).message}`);
+    }
+  }
+
   const dir = join(RUNTIME_DIR, "agents", agentId);
   if (!existsSync(dir)) return [];
-  let connectors: string[] = [];
+  return listProjectFiles(dir, connectorFiles);
+}
+
+/** The connector ids a project's own jaroku.json claims. Only for a project with no row yet. */
+function readDiskConnectors(agentId: string): string[] {
   try {
-    const meta = JSON.parse(readFileSync(join(dir, "jaroku.json"), "utf8")) as { connectors?: string[] };
-    connectors = meta.connectors ?? [];
+    const meta = JSON.parse(
+      readFileSync(join(RUNTIME_DIR, "agents", agentId, "jaroku.json"), "utf8"),
+    ) as { connectors?: string[] };
+    return meta.connectors ?? [];
   } catch {
-    /* metadata optional */
+    return []; // metadata optional
   }
-  const files = loadConnectors(RUNTIME_DIR)
-    .filter((c) => connectors.includes(c.id))
-    .map((c) => `tools/${c.file}`);
-  return listProjectFiles(dir, files);
 }
 
 // Graph topology is derived by spawning the isolated `jaroku_runner.graph` entrypoint. It is
@@ -471,6 +571,34 @@ for (const route of sessionRoutes({
 })) {
   if (route.method === "GET") router.get(route.path, route.handler);
   else router.post(route.path, route.handler);
+}
+
+// THE OBJECT ROUTE, which is what makes the local store's presigned URLs real.
+//
+// S3 answers its own URLs; a directory cannot, so the local store's point here. Mounted
+// unconditionally rather than only for the `fs` store: `objects` is whichever one was chosen,
+// and a deployment on S3 simply never mints a URL that arrives at this path.
+//
+// `workspaceFor` returns the workspace a request is authenticated for, or null when it presents
+// no credential at all. A bad token is a refusal rather than a null — see http/objects.ts for
+// why collapsing those two would turn one into access.
+for (const route of objectRoutes({
+  objects,
+  signingKey: objectSigningKey,
+  workspaceFor: async (req) => {
+    const header = req.header("authorization");
+    if (!header) return null;
+    const auth = await tokenVerifier.verify(TokenVerifier.bearer(header) ?? "");
+    const session = await contextResolver.resolve(
+      auth,
+      req.url.searchParams.get("workspace"),
+      req.requestId,
+      req.ip,
+    );
+    return session.context.workspaceId;
+  },
+})) {
+  router.prefixRoute(route.method, route.prefix, route.handler);
 }
 
 const relay = new WsRelay({
@@ -552,7 +680,7 @@ const relay = new WsRelay({
   // workspaces to one process, and on that day this is a client asking for another tenant's
   // generated source code by name and getting it.
   listAgentFiles: async (ctx, agentId) =>
-    (await agentRepo.bySlug(ctx, agentId)) ? agentProjectFiles(agentId) : [],
+    (await agentRepo.bySlug(ctx, agentId)) ? agentProjectFiles(ctx, agentId) : [],
   getAgentGraph: async (ctx, agentId) =>
     (await agentRepo.bySlug(ctx, agentId))
       ? agentGraph(agentId)
@@ -2025,7 +2153,7 @@ function truncateJson(v: unknown, cap = 800): string {
   return s.length > cap ? `${s.slice(0, cap)}\n…(truncated)` : s;
 }
 
-function buildExplainContext(cmd: ExplainCommand): string {
+async function buildExplainContext(ctx: TenantContext, cmd: ExplainCommand): Promise<string> {
   const { agentId, subject } = cmd;
   if (subject.kind === "step") {
     const st = subject.step;
@@ -2038,7 +2166,7 @@ function buildExplainContext(cmd: ExplainCommand): string {
     return parts.join("\n\n");
   }
   // node / agent — ground in the agent's on-disk prompt + tools (already served to the client too).
-  const files = agentProjectFiles(agentId) as { path: string; content: string }[];
+  const files = await agentProjectFiles(ctx, agentId);
   const prompt = files.find((f) => /prompt/i.test(f.path) && f.path.endsWith(".md"))?.content ?? "(no system prompt file)";
   const toolFiles = files.filter((f) => /(^|\/)tools\//.test(f.path) && f.path.endsWith(".py") && !f.path.endsWith("__init__.py"));
   const tools = toolFiles.length
@@ -2048,7 +2176,7 @@ function buildExplainContext(cmd: ExplainCommand): string {
   return [head, `System prompt:\n${prompt.slice(0, 1500)}`, `Tools:\n${tools}`].join("\n\n");
 }
 
-function explainAgent(ctx: TenantContext, cmd: ExplainCommand): void {
+async function explainAgent(ctx: TenantContext, cmd: ExplainCommand): Promise<void> {
   if (explaining) {
     // To the asker, not to the scope: the answer still streaming belongs to somebody else, and
     // an explanation quotes the agent's system prompt and tool source back to the reader.
@@ -2058,7 +2186,7 @@ function explainAgent(ctx: TenantContext, cmd: ExplainCommand): void {
   replyContext = ctx;
   explaining = true;
   relay.broadcastReply(contextForReply(), { type: "started", agentId: cmd.agentId, question: cmd.question });
-  const context = buildExplainContext(cmd);
+  const context = await buildExplainContext(ctx, cmd);
   void streamExplain(context, cmd.question, {
     onDelta: (text) => relay.broadcastReply(contextForReply(), { type: "delta", agentId: cmd.agentId, text }),
     onDone: () => { explaining = false; relay.broadcastReply(contextForReply(), { type: "done", agentId: cmd.agentId }); },
