@@ -65,11 +65,21 @@ export const DEPLOY_ARTIFACTS = new Set([
   "pyproject.toml",
 ]);
 
+// EVERY PATH HERE IS A POSIX OBJECT PATH, and `tools/mcp_bridge.py` is written out rather than
+// assembled with `join`. That is not style. `join` uses the PLATFORM separator, so on Windows
+// this entry read `tools\mcp_bridge.py` — which matched the local paths `listProjectFiles`
+// produced there and matches NOTHING in the object store, whose keys are always `/`-separated
+// (storage/keys.ts refuses a backslash outright). The block list would have gone quietly empty
+// for the one file it most needs to cover: the reviewed bridge that honours an agent's entire
+// MCP grant.
+//
+// It never failed on macOS or Linux, where the separator happens to agree, which is exactly why
+// it is spelled explicitly now and asserted in readOnly.test.ts rather than left to a coincidence.
 const HOST_OWNED = new Set([
   "jaroku.json",
   "__init__.py",
   "mcp_tools.json",
-  join("tools", "mcp_bridge.py"),
+  "tools/mcp_bridge.py",
   ...DEPLOY_ARTIFACTS,
 ]);
 
@@ -89,9 +99,20 @@ function isTextFile(name: string): boolean {
   return dot >= 0 && TEXT_EXTENSIONS.has(name.slice(dot));
 }
 
-/** The read-only set for a project: host-owned files + its installed connector files. */
+/**
+ * The read-only set for a project: host-owned files + its installed connector files.
+ *
+ * `connectorFiles` are project-relative, posix-style — `tools/postgres.py`. Callers pass every
+ * filename in the catalogue rather than only the installed ones, so the model cannot introduce
+ * a file masquerading as a reviewed template.
+ */
 export function readOnlyPaths(connectorFiles: string[]): Set<string> {
   return new Set([...HOST_OWNED, ...connectorFiles]);
+}
+
+/** The host-owned half on its own, for the test that asserts what it contains and how. */
+export function hostOwnedPaths(): string[] {
+  return [...HOST_OWNED].sort();
 }
 
 /**

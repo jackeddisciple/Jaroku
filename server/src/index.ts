@@ -417,6 +417,8 @@ for (const stale of (
 const deployDeps: DeployManagerDeps = {
   runtimeDir: RUNTIME_DIR,
   store: deployStore,
+  agents: agentRepo,
+  projects,
   context: contextForDeploy,
   token: () => process.env[RAILWAY_ENV_KEY],
   // The same pool-aware check the editor uses, and for a sharper version of the reason:

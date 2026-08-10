@@ -26,6 +26,9 @@ import { join } from "node:path";
 
 import type { Deployment, DeployStatus, DeployStore } from "./deployStore.ts";
 import { readAgentMeta, writeDeployArtifacts } from "./deployArtifacts.ts";
+import type { AgentRepository } from "./db/repositories/agents.ts";
+import { filesFromDirectory, type ProjectStore } from "./storage/projectStore.ts";
+import { listProjectFiles } from "./projectFs.ts";
 import {
   hostEnv, makeScrubber, requiredSecrets, resolveSecretValues,
   type DeploySecretStatus,
@@ -59,6 +62,10 @@ export type DeployStage =
 export interface DeployManagerDeps {
   runtimeDir: string;
   store: DeployStore;
+  /** Which agents exist, and at which version. Needed to record what a deploy wrote. */
+  agents: AgentRepository;
+  /** Where an agent's files live. A deploy adds four of them, so it publishes a version. */
+  projects: ProjectStore;
   /** The workspace this deploy belongs to. Read at the moment of use, like `token`. */
   context: () => TenantContext;
   /** The agent's Railway token, read at the moment of use. Never held by this class. */
@@ -340,6 +347,14 @@ export class DeployManager {
       });
       await this.log(id, "packaging", "jaroku",
         `wrote ${artifacts.paths.join(", ")} · image installs ${artifacts.requires.join(", ")}`);
+      // AND RECORDED AS A VERSION, because the four files just written are part of this
+      // project now. The upload below reads the local directory — that is what the Railway CLI
+      // takes — but the local directory is a materialisation of a version, so a deploy that
+      // only wrote there would produce files the file list cannot see, that another replica has
+      // never heard of, and that the next applied edit would silently drop when it materialises
+      // the version it published. The read-only rule protecting serve.py and the Dockerfile
+      // only means something if they are actually IN the thing it protects.
+      await this.recordArtifacts(req.agentId);
       if (await this.stopped(id)) return;
 
       // --- provision ---
@@ -517,6 +532,32 @@ export class DeployManager {
    * fails for any reason, this makes a new project and says so — falling back to working is
    * better than refusing over a stale id we only cached as a convenience.
    */
+  /**
+   * Publish the project as it now stands, artifacts included, as a `deploy` version.
+   *
+   * Best-effort on purpose. A deploy that has already written its files and is about to upload
+   * them must not fail because the version could not be recorded — the deployment is the thing
+   * the user asked for, and an unrecorded version is a stale file list rather than a broken
+   * release. It is logged rather than swallowed.
+   */
+  private async recordArtifacts(agentId: string): Promise<void> {
+    try {
+      const ctx = this.deps.context();
+      const agent = await this.deps.agents.bySlug(ctx, agentId);
+      if (!agent) return;
+      const dir = join(this.deps.runtimeDir, "agents", agentId);
+      const connectorFiles = agent.connectors.map((id) => `tools/${id}.py`);
+      const files = filesFromDirectory(dir, listProjectFiles(dir, connectorFiles).map((f) => f.path));
+      if (!files.length) return;
+      await this.deps.projects.publish(ctx, agent.id, files, {
+        source: "deploy",
+        summary: "deploy artifacts",
+      });
+    } catch (err) {
+      console.warn(`[deploy] could not record the deploy artifacts as a version: ${(err as Error).message}`);
+    }
+  }
+
   private async resolveTarget(
     id: string,
     api: RailwayApi,
