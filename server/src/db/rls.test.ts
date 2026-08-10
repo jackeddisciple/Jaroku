@@ -186,7 +186,7 @@ try {
     // sealed against `<workspace_id>:<name>` so a row that escaped both decrypts to nothing.
     // The policy is still not optional — a leaked WRAPPED DATA KEY plus a leaked master key is
     // the whole workspace, and "we also encrypted it" is not a reason to skip the scope.
-    "workspace_data_keys", "workspace_secrets",
+    "workspace_data_keys", "workspace_secrets", "secret_refs",
   ];
   const guarded = await db.all<{ relname: string; relrowsecurity: boolean; relforcerowsecurity: boolean }>(
     `SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class

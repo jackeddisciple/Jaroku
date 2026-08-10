@@ -29,6 +29,7 @@ import { randomUUID } from "node:crypto";
 import type { Db, Queryable } from "../db/db.ts";
 import { asInt } from "../db/db.ts";
 import type { TenantContext } from "../db/tenant.ts";
+import type { SecretRefRepository } from "../db/repositories/secretRefs.ts";
 import {
   newDataKey, openWithDataKey, sealWithDataKey, type MasterKeyProvider,
 } from "./masterKey.ts";
@@ -40,6 +41,8 @@ import {
 export interface KmsSecretStoreOptions {
   db: Db;
   master: MasterKeyProvider;
+  /** The store-agnostic name registry. What `listNames` answers from. */
+  refs: SecretRefRepository;
   /** How a run id becomes a workspace. Null means "no such run", which means no secrets. */
   runWorkspace: RunWorkspaceResolver;
   /** What each name is for, when the caller knows. Display only. */
@@ -81,15 +84,15 @@ export class KmsSecretStore implements SecretStore {
     const now = new Date().toISOString();
     await this.q(ctx.workspaceId).run(
       `INSERT INTO workspace_secrets
-         (workspace_id, name, data_key_id, ciphertext, provider, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+         (workspace_id, name, data_key_id, ciphertext, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT (workspace_id, name) DO UPDATE SET
          data_key_id = excluded.data_key_id,
          ciphertext  = excluded.ciphertext,
-         provider    = excluded.provider,
          updated_at  = excluded.updated_at`,
-      [ctx.workspaceId, name, key.rowId, ciphertext, this.opts.providerFor?.(name) ?? null, now, now],
+      [ctx.workspaceId, name, key.rowId, ciphertext, now, now],
     );
+    await this.opts.refs.markConfigured(ctx, { name, provider: this.opts.providerFor?.(name) ?? null });
     // No warning to give. The local store's exists because a shell variable beats the file on
     // the next restart; nothing shadows a row.
     return { ok: true, warning: null };
@@ -125,31 +128,21 @@ export class KmsSecretStore implements SecretStore {
       out[row.name] = openWithDataKey(material, row.ciphertext, aadFor(workspaceId, row.name));
     }
 
-    if (Object.keys(out).length) {
-      await this.q(workspaceId).run(
-        `UPDATE workspace_secrets SET last_used_at = ?
-          WHERE workspace_id = ? AND name IN (${Object.keys(out).map(() => "?").join(", ")})`,
-        [new Date().toISOString(), workspaceId, ...Object.keys(out)],
-      );
-    }
+    // Usage is recorded in the registry rather than beside the ciphertext, so "when did a run
+    // last receive this" is one fact in one place whichever store answered.
+    await this.opts.refs.touch(workspaceId, Object.keys(out));
     return out;
   }
 
   async listNames(ctx: TenantContext): Promise<SecretRef[]> {
-    const rows = await this.q(ctx.workspaceId).all<{ name: string; provider: string | null; last_used_at: string | null }>(
-      `SELECT name, provider, last_used_at FROM workspace_secrets
-        WHERE workspace_id = ? ORDER BY name`,
-      [ctx.workspaceId],
-    );
-    // Names, providers and timestamps. The ciphertext column is not selected — not because
-    // selecting it would leak anything readable, but because a value that is never fetched is a
-    // value that cannot end up in a log line by way of an object somebody stringified.
-    return rows.map((r) => ({
-      name: r.name,
-      configured: true as const,
-      provider: r.provider ?? null,
-      lastUsedAt: r.last_used_at ?? null,
-    }));
+    // From the registry, not from `workspace_secrets`. Two reasons: it is the answer the local
+    // store gives too, so a client cannot tell which store it is talking to; and the ciphertext
+    // column is never selected at all, so a value cannot reach a log line by way of an object
+    // somebody stringified.
+    const rows = await this.opts.refs.list(ctx);
+    return rows
+      .filter((r) => r.configured)
+      .map((r) => ({ name: r.name, configured: true as const, provider: r.provider, lastUsedAt: r.last_used_at }));
   }
 
   async delete(ctx: TenantContext, name: string): Promise<void> {
@@ -158,6 +151,8 @@ export class KmsSecretStore implements SecretStore {
       `DELETE FROM workspace_secrets WHERE workspace_id = ? AND name = ?`,
       [ctx.workspaceId, name],
     );
+    // Cleared rather than forgotten — see the local store, and secretRefs.markCleared.
+    await this.opts.refs.markCleared(ctx, name);
   }
 
   /**

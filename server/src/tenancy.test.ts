@@ -36,6 +36,7 @@ import { EvalStore } from "./evalStore.ts";
 import { McpStore } from "./mcpStore.ts";
 import { DeployStore } from "./deployStore.ts";
 import { DbTicketStore } from "./db/repositories/tickets.ts";
+import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
 import { attackSuite } from "./auth/attacks.test.ts";
 import type { Run, Step } from "./types.ts";
 
@@ -388,6 +389,10 @@ const SCOPED_API: Record<string, string[]> = {
   // maintenance rather than a scoped operation, and asserting it "cannot reach another
   // workspace" would be asserting the opposite of what it is for. tickets.test.ts covers it.
   DbTicketStore: ["issue", "consume", "revoke"],
+  // Session 3. The names a workspace has configured — no values, but a list of what somebody
+  // integrates with is still theirs. `touch` takes a workspace id rather than a context,
+  // because its caller resolved one from a run; it is exercised for the same scoping anyway.
+  SecretRefRepository: ["list", "get", "declare", "markConfigured", "markCleared", "forget", "touch"],
 };
 
 /**
@@ -487,6 +492,20 @@ async function remainder(db: Db): Promise<void> {
   check((await agents.byId(B.ctx, sameSlug)) === undefined, "...and B cannot resolve A's uuid");
 
   check(!(await agents.editCounts(A.ctx)).has(theirAgent.id), "editCounts counts none of B's edits");
+
+  // Session 3: the credential NAMES a workspace has. No values live here, but what a tenant
+  // integrates with is not something another tenant is entitled to enumerate.
+  const refs = new SecretRefRepository(db);
+  await refs.markConfigured(B.ctx, { name: "B_ONLY_TOKEN", provider: "mcp" });
+  await refs.declare(B.ctx, { name: "B_DECLARED_TOKEN" });
+  check((await refs.get(A.ctx, "B_ONLY_TOKEN")) === undefined, "a secret ref of B's is invisible to A");
+  check((await refs.list(A.ctx)).every((r) => !r.name.startsWith("B_")), "and absent from A's listing");
+  await refs.markCleared(A.ctx, "B_ONLY_TOKEN");
+  check((await refs.get(B.ctx, "B_ONLY_TOKEN"))?.configured === true, "A cannot clear B's ref");
+  await refs.touch(A.ctx.workspaceId, ["B_ONLY_TOKEN"]);
+  check((await refs.get(B.ctx, "B_ONLY_TOKEN"))?.last_used_at === null, "nor record a use of it");
+  await refs.forget(A.ctx, "B_DECLARED_TOKEN");
+  check((await refs.get(B.ctx, "B_DECLARED_TOKEN")) !== undefined, "nor forget one B declared");
 
   let plannedRefused = false;
   try {

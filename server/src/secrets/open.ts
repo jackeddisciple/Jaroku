@@ -10,12 +10,15 @@ import type { CredentialWriter } from "../envWriter.ts";
 import { DotEnvSecretStore } from "./dotEnvSecretStore.ts";
 import { KmsSecretStore } from "./kmsSecretStore.ts";
 import { MASTER_KEY_ENV, resolveMasterKey } from "./masterKey.ts";
+import type { SecretRefRepository } from "../db/repositories/secretRefs.ts";
 import type { RunWorkspaceResolver, SecretStore, SecretStoreKind } from "./secretStore.ts";
 
 export const SECRET_STORE_ENV = "JAROKU_SECRET_STORE";
 
 export interface OpenSecretStoreOptions {
   db: Db;
+  /** The store-agnostic name registry. Both implementations record through it. */
+  refs: SecretRefRepository;
   /** The one writer of `runtime/.env`. Used only by the local store. */
   writer: CredentialWriter;
   envPath: string;
@@ -62,6 +65,7 @@ export function openSecretStore(opts: OpenSecretStoreOptions): SecretStore {
       writer: opts.writer,
       envPath: opts.envPath,
       providerFor: opts.providerFor,
+      refs: opts.refs,
     });
   }
 
@@ -70,6 +74,7 @@ export function openSecretStore(opts: OpenSecretStoreOptions): SecretStore {
     // Throws when the master key is absent, which is the intended outcome: see masterKey.ts for
     // why there is deliberately no generated fallback.
     master: resolveMasterKey(env),
+    refs: opts.refs,
     runWorkspace: opts.runWorkspace,
     providerFor: opts.providerFor,
   });

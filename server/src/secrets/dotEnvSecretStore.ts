@@ -25,11 +25,18 @@
 //
 // Both facts are asserted in the tests rather than left implied, so the day somebody points
 // this at a multi-tenant deployment the failure is a refusal at boot and not a shared key.
+//
+// IT STILL RECORDS ITS NAMES IN `secret_refs`. That is the one place this store is NOT purely a
+// wrapper, and the reason is that the registry is store-agnostic: a client asking what is
+// configured must get the same answer whichever store answered it, or the panel behaves
+// differently depending on how the server was deployed. The values stay in the file; only the
+// names, what they are for, and when a run last received one go in the table.
 
 import { existsSync, readFileSync } from "node:fs";
 import { parseLine } from "../env.ts";
 import type { CredentialWriter } from "../envWriter.ts";
 import type { TenantContext } from "../db/tenant.ts";
+import type { SecretRefRepository } from "../db/repositories/secretRefs.ts";
 import {
   assertSecretName, type SecretRef, type SecretStore, type SetResult,
 } from "./secretStore.ts";
@@ -41,6 +48,15 @@ export interface DotEnvSecretStoreOptions {
   envPath: string;
   /** What each name is for, when the caller knows. Display only — nothing branches on it. */
   providerFor?: (name: string) => string | null;
+  /**
+   * The store-agnostic name registry.
+   *
+   * Optional, and the one thing here that is: this store predates the table and has to keep
+   * working without a database — `test:env-writer` and the secret suite both construct it with
+   * nothing but a file, and a migration that has not run yet must not break `npm run dev`.
+   * Absent, `listNames` falls back to reading the file, which is what it did before.
+   */
+  refs?: SecretRefRepository;
 }
 
 /** Names that are Jaroku's own plumbing rather than a user's credential. Never listed. */
@@ -58,7 +74,13 @@ export class DotEnvSecretStore implements SecretStore {
     // refused in production is refused in development too. A rule enforced on one path is a
     // rule somebody discovers on the other path, in production, with a user watching.
     assertSecretName(name);
-    return this.opts.writer.set(name, value);
+    const written = this.opts.writer.set(name, value);
+    // Recorded only when the write actually happened. A refused value that still marked the
+    // name configured would show a green tick beside a credential nothing has.
+    if (written.ok) {
+      await this.opts.refs?.markConfigured(_ctx, { name, provider: this.opts.providerFor?.(name) ?? null });
+    }
+    return written;
   }
 
   /**
@@ -84,6 +106,9 @@ export class DotEnvSecretStore implements SecretStore {
         this.lastUsed.set(name, at);
       }
     }
+    // The run id is what a hosted store resolves a workspace from; here there is no workspace
+    // to resolve to, so the usage is recorded in memory above and the table is left alone.
+    // Writing every local workspace's row would be recording a fact the file cannot support.
     return out;
   }
 
@@ -94,7 +119,16 @@ export class DotEnvSecretStore implements SecretStore {
    * configured is what the loaders would actually load — a line this store cannot parse is a
    * line a run would not receive either, and listing it would be a lie the user acts on.
    */
-  async listNames(_ctx: TenantContext): Promise<SecretRef[]> {
+  async listNames(ctx: TenantContext): Promise<SecretRef[]> {
+    // The registry first, when there is one: it is the answer every implementation gives, and
+    // it knows things the file does not — what a name is for, and when a run last used it.
+    if (this.opts.refs) {
+      const rows = await this.opts.refs.list(ctx);
+      return rows
+        .filter((r) => r.configured)
+        .map((r) => ({ name: r.name, configured: true as const, provider: r.provider, lastUsedAt: r.last_used_at }));
+    }
+
     const names = new Set<string>();
     if (existsSync(this.opts.envPath)) {
       for (const line of readFileSync(this.opts.envPath, "utf8").split("\n")) {
@@ -124,9 +158,12 @@ export class DotEnvSecretStore implements SecretStore {
       }));
   }
 
-  async delete(_ctx: TenantContext, name: string): Promise<void> {
+  async delete(ctx: TenantContext, name: string): Promise<void> {
     assertSecretName(name);
     this.opts.writer.clear(name);
     this.lastUsed.delete(name);
+    // Cleared, not forgotten. A name an agent still declares is still a name the user needs to
+    // see — now with an empty state beside it rather than vanishing from the panel.
+    await this.opts.refs?.markCleared(ctx, name);
   }
 }

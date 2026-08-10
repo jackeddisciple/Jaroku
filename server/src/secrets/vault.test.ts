@@ -31,6 +31,7 @@ import { SqliteDb } from "../db/sqlite.ts";
 import { withScratchPostgres } from "../db/testDb.ts";
 import { newRequestId, systemContext, systemContextFor, type TenantContext } from "../db/tenant.ts";
 import { IdentityRepository } from "../db/repositories/identity.ts";
+import { SecretRefRepository } from "../db/repositories/secretRefs.ts";
 import { KmsSecretStore } from "./kmsSecretStore.ts";
 import { LocalMasterKeyProvider, MasterKeyError, MASTER_KEY_ENV, resolveMasterKey } from "./masterKey.ts";
 import { runSecretConformance } from "./conformance.ts";
@@ -130,9 +131,11 @@ async function suite(label: string, db: Db): Promise<void> {
   runs.set(runA, A.workspaceId);
   runs.set(runB, B.workspaceId);
 
+  const refs = new SecretRefRepository(db);
   const store = new KmsSecretStore({
     db,
     master,
+    refs,
     runWorkspace: async (id) => runs.get(id) ?? null,
     providerFor: (n) => (n.startsWith("ANTHROPIC") ? "anthropic" : null),
   });
@@ -272,6 +275,7 @@ async function suite(label: string, db: Db): Promise<void> {
   const wrongMaster = new KmsSecretStore({
     db,
     master: new LocalMasterKeyProvider(OTHER_MASTER),
+    refs,
     runWorkspace: async (id) => runs.get(id) ?? null,
   });
   let unreadable = false;

@@ -87,6 +87,7 @@ const SCOPED_MODULES = [
   "mcpStore.ts",
   "deployStore.ts",
   "db/repositories/agents.ts",
+  "db/repositories/secretRefs.ts",
 ];
 
 /**
@@ -102,6 +103,7 @@ const EXEMPT: Record<string, string> = {
   hydrate: "pure row-shaping",
   hydrateStep: "pure row-shaping",
   hydrateVersion: "pure row-shaping",
+  touch: "takes a workspace id rather than a context: its caller is getForRun, which resolved one from a run",
   hydrateRubric: "pure row-shaping",
   hydrateEvalRun: "pure row-shaping",
   hydrateTool: "pure row-shaping",

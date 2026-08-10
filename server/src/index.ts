@@ -65,6 +65,7 @@ import { McpStore } from "./mcpStore.ts";
 import { McpRegistry } from "./mcpRegistry.ts";
 import { fileCredentialWriter } from "./envWriter.ts";
 import { openSecretStore } from "./secrets/open.ts";
+import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
 import { isSecretName } from "./secrets/secretStore.ts";
 import { PROVIDER_ENV_KEY, isProviderId, providerStatus, verifyProviderKey } from "./providers.ts";
 import { DeployStore } from "./deployStore.ts";
@@ -195,8 +196,10 @@ function contextForRun(runId: string): TenantContext {
 //
 // The MCP registry and the provider panel keep talking to the writer directly for now; they are
 // moved onto this in the commit that gives names a table of their own.
+const secretRefs = new SecretRefRepository(db);
 const secrets = openSecretStore({
   db,
+  refs: secretRefs,
   writer: credentials,
   envPath: join(RUNTIME_DIR, ".env"),
   // How a run id becomes a workspace. The hosted store needs it because a worker assembling a
