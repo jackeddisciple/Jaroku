@@ -54,7 +54,15 @@ export function testContext(): TenantContext {
  * a caller can skip out loud rather than fail.
  */
 export async function withScratchPostgres<T>(
-  run: (db: PostgresDb) => Promise<T>,
+  /**
+   * `url` is the scratch database's own connection string.
+   *
+   * Handed over because one suite needs to point something OTHER than this pool at the same
+   * database: the checkpoint tests ask LangGraph's own `PostgresSaver.setup()` to create its
+   * tables, from Python, so that the schema under test is the one LangGraph produces rather
+   * than a hand-written imitation of it.
+   */
+  run: (db: PostgresDb, url: string) => Promise<T>,
 ): Promise<T | null> {
   const url = process.env[PG_URL_ENV];
   if (!url) {
@@ -83,7 +91,7 @@ export async function withScratchPostgres<T>(
   const db = new PostgresDb({ url: scratchUrl });
   try {
     await migrate(db.migrationTarget(), join(MIGRATIONS, "postgres"), () => {});
-    return await run(db);
+    return await run(db, scratchUrl);
   } finally {
     await db.close();
     // A database with a live connection cannot be dropped, and the pool's sockets linger for

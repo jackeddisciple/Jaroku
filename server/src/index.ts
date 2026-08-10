@@ -60,6 +60,7 @@ import { objectRoutes } from "./http/objects.ts";
 import {
   CHECKPOINT_SCHEMA, checkpointThreadId, checkpointerKindFromEnv,
 } from "./checkpoints/threads.ts";
+import { openCheckpointStore } from "./checkpoints/store.ts";
 import { introspectGraph, type GraphResult } from "./graphIntrospect.ts";
 import { streamExplain } from "./explainer.ts";
 import type { DeployChannelCommand, ExplainCommand } from "./wsRelay.ts";
@@ -333,7 +334,20 @@ let runActive = false;
 let activeRunId: string | null = null;
 let pausedRunId: string | null = null;
 
+// WHERE A RUN'S CHECKPOINTS GO. `sqlite` writes one file per run under .checkpoints/; `postgres`
+// writes rows a worker on another machine can read, which is the point. Resolved once and
+// announced, so a deployment is never unsure which it got.
+const CHECKPOINTER = checkpointerKindFromEnv();
+console.log(
+  `[server] checkpointer: ${CHECKPOINTER}` +
+    (CHECKPOINTER === "sqlite" ? ` (${join(RUNTIME_DIR, ".checkpoints")})` : ` (${CHECKPOINT_SCHEMA} schema)`),
+);
+
 const CHECKPOINT_DIR = join(RUNTIME_DIR, ".checkpoints");
+// Branching and sweeping, whichever store is holding the checkpoints. See checkpoints/store.ts:
+// a fork is a file copy locally and an INSERT … SELECT hosted, and both promise the same thing —
+// the parent's checkpoints are only ever read.
+const checkpoints = openCheckpointStore(CHECKPOINTER, { checkpointDir: CHECKPOINT_DIR, db });
 const controlFile = (runId: string): string => join(CHECKPOINT_DIR, `${runId}.control`);
 /** Ask the runner to pause: it reads this file at its next node boundary. */
 function requestPause(runId: string): void {
@@ -2173,8 +2187,7 @@ async function branchRun(
   }
   // Resolve the node boundary containing `atSeq` — we fork at a whole-node boundary, never mid-node.
   const boundary = await store.boundaryForStep(ctx, fromRunId, atSeq);
-  const parentDb = join(CHECKPOINT_DIR, `${fromRunId}.sqlite`);
-  if (!boundary || !existsSync(parentDb)) {
+  if (!boundary || !(await checkpoints.has(ctx, fromRunId))) {
     relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: "no durable checkpoint for that step (branching needs a checkpointed run)" });
     return;
   }
@@ -2182,10 +2195,12 @@ async function branchRun(
   const branchId = randomUUID();
   const { checkpointId, seqHigh } = boundary;
   try {
-    // Copy the parent's step prefix (0..boundary) + a physical copy of its checkpoint db, so the
-    // parent is never mutated and the branch is self-contained + independently inspectable.
+    // Copy the parent's step prefix (0..boundary) and its checkpoints up to the same boundary,
+    // so the parent is never mutated and the branch is self-contained and independently
+    // inspectable. What "copy the checkpoints" means is the store's business: a file copy
+    // locally, a scoped row copy hosted, and the parent read-only in both.
     await store.copyRunPrefix(ctx, fromRunId, branchId, seqHigh, seqHigh);
-    copyFileSync(parentDb, join(CHECKPOINT_DIR, `${branchId}.sqlite`));
+    await checkpoints.fork(ctx, { fromRunId, toRunId: branchId, checkpointId });
   } catch (err) {
     relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: `branch prep failed: ${(err as Error).message}` });
     return;
