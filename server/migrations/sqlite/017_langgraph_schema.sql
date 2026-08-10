@@ -1,0 +1,6 @@
+-- 017_langgraph_schema — nothing to do on this driver.
+--
+-- SQLite has no schemas, and the SQLite checkpointer does not use one: it writes
+-- `runtime/.checkpoints/<run_id>.sqlite`, one file per run, exactly as it always has. A
+-- comment-only file rather than a missing one, so the two dialects can never drift apart
+-- silently — see migrate.ts.

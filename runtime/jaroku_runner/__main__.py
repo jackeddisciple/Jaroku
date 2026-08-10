@@ -30,7 +30,7 @@ from jaroku_interceptor import JarokuTracer, Run, load_env
 from jaroku_interceptor.schema import emit_run_end, emit_run_start, now_iso
 
 from .contract import ContractError, load_agent, tools_of
-from .debug import run_with_checkpoints
+from .debug import run_with_checkpoints, thread_id_for
 from .guard import install_stdout_guard
 from .models import build_model, resolve_model_name
 
@@ -78,9 +78,12 @@ def main(argv: list[str]) -> int:
     resuming = resume_run_id is not None
 
     run_id = resume_run_id or os.environ.get("JAROKU_RUN_ID") or str(uuid.uuid4())
-    # The checkpoint thread: a branch continues the PARENT's thread (inside its copied db); a fresh
-    # run or resume uses its own run id as the thread.
-    thread_id = branch_thread if branching else run_id
+    # The checkpoint thread: a branch continues the PARENT's thread; a fresh run or resume uses
+    # its own. `thread_id_for` prefixes the workspace when JAROKU_WORKSPACE_ID is set, because on
+    # the Postgres checkpointer every tenant's threads share one table and nothing but the key
+    # separates them — see debug.py. A copied-out project has no workspace and gets the bare run
+    # id, which is what keeps an exported project standalone.
+    thread_id = branch_thread if branching else thread_id_for(run_id)
     seq_offset = int(os.environ.get("JAROKU_SEQ_OFFSET", "0") or "0")
     # Both resume and branch continue a run that already exists in the store — no new run_start.
     is_continuation = resuming or branching

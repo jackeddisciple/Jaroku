@@ -57,6 +57,9 @@ import { openObjectStore } from "./storage/open.ts";
 import { resolveSigningKey } from "./storage/presign.ts";
 import { filesFromDirectory, ProjectStore } from "./storage/projectStore.ts";
 import { objectRoutes } from "./http/objects.ts";
+import {
+  CHECKPOINT_SCHEMA, checkpointThreadId, checkpointerKindFromEnv,
+} from "./checkpoints/threads.ts";
 import { introspectGraph, type GraphResult } from "./graphIntrospect.ts";
 import { streamExplain } from "./explainer.ts";
 import type { DeployChannelCommand, ExplainCommand } from "./wsRelay.ts";
@@ -2041,7 +2044,17 @@ async function runAgent(
   // JAROKU_CONTROL_DIR is where tools/mcp_bridge.py exchanges confirmation approvals with
   // this process. Its ABSENCE is how a copied-out project knows nobody is watching — see the
   // gate's standalone branch. Set on every interactive run, so the gate always has a route.
-  const env: NodeJS.ProcessEnv = { JAROKU_RUN_ID: runId, JAROKU_CONTROL_DIR: CHECKPOINT_DIR };
+  const env: NodeJS.ProcessEnv = {
+    JAROKU_RUN_ID: runId,
+    JAROKU_CONTROL_DIR: CHECKPOINT_DIR,
+    // WHICH WORKSPACE THIS RUN'S CHECKPOINTS BELONG TO.
+    //
+    // On the Postgres checkpointer every tenant's threads share one table and there is no RLS
+    // in that schema — LangGraph never issues SET LOCAL, so a policy there would match nothing.
+    // The isolation is the key: `ws:<workspace_id>:run:<run_id>`. The SQLite path ignores it,
+    // because one file per run is already a namespace.
+    JAROKU_WORKSPACE_ID: ctx.workspaceId,
+  };
   if (provider) env.JAROKU_PROVIDER = provider;
   if (model) env.JAROKU_MODEL = model;
 
@@ -2124,6 +2137,9 @@ async function resumeRun(ctx: TenantContext, runId: string): Promise<void> {
   console.log(`[debug] resuming run ${runId} from seq ${seqOffset} (agent ${run.agent_id})`);
   const env: NodeJS.ProcessEnv = {
     JAROKU_RESUME_RUN_ID: runId,
+    // The same workspace the run was dispatched in — a resume continues the SAME thread, so it
+    // has to compute the same thread id. See runAgent.
+    JAROKU_WORKSPACE_ID: ctx.workspaceId,
     JAROKU_SEQ_OFFSET: String(seqOffset),
     JAROKU_PROVIDER: run.provider,
     JAROKU_MODEL: run.model,
@@ -2178,7 +2194,11 @@ async function branchRun(
   const env: NodeJS.ProcessEnv = {
     JAROKU_RUN_ID: branchId,
     JAROKU_CONTROL_DIR: CHECKPOINT_DIR,
-    JAROKU_BRANCH_THREAD_ID: fromRunId, // the checkpoint thread lives under the parent's id
+    JAROKU_WORKSPACE_ID: ctx.workspaceId,
+    // The parent's thread, spelled the same way the parent spelled it. A branch re-enters an
+    // existing thread, so this is the parent's full id rather than its run id — computing it
+    // here rather than in the runner keeps one definition of what a thread is called.
+    JAROKU_BRANCH_THREAD_ID: checkpointThreadId(ctx.workspaceId, fromRunId),
     JAROKU_BRANCH_CHECKPOINT_ID: checkpointId,
     JAROKU_SEQ_OFFSET: String(seqHigh + 1),
     JAROKU_PROVIDER: parent.provider,

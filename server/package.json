@@ -47,6 +47,7 @@
     "test:retry": "tsx src/evalRetry.test.ts",
     "test:judge": "tsx src/judge/rubric.test.ts",
     "test:cleanup": "tsx src/evalCleanup.test.ts",
+    "test:checkpoint-threads": "tsx src/checkpoints/threads.test.ts",
     "test:env-writer": "tsx src/envWriter.test.ts",
     "test:secrets": "tsx src/secrets/secrets.test.ts",
     "test:vault": "tsx src/secrets/vault.test.ts",

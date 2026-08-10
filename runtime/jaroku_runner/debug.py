@@ -18,7 +18,30 @@ Control plane (all off the frozen stdout trace stream):
   * server -> runner: a per-run ``<run_id>.control`` file the runner reads at each boundary;
     ``pause`` makes it stop AT the boundary (checkpoint durable) and exit without a run_end.
 
-Checkpoints and control files live under ``runtime/.checkpoints/`` (gitignored).
+WHERE THE CHECKPOINTS LIVE — two implementations, selected by ``JAROKU_CHECKPOINTER``.
+
+``sqlite`` (the default) writes ``runtime/.checkpoints/<run_id>.sqlite``, exactly as it always
+has: no database to stand up, no cloud account, and ``npm run dev`` unchanged.
+
+``postgres`` writes to a real database through ``PostgresSaver``, because a file on one machine
+cannot be resumed by a worker on another — which is the whole of Session 3. Three things about
+that path are deliberate:
+
+  * ITS OWN CONNECTION. LangGraph does not issue ``SET LOCAL app.workspace_id``, so it must not
+    borrow a pool whose isolation depends on that. It opens its own, from
+    ``JAROKU_CHECKPOINT_PG_URL``.
+
+  * ITS OWN SCHEMA. ``langgraph``, set on the connection's search_path, so LangGraph's tables
+    and its migrations live somewhere Jaroku's schema does not, and neither one's migration
+    runner has an opinion about the other's tables.
+
+  * THE WORKSPACE IN THE THREAD ID. ``ws:<workspace_id>:run:<run_id>``. Access is mediated
+    entirely by Jaroku's code — there is no RLS in that schema — so the workspace has to be part
+    of the key rather than a column somebody remembers to filter on. It also makes the sweep a
+    prefix delete and makes a thread collision between two tenants impossible.
+
+An exported project has neither variable set, gets the SQLite saver, and works standalone —
+the same way the absence of ``JAROKU_CONTROL_DIR`` is how it knows nobody is watching.
 """
 
 from __future__ import annotations
@@ -28,8 +51,9 @@ import os
 import sqlite3
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 # runtime/.checkpoints/ — sibling of jaroku_runner/, alongside .staging/ and .history/.
 CHECKPOINT_DIR = Path(__file__).resolve().parent.parent / ".checkpoints"
@@ -47,6 +71,43 @@ def checkpoint_db_path(run_id: str) -> Path:
     return CHECKPOINT_DIR / f"{run_id}.sqlite"
 
 
+# The schema LangGraph's tables live in on the Postgres path. Jaroku owns the schema and the
+# grant; LangGraph owns everything inside it and creates it with its own setup().
+CHECKPOINT_SCHEMA = "langgraph"
+
+
+def checkpointer_kind() -> str:
+    """``sqlite`` or ``postgres``. Anything else is a configuration error, not a fallback."""
+    kind = (os.environ.get("JAROKU_CHECKPOINTER") or "sqlite").strip().lower()
+    if kind not in ("sqlite", "postgres"):
+        raise RuntimeError(
+            f'JAROKU_CHECKPOINTER must be "sqlite" or "postgres", not "{kind}". Falling back '
+            f"would run with checkpoints nobody can find."
+        )
+    return kind
+
+
+def thread_id_for(run_id: str, workspace_id: str | None = None) -> str:
+    """The checkpoint thread a run writes to.
+
+    ``ws:<workspace_id>:run:<run_id>`` on the Postgres checkpointer, and the bare run id on
+    SQLite — the same rule the Node side computes in checkpoints/threads.ts, which is where the
+    long version of why lives.
+
+    The short version: on Postgres every tenant's threads share one table in a schema with no
+    row-level security, so the workspace has to be part of the key. On SQLite it is one file per
+    run, which is already a namespace — and prefixing there would break a branch from any run
+    checkpointed before this session, for nothing.
+
+    A copied-out project has no workspace and gets the bare form either way, which is what keeps
+    an exported project standalone.
+    """
+    ws = workspace_id or os.environ.get("JAROKU_WORKSPACE_ID") or ""
+    if not ws or checkpointer_kind() == "sqlite":
+        return run_id
+    return f"ws:{ws}:run:{run_id}"
+
+
 def control_path(run_id: str) -> Path:
     return CHECKPOINT_DIR / f"{run_id}.control"
 
@@ -62,6 +123,59 @@ def _pause_requested(run_id: str) -> bool:
         return p.exists() and p.read_text().strip() == "pause"
     except OSError:
         return False
+
+
+@contextmanager
+def _open_saver(run_id: str) -> Iterator[Any]:
+    """The checkpointer for this run, opened and closed. See the module docstring for the choice.
+
+    Both branches call ``setup()``, which is idempotent and creates whatever tables the saver
+    needs. On the Postgres side that runs inside the ``langgraph`` schema, because the search
+    path says so — LangGraph's migrations are LangGraph's, and they must not land beside
+    Jaroku's tables where Jaroku's migration runner would then have an opinion about them.
+    """
+    kind = checkpointer_kind()
+    if kind == "sqlite":
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        conn = sqlite3.connect(str(checkpoint_db_path(run_id)), check_same_thread=False)
+        try:
+            saver = SqliteSaver(conn)
+            saver.setup()
+            yield saver
+        finally:
+            conn.close()
+        return
+
+    url = os.environ.get("JAROKU_CHECKPOINT_PG_URL") or ""
+    if not url:
+        raise RuntimeError(
+            "JAROKU_CHECKPOINTER=postgres needs JAROKU_CHECKPOINT_PG_URL. It is deliberately "
+            "NOT JAROKU_PG_URL: the checkpointer opens its own connection, because LangGraph "
+            "never issues SET LOCAL app.workspace_id and must not borrow a pool whose isolation "
+            "depends on it."
+        )
+    try:
+        from langgraph.checkpoint.postgres import PostgresSaver
+    except ImportError as exc:  # pragma: no cover - depends on the optional extra
+        raise RuntimeError(
+            "JAROKU_CHECKPOINTER=postgres needs the checkpoint extra. Install it with: "
+            "uv sync --extra hosted"
+        ) from exc
+
+    # The schema is created here rather than by a Jaroku migration, and that is the same
+    # separation as above: Jaroku's migration runner owns Jaroku's schema, and this owns the one
+    # LangGraph's own setup() then fills. CREATE SCHEMA IF NOT EXISTS is idempotent and cheap.
+    import psycopg
+
+    with psycopg.connect(url, autocommit=True) as bootstrap:
+        bootstrap.execute(f"CREATE SCHEMA IF NOT EXISTS {CHECKPOINT_SCHEMA}")
+
+    with psycopg.connect(url, autocommit=True) as conn:
+        conn.execute(f"SET search_path TO {CHECKPOINT_SCHEMA}")
+        saver = PostgresSaver(conn)
+        saver.setup()
+        yield saver
 
 
 def run_with_checkpoints(
@@ -100,12 +214,7 @@ def run_with_checkpoints(
         app.invoke(initial_state, config={"callbacks": [tracer], "recursion_limit": recursion_limit})
         return "completed"
 
-    from langgraph.checkpoint.sqlite import SqliteSaver
-
-    conn = sqlite3.connect(str(checkpoint_db_path(run_id)), check_same_thread=False)
-    try:
-        saver = SqliteSaver(conn)
-        saver.setup()
+    with _open_saver(run_id) as saver:
         graph = builder.compile(checkpointer=saver, interrupt_after="*")
         config = {
             "configurable": {"thread_id": thread_id},
@@ -166,5 +275,3 @@ def run_with_checkpoints(
                     "checkpoint_id": checkpoint_id, "next": list(snapshot.next),
                 })
                 return "paused"
-    finally:
-        conn.close()

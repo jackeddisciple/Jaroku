@@ -25,6 +25,15 @@ connectors = [
     "mcp>=1.9.0",
 ]
 
+# The hosted path. Kept out of the base install for the same reason the connectors are: a
+# checkpoint on a local disk is the right trade for one machine, needs no database, and is what
+# `npm run dev` uses. `JAROKU_CHECKPOINTER=postgres` needs these, and says so by name when they
+# are absent rather than failing on an import somewhere deep in a run.
+hosted = [
+    "langgraph-checkpoint-postgres>=2.0.0",
+    "psycopg[binary]>=3.1.0",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
