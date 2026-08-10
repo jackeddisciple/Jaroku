@@ -1,124 +1,96 @@
-// Sweeping the resumable-checkpoint blobs an eval leaves behind.
+// Sweeping the resumable-checkpoint state an eval leaves behind.
 //
 // Every run is driven through a checkpointed twin (jaroku_runner/debug.py) so it can be
-// paused, resumed and branched — which means every run drops a `<run_id>.sqlite` under
-// runtime/.checkpoints/. That's the right trade for the interactive run the user is
-// driving. It is the wrong trade at eval scale: fifty examples across three providers is
-// 150 checkpoint databases per eval, for runs nobody will ever resume.
+// paused, resumed and branched — which means every run leaves durable checkpoints behind.
+// That's the right trade for the interactive run the user is driving. It is the wrong trade
+// at eval scale: fifty examples across three providers is 150 checkpointed runs, for runs
+// nobody will ever resume.
 //
 // WHAT IS AND ISN'T DELETED, precisely:
-//   * DELETED — the checkpoint db and control file for an eval job's run. These exist only
-//     to make a run resumable; the eval is over and nothing will resume it.
+//   * DELETED — the checkpoint state for an eval job's run. It exists only to make a run
+//     resumable; the eval is over and nothing will resume it.
 //   * KEPT — the run row, every step, the job row, the score, the trace. Drill-down still
 //     opens the full timeline afterwards, which is the whole point of building eval jobs
 //     on the ordinary run path.
 //   * NEVER TOUCHED — anything belonging to an interactive run. Those are exactly the runs
 //     a user might come back to and branch from.
 //
-// The sweep is best-effort by design: a file that won't delete is a warning, never a
+// WHAT CHANGED IN SESSION 3. This used to unlink files under `runtime/.checkpoints/`, which is
+// the only thing it could do when a checkpoint was a file. It now asks the CheckpointStore, so
+// the sweep is a file unlink locally and a delete by thread hosted — and the rules above are
+// enforced in one place rather than once per storage medium. The run ids it deletes come from
+// the eval's own job rows either way, which is what makes "an interactive run is never swept"
+// true by construction rather than by a filename pattern.
+//
+// The sweep is best-effort by design: something that will not delete is a warning, never a
 // failure. Losing an eval's results to a cleanup error would be a far worse bug than
-// leaving a stale blob on disk.
+// leaving stale state behind.
 
-import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
-import { join } from "node:path";
 import type { EvalStore } from "./evalStore.ts";
 import type { TenantContext } from "./db/tenant.ts";
+import type { CheckpointStore, SweepResult } from "./checkpoints/store.ts";
 
-export interface SweepResult {
-  removed: number;
-  bytesFreed: number;
-  failed: number;
-}
-
-/** Artifacts a single run leaves in .checkpoints/. */
-function artifactsFor(checkpointDir: string, runId: string): string[] {
-  return [
-    join(checkpointDir, `${runId}.sqlite`),
-    // SQLite WAL sidecars — deleting only the main file would leave these orphaned.
-    join(checkpointDir, `${runId}.sqlite-wal`),
-    join(checkpointDir, `${runId}.sqlite-shm`),
-    join(checkpointDir, `${runId}.control`),
-    join(checkpointDir, `${runId}.edit.json`),
-  ];
-}
+export type { SweepResult };
 
 /**
- * Drop the checkpoint artifacts for one finished eval's runs.
+ * Drop the checkpoint state for one finished eval's runs.
  *
- * Only touches runs recorded as this eval's jobs, so an interactive run can never be
- * caught in the sweep even if it happened to be executing at the same time.
+ * Only touches runs recorded as this eval's jobs, so an interactive run can never be caught in
+ * the sweep even if it happened to be executing at the same time.
  */
 export async function sweepEvalArtifacts(
   ctx: TenantContext,
   evalStore: EvalStore,
-  checkpointDir: string,
+  checkpoints: CheckpointStore,
   evalId: string,
 ): Promise<SweepResult> {
-  const out: SweepResult = { removed: 0, bytesFreed: 0, failed: 0 };
-  if (!existsSync(checkpointDir)) return out;
-
+  const runIds: string[] = [];
   for (const job of await evalStore.jobsForEval(ctx, evalId)) {
-    if (!job.run_id) continue;
-    for (const path of artifactsFor(checkpointDir, job.run_id)) {
-      if (!existsSync(path)) continue;
-      try {
-        out.bytesFreed += statSync(path).size;
-        rmSync(path, { force: true });
-        out.removed++;
-      } catch {
-        // Best effort: a stale blob is a much smaller problem than a failed cleanup
-        // taking down the path that reports an eval's results.
-        out.failed++;
-      }
-    }
+    if (job.run_id) runIds.push(job.run_id);
   }
-  return out;
+  if (!runIds.length) return { removed: 0, bytesFreed: 0, failed: 0 };
+  return checkpoints.sweepRuns(ctx, runIds);
 }
 
 /**
- * Startup sweep: checkpoint blobs whose run belongs to a FINISHED eval.
+ * Startup sweep: checkpoint state whose run belongs to a FINISHED eval.
  *
- * Catches evals interrupted by a crash or a restart, whose per-eval sweep never ran. A
- * checkpoint whose run id isn't an eval job's is left strictly alone — that's either an
- * interactive run or something we don't understand, and neither is ours to delete.
+ * Catches evals interrupted by a crash or a restart, whose per-eval sweep never ran. State
+ * whose run id isn't an eval job's is left strictly alone — that's either an interactive run
+ * or something we don't understand, and neither is ours to delete.
+ *
+ * The intersection is what makes that true, and it is why the store's `runsHeld` is allowed to
+ * be unscoped on the local path: whatever it reports, only the ids this workspace's finished
+ * evals actually name are swept.
  */
 export async function sweepOrphanedEvalArtifacts(
   contexts: TenantContext[],
   evalStore: EvalStore,
-  checkpointDir: string,
+  checkpoints: CheckpointStore,
 ): Promise<SweepResult> {
   const out: SweepResult = { removed: 0, bytesFreed: 0, failed: 0 };
-  if (!existsSync(checkpointDir)) return out;
 
-  // Run ids belonging to evals that are over. An eval still in flight keeps its files.
-  const finished = new Set<string>();
-  // A workspace at a time, across all of them. The sweep still cleans a whole machine's
-  // disk; it just cannot do that with one unscoped query, because under RLS as the
-  // application role an unscoped query returns nothing at all.
+  // A workspace at a time, across all of them. The sweep still cleans a whole machine's state;
+  // it just cannot do that with one unscoped query, because under RLS as the application role
+  // an unscoped query returns nothing at all.
   for (const ctx of contexts) {
+    // Run ids belonging to evals that are over. An eval still in flight keeps its checkpoints.
+    const finished = new Set<string>();
     for (const run of await evalStore.finishedEvalRuns(ctx, 500)) {
       for (const job of await evalStore.jobsForEval(ctx, run.id)) {
         if (job.run_id) finished.add(job.run_id);
       }
     }
-  }
-  if (!finished.size) return out;
+    if (!finished.size) continue;
 
-  for (const entry of readdirSync(checkpointDir)) {
-    // Strip every known suffix to recover the run id the file belongs to.
-    const runId = entry
-      .replace(/\.sqlite(-wal|-shm)?$/, "")
-      .replace(/\.control$/, "")
-      .replace(/\.edit\.json$/, "");
-    if (!finished.has(runId)) continue; // not an eval job's — leave it alone
-    const path = join(checkpointDir, entry);
-    try {
-      out.bytesFreed += statSync(path).size;
-      rmSync(path, { force: true });
-      out.removed++;
-    } catch {
-      out.failed++;
-    }
+    // Intersected with what the store is actually holding, so a run whose checkpoints were
+    // already swept does not count as a deletion and the reported number stays honest.
+    const held = (await checkpoints.runsHeld(ctx)).filter((id) => finished.has(id));
+    if (!held.length) continue;
+    const swept = await checkpoints.sweepRuns(ctx, held);
+    out.removed += swept.removed;
+    out.bytesFreed += swept.bytesFreed;
+    out.failed += swept.failed;
   }
   return out;
 }

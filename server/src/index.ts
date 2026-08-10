@@ -304,22 +304,6 @@ for (const ctx of workspaceContexts) {
   }
 }
 
-// Catch checkpoint blobs from evals whose per-eval sweep never ran (a crash, a restart).
-// Only runs belonging to FINISHED eval jobs are touched — an interactive run's checkpoint
-// is exactly the thing a user might come back to branch from, and is never swept.
-{
-  const swept = await sweepOrphanedEvalArtifacts(
-    workspaceContexts,
-    evalStore,
-    join(RUNTIME_DIR, ".checkpoints"),
-  );
-  if (swept.removed) {
-    console.log(
-      `[eval] swept ${swept.removed} orphaned checkpoint artifact(s) from earlier evals, ${fmtBytes(swept.bytesFreed)} freed`,
-    );
-  }
-}
-
 // True from spawn until run_end (or exit) of the INTERACTIVE run. Deliberately NOT
 // pool.interactiveRunning: the process outlives its run_end by a beat while it tears down,
 // and refusing an apply/undo in that window is a race the user would hit by clicking right
@@ -348,6 +332,19 @@ const CHECKPOINT_DIR = join(RUNTIME_DIR, ".checkpoints");
 // a fork is a file copy locally and an INSERT … SELECT hosted, and both promise the same thing —
 // the parent's checkpoints are only ever read.
 const checkpoints = openCheckpointStore(CHECKPOINTER, { checkpointDir: CHECKPOINT_DIR, db });
+
+// Catch checkpoint blobs from evals whose per-eval sweep never ran (a crash, a restart).
+// Only runs belonging to FINISHED eval jobs are touched — an interactive run's checkpoint
+// is exactly the thing a user might come back to branch from, and is never swept.
+{
+  const swept = await sweepOrphanedEvalArtifacts(workspaceContexts, evalStore, checkpoints);
+  if (swept.removed) {
+    console.log(
+      `[eval] swept ${swept.removed} orphaned checkpoint artifact(s) from earlier evals, ${fmtBytes(swept.bytesFreed)} freed`,
+    );
+  }
+}
+
 const controlFile = (runId: string): string => join(CHECKPOINT_DIR, `${runId}.control`);
 /** Ask the runner to pause: it reads this file at its next node boundary. */
 function requestPause(runId: string): void {
@@ -822,7 +819,7 @@ evalRunner = new EvalRunner({
     judge.seal(e.evalId);
     // Sweep the resumable-checkpoint blobs these runs left behind. The traces stay —
     // only the pause/resume machinery goes, and nobody resumes a finished eval job.
-    void sweepEvalArtifacts(contextForEval(e.evalId), evalStore, CHECKPOINT_DIR, e.evalId).then((swept) => {
+    void sweepEvalArtifacts(contextForEval(e.evalId), evalStore, checkpoints, e.evalId).then((swept) => {
       if (swept.removed) {
         console.log(
           `[eval] ${e.evalId} swept ${swept.removed} checkpoint artifact(s), ${fmtBytes(swept.bytesFreed)} freed` +
