@@ -22,6 +22,7 @@
     "test:rls": "tsx src/db/rls.test.ts",
     "test:db-boundary": "tsx src/db/boundary.test.ts",
     "test:object-keys": "tsx src/storage/keys.test.ts",
+    "test:objects": "tsx src/storage/objects.test.ts",
     "test:tenancy": "tsx src/tenancy.test.ts",
     "test:acceptance": "tsx src/acceptance.test.ts",
     "test:relay": "tsx src/wsRelay.test.ts",
@@ -53,7 +54,8 @@
     "test:mcp-validate": "tsx src/mcpValidate.test.ts",
     "test:mcp-registry": "tsx src/mcpRegistry.test.ts",
     "test:mcp-hardening": "tsx src/mcpHardening.test.ts",
-    "mock:mcp": "tsx fixtures/mcp/mockServer.ts"
+    "mock:mcp": "tsx fixtures/mcp/mockServer.ts",
+    "mock:s3": "tsx fixtures/s3/mockS3.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",
