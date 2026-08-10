@@ -157,6 +157,46 @@ export class AgentRepository {
   }
 
   /**
+   * Insert an agent whose uuid the CALLER minted.
+   *
+   * Distinct from `upsertFromDisk`, which takes a slug and invents an id, because generation
+   * needs the id before there is anything to record: object keys are built from it, and the
+   * staging objects for a project are written before anybody knows whether the project will
+   * validate. So the id is decided first and this is where it becomes a row — at the end, only
+   * if the generation succeeded, which is why a failed generation leaves no unopenable agent in
+   * the sidebar.
+   *
+   * Insert, not upsert. A slug this workspace already uses is a bug in the caller's uniqueness
+   * check rather than something to quietly overwrite: the row it would overwrite belongs to an
+   * agent with runs, evals and deployments pointing at it.
+   */
+  async create(ctx: TenantContext, a: AgentOnDisk & { id: string }): Promise<Agent> {
+    if (!SAFE_SLUG.test(a.slug)) throw new Error(`not a usable agent id: ${a.slug}`);
+    await this.q(ctx).run(
+      `INSERT INTO agents (id, workspace_id, slug, display_name, description, connectors,
+         mcp_tools, required_env, default_provider, hand_written, creation_cost, created_by,
+         created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        a.id,
+        ctx.workspaceId,
+        a.slug,
+        a.display_name ?? null,
+        a.description ?? null,
+        JSON.stringify(a.connectors ?? []),
+        JSON.stringify(a.mcp_tools ?? []),
+        JSON.stringify(a.required_env ?? []),
+        a.default_provider ?? "fake",
+        a.hand_written ? 1 : 0,
+        a.creation_cost ?? null,
+        ctx.actorUserId,
+        a.created_at ?? new Date().toISOString(),
+      ],
+    );
+    return (await this.byId(ctx, a.id))!;
+  }
+
+  /**
    * Record what is on disk, keeping the row's identity.
    *
    * Upsert on (workspace_id, slug) rather than on id, because the disk has no uuid to offer —

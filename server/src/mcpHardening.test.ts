@@ -26,6 +26,7 @@ import { generationRequest } from "./generator.ts";
 import { buildManifest, manifestCollisions, manifestToolNames } from "./mcpManifest.ts";
 import type { McpServerView, McpToolView } from "./mcpRegistry.ts";
 import { buildUserPrompt } from "./prompt.ts";
+import { systemContextFor } from "./db/tenant.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = "") => {
@@ -347,10 +348,14 @@ except Exception as exc:
   // and they disagreed: the manifest and the bridge were written for every generation, and the
   // prompt mentioned neither. The project that came back could not wire in MCP_TOOLS it was
   // never told about, so validation rule 12 discarded it — every time, after paying in full.
+  const unscoped = systemContextFor("00000000-0000-4000-8000-000000000001", "mcp-hardening");
   const granted = [tool("alpha", "create_issue", "low"), tool("beta", "delete_record", "high")];
   const prompt = buildUserPrompt(
     generationRequest(
-      { runtimeDir: ".", prompt: "build me something", connectors: [], mcpTools: granted },
+      // A context is required to GENERATE — every object key is built from its workspace — but
+      // `generationRequest` only shapes the prompt, so this one is a placeholder and nothing
+      // here reads it. Named `unscoped` so it cannot be mistaken for a real one.
+      { runtimeDir: ".", ctx: unscoped, prompt: "build me something", connectors: [], mcpTools: granted },
       "agent_1", "Agent", [],
     ),
   );
@@ -366,7 +371,7 @@ except Exception as exc:
   // The reverse of the same invariant: a prompt that advertises a tool the manifest does not
   // grant sets the model up to write a call to something that will not exist at runtime.
   const noMcp = buildUserPrompt(
-    generationRequest({ runtimeDir: ".", prompt: "p", connectors: [] }, "a", "A", []),
+    generationRequest({ runtimeDir: ".", ctx: unscoped, prompt: "p", connectors: [] }, "a", "A", []),
   );
   check("an agent with no MCP grant is told nothing about MCP",
     !noMcp.includes("MCP TOOLS this agent is scoped to"), noMcp.slice(0, 60));

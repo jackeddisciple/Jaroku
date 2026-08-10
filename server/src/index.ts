@@ -158,7 +158,6 @@ const mcpRegistry = new McpRegistry(mcpStore, credentials);
 // the provider's.
 const EVAL_CONCURRENCY = Math.max(1, Number(process.env.JAROKU_EVAL_CONCURRENCY ?? 4));
 const pool = new RunPool(EVAL_CONCURRENCY);
-const generator = new Generator();
 const planner = new Planner();
 
 // Run ids belonging to an in-flight eval job. Their events persist normally but are kept
@@ -339,6 +338,11 @@ const agentRepo = new AgentRepository(store.database());
 // immutable objects. Session 3's whole point: a generation on one replica and the edit that
 // follows on another are reading the same bytes, because neither of them is reading a disk.
 const projects = new ProjectStore(objects, agentRepo);
+
+// The builder, which now writes a version rather than a directory. Constructed here rather
+// than beside the run pool because it needs both of the two things above it: the table that
+// says which agents exist, and the store that says what they contain.
+const generator = new Generator({ runtimeDir: RUNTIME_DIR, agents: agentRepo, projects });
 
 /**
  * Publish anything on disk that has never been published.
@@ -1903,7 +1907,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   const mcpTools = await mcpRegistry.resolve(genCtx, mcpRefs);
   const mcpServers = await mcpRegistry.list(genCtx);
   void generator.generate({
-    runtimeDir: RUNTIME_DIR, prompt, connectors, mcpTools, mcpServers, name, plan, planUsage,
+    runtimeDir: RUNTIME_DIR, ctx: genCtx, prompt, connectors, mcpTools, mcpServers, name, plan, planUsage,
   });
 }
 

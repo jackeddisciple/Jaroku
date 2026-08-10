@@ -368,7 +368,7 @@ const SCOPED_API: Record<string, string[]> = {
   // uuid is already workspace-scoped — so every one of these is scoped by a JOIN rather than by
   // a WHERE on this table, and a missing join would be invisible in a single-tenant test.
   AgentRepository: [
-    "list", "bySlug", "byId", "upsertFromDisk", "syncFromDisk", "addVersion",
+    "list", "bySlug", "byId", "create", "upsertFromDisk", "syncFromDisk", "addVersion",
     "plannedNextVersion", "version", "versions", "undoVersion",
   ],
   // Session 2. These decide who can see a workspace AT ALL, so a cross-tenant bug in any of
@@ -478,6 +478,14 @@ async function remainder(db: Db): Promise<void> {
     (await agents.bySlug(B.ctx, "support_bot"))!.current_version === 2,
     "...leaving B's pointer where it was",
   );
+  // `create` mints the row for a generation, with the uuid the object keys were already built
+  // from. Two workspaces may hold the same slug, and the rows must be distinct agents.
+  const sameSlug = randomUUID();
+  await agents.create(A.ctx, { id: sameSlug, slug: "shared_name" });
+  await agents.create(B.ctx, { id: randomUUID(), slug: "shared_name" });
+  check((await agents.bySlug(B.ctx, "shared_name"))!.id !== sameSlug, "create gives each workspace its own agent for one slug");
+  check((await agents.byId(B.ctx, sameSlug)) === undefined, "...and B cannot resolve A's uuid");
+
   let plannedRefused = false;
   try {
     await agents.plannedNextVersion(A.ctx, theirAgent.id);

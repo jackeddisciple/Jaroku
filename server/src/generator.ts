@@ -1,9 +1,11 @@
 // Builder AI layer (doc §8, 🟡): prompt -> Claude -> a complete LangGraph project, streamed.
 //
 // Safety properties this module is responsible for:
-//   * Staging + atomic swap. Files are written to agents/.staging/<id>/ and only moved into
-//     agents/<id>/ after validation passes. A crash, a truncated stream, or a rule violation
-//     leaves any previously working agent untouched.
+//   * Staging + a version bump. Files are written to object-store keys under a STAGING ID and
+//     are promoted to a version only after validation passes. A crash, a truncated stream, or a
+//     rule violation leaves any previously working agent untouched — the same promise the old
+//     `.staging/` directory plus `atomicSwap` made, in the only form that survives having
+//     several replicas and no shared disk. See storage/projectStore.ts.
 //   * Path confinement. Every path the model emits is checked; absolute paths, "..", and
 //     anything escaping the staging root are rejected outright.
 //   * The API key never leaves this process. It is read from runtime/.env and is never
@@ -13,19 +15,24 @@
 // JAROKU_GEN_FIXTURE records/replays a generation so streaming UX can be iterated for free.
 
 import { EventEmitter } from "node:events";
+import { randomUUID } from "node:crypto";
 import {
   copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative } from "node:path";
 import { anthropicClient, emptyUsage, summarizeUsage, type UsageSummary } from "./claude.ts";
 import { loadConnectors, requiredEnv, resolveSelected, templatesDir, type Connector } from "./connectors.ts";
 import { FileProtocolParser, type ProtocolEvent } from "./fileProtocol.ts";
 import { round8 } from "./pricing.ts";
-import { atomicSwap } from "./projectFs.ts";
+import type { AgentRepository } from "./db/repositories/agents.ts";
+import type { TenantContext } from "./db/tenant.ts";
+import { newStagingId, safeObjectPath } from "./storage/keys.ts";
+import type { ProjectStore } from "./storage/projectStore.ts";
 import { buildSystemPrompt, buildUserPrompt, type GenerationRequest } from "./prompt.ts";
 import {
-  BRIDGE_FILE, BRIDGE_TEMPLATE, buildManifest, manifestCollisions, manifestEnv, manifestRefs,
-  manifestToolNames, writeManifest, type Manifest,
+  BRIDGE_FILE, BRIDGE_TEMPLATE, MANIFEST_FILE, buildManifest, manifestCollisions, manifestEnv,
+  manifestRefs, manifestToolNames, type Manifest,
 } from "./mcpManifest.ts";
 import type { McpServerView, McpToolView } from "./mcpRegistry.ts";
 import { validateProject } from "./validator.ts";
@@ -36,8 +43,17 @@ export const GENERATION_MODEL = process.env.JAROKU_GEN_MODEL ?? "claude-haiku-4-
 const MAX_TOKENS = 16000;
 const STAGING_DIRNAME = ".staging";
 
+export interface GeneratorDeps {
+  /** Where a published version is materialised for the local run path, and where templates live. */
+  runtimeDir: string;
+  agents: AgentRepository;
+  projects: ProjectStore;
+}
+
 export interface GenerateOptions {
   runtimeDir: string;
+  /** Whose agent this is. Every key the generation writes is built from its workspace id. */
+  ctx: TenantContext;
   prompt: string;
   connectors?: string[];
   /**
@@ -80,10 +96,27 @@ export function agentsDir(runtimeDir: string): string {
   return join(runtimeDir, "agents");
 }
 
-function uniqueAgentId(runtimeDir: string, desired: string): string {
+/**
+ * A slug nothing in this workspace is already using.
+ *
+ * BOTH the table and the disk are consulted, and they are asking different questions. The table
+ * is the one that matters: slugs became unique PER WORKSPACE in Session 1, so two tenants may
+ * each have a `support_bot` and neither may have two. The disk is checked as well because
+ * `runtime/agents/` is still one namespace shared by every workspace on a development box, and
+ * materialising a new agent over a directory another workspace is running out of would be a
+ * local-only data loss that no hosted test would ever see.
+ */
+async function uniqueAgentSlug(
+  agents: AgentRepository,
+  ctx: TenantContext,
+  runtimeDir: string,
+  desired: string,
+): Promise<string> {
   let id = desired;
   let n = 2;
-  while (existsSync(join(agentsDir(runtimeDir), id))) id = `${desired}_${n++}`;
+  while ((await agents.bySlug(ctx, id)) || existsSync(join(agentsDir(runtimeDir), id))) {
+    id = `${desired}_${n++}`;
+  }
   return id;
 }
 
@@ -128,24 +161,36 @@ export function generationRequest(
 }
 
 export class Generator extends EventEmitter<GeneratorEvents> {
+  constructor(private readonly deps: GeneratorDeps) {
+    super();
+  }
+
   async generate(opts: GenerateOptions): Promise<void> {
-    const { runtimeDir } = opts;
+    const { runtimeDir, ctx } = opts;
+    const { agents, projects } = this.deps;
     const all = loadConnectors(runtimeDir);
     const selected = resolveSelected(all, opts.connectors);
 
     const name = (opts.name?.trim() || opts.prompt.trim().split("\n")[0] || "agent").slice(0, 60);
-    const agentId = uniqueAgentId(runtimeDir, slugify(opts.name?.trim() || opts.prompt));
+    const slug = await uniqueAgentSlug(agents, ctx, runtimeDir, slugify(opts.name?.trim() || opts.prompt));
 
-    const staging = join(agentsDir(runtimeDir), STAGING_DIRNAME, agentId);
-    rmSync(staging, { recursive: true, force: true });
-    mkdirSync(staging, { recursive: true });
+    // THE AGENT'S UUID IS MINTED HERE AND ITS ROW IS WRITTEN AT THE END.
+    //
+    // Object keys are built from the uuid, so staging needs one before there is anything worth
+    // recording. Writing the row up front instead would leave an agent with no version behind
+    // every failed generation — visible in the sidebar, unopenable, and needing its own cleanup
+    // path. The keyspace does not care whether a row exists; the sidebar does.
+    const agentUuid = randomUUID();
+    const stagingId = newStagingId();
 
     const buffers = new Map<string, string>();
+    /** Complete files, by project-relative path. What becomes the staging objects. */
+    const staged = new Map<string, string>();
     let usage: UsageSummary = emptyUsage();
 
     const onEvent = (event: ProtocolEvent) => {
       if (event.type === "file_start") {
-        const safe = safeRelativePath(staging, event.path);
+        const safe = safeObjectPath(event.path);
         if (!safe) throw new Error(`refusing unsafe generated path: ${event.path}`);
         buffers.set(event.path, "");
         this.emit("file_start", { path: safe });
@@ -153,11 +198,12 @@ export class Generator extends EventEmitter<GeneratorEvents> {
         buffers.set(event.path, (buffers.get(event.path) ?? "") + event.text);
         this.emit("file_delta", { path: event.path, text: event.text });
       } else {
-        // Write on close: a file exists on disk only once it is complete.
-        const safe = safeRelativePath(staging, event.path)!;
-        const target = join(staging, safe);
-        mkdirSync(dirname(target), { recursive: true });
-        writeFileSync(target, buffers.get(event.path) ?? "", "utf8");
+        // Recorded on close, so a file exists as a unit or not at all — the same property
+        // "write on close" gave when the destination was a directory. The write to the store
+        // happens once the whole stream is in, because this callback is synchronous and an
+        // upload is not, and a half-awaited put is worse than a buffered one.
+        const safe = safeObjectPath(event.path)!;
+        staged.set(safe, buffers.get(event.path) ?? "");
         this.emit("file_end", { path: safe });
       }
     };
@@ -174,6 +220,12 @@ export class Generator extends EventEmitter<GeneratorEvents> {
     // And a grant that cannot be represented has to fail before anything is spent. Nothing in
     // the model's output can fix two servers advertising one name — see manifestCollisions.
     const manifest = buildManifest(opts.mcpTools ?? [], opts.mcpServers ?? []);
+
+    // Where the project is assembled for the checks that need a filesystem. A temp directory,
+    // not `runtime/agents/.staging/`, and that is the change: nothing this generation touches
+    // is on a path another replica or another workspace shares. Session 4 replaces it with a
+    // sandbox's tmpfs and this call site does not change.
+    const scratch = join(tmpdir(), `jaroku-gen-${stagingId}`);
 
     try {
       const clash = manifestCollisions(manifest);
@@ -221,7 +273,7 @@ export class Generator extends EventEmitter<GeneratorEvents> {
       } else {
         const raw = await this.streamGeneration(
           all,
-          generationRequest(opts, agentId, name, selected),
+          generationRequest(opts, slug, name, selected),
           (chunk) => parser.push(chunk),
           (u) => (usage = u),
         );
@@ -231,21 +283,33 @@ export class Generator extends EventEmitter<GeneratorEvents> {
       const protocolError = parser.finish();
       if (protocolError) throw new Error(protocolError);
 
-      // Host-owned files. Written after the model's, so the model cannot shadow them.
-      const connectorFiles = this.installConnectors(staging, selected, runtimeDir);
-      const mcpFiles = this.installMcpBridge(staging, manifest, runtimeDir);
-      this.writeHostFiles(staging, {
-        agentId, name, description: opts.prompt, selected, manifest,
+      // Host-owned files, added after the model's so the model cannot shadow them. Same order
+      // and same content as when they were written to a directory; the only difference is that
+      // "written" now means "put in the map that becomes the staging objects".
+      const connectorFiles = this.connectorFiles(selected, runtimeDir);
+      const mcpFiles = this.mcpBridgeFiles(manifest, runtimeDir);
+      const hostFiles = this.hostFiles(staged, {
+        agentId: slug, name, description: opts.prompt, selected, manifest,
         planned: Boolean(opts.plan),
         planCost: opts.planUsage?.cost_usd ?? 0,
         generationCost: usage.cost_usd,
       });
+      for (const f of [...connectorFiles, ...mcpFiles, ...hostFiles]) staged.set(f.path, f.content);
 
-      const result = await validateProject(staging, {
+      // STAGING IS THE OBJECT STORE NOW. Under a staging id nothing else refers to, so a
+      // generation that never lands leaves objects behind and no version at all.
+      for (const path of [...staged.keys()].sort()) {
+        await projects.putStaging(ctx, agentUuid, stagingId, { path, content: staged.get(path)! });
+      }
+
+      // ...and validation reads from there, rather than from wherever the files happened to be
+      // written. That is what makes this the same code path on a replica holding no copy.
+      await projects.materialiseStaging(ctx, agentUuid, stagingId, scratch);
+      const result = await validateProject(scratch, {
         runtimeDir,
         // The bridge is reviewed code copied in verbatim, exactly like a connector template,
         // so it is excluded from the model-output lints for the same reason.
-        connectorFiles: [...connectorFiles, ...mcpFiles],
+        connectorFiles: [...connectorFiles, ...mcpFiles].map((f) => f.path),
         // Connector tools are real tool objects too — calling one directly crashes the
         // same way, so they must be part of the "do not call directly" set.
         connectorToolNames: selected.flatMap((c) => c.tools.map((t) => t.name)),
@@ -256,7 +320,7 @@ export class Generator extends EventEmitter<GeneratorEvents> {
         requireToolErrorHandling: true,
       });
       if (!result.ok) {
-        rmSync(staging, { recursive: true, force: true });
+        await projects.discardStaging(ctx, agentUuid, stagingId);
         this.emit("error", {
           message: "the generated project failed validation and was discarded",
           problems: result.problems,
@@ -264,13 +328,37 @@ export class Generator extends EventEmitter<GeneratorEvents> {
         return;
       }
 
-      atomicSwap(staging, join(agentsDir(runtimeDir), agentId));
+      // The row, then the version. In that order because a version hangs off an agent, and in
+      // one direction because a failure here leaves staging objects rather than a half-agent.
+      await agents.create(ctx, {
+        id: agentUuid,
+        slug,
+        display_name: name,
+        description: opts.prompt.trim().slice(0, 500),
+        connectors: selected.map((c) => c.id),
+        mcp_tools: manifestRefs(manifest),
+        required_env: [...requiredEnv(selected), ...manifestEnv(manifest)],
+        default_provider: "fake",
+        creation_cost: round8((opts.planUsage?.cost_usd ?? 0) + usage.cost_usd),
+      });
+      const { version } = await projects.publishStaging(ctx, agentUuid, stagingId, {
+        source: "generation",
+        summary: name,
+      });
+
+      // AND A LOCAL COPY, because a run is still a subprocess importing `agents.<slug>.agent`
+      // from `runtime/agents/`. That directory stops being the source of truth here and becomes
+      // a materialisation of one — Session 4 replaces it with a sandbox fetching the version.
+      await projects.materialise(ctx, agentUuid, version, join(agentsDir(runtimeDir), slug));
+
       this.emit("done", {
-        agentId, name, files: parser.files, usage, planUsage: opts.planUsage ?? emptyUsage(),
+        agentId: slug, name, files: parser.files, usage, planUsage: opts.planUsage ?? emptyUsage(),
       });
     } catch (err) {
-      rmSync(staging, { recursive: true, force: true });
+      await projects.discardStaging(ctx, agentUuid, stagingId).catch(() => {});
       this.emit("error", { message: (err as Error).message });
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
     }
   }
 
@@ -312,52 +400,47 @@ export class Generator extends EventEmitter<GeneratorEvents> {
     return raw;
   }
 
-  /** Copy reviewed connector templates in verbatim. Returns their project-relative paths. */
-  private installConnectors(staging: string, selected: Connector[], runtimeDir: string): string[] {
-    const toolsDir = join(staging, "tools");
-    mkdirSync(toolsDir, { recursive: true });
-    const written: string[] = [];
+  /** Reviewed connector templates, verbatim. Read rather than copied, and still byte-for-byte. */
+  private connectorFiles(selected: Connector[], runtimeDir: string): StagedFile[] {
+    const out: StagedFile[] = [];
     for (const c of selected) {
       const src = join(templatesDir(runtimeDir), c.file);
       if (!existsSync(src)) continue;
-      copyFileSync(src, join(toolsDir, c.file)); // byte-for-byte; never re-rendered
-      written.push(join("tools", c.file));
+      out.push({ path: `tools/${c.file}`, content: readFileSync(src, "utf8") }); // never re-rendered
     }
-    return written;
+    return out;
   }
 
   /**
-   * Copy the reviewed MCP bridge and write the manifest beside it.
+   * The reviewed MCP bridge and the manifest beside it.
    *
-   * Both are host-owned, both are written after the model's files, and neither exists when
-   * the agent has no MCP tools — a project that was never granted any carries no MCP
-   * machinery at all. Returns their project-relative paths.
+   * Both are host-owned, both are added after the model's files, and neither exists when the
+   * agent has no MCP tools — a project that was never granted any carries no MCP machinery at
+   * all.
    */
-  private installMcpBridge(staging: string, manifest: Manifest, runtimeDir: string): string[] {
+  private mcpBridgeFiles(manifest: Manifest, runtimeDir: string): StagedFile[] {
     if (!manifest.servers.length) return [];
-    const toolsDir = join(staging, "tools");
-    mkdirSync(toolsDir, { recursive: true });
     const src = join(templatesDir(runtimeDir), BRIDGE_TEMPLATE);
     if (!existsSync(src)) return [];
-    copyFileSync(src, join(toolsDir, BRIDGE_TEMPLATE)); // byte-for-byte; never re-rendered
-    writeManifest(staging, manifest);
-    return [BRIDGE_FILE];
+    return [
+      { path: BRIDGE_FILE, content: readFileSync(src, "utf8") }, // byte-for-byte
+      { path: MANIFEST_FILE, content: `${JSON.stringify(manifest, null, 2)}\n` },
+    ];
   }
 
-  private writeHostFiles(
-    staging: string,
+  private hostFiles(
+    staged: Map<string, string>,
     meta: {
       agentId: string; name: string; description: string; selected: Connector[];
       manifest: Manifest;
       planned: boolean; planCost: number; generationCost: number;
     },
-  ): void {
+  ): StagedFile[] {
     // Connector env and MCP credential keys land in the same list: both are things this
     // agent cannot run without, and .env.example exists to tell a user what those are.
     const env = [...requiredEnv(meta.selected), ...manifestEnv(meta.manifest)];
 
-    writeFileSync(
-      join(staging, "jaroku.json"),
+    const jaroku =
       JSON.stringify(
         {
           agent_id: meta.agentId,
@@ -388,26 +471,33 @@ export class Generator extends EventEmitter<GeneratorEvents> {
         },
         null,
         2,
-      ) + "\n",
-      "utf8",
-    );
+      ) + "\n";
 
     // Merge connector env into whatever the model wrote, so .env.example is complete even
     // if the model forgot a key.
-    const envPath = join(staging, ".env.example");
-    const existing = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+    const existing = staged.get(".env.example") ?? "";
     const missing = env.filter((k) => !existing.includes(k));
+    let envExample = existing;
     if (missing.length) {
       const block = ["", "# Required by the connectors and MCP servers this agent uses:", ...missing.map((k) => `${k}=`), ""].join("\n");
-      writeFileSync(envPath, `${existing.trimEnd()}\n${block}`, "utf8");
+      envExample = `${existing.trimEnd()}\n${block}`;
     } else if (!existing) {
-      writeFileSync(envPath, "# This agent needs no credentials.\n", "utf8");
+      envExample = "# This agent needs no credentials.\n";
     }
 
-    // Package markers so `agents.<id>.agent` imports cleanly.
-    writeFileSync(join(staging, "__init__.py"), `"""${meta.name} — generated by Jaroku."""\n`, "utf8");
+    return [
+      { path: "jaroku.json", content: jaroku },
+      { path: ".env.example", content: envExample },
+      // Package markers so `agents.<id>.agent` imports cleanly.
+      { path: "__init__.py", content: `"""${meta.name} — generated by Jaroku."""\n` },
+    ];
   }
+}
 
+/** A file on its way into staging. Same shape as the project store's, named where it is built. */
+interface StagedFile {
+  path: string;
+  content: string;
 }
 
 /** Replay a recorded stream, chunked and paced, so the UI behaves as it would live. */
