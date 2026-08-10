@@ -64,6 +64,8 @@ import { loadRuntimeEnv } from "./env.ts";
 import { McpStore } from "./mcpStore.ts";
 import { McpRegistry } from "./mcpRegistry.ts";
 import { fileCredentialWriter } from "./envWriter.ts";
+import { DotEnvSecretStore } from "./secrets/dotEnvSecretStore.ts";
+import { isSecretName } from "./secrets/secretStore.ts";
 import { PROVIDER_ENV_KEY, isProviderId, providerStatus, verifyProviderKey } from "./providers.ts";
 import { DeployStore } from "./deployStore.ts";
 import { DeployManager, planDeploy, type DeployManagerDeps } from "./deployManager.ts";
@@ -150,6 +152,28 @@ await evalStore.init();
 // secret going to the same file, and the rule is that there is exactly one path to it — so
 // they get the same writer object rather than two constructed from the same path.
 const credentials = fileCredentialWriter(join(RUNTIME_DIR, ".env"));
+
+// AND THE INTERFACE THAT WRITER NOW SITS BEHIND.
+//
+// Constructed FROM the writer above rather than opening its own handle on the file, so there is
+// still exactly one thing in this process that writes runtime/.env — the property that module's
+// header has claimed since the day it was written. What the store adds is the shape: `set`,
+// `getForRun`, `listNames`, `delete`, and deliberately no `get` that would hand a plaintext
+// value back to a request handler. See secrets/secretStore.ts for why that absence is the
+// design rather than an omission.
+//
+// The MCP registry and the provider panel keep talking to the writer directly for now; they are
+// moved onto this in the commit that gives names a table of their own.
+const secrets = new DotEnvSecretStore({
+  writer: credentials,
+  envPath: join(RUNTIME_DIR, ".env"),
+  providerFor: (name) =>
+    name.startsWith("JAROKU_MCP_") ? "mcp"
+      : name.startsWith("ANTHROPIC") ? "anthropic"
+        : name.startsWith("OPENAI") ? "openai"
+          : name === RAILWAY_ENV_KEY ? "railway"
+            : null,
+});
 const mcpStore = new McpStore(store.database());
 const mcpRegistry = new McpRegistry(mcpStore, credentials);
 // Slot 0 is the interactive run; the rest are the eval fan-out's. Modest by default —
@@ -708,7 +732,7 @@ const relay = new WsRelay({
   // every handler reached for the server's own instead. With one workspace the two are the
   // same object, which is exactly why it would have gone unnoticed until it was not.
   onCommand: (cmd: ForwardedCommand, ctx: TenantContext) => {
-    if (cmd.cmd === "run") runAgent(ctx, cmd.input, cmd.provider, cmd.model, cmd.agentId);
+    if (cmd.cmd === "run") void runAgent(ctx, cmd.input, cmd.provider, cmd.model, cmd.agentId);
     else if (cmd.cmd === "generate") generateAgent(ctx, cmd);
     else if (cmd.cmd === "planAgent") planAgent(ctx, cmd);
     else if (cmd.cmd === "discardPlan") planner.discard(cmd.planId);
@@ -1976,13 +2000,13 @@ function editAgent(ctx: TenantContext, agentId: string, instruction: string): vo
 }
 
 // --- run trigger ------------------------------------------------------------
-function runAgent(
+async function runAgent(
   ctx: TenantContext,
   input?: string,
   provider?: string,
   model?: string,
   agentId?: string,
-): void {
+): Promise<void> {
   if (pool.interactiveRunning) {
     console.log("[manager] agent already running; ignoring run request");
     return;
@@ -2010,6 +2034,26 @@ function runAgent(
   const env: NodeJS.ProcessEnv = { JAROKU_RUN_ID: runId, JAROKU_CONTROL_DIR: CHECKPOINT_DIR };
   if (provider) env.JAROKU_PROVIDER = provider;
   if (model) env.JAROKU_MODEL = model;
+
+  // THE CREDENTIALS THIS RUN NEEDS, RESOLVED BY NAME, THROUGH THE SECRET STORE.
+  //
+  // A no-op today and the whole point tomorrow. The subprocess still inherits this process's
+  // environment, so locally these values were already reachable — what changes is that the run
+  // now says WHICH names it needs and gets them from the store rather than from whatever
+  // happens to be ambient. Session 4's sandbox spec has an explicit `env` and no inheritance
+  // at all, and this is the seam it fills: the same call, a different store behind it, and a
+  // list of names that came from the agent's own declaration rather than from the box.
+  //
+  // Failure here is not fatal. A credential that cannot be resolved is one the agent reports at
+  // the point of use, with the name in the message, which is a far better error than a run that
+  // refuses to start for a variable it might not have needed.
+  try {
+    const agent = agentId ? await agentRepo.bySlug(ctx, agentId) : undefined;
+    const names = (agent?.required_env ?? []).filter(isSecretName);
+    if (names.length) Object.assign(env, await secrets.getForRun(runId, names));
+  } catch (err) {
+    console.warn(`[manager] could not resolve credentials for ${runId}: ${(err as Error).message}`);
+  }
   runActive = true;
   activeRunId = runId;
   pausedRunId = null;
@@ -2210,7 +2254,7 @@ async function explainAgent(ctx: TenantContext, cmd: ExplainCommand): Promise<vo
 if (process.env.JAROKU_NO_AUTORUN !== "1") {
   // Small delay so the relay is listening before the first events land.
   // Nobody asked for this one, so it runs in the server's own workspace.
-  setTimeout(() => runAgent(serverContext()), 300);
+  setTimeout(() => void runAgent(serverContext()), 300);
 }
 
 // --- graceful shutdown ------------------------------------------------------
