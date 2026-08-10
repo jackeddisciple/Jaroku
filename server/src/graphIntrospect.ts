@@ -3,6 +3,18 @@
 // model and prints its topology as a SINGLE JSON object on stdout. This is deliberately NOT
 // the trace pipeline: it never runs the graph, never touches the frozen trace schema/stream,
 // and rides its own "graph" channel — same separation as gen/edit/agentFiles.
+//
+// SESSION 3: WHICH FILES IT BUILDS FROM. It used to import `agents.<slug>` out of
+// `runtime/agents/`, which is a directory a replica that has never run this agent does not
+// have. It is now given a project DIRECTORY — materialised out of the object store by the
+// caller — and `JAROKU_AGENT_DIR` tells the runner to import from there instead.
+//
+// What has NOT changed, and is Session 4's job rather than this one's: the Python still runs on
+// the control plane. Building a compiled graph imports the agent's module, which is model-written
+// code, and no amount of routing the FILES through an object store makes executing them here
+// safe. The spec is explicit that both this and the validator's import check move into the
+// sandbox in Session 4; what this commit does is make the file access replica-independent so
+// that when they move, the call sites do not change.
 
 import { spawn } from "node:child_process";
 
@@ -27,12 +39,23 @@ const TIMEOUT_MS = 20_000;
 
 /** Run `python -m jaroku_runner.graph <agentId>` and parse its one-shot JSON. Never rejects —
  *  any failure comes back as `{ agent_id, error }` so the client always gets a definite answer. */
-export function introspectGraph(runtimeDir: string, agentId: string): Promise<GraphResult> {
+export function introspectGraph(
+  runtimeDir: string,
+  agentId: string,
+  /**
+   * The project to build from, when it is not `runtime/agents/<agentId>/`.
+   *
+   * What the object store materialised. Absent, the runner resolves the agent the way it always
+   * has — which is what a copied-out project and a hand-dropped one both need.
+   */
+  projectDir?: string,
+): Promise<GraphResult> {
   return new Promise((resolve) => {
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       ...process.env,
       PATH: `/opt/homebrew/bin:${process.env.PATH ?? ""}`,
     };
+    if (projectDir) env.JAROKU_AGENT_DIR = projectDir;
     const child = spawn("uv", ["run", "python", "-m", "jaroku_runner.graph", agentId], {
       cwd: runtimeDir,
       env,

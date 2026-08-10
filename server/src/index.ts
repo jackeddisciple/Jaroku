@@ -10,6 +10,7 @@
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { RunPool } from "./runPool.ts";
@@ -563,16 +564,47 @@ function readDiskConnectors(agentId: string): string[] {
 }
 
 // Graph topology is derived by spawning the isolated `jaroku_runner.graph` entrypoint. It is
-// pure w.r.t. an agent's on-disk code, so it's cached per agent and invalidated on apply/undo.
+// pure with respect to an agent's FILES, so it is cached per agent and version, and a version
+// bump — an apply, an undo — is a different cache key rather than an invalidation somebody has
+// to remember to perform.
+//
+// The files it builds from are materialised out of the object store into a temp directory, so a
+// replica that has never run this agent answers the graph view identically to the one that
+// generated it. That is the Session 3 half. The Python still executes on the control plane;
+// moving it into a sandbox is Session 4's, and is why the temp directory exists at all rather
+// than the runner being pointed at `runtime/agents/`.
 const graphCache = new Map<string, Promise<GraphResult>>();
-function agentGraph(agentId: string): Promise<GraphResult> {
-  if (!isSafeAgentId(agentId)) return Promise.resolve({ agent_id: agentId, error: "invalid agent id" });
-  let pending = graphCache.get(agentId);
+async function agentGraph(ctx: TenantContext, agentId: string): Promise<GraphResult> {
+  if (!isSafeAgentId(agentId)) return { agent_id: agentId, error: "invalid agent id" };
+  const agent = await agentRepo.bySlug(ctx, agentId);
+  if (!agent) return { agent_id: agentId, error: "no such agent in this workspace" };
+
+  // Keyed by the AGENT UUID and the version, not by the slug: two workspaces may each have a
+  // `support_bot`, and one of them must not be shown the other's topology out of a cache.
+  const key = `${agent.id}@${agent.current_version}`;
+  let pending = graphCache.get(key);
   if (!pending) {
-    pending = introspectGraph(RUNTIME_DIR, agentId);
+    pending = (async () => {
+      const dir = join(tmpdir(), `jaroku-graph-${agent.id}-${agent.current_version}`);
+      try {
+        const written = await projects.materialise(ctx, agent.id, agent.current_version, dir);
+        if (!written.includes("agent.py")) {
+          // A version with no agent.py cannot be built. Fall back to the disk, which is where a
+          // project somebody dropped in by hand lives — the same fallback the file list makes.
+          return await introspectGraph(RUNTIME_DIR, agentId);
+        }
+        return await introspectGraph(RUNTIME_DIR, agentId, dir);
+      } catch {
+        return await introspectGraph(RUNTIME_DIR, agentId);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    })();
     // Don't cache a failure — let a later request retry (e.g. after a transient import error).
-    pending.then((r) => { if (r.error) graphCache.delete(agentId); });
-    graphCache.set(agentId, pending);
+    void pending.then((r) => {
+      if (r.error) graphCache.delete(key);
+    });
+    graphCache.set(key, pending);
   }
   return pending;
 }
@@ -743,7 +775,7 @@ const relay = new WsRelay({
     (await agentRepo.bySlug(ctx, agentId)) ? agentProjectFiles(ctx, agentId) : [],
   getAgentGraph: async (ctx, agentId) =>
     (await agentRepo.bySlug(ctx, agentId))
-      ? agentGraph(agentId)
+      ? agentGraph(ctx, agentId)
       : { agent_id: agentId, error: "no such agent in this workspace" },
   listMcpServers: (ctx) => mcpRegistry.list(ctx),
   // By name only. The client learns THAT a key is set, never what it is.
@@ -1986,8 +2018,8 @@ editor.on("applied", (e) => {
   relay.broadcastEdit(contextForEdit(), { type: "applied", ...e });
   void syncAgents().then(() => relay.broadcastAgents());
   relay.broadcastAgentFiles(contextForEdit(), e.agentId);
-  // An edit may have changed the graph structure — invalidate and re-push.
-  graphCache.delete(e.agentId);
+  // An edit changed the version, and the graph cache is keyed by it — so there is nothing to
+  // invalidate, and re-pushing simply builds the new one.
   void relay.broadcastAgentGraph(contextForEdit(), e.agentId);
 });
 
@@ -1996,7 +2028,7 @@ editor.on("undone", (e) => {
   relay.broadcastEdit(contextForEdit(), { type: "undone", ...e });
   void syncAgents().then(() => relay.broadcastAgents());
   relay.broadcastAgentFiles(contextForEdit(), e.agentId);
-  graphCache.delete(e.agentId);
+  // Same as apply: the pointer moved, so the cache key did too.
   void relay.broadcastAgentGraph(contextForEdit(), e.agentId);
 });
 
