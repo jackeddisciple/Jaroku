@@ -114,6 +114,35 @@ export function assertSecretName(name: unknown): string {
 }
 
 /**
+ * Why a value cannot be stored, or null when it can.
+ *
+ * ONE RULE FOR BOTH IMPLEMENTATIONS, which is why it lives here rather than in either of them.
+ * AES-GCM would happily seal a value containing a newline and the `.env` format cannot hold
+ * one — so a hosted store that accepted it would produce a credential that works in production
+ * and fails locally, and an exported project (which the README promises is portable, and which
+ * writes a `.env`) would silently lose it.
+ *
+ * The local store applies a SECOND, narrower rule on top of this: `envWriter.renderLine`
+ * refuses anything that would not read back byte-identically through the real loader. That one
+ * is a property of the file format and cannot be shared.
+ */
+export function unstorableReason(value: unknown): string | null {
+  if (typeof value !== "string") return "a credential must be a string";
+  if (/[\r\n]/.test(value)) {
+    // Refusing rather than stripping: a value with a line break in it is not the value the user
+    // meant to paste, and silently truncating a credential produces a confusing 401 instead of
+    // a clear error. Same judgement, same words, as envWriter.
+    return "a credential cannot contain a line break";
+  }
+  if (value.includes("\u0000")) {
+    // Postgres cannot store one in a text column at all — the driver fails the whole statement.
+    // Refusing here makes the two drivers agree instead of one of them losing the write.
+    return "a credential cannot contain a NUL byte";
+  }
+  return null;
+}
+
+/**
  * Which workspace a run belongs to.
  *
  * Injected into a store rather than looked up by it, so the secrets layer does not grow a

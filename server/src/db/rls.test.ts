@@ -181,6 +181,12 @@ try {
     // what proves it. See migration 012 for why that was worth the trouble when `ws_tickets`
     // could not do it.
     "workspace_invites",
+    // Session 3. The vault holds ciphertext, so a policy here is the second wall behind a
+    // third one: the rows are scoped, RLS backstops the scope, and the ciphertext itself is
+    // sealed against `<workspace_id>:<name>` so a row that escaped both decrypts to nothing.
+    // The policy is still not optional — a leaked WRAPPED DATA KEY plus a leaked master key is
+    // the whole workspace, and "we also encrypted it" is not a reason to skip the scope.
+    "workspace_data_keys", "workspace_secrets",
   ];
   const guarded = await db.all<{ relname: string; relrowsecurity: boolean; relforcerowsecurity: boolean }>(
     `SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class

@@ -64,7 +64,7 @@ import { loadRuntimeEnv } from "./env.ts";
 import { McpStore } from "./mcpStore.ts";
 import { McpRegistry } from "./mcpRegistry.ts";
 import { fileCredentialWriter } from "./envWriter.ts";
-import { DotEnvSecretStore } from "./secrets/dotEnvSecretStore.ts";
+import { openSecretStore } from "./secrets/open.ts";
 import { isSecretName } from "./secrets/secretStore.ts";
 import { PROVIDER_ENV_KEY, isProviderId, providerStatus, verifyProviderKey } from "./providers.ts";
 import { DeployStore } from "./deployStore.ts";
@@ -153,27 +153,6 @@ await evalStore.init();
 // they get the same writer object rather than two constructed from the same path.
 const credentials = fileCredentialWriter(join(RUNTIME_DIR, ".env"));
 
-// AND THE INTERFACE THAT WRITER NOW SITS BEHIND.
-//
-// Constructed FROM the writer above rather than opening its own handle on the file, so there is
-// still exactly one thing in this process that writes runtime/.env — the property that module's
-// header has claimed since the day it was written. What the store adds is the shape: `set`,
-// `getForRun`, `listNames`, `delete`, and deliberately no `get` that would hand a plaintext
-// value back to a request handler. See secrets/secretStore.ts for why that absence is the
-// design rather than an omission.
-//
-// The MCP registry and the provider panel keep talking to the writer directly for now; they are
-// moved onto this in the commit that gives names a table of their own.
-const secrets = new DotEnvSecretStore({
-  writer: credentials,
-  envPath: join(RUNTIME_DIR, ".env"),
-  providerFor: (name) =>
-    name.startsWith("JAROKU_MCP_") ? "mcp"
-      : name.startsWith("ANTHROPIC") ? "anthropic"
-        : name.startsWith("OPENAI") ? "openai"
-          : name === RAILWAY_ENV_KEY ? "railway"
-            : null,
-});
 const mcpStore = new McpStore(store.database());
 const mcpRegistry = new McpRegistry(mcpStore, credentials);
 // Slot 0 is the interactive run; the rest are the eval fan-out's. Modest by default —
@@ -204,6 +183,34 @@ const runWorkspaces = new Map<string, TenantContext>();
 function contextForRun(runId: string): TenantContext {
   return runWorkspaces.get(runId) ?? serverContext();
 }
+
+// AND THE INTERFACE THAT WRITER NOW SITS BEHIND.
+//
+// Constructed FROM the writer above rather than opening its own handle on the file, so there is
+// still exactly one thing in this process that writes runtime/.env — the property that module's
+// header has claimed since the day it was written. What the store adds is the shape: `set`,
+// `getForRun`, `listNames`, `delete`, and deliberately no `get` that would hand a plaintext
+// value back to a request handler. See secrets/secretStore.ts for why that absence is the
+// design rather than an omission.
+//
+// The MCP registry and the provider panel keep talking to the writer directly for now; they are
+// moved onto this in the commit that gives names a table of their own.
+const secrets = openSecretStore({
+  db,
+  writer: credentials,
+  envPath: join(RUNTIME_DIR, ".env"),
+  // How a run id becomes a workspace. The hosted store needs it because a worker assembling a
+  // sandbox holds the run and nothing else; the local store ignores it, because a file has no
+  // notion of a workspace to resolve to.
+  runWorkspace: async (runId) => runWorkspaces.get(runId)?.workspaceId ?? null,
+  providerFor: (name) =>
+    name.startsWith("JAROKU_MCP_") ? "mcp"
+      : name.startsWith("ANTHROPIC") ? "anthropic"
+        : name.startsWith("OPENAI") ? "openai"
+          : name === RAILWAY_ENV_KEY ? "railway"
+            : null,
+});
+console.log(`[server] secret store: ${secrets.kind}${secrets.kind === "dotenv" ? " (runtime/.env)" : ""}`);
 
 // The same problem for the three orchestrators, which emit through callbacks registered once
 // at boot and therefore have no argument to carry a context on.
