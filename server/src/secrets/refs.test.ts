@@ -136,6 +136,44 @@ async function suite(label: string, db: Db): Promise<void> {
   }
   check(brokenScope, "agent scope with no agent is refused by the schema, not by convention");
 
+  // An agent scope pointing at ANOTHER workspace's agent. The uuid exists, so the foreign key
+  // 016 wrote — to `agents(id)`, globally unique — was satisfied by it, and the row landed here
+  // with its lifetime in the other tenant's hands: their deleting that agent cascaded this
+  // workspace's declaration away. Refused twice now, and both are worth asserting, because the
+  // one that produces the readable message is not the one that cannot be bypassed.
+  const theirs = await agents.upsertFromDisk(B, { slug: "their_bot" });
+  let crossed = "";
+  try {
+    await refs.declare(A, { name: "THEIR_AGENT_TOKEN", scope: "agent", agentId: theirs.id });
+  } catch (e) {
+    crossed = (e as Error).message;
+  }
+  check(crossed.includes("no such agent in this workspace"), "an agent scope cannot name another workspace's agent", crossed);
+  check((await refs.get(A, "THEIR_AGENT_TOKEN")) === undefined, "...and nothing was written");
+
+  let crossedConfigured = false;
+  try {
+    await refs.markConfigured(A, { name: "THEIR_AGENT_TOKEN", scope: "agent", agentId: theirs.id });
+  } catch {
+    crossedConfigured = true;
+  }
+  check(crossedConfigured, "...on the configured path as well as the declared one");
+
+  // And underneath the check: the database itself, reached past the repository the way a future
+  // caller with its own INSERT would.
+  let keyHeld = false;
+  try {
+    const now = new Date().toISOString();
+    await db.forWorkspace(A.workspaceId).run(
+      `INSERT INTO secret_refs (workspace_id, name, provider, scope, agent_id, configured,
+         created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [A.workspaceId, "RAW_CROSS_TENANT", null, "agent", theirs.id, 0, now, now],
+    );
+  } catch {
+    keyHeld = true;
+  }
+  check(keyHeld, "...and the foreign key refuses the pair even when the check is bypassed");
+
   // --- usage ---------------------------------------------------------------------------
   console.log("\n  when a run last received it");
   await refs.markConfigured(A, { name: "ANTHROPIC_API_KEY", provider: "anthropic" });

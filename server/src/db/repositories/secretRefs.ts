@@ -52,6 +52,26 @@ export class SecretRefRepository {
     };
   }
 
+  /**
+   * Refuse an agent scope naming an agent this workspace does not have.
+   *
+   * Migration 018 makes the database refuse it too, and that key is the one that counts. This is
+   * here for the message: a composite foreign key failing says "FOREIGN KEY constraint failed",
+   * which tells whoever hit it nothing about which of the two columns was wrong.
+   *
+   * A soft-deleted agent counts as absent, deliberately — it is gone from every listing the user
+   * sees, so a credential cannot newly be scoped to it. Rows declared before the delete keep
+   * pointing at it; the foreign key is about existence and this is about a fresh declaration.
+   */
+  private async assertAgentIsOurs(ctx: TenantContext, agentId: string | null | undefined): Promise<void> {
+    if (!agentId) return;
+    const row = await this.q(ctx).get<Record<string, unknown>>(
+      `SELECT id FROM agents WHERE workspace_id = ? AND id = ? AND deleted_at IS NULL`,
+      [ctx.workspaceId, agentId],
+    );
+    if (!row) throw new Error(`no such agent in this workspace: ${agentId}`);
+  }
+
   /** Everything this workspace knows about, configured or merely declared. Sorted by name. */
   async list(ctx: TenantContext): Promise<SecretRefRow[]> {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
@@ -84,6 +104,7 @@ export class SecretRefRepository {
    * either order has to be safe.
    */
   async declare(ctx: TenantContext, input: DeclareInput): Promise<void> {
+    await this.assertAgentIsOurs(ctx, input.agentId);
     const now = new Date().toISOString();
     await this.q(ctx).run(
       `INSERT INTO secret_refs (workspace_id, name, provider, scope, agent_id, configured,
@@ -109,6 +130,7 @@ export class SecretRefRepository {
 
   /** Record that a value is now set under this name. Called by every store's `set`. */
   async markConfigured(ctx: TenantContext, input: DeclareInput): Promise<void> {
+    await this.assertAgentIsOurs(ctx, input.agentId);
     const now = new Date().toISOString();
     await this.q(ctx).run(
       `INSERT INTO secret_refs (workspace_id, name, provider, scope, agent_id, configured,
