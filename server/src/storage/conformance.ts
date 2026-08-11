@@ -21,6 +21,7 @@
 import { randomUUID } from "node:crypto";
 import { agentStagingKey, agentVersionKey, agentVersionPrefix, workspacePrefix } from "./keys.ts";
 import { ObjectNotFound, type ObjectStore } from "./objectStore.ts";
+import { MAX_PRESIGN_TTL_S } from "./presign.ts";
 
 export interface ConformanceResult {
   failures: number;
@@ -172,6 +173,29 @@ export async function runObjectConformance(label: string, store: ObjectStore): P
   check(signed.url.length > 0 && Date.parse(signed.expiresAt) > Date.now(), "presignGet mints a URL with a future expiry");
   const signedPut = await store.presignPut(agentVersionKey(WS, AGENT, 5, "new.py"), 300);
   check(signedPut.url !== signed.url, "presignPut is a different URL — a read grant is not a write grant");
+
+  // The ttl, at both ends of what a caller can pass. A fraction is the interesting one: it used
+  // to floor to zero locally, minting a URL whose expiry had already passed — a signature that
+  // verifies and is refused anyway, which looks exactly like a wrong signing key.
+  const fraction = await store.presignGet(agentVersionKey(WS, AGENT, 2, "agent.py"), 0.5);
+  check(
+    Date.parse(fraction.expiresAt) > Date.now(),
+    `a sub-second ttl still mints a URL that is valid when it is handed over (${fraction.expiresAt})`,
+  );
+  const huge = await store.presignGet(agentVersionKey(WS, AGENT, 2, "agent.py"), 60 * 60 * 24 * 30);
+  check(
+    Date.parse(huge.expiresAt) - Date.now() <= MAX_PRESIGN_TTL_S * 1000 + 5_000,
+    `...and a ttl of a month is clamped to the maximum, not honoured (${huge.expiresAt})`,
+  );
+  for (const bad of [0, -60, Number.NaN, Number.POSITIVE_INFINITY]) {
+    let refused = false;
+    try {
+      await store.presignGet(agentVersionKey(WS, AGENT, 2, "agent.py"), bad);
+    } catch {
+      refused = true;
+    }
+    check(refused, `...and a ttl of ${bad} is refused rather than signed`);
+  }
 
   // --- clean up ------------------------------------------------------------------------
   await store.deletePrefix(workspacePrefix(WS));

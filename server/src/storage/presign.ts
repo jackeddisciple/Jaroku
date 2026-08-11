@@ -58,6 +58,25 @@ export const SIGNING_KEY_ENV = "JAROKU_OBJECT_SIGNING_KEY";
 export const MAX_PRESIGN_TTL_S = 60 * 60;
 
 /**
+ * A ttl in whole seconds that both implementations agree on.
+ *
+ * Here rather than at each call site because the two disagreed, and in the worst direction: the
+ * local signer floored, so a sub-second ttl became ZERO and minted a URL already past its expiry
+ * — a signature that verifies and is refused, which reads as a signing-key mismatch and is not
+ * one. S3's signer clamped to at least a second and never clamped the top end at all, so the
+ * same call produced a working URL there and a dead one locally.
+ *
+ * A second is the floor because neither scheme can express less: `X-Amz-Expires` is an integer
+ * count of seconds, and the local scheme's expiry is compared with `<=`.
+ */
+export function normalisePresignTtl(ttlSeconds: number): number {
+  if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
+    throw new Error(`a presign ttl must be a positive number of seconds, not ${ttlSeconds}`);
+  }
+  return Math.min(Math.max(1, Math.floor(ttlSeconds)), MAX_PRESIGN_TTL_S);
+}
+
+/**
  * Resolve the key that signs local object URLs.
  *
  * From the environment when it is set. Otherwise generated and persisted at `statePath`,
@@ -136,10 +155,7 @@ export function signLocalUrl(
   now: number = Date.now(),
 ): Presigned {
   assertKey(key);
-  if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
-    throw new Error(`a presign ttl must be a positive number of seconds, not ${ttlSeconds}`);
-  }
-  const ttl = Math.min(Math.floor(ttlSeconds), MAX_PRESIGN_TTL_S);
+  const ttl = normalisePresignTtl(ttlSeconds);
   const expiresAtMs = now + ttl * 1000;
   const sig = sign(secret, op, key, expiresAtMs);
   // The key is percent-encoded as a whole, slashes included. Leaving them bare would make the

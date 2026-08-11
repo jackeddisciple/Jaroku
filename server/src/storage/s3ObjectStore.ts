@@ -32,7 +32,7 @@ import { assertKey, assertPrefix } from "./keys.ts";
 import {
   ObjectNotFound, type ObjectMeta, type ObjectStore, type PutOptions,
 } from "./objectStore.ts";
-import type { Presigned } from "./presign.ts";
+import { normalisePresignTtl, type Presigned } from "./presign.ts";
 import { presignUrl, signRequest, uriEncode, type SigV4Credentials } from "./sigv4.ts";
 
 /** Past this, a body is uploaded in parts. S3's own minimum part size is 5 MiB. */
@@ -395,7 +395,7 @@ export class S3ObjectStore implements ObjectStore {
 
   private presign(method: "GET" | "PUT", key: string, ttlSeconds: number): Presigned {
     assertKey(key);
-    const ttl = Math.max(1, Math.floor(ttlSeconds));
+    const ttl = normalisePresignTtl(ttlSeconds);
     const url = presignUrl(this.sigContext(), method, this.origin, this.pathFor(key), ttl);
     return { url, expiresAt: new Date(Date.now() + ttl * 1000).toISOString() };
   }
