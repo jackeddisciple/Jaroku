@@ -36,7 +36,7 @@ const base: Omit<PoolRunOptions, "runId"> = { runtimeDir: "/does/not/matter" };
 await (async () => {
   const fakes: FakeSandbox[] = [];
   const pool = new RunPool(1, { sandbox: () => { const f = new FakeSandbox(); fakes.push(f); return f; } });
-  pool.startInteractive({ ...base, runId: "r1", workspaceId: "ws-1" });
+  pool.tryStart({ ...base, runId: "r1", workspaceId: "ws-1" });
   check("no controlPlaneUrl configured -> no token minted even with a workspaceId", fakes[0]!.lastSpec?.controlPlane === undefined);
   check("the bus does not track a run with no control plane to push into", !pool.eventBus.has("r1"));
 })();
@@ -47,7 +47,7 @@ await (async () => {
     controlPlaneUrl: "https://cp.example.com",
     sandbox: () => { const f = new FakeSandbox(); fakes.push(f); return f; },
   });
-  pool.startInteractive({ ...base, runId: "r1" }); // no workspaceId
+  pool.tryStart({ ...base, runId: "r1" }); // no workspaceId
   check("a control plane with no workspaceId still mints no token", fakes[0]!.lastSpec?.controlPlane === undefined);
 })();
 
@@ -59,7 +59,7 @@ await (async () => {
     bus,
     sandbox: () => { const f = new FakeSandbox(); fakes.push(f); return f; },
   });
-  pool.startInteractive({ ...base, runId: "r1", workspaceId: "ws-1" });
+  pool.tryStart({ ...base, runId: "r1", workspaceId: "ws-1" });
   const spec = fakes[0]!.lastSpec;
   check("a workspace + a control plane mints a run token", !!spec?.controlPlane?.runToken);
   check("the control plane URL is passed through", spec?.controlPlane?.url === "https://cp.example.com");
@@ -76,7 +76,7 @@ await (async () => {
     revocations,
     sandbox: () => { const f = new FakeSandbox(); fakes.push(f); return f; },
   });
-  pool.startInteractive({ ...base, runId: "r1", workspaceId: "ws-1" });
+  pool.tryStart({ ...base, runId: "r1", workspaceId: "ws-1" });
   fakes[0]!.stop(); // simulate the sandbox exiting
   check("the bus stops tracking the run once it exits", !bus.has("r1"));
   check("the run's token is revoked the moment it exits, not left to run out its own ttl", revocations.isRevoked("r1"));
@@ -92,7 +92,7 @@ await (async () => {
     signingKey,
     sandbox: () => { const f = new FakeSandbox(); fakes.push(f); return f; },
   });
-  pool.startInteractive({ ...base, runId: "r1", workspaceId: "ws-42" });
+  pool.tryStart({ ...base, runId: "r1", workspaceId: "ws-42" });
   const runToken = fakes[0]!.lastSpec!.controlPlane!.runToken;
   const verified = verifyRunToken(signingKey, runToken);
   check("the minted token verifies against the pool's own signing key", verified.ok);

@@ -11,10 +11,15 @@
 // ProcessManager's `stderr`/`exit` don't say which run they came from, which was fine with
 // one and ambiguous with twelve), and that a run can be given a deadline.
 //
-// SLOT 0 IS RESERVED FOR THE INTERACTIVE RUN. Pause/resume/branch all assume a single
-// addressable run the user is driving: `pauseRun` writes a control file for it, `resumeRun`
-// refuses if a run is active, branching forks its checkpoint. Reserving a slot means a
-// running eval can never occupy the interactive path, and those semantics are untouched.
+// EVERY SLOT IS INTERCHANGEABLE. Before Session 5, slot 0 was reserved for the interactive
+// run so a running eval could never occupy the one path pause/resume/branch address — a
+// single, process-wide reservation, because there was only ever one workspace to reserve it
+// for. That protection is now two SEPARATE pools (see index.ts: `interactivePool` and
+// `evalPool`), each with its own capacity, plus a per-workspace semaphore on the interactive
+// class (queue/semaphores.ts's `workspaceSemaphore`) gating how many of ITS OWN interactive
+// runs one workspace may have going at once. Nothing in this file knows which kind of run a
+// slot is running any more — that distinction now lives entirely in which pool a caller reaches
+// for, not in an index this one used to special-case.
 //
 // TIMEOUTS ARE OPT-IN, and eval jobs are the reason they exist. A Python subprocess that
 // hangs on a network call holds its slot forever; with a bounded pool that's a stuck eval
@@ -90,9 +95,6 @@ interface Slot {
   tokenExpiresAtMs: number | null;
 }
 
-/** Slot 0 is the interactive run's. Everything else is available to the eval fan-out. */
-const INTERACTIVE_SLOT = 0;
-
 export class RunPool extends EventEmitter<RunPoolEvents> {
   private slots: Slot[] = [];
   private sandbox: SandboxFactory;
@@ -102,10 +104,12 @@ export class RunPool extends EventEmitter<RunPoolEvents> {
   private revocations: RunTokenRevocationList;
 
   /**
-   * @param concurrency how many runs may execute at once IN ADDITION to the interactive
-   *   one. Kept modest by default: each slot is a Python subprocess with a LangGraph import,
-   *   and oversubscribing the machine makes every run slower and its latency numbers — which
-   *   the comparison dashboard reports — meaningless.
+   * @param concurrency how many runs this pool may execute at once. A caller wanting a
+   *   dedicated interactive pool and a dedicated eval pool constructs two of these — see
+   *   index.ts — rather than asking one pool to divide itself. Kept modest by default: each
+   *   slot is a Python subprocess with a LangGraph import, and oversubscribing the machine
+   *   makes every run slower and its latency numbers — which the comparison dashboard
+   *   reports — meaningless.
    * @param opts what a slot actually runs on, and the control-plane wiring a hosted sandbox
    *   needs a run token for. Every field defaults to something that keeps the local, no-hosted-
    *   control-plane path working exactly as it did before this existed — see PoolRunOptions on
@@ -118,7 +122,7 @@ export class RunPool extends EventEmitter<RunPoolEvents> {
     this.bus = opts.bus ?? new RunEventBus();
     this.signingKey = opts.signingKey ?? randomBytes(32);
     this.revocations = opts.revocations ?? new RunTokenRevocationList();
-    const total = Math.max(1, concurrency) + 1; // +1 for the reserved interactive slot
+    const total = Math.max(1, concurrency);
     for (let i = 0; i < total; i++) this.slots.push(this.makeSlot(i));
   }
 
@@ -210,24 +214,12 @@ export class RunPool extends EventEmitter<RunPoolEvents> {
   }
 
   /**
-   * Start the interactive run in its reserved slot. Returns false if one is already
-   * running — the same refusal the single-manager path had, so nothing upstream changes.
-   */
-  startInteractive(opts: PoolRunOptions): boolean {
-    const slot = this.slots[INTERACTIVE_SLOT]!;
-    if (slot.manager.running) return false;
-    this.launch(slot, opts);
-    return true;
-  }
-
-  /**
-   * Start a background run (an eval job) in any free non-interactive slot.
-   * Returns false when the pool is saturated — the caller keeps it queued rather than
-   * spawning past the cap.
+   * Start a run in any free slot. Returns false when the pool is saturated — the caller
+   * either keeps it queued (the dispatcher's job now, for run.eval and judge) or reports the
+   * refusal directly (the interactive path, still synchronous by design).
    */
   tryStart(opts: PoolRunOptions): boolean {
-    for (let i = INTERACTIVE_SLOT + 1; i < this.slots.length; i++) {
-      const slot = this.slots[i]!;
+    for (const slot of this.slots) {
       if (!slot.manager.running && slot.runId === null) {
         this.launch(slot, opts);
         return true;
@@ -236,28 +228,25 @@ export class RunPool extends EventEmitter<RunPoolEvents> {
     return false;
   }
 
-  /** Free background slots right now. The orchestrator's dispatch budget per tick. */
+  /** Free slots right now. The orchestrator's dispatch budget per tick. */
   get freeSlots(): number {
     let n = 0;
-    for (let i = INTERACTIVE_SLOT + 1; i < this.slots.length; i++) {
-      const slot = this.slots[i]!;
+    for (const slot of this.slots) {
       if (!slot.manager.running && slot.runId === null) n++;
     }
     return n;
   }
 
-  /** Background capacity, excluding the reserved interactive slot. */
+  /** Total capacity this pool was built with. */
   get capacity(): number {
-    return this.slots.length - 1;
+    return this.slots.length;
   }
 
-  /** Whether the interactive run is executing (pause/branch guards read this). */
-  get interactiveRunning(): boolean {
-    return this.slots[INTERACTIVE_SLOT]!.manager.running;
-  }
-
-  /** Whether ANY slot is busy. This is what gates agent edits: mutating an agent's files
-   *  while a background eval is reading them would make the trace lie about what ran. */
+  /** Whether ANY slot is busy. On the interactive pool this is what pause/resume/branch use
+   *  to mean "is there still a live process for the run I'm asking about" — see index.ts's
+   *  own note on why that is a stricter, later-clearing signal than `runActive`. On the eval
+   *  pool it's what gates agent edits: mutating an agent's files while a background eval is
+   *  reading them would make the trace lie about what ran. */
   get busy(): boolean {
     return this.slots.some((s) => s.manager.running || s.runId !== null);
   }

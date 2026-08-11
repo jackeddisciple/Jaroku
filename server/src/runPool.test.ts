@@ -1,10 +1,11 @@
 // Run pool guarantees, exercised against REAL subprocesses.
 //
-// These are the properties a fan-out depends on, and all three fail silently if broken:
-// exceeding the cap just makes everything slower (and poisons the latency numbers the
-// comparison dashboard reports), losing the interactive reservation breaks pause/branch
-// only once an eval happens to be running, and a missing timeout turns one hung network
-// call into an eval that never finishes with no way out.
+// These are the properties a fan-out depends on, and both fail silently if broken: exceeding
+// the cap just makes everything slower (and poisons the latency numbers the comparison
+// dashboard reports), and a missing timeout turns one hung network call into an eval that
+// never finishes with no way out. The interactive/eval separation this class used to enforce
+// itself (one reserved slot) is now index.ts's job — two separate pools — so it isn't tested
+// here any more; see index.ts's own commentary on interactivePool/evalPool instead.
 //
 // Runs on the free `fake` provider, so this costs nothing.
 //
@@ -40,7 +41,9 @@ const check = (name: string, ok: boolean, detail = "") => {
 // what is under test is the attribution, and the parser in between is fileProtocol.test.ts's.
 {
   interface FakeSlot { runId: string | null; manager: { emit: (event: string, value: unknown) => void } }
-  const pool = new RunPool(1);
+  // Two slots on purpose — this scenario needs one busy and one genuinely idle to test
+  // attribution across both, which a single-slot pool has no room to set up.
+  const pool = new RunPool(2);
   const slots = (pool as unknown as { slots: FakeSlot[] }).slots;
   check("a pool has its slots", slots.length > 1);
   slots[0]!.runId = "the-slots-own-run";
@@ -91,15 +94,15 @@ function runnerProcessCount(): number {
   }
 }
 
-// --- 1. capacity is a hard cap, and slot 0 is not part of it -------------------------
+// --- 1. capacity is a hard cap, every slot interchangeable ----------------------------
 {
   const CONCURRENCY = 2;
   const pool = new RunPool(CONCURRENCY);
   const exits: string[] = [];
   pool.on("exit", ({ runId }) => exits.push(runId));
 
-  check("capacity excludes the interactive slot", pool.capacity === CONCURRENCY, `got ${pool.capacity}`);
-  check("all background slots free initially", pool.freeSlots === CONCURRENCY);
+  check("capacity is exactly what the pool was built with", pool.capacity === CONCURRENCY, `got ${pool.capacity}`);
+  check("every slot free initially", pool.freeSlots === CONCURRENCY);
 
   const started = [
     pool.tryStart({ ...base, runId: "bg-1" }),
@@ -107,20 +110,16 @@ function runnerProcessCount(): number {
   ];
   const overflow = pool.tryStart({ ...base, runId: "bg-3" });
 
-  check("fills every background slot", started.every(Boolean));
+  check("fills every slot", started.every(Boolean));
   check("refuses to spawn past the cap", overflow === false);
   check("no free slots while saturated", pool.freeSlots === 0);
 
-  // The reservation is the whole point: an eval must never be able to take the slot the
-  // user's run — and pause/resume/branch — depend on.
-  const interactive = pool.startInteractive({ ...base, runId: "interactive-1" });
-  check("interactive slot still available while background is saturated", interactive === true);
-  check("interactive run refuses a second interactive start",
-    pool.startInteractive({ ...base, runId: "interactive-2" }) === false);
-
+  // Session 5: the reservation that used to be one hardcoded slot inside this class is now
+  // two SEPARATE pool instances (see index.ts) plus a per-workspace semaphore in front of the
+  // interactive one — this class no longer has any concept of "interactive" to test.
 
   await wait(25_000);
-  check("every run exited", exits.length === 3, `exits: ${exits.join(",")}`);
+  check("every run exited", exits.length === 2, `exits: ${exits.join(",")}`);
   check("slots released after exit", pool.freeSlots === CONCURRENCY, `free=${pool.freeSlots}`);
   check("pool reports idle", pool.busy === false);
   pool.stopAll();

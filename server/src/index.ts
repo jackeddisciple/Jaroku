@@ -2,8 +2,9 @@
 //
 //   uv-spawned agent  --stdout JSON-->  RunPool slot  --event-->  { persist + broadcast }
 //
-// The pool reserves slot 0 for the interactive run — the one the user drives, and the only
-// one pause/resume/branch address — and lends the rest to the eval fan-out.
+// Two pools, since Session 5: `interactivePool` for the run the user drives — the only one
+// pause/resume/branch address — and `evalPool` for the eval fan-out, so neither can starve
+// the other of a slot. See the pools' own construction below for why.
 //
 // Run:  npm run dev        (in server/)
 // Then open http://localhost:4317 to watch traces live.
@@ -13,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import { RunPool } from "./runPool.ts";
+import { RunPool, type RunPoolEvents } from "./runPool.ts";
 import { TraceStore } from "./store.ts";
 import { migrate } from "./db/migrate.ts";
 import { openDb } from "./db/open.ts";
@@ -86,6 +87,7 @@ import { FlyMachinesSandbox } from "./sandbox/flySandbox.ts";
 import { TraceIngestMetrics } from "./sandbox/traceIngestMetrics.ts";
 import { BackpressureTracker } from "./sandbox/backpressure.ts";
 import { Dispatcher, defaultQueueBackend } from "./queue/dispatcher.ts";
+import { workspaceSemaphore } from "./queue/semaphores.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = resolve(__dirname, "..");
@@ -198,21 +200,38 @@ const credentials = fileCredentialWriter(join(RUNTIME_DIR, ".env"));
 
 const mcpStore = new McpStore(store.database());
 const mcpRegistry = new McpRegistry(mcpStore, credentials);
-// Slot 0 is the interactive run; the rest are the eval fan-out's. Modest by default —
-// each slot is a Python subprocess with a LangGraph import, and oversubscribing the machine
-// inflates every run's latency, which the comparison dashboard then reports as if it were
-// the provider's.
-const EVAL_CONCURRENCY = Math.max(1, Number(process.env.JAROKU_EVAL_CONCURRENCY ?? 4));
-const pool = new RunPool(EVAL_CONCURRENCY, {
+
+// TWO POOLS, SESSION 5. Before this, one pool reserved slot 0 for the interactive run and
+// lent the rest to the eval fan-out — a single, process-wide reservation, because there was
+// only ever one workspace to reserve it for. That protection is now structural instead of a
+// carved-out index: interactivePool and evalPool are separate RunPool instances with
+// separate capacity, so an eval fan-out can saturate its own pool completely without ever
+// touching a slot an interactive run could have used. Both share the same sandbox factory,
+// event bus and run-token machinery — a run token only has to verify, not be unique to a
+// pool, and sharing them is simpler than two separate control-plane wiring paths.
+const sandboxFactory =
+  RUN_SANDBOX_KIND === "fly"
+    ? () => new FlyMachinesSandbox({ app: FLY_APP!, bus: runEventBus, image: sandboxImageRef() })
+    : undefined;
+const poolOpts = {
   controlPlaneUrl: CONTROL_PLANE_URL,
   bus: runEventBus,
   signingKey: runTokenSigningKey,
   revocations: runTokenRevocations,
-  sandbox:
-    RUN_SANDBOX_KIND === "fly"
-      ? () => new FlyMachinesSandbox({ app: FLY_APP!, bus: runEventBus, image: sandboxImageRef() })
-      : undefined,
-});
+  sandbox: sandboxFactory,
+};
+// How many DIFFERENT workspaces' interactive runs this pool has ROOM for. Defaults to one,
+// and raising it is not yet meaningful: `runActive`/`activeRunId` below are still a single
+// process-wide pair, not a per-workspace map, so runAgent refuses a second interactive run
+// for ANY workspace the moment interactivePool.busy is true — that check, not this pool's
+// own capacity, is what still limits this gateway to one live interactive run at a time.
+// The per-workspace RESERVATION (see acquireInteractiveSlot below) is real infrastructure
+// today regardless; widening activeRunId into a per-workspace map, so this number starts
+// doing something, is the documented next step — not delivered this session.
+const INTERACTIVE_CONCURRENCY = Math.max(1, Number(process.env.JAROKU_INTERACTIVE_CONCURRENCY ?? 1));
+const interactivePool = new RunPool(INTERACTIVE_CONCURRENCY, poolOpts);
+const EVAL_CONCURRENCY = Math.max(1, Number(process.env.JAROKU_EVAL_CONCURRENCY ?? 4));
+const evalPool = new RunPool(EVAL_CONCURRENCY, poolOpts);
 const planner = new Planner();
 
 // WHERE A run.eval JOB ACTUALLY GOES, per Session 5. Redis when JAROKU_REDIS_URL is set, so a
@@ -221,6 +240,30 @@ const planner = new Planner();
 // its own admissions locally today — see evalRunner.ts's drainAvailable() — a genuinely
 // separate worker process is available (worker.ts) but is not this dev topology's default.
 const dispatcher = new Dispatcher(defaultQueueBackend());
+
+// THE PER-WORKSPACE INTERACTIVE RESERVATION — the descendant of the single reserved slot 0
+// used to be. Acquired before interactivePool.tryStart() in runAgent/resumeRun/branchRun,
+// released the moment that run's process actually exits (or fails to spawn). Its cap
+// defaults to one per workspace (queue/jobs.ts's run.interactive config) — same ceiling
+// `runActive` already enforces process-wide today, so nothing observable changes for a
+// single active run; what changes is that the ceiling is now an explicit, named, leased
+// reservation instead of an implicit side effect of there having been only one slot.
+const interactiveLeaseByRun = new Map<string, string>();
+async function acquireInteractiveSlot(workspaceId: string, runId: string): Promise<boolean> {
+  const leaseId = randomUUID();
+  const granted = await workspaceSemaphore(dispatcher.backend, "run.interactive", workspaceId).acquire(
+    leaseId,
+    60 * 60 * 1000, // generous — released explicitly on exit; this is only the crash safety net
+  );
+  if (granted) interactiveLeaseByRun.set(runId, leaseId);
+  return granted;
+}
+async function releaseInteractiveSlot(workspaceId: string, runId: string): Promise<void> {
+  const leaseId = interactiveLeaseByRun.get(runId);
+  if (!leaseId) return;
+  interactiveLeaseByRun.delete(runId);
+  await workspaceSemaphore(dispatcher.backend, "run.interactive", workspaceId).release(leaseId);
+}
 
 // Run ids belonging to an in-flight eval job. Their events persist normally but are kept
 // OFF the "trace" channel, so a fan-out can't steal the timeline's focus (traceStore
@@ -360,10 +403,10 @@ for (const ctx of workspaceContexts) {
 }
 
 // True from spawn until run_end (or exit) of the INTERACTIVE run. Deliberately NOT
-// pool.interactiveRunning: the process outlives its run_end by a beat while it tears down,
-// and refusing an apply/undo in that window is a race the user would hit by clicking right
-// after a run finishes. Once run_end is emitted the graph is done and the project files are
-// no longer being read.
+// interactivePool.busy: the process outlives its run_end by a beat while it tears down, and
+// refusing an apply/undo in that window is a race the user would hit by clicking right after
+// a run finishes. Once run_end is emitted the graph is done and the project files are no
+// longer being read.
 let runActive = false;
 
 // Debug depth (Week 6). The server mints each run's id up front so it can address a live run
@@ -444,11 +487,13 @@ const editor = new Editor({
   runtimeDir: RUNTIME_DIR,
   agents: agentRepo,
   projects,
-  // Pool-aware, not just interactive-aware: an eval job is reading the agent's files from
+  // BOTH pools, not just the interactive one: an eval job is reading the agent's files from
   // a subprocess right now, and rewriting them mid-flight would make the trace describe
-  // code that never ran. `pool.busy` covers every slot.
+  // code that never ran. `.busy` covers every slot in whichever pool it's asked of.
   canMutate: () =>
-    runActive || pool.busy ? "cannot modify the agent while a run is in progress" : null,
+    runActive || interactivePool.busy || evalPool.busy
+      ? "cannot modify the agent while a run is in progress"
+      : null,
 });
 
 /**
@@ -529,7 +574,7 @@ const deployDeps: DeployManagerDeps = {
   // The same pool-aware check the editor uses, and for a sharper version of the reason:
   // deploying WRITES into the project, so doing it while a subprocess is importing those
   // files would change code out from under a run in flight.
-  agentBusy: () => runActive || pool.busy,
+  agentBusy: () => runActive || interactivePool.busy || evalPool.busy,
   onStage: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "stage", ...e }),
   onLog: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "log", ...e }),
   onServeToken: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "serveToken", ...e }),
@@ -688,20 +733,24 @@ router.get(
 
 // THE CONTROL PLANE A HOSTED SANDBOX'S RUNNER CALLS HOME TO — see sandbox/controlPlaneRoutes.ts.
 // Registered unconditionally, not only under JAROKU_RUN_SANDBOX=fly: the routes are inert
-// without a run token to present (pool.eventBus has no entries for a local-only server, since
+// without a run token to present (runEventBus has no entries for a local-only server, since
 // runPool.ts never registers one without both a workspaceId and a configured control plane), so
 // there is nothing to gain and a live/ready toggle to lose by making this conditional.
+// Both pools share this SAME bus (see poolOpts above), so there is exactly one to register.
 const traceIngestMetrics = new TraceIngestMetrics();
 const traceBackpressure = new BackpressureTracker();
 registerControlPlaneRoutes(router, {
-  bus: pool.eventBus,
+  bus: runEventBus,
   signingKey: runTokenSigningKey,
   revocations: runTokenRevocations,
   metrics: traceIngestMetrics,
   backpressure: traceBackpressure,
   onBackpressureViolation: (runId, reason) => {
     console.warn(`[trace-ingest] ${runId} ${reason} — stopping the run`);
-    pool.stop(runId);
+    // Which pool the offending run is in isn't known here — stop() on the wrong one is
+    // already a documented no-op (runPool.ts), so asking both is simpler than tracking it.
+    interactivePool.stop(runId);
+    evalPool.stop(runId);
   },
   // The hosted twin of the local "tool_confirm" control-line handler further down this file —
   // same pendingConfirms registration, same broadcast shape, so the UI's modal cannot tell
@@ -932,7 +981,7 @@ const judge = new JudgeScorer({
 });
 
 evalRunner = new EvalRunner({
-  pool,
+  pool: evalPool,
   store,
   dispatcher,
   evalStore,
@@ -1133,7 +1182,7 @@ async function handleMcpCommand(ctx: TenantContext, cmd: McpCommand): Promise<vo
         // hosted run has no approval file anybody is polling for. Writing to whichever
         // mechanism the run is NOT using costs one harmless call.
         writeApproval(cmd.runId, cmd.nonce, verdict);
-        pool.eventBus.resolveMcpConfirm(cmd.runId, cmd.nonce, verdict);
+        runEventBus.resolveMcpConfirm(cmd.runId, cmd.nonce, verdict);
         console.log(`[mcp] ${pending.server}/${pending.tool} — ${verdict}`);
         relay.broadcastMcp(ctx, { type: "confirmResolved", runId: cmd.runId, nonce: cmd.nonce, verdict });
         return;
@@ -1808,7 +1857,26 @@ function ingest(work: () => Promise<void>): void {
   });
 }
 
-pool.on("event", ({ runId, event }) => {
+// EVERYTHING BELOW LISTENS ON BOTH POOLS. An eval run's trace still has to reach the SAME
+// TraceStore and the SAME control-line handling an interactive run's does — isEvalRun() is
+// what already keeps its ordinary events off the live "trace"/"log" channels, and
+// activeRunId/pausedRunId are already scoped to the interactive run alone (an eval runId
+// never equals either), so registering the identical handler on evalPool costs nothing extra
+// to reason about: every branch below already answers "is this MY run" correctly per event.
+function onBothPools<K extends keyof RunPoolEvents>(
+  event: K,
+  handler: (...args: RunPoolEvents[K]) => void,
+): void {
+  // TypeScript cannot distribute EventEmitter.on's conditional parameter type through a
+  // generic K here, even though `handler` is exactly what it wants for any concrete K a
+  // caller below actually passes — the callers, not this plumbing, are what type safety here
+  // protects.
+  const on = (pool: RunPool) => (pool.on as (event: K, handler: (...args: RunPoolEvents[K]) => void) => void)(event, handler);
+  on(interactivePool);
+  on(evalPool);
+}
+
+onBothPools("event", ({ runId, event }) => {
   // Read synchronously: this flag gates whether a NEW run may start, and deferring it would
   // leave a window in which the finished run still looks active.
   if (runId === activeRunId && event.kind === "run_end") runActive = false;
@@ -1833,12 +1901,12 @@ pool.on("event", ({ runId, event }) => {
   });
 });
 
-pool.on("parseError", ({ runId, line, error }) => {
+onBothPools("parseError", ({ runId, line, error }) => {
   console.error(`[manager] non-event stdout line (${error}):`, line.slice(0, 200));
   if (!isEvalRun(runId)) relay.broadcastLog(contextForRun(runId), "parseError", `${error}: ${line.slice(0, 200)}`);
 });
 
-pool.on("stderr", ({ runId, line }) => {
+onBothPools("stderr", ({ runId, line }) => {
   console.error("[agent]", line);
   // An agent's stderr is its workspace's: it can carry a stack trace over the user's own data.
   if (!isEvalRun(runId)) relay.broadcastLog(contextForRun(runId), "stderr", line);
@@ -1847,7 +1915,7 @@ pool.on("stderr", ({ runId, line }) => {
 // Debug-depth control events (off the trace stream). A `boundary` correlates the durable
 // checkpoint to the steps it covers (for later branching); a `paused` flips the run to the
 // store-only 'paused' status so history shows it as resumable, without any run_end.
-pool.on("control", ({ runId: slotRunId, ctrl }) => {
+onBothPools("control", ({ runId: slotRunId, ctrl }) => {
   // THE RUN IS THE SLOT'S, NOT THE LINE'S.
   //
   // This used to read `ctrl.run_id` — a field in text a subprocess printed — and every branch
@@ -1928,20 +1996,25 @@ pool.on("control", ({ runId: slotRunId, ctrl }) => {
   }
 });
 
-pool.on("spawnError", ({ runId, error }) => {
+onBothPools("spawnError", ({ runId, error }) => {
   if (runId === activeRunId) {
     runActive = false;
     activeRunId = null;
   }
+  void releaseInteractiveSlot(contextForRun(runId).workspaceId, runId);
   console.error(`[manager] spawn error (run ${runId}):`, error.message);
 });
 
-pool.on("exit", ({ runId, code, signal, timedOut }) => {
+onBothPools("exit", ({ runId, code, signal, timedOut }) => {
   // The subprocess is gone, so any question it was waiting on is moot. Left standing, a run
   // that crashed while blocked would leave a modal asking about a process that no longer
   // exists, and answering it would write a file nobody will ever read.
   clearConfirms(runId, "run ended");
   traceBackpressure.release(runId);
+  // A no-op for an eval run — it never acquired one. A paused run's process genuinely exits
+  // (see debug depth §S3), so this releases the reservation across the pause too; resumeRun
+  // re-acquires a fresh one on its way back in.
+  void releaseInteractiveSlot(contextForRun(runId).workspaceId, runId);
   // Only the interactive run owns the interactive flags; an eval job finishing must not
   // clear them out from under a run the user is driving.
   if (runId === activeRunId) {
@@ -2235,7 +2308,7 @@ async function runAgent(
   model?: string,
   agentId?: string,
 ): Promise<void> {
-  if (pool.interactiveRunning) {
+  if (interactivePool.busy) {
     console.log("[manager] agent already running; ignoring run request");
     return;
   }
@@ -2292,11 +2365,20 @@ async function runAgent(
   } catch (err) {
     console.warn(`[manager] could not resolve credentials for ${runId}: ${(err as Error).message}`);
   }
+  // The reservation. interactivePool.busy already refused a second run process-wide, so this
+  // should never actually be denied today — it is acquired anyway, unconditionally, because
+  // it is the mechanism that has to exist and be exercised now for a future session to widen
+  // the process-wide check above into a per-workspace one without also inventing this.
+  if (!(await acquireInteractiveSlot(ctx.workspaceId, runId))) {
+    console.warn(`[manager] interactive reservation denied for workspace ${ctx.workspaceId} — refusing run ${runId}`);
+    relay.broadcastDebug(ctx, { type: "error", message: "you already have an interactive run in progress" });
+    return;
+  }
   runActive = true;
   activeRunId = runId;
   pausedRunId = null;
   runWorkspaces.set(runId, ctx);
-  pool.startInteractive({ runId, runtimeDir: RUNTIME_DIR, input, agentId, env, workspaceId: ctx.workspaceId });
+  interactivePool.tryStart({ runId, runtimeDir: RUNTIME_DIR, input, agentId, env, workspaceId: ctx.workspaceId });
 }
 
 // Pause the live run at its next node boundary (the runner honours the control file there).
@@ -2327,12 +2409,12 @@ async function resumeRun(ctx: TenantContext, runId: string): Promise<void> {
   // presses Resume as soon as the UI says "paused", which is exactly what the UI invites,
   // hits a slot that is about to free and was told nothing at all. The wait is bounded and
   // short because a paused run is always on its way out.
-  if (pool.interactiveRunning && pausedRunId === runId) {
-    for (let i = 0; i < 40 && pool.interactiveRunning; i++) {
+  if (interactivePool.busy && pausedRunId === runId) {
+    for (let i = 0; i < 40 && interactivePool.busy; i++) {
       await new Promise((r) => setTimeout(r, 50));
     }
   }
-  if (pool.interactiveRunning) {
+  if (interactivePool.busy) {
     // A genuinely different run is executing. Say so ON THE CHANNEL: a console.log is
     // invisible to the client, so the Resume button simply appeared to do nothing.
     const message =
@@ -2367,12 +2449,16 @@ async function resumeRun(ctx: TenantContext, runId: string): Promise<void> {
     JAROKU_PROVIDER: run.provider,
     JAROKU_MODEL: run.model,
   };
+  if (!(await acquireInteractiveSlot(ctx.workspaceId, runId))) {
+    relay.broadcastDebug(ctx, { type: "error", runId, message: "you already have an interactive run in progress" });
+    return;
+  }
   runActive = true;
   activeRunId = runId;
   pausedRunId = null;
   runWorkspaces.set(runId, ctx);
   relay.broadcastDebug(ctx, { type: "resumed", runId, seqOffset });
-  pool.startInteractive({ runId, runtimeDir: RUNTIME_DIR, agentId: run.agent_id, env, workspaceId: ctx.workspaceId });
+  interactivePool.tryStart({ runId, runtimeDir: RUNTIME_DIR, agentId: run.agent_id, env, workspaceId: ctx.workspaceId });
 }
 
 // Fork a NEW run from a parent run's checkpoint at a step's node boundary, optionally with a
@@ -2385,7 +2471,7 @@ async function branchRun(
   editNode?: string,
   editedState?: Record<string, unknown>,
 ): Promise<void> {
-  if (pool.interactiveRunning) {
+  if (interactivePool.busy) {
     relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: "a run is active — stop it before branching" });
     return;
   }
@@ -2435,6 +2521,10 @@ async function branchRun(
     if (editNode) env.JAROKU_BRANCH_EDIT_NODE = editNode;
   }
 
+  if (!(await acquireInteractiveSlot(ctx.workspaceId, branchId))) {
+    relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: "you already have an interactive run in progress" });
+    return;
+  }
   runActive = true;
   activeRunId = branchId;
   pausedRunId = null;
@@ -2444,7 +2534,7 @@ async function branchRun(
   console.log(`[debug] branching ${fromRunId} @seq ${seqHigh} -> ${branchId} (agent ${parent.agent_id})`);
   void relay.broadcastHistory(); // surface the new branch run in history immediately
   relay.broadcastDebug(ctx, { type: "branched", parentRunId: fromRunId, branchId, fromSeq: seqHigh });
-  pool.startInteractive({ runId: branchId, runtimeDir: RUNTIME_DIR, agentId: parent.agent_id, env, workspaceId: ctx.workspaceId });
+  interactivePool.tryStart({ runId: branchId, runtimeDir: RUNTIME_DIR, agentId: parent.agent_id, env, workspaceId: ctx.workspaceId });
 }
 
 // --- explain (unified composer) --------------------------------------------
@@ -2514,7 +2604,8 @@ if (process.env.JAROKU_NO_AUTORUN !== "1") {
 // --- graceful shutdown ------------------------------------------------------
 function shutdown(): void {
   console.log("\n[server] shutting down…");
-  pool.stopAll();
+  interactivePool.stopAll();
+  evalPool.stopAll();
   // Drain the ingest chain before closing. Events already read off a subprocess's stdout are
   // events the user watched happen, and closing the database out from under the last few
   // would lose the end of a trace that visibly ran. Bounded, so a wedged write cannot make
