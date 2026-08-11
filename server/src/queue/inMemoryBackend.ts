@@ -20,6 +20,8 @@ interface ClassState {
 
 export class InMemoryQueueBackend implements QueueBackend {
   private classes = new Map<JobClass, ClassState>();
+  /** Semaphores are named counters independent of any class's ring — see backend.ts. */
+  private semaphores = new Map<string, Map<string, number>>(); // key -> leaseId -> expiresAtMs
 
   private state(jobClass: JobClass): ClassState {
     let s = this.classes.get(jobClass);
@@ -103,5 +105,32 @@ export class InMemoryQueueBackend implements QueueBackend {
     let n = 0;
     for (const lease of s.leases.values()) if (lease.expiresAtMs > now) n++;
     return n;
+  }
+
+  async acquireSemaphore(key: string, max: number, leaseId: string, ttlMs: number): Promise<boolean> {
+    const now = Date.now();
+    let holders = this.semaphores.get(key);
+    if (!holders) {
+      holders = new Map();
+      this.semaphores.set(key, holders);
+    }
+    let live = 0;
+    for (const expiresAtMs of holders.values()) if (expiresAtMs > now) live++;
+    if (live >= max) return false;
+    holders.set(leaseId, now + ttlMs);
+    return true;
+  }
+
+  async releaseSemaphore(key: string, leaseId: string): Promise<void> {
+    this.semaphores.get(key)?.delete(leaseId);
+  }
+
+  async semaphoreCount(key: string): Promise<number> {
+    const holders = this.semaphores.get(key);
+    if (!holders) return 0;
+    const now = Date.now();
+    let live = 0;
+    for (const expiresAtMs of holders.values()) if (expiresAtMs > now) live++;
+    return live;
   }
 }

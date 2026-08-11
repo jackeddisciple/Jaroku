@@ -94,6 +94,34 @@ redis.call('DEL', KEYS[2])
 if job then return job else return false end
 `;
 
+// A named semaphore is one sorted set: member = leaseId, score = expiresAtMs. Count is
+// ZCOUNT(now, +inf) rather than ZCARD, so an expired-but-unreleased holder stops counting
+// against the cap immediately rather than waiting for something to clean it up — the same
+// "capacity check never deletes" rule inFlightCount follows for the ring's own reserved
+// index, for the same reason: only an explicit release should ever remove a member.
+const SEMAPHORE_ACQUIRE_SCRIPT = `
+local key = KEYS[1]
+local now = tonumber(ARGV[1])
+local ttl = tonumber(ARGV[2])
+local leaseId = ARGV[3]
+local max = tonumber(ARGV[4])
+
+local live = redis.call('ZCOUNT', key, now, '+inf')
+if live >= max then
+  return false
+end
+redis.call('ZADD', key, now + ttl, leaseId)
+-- Trim anything already expired so an idle semaphore's zset doesn't grow forever. Strictly
+-- less than now, never touching a still-live member regardless of what TTL it was granted.
+redis.call('ZREMRANGEBYSCORE', key, '-inf', '(' .. now)
+return true
+`;
+
+const SEMAPHORE_RELEASE_SCRIPT = `
+redis.call('ZREM', KEYS[1], ARGV[1])
+return 1
+`;
+
 interface QueueRedis extends Redis {
   jarokuAdmit(
     ring: string,
@@ -109,6 +137,8 @@ interface QueueRedis extends Redis {
   jarokuEnqueue(list: string, ring: string, workspaceId: string, jobJson: string): Promise<number>;
   jarokuAck(index: string, reservedKey: string, leaseId: string): Promise<number>;
   jarokuClaimExpired(index: string, reservedKey: string, leaseId: string, now: string): Promise<string | null>;
+  jarokuSemAcquire(semKey: string, now: string, ttl: string, leaseId: string, max: string): Promise<1 | null>;
+  jarokuSemRelease(semKey: string, leaseId: string): Promise<number>;
 }
 
 function keys(jobClass: JobClass) {
@@ -123,6 +153,12 @@ function keys(jobClass: JobClass) {
   };
 }
 
+/** Semaphore keys are not job-class-ring keys — they live under their own namespace so a
+ *  workspace's `run.eval` reservation can never collide with anything the ring uses. */
+function semaphoreRedisKey(key: string): string {
+  return `sem:${key}`;
+}
+
 export class RedisQueueBackend implements QueueBackend {
   private client: QueueRedis;
 
@@ -133,6 +169,8 @@ export class RedisQueueBackend implements QueueBackend {
       this.client.defineCommand("jarokuEnqueue", { numberOfKeys: 2, lua: ENQUEUE_SCRIPT });
       this.client.defineCommand("jarokuAck", { numberOfKeys: 2, lua: ACK_SCRIPT });
       this.client.defineCommand("jarokuClaimExpired", { numberOfKeys: 2, lua: CLAIM_EXPIRED_SCRIPT });
+      this.client.defineCommand("jarokuSemAcquire", { numberOfKeys: 1, lua: SEMAPHORE_ACQUIRE_SCRIPT });
+      this.client.defineCommand("jarokuSemRelease", { numberOfKeys: 1, lua: SEMAPHORE_RELEASE_SCRIPT });
     }
   }
 
@@ -193,5 +231,20 @@ export class RedisQueueBackend implements QueueBackend {
   async inFlightCount(jobClass: JobClass): Promise<number> {
     const now = Date.now();
     return this.client.zcount(keys(jobClass).index, now, "+inf");
+  }
+
+  async acquireSemaphore(key: string, max: number, leaseId: string, ttlMs: number): Promise<boolean> {
+    const now = Date.now();
+    const reply = await this.client.jarokuSemAcquire(semaphoreRedisKey(key), String(now), String(ttlMs), leaseId, String(max));
+    return reply === 1;
+  }
+
+  async releaseSemaphore(key: string, leaseId: string): Promise<void> {
+    await this.client.jarokuSemRelease(semaphoreRedisKey(key), leaseId);
+  }
+
+  async semaphoreCount(key: string): Promise<number> {
+    const now = Date.now();
+    return this.client.zcount(semaphoreRedisKey(key), now, "+inf");
   }
 }

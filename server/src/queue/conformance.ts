@@ -161,3 +161,62 @@ export async function runQueueConformance(
 
   return { failures };
 }
+
+/** The scenarios both backends' generic semaphore methods must pass identically. Independent
+ *  of any job class's ring, so this needs no jobClass argument at all - just a key nobody
+ *  else in the same test run happens to be using. */
+export async function runSemaphoreConformance(label: string, backend: QueueBackend): Promise<{ failures: number }> {
+  let failures = 0;
+  const check = (ok: boolean, msg: string): void => {
+    if (ok) console.log(`  ok   [${label}] ${msg}`);
+    else {
+      failures++;
+      console.log(`  FAIL [${label}] ${msg}`);
+    }
+  };
+
+  {
+    const key = `test:sem:${randomUUID()}`;
+    const l1 = randomUUID();
+    check(await backend.acquireSemaphore(key, 2, l1, 60_000), "the first of two slots is granted");
+    check((await backend.semaphoreCount(key)) === 1, "count reflects one held slot");
+    const l2 = randomUUID();
+    check(await backend.acquireSemaphore(key, 2, l2, 60_000), "the second of two slots is granted");
+    const l3 = randomUUID();
+    check(!(await backend.acquireSemaphore(key, 2, l3, 60_000)), "a third is refused once both are held");
+    await backend.releaseSemaphore(key, l1);
+    check((await backend.semaphoreCount(key)) === 1, "releasing one drops the count back down");
+    const l4 = randomUUID();
+    check(await backend.acquireSemaphore(key, 2, l4, 60_000), "a slot freed by release can be re-acquired");
+    await backend.releaseSemaphore(key, l2);
+    await backend.releaseSemaphore(key, l4);
+    check((await backend.semaphoreCount(key)) === 0, "fully released settles back to zero");
+  }
+
+  {
+    // A negative TTL means "already expired" - the same trick the reap scenario above uses.
+    const key = `test:sem:expiry:${randomUUID()}`;
+    const l1 = randomUUID();
+    check(await backend.acquireSemaphore(key, 1, l1, -1), "a slot can be acquired with an already-past TTL");
+    check((await backend.semaphoreCount(key)) === 0, "and does not count once it has expired");
+    const l2 = randomUUID();
+    check(
+      await backend.acquireSemaphore(key, 1, l2, 60_000),
+      "so a saturated-looking cap admits again once the old holder has expired, with no explicit release needed",
+    );
+    await backend.releaseSemaphore(key, l2);
+  }
+
+  {
+    // Releasing something that was never held, or already released, must not throw or go
+    // negative - a worker that acks twice (a retry of its own cleanup after a network blip)
+    // is a real shape, not a hypothetical one.
+    const key = `test:sem:idempotent:${randomUUID()}`;
+    const leaseId = randomUUID();
+    await backend.releaseSemaphore(key, leaseId); // never acquired
+    await backend.releaseSemaphore(key, leaseId); // released twice
+    check((await backend.semaphoreCount(key)) === 0, "releasing a slot nobody holds is a harmless no-op");
+  }
+
+  return { failures };
+}

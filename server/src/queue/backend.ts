@@ -65,4 +65,23 @@ export interface QueueBackend {
 
   /** How many leases of this class are currently outstanding, globally. */
   inFlightCount(jobClass: JobClass): Promise<number>;
+
+  // --- generic named semaphores, independent of any job class's ring --------------------
+  //
+  // tryAdmit's own cap (above) has to be atomic WITH the pop, because which workspace it
+  // will serve isn't known until the rotation runs — checking capacity a moment earlier or
+  // later is exactly the race that makes a cap not real. A per-workspace or per-provider
+  // cap doesn't have that problem: the caller already knows which workspace or provider a
+  // job is for before it asks. So these are plain leased counters, checked as an ADDITIONAL
+  // step after a fair admit, not fused into it — see queue/semaphores.ts for why that
+  // composition is deliberate rather than a shortcut.
+
+  /** Reserve one slot of `key`, good for `ttlMs`, if fewer than `max` are currently held.
+   *  Returns whether it was granted. */
+  acquireSemaphore(key: string, max: number, leaseId: string, ttlMs: number): Promise<boolean>;
+  /** Release a slot early. Idempotent — releasing one already expired or already released
+   *  is a no-op. */
+  releaseSemaphore(key: string, leaseId: string): Promise<void>;
+  /** How many slots of `key` are currently held. */
+  semaphoreCount(key: string): Promise<number>;
 }

@@ -86,7 +86,8 @@
     "test:fly-sandbox": "tsx src/sandbox/flySandbox.test.ts",
     "test:redis": "tsx src/queue/redis.test.ts",
     "test:jobs": "tsx src/queue/jobs.test.ts",
-    "test:dispatcher": "tsx src/queue/dispatcher.test.ts"
+    "test:dispatcher": "tsx src/queue/dispatcher.test.ts",
+    "test:semaphores": "tsx src/queue/semaphores.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",
