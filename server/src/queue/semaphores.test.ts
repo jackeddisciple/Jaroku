@@ -69,6 +69,62 @@ failures += (await runSemaphoreConformance("in-memory", new InMemoryQueueBackend
 // The semaphore scripts are Lua too, and they carry the per-workspace and per-provider caps —
 // the descendants of slot 0 and JAROKU_LIMIT_<PROVIDER>. fixtures/redis/mockRedis.ts runs the
 // real ones, so this no longer waits on a broker being installed. See dispatcher.test.ts.
+console.log("\nwhat the in-memory backend is still holding after the traffic stops");
+{
+  // A gateway on the in-memory backend runs for as long as the process does. Redis's own acquire
+  // script trims expired members on every call and drops a zset once it is empty; this had no
+  // equivalent, so every workspace that ever queued a job and every lease that ever expired
+  // without an explicit release stayed in memory for the process's whole uptime. At a hosted
+  // deployment's workspace count that is a leak, not a rounding error.
+  const backend = new InMemoryQueueBackend();
+  const start = backend.retainedEntries();
+
+  for (let i = 0; i < 2_000; i++) {
+    const ws = `ws-churn-${i}`;
+    await backend.enqueue({
+      id: `job-${i}`, class: "run.eval", workspaceId: ws,
+      idempotencyKey: `run.eval:job-${i}`, enqueuedAt: new Date().toISOString(), attempt: 1, payload: {},
+    });
+    const leaseId = `lease-${i}`;
+    await backend.tryAdmit("run.eval", { leaseId, leaseTtlMs: 60_000, maxGlobalInFlight: null });
+    await backend.ack("run.eval", leaseId);
+    // An expired holder nobody releases — a worker that died mid-job, which is the case leases
+    // exist for and therefore the case that accumulates. All against ONE key, because that is
+    // the axis with no ceiling: a key is per workspace and per provider and so bounded by how
+    // many of those exist, but lease ids are minted per admission, forever.
+    await backend.acquireSemaphore("run.eval:provider:fake", 4, `sem-${i}`, -1);
+  }
+
+  const after = backend.retainedEntries();
+  check(
+    after.lists - start.lists === 0,
+    `two thousand drained workspaces leave no list behind (${after.lists - start.lists} retained)`,
+  );
+  check(
+    after.leases - start.leases === 0,
+    `and no acked lease behind (${after.leases - start.leases} retained)`,
+  );
+  check(
+    (await backend.semaphoreCount("run.eval:provider:fake")) === 0,
+    "and two thousand expired holders leave the cap free rather than looking saturated",
+  );
+  // The count above would read 0 either way, since an expired holder never counted against the
+  // cap. What proves the trim is what is RETAINED: one key acquired two thousand times left two
+  // thousand dead entries in its map, one per lease id, none of which anything would ever remove.
+  check(
+    after.semaphoreHolders - start.semaphoreHolders <= 1,
+    `expired holders are trimmed rather than accumulating (${after.semaphoreHolders - start.semaphoreHolders} retained)`,
+  );
+
+  // ...without breaking the thing the retention was protecting: a LIVE holder still counts.
+  await backend.acquireSemaphore("run.eval:provider:anthropic", 2, "live-1", 60_000);
+  await backend.acquireSemaphore("run.eval:provider:anthropic", 2, "live-2", 60_000);
+  check(
+    !(await backend.acquireSemaphore("run.eval:provider:anthropic", 2, "live-3", 60_000)),
+    "and a cap held by live leases still refuses a third",
+  );
+}
+
 console.log("\nRedisQueueBackend, on the in-process Lua fixture");
 failures += (
   await runSemaphoreConformance("redis-lua", new RedisQueueBackend(new MockRedis() as unknown as Redis))

@@ -59,7 +59,7 @@ export class InMemoryQueueBackend implements QueueBackend {
       if (!list || list.length === 0) continue; // stale ring entry; drop it, keep looking
       const job = list.shift()!;
       if (list.length > 0) s.ring.push(candidate); // still has work: rotate to the back
-      // else: leave it out of the ring until something re-enqueues into it
+      else s.lists.delete(candidate); // out of the ring AND out of the map — see the note below
       s.leases.set(opts.leaseId, { job, expiresAtMs: now + opts.leaseTtlMs });
       return job;
     }
@@ -107,6 +107,21 @@ export class InMemoryQueueBackend implements QueueBackend {
     return n;
   }
 
+  /**
+   * NOTHING HERE IS EVER SWEPT BY ANYTHING ELSE, so it has to sweep itself.
+   *
+   * The Redis backend's acquire script trims expired members on every call
+   * (ZREMRANGEBYSCORE) and Redis drops a zset once its last member is gone. This did neither: an
+   * expired holder — a worker that died, a run whose lease lapsed — stayed in the map forever,
+   * and the map for a key stayed even once empty. Since keys are per workspace and per provider,
+   * and lease ids are per admission, that is one entry accumulated per crashed lease for the
+   * process's whole uptime, against exactly the number of workspaces a hosted deployment has.
+   * Correct in a test that runs for two seconds; a leak in a gateway that runs for a month.
+   *
+   * Trimming an EXPIRED SEMAPHORE HOLDER is safe in a way trimming an expired LEASE is not: a
+   * holder carries nothing but a number, where a lease still carries the job reapExpired has to
+   * give back. That asymmetry is why liveLeaseCount above must stay read-only and this must not.
+   */
   async acquireSemaphore(key: string, max: number, leaseId: string, ttlMs: number): Promise<boolean> {
     const now = Date.now();
     let holders = this.semaphores.get(key);
@@ -115,14 +130,23 @@ export class InMemoryQueueBackend implements QueueBackend {
       this.semaphores.set(key, holders);
     }
     let live = 0;
-    for (const expiresAtMs of holders.values()) if (expiresAtMs > now) live++;
-    if (live >= max) return false;
+    for (const [held, expiresAtMs] of [...holders]) {
+      if (expiresAtMs > now) live++;
+      else holders.delete(held);
+    }
+    if (live >= max) {
+      if (holders.size === 0) this.semaphores.delete(key);
+      return false;
+    }
     holders.set(leaseId, now + ttlMs);
     return true;
   }
 
   async releaseSemaphore(key: string, leaseId: string): Promise<void> {
-    this.semaphores.get(key)?.delete(leaseId);
+    const holders = this.semaphores.get(key);
+    if (!holders) return;
+    holders.delete(leaseId);
+    if (holders.size === 0) this.semaphores.delete(key);
   }
 
   async semaphoreCount(key: string): Promise<number> {
@@ -134,16 +158,34 @@ export class InMemoryQueueBackend implements QueueBackend {
     return live;
   }
 
+  /** What this backend is still holding onto, counted. Exposed for the same reason ringOrder is
+   *  (see backend.ts): a property worth asserting that is otherwise invisible from outside.
+   *  `semaphoreHolders` is the number with no ceiling — keys are per workspace and per provider,
+   *  but a lease id is minted per admission. Nothing in production reads this. */
+  retainedEntries(): { lists: number; leases: number; semaphoreKeys: number; semaphoreHolders: number } {
+    let lists = 0;
+    let leases = 0;
+    for (const s of this.classes.values()) {
+      lists += s.lists.size;
+      leases += s.leases.size;
+    }
+    let semaphoreHolders = 0;
+    for (const holders of this.semaphores.values()) semaphoreHolders += holders.size;
+    return { lists, leases, semaphoreKeys: this.semaphores.size, semaphoreHolders };
+  }
+
   async purgePending(jobClass: JobClass, workspaceId: string, idempotencyKeys: Set<string>): Promise<number> {
     const s = this.state(jobClass);
     const list = s.lists.get(workspaceId);
     if (!list || !list.length) return 0;
     const before = list.length;
     const kept = list.filter((j) => !idempotencyKeys.has(j.idempotencyKey));
-    s.lists.set(workspaceId, kept);
     if (kept.length === 0) {
+      s.lists.delete(workspaceId);
       const idx = s.ring.indexOf(workspaceId);
       if (idx >= 0) s.ring.splice(idx, 1);
+    } else {
+      s.lists.set(workspaceId, kept);
     }
     return before - kept.length;
   }
