@@ -12,10 +12,10 @@
 //
 //   npm run test:object-keys
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { randomBytes, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
   agentPrefix, agentStagingKey, agentStagingPrefix, agentVersionKey, agentVersionPrefix,
@@ -236,6 +236,49 @@ console.log("\nFsObjectStore");
     /* refused, as it must be */
   }
   check("a traversing key cannot write outside the root", !escaped && !existsSync(join(root, "..", "escaped.txt")));
+
+  // --- symlinks, which `resolve()` cannot see ------------------------------------------
+  //
+  // `resolve()` is string arithmetic and knows nothing about the filesystem, so a key whose
+  // every component is a legal NAME still escapes the root if one of those components is a
+  // link pointing out of it. An object store has no symlinks; this one has to refuse them.
+  const elsewhere = tmpRoot();
+  const linkedVersion = join(root, "ws", WS_A, "agents", AGENT, "v7");
+  mkdirSync(dirname(linkedVersion), { recursive: true });
+  symlinkSync(elsewhere, linkedVersion);
+
+  let wroteThrough = false;
+  try {
+    await store.put(agentVersionKey(WS_A, AGENT, 7, "escaped.py"), "outside the root");
+    wroteThrough = true;
+  } catch {
+    /* refused, as it must be */
+  }
+  check(
+    "a key passing through a symlinked directory cannot write outside the root",
+    !wroteThrough && !existsSync(join(elsewhere, "escaped.py")),
+  );
+  let readThrough = true;
+  try {
+    await store.get(agentVersionKey(WS_A, AGENT, 7, "escaped.py"));
+  } catch {
+    readThrough = false;
+  }
+  check("...nor read through one", !readThrough);
+
+  // A link that points back up its own tree. Following it is an infinite walk, and `stat`ing
+  // it is ELOOP — either one takes a whole workspace's listing down.
+  const cycle = join(root, "ws", WS_A, "agents", AGENT, "loop");
+  symlinkSync(join(root, "ws", WS_A), cycle);
+  let listed: number | string;
+  try {
+    listed = (await store.list(`ws/${WS_A}/`)).length;
+  } catch (err) {
+    listed = (err as Error).message;
+  }
+  check("a symlink cycle is skipped rather than raising ELOOP", typeof listed === "number", String(listed));
+  rmSync(cycle, { force: true });
+  rmSync(linkedVersion, { force: true });
 
   // Written directly, bypassing the store, so nothing was validated on the way in.
   const stray = join(root, "ws", WS_A, "agents", AGENT, "v2", "agent.py.tmp-abc");

@@ -29,8 +29,8 @@
 // half-written agent.py is a syntax error attributed to the model.
 
 import {
-  chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, rmSync, statSync,
-  writeFileSync,
+  chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync,
+  rmSync, statSync, writeFileSync,
 } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -76,7 +76,35 @@ export class FsObjectStore implements ObjectStore {
     if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
       throw new Error(`object key resolves outside the store root: ${key}`);
     }
+    this.refuseSymlinks(rel);
     return full;
+  }
+
+  /**
+   * Refuse a key any of whose components is a symlink.
+   *
+   * `lstat`, never `stat`: the point is to see the link itself rather than what it points at.
+   * Walked from the root down, so a link ANYWHERE on the way is caught — the dangerous one is
+   * a directory component, because that redirects everything beneath it, and the target is
+   * checked too so a link cannot be written through or read out of.
+   *
+   * A component that does not exist yet is fine and stops the walk: nothing below it can be a
+   * link, and `put` is about to create it as a real directory.
+   */
+  private refuseSymlinks(rel: string): void {
+    let cursor = this.root;
+    for (const part of rel.split(sep)) {
+      cursor = join(cursor, part);
+      let stat;
+      try {
+        stat = lstatSync(cursor);
+      } catch {
+        return; // does not exist yet — and neither does anything under it
+      }
+      if (stat.isSymbolicLink()) {
+        throw new Error(`object key passes through a symlink, which an object store has none of: ${rel}`);
+      }
+    }
   }
 
   private metaFor(key: string, full: string, body?: Buffer): ObjectMeta {
@@ -146,7 +174,12 @@ export class FsObjectStore implements ObjectStore {
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir)) {
         const full = join(dir, entry);
-        const stat = statSync(full);
+        // `lstat`, so a symlink is seen as a symlink. Skipped entirely rather than followed:
+        // an object store has no symlinks, so anything reachable only through one is not an
+        // object — and a link that points back up its own tree would otherwise be an infinite
+        // walk, or an ELOOP that takes down a whole workspace's listing.
+        const stat = lstatSync(full);
+        if (stat.isSymbolicLink()) continue;
         if (stat.isDirectory()) {
           walk(full);
           continue;
