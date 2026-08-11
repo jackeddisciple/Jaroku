@@ -10,9 +10,12 @@
 // a second script somebody can forget to run is not a gate. Session 3 added STORAGE: object
 // keys, presigned URLs, version pointers, credential names and checkpoint threads, all of which
 // live outside the tables the earlier assertions cover and none of which RLS reaches. Session 4
-// adds run tokens and sandbox reach. The rule is that a session does not merge until this file
-// covers what it added, which is why the coverage assertion at the bottom fails when a store
-// grows a method nothing here exercises.
+// adds a version's cached graph result (below) and, on a surface with no Db-backed rows at all —
+// run tokens and the control-plane HTTP routes a hosted sandbox calls — a companion file,
+// sandbox/tenancyIsolation.test.ts, asserting the identical property against that transport
+// instead. The rule is that a session does not merge until this file (or its companion) covers
+// what it added, which is why the coverage assertion at the bottom fails when a store grows a
+// method nothing here exercises.
 //
 // Runs on both drivers. On Postgres RLS is a second wall behind everything asserted here; on
 // SQLite this layer is the only wall, which is exactly why the suite matters more there.
@@ -380,6 +383,8 @@ const SCOPED_API: Record<string, string[]> = {
     "list", "bySlug", "byId", "create", "upsertFromDisk", "syncFromDisk", "addVersion",
     "plannedNextVersion", "reserveVersion", "promoteVersion", "version", "versions",
     "undoVersion", "editCounts",
+    // Session 4.
+    "getGraphCache", "setGraphCache",
   ],
   // Session 2. These decide who can see a workspace AT ALL, so a cross-tenant bug in any of
   // them is worse than one in the stores above — it does not leak a row, it hands over the
@@ -659,6 +664,16 @@ async function remainder(db: Db): Promise<void> {
   check((await agents.byId(B.ctx, sameSlug)) === undefined, "...and B cannot resolve A's uuid");
 
   check(!(await agents.editCounts(A.ctx)).has(theirAgent.id), "editCounts counts none of B's edits");
+
+  // Session 4: a version's cached graph introspection result (agent_versions.graph_cache). No
+  // workspace_id of its own, same as the version row it lives on — scoped by the same join.
+  await agents.setGraphCache(B.ctx, theirAgent.id, 2, { agent_id: "support_bot", nodes: [], edges: [] });
+  check((await agents.getGraphCache(A.ctx, theirAgent.id, 2)) === undefined, "getGraphCache cannot read B's cached graph");
+  await agents.setGraphCache(A.ctx, theirAgent.id, 2, { agent_id: "forged", nodes: [], edges: [] });
+  check(
+    ((await agents.getGraphCache(B.ctx, theirAgent.id, 2)) as { agent_id?: string } | undefined)?.agent_id === "support_bot",
+    "setGraphCache cannot overwrite B's cached graph",
+  );
 
   // Session 3: the credential NAMES a workspace has. No values live here, but what a tenant
   // integrates with is not something another tenant is entitled to enumerate.
