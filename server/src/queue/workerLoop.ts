@@ -158,19 +158,33 @@ export class WorkerLoop {
   async shutdown(drainMs: number): Promise<{ drained: number; stillRunning: number }> {
     this.stopping = true;
     const deadline = Date.now() + drainMs;
+    const atStart = this.inFlight.size;
     while (this.inFlight.size > 0 && Date.now() < deadline) {
       await Promise.race([...[...this.inFlight.values()].map((e) => e.promise), sleep(50)]);
     }
-    for (const [leaseId, entry] of this.inFlight) {
+    let handedBack = 0;
+    // A SNAPSHOT, RE-CHECKED. Handing one job back awaits two round trips, and a handler that
+    // finishes during them removes itself from inFlight — but the loop was iterating entries it
+    // had already read, so it re-enqueued work that had just completed and acked. That is a
+    // duplicate this method manufactured, in the one place whose whole purpose is losing nothing
+    // and duplicating nothing. Re-checking membership immediately before each step closes the
+    // gap the awaits opened. What remains is the instant between the last check and the enqueue
+    // landing, which Node offers no way to close — a handler cannot be cancelled — and which the
+    // at-least-once contract covers.
+    for (const [leaseId, entry] of [...this.inFlight]) {
+      if (!this.inFlight.has(leaseId)) continue;
       await this.dispatcher.ack(entry.jobClass, leaseId);
+      if (!this.inFlight.has(leaseId)) continue; // it finished while the ack was in flight
       await this.dispatcher.enqueue(entry.jobClass, entry.job.workspaceId, entry.job.payload, {
         id: entry.job.id,
         idempotencyKey: entry.job.idempotencyKey,
         attempt: entry.job.attempt,
       });
+      handedBack++;
     }
-    const stillRunning = this.inFlight.size;
     if (this.runPromise) await this.runPromise;
-    return { drained: this.classes.length, stillRunning };
+    // Both numbers are JOBS. `drained` used to report `classes.length` — how many classes this
+    // worker was configured for, which is not a fact about this shutdown at all.
+    return { drained: atStart - handedBack, stillRunning: handedBack };
   }
 }

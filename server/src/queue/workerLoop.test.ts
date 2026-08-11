@@ -214,5 +214,57 @@ console.log("\na job still running when the drain window closes is handed back, 
   check(secondHandled === 1, "a fresh worker picks up the handed-back job and runs it exactly once");
 }
 
+console.log("\na job that finishes DURING the hand-back is not handed back as well");
+{
+  // The drain window closes with the handler still going, so shutdown starts handing it back —
+  // and handing one job back is two awaits. A handler that finishes inside them has already
+  // acked and already done the work; re-enqueuing it anyway is a duplicate this method invented.
+  // The slow ack here is what makes that window wide enough to observe deterministically; in
+  // production it is a Redis round trip, which is not narrow either.
+  const backend = new InMemoryQueueBackend();
+  const dispatcher = new Dispatcher(backend);
+  const ws = `ws-${randomUUID()}`;
+  let handled = 0;
+  let releaseHandler: (() => void) | null = null;
+
+  const realAck = dispatcher.ack.bind(dispatcher);
+  dispatcher.ack = async (jobClass, leaseId) => {
+    await realAck(jobClass, leaseId);
+    // The handler completes right here — mid-hand-back, after its lease is already released.
+    releaseHandler?.();
+    releaseHandler = null;
+    await sleep(20);
+  };
+
+  await dispatcher.enqueue("run.eval", ws, { tag: "boundary" });
+  // TWO classes, one job. `drained` used to report classes.length, so a worker configured for
+  // two classes claimed to have drained two jobs having drained one.
+  const loop = new WorkerLoop({
+    dispatcher,
+    classes: ["run.eval", "judge"],
+    handlers: {
+      // No ack of its own: shutdown's hand-back acks first, and ack is idempotent — this
+      // handler's work is simply DONE the moment it is released, which is the case under test.
+      "run.eval": async () => {
+        handled++;
+        await new Promise<void>((resolve) => (releaseHandler = resolve));
+      },
+      judge: async () => {},
+    },
+    idlePollMs: 10,
+  });
+  const running = loop.run();
+  for (let i = 0; i < 50 && handled < 1; i++) await sleep(10);
+
+  const result = await loop.shutdown(50);
+  await running;
+  await sleep(50);
+
+  const pending = await backend.pendingCount("run.eval", ws);
+  check(pending === 0, `a job that finished mid-hand-back is not put back too (${pending} pending)`);
+  check(result.stillRunning === 0, "and shutdown does not report it as a straggler");
+  check(result.drained === 1, `drained counts JOBS that finished, not configured classes (got ${result.drained})`);
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);
