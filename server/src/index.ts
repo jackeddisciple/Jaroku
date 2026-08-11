@@ -790,9 +790,9 @@ const relay = new WsRelay({
     else if (cmd.cmd === "planAgent") planAgent(ctx, cmd);
     else if (cmd.cmd === "discardPlan") planner.discard(cmd.planId);
     else if (cmd.cmd === "edit") editAgent(ctx, cmd.agentId, cmd.instruction);
-    else if (cmd.cmd === "applyEdit") void editor.apply(cmd.proposalId);
+    else if (cmd.cmd === "applyEdit") void editor.apply(ctx, cmd.proposalId);
     else if (cmd.cmd === "undoEdit") void editor.undo(ctx, cmd.agentId);
-    else if (cmd.cmd === "discardEdit") void editor.discard(cmd.proposalId);
+    else if (cmd.cmd === "discardEdit") void editor.discard(ctx, cmd.proposalId);
     else if (cmd.cmd === "pauseRun") pauseRun(ctx, cmd.runId);
     else if (cmd.cmd === "resumeRun") void resumeRun(ctx, cmd.runId);
     else if (cmd.cmd === "branchRun") void branchRun(ctx, cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState);

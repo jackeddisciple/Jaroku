@@ -372,10 +372,18 @@ export class Editor extends EventEmitter<EditorEvents> {
    *
    * No snapshot, because there is nothing to snapshot — the version this replaces was written
    * once and is never rewritten, so it is still exactly where Undo will point.
+   *
+   * TAKES THE ASKING WORKSPACE, and it is not decoration. A proposal id is the whole argument
+   * this command has, and the record it names carries a context of its own — so without this
+   * check the handler applied a proposal in ITS workspace rather than in the caller's: one
+   * workspace sending another's proposal id published a new version of an agent it has no row
+   * for. Every other command on this socket is answered in the caller's scope; this one now is
+   * too, and a proposal belonging to somebody else is reported as absent rather than as
+   * forbidden, which is what `bySlug` does with an agent for the same reason.
    */
-  async apply(proposalId: string): Promise<void> {
+  async apply(ctx: TenantContext, proposalId: string): Promise<void> {
     const rec = this.pending.get(proposalId);
-    if (!rec) {
+    if (!rec || rec.ctx.workspaceId !== ctx.workspaceId) {
       this.fail({ message: "that proposal is no longer available", proposalId });
       return;
     }
@@ -395,7 +403,7 @@ export class Editor extends EventEmitter<EditorEvents> {
       return;
     }
     if (agent.current_version !== rec.baseVersion) {
-      await this.discard(proposalId);
+      await this.discard(rec.ctx, proposalId);
       this.fail({
         message:
           `this agent changed while the proposal was open (it was v${rec.baseVersion}, it is now ` +
@@ -468,10 +476,12 @@ export class Editor extends EventEmitter<EditorEvents> {
     });
   }
 
-  /** Drop a pending proposal without applying it. */
-  async discard(proposalId: string): Promise<void> {
+  /** Drop a pending proposal without applying it. Only the workspace that made it may. */
+  async discard(ctx: TenantContext, proposalId: string): Promise<void> {
     const rec = this.pending.get(proposalId);
-    if (!rec) return; // already gone — discarding twice is not an error
+    // Already gone, or never theirs. Both are silent: discarding twice is not an error, and
+    // answering differently for somebody else's id would confirm that the id exists.
+    if (!rec || rec.ctx.workspaceId !== ctx.workspaceId) return;
     this.pending.delete(proposalId);
     await this.opts.projects.discardStaging(rec.ctx, rec.agentUuid, rec.stagingId).catch(() => {});
     this.emit("discarded", { proposalId, agentId: rec.agentId });
@@ -479,7 +489,7 @@ export class Editor extends EventEmitter<EditorEvents> {
 
   private async discardForAgent(agentId: string): Promise<void> {
     for (const rec of [...this.pending.values()]) {
-      if (rec.agentId === agentId) await this.discard(rec.proposalId);
+      if (rec.agentId === agentId) await this.discard(rec.ctx, rec.proposalId);
     }
   }
 

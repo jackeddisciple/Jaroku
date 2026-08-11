@@ -83,7 +83,7 @@ function propose(editor: Editor, ctx: TenantContext, agentId: string, instructio
   });
 }
 
-function apply(editor: Editor, proposalId: string): Promise<{ version?: number; error?: string }> {
+function apply(editor: Editor, ctx: TenantContext, proposalId: string): Promise<{ version?: number; error?: string }> {
   return new Promise((done) => {
     const onApplied = (e: { version: number }): void => {
       editor.off("error", onError);
@@ -95,7 +95,7 @@ function apply(editor: Editor, proposalId: string): Promise<{ version?: number; 
     };
     editor.once("applied", onApplied);
     editor.once("error", onError);
-    void editor.apply(proposalId);
+    void editor.apply(ctx, proposalId);
   });
 }
 
@@ -169,7 +169,7 @@ console.log("\na proposal");
 
   // --- 2. apply is a version bump ----------------------------------------------------------
   console.log("\napply");
-  const applied = await apply(editor, out.proposalId);
+  const applied = await apply(editor, A, out.proposalId);
   check(applied.version === generatedVersion + 1, `apply publishes the next version (v${applied.version})`, applied.error);
 
   const row = await agents.version(A, agent.id, applied.version!);
@@ -298,6 +298,34 @@ console.log("\nanother workspace");
     (await agents.bySlug(A, "support_bot"))!.current_version === generatedVersion,
     "...leaving A's pointer where it was",
   );
+
+  // A PROPOSAL IS AN ID, AND AN ID IS ALL THE COMMAND CARRIES. Proposing was refused above
+  // because it names an agent; applying names a proposal, whose record has a context of its own
+  // — so the handler used to act in THAT context and publish a version of A's agent on B's
+  // command. The same for discarding, which would have thrown A's reviewed diff away.
+  process.env.JAROKU_EDIT_FIXTURE = join(FIXTURES, "edit-prompt-tweak.txt");
+  const mine = await propose(editor, A, "support_bot", "a proposal of A's own");
+  check(mine.kind === "proposal", "A makes a proposal of its own", mine.kind === "error" ? mine.message : "");
+  if (mine.kind !== "proposal") throw new Error("cannot continue");
+  const before = (await agents.bySlug(A, "support_bot"))!.current_version;
+
+  const stolen = await apply(editor, B, mine.proposalId);
+  check(stolen.error !== undefined, "another workspace holding the id cannot apply it");
+  check(
+    (stolen.error ?? "").includes("no longer available"),
+    "...and is told it is not there, rather than that it is not theirs",
+    stolen.error,
+  );
+  check((await agents.bySlug(A, "support_bot"))!.current_version === before, "...and A's pointer did not move");
+
+  // Nor discard it. Asserted through the staging objects rather than by applying, because
+  // applying would spend the proposal and this is a question about whether it is still there.
+  await editor.discard(B, mine.proposalId);
+  const afterTheirs = (await objects.list(workspacePrefix(A.workspaceId))).filter((o) => o.key.includes("/staging/"));
+  check(afterTheirs.length > 0, `...nor discard it — A's staged copy is still there (${afterTheirs.length} object(s))`);
+  await editor.discard(A, mine.proposalId);
+  const afterOwn = (await objects.list(workspacePrefix(A.workspaceId))).filter((o) => o.key.includes("/staging/"));
+  check(afterOwn.length === 0, "...while the workspace that made it can", `${afterOwn.length} left`);
 }
 
 // --- 8. a proposal whose base moved underneath it --------------------------------------------
@@ -322,7 +350,7 @@ console.log("\na proposal whose base version moved");
   const moved = (await agents.bySlug(A, "support_bot"))!.current_version;
   check(moved > before, `something else published in between (v${before} -> v${moved})`);
 
-  const applied = await apply(editor, out.proposalId);
+  const applied = await apply(editor, A, out.proposalId);
   check(applied.error !== undefined, "applying the stale proposal is refused");
   check(
     (applied.error ?? "").includes(`v${before}`) && (applied.error ?? "").includes(`v${moved}`),
