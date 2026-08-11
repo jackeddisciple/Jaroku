@@ -18,7 +18,7 @@
 //   npm run test:db-boundary
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -55,7 +55,7 @@ const DRIVERS = [/from\s+["']node:sqlite["']/, /from\s+["']pg["']/, /require\(["
 
 const offenders: string[] = [];
 for (const file of files) {
-  if (file.startsWith(DB_DIR + "/") || file === DB_DIR) continue;
+  if (file.startsWith(DB_DIR + sep) || file === DB_DIR) continue;
   const text = readFileSync(file, "utf8");
   if (DRIVERS.some((re) => re.test(text))) offenders.push(relative(SRC, file));
 }
@@ -64,7 +64,7 @@ else ok(`no file outside src/db/ imports node:sqlite or pg (${files.length} chec
 
 // The rule is only worth anything if the drivers are genuinely imported SOMEWHERE inside it —
 // a pass because nothing imports them at all would be a green tick over a deleted feature.
-const inside = files.filter((f) => f.startsWith(DB_DIR + "/")).filter((f) => {
+const inside = files.filter((f) => f.startsWith(DB_DIR + sep)).filter((f) => {
   const t = readFileSync(f, "utf8");
   return DRIVERS.some((re) => re.test(t));
 });
