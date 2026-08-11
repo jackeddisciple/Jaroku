@@ -1383,6 +1383,15 @@ async function handleDeployCommand(ctx: TenantContext, cmd: DeployChannelCommand
           relay.broadcastDeploy(ctx, { type: "error", message: "no deployment id to cancel" });
           return;
         }
+        // WHOSE DEPLOYMENT. The manager is one per process and keyed by id, so without this a
+        // workspace holding another tenant's deployment id could stop their deploy partway —
+        // against a real Railway account, with whatever it had already created left behind.
+        // `forgetDeployment` below already asks this question; cancelling is the one that
+        // interrupts something in flight, so it is the one that needed it more.
+        if (!(await deployStore.get(ctx, target))) {
+          relay.broadcastDeploy(ctx, { type: "error", message: "no such deployment" });
+          return;
+        }
         await deployManager.cancel(target);
         return;
       }
