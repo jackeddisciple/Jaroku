@@ -98,13 +98,23 @@ async function handleTrace(req: HttpRequest, runId: string, deps: ControlPlaneDe
   const body = await req.json<{ events?: unknown[] }>();
   if (!Array.isArray(body.events)) throw badRequest("expected {events: [...]}");
 
-  // Bytes are checked BEFORE parsing any event out of the batch — a batch that is itself over
-  // budget must not get partial credit for the events ahead of the one that tips it over. Per-
-  // event size is what recordBytes' own single-write cap catches; the cumulative check is what
+  // Bytes AND RATE are checked BEFORE parsing any event out of the batch — a batch that is itself
+  // over budget must not get partial credit for the events ahead of the one that tips it over.
+  // Per-event size is what recordBytes' own single-write cap catches; the cumulative check is what
   // catches many small, individually-fine events adding up to a flood.
+  //
+  // recordLine IS THE THIRD CAP AND IT APPLIES HERE TOO. backpressure.ts documents three —
+  // bytes per run, single-line length, lines per second — and states that the same limiter serves
+  // both transports. This route enforced only the first two, so the rate cap existed on a local
+  // subprocess's stdout and nowhere on the hosted path: a run pushing batches of small events as
+  // fast as it could open connections was rate-limited by nothing until it eventually walked into
+  // the 64 MB per-run ceiling. One event on the wire is one line, so it is counted as one.
+  const serialised: string[] = [];
   for (const candidate of body.events) {
-    const size = Buffer.byteLength(JSON.stringify(candidate), "utf8");
-    const violation = deps.backpressure.recordBytes(runId, size);
+    const json = JSON.stringify(candidate) ?? "null";
+    serialised.push(json);
+    const violation =
+      deps.backpressure.recordBytes(runId, Buffer.byteLength(json, "utf8")) ?? deps.backpressure.recordLine(runId);
     if (violation) {
       const reason = describeViolation(violation);
       deps.onBackpressureViolation?.(runId, reason);
@@ -114,12 +124,12 @@ async function handleTrace(req: HttpRequest, runId: string, deps: ControlPlaneDe
 
   let accepted = 0;
   let dropped = 0;
-  for (const candidate of body.events) {
+  for (const [i, candidate] of body.events.entries()) {
     if (isTraceEvent(candidate)) {
       deps.bus.pushTrace(runId, candidate as TraceEvent);
       accepted++;
     } else {
-      const line = JSON.stringify(candidate).slice(0, 300);
+      const line = serialised[i]!.slice(0, 300);
       deps.bus.pushParseError(runId, { line, error: "not a recognized trace event" });
       deps.metrics?.recordDropped({ runId, reason: `not a recognized trace event: ${line}` });
       dropped++;

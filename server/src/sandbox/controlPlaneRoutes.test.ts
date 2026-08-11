@@ -176,6 +176,67 @@ const token1 = mintRunToken(signingKey, "run-1", "ws-1", 3600);
   });
   check("a run under the cap is accepted normally", r.status === 200 && (r.json as { accepted: number })?.accepted === 1);
 }
+{
+  // THE RATE CAP, ON THIS TRANSPORT TOO. backpressure.ts names three caps and says the same
+  // limiter serves both transports; this route used to call recordBytes and never recordLine, so
+  // lines-per-second was enforced on a local subprocess's stdout and on nothing at all here. A
+  // run pushing tiny events as fast as it can open connections stays far under every byte cap.
+  // Its own tracker and its own server: this case needs a GENEROUS byte budget, precisely so
+  // that the byte cap cannot be what refuses the flood. The shared one above is deliberately
+  // tiny for the opposite reason.
+  const rateBus = new RunEventBus();
+  const rateViolations: Array<{ runId: string; reason: string }> = [];
+  const rateRouter = new Router({ log: () => {}, quiet: () => true });
+  registerControlPlaneRoutes(rateRouter, {
+    bus: rateBus,
+    signingKey,
+    revocations,
+    backpressure: new BackpressureTracker({ ...DEFAULT_BACKPRESSURE_LIMITS, maxBytesPerRun: 64 * 1024 * 1024 }),
+    onBackpressureViolation: (runId, reason) => rateViolations.push({ runId, reason }),
+  });
+  const rateHttp = createServer((req, res) => {
+    void rateRouter.handle(req, res).then((handled) => {
+      if (!handled) res.writeHead(404).end();
+    });
+  });
+  await new Promise<void>((resolve) => rateHttp.listen(0, "127.0.0.1", resolve));
+  const rateBase = `http://127.0.0.1:${(rateHttp.address() as AddressInfo).port}`;
+
+  rateBus.register("run-fast");
+  const fastToken = mintRunToken(signingKey, "run-fast", "ws-1", 3600);
+  const tiny = { kind: "state_update", schema_version: 1, run: { id: "run-fast" } };
+  const limit = DEFAULT_BACKPRESSURE_LIMITS.maxLinesPerSecond;
+  let refusedAt: number | null = null;
+  let bytesPushed = 0;
+  const BATCH = 10;
+  for (let batch = 0; batch < limit && refusedAt === null; batch++) {
+    const events = new Array(BATCH).fill(tiny);
+    const payload = JSON.stringify({ events });
+    bytesPushed += Buffer.byteLength(payload, "utf8");
+    const res = await fetch(`${rateBase}/v1/runs/run-fast/trace`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${fastToken}` },
+      body: payload,
+    });
+    if (res.status === 400) refusedAt = (batch + 1) * BATCH;
+    await res.text();
+  }
+  check("a run flooding small events is refused on the rate cap", refusedAt !== null, "never refused");
+  check(
+    `...within a batch of the ${limit}/s line, not after megabytes (refused at ${refusedAt} events)`,
+    refusedAt !== null && refusedAt <= limit + BATCH,
+  );
+  check(
+    "...and the reason names the rate, not the byte budget",
+    rateViolations.some((v) => v.runId === "run-fast" && v.reason.includes("lines in one second")),
+  );
+  check(
+    "the flood never came near the 64 MB byte ceiling that was NOT what stopped it",
+    bytesPushed < 1024 * 1024,
+    `pushed ${bytesPushed} bytes`,
+  );
+  rateHttp.close();
+}
 
 // --- revocation --------------------------------------------------------------------------
 
