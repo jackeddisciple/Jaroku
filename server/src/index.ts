@@ -879,6 +879,15 @@ const MCP_COMMAND_NAMES = new Set([
 // resurrect a prompt for a run that no longer exists.
 interface PendingConfirm {
   runId: string;
+  /**
+   * The workspace whose run is blocked.
+   *
+   * Recorded when the ask is raised, so answering it can be checked against who is answering.
+   * `resolveMcpConfirm` carries a run id and a nonce and nothing else — and what it does is
+   * approve a tool call the registry classified as high-impact, in a run belonging to whoever
+   * started it. Without this, holding those two strings was the whole of the authorisation.
+   */
+  workspaceId: string;
   nonce: string;
   server: string;
   tool: string;
@@ -992,7 +1001,10 @@ async function handleMcpCommand(ctx: TenantContext, cmd: McpCommand): Promise<vo
         const verdict = cmd.verdict === "once" || cmd.verdict === "run" ? cmd.verdict : "deny";
         const key = confirmKey(cmd.runId, cmd.nonce);
         const pending = pendingConfirms.get(key);
-        if (!pending) {
+        // An ask belonging to another workspace answers exactly as an absent one does. Same
+        // message on purpose: a different answer would tell somebody holding a run id and a
+        // nonce that they had guessed a real pair.
+        if (!pending || pending.workspaceId !== ctx.workspaceId) {
           // Already answered, timed out, or the run died. Saying so beats silence: two
           // people clicking the same modal should not both think they decided it.
           relay.broadcastMcp(ctx, {
@@ -1751,7 +1763,7 @@ pool.on("control", ({ runId: slotRunId, ctrl }) => {
       const server = String(ctrl.server ?? "unknown");
       const tool = String(ctrl.tool ?? "unknown");
       pendingConfirms.set(confirmKey(runId, nonce), {
-        runId, nonce, server, tool, requestedAt: Date.now(),
+        runId, workspaceId: runCtx.workspaceId, nonce, server, tool, requestedAt: Date.now(),
       });
       console.log(`[mcp] ${runId} is waiting for confirmation of ${server}/${tool}`);
       relay.broadcastMcp(runCtx, {
