@@ -230,9 +230,16 @@ export class EvalRunner {
     });
   }
 
-  /** Whether any eval is draining — used to refuse a second start from the UI. */
+  /**
+   * A start that has begun but has no eval id yet. `live` only gains an entry once the dataset
+   * has been read and the rows written, which is five awaits after `start` was called — and
+   * "one eval at a time" has to hold across that whole span, not just at its end. See start().
+   */
+  private starting = false;
+
+  /** Whether any eval is draining, or is on its way to. Used to refuse a second start. */
   get active(): boolean {
-    return this.live.size > 0;
+    return this.starting || this.live.size > 0;
   }
 
   activeEvalIds(): string[] {
@@ -244,8 +251,27 @@ export class EvalRunner {
    *
    * Fails loudly rather than starting an empty or malformed eval — a comparison built on
    * nothing is worse than an error, because it renders as a dashboard full of blanks.
+   *
+   * ONE AT A TIME, CLAIMED SYNCHRONOUSLY. The refusal used to live in the WebSocket handler as
+   * `if (evalRunner.active)`, followed by five awaits before anything became live — and wsRelay
+   * dispatches commands concurrently, so two startEval messages genuinely overlap and both saw
+   * `active === false`. That is not merely two evals contending for slots: index.ts resolves the
+   * runner's workspace as `contextForEval(activeEvalIds()[0])`, so a second live eval has every
+   * read and write attributed to the FIRST one's workspace — its jobs looked up in the wrong
+   * tenancy scope, its rows written there. The claim belongs here, where the invariant is, and it
+   * is taken before the first await so there is no window to lose.
    */
   async start(req: StartEvalRequest): Promise<{ evalId: string } | { error: string }> {
+    if (this.active) return { error: "an eval is already running" };
+    this.starting = true;
+    try {
+      return await this.startClaimed(req);
+    } finally {
+      this.starting = false;
+    }
+  }
+
+  private async startClaimed(req: StartEvalRequest): Promise<{ evalId: string } | { error: string }> {
     const examples = await this.deps.evalStore.listExamples(req.ctx, req.datasetId);
     if (!examples.length) return { error: "that dataset has no examples" };
     if (!req.targets.length) return { error: "pick at least one provider to compare" };

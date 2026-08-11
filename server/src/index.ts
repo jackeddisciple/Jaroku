@@ -1713,7 +1713,13 @@ async function handleEvalCommand(ctx: TenantContext, cmd: ForwardedCommand): Pro
       case "startEval": {
         // One eval at a time. Two concurrent fan-outs would contend for the same pool
         // slots and each would report latency inflated by the other — a comparison the
-        // numbers can't support.
+        // numbers can't support. Worse, `contextForEval` below resolves the runner's workspace
+        // as its FIRST active eval, so a second live one writes into the first one's tenancy.
+        //
+        // A FAST PATH, NOT THE GUARD. This check is followed by an await before `start` is even
+        // called, and wsRelay dispatches commands concurrently — so two of these overlap and both
+        // read `active === false`. `EvalRunner.start` claims synchronously and refuses with the
+        // same message; this only saves the round trip when the answer is already obvious.
         if (evalRunner.active) {
           relay.broadcastEval(ctx, { type: "error", message: "an eval is already running" });
           return;

@@ -363,6 +363,51 @@ console.log("\nthe store throws between reserving and starting");
   (evalStore as unknown as { markJobRunning: typeof evalStore.markJobRunning }).markJobRunning = realMarkJobRunning;
 }
 
+// --- two startEval commands arriving together ---------------------------------------------
+//
+// "One eval at a time" is not a preference here, it is what makes the runner's context correct:
+// index.ts resolves the workspace as contextForEval(activeEvalIds()[0]), so a SECOND live eval
+// has every read and write attributed to the FIRST one's workspace. Its jobs are looked up in
+// the wrong tenancy scope and its rows are written there.
+//
+// The guard was `if (evalRunner.active)` in the WebSocket handler, followed by five awaits before
+// anything became live — and wsRelay dispatches commands concurrently (`void authorized().then(
+// dispatch)`), so two startEval commands genuinely overlap. Both saw `active === false`.
+
+console.log("\ntwo evals started at the same instant");
+{
+  const pool = new FakePool(4);
+  const dispatcher = new Dispatcher(new InMemoryQueueBackend());
+  const runner = makeRunner(pool, dispatcher);
+
+  const a = await datasetOf("agent_race_a", 2);
+  const b = await datasetOf("agent_race_b", 2);
+
+  const [first, second] = await Promise.all([
+    runner.start({
+      ctx, datasetId: a.datasetId, agentId: "agent_race_a", rubricId: a.rubricId,
+      targets: [{ provider: "fake", model: "fake" }], budgetUsd: null,
+    }),
+    runner.start({
+      ctx, datasetId: b.datasetId, agentId: "agent_race_b", rubricId: b.rubricId,
+      targets: [{ provider: "fake", model: "fake" }], budgetUsd: null,
+    }),
+  ]);
+
+  const accepted = [first, second].filter((r) => !("error" in r));
+  check(accepted.length === 1, `exactly one of two simultaneous starts is accepted (${accepted.length} were)`);
+  check(
+    runner.activeEvalIds().length === 1,
+    `and only one eval is live, so context() answers for the eval it belongs to (${runner.activeEvalIds().length} live)`,
+  );
+  const refused = [first, second].find((r) => "error" in r) as { error: string } | undefined;
+  check(!!refused?.error.includes("already running"), `the other is told why (got ${JSON.stringify(refused?.error)})`);
+
+  for (const r of accepted) if (!("error" in r)) await runner.cancel(r.evalId);
+  for (const runId of pool.activeRunIds()) pool.finish(runId, { spawnError: "cancelled" });
+  await sleep(100);
+}
+
 check(unhandled.length === 0, `nothing rejected unhandled across the whole suite (${unhandled.length})`);
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
