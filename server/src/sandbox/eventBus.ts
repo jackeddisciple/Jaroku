@@ -46,6 +46,16 @@ interface RunEntry {
 
 const DEFAULT_LONG_POLL_MS = 25_000;
 
+/**
+ * How many actions may pile up for a run that nobody is polling for.
+ *
+ * A run whose sandbox has stopped asking — killed, crashed, wedged, or never started — still
+ * has a UI attached to it that can press pause. Without a ceiling that is an unbounded array
+ * per run, held for as long as the run is registered. Pause and resume are last-write-wins
+ * (see signal()), so in practice the queue only reaches this at all under something abusive.
+ */
+const MAX_QUEUED_ACTIONS = 64;
+
 export class RunEventBus {
   private runs = new Map<string, RunEntry>();
 
@@ -122,6 +132,14 @@ export class RunEventBus {
       waiter.resolve(action);
       return;
     }
+    // Nobody is polling. Pause and resume are last-write-wins — a run told to pause, resume and
+    // pause again while its sandbox was not asking should see "pause", not replay all three — so
+    // a new one supersedes any earlier one rather than queuing behind it. mcp-confirm verdicts
+    // are nonce-specific and are never collapsed.
+    if (action.action === "pause" || action.action === "resume") {
+      entry.queue = entry.queue.filter((a) => a.action !== "pause" && a.action !== "resume");
+    }
+    if (entry.queue.length >= MAX_QUEUED_ACTIONS) entry.queue.shift();
     entry.queue.push(action);
   }
 
@@ -129,12 +147,26 @@ export class RunEventBus {
    * The runner's long-poll: return immediately if something is already queued, otherwise wait
    * up to `timeoutMs` and resolve to `{action:"none"}` if nothing arrives — the runner asks
    * again, which is what keeps this a poll rather than an open-ended hang.
+   *
+   * A NEW POLL SUPERSEDES THE RUN'S EARLIER ONES. A runner has exactly one poll in flight at a
+   * time (jaroku_runner asks, waits, asks again), so a second arriving is proof the first is no
+   * longer being read — the client gave up on it, its socket died, or something is opening
+   * connections it never intends to read. controlPlaneRoutes.ts already documented the damage
+   * that does: signal() hands the action to ONE waiter, so a stale one silently swallows a real
+   * pause and the live poll never hears about it. Superseding also bounds what a run can hold
+   * here at one waiter and one timer, where before a sandbox could park as many of each as it
+   * could open sockets.
    */
   async waitForControl(runId: string, timeoutMs = DEFAULT_LONG_POLL_MS): Promise<ControlAction> {
     const entry = this.runs.get(runId);
     if (!entry) return { action: "none" };
     const queued = entry.queue.shift();
     if (queued) return queued;
+    for (const stale of entry.waiters) {
+      clearTimeout(stale.timer);
+      stale.resolve({ action: "none" });
+    }
+    entry.waiters = [];
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         entry.waiters = entry.waiters.filter((w) => w.resolve !== resolve);

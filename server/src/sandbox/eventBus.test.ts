@@ -109,5 +109,71 @@ await (async () => {
   check("an event pushed to one run never reaches another run's emitter", sawOnR1 && !sawOnR2);
 })();
 
+// --- what a run may park on the bus, and what a second poll means -------------------------
+//
+// waitForControl is reachable from a sandbox over HTTP, so "how many of these can one run have
+// open" is a question a hostile run gets to answer. It used to be "as many as it can open
+// sockets", each with a live timer — and signal() hands its action to exactly ONE waiter, so a
+// run that parked a hundred abandoned polls made a real pause a 1-in-101 shot.
+
+await (async () => {
+  const bus = new RunEventBus();
+  bus.register("r1");
+  const first = bus.waitForControl("r1", 30_000);
+  const second = bus.waitForControl("r1", 30_000);
+  const third = bus.waitForControl("r1", 30_000);
+  // Two earlier polls, superseded: they resolve now rather than sitting on the action.
+  check("an earlier poll is released when a newer one arrives", (await first).action === "none");
+  check("...and so is the one after it", (await second).action === "none");
+
+  bus.signal("r1", { action: "pause" });
+  check("the pause reaches the poll that is actually live", (await third).action === "pause");
+})();
+
+await (async () => {
+  const bus = new RunEventBus();
+  bus.register("r1");
+  // A hundred abandoned polls, then the real one. Before superseding, signal() would hand the
+  // pause to whichever of the hundred came first and this run would never see it.
+  const abandoned = Array.from({ length: 100 }, () => bus.waitForControl("r1", 30_000));
+  const live = bus.waitForControl("r1", 30_000);
+  bus.signal("r1", { action: "pause" });
+  const settled = await Promise.all([...abandoned, live]);
+  check("a hundred parked polls do not swallow the pause", settled[100]!.action === "pause");
+  check(
+    "...and every abandoned one was released rather than left holding a timer",
+    settled.slice(0, 100).every((a) => a.action === "none"),
+  );
+})();
+
+await (async () => {
+  const bus = new RunEventBus();
+  bus.register("r1");
+  // Nobody polling. Pause/resume are last-write-wins: replaying the whole history to a runner
+  // that finally asks would resume a run the user has since paused.
+  bus.signal("r1", { action: "pause" });
+  bus.signal("r1", { action: "resume" });
+  bus.signal("r1", { action: "pause" });
+  check("queued pause/resume collapse to the latest intent", (await bus.waitForControl("r1", 10)).action === "pause");
+  check("...with nothing stale behind it", (await bus.waitForControl("r1", 10)).action === "none");
+})();
+
+await (async () => {
+  const bus = new RunEventBus();
+  bus.register("r1");
+  for (let i = 0; i < 5_000; i++) {
+    bus.signal("r1", { action: "mcp-confirm", nonce: `n${i}`, verdict: "deny" });
+  }
+  let drained = 0;
+  for (;;) {
+    const a = await bus.waitForControl("r1", 1);
+    if (a.action === "none") break;
+    drained++;
+    if (drained > 200) break;
+  }
+  check(`a run nobody polls for cannot park unbounded actions (held ${drained})`, drained <= 64);
+  check("and what it kept is the most recent, not the oldest", drained > 0);
+})();
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);
