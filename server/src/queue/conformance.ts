@@ -75,6 +75,40 @@ export async function runQueueConformance(
     await drainAll(backend, jobClass);
   }
 
+  // --- ringOrder means the same thing on every backend ------------------------------------
+  //
+  // backend.ts documents it as "which workspace is served next, and after that, and after that."
+  // Nothing here compared it to what the backend ACTUALLY serves next, and one implementation
+  // answered in reverse: its ring was rotated tail-to-head while enqueue appended to the tail, so
+  // the most recently pending workspace went first and the longest-waiting one went last. Both
+  // are round-robin; only one of them is the documented order, and a suite that never asks cannot
+  // tell them apart.
+  {
+    const order = [`ws-r1-${randomUUID()}`, `ws-r2-${randomUUID()}`, `ws-r3-${randomUUID()}`];
+    for (const ws of order) {
+      await backend.enqueue(makeJob(jobClass, ws, "first"));
+      await backend.enqueue(makeJob(jobClass, ws, "second")); // a second job keeps it in the ring
+    }
+    const declared = await backend.ringOrder(jobClass);
+    const served: string[] = [];
+    for (let i = 0; i < order.length; i++) {
+      const leaseId = randomUUID();
+      const admitted = await backend.tryAdmit(jobClass, { leaseId, leaseTtlMs: 60_000, maxGlobalInFlight: null });
+      if (!admitted) break;
+      served.push(admitted.workspaceId);
+      await backend.ack(jobClass, leaseId);
+    }
+    check(
+      JSON.stringify(declared) === JSON.stringify(served),
+      `ringOrder is the order actually served (said [${declared.join(", ")}], served [${served.join(", ")}])`,
+    );
+    check(
+      served[0] === order[0],
+      "and the workspace that became pending first is the one served first, not the most recent",
+    );
+    await drainAll(backend, jobClass);
+  }
+
   // --- starvation: a huge backlog does not block a latecomer with one job -----------------
   {
     const BIG = `ws-big-${randomUUID()}`;

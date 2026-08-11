@@ -38,7 +38,11 @@ local reservedPrefix = ARGV[6]
 local safetyTtl = tonumber(ARGV[7])
 
 if maxInFlight >= 0 then
-  local inFlight = redis.call('ZCOUNT', KEYS[2], now, '+inf')
+  -- Exclusive of now, matching InMemoryQueueBackend's expiresAtMs > now. ZCOUNT's own min is
+  -- inclusive, so a lease expiring on this exact millisecond counted as in flight here while
+  -- CLAIM_EXPIRED_SCRIPT (score > now) already considered it reapable — one millisecond in which
+  -- a lease was simultaneously holding capacity and available to be claimed.
+  local inFlight = redis.call('ZCOUNT', KEYS[2], '(' .. now, '+inf')
   if inFlight >= maxInFlight then
     return false
   end
@@ -48,22 +52,31 @@ local ringLen = redis.call('LLEN', KEYS[1])
 local attempts = 0
 while attempts < ringLen do
   attempts = attempts + 1
-  local candidate = redis.call('RPOPLPUSH', KEYS[1], KEYS[1])
+  -- HEAD TO TAIL, not tail to head. enqueue RPUSHes a newly-pending workspace onto the TAIL, so
+  -- rotating with RPOPLPUSH served the most RECENTLY pending workspace first — the ring ran
+  -- backwards. Round-robin survived that (everyone still gets a turn per cycle) but two things
+  -- did not: a workspace that has been waiting longest lost its place to one that just arrived,
+  -- and ringOrder() answered "who is served next, and after that" in exactly reverse order,
+  -- which is the opposite of what InMemoryQueueBackend answers for the same queue. One
+  -- interface, two implementations, two different answers.
+  local candidate = redis.call('LPOP', KEYS[1])
   if not candidate then
     return false
   end
+  redis.call('RPUSH', KEYS[1], candidate)
   local listKey = listPrefix .. candidate
   local job = redis.call('LPOP', listKey)
   if job then
     if redis.call('LLEN', listKey) == 0 then
-      redis.call('LREM', KEYS[1], 1, candidate)
+      -- The rotation just put it at the tail, so remove from the tail (LREM's negative count).
+      redis.call('LREM', KEYS[1], -1, candidate)
     end
     local reservedKey = reservedPrefix .. leaseId
     redis.call('SET', reservedKey, job, 'PX', safetyTtl)
     redis.call('ZADD', KEYS[2], now + ttl, leaseId)
     return {candidate, job}
   else
-    redis.call('LREM', KEYS[1], 1, candidate)
+    redis.call('LREM', KEYS[1], -1, candidate)
     ringLen = redis.call('LLEN', KEYS[1])
   end
 end
@@ -95,7 +108,7 @@ if job then return job else return false end
 `;
 
 // A named semaphore is one sorted set: member = leaseId, score = expiresAtMs. Count is
-// ZCOUNT(now, +inf) rather than ZCARD, so an expired-but-unreleased holder stops counting
+// ZCOUNT((now, +inf) rather than ZCARD, so an expired-but-unreleased holder stops counting
 // against the cap immediately rather than waiting for something to clean it up — the same
 // "capacity check never deletes" rule inFlightCount follows for the ring's own reserved
 // index, for the same reason: only an explicit release should ever remove a member.
@@ -106,7 +119,7 @@ local ttl = tonumber(ARGV[2])
 local leaseId = ARGV[3]
 local max = tonumber(ARGV[4])
 
-local live = redis.call('ZCOUNT', key, now, '+inf')
+local live = redis.call('ZCOUNT', key, '(' .. now, '+inf')
 if live >= max then
   return false
 end
@@ -247,8 +260,8 @@ export class RedisQueueBackend implements QueueBackend {
   }
 
   async inFlightCount(jobClass: JobClass): Promise<number> {
-    const now = Date.now();
-    return this.client.zcount(keys(jobClass).index, now, "+inf");
+    // `(now`, not `now` — see ADMIT_SCRIPT's own note on why the boundary is exclusive.
+    return this.client.zcount(keys(jobClass).index, `(${Date.now()}`, "+inf");
   }
 
   async acquireSemaphore(key: string, max: number, leaseId: string, ttlMs: number): Promise<boolean> {
@@ -262,8 +275,7 @@ export class RedisQueueBackend implements QueueBackend {
   }
 
   async semaphoreCount(key: string): Promise<number> {
-    const now = Date.now();
-    return this.client.zcount(semaphoreRedisKey(key), now, "+inf");
+    return this.client.zcount(semaphoreRedisKey(key), `(${Date.now()}`, "+inf");
   }
 
   async purgePending(jobClass: JobClass, workspaceId: string, idempotencyKeys: Set<string>): Promise<number> {
