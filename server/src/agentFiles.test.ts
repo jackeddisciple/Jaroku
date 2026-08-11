@@ -21,7 +21,7 @@ import { IdentityRepository } from "./db/repositories/identity.ts";
 import { AgentRepository } from "./db/repositories/agents.ts";
 import { FsObjectStore } from "./storage/fsObjectStore.ts";
 import { ProjectStore } from "./storage/projectStore.ts";
-import { readAgentFiles, type AgentFilesDeps } from "./agentFiles.ts";
+import { readAgentFiles, slugsOwnedElsewhere, type AgentFilesDeps } from "./agentFiles.ts";
 
 let failures = 0;
 const check = (msg: string, ok: boolean, detail = ""): void => {
@@ -52,6 +52,7 @@ const deps: AgentFilesDeps = {
   runtimeDir, agents, projects,
   connectorFilesFor: () => [],
   serverWorkspaceId: () => SERVER.workspaceId,
+  ownedElsewhere: async (slug) => (await slugsOwnedElsewhere({ agents, identity }, SERVER.workspaceId)).has(slug),
 };
 
 const aAgent = await agents.upsertFromDisk(A, { slug: "support_bot" });
@@ -116,6 +117,29 @@ console.log("\nreconciling against a disk that holds nothing");
   // And it still reads back — the point of not deleting it is that the files are elsewhere.
   const files = await readAgentFiles(deps, A, "support_bot");
   check("...with its files still readable from the store", files.source === "version" && files.files.length > 0);
+}
+
+// The adoption half. The boot scan runs as the workspace this process acts in and takes every
+// directory it finds — including the ones A and B materialised, whose metadata and, once the row
+// exists, whose source would become the local workspace's to read.
+console.log("\nwhich directories the boot scan may adopt");
+{
+  const elsewhere = await slugsOwnedElsewhere({ agents, identity }, SERVER.workspaceId);
+  check("a slug another workspace owns is named", elsewhere.has("support_bot"));
+  check("...and a directory nobody has a row for is not", !elsewhere.has("hand_dropped"));
+
+  const scanned = ["support_bot", "hand_dropped"].filter((slug) => !elsewhere.has(slug));
+  check(`...so the scan adopts only the unclaimed one (${scanned.join(", ") || "none"})`, scanned.join(",") === "hand_dropped");
+
+  await agents.syncFromDisk(SERVER, scanned.map((slug) => ({ slug })));
+  check("the local workspace gets the hand-dropped agent", (await agents.bySlug(SERVER, "hand_dropped")) !== undefined);
+  check("...and not the one A owns", (await agents.bySlug(SERVER, "support_bot")) === undefined);
+  check("...whose own row is untouched", (await agents.bySlug(A, "support_bot")) !== undefined);
+
+  // The consequence that made it worth fixing: without a row of its own, the local workspace
+  // cannot reach A's materialised directory through the file read either.
+  const leaked = await readAgentFiles(deps, SERVER, "support_bot");
+  check("...so A's materialised source stays unreadable here", leaked.files.length === 0 && leaked.source === "none");
 }
 
 await db.close();

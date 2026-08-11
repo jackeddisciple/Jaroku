@@ -58,7 +58,7 @@ import { openObjectStore } from "./storage/open.ts";
 import { resolveSigningKey } from "./storage/presign.ts";
 import { filesFromDirectory, ProjectStore } from "./storage/projectStore.ts";
 import { objectRoutes } from "./http/objects.ts";
-import { readAgentFiles, type AgentFilesDeps } from "./agentFiles.ts";
+import { readAgentFiles, slugsOwnedElsewhere, type AgentFilesDeps } from "./agentFiles.ts";
 import {
   CHECKPOINT_SCHEMA, checkpointThreadId, checkpointerKindFromEnv,
 } from "./checkpoints/threads.ts";
@@ -291,7 +291,8 @@ const rubricIdFor = async (ctx: TenantContext, datasetId: string): Promise<strin
 // actually connects as — an unscoped query returns nothing, so the reconciliation silently
 // did nothing and interrupted evals stayed "running" forever. `workspaces` carries no policy
 // precisely so this list is readable, and each workspace is then reconciled in its own scope.
-const workspaceIds = await new IdentityRepository(db).listWorkspaceIds(systemContext(newRequestId()));
+const bootIdentity = new IdentityRepository(db);
+const workspaceIds = await bootIdentity.listWorkspaceIds(systemContext(newRequestId()));
 const workspaceContexts = workspaceIds.map((id) => systemContextFor(id, newRequestId()));
 
 for (const ctx of workspaceContexts) {
@@ -434,9 +435,11 @@ async function importAgentFiles(ctx: TenantContext): Promise<void> {
 }
 
 async function syncAgents(): Promise<void> {
+  // Only the directories that are this workspace's to adopt. See agentFiles.ts.
+  const elsewhere = await slugsOwnedElsewhere({ agents: agentRepo, identity: bootIdentity }, serverContext().workspaceId);
   await agentRepo.syncFromDisk(
     serverContext(),
-    scanAgentDirectory(RUNTIME_DIR).map((a) => ({
+    scanAgentDirectory(RUNTIME_DIR).filter((a) => !elsewhere.has(a.agent_id)).map((a) => ({
       slug: a.agent_id,
       display_name: a.name,
       description: a.description,
@@ -537,6 +540,8 @@ const agentFilesDeps: AgentFilesDeps = {
       .map((c) => `tools/${c.file}`);
   },
   serverWorkspaceId: () => serverContext().workspaceId,
+  ownedElsewhere: async (slug) =>
+    (await slugsOwnedElsewhere({ agents: agentRepo, identity: bootIdentity }, serverContext().workspaceId)).has(slug),
 };
 
 /** The connector ids a project's own jaroku.json claims. Only for a project with no row yet. */
