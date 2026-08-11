@@ -1695,8 +1695,29 @@ pool.on("stderr", ({ runId, line }) => {
 // Debug-depth control events (off the trace stream). A `boundary` correlates the durable
 // checkpoint to the steps it covers (for later branching); a `paused` flips the run to the
 // store-only 'paused' status so history shows it as resumable, without any run_end.
-pool.on("control", ({ ctrl }) => {
-  const runId = typeof ctrl.run_id === "string" ? ctrl.run_id : null;
+pool.on("control", ({ runId: slotRunId, ctrl }) => {
+  // THE RUN IS THE SLOT'S, NOT THE LINE'S.
+  //
+  // This used to read `ctrl.run_id` — a field in text a subprocess printed — and every branch
+  // below then acted in `contextForRun` of it. Agent code is model-written and user-editable,
+  // and its stdout is this parser's input, so a single crafted control line let one run reach
+  // into another workspace: `paused` flipped somebody else's run's status, `boundary` rewrote
+  // the checkpoint pointer their branching depends on, and `tool_confirm` put a modal with
+  // attacker-chosen server, tool and argument text in front of another tenant.
+  //
+  // The pool already attributes every line to the slot that produced it, which is how the
+  // event path has always been safe (see runPool.makeSlot). The two now agree. A line whose
+  // own id disagrees is a forgery or a runner bug; either way it is dropped and said out loud,
+  // because a legitimate one always matches — a resume and a branch both run under the id the
+  // slot was started with.
+  const claimed = typeof ctrl.run_id === "string" ? ctrl.run_id : null;
+  if (claimed && claimed !== slotRunId) {
+    console.warn(
+      `[debug] dropped a control line from run ${slotRunId} claiming to be run ${claimed}`,
+    );
+    return;
+  }
+  const runId = slotRunId;
   if (!runId) return;
   const seqHigh = typeof ctrl.seq_high === "number" ? ctrl.seq_high : -1;
   const checkpointId = typeof ctrl.checkpoint_id === "string" ? ctrl.checkpoint_id : null;

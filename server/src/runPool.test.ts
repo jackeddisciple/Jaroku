@@ -20,16 +20,63 @@ const RUNTIME_DIR = join(resolve(dirname(fileURLToPath(import.meta.url)), "..", 
 // Any generated agent works; this one exercises four tools, so it has real boundaries.
 const AGENT = "a_simple_todo_list_agent_that_can_add_ta_2";
 
-if (!existsSync(join(RUNTIME_DIR, "agents", AGENT))) {
-  console.log(`  SKIP  fixture agent ${AGENT} is not present`);
-  process.exit(0);
-}
-
 let fail = 0;
 const check = (name: string, ok: boolean, detail = "") => {
   if (ok) console.log(`  ok   ${name}`);
   else { fail++; console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ""}`); }
 };
+
+// --- 0. who a line belongs to is the SLOT's answer, never the line's -------------------
+//
+// First, and before the fixture check, because it needs no subprocess and it is the property
+// with a security consequence. Agent code is model-written and user-editable, and its stdout
+// is what the protocol parser reads — so if a run could name another run in a line it printed,
+// it could reach into another workspace: the consumer resolves a workspace FROM the run id and
+// then pauses that run, re-stamps the checkpoint boundary its branching depends on, or raises
+// a tool-confirmation modal carrying text the line chose. The pool is where attribution is
+// decided, so this is where it is asserted.
+//
+// The forged line is injected on the slot's own manager rather than printed by a Python agent:
+// what is under test is the attribution, and the parser in between is fileProtocol.test.ts's.
+{
+  interface FakeSlot { runId: string | null; manager: { emit: (event: string, value: unknown) => void } }
+  const pool = new RunPool(1);
+  const slots = (pool as unknown as { slots: FakeSlot[] }).slots;
+  check("a pool has its slots", slots.length > 1);
+  slots[0]!.runId = "the-slots-own-run";
+
+  const seenControl: string[] = [];
+  const seenEvent: string[] = [];
+  pool.on("control", ({ runId }) => void seenControl.push(runId));
+  pool.on("event", ({ runId }) => void seenEvent.push(runId));
+
+  slots[0]!.manager.emit("control", { ctrl: "paused", run_id: "somebody-elses-run", seq_high: 1 });
+  check(
+    "a control line claiming another run is attributed to the slot that produced it",
+    seenControl.length === 1 && seenControl[0] === "the-slots-own-run",
+    JSON.stringify(seenControl),
+  );
+
+  slots[0]!.manager.emit("event", { kind: "run_end", run: { id: "somebody-elses-run" } });
+  check(
+    "...and so is an event, which is where the rule came from",
+    seenEvent.length === 1 && seenEvent[0] === "the-slots-own-run",
+    JSON.stringify(seenEvent),
+  );
+
+  // A slot with nothing in it emits nothing at all — a line arriving after a run was released
+  // has no run to belong to, and inventing one from the line is the same bug.
+  slots[1]!.runId = null;
+  slots[1]!.manager.emit("control", { ctrl: "paused", run_id: "somebody-elses-run" });
+  check("a line from an idle slot is dropped rather than attributed", seenControl.length === 1);
+  pool.stopAll();
+}
+
+if (!existsSync(join(RUNTIME_DIR, "agents", AGENT))) {
+  console.log(`  SKIP  fixture agent ${AGENT} is not present — the subprocess sections need one`);
+  console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
+  process.exit(fail === 0 ? 0 : 1);
+}
 
 const base = { runtimeDir: RUNTIME_DIR, agentId: AGENT, input: "add milk" };
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -70,6 +117,7 @@ function runnerProcessCount(): number {
   check("interactive slot still available while background is saturated", interactive === true);
   check("interactive run refuses a second interactive start",
     pool.startInteractive({ ...base, runId: "interactive-2" }) === false);
+
 
   await wait(25_000);
   check("every run exited", exits.length === 3, `exits: ${exits.join(",")}`);
