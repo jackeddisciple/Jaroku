@@ -197,15 +197,37 @@ export class EvalRunner {
   constructor(private deps: EvalRunnerDeps) {
     // A job's run finishing is what advances the queue. Attribution is by run id — the
     // pool tags every event with one precisely so N concurrent runs stay distinguishable.
-    deps.pool.on("exit", ({ runId, timedOut }) => this.onRunExit(runId, timedOut, null));
-    deps.pool.on("spawnError", ({ runId, error }) => this.onRunExit(runId, false, error.message));
+    deps.pool.on("exit", ({ runId, timedOut }) => this.guard("run exit", this.onRunExit(runId, timedOut, null)));
+    deps.pool.on("spawnError", ({ runId, error }) =>
+      this.guard("spawn error", this.onRunExit(runId, false, error.message)),
+    );
 
     // A SAFETY NET, not the primary driver. dispatch() already attempts an immediate drain
     // right after enqueueing, and onRunExit's own pump() does too once a slot frees up — this
     // timer only matters for capacity that opens for a reason NEITHER of those triggers on:
     // another eval's job finishing releases the global run.eval semaphore, or a provider
     // semaphore lease simply expiring. Unref'd so it never holds the process open.
-    setInterval(() => void this.drainAvailable(), 500).unref();
+    setInterval(() => this.guard("periodic drain", this.drainAvailable()), 500).unref();
+  }
+
+  /**
+   * Every promise this class starts and does not await goes through here.
+   *
+   * NOT DEFENSIVE TIDYING — a floating promise that rejects is an `unhandledRejection`, and Node
+   * has ENDED THE PROCESS for that since v15. Everything that drives this file forward is
+   * floating by design: an EventEmitter listener cannot be awaited, and neither can a 500 ms
+   * timer. So one SQLITE_BUSY under exactly the concurrency this session exists to support, or
+   * one Redis blip, took down the gateway — the eval would have recovered on the next tick if
+   * anything had been left running to take it.
+   *
+   * Logged rather than swallowed: the drain is idempotent and self-healing (the timer tries
+   * again, and pump() reconciles against the persisted rows either way), so the right response to
+   * one failed pass is to say so and let the next one run.
+   */
+  private guard(what: string, p: Promise<unknown>): void {
+    void p.catch((err) => {
+      console.error(`[eval] ${what} failed:`, (err as Error)?.message ?? err);
+    });
   }
 
   /** Whether any eval is draining — used to refuse a second start from the UI. */
@@ -268,7 +290,7 @@ export class EvalRunner {
       total: spec.length,
       targets: req.targets,
     });
-    void this.pump(evalRun.id);
+    this.guard("initial pump", this.pump(evalRun.id));
     return { evalId: evalRun.id };
   }
 
@@ -347,7 +369,7 @@ export class EvalRunner {
         await this.enqueueJob(live, job);
       }
     }
-    void this.drainAvailable(); // best-effort immediate attempt; the periodic timer covers the rest
+    this.guard("drain", this.drainAvailable()); // best-effort; the periodic timer covers the rest
     await this.reportProgress(evalId);
     await this.finishIfDone(evalId);
     await this.scheduleRetryWake(evalId);
@@ -385,7 +407,7 @@ export class EvalRunner {
     live.retryTimer = setTimeout(() => {
       const l = this.live.get(evalId);
       if (l) l.retryTimer = null;
-      void this.pump(evalId);
+      this.guard("retry wake", this.pump(evalId));
     }, wakeIn);
   }
 
@@ -423,16 +445,44 @@ export class EvalRunner {
 
   /**
    * Admit as many run.eval jobs as the dispatcher and this process's own pool both have room
-   * for, right now, and start each one. Safe to call from anywhere and any number of times
-   * concurrently — tryAdmit's own atomicity is what makes overlapping callers harmless rather
-   * than something this method has to guard against.
+   * for, right now, and start each one.
+   *
+   * WHY THIS LOOP AWAITS EACH START, AND WHY IT STOPS ON A REQUEUE.
+   *
+   * It used to do neither, and the combination was a livelock that took the whole process with
+   * it. `pool.freeSlots` only moves once a job actually reaches tryStart, which is several awaits
+   * into executeAdmitted — so a loop that fires each one off unawaited kept reading room it had
+   * already spoken for. That alone is over-admission. The livelock is what happens next: a job
+   * admitted with no provider slot left is put straight BACK on the queue, so the queue never
+   * empties, and `freeSlots > 0` stays true because the provider cap (two, for a real provider)
+   * is tighter than the eval pool (four). Admit, refuse, requeue, admit the same job again,
+   * forever — and because every step of it resolves as a microtask, the event loop never reaches
+   * a timer or a socket. Not a busy loop beside a working server: a wedged one. Any eval against
+   * a real provider with more queued jobs than the provider cap did this.
+   *
+   * A requeue means the thing standing in the way is a lease held by a run that has not finished,
+   * so no amount of asking again in this pass changes the answer. Stop, and let the next trigger
+   * — a job exiting, or the 500 ms timer — ask again once something has actually changed.
    */
+  private draining = false;
+
   private async drainAvailable(): Promise<void> {
-    for (;;) {
-      if (this.deps.pool.freeSlots <= 0) return; // this process has nowhere to put another one
-      const admission = await this.deps.dispatcher.tryAdmit<RunEvalPayload>("run.eval");
-      if (!admission) return;
-      void this.executeAdmitted(admission.job, admission.leaseId);
+    // Overlapping drains (the timer firing into one already running, two exits landing together)
+    // do not admit twice — tryAdmit is atomic — but they do each add a full pass of round trips
+    // to a queue that one pass is already walking.
+    if (this.draining) return;
+    this.draining = true;
+    try {
+      for (;;) {
+        if (this.deps.pool.freeSlots <= 0) return; // this process has nowhere to put another one
+        const admission = await this.deps.dispatcher.tryAdmit<RunEvalPayload>("run.eval");
+        if (!admission) return;
+        const outcome = await this.executeAdmitted(admission.job, admission.leaseId);
+        // "dropped" is progress — the queue got shorter and nothing went back on it.
+        if (outcome === "requeued") return;
+      }
+    } finally {
+      this.draining = false;
     }
   }
 
@@ -440,15 +490,21 @@ export class EvalRunner {
    * A job the dispatcher has fairly chosen. From here it either actually runs, or is put
    * straight back — never left admitted-but-stranded, which would hold its capacity hostage
    * for nothing.
+   *
+   * Reports which of the three it was, because drainAvailable's loop cannot tell them apart from
+   * the outside and has to stop on one of them — see its own note.
    */
-  private async executeAdmitted(job: QueueJob<RunEvalPayload>, leaseId: string): Promise<void> {
+  private async executeAdmitted(
+    job: QueueJob<RunEvalPayload>,
+    leaseId: string,
+  ): Promise<"started" | "dropped" | "requeued"> {
     const payload = job.payload;
     const live = this.live.get(payload.evalId);
     if (!live || live.cancelled) {
       // The eval finished or was cancelled between being enqueued and being admitted. Ack
       // and drop it — see cancel()'s note on why this is a lazy purge rather than an eager one.
       await this.deps.dispatcher.ack("run.eval", leaseId);
-      return;
+      return "dropped";
     }
 
     // The provider cap is GLOBAL now — every eval, every workspace, one shared count per
@@ -460,7 +516,7 @@ export class EvalRunner {
     if (!(await provSem.acquire(provLeaseId, PROVIDER_LEASE_TTL_MS))) {
       await this.deps.dispatcher.ack("run.eval", leaseId);
       await this.requeueVerbatim(job);
-      return;
+      return "requeued";
     }
 
     const runId = randomUUID();
@@ -472,20 +528,37 @@ export class EvalRunner {
       providerLeaseId: provLeaseId,
     });
     this.deps.markEvalRun(runId, true);
-    await this.deps.evalStore.markJobRunning(this.deps.context(), payload.jobId, runId, payload.attempt);
 
-    const started = this.deps.pool.tryStart({
-      runId,
-      runtimeDir: this.deps.runtimeDir,
-      agentId: payload.agentId,
-      input: payload.input,
-      timeoutMs: DEFAULT_JOB_TIMEOUT_MS,
-      env: {
-        JAROKU_RUN_ID: runId,
-        JAROKU_PROVIDER: payload.provider,
-        JAROKU_MODEL: payload.model,
-      },
-    });
+    // FROM HERE ON THIS RUN HOLDS TWO RESERVATIONS — the dispatcher's lease and the provider
+    // slot — and something has to give them back on EVERY path out. The happy one is
+    // onRunExit's; there is no exit event coming for a run that never started, so any throw
+    // between here and a successful tryStart has to hand them back itself. Without this, one
+    // failing markJobRunning (SQLITE_BUSY under exactly the concurrency this session is about)
+    // silently retired one of the two provider slots a real provider gets, permanently.
+    let started = false;
+    try {
+      await this.deps.evalStore.markJobRunning(this.deps.context(), payload.jobId, runId, payload.attempt);
+      started = this.deps.pool.tryStart({
+        runId,
+        runtimeDir: this.deps.runtimeDir,
+        agentId: payload.agentId,
+        input: payload.input,
+        timeoutMs: DEFAULT_JOB_TIMEOUT_MS,
+        env: {
+          JAROKU_RUN_ID: runId,
+          JAROKU_PROVIDER: payload.provider,
+          JAROKU_MODEL: payload.model,
+        },
+      });
+    } catch (err) {
+      live.runToJob.delete(runId);
+      this.leaseByRun.delete(runId);
+      this.deps.markEvalRun(runId, false);
+      await provSem.release(provLeaseId);
+      await this.deps.dispatcher.ack("run.eval", leaseId);
+      await this.requeueVerbatim(job);
+      throw err; // guard() logs it; the reservations are already back
+    }
 
     // freeSlots > 0 in drainAvailable() only proves there was room a moment ago — another
     // caller of drainAvailable() (the periodic timer, another eval's own pump()) can win the
@@ -499,7 +572,9 @@ export class EvalRunner {
       await this.deps.dispatcher.ack("run.eval", leaseId);
       await this.deps.evalStore.requeueJob(this.deps.context(), payload.jobId);
       await this.requeueVerbatim(job);
+      return "requeued";
     }
+    return "started";
   }
 
   /** Put an admitted-but-not-executed job straight back on the queue, unchanged — no attempt
@@ -513,6 +588,22 @@ export class EvalRunner {
   }
 
   private async onRunExit(runId: string, timedOut: boolean, spawnError: string | null): Promise<void> {
+    // Release the dispatcher lease and the provider slot the moment the run is actually done,
+    // regardless of how it turned out — a job that failed still frees the capacity it was
+    // holding, and holding it any longer starves whatever is waiting behind it.
+    //
+    // BEFORE the "is this run's eval still live" check below, not after. Those are two different
+    // questions: an eval can stop being live (finished, swept, cancelled and reconciled) while a
+    // run it started is still winding down, and returning early on the second question used to
+    // skip the release for the first — the run's provider slot then sat held until its own
+    // three-and-a-half-minute TTL lapsed. A real provider gets two.
+    const lease = this.leaseByRun.get(runId);
+    if (lease) {
+      this.leaseByRun.delete(runId);
+      await this.deps.dispatcher.ack("run.eval", lease.dispatcherLeaseId);
+      await providerSemaphore(this.deps.dispatcher.backend, "run.eval", lease.provider).release(lease.providerLeaseId);
+    }
+
     // Find the eval this run belongs to. Interactive runs match nothing and fall through.
     let live: Live | undefined;
     for (const l of this.live.values()) {
@@ -523,16 +614,6 @@ export class EvalRunner {
     const jobId = live.runToJob.get(runId)!;
     live.runToJob.delete(runId);
     this.deps.markEvalRun(runId, false);
-
-    // Release the dispatcher lease and the provider slot the moment the run is actually
-    // done, regardless of how it turned out — a job that failed still frees the capacity it
-    // was holding, and holding it any longer starves whatever is waiting behind it.
-    const lease = this.leaseByRun.get(runId);
-    if (lease) {
-      this.leaseByRun.delete(runId);
-      await this.deps.dispatcher.ack("run.eval", lease.dispatcherLeaseId);
-      await providerSemaphore(this.deps.dispatcher.backend, "run.eval", lease.provider).release(lease.providerLeaseId);
-    }
 
     const job = await this.deps.evalStore.getJob(this.deps.context(), jobId);
 
