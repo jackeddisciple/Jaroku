@@ -45,6 +45,39 @@ path is the default and is unchanged.
 
 - The read-only block list spelled `tools/mcp_bridge.py` with the platform separator, so on Windows it matched nothing in the object store — silently dropping the one file that scopes an agent's entire MCP access.
 
+#### From the bug hunt across sessions 1 to 3
+
+Storage:
+
+- `FsObjectStore` followed a symlink out of its own root, and `list()` walked one into a cycle. Object stores have no symlinks; it now refuses a key whose path passes through one.
+- A symlink in a project directory reached the file list and was copied, contents and all, into a published version.
+- The file list and the graph view fell back to `runtime/agents/<slug>` for a workspace whose own version was empty — handing it another tenant's generated source, through a lookup that had correctly found the caller's own row.
+- A publish that lost a race moved `current_version` onto a version whose objects the winner's cleanup had deleted. Publishing now reserves the number, writes the objects, then promotes.
+- Applying an edit whose base version had moved — a deploy publishing in between — silently dropped whatever landed in between. It is refused, naming both versions.
+- A file named `__proto__` was swallowed by the manifest object, so the version was published without it while the object sat in the store.
+- Both object stores now normalise a presign TTL the same way. A fractional one floored to zero locally and minted a URL that had already expired.
+
+Tenancy:
+
+- `secret_refs` accepted an `agent_id` from another workspace: the foreign key was to `agents(id)`, which any tenant's agent satisfies. Migration 018 makes it a key on the pair.
+- Boot soft-deleted every agent whose directory was absent — which on a second replica, or after the runtime directory was cleaned, was all of them, while their versions sat intact in the store.
+- Boot also adopted every directory under `runtime/agents/` into the local workspace, including the ones other workspaces had materialised.
+- `applyEdit`, `discardEdit`, `discardPlan`, `generate --planId`, `pauseRun`, `cancelEval`, `cancelDeploy` and `resolveMcpConfirm` acted on an id without asking whose it was. Each is now answered in the caller's workspace, and an id belonging to somebody else reads as absent rather than as forbidden.
+- A control line printed by an agent's own subprocess was attributed to the run id IN the line rather than to the slot that produced it, so one run could pause another workspace's run, re-stamp the checkpoint boundary its branching depends on, or raise a tool-confirmation modal in it.
+- Starting an eval read its dataset as the server rather than as the asking workspace, so no other workspace could start one at all.
+
+Row-level security — all three worked locally, on SQLite, and as the database owner every test connects as, and did nothing as the application role a deployment actually connects with:
+
+- The whole invite flow ran unscoped, so creating one failed the policy outright and listing, revoking and accepting saw nothing.
+- The eval job aggregates read `steps` unscoped, zeroing every job's cost, tokens and latency — and the budget ceiling they feed.
+- The eval cost estimate read `runs` unscoped, so it always fell back to "no history".
+
+A new structural rule in `test:db-boundary` reads the policied tables out of the migrations and fails when one is reached without a scope, which is what found the last two.
+
+Elsewhere:
+
+- The WebSocket server accepted `ws`'s default 100 MiB message while the HTTP router beside it stopped at 64 KiB; it now caps at 1 MiB, enforced before a byte is buffered.
+
 ---
 
 ## v0.2.6 : Authentication and Workspace Access
