@@ -36,6 +36,8 @@ const MAX_TOKENS = 600;
 
 export interface PlanOptions {
   runtimeDir: string;
+  /** The workspace asking. A plan is one workspace's, and only that one may spend it. */
+  workspaceId: string;
   prompt: string;
   connectors?: string[];
   /**
@@ -54,6 +56,15 @@ export interface PlanOptions {
  *  generation must build what was approved, not what the composer happens to say later. */
 export interface PendingPlan {
   planId: string;
+  /**
+   * Whose plan this is.
+   *
+   * There is one slot, and a plan id is the whole of what `generate` and `discardPlan` carry —
+   * so without this the slot answered to whoever held the id. Another workspace could spend a
+   * plan it never wrote (its prompt and its reviewed design becoming the agent THEY build) or
+   * throw it away between the user reading it and pressing Generate.
+   */
+  workspaceId: string;
   prompt: string;
   connectors: string[];
   /**
@@ -99,9 +110,9 @@ export class Planner extends EventEmitter<PlannerEvents> {
   private pending: PendingPlan | null = null;
   private busy = false;
 
-  /** The plan awaiting confirmation, if any. Read-only — use take() to consume it. */
-  peek(): PendingPlan | null {
-    return this.pending;
+  /** This workspace's plan awaiting confirmation, if any. Read-only — use take() to consume it. */
+  peek(workspaceId: string): PendingPlan | null {
+    return this.pending?.workspaceId === workspaceId ? this.pending : null;
   }
 
   /**
@@ -121,15 +132,15 @@ export class Planner extends EventEmitter<PlannerEvents> {
    * never as "generate without the plan": the user approved a specific plan, and silently
    * building something unreviewed instead is the exact failure this gate exists to prevent.
    */
-  take(planId: string): PendingPlan | null {
-    if (!this.pending || this.pending.planId !== planId) return null;
+  take(workspaceId: string, planId: string): PendingPlan | null {
+    if (!this.pending || this.pending.planId !== planId || this.pending.workspaceId !== workspaceId) return null;
     const rec = this.pending;
     this.pending = null;
     return rec;
   }
 
-  discard(planId: string): void {
-    if (!this.pending || this.pending.planId !== planId) return;
+  discard(workspaceId: string, planId: string): void {
+    if (!this.pending || this.pending.planId !== planId || this.pending.workspaceId !== workspaceId) return;
     this.pending = null;
     this.emit("discarded", { planId });
   }
@@ -147,7 +158,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
       const mcpTools = opts.mcpTools ?? [];
 
       // A revision reads the plan it is revising BEFORE the slot is cleared.
-      const previous = opts.revisePlanId ? this.take(opts.revisePlanId) : null;
+      const previous = opts.revisePlanId ? this.take(opts.workspaceId, opts.revisePlanId) : null;
       if (opts.revisePlanId && !previous) {
         this.emit("error", {
           message: "that plan is no longer available — describe the agent again",
@@ -159,7 +170,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
       // Any other pending plan is superseded the moment a new one starts streaming: the card
       // it belongs to has already been replaced on screen, and leaving it takeable would let a
       // stale tab generate from a plan the user has visibly moved on from.
-      if (this.pending) this.discard(this.pending.planId);
+      if (this.pending) this.discard(this.pending.workspaceId, this.pending.planId);
 
       // A revision keeps the ORIGINAL brief; feedback is a correction to part of the plan, not
       // a replacement for what the user asked for.
@@ -212,6 +223,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
 
       const rec: PendingPlan = {
         planId: randomUUID(),
+        workspaceId: opts.workspaceId,
         prompt,
         connectors: selected.map((c) => c.id),
         mcpTools: mcpTools.map((t) => `${t.server_id}/${t.name}`),

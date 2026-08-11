@@ -42,7 +42,7 @@
     "test:tickets": "tsx src/auth/tickets.test.ts",
     "test:members": "tsx src/auth/members.test.ts",
     "test:protocol": "tsx src/fileProtocol.test.ts",
-    "test:plan": "tsx src/planProtocol.test.ts",
+    "test:plan": "tsx src/planProtocol.test.ts && tsx src/planOwnership.test.ts",
     "test:pricing": "tsx src/pricing.test.ts",
     "test:pool": "tsx src/runPool.test.ts",
     "test:aggregate": "tsx src/evalAggregate.test.ts",

@@ -788,7 +788,7 @@ const relay = new WsRelay({
     if (cmd.cmd === "run") void runAgent(ctx, cmd.input, cmd.provider, cmd.model, cmd.agentId);
     else if (cmd.cmd === "generate") generateAgent(ctx, cmd);
     else if (cmd.cmd === "planAgent") planAgent(ctx, cmd);
-    else if (cmd.cmd === "discardPlan") planner.discard(cmd.planId);
+    else if (cmd.cmd === "discardPlan") planner.discard(ctx.workspaceId, cmd.planId);
     else if (cmd.cmd === "edit") editAgent(ctx, cmd.agentId, cmd.instruction);
     else if (cmd.cmd === "applyEdit") void editor.apply(ctx, cmd.proposalId);
     else if (cmd.cmd === "undoEdit") void editor.undo(ctx, cmd.agentId);
@@ -1834,6 +1834,7 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
   );
   void planner.plan({
     runtimeDir: RUNTIME_DIR,
+    workspaceId: ctx.workspaceId,
     prompt: cmd.prompt,
     connectors: cmd.connectors,
     // Resolved here rather than in the planner, so the planner keeps its single dependency
@@ -1883,7 +1884,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     // Everything that can refuse this generation is checked against peek() FIRST, so a
     // refusal never burns the plan. take() happens only once the build is certain to start —
     // a user told "no" should still have their plan on screen to revise.
-    const rec = planner.peek();
+    const rec = planner.peek(ctx.workspaceId);
     if (!rec || rec.planId !== cmd.planId) {
       // Never fall through to an unplanned generation here. The user approved a specific
       // plan; quietly building something they never reviewed is the exact failure this gate
@@ -1932,7 +1933,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
       return;
     }
 
-    planner.take(cmd.planId); // spend it: this generation is now certain to start
+    planner.take(ctx.workspaceId, cmd.planId); // spend it: this generation is now certain to start
     ({ prompt, connectors, name } = rec);
     mcpRefs = approvedRefs;
     plan = rec.plan.raw;
