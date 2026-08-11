@@ -42,7 +42,7 @@ const baseSpec = (runId: string): SandboxSpec => ({
 
 await withMock(async (mock) => {
   const bus = new RunEventBus();
-  const sandbox = new FlyMachinesSandbox({ app: "jaroku-runs", bus, image: IMAGE });
+  const sandbox = new FlyMachinesSandbox({ app: "jaroku-runs", bus, image: IMAGE, exitPollMs: 50 });
   const exits: unknown[] = [];
   sandbox.on("exit", (e) => exits.push(e));
 
@@ -78,7 +78,7 @@ await withMock(async (mock) => {
 
 await withMock(async (mock) => {
   const bus = new RunEventBus();
-  const sandbox = new FlyMachinesSandbox({ app: "jaroku-runs", bus, image: IMAGE });
+  const sandbox = new FlyMachinesSandbox({ app: "jaroku-runs", bus, image: IMAGE, exitPollMs: 50 });
   const exits: Array<{ oom?: boolean }> = [];
   sandbox.on("exit", (e) => exits.push(e));
   sandbox.start(baseSpec("run-fly-oom"));
@@ -109,7 +109,7 @@ await withMock(async () => {
   // spawnError handling already knows what to do with this.
   process.env.JAROKU_FLY_API_TOKEN = "";
   const bus = new RunEventBus();
-  const sandbox = new FlyMachinesSandbox({ app: "jaroku-runs", bus, image: IMAGE });
+  const sandbox = new FlyMachinesSandbox({ app: "jaroku-runs", bus, image: IMAGE, exitPollMs: 50 });
   const errors: Error[] = [];
   sandbox.on("spawnError", (e) => errors.push(e));
   sandbox.start(baseSpec("run-fly-noauth"));

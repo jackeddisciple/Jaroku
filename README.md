@@ -51,6 +51,7 @@ of the repo and run yourself.
 - [Developing for free (fixtures)](#developing-for-free-fixtures)
 - [The tenancy model](#the-tenancy-model)
 - [Storage isolation](#storage-isolation)
+- [Sandboxed execution and the distributed control plane](#sandboxed-execution-and-the-distributed-control-plane)
 - [Authentication and membership](#authentication-and-membership)
 - [Where data lives](#where-data-lives)
 - [Security notes](#security-notes)
@@ -572,6 +573,16 @@ exists so a fresh checkout has something to run before anything has been generat
 | `evalEstimate.ts` | What a real-provider eval will roughly cost, *before* committing. |
 | `evalCleanup.ts` | Sweeps checkpoint blobs left by finished eval jobs. Never touches interactive runs. |
 | `judge/` | LLM-as-judge: `rubric.ts` (pure — prompt + parser), `score.ts` (the pipeline), `output.ts` (extracting the agent's answer from a trace). |
+| `sandbox/runSandbox.ts` | The `RunSandbox` interface, and `sandboxKind()` reading `JAROKU_RUN_SANDBOX`. |
+| `sandbox/flySandbox.ts` / `flyApi.ts` | The hosted `RunSandbox`: one Fly Machine per run, and the bare Fly Machines API client underneath it. |
+| `sandbox/codeCheck.ts` | The narrower `CodeCheckSandbox` interface — what the import check and graph introspection run through. |
+| `sandbox/eventBus.ts` | `RunEventBus`: what a hosted run's control-plane HTTP routes push into, and what a hosted `RunSandbox` re-emits as its own events. |
+| `sandbox/controlPlaneRoutes.ts` | The four HTTP routes a hosted run's runner speaks to: trace push, control push, control long-poll, MCP confirm. |
+| `sandbox/runTokens.ts` | Minting and verifying the self-contained token that scopes those routes to one run. |
+| `sandbox/egressPolicy.ts` / `databaseUrl.ts` | What a sandbox may reach, computed and pinned per run; and the SSRF-closing validation a workspace's own `DATABASE_URL` goes through first. |
+| `sandbox/backpressure.ts` | Bytes/line/rate caps shared by a local run's stdout and a hosted run's trace push. |
+| `sandbox/image.ts` | Enforces that a sandbox image reference is pinned by digest, never a tag. |
+| `sandbox/traceIngestMetrics.ts` | Counts what the trace route drops rather than ingests. |
 
 ---
 
@@ -1548,6 +1559,13 @@ to happen because a browser cannot put a header on a WebSocket:
 | `JAROKU_MASTER_KEY` | — | Wraps each workspace's data key when `JAROKU_SECRET_STORE=kms`. No generated fallback: a regenerated master key would make every stored credential permanently unreadable |
 | `JAROKU_CHECKPOINTER` | `sqlite` | `sqlite` \| `postgres`. Where pause/resume/branch state lives |
 | `JAROKU_CHECKPOINT_PG_URL` | — | The checkpointer's OWN connection. Not `JAROKU_PG_URL`: LangGraph never issues `SET LOCAL`, so it must not borrow the pool whose isolation depends on it |
+| `JAROKU_RUN_SANDBOX` | `local` | `local` \| `fly`. Where a run's code actually executes — see [Sandboxed execution](#sandboxed-execution-and-the-distributed-control-plane) |
+| `JAROKU_CONTROL_PLANE_URL` | — | This server's own public address, told to a hosted run so its control-plane client knows where to push and poll. **Required** when `JAROKU_RUN_SANDBOX=fly` |
+| `JAROKU_FLY_APP` | — | Which Fly app a run's machine is created in. **Required** when `JAROKU_RUN_SANDBOX=fly` |
+| `JAROKU_FLY_API_TOKEN` | — | The Fly Machines API token. Never an agent's own credential — this is the platform's |
+| `JAROKU_FLY_API` | `https://api.machines.dev/v1` | Fly's Machines API endpoint. Overridable to point at the fixture (`npm run mock:fly`) |
+| `JAROKU_SANDBOX_IMAGE` | — | The sandbox image, as `name@sha256:…` — a bare tag is refused. **Required** when `JAROKU_RUN_SANDBOX=fly` |
+| `JAROKU_RUN_TOKEN_SIGNING_KEY` | generated into `server/.runtokenkey` | Signs run tokens. **Required in production**, same reasoning as `JAROKU_OBJECT_SIGNING_KEY` |
 | `JAROKU_NO_AUTORUN` | — | Set to `1` to skip the startup run |
 | `JAROKU_EVAL_CONCURRENCY` | `4` | Pool slots. Slot 0 is always the interactive run |
 | `JAROKU_LIMIT_<PROVIDER>` | `16` (fake) / `2` (real) | Per-provider concurrent-run cap, e.g. `JAROKU_LIMIT_ANTHROPIC=4` |
@@ -1592,7 +1610,9 @@ should not disagree about who is doing the thinking.
 | `JAROKU_BRANCH_CHECKPOINT_ID` / `_THREAD_ID` / `_EDIT_FILE` / `_EDIT_NODE` | Branch a new run from a parent's checkpoint, optionally with a state edit |
 | `JAROKU_WORKSPACE_ID` | Which workspace a run's checkpoints belong to. Part of the thread id on the Postgres checkpointer, ignored on SQLite |
 | `JAROKU_AGENT_DIR` | Import the project from THIS directory instead of `runtime/agents/<id>/`. What a version materialised out of the object store is handed to |
-| `JAROKU_CONTROL_DIR` | Where the MCP bridge exchanges confirmation approvals. Its **absence** is how a copied-out project knows nobody is watching |
+| `JAROKU_CONTROL_DIR` | Where the MCP bridge exchanges confirmation approvals locally. Its **absence** is how a copied-out project knows nobody is watching |
+| `JAROKU_CONTROL_PLANE_URL` / `JAROKU_RUN_TOKEN` | Set on a HOSTED run only. The HTTP control plane a sandboxed run pushes trace/control to and polls pause/resume from — see [Sandboxed execution](#sandboxed-execution-and-the-distributed-control-plane). Absent locally, which is how the runner knows to use the file/pipe path instead |
+| `JAROKU_PROJECT_TAR_URL` | Set on a HOSTED run only. Where `sandbox/boot.py` fetches the run's project archive from before extracting it and executing the real command |
 | `JAROKU_MCP_CONFIRM` | `require` \| `skip`. Defaults to require under a host, skip standalone |
 | `JAROKU_MCP_CONFIRM_TIMEOUT_S` | `120` — how long the gate waits before **denying** |
 | `JAROKU_MCP_CALL_TIMEOUT_S` | `60` — wall-clock ceiling on one MCP tool call |
@@ -1695,6 +1715,24 @@ npm run test:vault       # envelope encryption, the row binding, rotation, a wro
 npm run test:secret-refs # names and no values, and both stores answering identically
 npm run test:checkpoint-threads # one thread name, computed in TypeScript and in Python
 npm run test:branch      # a fork copies rows; the parent is hashed before and after
+
+# sandboxed execution — see "Sandboxed execution and the distributed control plane"
+npm run test:sandbox-image # digest pinning, and boot.py's archive extraction against hostile tars
+npm run test:egress-policy # every named private/link-local/reserved range, DNS rebinding, pinning
+npm run test:database-url  # a workspace's own DATABASE_URL, the SSRF cases
+npm run test:event-bus     # the push/long-poll transport a hosted run's control plane rides on
+npm run test:run-tokens    # minting, scoping, expiry, revocation
+npm run test:control-plane-routes # the four HTTP routes, auth, scoping, the long-poll, mcp-confirm
+npm run test:pool-tokens   # RunPool only mints a token when there is a control plane to use it
+npm run test:controlplane-http-python # the runner's own HTTP client, driven against the real routes
+npm run test:mcp-confirm-http # mcp_bridge.py's confirmation gate over the hosted control plane
+npm run test:trace-ingest-metrics # a dropped event is counted, not merely logged
+npm run test:backpressure  # bytes/line/rate caps, pure
+npm run test:code-check    # LocalCodeCheckSandbox against a real uv/python process
+npm run test:graph-introspect # a version's graph is introspected at most once, ever
+npm run test:fly-sandbox   # FlyMachinesSandbox against a fixture Fly Machines API
+npm run test:escape-suite  # each named attack vector, proven against the real refusing code
+npm run test:tenancy-isolation # two workspaces, two run tokens, neither reaches the other's run
 
 # auth — see "Authentication and membership"
 npm run test:http        # the HTTP layer: error envelope, body caps, log redaction
@@ -2135,6 +2173,148 @@ LangGraph's and it has added one before.
 eval finishes; the run rows, steps, jobs, scores and traces stay; **an interactive run's
 checkpoints are never swept**, and that is true by construction rather than by a filename pattern,
 because the run ids come from the eval's own job rows.
+
+---
+
+## Sandboxed execution and the distributed control plane
+
+Session 4 of the hosted migration. Three places used to execute model-written Python directly on
+this process — a run (`processManager.ts`), the import check (`validator.ts`), and graph
+introspection (`graphIntrospect.ts`) — and all three now go through an interface instead of a raw
+`child_process.spawn`. The local path is unchanged: `npm run dev` still spawns exactly the
+subprocess it always has, with nothing installed and nothing running. A hosted run instead
+executes inside its own Fly Machine, reachable only by the egress it was declared to need,
+authenticated by a token scoped to that run and nothing else.
+
+### RunSandbox and CodeCheckSandbox
+
+Two interfaces, not one, because a full agent run and a twenty-second static check are genuinely
+different shapes of problem:
+
+| | `RunSandbox` | `CodeCheckSandbox` |
+|---|---|---|
+| what it runs | a whole agent execution | one short-lived check |
+| has a run id, a trace, a control plane | yes | no |
+| implementations | `LocalSubprocessSandbox`, `FlyMachinesSandbox` | `LocalCodeCheckSandbox` |
+| selected by | `JAROKU_RUN_SANDBOX=local\|fly` | not yet selectable — see below |
+
+`LocalSubprocessSandbox` is `ProcessManager` unchanged, under the interface's name.
+`FlyMachinesSandbox` turns a `SandboxSpec` into one Fly Machine per run — the image pinned by
+digest, resources from `SandboxLimits`, and env carrying only the run's control-plane credentials
+and project archive URL, nothing ambient. `RunPool` takes a sandbox factory in its constructor
+rather than building one itself, so which kind a slot runs is a config choice, never a rewrite of
+the pool.
+
+**A documented gap, not a silent one.** `validator.ts` and `graphIntrospect.ts` both moved onto
+`CodeCheckSandbox`, and its only implementation today is local — the same subprocess check this
+codebase always ran, now behind an interface. A hosted implementation running the check inside
+the sandbox image instead of on the control plane is the natural next step (the image already
+carries `jaroku_runner` and Python) and was not built this session.
+
+### The egress policy
+
+A sandbox is granted exactly what a run declares it needs, computed fresh every time:
+
+```
+provider   → api.anthropic.com  OR  api.openai.com, never both, never for the "fake" provider
+connectors → each connector's fixed hosts (gmail.googleapis.com, slack.com, …)
+postgres   → only the workspace's own validated DATABASE_URL, never a fixed host
+```
+
+Every host is resolved and **pinned** before the sandbox starts — the sandbox is handed literal
+IPs, never a hostname to re-resolve, which is what closes the DNS-rebinding window between
+validation and use. **Every private, link-local and reserved range is refused unconditionally**,
+including the cloud metadata endpoint (`169.254.169.254`) and its IPv4-mapped IPv6 form — and a
+host is refused *whole* if even one of its resolved answers lands in one of them, not merely
+filtered down to the answers that didn't.
+
+A workspace's own `DATABASE_URL` is the one egress host that is genuinely user-supplied, and is
+validated separately (`validateDatabaseUrl`): scheme, a small port allowlist (5432, 5433, 6543 —
+never an arbitrary port a scan of the workspace's own infrastructure could use), and the identical
+private-range refusal every other host goes through.
+
+### The sandbox image
+
+One image (`runtime/sandbox/Dockerfile`), built once, reviewed once, and **referenced only by
+digest** — a tag can be repointed by anyone with push access to the registry; a digest cannot.
+It ships Jaroku's own reviewed code (`jaroku_runner`, the interceptor, the tool templates) and
+**none of an agent's** — the untrusted part. `boot.py`, the image's `ENTRYPOINT`, fetches the
+run's project archive fresh at boot from a presigned URL, extracts it with the same
+traversal/symlink refusal `projectFs` already enforces on local disk, points
+`JAROKU_AGENT_DIR` at the result, and `exec`s the real run command in its own place — there is no
+wrapper process left running above the workload for a signal to get lost in.
+
+### The control plane, over HTTP
+
+A hosted run has no local pipe for this process to read and no shared control file — so it
+**pushes** instead of being read from, and **polls** instead of being told:
+
+| Route | Direction | Carries |
+|---|---|---|
+| `POST /v1/runs/:id/trace` | runner → server | batched trace events, the exact schema-v1 shape |
+| `POST /v1/runs/:id/control` | runner → server | one `@@JAROKU_CTRL@@`-shaped control line |
+| `GET /v1/runs/:id/control` | server → runner | a bounded long-poll: `pause`, `resume`, or `none` |
+| `POST /v1/runs/:id/mcp-confirm` | runner → server | blocks until a human answers, or its own timeout denies |
+
+Every route is authenticated by a **run token** — self-contained and HMAC-signed, the same shape
+a presigned object URL already is, scoped to exactly one run id rather than a workspace. Minted
+only when a launch carries both a `workspaceId` and a configured control-plane URL, so the local
+path — which has neither — mints nothing and behaves exactly as it always has. A token presented
+against a different run than the one it names is a `403`, not a `404`.
+
+`jaroku_runner/controlplane_http.py` is the runner's client for this surface: trace events are
+batched (50 events or 100ms, whichever comes first) rather than one HTTP round trip per step, with
+an explicit flush at run end for whatever never crossed a threshold. `mcp_bridge.py` gets its
+**own, separately-written copy** of the HTTP confirm client rather than importing this module —
+it is copied byte-for-byte into every generated project, and a generated project must never
+import anything named `jaroku`.
+
+A hosted MCP confirmation raises the identical modal a local one does — the same `pendingConfirms`
+registration on the server, the same `confirmRequest` broadcast — so the UI cannot tell which kind
+of run it is looking at, and answering one resolves both the local approval file and the event bus
+so `resolveMcpConfirm` never has to know either.
+
+### Backpressure
+
+A hostile or merely buggy agent can write arbitrarily fast and arbitrarily much. One tracker
+enforces three caps on both transports a run can write through — a local run's raw stdout chunks
+and a hosted run's trace-push batches:
+
+- **bytes per run** (64 MB default) — checked on the raw write, before it joins any buffer, or a
+  single write with no newline in it would accumulate forever;
+- **a single line's own size** (1 MB default);
+- **lines per second** (200 default).
+
+A run that crosses any cap **stays refused for the rest of its life**, not merely for the one call
+that tripped it — and is stopped outright, not merely declined further writes. A dropped trace
+event is counted (`TraceIngestMetrics`), not merely logged and forgotten.
+
+### Caching a version's graph
+
+A version's compiled topology cannot change without the version itself changing, so
+`introspectGraphCached` introspects a given `(agent, version)` pair **at most once, ever**
+(migration 019, `agent_versions.graph_cache`) — a replica that has never even seen this agent
+before answers the graph view instantly once any replica has introspected it once. A failed
+introspection is deliberately never cached, so a transient sandbox hiccup gets to try again next
+time rather than permanently breaking that version's graph view.
+
+### What this session proves, and what it does not
+
+The escape suite (`npm run test:escape-suite`) names each attack by what it is and proves it
+against the real refusing code, not a description of it: the cloud metadata endpoint in every
+shape it could arrive in, a workspace's own Postgres and Redis-shaped ports, another run's token,
+a project archive engineered to escape its extraction root, a repointed image, a stdout flood, DNS
+rebinding. Two gaps are recorded rather than assumed closed, the same "known limit, stated
+plainly" discipline the rest of this README holds to:
+
+- **No pid/process-count ceiling is enforced inside a hosted machine yet.** What actually stops a
+  fork bomb today is Fly's own memory ceiling killing the machine once `guest.memory_mb` is
+  exhausted, not a dedicated `pids` cap.
+- **No network-layer egress enforcement is wired.** The policy above is computed, validated and
+  pinned before a run starts, but nothing in this session installs an in-VM firewall or an egress
+  proxy that would stop a compromised process from simply opening a socket to an address the
+  policy never admitted. This is the largest gap this session leaves, and it is the next one to
+  close.
 
 ---
 

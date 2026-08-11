@@ -8,6 +8,102 @@ release notes and the commits in that release's range.
 
 ---
 
+## Unreleased : Sandboxed Execution
+
+Session 4 of the hosted migration. Every place model-written code used to execute directly on
+this process — a run, the import check, graph introspection — now goes through `RunSandbox` or
+`CodeCheckSandbox`, an interface rather than a raw `child_process.spawn`. The local
+implementation is behaviour-identical to what came before it: `npm run dev` still spawns exactly
+the subprocess it always has, with nothing installed and nothing running. The hosted
+implementation runs a run inside its own Fly Machine, reachable only by the egress it was
+declared to need, authenticated by a token scoped to that run alone.
+
+### Added
+
+- `RunSandbox`, the interface a run's execution goes through — `LocalSubprocessSandbox` (the
+  renamed, unchanged `ProcessManager`) and `FlyMachinesSandbox`, selected by
+  `JAROKU_RUN_SANDBOX=local|fly` and defaulting to `local`.
+- `CodeCheckSandbox`, the narrower interface for a short-lived check with no run identity and no
+  trace — the import check and graph introspection both move onto it, off a direct spawn.
+- `buildEgressPolicy`: the one provider host, each connector's fixed hosts, the control plane and
+  the object store, each resolved and pinned before a sandbox starts. Every private, link-local
+  and reserved IPv4/IPv6 range is refused unconditionally, including the IPv4-mapped form of the
+  cloud metadata endpoint, and a host is refused whole if *any* of its resolved answers is one of
+  them — the DNS-rebinding case a naive re-check would miss.
+- `validateDatabaseUrl`: a workspace's own DATABASE_URL is parsed, constrained to a small port
+  allowlist, and resolved through the identical private-range refusal every other egress host
+  goes through, closing the SSRF vector a Postgres connector's user-supplied URL would otherwise
+  be.
+- `runtime/sandbox/Dockerfile` and `boot.py`: one sandbox image, built once and referenced only by
+  digest — never a tag — ships Jaroku's own reviewed code and none of an agent's. `boot.py`
+  fetches the run's project archive fresh at boot and extracts it with the same traversal/symlink
+  refusal `projectFs` already enforces on local disk.
+- Run tokens: a self-contained, HMAC-signed credential scoped to exactly one run id, the same
+  shape a presigned object URL already is and for the same reason — the control-plane long-poll
+  is a hot path, and a database round trip on every poll is a cost worth skipping.
+- A control-plane HTTP surface for a hosted run with no local pipe or shared control file to use:
+  batched trace push, a control-line push, a bounded long-poll for pause/resume, and a blocking
+  MCP confirmation that denies on its own timeout — never allows.
+- `jaroku_runner/controlplane_http.py`: the runner's client for that surface, batching trace
+  events (50 or 100ms, whichever comes first) rather than one HTTP round trip per step.
+  `mcp_bridge.py` gets its own, deliberately separate copy — it is copied into every generated
+  project and must never import anything named `jaroku`.
+- `BackpressureTracker`: bytes-per-run, a single-line ceiling, and a lines-per-second rate, the
+  same tracker behind a local run's raw stdout chunks and a hosted run's trace-push batches. A run
+  that crosses any cap stays refused for the rest of its life, not merely for one call.
+- `TraceIngestMetrics`: a dropped trace event is counted, not merely logged and forgotten.
+- Migration 019: `agent_versions.graph_cache`. A version's topology cannot change without the
+  version itself changing, so `introspectGraphCached` introspects a given version at most once,
+  ever, across every replica and every restart — and deliberately never caches a failure.
+- A fixture Fly Machines API (`fixtures/fly/mockFlyApi.ts`), so `FlyMachinesSandbox` is built and
+  verified with no Fly account, the same way the fixture S3 and MCP server already let this
+  codebase test its other hosted paths for free.
+- A sandbox escape suite naming each attack by what it is — IMDS, a workspace's own Postgres, a
+  Redis-shaped port, another run's token, a host-filesystem escape via a crafted archive, a
+  repointed image, resource exhaustion, DNS rebinding — proven against the real code that refuses
+  it, with two gaps recorded rather than assumed closed (see Verification).
+- `sandbox/tenancyIsolation.test.ts`, extending the isolation suite onto a surface with no
+  database rows: two workspaces, two run tokens, neither able to reach the other's run through
+  any of the four control-plane routes.
+
+### Changed
+
+- `ProcessManager` is now `LocalSubprocessSandbox`, implementing `RunSandbox`; `RunPool` takes a
+  sandbox factory rather than constructing one directly, so a hosted sandbox is a constructor
+  argument, never a rewrite of the pool.
+- A run token and a bus entry are minted only when a launch carries both a `workspaceId` and a
+  configured control-plane URL — the local path has neither and mints nothing.
+- `validator.ts`'s static analysis and import check, and `graphIntrospect.ts`, no longer spawn a
+  subprocess directly; both go through `CodeCheckSandbox`, local behaviour unchanged.
+- The MCP confirmation gate gets a third path in `mcp_bridge.py`, checked before the file-based
+  one: a hosted run has no shared control directory, so it blocks on `POST /mcp-confirm` instead.
+- A hosted MCP confirmation raises the identical modal a local one does, through the same
+  `pendingConfirms` registration; answering one now resolves both the approval file and the event
+  bus, so `resolveMcpConfirm` never has to know which kind of run it is answering.
+
+### Fixed
+
+- Nothing in this session was a bug fix to existing behaviour — Session 4 is additive
+  infrastructure, and the local path it sits beside is unchanged by construction, not merely by
+  intent (see Verification).
+
+### Verification
+
+- Every module above ships with its own suite, run against real subprocesses, a real fixture Fly
+  API, and the real Python control-plane client — not mocked substitutes standing in for them.
+- The escape suite records two gaps rather than closing over them: no pid/process-count ceiling
+  is enforced inside a hosted machine yet (today's actual backstop is Fly's own memory ceiling),
+  and no network-layer egress enforcement is wired to stop a compromised process from opening a
+  socket the policy never admitted — the policy is computed and validated, but nothing yet
+  refuses the packet. Both are the natural next hardening step, not a claim this session makes.
+- A hosted `RunSandbox` implementation running the import check and graph introspection inside
+  the sandbox image (rather than `CodeCheckSandbox`'s local implementation) is a documented
+  follow-up: the interface exists and the image already carries everything it would need, but the
+  concrete Fly-backed executor was not built this session.
+- `npm run typecheck` clean on both `server/` and `client/` at every commit in this session.
+
+---
+
 ## v0.2.7 : Storage Isolation
 
 Session 3 of the hosted migration. Every assumption that the server, an agent's code and its
