@@ -793,7 +793,7 @@ const relay = new WsRelay({
     else if (cmd.cmd === "applyEdit") void editor.apply(ctx, cmd.proposalId);
     else if (cmd.cmd === "undoEdit") void editor.undo(ctx, cmd.agentId);
     else if (cmd.cmd === "discardEdit") void editor.discard(ctx, cmd.proposalId);
-    else if (cmd.cmd === "pauseRun") pauseRun(ctx, cmd.runId);
+    else if (cmd.cmd === "pauseRun") void pauseRun(ctx, cmd.runId);
     else if (cmd.cmd === "resumeRun") void resumeRun(ctx, cmd.runId);
     else if (cmd.cmd === "branchRun") void branchRun(ctx, cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState);
     else if (cmd.cmd === "explain") explainAgent(ctx, cmd);
@@ -2126,9 +2126,17 @@ async function runAgent(
 }
 
 // Pause the live run at its next node boundary (the runner honours the control file there).
-function pauseRun(ctx: TenantContext, runId: string): void {
+async function pauseRun(ctx: TenantContext, runId: string): Promise<void> {
   if (!runActive || activeRunId !== runId) {
     console.log(`[debug] pauseRun ignored — ${runId} is not the active run`);
+    return;
+  }
+  // WHOSE RUN, and not merely which run. Every other command on this socket is answered in the
+  // caller's workspace; this one took a run id and acted on it, so a workspace holding another
+  // tenant's run id could halt their run mid-execution. `getRun` is scoped, so a run that is
+  // not this workspace's simply is not there — the same answer `resumeRun` gives.
+  if (!(await store.getRun(ctx, runId))) {
+    console.log(`[debug] pauseRun refused — ${runId} is not this workspace's run`);
     return;
   }
   console.log(`[debug] pause requested for run ${runId}`);
