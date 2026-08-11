@@ -49,6 +49,7 @@
     "test:egress-policy": "tsx src/sandbox/egressPolicy.test.ts",
     "test:database-url": "tsx src/sandbox/databaseUrl.test.ts",
     "test:event-bus": "tsx src/sandbox/eventBus.test.ts",
+    "test:run-tokens": "tsx src/sandbox/runTokens.test.ts",
     "test:aggregate": "tsx src/evalAggregate.test.ts",
     "test:retry": "tsx src/evalRetry.test.ts && tsx src/evalOwnership.test.ts",
     "test:judge": "tsx src/judge/rubric.test.ts",
