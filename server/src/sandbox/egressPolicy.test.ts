@@ -130,10 +130,10 @@ await (async () => {
     "api.anthropic.com": { v4: ["160.79.104.10"] },
     "gmail.googleapis.com": { v4: ["142.250.80.10"] },
     "oauth2.googleapis.com": { v4: ["142.250.80.11"] },
-    "control.example.com": { v4: ["203.0.113.200"] }, // deliberately NOT used — see below
+    "control.example.com": { v4: ["93.184.216.41"] }, // deliberately NOT used — see below
   });
   const policy = await buildEgressPolicy(
-    { runId: "r1", provider: "anthropic", connectors: ["gmail", "postgres"] },
+    { runId: "r1", provider: "anthropic", connectors: ["gmail"] },
     resolver,
   );
   const hosts = policy.rules.map((r) => r.host).sort();
@@ -142,9 +142,46 @@ await (async () => {
     hosts.join(",") === "api.anthropic.com,gmail.googleapis.com,oauth2.googleapis.com",
     hosts.join(","),
   );
-  check("postgres contributes no fixed host (its host is user-supplied, validated elsewhere)", !hosts.includes("postgres"));
   check("admits() recognises a granted, pinned address", admits(policy, "160.79.104.10", 443));
   check("admits() refuses an address nothing resolved to", !admits(policy, "1.2.3.4", 443));
+})();
+
+await (async () => {
+  // Postgres is the one connector without a fixed host — its host is whatever the workspace's
+  // own DATABASE_URL validated to (databaseUrl.ts), threaded through as an already-pinned value.
+  const resolver = fakeResolver({});
+  let threwWithoutOne = false;
+  try {
+    await buildEgressPolicy({ runId: "r5", provider: "fake", connectors: ["postgres"] }, resolver);
+  } catch (e) {
+    threwWithoutOne = e instanceof EgressPolicyError;
+  }
+  check("selecting postgres without a validated DATABASE_URL is refused", threwWithoutOne);
+
+  const policy = await buildEgressPolicy(
+    {
+      runId: "r6",
+      provider: "fake",
+      connectors: ["postgres"],
+      databaseUrl: { host: "db.example.com", port: 5432, ips: ["93.184.216.40"] },
+    },
+    resolver,
+  );
+  check(
+    "a validated DATABASE_URL becomes exactly one rule for its own pinned address",
+    policy.rules.length === 1 && admits(policy, "93.184.216.40", 5432),
+  );
+
+  let threwUnselected = false;
+  try {
+    await buildEgressPolicy(
+      { runId: "r7", provider: "fake", connectors: [], databaseUrl: { host: "db.example.com", port: 5432, ips: ["93.184.216.40"] } },
+      resolver,
+    );
+  } catch (e) {
+    threwUnselected = e instanceof EgressPolicyError;
+  }
+  check("a databaseUrl with postgres not selected is refused rather than silently granted", threwUnselected);
 })();
 
 await (async () => {

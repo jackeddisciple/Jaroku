@@ -165,6 +165,13 @@ export interface EgressPolicyInput {
   controlPlanePort?: number;
   /** Where the run fetches its project archive from (see boot.py). */
   objectStoreHost?: string;
+  /**
+   * The postgres connector's egress, already validated by databaseUrl.ts. Taken as an already-
+   * pinned {host, port, ips} rather than a raw URL — this module has no business re-deciding
+   * what counts as a safe DATABASE_URL, and a second copy of that judgment is how the two
+   * would eventually disagree.
+   */
+  databaseUrl?: { host: string; port: number; ips: string[] };
 }
 
 /**
@@ -200,6 +207,15 @@ export async function buildEgressPolicy(
   }
   if (input.objectStoreHost) {
     rules.push(await rule(input.objectStoreHost, "fetching the agent's project archive", resolver));
+  }
+  if (input.databaseUrl) {
+    if (!input.connectors.includes("postgres")) {
+      throw new EgressPolicyError("a databaseUrl was supplied but the postgres connector was not selected");
+    }
+    const { host, port, ips } = input.databaseUrl;
+    rules.push({ host, ips, ports: [port], reason: "the postgres connector's own DATABASE_URL" });
+  } else if (input.connectors.includes("postgres")) {
+    throw new EgressPolicyError("the postgres connector is selected but no validated DATABASE_URL was supplied");
   }
 
   return { runId: input.runId, rules };
