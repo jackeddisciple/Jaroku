@@ -12,6 +12,7 @@ import { randomBytes } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router } from "../http/router.ts";
+import { BackpressureTracker } from "./backpressure.ts";
 import { RunEventBus } from "./eventBus.ts";
 import { mintRunToken } from "./runTokens.ts";
 import { registerControlPlaneRoutes } from "./controlPlaneRoutes.ts";
@@ -27,7 +28,12 @@ const RUNTIME_DIR = join(resolve(dirname(fileURLToPath(import.meta.url)), "..", 
 const signingKey = randomBytes(32);
 const bus = new RunEventBus();
 const router = new Router({ log: () => {}, quiet: () => true });
-registerControlPlaneRoutes(router, { bus, signingKey, revocations: new (await import("./runTokens.ts")).RunTokenRevocationList() });
+registerControlPlaneRoutes(router, {
+  bus,
+  signingKey,
+  revocations: new (await import("./runTokens.ts")).RunTokenRevocationList(),
+  backpressure: new BackpressureTracker(),
+});
 
 const http = createServer((req, res) => {
   void router.handle(req, res).then((handled) => {

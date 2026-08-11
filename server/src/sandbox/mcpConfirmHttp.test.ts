@@ -12,6 +12,7 @@ import { randomBytes } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router } from "../http/router.ts";
+import { BackpressureTracker } from "./backpressure.ts";
 import { RunEventBus } from "./eventBus.ts";
 import { mintRunToken, RunTokenRevocationList } from "./runTokens.ts";
 import { registerControlPlaneRoutes } from "./controlPlaneRoutes.ts";
@@ -37,6 +38,7 @@ registerControlPlaneRoutes(router, {
   bus,
   signingKey,
   revocations: new RunTokenRevocationList(),
+  backpressure: new BackpressureTracker(),
   onMcpConfirmRequested: (runId, payload) => {
     if (typeof payload.nonce === "string") noncesByRun.set(runId, payload.nonce);
   },

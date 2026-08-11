@@ -14,6 +14,7 @@
 
 import { badRequest, forbidden, notFound, unauthorized, type HttpRequest, type Router } from "../http/router.ts";
 import { isTraceEvent, type TraceEvent } from "../types.ts";
+import { BackpressureTracker, describeViolation } from "./backpressure.ts";
 import { RunEventBus } from "./eventBus.ts";
 import { verifyRunToken, type RunTokenRevocationList } from "./runTokens.ts";
 import type { TraceIngestMetrics } from "./traceIngestMetrics.ts";
@@ -34,6 +35,15 @@ export interface ControlPlaneDeps {
   onMcpConfirmRequested?: (runId: string, payload: Record<string, unknown>) => void;
   /** Counts what the trace route drops rather than ingests — see traceIngestMetrics.ts. */
   metrics?: TraceIngestMetrics;
+  /** Bytes/lines/rate caps on the trace push — see backpressure.ts. Required rather than
+   *  defaulted, the same way signingKey and revocations are: a shared module-level default
+   *  would let two unrelated callers of this module (two test files, or two servers in one
+   *  process) silently share one run's usage counters with another's. */
+  backpressure: BackpressureTracker;
+  /** A hostile run is not merely refused further pushes — it is stopped. Wired to
+   *  `pool.stop(runId)` in production; a no-op default is fine for a caller that has no
+   *  sandbox to reach (e.g. a test exercising the route in isolation). */
+  onBackpressureViolation?: (runId: string, reason: string) => void;
 }
 
 /** The run token this request is bearing, checked against the :runId in the path and against
@@ -87,6 +97,21 @@ async function handleTrace(req: HttpRequest, runId: string, deps: ControlPlaneDe
   authenticate(req, runId, deps);
   const body = await req.json<{ events?: unknown[] }>();
   if (!Array.isArray(body.events)) throw badRequest("expected {events: [...]}");
+
+  // Bytes are checked BEFORE parsing any event out of the batch — a batch that is itself over
+  // budget must not get partial credit for the events ahead of the one that tips it over. Per-
+  // event size is what recordBytes' own single-write cap catches; the cumulative check is what
+  // catches many small, individually-fine events adding up to a flood.
+  for (const candidate of body.events) {
+    const size = Buffer.byteLength(JSON.stringify(candidate), "utf8");
+    const violation = deps.backpressure.recordBytes(runId, size);
+    if (violation) {
+      const reason = describeViolation(violation);
+      deps.onBackpressureViolation?.(runId, reason);
+      throw badRequest(`run ${runId} exceeded its trace backpressure limit: ${reason}`);
+    }
+  }
+
   let accepted = 0;
   let dropped = 0;
   for (const candidate of body.events) {

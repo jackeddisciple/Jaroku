@@ -11,8 +11,13 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { RAILWAY_ENV_KEY } from "./railwayApi.ts";
+import { BackpressureTracker, describeViolation, type BackpressureViolation } from "./sandbox/backpressure.ts";
 import type { RunSandbox, SandboxEvents, SandboxSpec } from "./sandbox/runSandbox.ts";
 import { isTraceEvent, type TraceEvent } from "./types.ts";
+
+/** One instance only ever runs one thing at a time (it is a pool slot), so a fixed key —
+ *  reset on every start() — is exactly as good as keying by the real run id. */
+const BACKPRESSURE_KEY = "current";
 
 // Debug-depth control plane: the runner writes one `@@JAROKU_CTRL@@ {json}` line per node
 // boundary (and on pause) to STDERR — deliberately off stdout so the frozen NDJSON trace stream
@@ -36,6 +41,7 @@ export class LocalSubprocessSandbox extends EventEmitter<SandboxEvents> implemen
   private child: ChildProcessWithoutNullStreams | null = null;
   private stdoutBuf = "";
   private stderrBuf = "";
+  private backpressure = new BackpressureTracker();
 
   get running(): boolean {
     return this.child !== null && this.child.exitCode === null && !this.child.killed;
@@ -67,6 +73,7 @@ export class LocalSubprocessSandbox extends EventEmitter<SandboxEvents> implemen
     this.child = child;
     this.stdoutBuf = "";
     this.stderrBuf = "";
+    this.backpressure.release(BACKPRESSURE_KEY); // a fresh budget for this run, not the last one
 
     child.on("error", (err) => this.emit("spawnError", err));
 
@@ -86,8 +93,21 @@ export class LocalSubprocessSandbox extends EventEmitter<SandboxEvents> implemen
   }
 
   private onStdout(chunk: string): void {
+    // Checked on the RAW CHUNK, before it joins the buffer — a write with no newline in it
+    // would otherwise accumulate in stdoutBuf forever, since flushStdout only inspects what
+    // split("\n") already found. This is what actually stops "10 GB of stdout, no newline".
+    const violation = this.backpressure.recordBytes(BACKPRESSURE_KEY, Buffer.byteLength(chunk, "utf8"));
+    if (violation) return this.terminateForBackpressure(violation);
     this.stdoutBuf += chunk;
     this.flushStdout(false);
+  }
+
+  private terminateForBackpressure(violation: BackpressureViolation): void {
+    if (!this.running) return;
+    const message = `terminated: ${describeViolation(violation)}`;
+    this.emit("stderr", `[jaroku] ${message}`);
+    this.stdoutBuf = ""; // whatever is left unparsed is exactly the flood being refused
+    this.stop(0); // SIGTERM immediately, SIGKILL with no grace — this is not a run to wait out
   }
 
   // Emit one event per complete line. When `final`, also process a trailing line
@@ -99,6 +119,8 @@ export class LocalSubprocessSandbox extends EventEmitter<SandboxEvents> implemen
     for (const raw of lines) {
       const line = raw.trim();
       if (!line) continue;
+      const rateViolation = this.backpressure.recordLine(BACKPRESSURE_KEY);
+      if (rateViolation) return this.terminateForBackpressure(rateViolation);
       let parsed: unknown;
       try {
         parsed = JSON.parse(line);

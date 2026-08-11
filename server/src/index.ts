@@ -84,6 +84,7 @@ import { registerControlPlaneRoutes } from "./sandbox/controlPlaneRoutes.ts";
 import { sandboxImageRef } from "./sandbox/image.ts";
 import { FlyMachinesSandbox } from "./sandbox/flySandbox.ts";
 import { TraceIngestMetrics } from "./sandbox/traceIngestMetrics.ts";
+import { BackpressureTracker } from "./sandbox/backpressure.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = resolve(__dirname, "..");
@@ -674,11 +675,17 @@ router.get(
 // runPool.ts never registers one without both a workspaceId and a configured control plane), so
 // there is nothing to gain and a live/ready toggle to lose by making this conditional.
 const traceIngestMetrics = new TraceIngestMetrics();
+const traceBackpressure = new BackpressureTracker();
 registerControlPlaneRoutes(router, {
   bus: pool.eventBus,
   signingKey: runTokenSigningKey,
   revocations: runTokenRevocations,
   metrics: traceIngestMetrics,
+  backpressure: traceBackpressure,
+  onBackpressureViolation: (runId, reason) => {
+    console.warn(`[trace-ingest] ${runId} ${reason} — stopping the run`);
+    pool.stop(runId);
+  },
   // The hosted twin of the local "tool_confirm" control-line handler further down this file —
   // same pendingConfirms registration, same broadcast shape, so the UI's modal cannot tell
   // which kind of run it is looking at. Deferred to a function so it can close over
@@ -1916,6 +1923,7 @@ pool.on("exit", ({ runId, code, signal, timedOut }) => {
   // that crashed while blocked would leave a modal asking about a process that no longer
   // exists, and answering it would write a file nobody will ever read.
   clearConfirms(runId, "run ended");
+  traceBackpressure.release(runId);
   // Only the interactive run owns the interactive flags; an eval job finishing must not
   // clear them out from under a run the user is driving.
   if (runId === activeRunId) {

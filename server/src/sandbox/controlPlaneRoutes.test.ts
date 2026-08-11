@@ -7,6 +7,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { randomBytes } from "node:crypto";
 import { Router } from "../http/router.ts";
+import { BackpressureTracker, DEFAULT_BACKPRESSURE_LIMITS } from "./backpressure.ts";
 import { RunEventBus } from "./eventBus.ts";
 import { mintRunToken, RunTokenRevocationList } from "./runTokens.ts";
 import { registerControlPlaneRoutes } from "./controlPlaneRoutes.ts";
@@ -21,13 +22,19 @@ const signingKey = randomBytes(32);
 const bus = new RunEventBus();
 const revocations = new RunTokenRevocationList();
 const confirmRequests: Array<{ runId: string; payload: Record<string, unknown> }> = [];
+const backpressureViolations: Array<{ runId: string; reason: string }> = [];
+// A tiny cap, specifically for the backpressure tests below — the default (64 MB) would make
+// them either slow or pointless to actually cross.
+const backpressure = new BackpressureTracker({ ...DEFAULT_BACKPRESSURE_LIMITS, maxBytesPerRun: 500 });
 
 const router = new Router({ log: () => {}, quiet: () => true });
 registerControlPlaneRoutes(router, {
   bus,
   signingKey,
   revocations,
+  backpressure,
   onMcpConfirmRequested: (runId, payload) => confirmRequests.push({ runId, payload }),
+  onBackpressureViolation: (runId, reason) => backpressureViolations.push({ runId, reason }),
 });
 
 const http = createServer((req, res) => {
@@ -140,6 +147,34 @@ const token1 = mintRunToken(signingKey, "run-1", "ws-1", 3600);
 {
   const r = await call("POST", "/v1/runs/run-1/mcp-confirm", token1, { notNonce: true });
   check("a missing nonce is refused with 400", r.status === 400);
+}
+
+// --- backpressure --------------------------------------------------------------------------
+
+{
+  bus.register("run-flood");
+  const floodToken = mintRunToken(signingKey, "run-flood", "ws-1", 3600);
+  const bigEvent = { kind: "step", schema_version: 1, step: { id: "x", seq: 0, output: "x".repeat(1000) } };
+  const r = await call("POST", "/v1/runs/run-flood/trace", floodToken, { events: [bigEvent] });
+  check("a batch over the per-run byte cap is refused with 400", r.status === 400);
+  check("onBackpressureViolation was told which run and why", backpressureViolations.some((v) => v.runId === "run-flood"));
+}
+{
+  // Once violated, a run STAYS refused rather than being allowed to earn back budget — even a
+  // tiny, otherwise-harmless event sent right after.
+  const floodToken = mintRunToken(signingKey, "run-flood", "ws-1", 3600);
+  const r = await call("POST", "/v1/runs/run-flood/trace", floodToken, {
+    events: [{ kind: "run_end", schema_version: 1, run: { id: "run-flood" } }],
+  });
+  check("a run that already violated stays refused for a small, later event too", r.status === 400);
+}
+{
+  bus.register("run-clean");
+  const cleanToken = mintRunToken(signingKey, "run-clean", "ws-1", 3600);
+  const r = await call("POST", "/v1/runs/run-clean/trace", cleanToken, {
+    events: [{ kind: "run_start", schema_version: 1, run: { id: "run-clean" } }],
+  });
+  check("a run under the cap is accepted normally", r.status === 200 && (r.json as { accepted: number })?.accepted === 1);
 }
 
 // --- revocation --------------------------------------------------------------------------
