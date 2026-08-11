@@ -155,14 +155,76 @@ def _emit_ctrl(obj: dict[str, Any]) -> None:
     print(CTRL_SENTINEL + json.dumps(obj), file=sys.stderr, flush=True)
 
 
+def _http_control_plane() -> tuple[str, str, str] | None:
+    """(url, run token, run id), or None when a hosted control plane is not configured.
+
+    A SEPARATE, SELF-CONTAINED COPY of what jaroku_runner/controlplane_http.py already does —
+    not an import of it. `import jaroku_runner...` is exactly what rule 1 and validator.ts's
+    JAROKU_IMPORT check exist to refuse, because this file is copied byte-for-byte into every
+    generated project and a generated project must not depend on Jaroku's own host code. Small
+    and stdlib-only (urllib, same as the file path uses pathlib) is the cost of that promise.
+    """
+    url = os.environ.get("JAROKU_CONTROL_PLANE_URL")
+    token = os.environ.get("JAROKU_RUN_TOKEN")
+    run_id = os.environ.get("JAROKU_RUN_ID")
+    if not url or not token or not run_id:
+        return None
+    return url.rstrip("/"), token, run_id
+
+
+def _http_confirm(
+    control_plane: tuple[str, str, str], server_id: str, name: str, reason: str, payload: str
+) -> str:
+    """Block on POST /mcp-confirm until a human answers or the SERVER's own timeout denies.
+
+    Returns "run", "once" or "deny" — never raises for a network failure, because the caller's
+    own fallback on anything but those three strings IS denial, the same posture the file-based
+    path already takes toward an unreadable or unexpected approval value.
+    """
+    import urllib.error
+    import urllib.request
+
+    base_url, token, run_id = control_plane
+    nonce = uuid.uuid4().hex[:12]
+    _emit_ctrl(
+        {
+            "ctrl": "tool_confirm", "run_id": run_id, "nonce": nonce, "server": server_id,
+            "tool": name, "impact_reason": reason, "args": payload, "timeout_s": CONFIRM_TIMEOUT_S,
+        }
+    )
+    body = json.dumps(
+        {"nonce": nonce, "server": server_id, "tool": name, "args": payload, "timeout_s": CONFIRM_TIMEOUT_S}
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base_url}/v1/runs/{run_id}/mcp-confirm",
+        data=body,
+        method="POST",
+        headers={"content-type": "application/json", "authorization": f"Bearer {token}"},
+    )
+    try:
+        # A little slack over the server's own timeout, so its denial-on-timeout is what
+        # actually decides — the same margin the file-based poll gives CONFIRM_TIMEOUT_S.
+        with urllib.request.urlopen(req, timeout=CONFIRM_TIMEOUT_S + 10) as resp:  # noqa: S310
+            result = json.loads(resp.read() or b"{}")
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        print(f"[jaroku] mcp-confirm request failed, treating as denied: {exc}", file=sys.stderr, flush=True)
+        return "deny"
+    verdict = result.get("verdict")
+    return verdict if verdict in ("run", "once", "deny") else "deny"
+
+
 def _confirm(server_id: str, name: str, args: dict[str, Any], reason: str) -> None:
     """Block until a high-impact call is approved, or raise.
 
-    Four situations, and each is decided on purpose rather than by fallthrough:
+    Five situations, and each is decided on purpose rather than by fallthrough:
 
       * Already granted for this run -> proceed silently. That is what "first use" means.
 
-      * A host is listening -> ask it, and wait. Deny on refusal or on timeout.
+      * A hosted control plane is configured -> ask it over HTTP, and wait. Checked before the
+        file-based path: a hosted run has no shared filesystem for JAROKU_CONTROL_DIR to name,
+        so it is JAROKU_CONTROL_PLANE_URL/JAROKU_RUN_TOKEN or nothing.
+
+      * A LOCAL host is listening (JAROKU_CONTROL_DIR) -> ask it via the approval file, and wait.
 
       * No host, JAROKU_MCP_CONFIRM=require -> refuse. Somebody asked for the gate in a place
         that cannot show it, and quietly running anyway would answer their question wrongly.
@@ -179,6 +241,25 @@ def _confirm(server_id: str, name: str, args: dict[str, Any], reason: str) -> No
     mode = os.environ.get("JAROKU_MCP_CONFIRM", "").strip().lower()
     if mode == "skip":
         return
+
+    control_plane = _http_control_plane()
+    if control_plane is not None:
+        try:
+            payload = json.dumps(args, default=str)
+        except Exception:  # noqa: BLE001 - showing something beats showing nothing
+            payload = repr(args)
+        if len(payload) > MAX_ARGS_CHARS:
+            payload = payload[:MAX_ARGS_CHARS] + " …(truncated)"
+        verdict = _http_confirm(control_plane, server_id, name, reason, payload)
+        if verdict == "run":
+            _run_grants.add(key)
+            return
+        if verdict == "once":
+            return
+        raise ToolNotApproved(
+            f"{key} was not approved over the hosted control plane "
+            f"(verdict: {verdict!r}). High-impact MCP tools are never allowed by default."
+        )
 
     control_dir = _host_control_dir()
     if control_dir is None:
