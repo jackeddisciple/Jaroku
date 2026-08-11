@@ -8,7 +8,7 @@
 //     same pattern the Python runner enforces, so a client-supplied id can't traverse paths.
 
 import {
-  cpSync, existsSync, readFileSync, readdirSync, renameSync, rmSync, statSync, mkdirSync,
+  cpSync, existsSync, lstatSync, readFileSync, readdirSync, renameSync, rmSync, statSync, mkdirSync,
 } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 
@@ -118,6 +118,14 @@ export function hostOwnedPaths(): string[] {
 /**
  * All text files of an agent project, sorted, with read-only flags. `connectorFiles` are
  * project-relative connector template paths (e.g. "tools/gmail.py").
+ *
+ * SYMLINKS ARE SKIPPED, not followed, and that is a security property rather than tidiness.
+ * This list is served to the browser and — since Session 3 — copied into the object store as
+ * an agent's version, permanently. A project directory is something a user can edit and a
+ * generated project is something a model wrote, so a link named `notes.py` pointing at
+ * `../../.env`, or at `/etc/passwd`, would turn "show me my agent's code" into an arbitrary
+ * file read on a shared host. `lstat`, so the link is seen as a link; a link that points back
+ * up its own tree would also be an unbounded walk.
  */
 export function listProjectFiles(projectDir: string, connectorFiles: string[]): ProjectFile[] {
   const readOnly = readOnlyPaths(connectorFiles);
@@ -127,7 +135,8 @@ export function listProjectFiles(projectDir: string, connectorFiles: string[]): 
     for (const entry of readdirSync(dir)) {
       if (entry === "__pycache__" || (entry.startsWith(".") && !EXTENSIONLESS_TEXT.has(entry))) continue;
       const full = join(dir, entry);
-      const stat = statSync(full);
+      const stat = lstatSync(full);
+      if (stat.isSymbolicLink()) continue;
       if (stat.isDirectory()) {
         walk(full);
       } else if (isTextFile(entry) && stat.size <= MAX_FILE_BYTES) {

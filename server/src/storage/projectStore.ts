@@ -26,7 +26,7 @@
 // backfill runs disk → objects exactly once per agent that has never been published.
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import type {
   AgentVersion, AgentRepository, VersionManifest, VersionMeta,
@@ -276,14 +276,24 @@ export class ProjectStore {
   }
 }
 
-/** Read a directory's text files as `StoredFile`s. The disk half of the backfill. */
+/**
+ * Read a directory's text files as `StoredFile`s. The disk half of the backfill.
+ *
+ * A SYMLINK IS NOT A FILE OF THIS PROJECT. The caller's listing already skips them, and this
+ * checks again because the two are separated by a caller that could pass any list — and what
+ * gets read here is written into the object store as an agent's version, permanently, and then
+ * served. A link named `notes.py` pointing at `runtime/.env` would import a credential file
+ * into a version and hand it to the browser.
+ */
 export function filesFromDirectory(dir: string, paths: string[]): StoredFile[] {
   const out: StoredFile[] = [];
   for (const path of paths) {
     const normalised = path.split(sep).join("/");
     if (safeObjectPath(normalised) === null) continue;
     try {
-      out.push({ path: normalised, content: readFileSync(join(dir, path), "utf8") });
+      const full = join(dir, path);
+      if (lstatSync(full).isSymbolicLink()) continue;
+      out.push({ path: normalised, content: readFileSync(full, "utf8") });
     } catch {
       // A file that vanished between the listing and the read. Skipping is right: the
       // alternative is failing a whole import over one transient.

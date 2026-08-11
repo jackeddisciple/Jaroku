@@ -42,7 +42,8 @@ import { FsObjectStore } from "./storage/fsObjectStore.ts";
 import { ProjectStore } from "./storage/projectStore.ts";
 import { safeObjectPath } from "./storage/keys.ts";
 import { Generator } from "./generator.ts";
-import { DEPLOY_ARTIFACTS, hostOwnedPaths, readOnlyPaths } from "./projectFs.ts";
+import { DEPLOY_ARTIFACTS, hostOwnedPaths, listProjectFiles, readOnlyPaths } from "./projectFs.ts";
+import { filesFromDirectory } from "./storage/projectStore.ts";
 import { loadConnectors } from "./connectors.ts";
 import { writeDeployArtifacts } from "./deployArtifacts.ts";
 import { BRIDGE_FILE, MANIFEST_FILE } from "./mcpManifest.ts";
@@ -92,6 +93,41 @@ console.log("\nthe block list is spelled in object paths");
   check(!set.has("tools/notes.py"), "a bespoke tool is not read-only");
   check(!set.has("prompts/system.md"), "nor is the system prompt");
   check(!set.has("tools/mcp_bridge_helper.py"), "nor is a file whose name merely starts the same");
+}
+
+// --- 1b. a symlink is not a file of the project ----------------------------------------------
+//
+// The file list is served to the browser and, since versions, copied into the object store
+// permanently. A project directory is something a user can edit and a generated project is
+// something a model wrote, so a link named like a source file is how "show me my agent's code"
+// becomes an arbitrary file read on a shared host.
+console.log("\nsymlinks are not project files");
+{
+  const dir = tmpDir("project");
+  const secret = join(dir, "outside.txt");
+  fs.writeFileSync(secret, "A CREDENTIAL THAT IS NOT IN THIS PROJECT");
+  const project = join(dir, "agent_x");
+  fs.mkdirSync(join(project, "tools"), { recursive: true });
+  fs.writeFileSync(join(project, "agent.py"), "# real\n");
+  fs.symlinkSync(secret, join(project, "notes.py"));
+  fs.symlinkSync(dir, join(project, "tools", "up"));
+
+  const listed = listProjectFiles(project, []);
+  check(listed.some((f) => f.path === "agent.py"), "a real file is listed");
+  check(!listed.some((f) => f.path === "notes.py"), "a symlink to a file outside the project is not");
+  check(
+    !listed.some((f) => f.content.includes("A CREDENTIAL")),
+    "...so nothing outside the project reaches the file list",
+  );
+  check(
+    !listed.some((f) => f.path.startsWith("tools/up/")),
+    "...and a symlinked directory is not walked into",
+  );
+
+  // The same check on the way into a version, because the two are separated by a caller that
+  // could pass any list, and what lands here is stored permanently.
+  const imported = filesFromDirectory(project, ["agent.py", "notes.py"]);
+  check(imported.length === 1 && imported[0]!.path === "agent.py", "a symlink is not imported into a version");
 }
 
 // --- 2. every connector in the catalogue is covered ------------------------------------------
