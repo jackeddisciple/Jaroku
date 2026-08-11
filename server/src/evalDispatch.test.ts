@@ -173,5 +173,62 @@ console.log("\na transient failure retries through the queue, and the retry succ
   }
 }
 
+console.log("\nattempts exhaust through the queue, and backoff between them grows");
+{
+  const pool = new FakePool(4);
+  const dispatcher = new Dispatcher(new InMemoryQueueBackend());
+
+  const runner = new EvalRunner({
+    pool: pool as unknown as RunPool,
+    store,
+    dispatcher,
+    evalStore,
+    runtimeDir: ".",
+    context: () => ctx,
+    markEvalRun: () => {},
+    onStarted: () => {},
+    onProgress: () => {},
+    onFinished: () => {},
+  });
+
+  const ds = await evalStore.createDataset(ctx, "agent_exhaust", "exhaustion path");
+  await evalStore.addExample(ctx, ds.id, "hello", null, null);
+  const rubric = await evalStore.putRubric(ctx, { dataset_id: null, name: "r", criteria: [] });
+
+  const started = await runner.start({
+    ctx, datasetId: ds.id, agentId: "agent_exhaust", rubricId: rubric.id,
+    targets: [{ provider: "fake", model: "fake" }], budgetUsd: null,
+  });
+  if ("error" in started) { check(false, `start failed: ${started.error}`); }
+  else {
+    // JAROKU_JOB_ATTEMPTS defaults to 3 and JAROKU_RETRY_BASE_MS to 2000 - every attempt in
+    // this scenario fails, so this exercises the real default backoff schedule (2s, then 4s)
+    // rather than a value tuned just to make the test fast.
+    const attemptTimestamps: number[] = [];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      for (let i = 0; i < 400 && pool.started.length <= attempt; i++) await sleep(25);
+      check(pool.started.length === attempt + 1, `attempt ${attempt + 1} reaches the pool (started ${pool.started.length})`);
+      attemptTimestamps.push(Date.now());
+      const runId = pool.started[attempt]!.runId;
+      pool.finish(runId, { spawnError: "ECONNRESET on attempt" });
+    }
+
+    // A fourth attempt must NEVER arrive - MAX_ATTEMPTS is 3, and it must stay 3.
+    await sleep(6_000); // past even the second backoff, so a wrongly-scheduled 4th has time to show up
+    check(pool.started.length === 3, `no fourth attempt is ever dispatched (started ${pool.started.length})`);
+
+    const job = (await evalStore.jobsForEval(ctx, started.evalId))[0];
+    check(job?.status === "failed", `the job is left failed once attempts are exhausted (was ${job?.status})`);
+    check(job?.attempt === 2, `attempt is recorded as 2 (0-indexed - the third and final try), was ${job?.attempt}`);
+
+    if (attemptTimestamps.length === 3) {
+      const gap1 = attemptTimestamps[1]! - attemptTimestamps[0]!;
+      const gap2 = attemptTimestamps[2]! - attemptTimestamps[1]!;
+      check(gap1 >= 1_500, `the first backoff is roughly the 2000ms base, not immediate (was ${gap1}ms)`);
+      check(gap2 > gap1, `the second backoff is longer than the first - it's exponential, not flat (${gap1}ms -> ${gap2}ms)`);
+    }
+  }
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);
