@@ -84,7 +84,8 @@
     "mock:s3": "tsx fixtures/s3/mockS3.ts",
     "mock:fly": "tsx fixtures/fly/mockFlyApi.ts",
     "test:fly-sandbox": "tsx src/sandbox/flySandbox.test.ts",
-    "test:redis": "tsx src/queue/redis.test.ts"
+    "test:redis": "tsx src/queue/redis.test.ts",
+    "test:jobs": "tsx src/queue/jobs.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",
