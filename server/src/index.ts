@@ -2180,7 +2180,7 @@ async function runAgent(
   activeRunId = runId;
   pausedRunId = null;
   runWorkspaces.set(runId, ctx);
-  pool.startInteractive({ runId, runtimeDir: RUNTIME_DIR, input, agentId, env });
+  pool.startInteractive({ runId, runtimeDir: RUNTIME_DIR, input, agentId, env, workspaceId: ctx.workspaceId });
 }
 
 // Pause the live run at its next node boundary (the runner honours the control file there).
@@ -2256,7 +2256,7 @@ async function resumeRun(ctx: TenantContext, runId: string): Promise<void> {
   pausedRunId = null;
   runWorkspaces.set(runId, ctx);
   relay.broadcastDebug(ctx, { type: "resumed", runId, seqOffset });
-  pool.startInteractive({ runId, runtimeDir: RUNTIME_DIR, agentId: run.agent_id, env });
+  pool.startInteractive({ runId, runtimeDir: RUNTIME_DIR, agentId: run.agent_id, env, workspaceId: ctx.workspaceId });
 }
 
 // Fork a NEW run from a parent run's checkpoint at a step's node boundary, optionally with a
@@ -2328,7 +2328,7 @@ async function branchRun(
   console.log(`[debug] branching ${fromRunId} @seq ${seqHigh} -> ${branchId} (agent ${parent.agent_id})`);
   void relay.broadcastHistory(); // surface the new branch run in history immediately
   relay.broadcastDebug(ctx, { type: "branched", parentRunId: fromRunId, branchId, fromSeq: seqHigh });
-  pool.startInteractive({ runId: branchId, runtimeDir: RUNTIME_DIR, agentId: parent.agent_id, env });
+  pool.startInteractive({ runId: branchId, runtimeDir: RUNTIME_DIR, agentId: parent.agent_id, env, workspaceId: ctx.workspaceId });
 }
 
 // --- explain (unified composer) --------------------------------------------

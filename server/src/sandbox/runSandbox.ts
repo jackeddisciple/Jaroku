@@ -51,6 +51,9 @@ export interface SandboxSpec {
   /** Secrets and configuration for this run only. Never inherited ambiently on the hosted path. */
   env?: NodeJS.ProcessEnv;
   limits?: Partial<SandboxLimits>;
+  /** Where and how a hosted run reaches its control plane (sandbox/controlPlaneRoutes.ts). Absent
+   *  locally — LocalSubprocessSandbox talks over a pipe and a control file, not HTTP. */
+  controlPlane?: { url: string; runToken: string };
 }
 
 /** Typed events every RunSandbox implementation emits. Identical to what processManager.ts

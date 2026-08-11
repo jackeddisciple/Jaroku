@@ -22,8 +22,11 @@
 // running something genuinely long, and killing it out from under them would be worse than
 // the wedge it prevents.
 
+import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { LocalSubprocessSandbox, type AgentRunOptions } from "./processManager.ts";
+import { RunEventBus } from "./sandbox/eventBus.ts";
+import { mintRunToken, RunTokenRevocationList } from "./sandbox/runTokens.ts";
 import type { RunSandbox } from "./sandbox/runSandbox.ts";
 import type { TraceEvent } from "./types.ts";
 
@@ -32,14 +35,36 @@ import type { TraceEvent } from "./types.ts";
 export type SandboxFactory = () => RunSandbox;
 const defaultSandboxFactory: SandboxFactory = () => new LocalSubprocessSandbox();
 
+/** How long a run token lives, once a run needs one. Not the run's own timeoutMs (an eval job's
+ *  deadline) — this only has to outlast the run, so it is set generously rather than computed. */
+const RUN_TOKEN_TTL_S = 60 * 60 * 2;
+
 export interface PoolRunOptions extends AgentRunOptions {
   /** Server-minted run id, so the caller can address the run before run_start races back. */
   runId: string;
+  /**
+   * Which workspace this run belongs to. Optional for backward compatibility with callers that
+   * have no hosted control plane to scope a token to (every existing test, and the local path);
+   * REQUIRED to actually get a run token minted and registered on the event bus — see launch().
+   */
+  workspaceId?: string;
   /**
    * Wall-clock cap. On expiry the run is SIGTERMed, then SIGKILLed if it doesn't go, and
    * its `exit` reports `timedOut: true`. Omit for no deadline (the interactive path).
    */
   timeoutMs?: number;
+  /** Set by launch() when a run token was minted — never by a caller. See RunPoolOptions. */
+  controlPlane?: { url: string; runToken: string };
+}
+
+export interface RunPoolOptions {
+  sandbox?: SandboxFactory;
+  /** The hosted control plane's own base URL, e.g. "https://api.jaroku.example.com". Absent
+   *  means no run tokens are minted at all — the local path has nothing to scope one to. */
+  controlPlaneUrl?: string;
+  bus?: RunEventBus;
+  signingKey?: Buffer;
+  revocations?: RunTokenRevocationList;
 }
 
 /** Everything the pool emits carries `runId` — with N concurrent runs, an unattributed
@@ -59,6 +84,10 @@ interface Slot {
   runId: string | null;
   timer: NodeJS.Timeout | null;
   timedOut: boolean;
+  /** Set only when a run token was minted for this slot's occupant, so release() knows both
+   *  whether to revoke one and, since a self-contained token cannot be un-minted, until when
+   *  the revocation entry itself needs to be kept around. */
+  tokenExpiresAtMs: number | null;
 }
 
 /** Slot 0 is the interactive run's. Everything else is available to the eval fan-out. */
@@ -67,24 +96,47 @@ const INTERACTIVE_SLOT = 0;
 export class RunPool extends EventEmitter<RunPoolEvents> {
   private slots: Slot[] = [];
   private sandbox: SandboxFactory;
+  private controlPlaneUrl: string | undefined;
+  private bus: RunEventBus;
+  private signingKey: Buffer;
+  private revocations: RunTokenRevocationList;
 
   /**
    * @param concurrency how many runs may execute at once IN ADDITION to the interactive
    *   one. Kept modest by default: each slot is a Python subprocess with a LangGraph import,
    *   and oversubscribing the machine makes every run slower and its latency numbers — which
    *   the comparison dashboard reports — meaningless.
-   * @param sandbox what a slot actually runs on. Defaults to the local subprocess; a hosted
-   *   RunSandbox is passed in once one exists, so the pool itself never chooses.
+   * @param opts what a slot actually runs on, and the control-plane wiring a hosted sandbox
+   *   needs a run token for. Every field defaults to something that keeps the local, no-hosted-
+   *   control-plane path working exactly as it did before this existed — see PoolRunOptions on
+   *   why omitting `workspaceId` is what actually opts a run out of getting a token at all.
    */
-  constructor(concurrency: number, sandbox: SandboxFactory = defaultSandboxFactory) {
+  constructor(concurrency: number, opts: RunPoolOptions = {}) {
     super();
-    this.sandbox = sandbox;
+    this.sandbox = opts.sandbox ?? defaultSandboxFactory;
+    this.controlPlaneUrl = opts.controlPlaneUrl;
+    this.bus = opts.bus ?? new RunEventBus();
+    this.signingKey = opts.signingKey ?? randomBytes(32);
+    this.revocations = opts.revocations ?? new RunTokenRevocationList();
     const total = Math.max(1, concurrency) + 1; // +1 for the reserved interactive slot
     for (let i = 0; i < total; i++) this.slots.push(this.makeSlot(i));
   }
 
+  /** The bus a hosted sandbox's control-plane routes push into — exposed so the server can wire
+   *  registerControlPlaneRoutes(router, { bus: pool.eventBus, ... }) at startup. */
+  get eventBus(): RunEventBus {
+    return this.bus;
+  }
+
   private makeSlot(index: number): Slot {
-    const slot: Slot = { index, manager: this.sandbox(), runId: null, timer: null, timedOut: false };
+    const slot: Slot = {
+      index,
+      manager: this.sandbox(),
+      runId: null,
+      timer: null,
+      timedOut: false,
+      tokenExpiresAtMs: null,
+    };
 
     // Attribute every event to the run that produced it. Listeners are permanent — the
     // slot's runId at emit time is the attribution, so a slot can be reused safely.
@@ -118,8 +170,16 @@ export class RunPool extends EventEmitter<RunPoolEvents> {
   private release(slot: Slot): void {
     if (slot.timer) clearTimeout(slot.timer);
     slot.timer = null;
+    // A finished run's token is worthless to keep valid — revoke it immediately rather than
+    // waiting out its own ttl, and drop the bus entry so a long-poll left in flight (a hosted
+    // sandbox killed mid-request) resolves to "none" instead of leaking a pending timer.
+    if (slot.runId) {
+      if (slot.tokenExpiresAtMs !== null) this.revocations.revoke(slot.runId, slot.tokenExpiresAtMs);
+      if (this.bus.has(slot.runId)) this.bus.unregister(slot.runId);
+    }
     slot.runId = null;
     slot.timedOut = false;
+    slot.tokenExpiresAtMs = null;
   }
 
   private launch(slot: Slot, opts: PoolRunOptions): void {
@@ -134,7 +194,19 @@ export class RunPool extends EventEmitter<RunPoolEvents> {
         slot.manager.stop(); // SIGTERM, then SIGKILL if it doesn't go
       }, opts.timeoutMs);
     }
-    slot.manager.start(opts);
+
+    // A run token, and a bus entry to receive what a hosted sandbox pushes, only when there is
+    // both a workspace to scope one to AND a control plane for it to be presented against —
+    // the local path has neither, and PoolRunOptions.workspaceId being optional is exactly what
+    // lets every existing caller keep working without minting one it has no use for.
+    let spec: PoolRunOptions = opts;
+    if (opts.workspaceId && this.controlPlaneUrl) {
+      this.bus.register(opts.runId);
+      const runToken = mintRunToken(this.signingKey, opts.runId, opts.workspaceId, RUN_TOKEN_TTL_S);
+      slot.tokenExpiresAtMs = Date.now() + RUN_TOKEN_TTL_S * 1000;
+      spec = { ...opts, controlPlane: { url: this.controlPlaneUrl, runToken } };
+    }
+    slot.manager.start(spec);
   }
 
   /**
