@@ -57,10 +57,16 @@ export async function aggregateJob(
 ): Promise<JobMetrics> {
   // The two raw reads below go through the shared database rather than the trace store,
   // because they are aggregates the store has no method for. They carry the scope by hand
-  // for exactly the same reason every store method does.
-  const db = store.database();
+  // for exactly the same reason every store method does — and through `forWorkspace`, not the
+  // bare `Db`, because the WHERE clause is only half of it. `steps` has a FORCED RLS policy,
+  // and a policy reads `app.workspace_id`, which only a scoped query sets. Unscoped, as the
+  // application role a deployment connects with, both reads came back empty: every eval job
+  // reported no cost, no tokens and no step latency, and the budget ceiling they feed
+  // under-counted by all of it. Locally, and as the owner every test connects as, they were
+  // correct — which is what made it invisible.
+  const scoped = store.database().forWorkspace(ctx.workspaceId);
 
-  const totals = (await db.get<{ cost: number | null; tokens: number | null; step_latency: number | null }>(
+  const totals = (await scoped.get<{ cost: number | null; tokens: number | null; step_latency: number | null }>(
     `SELECT
        SUM(cost)   AS cost,
        SUM(tokens) AS tokens,
@@ -71,7 +77,7 @@ export async function aggregateJob(
 
   // An llm_call that reported tokens but no cost means we could not price part of this
   // run. The sum is therefore a floor, not the total.
-  const unpriced = await db.get<{ n: unknown }>(
+  const unpriced = await scoped.get<{ n: unknown }>(
     `SELECT COUNT(*) AS n FROM steps
      WHERE run_id = ? AND workspace_id = ? AND type = 'llm_call'
        AND tokens IS NOT NULL AND cost IS NULL`,

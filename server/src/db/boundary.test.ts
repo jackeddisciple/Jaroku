@@ -232,8 +232,13 @@ function policiedTables(): Set<string> {
  * The optional type-parameter list is not decoration: `this.db.all<Invite>(…)` is how a typed
  * read is spelled everywhere here, and without it this rule skipped every one of them — which
  * is the same hole rule 2's METHOD pattern had, found the same way.
+ *
+ * `db.` as well as `this.db.`, because a raw handle taken out of a store — `const db =
+ * store.database()` — is the same unscoped connection under a shorter name, and that is where
+ * the eval aggregates were reading `steps` from. `tx.` is deliberately not matched: a `tx` only
+ * exists inside `scoped` or `transaction`, and the call that opened it is what this judges.
  */
-const UNSCOPED_CALL = /this\.db\.(all|get|run|exec|transaction)(?:<[^>(]*>)?\s*\(/g;
+const UNSCOPED_CALL = /(?<![\w.])(?:this\.)?db\.(all|get|run|exec|transaction)(?:<[^>(]*>)?\s*\(/g;
 
 /** The argument list of a call, from its opening paren to the matching close. */
 function callArguments(text: string, openParen: number): string {
@@ -278,7 +283,7 @@ const UNSCOPED_OK: Record<string, string> = {
         (k) => k.startsWith(`${name.split("/").pop()}:`) && args.includes(k.slice(k.indexOf(":") + 1)),
       );
       if (excused) continue;
-      found.push(`${name}:${text.slice(0, m.index).split("\n").length} — this.db.${m[1]} names ${table}`);
+      found.push(`${name}:${text.slice(0, m.index).split("\n").length} — db.${m[1]} names ${table}`);
     }
   }
   if (found.length) fail(`a policied table reached without a scope: ${found.join("; ")}`);
