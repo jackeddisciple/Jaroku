@@ -67,14 +67,23 @@ function timeoutFromEnv(jobClass: JobClass, fallbackMs: number | null): number |
 }
 
 function concurrencyFromEnv(jobClass: JobClass, fallback: number): number {
-  const key = `JAROKU_WORKSPACE_CONCURRENCY_${jobClass.toUpperCase().replace(/[.\-]/g, "_")}`;
-  const raw = process.env[key];
-  const n = Number(raw);
+  return positiveFromEnv(`JAROKU_WORKSPACE_CONCURRENCY_${jobClass.toUpperCase().replace(/[.\-]/g, "_")}`, fallback);
+}
+
+/** How a numeric env override is read, everywhere in this file. Rejecting NaN, zero and negatives
+ *  alike matters: `Number(undefined)` and `Number("")` and `Number("lots")` all have to fall
+ *  through to the default rather than becoming a concurrency of zero, which admits nothing ever. */
+function positiveFromEnv(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
 /** Static defaults. Env overrides are resolved lazily by jobClassConfig() below so tests can
- *  vary process.env without re-importing the module. */
+ *  vary process.env without re-importing the module — which is why the per-class tables here
+ *  are FUNCTIONS of the environment rather than values read at import. Three of them used to be
+ *  values (`JAROKU_JUDGE_CONCURRENCY`, `JAROKU_JOB_TIMEOUT_MS`, `JAROKU_MCP_DISCOVERY_MS`), so
+ *  those three alone were frozen at the first import in the process, contradicting the sentence
+ *  immediately above them. */
 const DEFAULTS: Record<JobClass, Omit<JobClassConfig, "perWorkspaceConcurrency" | "timeoutMs">> = {
   "run.interactive": {
     label: "an interactive run",
@@ -101,38 +110,38 @@ const DEFAULTS: Record<JobClass, Omit<JobClassConfig, "perWorkspaceConcurrency" 
   "mcp.discover": { label: "MCP tool discovery", globalConcurrency: null, retryable: false, queued: false },
 };
 
-const PER_WORKSPACE_DEFAULT: Record<JobClass, number> = {
+const PER_WORKSPACE_DEFAULT: Record<JobClass, () => number> = {
   // The descendant of slot 0: one interactive run per workspace by default, same as today's
   // single reserved slot, just no longer a single GLOBAL slot every workspace contends for.
-  "run.interactive": 1,
+  "run.interactive": () => 1,
   // Free-tier-shaped default. A paid workspace overriding this is Session 6's plan-driven
   // concurrency (doc §S6); this session's caps are flat and env-overridable, not plan-aware.
-  "run.eval": 2,
-  judge: Number(process.env.JAROKU_JUDGE_CONCURRENCY ?? 4),
-  generate: 1,
-  plan: 2,
-  edit: 1,
-  explain: 4,
-  "mcp.discover": 2,
+  "run.eval": () => 2,
+  judge: () => positiveFromEnv("JAROKU_JUDGE_CONCURRENCY", 4),
+  generate: () => 1,
+  plan: () => 2,
+  edit: () => 1,
+  explain: () => 4,
+  "mcp.discover": () => 2,
 };
 
-const TIMEOUT_DEFAULT_MS: Record<JobClass, number | null> = {
-  "run.interactive": null,
-  "run.eval": Number(process.env.JAROKU_JOB_TIMEOUT_MS ?? 180_000),
-  judge: 60_000,
-  generate: 120_000,
-  plan: 60_000,
-  edit: 120_000,
-  explain: 30_000,
-  "mcp.discover": Number(process.env.JAROKU_MCP_DISCOVERY_MS ?? 30_000),
+const TIMEOUT_DEFAULT_MS: Record<JobClass, () => number | null> = {
+  "run.interactive": () => null,
+  "run.eval": () => positiveFromEnv("JAROKU_JOB_TIMEOUT_MS", 180_000),
+  judge: () => 60_000,
+  generate: () => 120_000,
+  plan: () => 60_000,
+  edit: () => 120_000,
+  explain: () => 30_000,
+  "mcp.discover": () => positiveFromEnv("JAROKU_MCP_DISCOVERY_MS", 30_000),
 };
 
 export function jobClassConfig(jobClass: JobClass): JobClassConfig {
   const base = DEFAULTS[jobClass];
   return {
     ...base,
-    perWorkspaceConcurrency: concurrencyFromEnv(jobClass, PER_WORKSPACE_DEFAULT[jobClass]),
-    timeoutMs: timeoutFromEnv(jobClass, TIMEOUT_DEFAULT_MS[jobClass]),
+    perWorkspaceConcurrency: concurrencyFromEnv(jobClass, PER_WORKSPACE_DEFAULT[jobClass]()),
+    timeoutMs: timeoutFromEnv(jobClass, TIMEOUT_DEFAULT_MS[jobClass]()),
   };
 }
 

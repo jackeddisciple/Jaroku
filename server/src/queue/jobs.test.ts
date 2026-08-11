@@ -83,5 +83,36 @@ check(
   "the same parts under a different class are a different key",
 );
 
+console.log("\nan override set after this module was imported");
+{
+  // The file says overrides "are resolved lazily by jobClassConfig() so tests can vary
+  // process.env without re-importing the module". Three were not: JAROKU_JUDGE_CONCURRENCY,
+  // JAROKU_JOB_TIMEOUT_MS and JAROKU_MCP_DISCOVERY_MS were read into a table at import, and so
+  // were frozen at whatever the environment held the first time anything touched this module.
+  const before = jobClassConfig("judge").perWorkspaceConcurrency;
+  process.env.JAROKU_JUDGE_CONCURRENCY = "9";
+  check(jobClassConfig("judge").perWorkspaceConcurrency === 9, "JAROKU_JUDGE_CONCURRENCY is read when asked, not at import");
+  delete process.env.JAROKU_JUDGE_CONCURRENCY;
+  check(jobClassConfig("judge").perWorkspaceConcurrency === before, "and unsetting it goes back to the default");
+
+  process.env.JAROKU_JOB_TIMEOUT_MS = "12345";
+  check(jobClassConfig("run.eval").timeoutMs === 12345, "so is JAROKU_JOB_TIMEOUT_MS");
+  process.env.JAROKU_JOB_TIMEOUT_MS = "not a number";
+  check(jobClassConfig("run.eval").timeoutMs === 180_000, "and garbage falls through to the default rather than to NaN");
+  process.env.JAROKU_JOB_TIMEOUT_MS = "0";
+  check(
+    jobClassConfig("run.eval").timeoutMs === 180_000,
+    "as does zero — a deadline of zero would kill every job the instant it started",
+  );
+  delete process.env.JAROKU_JOB_TIMEOUT_MS;
+
+  process.env.JAROKU_WORKSPACE_CONCURRENCY_RUN_EVAL = "0";
+  check(
+    jobClassConfig("run.eval").perWorkspaceConcurrency === 2,
+    "a concurrency of zero falls through too — it would admit nothing, ever",
+  );
+  delete process.env.JAROKU_WORKSPACE_CONCURRENCY_RUN_EVAL;
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);
