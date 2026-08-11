@@ -28,6 +28,7 @@
     "test:edit-versions": "tsx src/editVersions.test.ts",
     "test:read-only": "tsx src/readOnly.test.ts",
     "test:store-reads": "tsx src/storeReads.test.ts",
+    "test:agent-files": "tsx src/agentFiles.test.ts",
     "test:tenancy": "tsx src/tenancy.test.ts",
     "test:acceptance": "tsx src/acceptance.test.ts",
     "test:relay": "tsx src/wsRelay.test.ts",

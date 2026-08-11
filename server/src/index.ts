@@ -58,6 +58,7 @@ import { openObjectStore } from "./storage/open.ts";
 import { resolveSigningKey } from "./storage/presign.ts";
 import { filesFromDirectory, ProjectStore } from "./storage/projectStore.ts";
 import { objectRoutes } from "./http/objects.ts";
+import { readAgentFiles, type AgentFilesDeps } from "./agentFiles.ts";
 import {
   CHECKPOINT_SCHEMA, checkpointThreadId, checkpointerKindFromEnv,
 } from "./checkpoints/threads.ts";
@@ -511,45 +512,32 @@ function broadcastDeployments(): void {
 }
 
 /**
- * An agent project's files at its CURRENT VERSION, connector files flagged read-only.
+ * An agent project's files at its current version, connector files flagged read-only.
  *
- * Read from the object store rather than from `runtime/agents/<slug>/`, which is the change
- * this session is for: a replica that has never run this agent, and has nothing of it on disk,
- * answers this identically to the one that generated it.
- *
- * The disk is still the fallback, and stays one for as long as the local path exists. Two
- * things legitimately land there without a version row: a project a user drops in by hand
- * between boots, and one whose import failed. Both should still be readable — the alternative
- * is a file list that is empty for a project the user can see in their editor.
+ * The decision about WHERE that answer may come from is `agentFiles.ts`, not here — it is the
+ * one that governs what a workspace may read of an agent's source, and it lived as a closure in
+ * this file with a bug nothing could reach.
  */
 async function agentProjectFiles(ctx: TenantContext, agentId: string): Promise<ProjectFile[]> {
   if (!isSafeAgentId(agentId)) return [];
-  const agent = await agentRepo.bySlug(ctx, agentId);
-
-  // The read-only set is per project: host-owned files always, plus the connector templates
-  // this agent actually has installed. Derived from the row when there is one, and from
-  // jaroku.json otherwise, so both paths flag the same files.
-  const connectorIds = agent?.connectors ?? readDiskConnectors(agentId);
-  const connectorFiles = loadConnectors(RUNTIME_DIR)
-    .filter((c) => connectorIds.includes(c.id))
-    .map((c) => `tools/${c.file}`);
-
-  if (agent) {
-    try {
-      const stored = await projects.readCurrent(ctx, agent.id, agent.current_version);
-      if (stored.length) {
-        const readOnly = readOnlyPaths(connectorFiles);
-        return stored.map((f) => ({ path: f.path, content: f.content, readOnly: readOnly.has(f.path) }));
-      }
-    } catch (err) {
-      console.warn(`[objects] falling back to disk for ${agentId}: ${(err as Error).message}`);
-    }
-  }
-
-  const dir = join(RUNTIME_DIR, "agents", agentId);
-  if (!existsSync(dir)) return [];
-  return listProjectFiles(dir, connectorFiles);
+  return (await readAgentFiles(agentFilesDeps, ctx, agentId)).files;
 }
+
+const agentFilesDeps: AgentFilesDeps = {
+  runtimeDir: RUNTIME_DIR,
+  agents: agentRepo,
+  projects,
+  // The read-only set is per project: host-owned files always, plus the connector templates this
+  // agent actually has installed. From the row when there is one, and from jaroku.json otherwise,
+  // so both paths flag the same files.
+  connectorFilesFor: (agent, slug) => {
+    const ids = agent?.connectors ?? readDiskConnectors(slug);
+    return loadConnectors(RUNTIME_DIR)
+      .filter((c) => ids.includes(c.id))
+      .map((c) => `tools/${c.file}`);
+  },
+  serverWorkspaceId: () => serverContext().workspaceId,
+};
 
 /** The connector ids a project's own jaroku.json claims. Only for a project with no row yet. */
 function readDiskConnectors(agentId: string): string[] {
@@ -588,17 +576,21 @@ async function agentGraph(ctx: TenantContext, agentId: string): Promise<GraphRes
       const dir = join(tmpdir(), `jaroku-graph-${agent.id}-${agent.current_version}`);
       try {
         const written = await projects.materialise(ctx, agent.id, agent.current_version, dir);
-        if (!written.includes("agent.py")) {
-          // A version with no agent.py cannot be built. Fall back to the disk, which is where a
-          // project somebody dropped in by hand lives — the same fallback the file list makes.
-          return await introspectGraph(RUNTIME_DIR, agentId);
-        }
-        return await introspectGraph(RUNTIME_DIR, agentId, dir);
-      } catch {
-        return await introspectGraph(RUNTIME_DIR, agentId);
+        if (written.includes("agent.py")) return await introspectGraph(RUNTIME_DIR, agentId, dir);
+      } catch (err) {
+        return { agent_id: agentId, error: `could not read this agent's files: ${(err as Error).message}` };
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
+
+      // NO FALLBACK TO THE DISK. Same reason as the file list: `runtime/agents/<slug>` belongs
+      // to whichever workspace materialised it, and a slug is unique per workspace rather than
+      // globally — so building the graph from there would show one tenant the topology of
+      // another's agent. Only the workspace this process acts in may read a hand-dropped one.
+      if (ctx.workspaceId === serverContext().workspaceId) {
+        return await introspectGraph(RUNTIME_DIR, agentId);
+      }
+      return { agent_id: agentId, error: "this agent has no published version to build a graph from" };
     })();
     // Don't cache a failure — let a later request retry (e.g. after a transient import error).
     void pending.then((r) => {
