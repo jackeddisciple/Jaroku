@@ -54,6 +54,10 @@ export interface SandboxSpec {
   /** Where and how a hosted run reaches its control plane (sandbox/controlPlaneRoutes.ts). Absent
    *  locally — LocalSubprocessSandbox talks over a pipe and a control file, not HTTP. */
   controlPlane?: { url: string; runToken: string };
+  /** Where a hosted sandbox fetches the agent's project from — see sandbox/boot.py, which
+   *  extracts this into the tmpfs scratch mount before executing anything. Absent locally: the
+   *  project is already on this machine's disk under runtime/agents/<id>/. */
+  files?: { presignedTarUrl: string };
 }
 
 /** Typed events every RunSandbox implementation emits. Identical to what processManager.ts
