@@ -201,7 +201,7 @@ export class Router {
   }
 
   /** Everything under `prefix`, for a route whose tail is data rather than a path. */
-  prefixRoute(method: "GET" | "PUT", prefix: string, handler: Handler): this {
+  prefixRoute(method: "GET" | "PUT" | "POST", prefix: string, handler: Handler): this {
     this.routes.push({ method, path: prefix, prefix: true, handler });
     return this;
   }

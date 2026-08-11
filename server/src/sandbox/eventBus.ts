@@ -30,11 +30,18 @@ interface PendingWaiter {
   timer: NodeJS.Timeout;
 }
 
+interface McpConfirmWaiter {
+  resolve: (verdict: "run" | "once" | "deny") => void;
+  timer: NodeJS.Timeout;
+}
+
 interface RunEntry {
   emitter: EventEmitter<SandboxEvents>;
   /** Actions queued for the runner's NEXT long-poll, drained in order. */
   queue: ControlAction[];
   waiters: PendingWaiter[];
+  /** One blocking POST /mcp-confirm per nonce, resolved by resolveMcpConfirm or its timeout. */
+  confirms: Map<string, McpConfirmWaiter>;
 }
 
 const DEFAULT_LONG_POLL_MS = 25_000;
@@ -47,7 +54,7 @@ export class RunEventBus {
   register(runId: string): EventEmitter<SandboxEvents> {
     let entry = this.runs.get(runId);
     if (!entry) {
-      entry = { emitter: new EventEmitter<SandboxEvents>(), queue: [], waiters: [] };
+      entry = { emitter: new EventEmitter<SandboxEvents>(), queue: [], waiters: [], confirms: new Map() };
       this.runs.set(runId, entry);
     }
     return entry.emitter;
@@ -68,6 +75,14 @@ export class RunEventBus {
       w.resolve({ action: "none" });
     }
     entry.waiters = [];
+    // A run that exits mid-confirmation (killed, timed out, crashed) leaves nobody to deliver
+    // the verdict to — deny, the same "nobody answered" outcome a timeout produces, rather than
+    // leaving the promise to hang until ITS OWN timer fires for a run that no longer exists.
+    for (const c of entry.confirms.values()) {
+      clearTimeout(c.timer);
+      c.resolve("deny");
+    }
+    entry.confirms.clear();
     this.runs.delete(runId);
   }
 
@@ -127,5 +142,37 @@ export class RunEventBus {
       }, timeoutMs);
       entry.waiters.push({ resolve, timer });
     });
+  }
+
+  // --- MCP confirmation: a blocking POST from the runner, resolved by a human's answer -------
+
+  /**
+   * The runner's blocking POST /mcp-confirm: hold the connection open until resolveMcpConfirm
+   * answers this exact nonce, or `timeoutMs` passes — denying, never allowing, on timeout. Two
+   * concurrent waits on the SAME nonce would mean two runner requests raced for one
+   * confirmation, which cannot happen (a nonce is minted once, per call, by the runner itself),
+   * so a second call for a nonce already waited on replaces the first rather than queuing.
+   */
+  awaitMcpConfirm(runId: string, nonce: string, timeoutMs: number): Promise<"run" | "once" | "deny"> {
+    const entry = this.runs.get(runId);
+    if (!entry) return Promise.resolve("deny"); // no such run — nothing to confirm against
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        entry.confirms.delete(nonce);
+        resolve("deny");
+      }, timeoutMs);
+      entry.confirms.set(nonce, { resolve, timer });
+    });
+  }
+
+  /** A human answered (or the run's own mechanism auto-denied it) — wake the waiting POST. */
+  resolveMcpConfirm(runId: string, nonce: string, verdict: "run" | "once" | "deny"): boolean {
+    const entry = this.runs.get(runId);
+    const waiter = entry?.confirms.get(nonce);
+    if (!entry || !waiter) return false;
+    clearTimeout(waiter.timer);
+    entry.confirms.delete(nonce);
+    waiter.resolve(verdict);
+    return true;
   }
 }
