@@ -63,7 +63,7 @@ import {
   CHECKPOINT_SCHEMA, checkpointThreadId, checkpointerKindFromEnv,
 } from "./checkpoints/threads.ts";
 import { openCheckpointStore } from "./checkpoints/store.ts";
-import { introspectGraph, type GraphResult } from "./graphIntrospect.ts";
+import { introspectGraph, introspectGraphCached, type GraphResult } from "./graphIntrospect.ts";
 import { streamExplain } from "./explainer.ts";
 import type { DeployChannelCommand, ExplainCommand } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
@@ -607,9 +607,12 @@ function readDiskConnectors(agentId: string): string[] {
 //
 // The files it builds from are materialised out of the object store into a temp directory, so a
 // replica that has never run this agent answers the graph view identically to the one that
-// generated it. That is the Session 3 half. The Python still executes on the control plane;
-// moving it into a sandbox is Session 4's, and is why the temp directory exists at all rather
-// than the runner being pointed at `runtime/agents/`.
+// generated it. That is the Session 3 half. Session 4 adds two more: the Python now runs through
+// CodeCheckSandbox rather than a direct spawn (see graphIntrospect.ts), and the result is cached
+// on the version row itself (introspectGraphCached), not only in this process's memory — a
+// version's topology cannot change without the version changing, so a replica that has never
+// even SEEN this agent before can still answer instantly once any replica has introspected it
+// once.
 const graphCache = new Map<string, Promise<GraphResult>>();
 async function agentGraph(ctx: TenantContext, agentId: string): Promise<GraphResult> {
   if (!isSafeAgentId(agentId)) return { agent_id: agentId, error: "invalid agent id" };
@@ -625,7 +628,13 @@ async function agentGraph(ctx: TenantContext, agentId: string): Promise<GraphRes
       const dir = join(tmpdir(), `jaroku-graph-${agent.id}-${agent.current_version}`);
       try {
         const written = await projects.materialise(ctx, agent.id, agent.current_version, dir);
-        if (written.includes("agent.py")) return await introspectGraph(RUNTIME_DIR, agentId, dir);
+        if (written.includes("agent.py")) {
+          const store = {
+            getGraphCache: (id: string, v: number) => agentRepo.getGraphCache(ctx, id, v),
+            setGraphCache: (id: string, v: number, g: unknown) => agentRepo.setGraphCache(ctx, id, v, g),
+          };
+          return await introspectGraphCached(RUNTIME_DIR, agentId, agent.current_version, store, dir);
+        }
       } catch (err) {
         return { agent_id: agentId, error: `could not read this agent's files: ${(err as Error).message}` };
       } finally {

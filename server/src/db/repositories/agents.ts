@@ -398,6 +398,39 @@ export class AgentRepository {
   }
 
   /**
+   * A version's cached graph introspection result, or undefined if nothing has been cached yet.
+   *
+   * Kept out of `version()`'s own SELECT list and `AgentVersion` deliberately — the history list
+   * and every other version read has no use for a topology blob, and loading one on every row of
+   * a list nobody asked to see the graph of is exactly the kind of cost a cache should not add.
+   */
+  async getGraphCache(ctx: TenantContext, agentId: string, version: number): Promise<unknown | undefined> {
+    const row = await this.q(ctx).get<{ graph_cache: unknown }>(
+      `SELECT v.graph_cache
+         FROM agent_versions v JOIN agents a ON a.id = v.agent_id
+        WHERE v.agent_id = ? AND v.version = ? AND a.workspace_id = ?`,
+      [agentId, version, ctx.workspaceId],
+    );
+    if (!row || row.graph_cache === null || row.graph_cache === undefined) return undefined;
+    return jsonFromColumn(this.db.dialect, row.graph_cache);
+  }
+
+  /**
+   * Cache a version's graph introspection result. Scoped through the agent like every other
+   * version write, so a workspace can only ever cache a result for its own version — not that a
+   * cross-workspace agent id would resolve to a row at all, but the WHERE clause is the same
+   * belt-and-braces this repository applies everywhere else rather than trusting the caller.
+   */
+  async setGraphCache(ctx: TenantContext, agentId: string, version: number, graph: unknown): Promise<void> {
+    await this.q(ctx).run(
+      `UPDATE agent_versions AS v SET graph_cache = ?
+        WHERE v.agent_id = ? AND v.version = ?
+          AND EXISTS (SELECT 1 FROM agents a WHERE a.id = v.agent_id AND a.workspace_id = ?)`,
+      [JSON.stringify(graph), agentId, version, ctx.workspaceId],
+    );
+  }
+
+  /**
    * An agent's versions, newest first, still on the line.
    *
    * `undone_at IS NULL` by default because that is what "the history" means to the UI: undoing

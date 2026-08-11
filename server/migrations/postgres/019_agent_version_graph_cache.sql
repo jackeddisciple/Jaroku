@@ -1,0 +1,16 @@
+-- 019_agent_version_graph_cache — the graph view stops needing a sandbox per view.
+--
+-- graphIntrospect.ts imports a version's agent.py to read its compiled LangGraph topology. That
+-- import is model-written code, so Session 4 moves it into a sandbox alongside the import check
+-- — but a version's topology cannot change without the version itself changing (it is derived
+-- purely from agent.py, which a version's manifest already hashes), so introspecting the SAME
+-- version twice is introspecting something that cannot have changed. Caching the result on the
+-- version row turns every graph view after the first, for any version, into a read with no
+-- sandbox involved at all.
+--
+-- NULLABLE, AND DELIBERATELY NEVER BACKFILLED. Every existing version was introspected the old
+-- way or not at all; this migration adds nowhere to have cached a result for them. The first
+-- request for an old version's graph pays the introspection cost once, same as a fresh version
+-- always would, and caches it from then on — there is nothing to migrate, only somewhere new to
+-- remember an answer this table never had before.
+ALTER TABLE agent_versions ADD COLUMN graph_cache json;
