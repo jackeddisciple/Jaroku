@@ -7,10 +7,14 @@
 //
 // These checks mirror the hard rules in prompt.ts. The prompt asks; this enforces.
 
-import { spawn } from "node:child_process";
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import type { Manifest } from "./mcpManifest.ts";
+import { LocalCodeCheckSandbox, type CodeCheckSandbox } from "./sandbox/codeCheck.ts";
+
+/** Shared unless a caller injects its own — see codeCheck.ts's module comment on why the local
+ *  path stays exactly what it was, and what a hosted implementation would replace this with. */
+const defaultCodeCheckSandbox: CodeCheckSandbox = new LocalCodeCheckSandbox();
 
 export interface ValidationResult {
   ok: boolean;
@@ -68,6 +72,7 @@ function analyzePython(
   reviewedFiles: string[],
   /** name -> { schema, server } for every MCP tool this agent's manifest grants. */
   mcpTools: Record<string, { schema: Record<string, unknown>; server: string }>,
+  sandbox: CodeCheckSandbox = defaultCodeCheckSandbox,
 ): Promise<string[]> {
   const script = `
 import ast, json, os, sys
@@ -282,46 +287,34 @@ for rel, tree in generated.items():
 print(json.dumps(problems))
 `.trim();
 
-  return new Promise((resolve) => {
-    const child = spawn(
-      "uv",
-      [
-        "run", "python", "-c", script,
-        projectDir,
-        JSON.stringify(toolNames),
-        JSON.stringify(reviewedFiles),
-        JSON.stringify(mcpTools),
-      ],
-      {
-        cwd: runtimeDir,
-        env: { ...process.env, PATH: `/opt/homebrew/bin:${process.env.PATH ?? ""}` },
-      },
-    );
-    let out = "";
-    let err = "";
-    child.stdout.on("data", (d) => (out += d));
-    child.stderr.on("data", (d) => (err += d));
-    child.on("error", (e) => resolve([`could not run the syntax check: ${e.message}`]));
-    child.on("exit", (code) => {
+  return sandbox
+    .run({
+      runtimeDir,
+      args: ["-c", script, projectDir, JSON.stringify(toolNames), JSON.stringify(reviewedFiles), JSON.stringify(mcpTools)],
+      // No timeout existed here before this commit — AST-walking our own script over a staged
+      // project is near-instant, so this is a defensive ceiling rather than a behaviour change
+      // anything legitimate could ever reach.
+      timeoutMs: 30_000,
+    })
+    .then(({ stdout, stderr, spawnError, timedOut }) => {
+      if (spawnError) return [`could not run the syntax check: ${spawnError}`];
       // Fail CLOSED. This used to read `out.trim() || "[]"`, which turned a crashed analysis
       // into an empty problem list — so a project whose static checks never ran was reported
       // as clean, and the import check then executed it. A check that cannot run is not a
       // check that passed.
-      const text = out.trim();
+      const text = stdout.trim();
       if (!text) {
-        resolve([
-          `the static analysis did not run (exit ${code ?? "?"})` +
-            (err.trim() ? `: ${err.trim().split("\n").slice(-3).join(" ").slice(0, 300)}` : ""),
-        ]);
-        return;
+        return [
+          `the static analysis did not run${timedOut ? " (timed out)" : ""}` +
+            (stderr.trim() ? `: ${stderr.trim().split("\n").slice(-3).join(" ").slice(0, 300)}` : ""),
+        ];
       }
       try {
-        resolve(JSON.parse(text) as string[]);
+        return JSON.parse(text) as string[];
       } catch {
-        resolve([`syntax check failed to report: ${err.slice(0, 300)}`]);
+        return [`syntax check failed to report: ${stderr.slice(0, 300)}`];
       }
     });
-  });
 }
 
 /**
@@ -339,7 +332,11 @@ print(json.dumps(problems))
  * execute seconds later — inside the same uv venv, with stdout captured so a violation
  * of rule 3 at import time surfaces here instead of corrupting the event stream.
  */
-function importCheck(runtimeDir: string, projectDir: string): Promise<string[]> {
+function importCheck(
+  runtimeDir: string,
+  projectDir: string,
+  sandbox: CodeCheckSandbox = defaultCodeCheckSandbox,
+): Promise<string[]> {
   const script = `
 import contextlib, importlib, io, json, os, sys, traceback
 
@@ -373,37 +370,22 @@ if out:
 print(json.dumps(problems))
 `.trim();
 
-  return new Promise((resolve) => {
-    const child = spawn(
-      "uv",
-      ["run", "python", "-c", script, dirname(projectDir), basename(projectDir)],
-      {
-        cwd: runtimeDir,
-        env: { ...process.env, PATH: `/opt/homebrew/bin:${process.env.PATH ?? ""}` },
-      },
-    );
-    // Top-level code can loop forever; a hung import must reject, not hang validation.
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      resolve(["the project's import timed out after 20s — top-level code must not block"]);
-    }, 20_000);
-    let out = "";
-    let err = "";
-    child.stdout.on("data", (d) => (out += d));
-    child.stderr.on("data", (d) => (err += d));
-    child.on("error", (e) => {
-      clearTimeout(timer);
-      resolve([`could not run the import check: ${e.message}`]);
-    });
-    child.on("exit", () => {
-      clearTimeout(timer);
+  return sandbox
+    .run({
+      runtimeDir,
+      args: ["-c", script, dirname(projectDir), basename(projectDir)],
+      // Top-level code can loop forever; a hung import must reject, not hang validation.
+      timeoutMs: 20_000,
+    })
+    .then(({ stdout, stderr, spawnError, timedOut }) => {
+      if (spawnError) return [`could not run the import check: ${spawnError}`];
+      if (timedOut) return ["the project's import timed out after 20s — top-level code must not block"];
       try {
-        resolve(JSON.parse(out.trim() || "[]"));
+        return JSON.parse(stdout.trim() || "[]") as string[];
       } catch {
-        resolve([`import check failed to report: ${err.slice(0, 300)}`]);
+        return [`import check failed to report: ${stderr.slice(0, 300)}`];
       }
     });
-  });
 }
 
 /**
