@@ -45,6 +45,7 @@
     "test:plan": "tsx src/planProtocol.test.ts && tsx src/planOwnership.test.ts",
     "test:pricing": "tsx src/pricing.test.ts",
     "test:pool": "tsx src/runPool.test.ts",
+    "test:interactive-slot": "tsx src/interactiveSlot.test.ts",
     "test:sandbox-image": "tsx src/sandbox/image.test.ts",
     "test:egress-policy": "tsx src/sandbox/egressPolicy.test.ts",
     "test:database-url": "tsx src/sandbox/databaseUrl.test.ts",

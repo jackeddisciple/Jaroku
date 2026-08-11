@@ -87,7 +87,7 @@ import { FlyMachinesSandbox } from "./sandbox/flySandbox.ts";
 import { TraceIngestMetrics } from "./sandbox/traceIngestMetrics.ts";
 import { BackpressureTracker } from "./sandbox/backpressure.ts";
 import { Dispatcher, defaultQueueBackend } from "./queue/dispatcher.ts";
-import { workspaceSemaphore } from "./queue/semaphores.ts";
+import { InteractiveSlots } from "./interactiveSlot.ts";
 import { EventBridge } from "./queue/eventBridge.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -254,22 +254,12 @@ const eventBridge = EventBridge.create();
 // `runActive` already enforces process-wide today, so nothing observable changes for a
 // single active run; what changes is that the ceiling is now an explicit, named, leased
 // reservation instead of an implicit side effect of there having been only one slot.
-const interactiveLeaseByRun = new Map<string, string>();
-async function acquireInteractiveSlot(workspaceId: string, runId: string): Promise<boolean> {
-  const leaseId = randomUUID();
-  const granted = await workspaceSemaphore(dispatcher.backend, "run.interactive", workspaceId).acquire(
-    leaseId,
-    60 * 60 * 1000, // generous — released explicitly on exit; this is only the crash safety net
-  );
-  if (granted) interactiveLeaseByRun.set(runId, leaseId);
-  return granted;
-}
-async function releaseInteractiveSlot(workspaceId: string, runId: string): Promise<void> {
-  const leaseId = interactiveLeaseByRun.get(runId);
-  if (!leaseId) return;
-  interactiveLeaseByRun.delete(runId);
-  await workspaceSemaphore(dispatcher.backend, "run.interactive", workspaceId).release(leaseId);
-}
+// Reserving and STARTING are one call (interactiveSlot.ts): the reservation is released by the
+// run's own exit event, so a start that never happened has nothing coming to release it — and
+// the cap is one per workspace with an hour-long lease. See that module's header.
+const interactiveSlots = new InteractiveSlots(dispatcher.backend, randomUUID);
+const releaseInteractiveSlot = (workspaceId: string, runId: string): Promise<void> =>
+  interactiveSlots.release(workspaceId, runId);
 
 // Run ids belonging to an in-flight eval job. Their events persist normally but are kept
 // OFF the "trace" channel, so a fan-out can't steal the timeline's focus (traceStore
@@ -2398,16 +2388,25 @@ async function runAgent(
   // should never actually be denied today — it is acquired anyway, unconditionally, because
   // it is the mechanism that has to exist and be exercised now for a future session to widen
   // the process-wide check above into a per-workspace one without also inventing this.
-  if (!(await acquireInteractiveSlot(ctx.workspaceId, runId))) {
-    console.warn(`[manager] interactive reservation denied for workspace ${ctx.workspaceId} — refusing run ${runId}`);
-    relay.broadcastDebug(ctx, { type: "error", message: "you already have an interactive run in progress" });
+  runWorkspaces.set(runId, ctx); // before the start: its first events arrive on their own tick
+  const outcome = await interactiveSlots.reserveAndStart(ctx.workspaceId, runId, () =>
+    interactivePool.tryStart({ runId, runtimeDir: RUNTIME_DIR, input, agentId, env, workspaceId: ctx.workspaceId }),
+  );
+  if (outcome !== "started") {
+    runWorkspaces.delete(runId);
+    console.warn(`[manager] interactive run ${runId} refused for workspace ${ctx.workspaceId}: ${outcome}`);
+    relay.broadcastDebug(ctx, {
+      type: "error",
+      message:
+        outcome === "no-reservation"
+          ? "you already have an interactive run in progress"
+          : "the server is at capacity for interactive runs — try again in a moment",
+    });
     return;
   }
   runActive = true;
   activeRunId = runId;
   pausedRunId = null;
-  runWorkspaces.set(runId, ctx);
-  interactivePool.tryStart({ runId, runtimeDir: RUNTIME_DIR, input, agentId, env, workspaceId: ctx.workspaceId });
 }
 
 // Pause the live run at its next node boundary (the runner honours the control file there).
@@ -2478,16 +2477,28 @@ async function resumeRun(ctx: TenantContext, runId: string): Promise<void> {
     JAROKU_PROVIDER: run.provider,
     JAROKU_MODEL: run.model,
   };
-  if (!(await acquireInteractiveSlot(ctx.workspaceId, runId))) {
-    relay.broadcastDebug(ctx, { type: "error", runId, message: "you already have an interactive run in progress" });
+  runWorkspaces.set(runId, ctx);
+  const outcome = await interactiveSlots.reserveAndStart(ctx.workspaceId, runId, () =>
+    interactivePool.tryStart({ runId, runtimeDir: RUNTIME_DIR, agentId: run.agent_id, env, workspaceId: ctx.workspaceId }),
+  );
+  if (outcome !== "started") {
+    runWorkspaces.delete(runId);
+    relay.broadcastDebug(ctx, {
+      type: "error",
+      runId,
+      message:
+        outcome === "no-reservation"
+          ? "you already have an interactive run in progress"
+          : "the server is at capacity for interactive runs — try again in a moment",
+    });
     return;
   }
   runActive = true;
   activeRunId = runId;
   pausedRunId = null;
-  runWorkspaces.set(runId, ctx);
+  // Announced only once the process is genuinely going — a "resumed" for a run that never
+  // restarted leaves the UI showing a live run against a dead id.
   relay.broadcastDebug(ctx, { type: "resumed", runId, seqOffset });
-  interactivePool.tryStart({ runId, runtimeDir: RUNTIME_DIR, agentId: run.agent_id, env, workspaceId: ctx.workspaceId });
 }
 
 // Kill a run outright — unlike pauseRun, there is nothing left to resume from. Works on an
@@ -2573,20 +2584,30 @@ async function branchRun(
     if (editNode) env.JAROKU_BRANCH_EDIT_NODE = editNode;
   }
 
-  if (!(await acquireInteractiveSlot(ctx.workspaceId, branchId))) {
-    relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: "you already have an interactive run in progress" });
+  // The branch belongs to the same workspace as its parent, which is the one that could see
+  // the parent in order to branch from it.
+  runWorkspaces.set(branchId, ctx);
+  const outcome = await interactiveSlots.reserveAndStart(ctx.workspaceId, branchId, () =>
+    interactivePool.tryStart({ runId: branchId, runtimeDir: RUNTIME_DIR, agentId: parent.agent_id, env, workspaceId: ctx.workspaceId }),
+  );
+  if (outcome !== "started") {
+    runWorkspaces.delete(branchId);
+    relay.broadcastDebug(ctx, {
+      type: "error",
+      runId: fromRunId,
+      message:
+        outcome === "no-reservation"
+          ? "you already have an interactive run in progress"
+          : "the server is at capacity for interactive runs — try again in a moment",
+    });
     return;
   }
   runActive = true;
   activeRunId = branchId;
   pausedRunId = null;
-  // The branch belongs to the same workspace as its parent, which is the one that could see
-  // the parent in order to branch from it.
-  runWorkspaces.set(branchId, ctx);
   console.log(`[debug] branching ${fromRunId} @seq ${seqHigh} -> ${branchId} (agent ${parent.agent_id})`);
   void relay.broadcastHistory(); // surface the new branch run in history immediately
   relay.broadcastDebug(ctx, { type: "branched", parentRunId: fromRunId, branchId, fromSeq: seqHigh });
-  interactivePool.tryStart({ runId: branchId, runtimeDir: RUNTIME_DIR, agentId: parent.agent_id, env, workspaceId: ctx.workspaceId });
 }
 
 // --- explain (unified composer) --------------------------------------------
