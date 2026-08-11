@@ -28,7 +28,14 @@ export interface AdmitOverrides {
 }
 
 export class Dispatcher {
-  constructor(private backend: QueueBackend) {}
+  constructor(private backendImpl: QueueBackend) {}
+
+  /** The underlying storage — exposed for callers that need a generic semaphore too (see
+   *  queue/semaphores.ts), so they share the same backend instance rather than opening a
+   *  second Redis connection for what is, underneath, the same store. */
+  get backend(): QueueBackend {
+    return this.backendImpl;
+  }
 
   /** Put one piece of work at the tail of `workspaceId`'s queue for `jobClass`. */
   async enqueue<T>(

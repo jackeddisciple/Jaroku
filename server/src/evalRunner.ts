@@ -30,19 +30,34 @@ import type { TraceStore } from "./store.ts";
 import type { TenantContext } from "./db/tenant.ts";
 import type { EvalStore, EvalJob, EvalTarget } from "./evalStore.ts";
 import { aggregateJob } from "./evalAggregate.ts";
+import { Dispatcher } from "./queue/dispatcher.ts";
+import { jobClassConfig, type QueueJob } from "./queue/jobs.ts";
+import { providerSemaphore } from "./queue/semaphores.ts";
 
-/** Per-provider ceiling on simultaneous runs. */
-function providerLimit(provider: string): number {
-  const env = Number(process.env[`JAROKU_LIMIT_${provider.toUpperCase()}`]);
-  if (Number.isFinite(env) && env > 0) return env;
-  // `fake` is local and free, so it's bounded only by the pool. Real providers get a low
-  // default: the cost of being conservative is a slower eval, the cost of being greedy is
-  // rate-limit errors misread as provider unreliability.
-  return provider === "fake" ? 16 : 2;
+/**
+ * What a `run.eval` queue job carries. The dispatcher and the worker-side admit loop never
+ * look inside it — this shape exists only so `dispatch()` and `executeAdmitted()` (both in
+ * this file) agree on what they put in and what they read back out.
+ */
+interface RunEvalPayload {
+  evalId: string;
+  jobId: string;
+  agentId: string;
+  input: string;
+  provider: string;
+  model: string;
+  attempt: number;
 }
 
-/** Wall-clock deadline per job. A wedged subprocess must not hold a slot forever. */
-const DEFAULT_JOB_TIMEOUT_MS = Number(process.env.JAROKU_JOB_TIMEOUT_MS ?? 180_000);
+/** Wall-clock deadline per job. A wedged subprocess must not hold a slot forever. Reads the
+ *  SAME env var queue/jobs.ts's run.eval config does, rather than keeping a second copy of
+ *  the same default that could drift from it. */
+const DEFAULT_JOB_TIMEOUT_MS = jobClassConfig("run.eval").timeoutMs ?? 180_000;
+
+/** How much longer than the job's own timeout a provider-semaphore lease is held for, so a
+ *  legitimately slow job doesn't get its provider slot reclaimed by a reaper while it's still
+ *  running fair and square. */
+const PROVIDER_LEASE_TTL_MS = DEFAULT_JOB_TIMEOUT_MS + 30_000;
 
 /** Total attempts per job, including the first. Bounded: every retry costs money again. */
 const MAX_ATTEMPTS = Math.max(1, Number(process.env.JAROKU_JOB_ATTEMPTS ?? 3));
@@ -96,6 +111,10 @@ export interface EvalProgress {
 export interface EvalRunnerDeps {
   pool: RunPool;
   store: TraceStore;
+  /** Where a run.eval job actually goes once its dataset row is written — the fair,
+   *  per-workspace-capped queue, not a direct pool.tryStart(). See dispatch() and
+   *  executeAdmitted() below for the two halves of what used to be one function. */
+  dispatcher: Dispatcher;
   /**
    * The workspace every job in this runner belongs to.
    *
@@ -150,23 +169,43 @@ interface Live {
   evalId: string;
   /** runId -> jobId, so a pool exit can be attributed to the job that caused it. */
   runToJob: Map<string, string>;
-  /** provider -> currently running count, for the per-provider cap. */
-  inFlight: Map<string, number>;
+  /** `${jobId}:${attempt}` already sent to the dispatcher, so pump()'s reconciliation scan
+   *  never enqueues the same attempt twice. A NEW attempt (a retry) is a new key, and gets
+   *  enqueued fresh once its backoff has passed — see scheduleRetryWake. */
+  enqueuedAttempts: Set<string>;
   cancelled: boolean;
   /** Single timer for the earliest backing-off retry. See scheduleRetryWake. */
   retryTimer: NodeJS.Timeout | null;
+}
+
+/** What a job's admission needs released once its run is done — the dispatcher's own lease,
+ *  and the provider semaphore acquired on top of it. Keyed by runId because that's what
+ *  onRunExit is handed; nothing upstream of it needs to know a lease exists at all. */
+interface RunLease {
+  jobId: string;
+  dispatcherLeaseId: string;
+  provider: string;
+  providerLeaseId: string;
 }
 
 export class EvalRunner {
   /** Evals currently draining. More than one is allowed; they share the pool's slots. */
   private live = new Map<string, Live>();
   private jobToEval = new Map<string, string>();
+  private leaseByRun = new Map<string, RunLease>();
 
   constructor(private deps: EvalRunnerDeps) {
     // A job's run finishing is what advances the queue. Attribution is by run id — the
     // pool tags every event with one precisely so N concurrent runs stay distinguishable.
     deps.pool.on("exit", ({ runId, timedOut }) => this.onRunExit(runId, timedOut, null));
     deps.pool.on("spawnError", ({ runId, error }) => this.onRunExit(runId, false, error.message));
+
+    // A SAFETY NET, not the primary driver. dispatch() already attempts an immediate drain
+    // right after enqueueing, and onRunExit's own pump() does too once a slot frees up — this
+    // timer only matters for capacity that opens for a reason NEITHER of those triggers on:
+    // another eval's job finishing releases the global run.eval semaphore, or a provider
+    // semaphore lease simply expiring. Unref'd so it never holds the process open.
+    setInterval(() => void this.drainAvailable(), 500).unref();
   }
 
   /** Whether any eval is draining — used to refuse a second start from the UI. */
@@ -211,7 +250,7 @@ export class EvalRunner {
     this.live.set(evalRun.id, {
       evalId: evalRun.id,
       runToJob: new Map(),
-      inFlight: new Map(),
+      enqueuedAttempts: new Set(),
       cancelled: false,
       retryTimer: null,
     });
@@ -233,7 +272,15 @@ export class EvalRunner {
     return { evalId: evalRun.id };
   }
 
-  /** Stop an eval: kill what's running, cancel what's queued. */
+  /**
+   * Stop an eval: kill what's running, cancel what's queued.
+   *
+   * A job already sitting in the dispatcher's Redis list (enqueued, not yet admitted) is
+   * NOT pulled back out here — the queue backend has no "remove this one job" operation, only
+   * FIFO pop. `executeAdmitted` checks `live.cancelled` the moment it IS admitted and acks it
+   * unrun instead, so nothing runs and nothing is billed; it just sits queued a little longer
+   * than strictly necessary first. Purging it immediately is commit 10's job.
+   */
   async cancel(evalId: string): Promise<void> {
     const live = this.live.get(evalId);
     if (!live) return;
@@ -276,6 +323,11 @@ export class EvalRunner {
       console.log(`[eval] ${evalId} hit its budget ceiling — ${cancelled} queued job(s) cancelled`);
     }
 
+    // WHICH QUEUED JOBS NEED TO REACH THE DISPATCHER — reconciliation against the persisted
+    // rows, not execution. Capacity (pool slots, the provider semaphore) is a SEPARATE
+    // concern now, checked by executeAdmitted() once the dispatcher's own fair rotation has
+    // actually chosen a job to run; this loop's only job is "does the dispatcher know about
+    // every eligible attempt yet."
     const jobs = await this.deps.evalStore.jobsForEval(this.deps.context(), evalId);
     if (!live.cancelled) {
       const now = Date.now();
@@ -284,12 +336,13 @@ export class EvalRunner {
         // A backing-off retry isn't eligible yet. Skipping (not breaking) lets other jobs
         // through — one provider's rate limit must not stall the whole eval.
         if (job.retry_not_before && Date.parse(job.retry_not_before) > now) continue;
-        if (this.deps.pool.freeSlots <= 0) break; // pool saturated — try again on the next exit
-        const running = live.inFlight.get(job.provider) ?? 0;
-        if (running >= providerLimit(job.provider)) continue; // this provider is at its cap
-        await this.dispatch(live, job);
+        const attemptKey = `${job.id}:${job.attempt}`;
+        if (live.enqueuedAttempts.has(attemptKey)) continue;
+        live.enqueuedAttempts.add(attemptKey);
+        await this.enqueueJob(live, job);
       }
     }
+    void this.drainAvailable(); // best-effort immediate attempt; the periodic timer covers the rest
     await this.reportProgress(evalId);
     await this.finishIfDone(evalId);
     await this.scheduleRetryWake(evalId);
@@ -331,7 +384,13 @@ export class EvalRunner {
     }, wakeIn);
   }
 
-  private async dispatch(live: Live, job: EvalJob): Promise<void> {
+  /**
+   * Tell the dispatcher a queued job exists. This is the whole of what used to be dispatch()
+   * — it does NOT touch the pool, and does not know whether or when a slot will actually
+   * open up. Fairness across workspaces is the dispatcher's job now, not a loop counting
+   * pool.freeSlots one eval at a time.
+   */
+  private async enqueueJob(live: Live, job: EvalJob): Promise<void> {
     const example = await this.deps.evalStore.getExample(this.deps.context(), job.example_id);
     if (!example) {
       // The example was deleted after the eval was queued. Record it rather than skipping
@@ -339,37 +398,113 @@ export class EvalRunner {
       await this.deps.evalStore.finishJob(this.deps.context(), job.id, "failed", { error: "example no longer exists" });
       return;
     }
-
     const evalRun = (await this.deps.evalStore.getEvalRun(this.deps.context(), live.evalId))!;
-    const runId = randomUUID();
-    live.runToJob.set(runId, job.id);
+    const payload: RunEvalPayload = {
+      evalId: live.evalId,
+      jobId: job.id,
+      agentId: evalRun.agent_id,
+      input: example.input,
+      provider: job.provider,
+      model: job.model,
+      attempt: job.attempt,
+    };
     this.jobToEval.set(job.id, live.evalId);
-    live.inFlight.set(job.provider, (live.inFlight.get(job.provider) ?? 0) + 1);
+    await this.deps.dispatcher.enqueue("run.eval", this.deps.context().workspaceId, payload, {
+      id: job.id,
+      idempotencyKey: `run.eval:${job.id}:${job.attempt}`,
+      attempt: job.attempt,
+    });
+  }
+
+  /**
+   * Admit as many run.eval jobs as the dispatcher and this process's own pool both have room
+   * for, right now, and start each one. Safe to call from anywhere and any number of times
+   * concurrently — tryAdmit's own atomicity is what makes overlapping callers harmless rather
+   * than something this method has to guard against.
+   */
+  private async drainAvailable(): Promise<void> {
+    for (;;) {
+      if (this.deps.pool.freeSlots <= 0) return; // this process has nowhere to put another one
+      const admission = await this.deps.dispatcher.tryAdmit<RunEvalPayload>("run.eval");
+      if (!admission) return;
+      void this.executeAdmitted(admission.job, admission.leaseId);
+    }
+  }
+
+  /**
+   * A job the dispatcher has fairly chosen. From here it either actually runs, or is put
+   * straight back — never left admitted-but-stranded, which would hold its capacity hostage
+   * for nothing.
+   */
+  private async executeAdmitted(job: QueueJob<RunEvalPayload>, leaseId: string): Promise<void> {
+    const payload = job.payload;
+    const live = this.live.get(payload.evalId);
+    if (!live || live.cancelled) {
+      // The eval finished or was cancelled between being enqueued and being admitted. Ack
+      // and drop it — see cancel()'s note on why this is a lazy purge rather than an eager one.
+      await this.deps.dispatcher.ack("run.eval", leaseId);
+      return;
+    }
+
+    // The provider cap is GLOBAL now — every eval, every workspace, one shared count per
+    // provider — where the old per-eval-instance map let two concurrent evals each get their
+    // own budget against the same provider. Checked here, after a fair admit rather than
+    // fused into it: see queue/semaphores.ts for why that composition is deliberate.
+    const provLeaseId = randomUUID();
+    const provSem = providerSemaphore(this.deps.dispatcher.backend, "run.eval", payload.provider);
+    if (!(await provSem.acquire(provLeaseId, PROVIDER_LEASE_TTL_MS))) {
+      await this.deps.dispatcher.ack("run.eval", leaseId);
+      await this.requeueVerbatim(job);
+      return;
+    }
+
+    const runId = randomUUID();
+    live.runToJob.set(runId, payload.jobId);
+    this.leaseByRun.set(runId, {
+      jobId: payload.jobId,
+      dispatcherLeaseId: leaseId,
+      provider: payload.provider,
+      providerLeaseId: provLeaseId,
+    });
     this.deps.markEvalRun(runId, true);
-    await this.deps.evalStore.markJobRunning(this.deps.context(), job.id, runId, job.attempt);
+    await this.deps.evalStore.markJobRunning(this.deps.context(), payload.jobId, runId, payload.attempt);
 
     const started = this.deps.pool.tryStart({
       runId,
       runtimeDir: this.deps.runtimeDir,
-      agentId: evalRun.agent_id,
-      input: example.input,
+      agentId: payload.agentId,
+      input: payload.input,
       timeoutMs: DEFAULT_JOB_TIMEOUT_MS,
       env: {
         JAROKU_RUN_ID: runId,
-        JAROKU_PROVIDER: job.provider,
-        JAROKU_MODEL: job.model,
+        JAROKU_PROVIDER: payload.provider,
+        JAROKU_MODEL: payload.model,
       },
     });
 
-    // The cap check above should make this unreachable; if the pool refuses anyway, undo
-    // the bookkeeping so the job goes back on the queue rather than being stranded in
-    // 'running' with no process behind it. No attempt is consumed — nothing ran.
+    // freeSlots > 0 in drainAvailable() only proves there was room a moment ago — another
+    // caller of drainAvailable() (the periodic timer, another eval's own pump()) can win the
+    // same slot in between. Undo everything and put the job back exactly as it was; no
+    // attempt is consumed, because nothing ran.
     if (!started) {
       live.runToJob.delete(runId);
-      live.inFlight.set(job.provider, Math.max(0, (live.inFlight.get(job.provider) ?? 1) - 1));
+      this.leaseByRun.delete(runId);
       this.deps.markEvalRun(runId, false);
-      await this.deps.evalStore.requeueJob(this.deps.context(), job.id);
+      await provSem.release(provLeaseId);
+      await this.deps.dispatcher.ack("run.eval", leaseId);
+      await this.deps.evalStore.requeueJob(this.deps.context(), payload.jobId);
+      await this.requeueVerbatim(job);
     }
+  }
+
+  /** Put an admitted-but-not-executed job straight back on the queue, unchanged — no attempt
+   *  bump, no backoff. It didn't fail; there just wasn't room yet. */
+  private async requeueVerbatim(job: QueueJob<RunEvalPayload>): Promise<void> {
+    await this.deps.dispatcher.enqueue("run.eval", job.workspaceId, job.payload, {
+      id: job.id,
+      idempotencyKey: job.idempotencyKey,
+      attempt: job.attempt,
+    });
   }
 
   private async onRunExit(runId: string, timedOut: boolean, spawnError: string | null): Promise<void> {
@@ -384,8 +519,17 @@ export class EvalRunner {
     live.runToJob.delete(runId);
     this.deps.markEvalRun(runId, false);
 
+    // Release the dispatcher lease and the provider slot the moment the run is actually
+    // done, regardless of how it turned out — a job that failed still frees the capacity it
+    // was holding, and holding it any longer starves whatever is waiting behind it.
+    const lease = this.leaseByRun.get(runId);
+    if (lease) {
+      this.leaseByRun.delete(runId);
+      await this.deps.dispatcher.ack("run.eval", lease.dispatcherLeaseId);
+      await providerSemaphore(this.deps.dispatcher.backend, "run.eval", lease.provider).release(lease.providerLeaseId);
+    }
+
     const job = await this.deps.evalStore.getJob(this.deps.context(), jobId);
-    if (job) live.inFlight.set(job.provider, Math.max(0, (live.inFlight.get(job.provider) ?? 1) - 1));
 
     // The run row is the source of truth for what happened — the runner brackets every
     // execution with run_start/run_end, so a contract violation or a mid-graph crash is

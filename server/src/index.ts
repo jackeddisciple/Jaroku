@@ -85,6 +85,7 @@ import { sandboxImageRef } from "./sandbox/image.ts";
 import { FlyMachinesSandbox } from "./sandbox/flySandbox.ts";
 import { TraceIngestMetrics } from "./sandbox/traceIngestMetrics.ts";
 import { BackpressureTracker } from "./sandbox/backpressure.ts";
+import { Dispatcher, defaultQueueBackend } from "./queue/dispatcher.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = resolve(__dirname, "..");
@@ -213,6 +214,13 @@ const pool = new RunPool(EVAL_CONCURRENCY, {
       : undefined,
 });
 const planner = new Planner();
+
+// WHERE A run.eval JOB ACTUALLY GOES, per Session 5. Redis when JAROKU_REDIS_URL is set, so a
+// separate `npm run worker` process could drain the same queue; in-memory otherwise, so
+// `npm run dev` keeps needing nothing installed. Either way, this gateway process still drains
+// its own admissions locally today — see evalRunner.ts's drainAvailable() — a genuinely
+// separate worker process is available (worker.ts) but is not this dev topology's default.
+const dispatcher = new Dispatcher(defaultQueueBackend());
 
 // Run ids belonging to an in-flight eval job. Their events persist normally but are kept
 // OFF the "trace" channel, so a fan-out can't steal the timeline's focus (traceStore
@@ -926,6 +934,7 @@ const judge = new JudgeScorer({
 evalRunner = new EvalRunner({
   pool,
   store,
+  dispatcher,
   evalStore,
   // One eval runs at a time, so this is the eval in flight.
   context: () => contextForEval(evalRunner?.activeEvalIds()[0] ?? ""),

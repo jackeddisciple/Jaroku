@@ -22,6 +22,8 @@ import { TraceStore } from "./store.ts";
 import { EvalStore } from "./evalStore.ts";
 import { EvalRunner } from "./evalRunner.ts";
 import type { RunPool } from "./runPool.ts";
+import { Dispatcher } from "./queue/dispatcher.ts";
+import { InMemoryQueueBackend } from "./queue/inMemoryBackend.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -63,6 +65,7 @@ const boundDuringStart: string[] = [];
 runner = new EvalRunner({
   pool: idlePool,
   store,
+  dispatcher: new Dispatcher(new InMemoryQueueBackend()),
   evalStore,
   runtimeDir: ".",
   context: () => contextForEval(runner.activeEvalIds()[0] ?? ""),

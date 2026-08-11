@@ -62,6 +62,7 @@
     "test:tenancy-isolation": "tsx src/sandbox/tenancyIsolation.test.ts",
     "test:aggregate": "tsx src/evalAggregate.test.ts",
     "test:retry": "tsx src/evalRetry.test.ts && tsx src/evalOwnership.test.ts",
+    "test:eval-dispatch": "tsx src/evalDispatch.test.ts",
     "test:judge": "tsx src/judge/rubric.test.ts",
     "test:cleanup": "tsx src/evalCleanup.test.ts",
     "test:checkpoint-threads": "tsx src/checkpoints/threads.test.ts",
