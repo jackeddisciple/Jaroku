@@ -874,6 +874,10 @@ export interface RelayOptions {
   listDeployments?: (ctx: TenantContext) =>
     | { deployments: unknown[]; railwayConfigured: boolean }
     | Promise<{ deployments: unknown[]; railwayConfigured: boolean }>;
+  /** Session 5: fired after every broadcastTo, so a caller can fan it out to other gateway
+   *  replicas over Redis — see queue/eventBridge.ts. Absent means single-replica, no bridge,
+   *  exactly today's behaviour. */
+  onBroadcast?: (ctx: TenantContext, payload: unknown) => void;
 }
 
 export class WsRelay {
@@ -1317,6 +1321,36 @@ export class WsRelay {
    * to get this wrong.
    */
   private broadcastTo(ctx: TenantContext, payload: unknown): void {
+    const msg = JSON.stringify(payload);
+    for (const ws of this.clients) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (this.contexts.get(ws)?.workspaceId !== ctx.workspaceId) continue;
+      ws.send(msg);
+    }
+    // Session 5: fan this SAME decision out to every other gateway replica, so a client
+    // connected to a different one sees it too — see queue/eventBridge.ts. Fired AFTER local
+    // delivery, and only from here: every broadcastX method already funnels through this one
+    // function, which is what makes one hook enough rather than one per channel. Firing it
+    // for ANYTHING that reaches broadcastTo also means it fires for exactly what was already
+    // decided to broadcast — an eval run's events that isEvalRun() kept off "trace" never
+    // reach broadcastTo for "trace" in the first place, so they never reach this hook either,
+    // with no separate cross-replica bookkeeping needed to preserve that.
+    this.opts.onBroadcast?.(ctx, payload);
+  }
+
+  /**
+   * The other half of the hook above: deliver a payload ANOTHER replica already decided to
+   * broadcast, to sockets on THIS one — without re-firing onBroadcast, which would publish it
+   * right back and the two replicas would ping-pong the same message forever. See
+   * queue/eventBridge.ts's subscriber, the only caller.
+   *
+   * Deliberately its own copy of broadcastTo's loop rather than a shared helper the two call
+   * — channels.test.ts statically inspects broadcastTo's OWN body for the workspace
+   * comparison, on purpose (a chokepoint worth keeping self-contained and boring), and this
+   * method carries the identical comparison for the identical reason, not because sharing it
+   * was hard.
+   */
+  deliverFromPeer(ctx: TenantContext, payload: unknown): void {
     const msg = JSON.stringify(payload);
     for (const ws of this.clients) {
       if (ws.readyState !== WebSocket.OPEN) continue;

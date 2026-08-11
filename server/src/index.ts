@@ -88,6 +88,7 @@ import { TraceIngestMetrics } from "./sandbox/traceIngestMetrics.ts";
 import { BackpressureTracker } from "./sandbox/backpressure.ts";
 import { Dispatcher, defaultQueueBackend } from "./queue/dispatcher.ts";
 import { workspaceSemaphore } from "./queue/semaphores.ts";
+import { EventBridge } from "./queue/eventBridge.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = resolve(__dirname, "..");
@@ -240,6 +241,11 @@ const planner = new Planner();
 // its own admissions locally today — see evalRunner.ts's drainAvailable() — a genuinely
 // separate worker process is available (worker.ts) but is not this dev topology's default.
 const dispatcher = new Dispatcher(defaultQueueBackend());
+
+// THE CROSS-REPLICA EVENT BRIDGE. undefined with no JAROKU_REDIS_URL — see
+// queue/eventBridge.ts's own header for why that is the whole story for a single-replica
+// `npm run dev`, not a degraded mode of a feature that is otherwise on.
+const eventBridge = EventBridge.create();
 
 // THE PER-WORKSPACE INTERACTIVE RESERVATION — the descendant of the single reserved slot 0
 // used to be. Acquired before interactivePool.tryStart() in runAgent/resumeRun/branchRun,
@@ -852,6 +858,9 @@ const relay = new WsRelay({
   router,
   originPolicy,
   clientHtmlPath: join(SERVER_DIR, "debug-client.html"),
+  // Session 5: fan every local broadcast out to any other gateway replica. A no-op call when
+  // eventBridge is undefined — see its own construction above.
+  onBroadcast: eventBridge ? (ctx, payload) => eventBridge.publish(ctx.workspaceId, payload) : undefined,
   listAgents: async (ctx) => {
     // One query for the whole list, so the sidebar can show a deploy state per row without
     // N round trips. `deployment` is null for an agent that has never been deployed.
@@ -963,6 +972,19 @@ const relay = new WsRelay({
     else void handleEvalCommand(ctx, cmd);
   },
 });
+
+// AND THE OTHER HALF: deliver what OTHER replicas publish to sockets THIS one holds.
+// deliverFromPeer, deliberately not broadcastTo — see wsRelay.ts's own note on why using the
+// publishing method here would ping-pong every message between replicas forever. The context
+// is minted fresh per message rather than looked up, because nothing about a cross-replica
+// event needs more than the workspace it belongs to — the actor and role that mattered were
+// already checked on whichever replica actually handled the request.
+if (eventBridge) {
+  void eventBridge.subscribe((workspaceId, payload) => {
+    relay.deliverFromPeer(systemContextFor(workspaceId, newRequestId()), payload);
+  });
+  console.log("[server] event bridge: subscribed for cross-replica fan-out");
+}
 
 // The orchestrator: expands (examples × providers) into persisted jobs and drains them
 // through the pool under per-provider caps. Every job runs the ordinary path — there is no
@@ -2638,7 +2660,7 @@ function shutdown(): void {
     ingestChain,
     new Promise<void>((r) => setTimeout(r, 2000).unref?.()),
   ]);
-  void drained.then(() => store.close()).finally(() => process.exit(0));
+  void drained.then(() => store.close()).then(() => eventBridge?.close()).finally(() => process.exit(0));
 }
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
