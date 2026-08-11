@@ -90,6 +90,34 @@ console.log("\nan agent nobody has");
   check("answers empty rather than throwing", r.files.length === 0 && r.source === "none");
 }
 
+// The boot reconciliation, and the same assumption from the other side. `syncFromDisk` used to
+// read an absent directory as "this agent is gone" — true when the directory WAS the agent, and
+// catastrophic now: a replica that never materialised anything, or a cleaned runtime directory,
+// soft-deleted the whole workspace on startup while every version sat intact in the store.
+console.log("\nreconciling against a disk that holds nothing");
+{
+  const published = await agents.bySlug(A, "support_bot");
+  check("the agent has a version behind it", (published?.current_version ?? 0) > 1);
+
+  const mirrored = await agents.upsertFromDisk(A, { slug: "mirror_only" });
+  check("...and a second agent has none", (await agents.versions(A, mirrored.id)).length === 0);
+
+  const after = await agents.syncFromDisk(A, []);
+  check(
+    "a published agent survives a sync that saw no directories at all",
+    (await agents.bySlug(A, "support_bot")) !== undefined,
+  );
+  check(
+    "...while a row the disk alone created is still swept",
+    (await agents.bySlug(A, "mirror_only")) === undefined,
+  );
+  check(`...and that is what the sync returns (${after.map((a) => a.slug).join(", ")})`, after.length === 1 && after[0]!.slug === "support_bot");
+
+  // And it still reads back — the point of not deleting it is that the files are elsewhere.
+  const files = await readAgentFiles(deps, A, "support_bot");
+  check("...with its files still readable from the store", files.source === "version" && files.files.length > 0);
+}
+
 await db.close();
 rmSync(dir, { recursive: true, force: true });
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

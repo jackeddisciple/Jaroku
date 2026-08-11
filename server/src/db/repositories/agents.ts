@@ -243,6 +243,17 @@ export class AgentRepository {
    * Soft-deletes rows whose directory has gone rather than deleting them, because runs, evals
    * and deployments still point at that agent by slug and a past comparison has to stay
    * readable after its agent is removed — the same reasoning `deleteDataset` follows.
+   *
+   * ONLY ROWS THE DISK ALONE PUT THERE. An agent with a published version does not live in
+   * `runtime/agents/` any more; it lives in the object store, and the directory is a copy one
+   * replica happened to materialise. So an absent directory says "this process has not
+   * materialised it" and nothing whatsoever about whether the agent exists — which is the whole
+   * assumption this session removes.
+   *
+   * It used to say otherwise, and the cost was total: boot a second replica, or boot the first
+   * one after its runtime directory was cleaned, and every agent in the workspace was
+   * soft-deleted on startup while its versions sat intact in the store. A row with no version
+   * behind it is still swept, because that one really is nothing but a mirror of a directory.
    */
   async syncFromDisk(ctx: TenantContext, onDisk: AgentOnDisk[]): Promise<Agent[]> {
     for (const a of onDisk) {
@@ -252,7 +263,9 @@ export class AgentRepository {
     for (const existing of await this.list(ctx)) {
       if (!seen.has(existing.slug)) {
         await this.q(ctx).run(
-          `UPDATE agents SET deleted_at = ? WHERE workspace_id = ? AND slug = ?`,
+          `UPDATE agents SET deleted_at = ?
+            WHERE workspace_id = ? AND slug = ?
+              AND NOT EXISTS (SELECT 1 FROM agent_versions v WHERE v.agent_id = agents.id)`,
           [new Date().toISOString(), ctx.workspaceId, existing.slug],
         );
       }
