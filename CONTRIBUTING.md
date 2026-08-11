@@ -58,6 +58,9 @@ The shortest list, with the tests that defend them:
 | A ws-ticket works exactly once, even when two sockets race for it | `test:tickets` |
 | A socket cannot outlive the membership that authorised it | `test:relay`, `test:tenancy` |
 | No client store retains a row across a workspace switch | `test:reset` |
+| One workspace's backlog never delays another's work | `test:dispatcher`, `loadtest:queue` |
+| A job survives the worker that was running it | `test:chaos`, `test:worker-loop` |
+| Eval runs stay off the live trace channel, across replicas too | `test:eval-off-trace` |
 
 ## Commits
 
@@ -81,6 +84,19 @@ Two entries, both in the same commit as the command:
    unrelated one shows an error about something it never did. `log` is a legitimate answer for a
    command whose own channel carries data rather than errors — but it has to be written down, so
    "log because that is right" and "log because nobody decided" cannot look the same.
+
+## A new job class needs a config entry, not a hardcoded number
+
+Concurrency limits and timeouts are data in one module — `JOB_CLASSES` and `jobClassConfig` in
+`server/src/queue/jobs.ts` — for the same reason roles are: two copies of the same number drift,
+and the one that drifts is always in the file nobody reopened. `npm run test:jobs` asserts every
+class has a complete config, so a class added without one fails rather than silently defaulting.
+
+Adding a class means deciding, while looking at every other class at once: how many one workspace
+may run at a time, how long one attempt may take, whether a failure is worth retrying at all, and
+whether it genuinely belongs on the queue. That last one is a real question — see
+[what Session 5 does not do](README.md#what-this-session-does-not-do); a short request a client is
+actively waiting on is not automatically better off dispatched asynchronously.
 
 ## A new client store must reset on a workspace switch
 

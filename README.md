@@ -52,6 +52,7 @@ of the repo and run yourself.
 - [The tenancy model](#the-tenancy-model)
 - [Storage isolation](#storage-isolation)
 - [Sandboxed execution and the distributed control plane](#sandboxed-execution-and-the-distributed-control-plane)
+- [Queueing, fairness, and per-workspace limits](#queueing-fairness-and-per-workspace-limits)
 - [Authentication and membership](#authentication-and-membership)
 - [Where data lives](#where-data-lives)
 - [Security notes](#security-notes)
@@ -348,7 +349,8 @@ Three processes, one direction of data flow.
 ┌───────────────────────────────┴───────────────────────────────────────────┐
 │  NODE SERVER — process manager + relay + store          localhost:4317    │
 │                                                                           │
-│   RunPool (N slots, slot 0 reserved for the interactive run)              │
+│   interactivePool + evalPool (separate capacity, neither starves the other)│
+│   Dispatcher → per-workspace lists → round-robin admit → leased caps      │
 │   Planner → Generator → Validator → atomic swap                          │
 │   Editor  → staged proposal → diff → apply/undo with linear history      │
 │   EvalRunner → persisted job queue → per-provider caps → judge           │
@@ -583,6 +585,13 @@ exists so a fresh checkout has something to run before anything has been generat
 | `sandbox/backpressure.ts` | Bytes/line/rate caps shared by a local run's stdout and a hosted run's trace push. |
 | `sandbox/image.ts` | Enforces that a sandbox image reference is pinned by digest, never a tag. |
 | `sandbox/traceIngestMetrics.ts` | Counts what the trace route drops rather than ingests. |
+| `queue/dispatcher.ts` | The fair dispatcher: enqueue, admit, ack, reap. What the rest of the server calls. |
+| `queue/backend.ts` | The `QueueBackend` interface — `InMemoryQueueBackend` (default) and `RedisQueueBackend` (one Lua script per atomic operation). |
+| `queue/jobs.ts` | Every job class as data: concurrency, timeout, retryability, and which are actually queued. |
+| `queue/semaphores.ts` | Named leased caps — per workspace, per provider. The descendants of slot 0 and `JAROKU_LIMIT_<PROVIDER>`. |
+| `queue/workerLoop.ts` | The admit loop a worker process runs, and the drain window that hands stragglers back. |
+| `queue/eventBridge.ts` | Cross-replica broadcast fan-out over Redis pub/sub, with the self-echo defence. |
+| `worker.ts` | The second entrypoint (`npm run worker`). Boots, requires Redis, drains nothing yet — see [queueing](#queueing-fairness-and-per-workspace-limits). |
 
 ---
 
@@ -1474,7 +1483,7 @@ frozen event schema, and everything added since rides beside it.
 | `graph` | Static LangGraph topology for an agent |
 | `gen` | Plan + generation lifecycle: `plan_started`, `plan_delta`, `plan`, `plan_error`, `started`, `file_start/delta/end`, `done`, `error` |
 | `edit` | Fix-loop lifecycle: `started`, file streaming, `proposal`, `applied`, `undone`, `discarded`, `error` |
-| `debug` | Control plane: `paused`, `resumed`, `boundary`, `branched`, `error` |
+| `debug` | Control plane: `paused`, `resumed`, `boundary`, `branched`, `cancelled`, `error` |
 | `eval` | Datasets, examples, rubrics, eval progress, scores, results, estimates |
 | `mcp` | MCP registry snapshots, discovery progress, and the first-use confirmation request |
 | `deploy` | Deployment snapshots, the pre-deploy plan, live stage transitions, scrubbed build-log lines, and the one-shot serve token |
@@ -1488,7 +1497,7 @@ frozen event schema, and everything added since rides beside it.
 
 `run` · `loadRun` · `listAgents` · `loadAgentFiles` · `loadAgentGraph` · `planAgent` ·
 `discardPlan` · `generate` · `edit` · `applyEdit` · `undoEdit` · `discardEdit` · `pauseRun` ·
-`resumeRun` · `branchRun` · `explain` · and the eval set: `createDataset` · `renameDataset` ·
+`resumeRun` · `cancelRun` · `branchRun` · `explain` · and the eval set: `createDataset` · `renameDataset` ·
 `deleteDataset` · `listDatasets` · `loadDataset` · `addExample` · `updateExample` ·
 `deleteExample` · `promoteTestInput` · `startEval` · `cancelEval` · `estimateEval` ·
 `loadEvalResults` · `listEvals` · `loadRubric` · `saveRubric` · and the MCP set:
@@ -1567,9 +1576,16 @@ to happen because a browser cannot put a header on a WebSocket:
 | `JAROKU_SANDBOX_IMAGE` | — | The sandbox image, as `name@sha256:…` — a bare tag is refused. **Required** when `JAROKU_RUN_SANDBOX=fly` |
 | `JAROKU_RUN_TOKEN_SIGNING_KEY` | generated into `server/.runtokenkey` | Signs run tokens. **Required in production**, same reasoning as `JAROKU_OBJECT_SIGNING_KEY` |
 | `JAROKU_NO_AUTORUN` | — | Set to `1` to skip the startup run |
-| `JAROKU_EVAL_CONCURRENCY` | `4` | Pool slots. Slot 0 is always the interactive run |
-| `JAROKU_LIMIT_<PROVIDER>` | `16` (fake) / `2` (real) | Per-provider concurrent-run cap, e.g. `JAROKU_LIMIT_ANTHROPIC=4` |
-| `JAROKU_JOB_TIMEOUT_MS` | `180000` | Per-eval-job wall-clock deadline |
+| `JAROKU_REDIS_URL` | — | Jaroku's own Redis. Unset means the queue is unconfigured: the dispatcher falls back to an in-memory backend and no cross-replica bridge is created — see [queueing](#queueing-fairness-and-per-workspace-limits) |
+| `JAROKU_EVAL_CONCURRENCY` | `4` | Slots in the **eval** pool. No longer shares a pool with the interactive run |
+| `JAROKU_INTERACTIVE_CONCURRENCY` | `1` | Slots in the **interactive** pool. Above 1 does nothing yet — see what Session 5 does not do |
+| `JAROKU_WORKSPACE_CONCURRENCY_<CLASS>` | per class | How many of one job class ONE workspace may have in flight, e.g. `JAROKU_WORKSPACE_CONCURRENCY_RUN_EVAL=4` |
+| `JAROKU_LIMIT_<PROVIDER>` | `16` (fake) / `2` (real) | Per-provider concurrent-run cap, e.g. `JAROKU_LIMIT_ANTHROPIC=4`. Now global across every eval, not per eval |
+| `JAROKU_JOB_TIMEOUT_MS` | `180000` | Per-eval-job wall-clock deadline (the `run.eval` class default) |
+| `JAROKU_JOB_TIMEOUT_MS_<CLASS>` | per class | Overrides one class's deadline, e.g. `JAROKU_JOB_TIMEOUT_MS_JUDGE=30000` |
+| `JAROKU_WORKER_CLASSES` | — | Which job classes `npm run worker` drains. Empty today — nothing is registered against it yet |
+| `JAROKU_WORKER_CONCURRENCY` | `4` | Pool slots in a worker process |
+| `JAROKU_WORKER_DRAIN_MS` | `30000` | How long a worker waits for in-flight jobs on SIGTERM before handing the stragglers back |
 | `JAROKU_JOB_ATTEMPTS` | `3` | Total attempts per job, including the first |
 | `JAROKU_RETRY_BASE_MS` | `2000` | Base for exponential retry backoff |
 | `JAROKU_MCP_TIMEOUT_MS` | `10000` | Per-request ceiling during MCP discovery |
@@ -1734,6 +1750,18 @@ npm run test:fly-sandbox   # FlyMachinesSandbox against a fixture Fly Machines A
 npm run test:escape-suite  # each named attack vector, proven against the real refusing code
 npm run test:tenancy-isolation # two workspaces, two run tokens, neither reaches the other's run
 
+# queueing and fairness — see "Queueing, fairness, and per-workspace limits"
+npm run test:redis       # the connection, and that an unset URL refuses rather than defaults
+npm run test:jobs        # every job class has a config; env overrides; idempotency keys
+npm run test:dispatcher  # starvation, thundering herds, caps, orphaned leases — on BOTH backends
+npm run test:semaphores  # named leased caps, expiry without release, idempotent release
+npm run test:worker-loop # handler routing, a throwing handler, and the drain window's hand-back
+npm run test:chaos       # a worker that vanishes mid-job; two reapers racing one expired lease
+npm run test:event-bridge # self-echo, no re-publish, a garbage message; cross-process needs Redis
+npm run test:eval-off-trace # twenty eval runs stay off `trace` even across replicas
+npm run test:eval-dispatch # enqueue → admit → run → retry/exhaust, through the real dispatcher
+npm run loadtest:queue   # N workspaces x M jobs: admit p50/p95, fairness ratio, head-of-line
+
 # auth — see "Authentication and membership"
 npm run test:http        # the HTTP layer: error envelope, body caps, log redaction
 npm run test:jwks        # key caching, forced refresh with a leash, symmetric keys refused
@@ -1753,9 +1781,9 @@ npm run test:shape-parity # one Run and four Steps through both drivers, compare
 npm run test:protocol    # the file-emission stream parser, at every chunk boundary
 npm run test:plan        # plan parsing + degradation + connector reconciliation
 npm run test:pricing     # exact/prefix matching, cache multipliers, unpriced → null
-npm run test:pool        # slot reservation, attribution, deadlines
+npm run test:pool        # capacity as a hard cap, attribution, deadlines
 npm run test:aggregate   # cost from steps, unknown vs free, partial-pricing flags
-npm run test:retry       # transient vs deterministic failure classification
+npm run test:retry       # transient vs deterministic classification, and the real backoff schedule
 npm run test:judge       # rubric prompt construction + verdict parsing
 npm run test:cleanup     # checkpoint sweeping (never touches interactive runs)
 npm run test:env-writer  # .env writes: no clobbering, no injection, exact round trips
@@ -2315,6 +2343,133 @@ plainly" discipline the rest of this README holds to:
   proxy that would stop a compromised process from simply opening a socket to an address the
   policy never admitted. This is the largest gap this session leaves, and it is the next one to
   close.
+
+---
+
+## Queueing, fairness, and per-workspace limits
+
+Session 5 of the hosted migration. The single-user version of "who runs next" was one pool with
+slot 0 reserved for the interactive run — correct when there was one workspace, and a way for one
+tenant to occupy every slot when there are six thousand. What replaces it is a fair dispatcher:
+work is enqueued per workspace, admitted round-robin, and capped by named leases rather than by
+which index a slot happened to have.
+
+### The dispatcher
+
+```
+enqueue ─▶ q:{class}:list:{workspace}   one FIFO list per (workspace, job class)
+                    │
+                    ▼
+           q:{class}:ring               rotation order of workspaces with pending work
+                    │
+      ┌─────────────┴──────────────┐
+      │  ONE atomic admit step:    │    rotate → check capacity → pop → reserve
+      │  a Lua script on Redis,    │
+      │  a synchronous block in    │
+      │  the in-memory backend     │
+      └─────────────┬──────────────┘
+                    ▼
+           q:{class}:reserved:*         the lease, until acked or its TTL lapses
+```
+
+**Fair means round-robin by workspace, not by job.** A workspace that submits five hundred eval
+jobs and a workspace that submits one are served in turn. The load-test harness measures exactly
+this: at 6,000 workspaces the fairness ratio is **1.000** (every workspace served an equal share)
+and the worst first-serve position is bounded by the number of *workspaces*, not by the size of
+the backlog — 5,999 out of 30,000 queued jobs, where a plain FIFO would have made the last
+workspace wait behind all 30,000.
+
+**Those four steps are one step on purpose.** Rotating, checking capacity, popping and reserving
+have to happen without another worker interleaving between them, or two workers both see room,
+both admit, and the cap was never real. Redis runs a script to completion before looking at
+anyone else's command, which is what buys that; the in-memory backend gets it for free by never
+awaiting inside the critical section.
+
+**A lease, not a pop.** An admitted job is *reserved*, not deleted — so a worker that dies
+mid-job doesn't take the job with it. Whatever notices the lapsed lease puts the job back
+(`reapExpired`). A graceful shutdown doesn't wait for that: it acks and re-enqueues its
+stragglers immediately, so recovery is a drain-window concern rather than a TTL one. Both paths
+are tested, including two reapers racing the same expired lease and still only claiming it once.
+
+### The caps, and what became of the old ones
+
+| Single-user | Now |
+|---|---|
+| slot 0 reserved for the interactive run | a per-workspace `run.interactive` lease, plus a separate `interactivePool` an eval fan-out cannot reach into |
+| `JAROKU_EVAL_CONCURRENCY` | still bounds `evalPool`, now one of two pools rather than the only one |
+| `JAROKU_LIMIT_<PROVIDER>` | a *global* per-provider semaphore — two concurrent evals now share one budget per provider, where each used to get its own |
+| `JAROKU_JOB_TIMEOUT_MS` | the default for `run.eval`; every class has its own, overridable per class |
+
+Per-workspace and per-provider caps are checked **after** a fair admit rather than fused into it,
+and that split is deliberate: the ring's own cap has to be atomic with the pop because *which*
+workspace it will serve isn't known until it rotates. A workspace or provider is known before the
+job is ever enqueued, so those caps have no such race and get to be plain leased counters instead
+of more Lua.
+
+**Retry classification is unchanged and reused verbatim.** `isTransientFailure` still decides
+what is worth paying to retry, unrecognised failures still count as deterministic, and the queue
+does not get its own competing retry policy. What's new is the proof: `test:retry` now runs the
+whole cycle through the real dispatcher and asserts attempts exhaust at exactly
+`JAROKU_JOB_ATTEMPTS` with no fourth dispatch, and that the gap between attempts actually grows
+(2s, then 4s) rather than firing back to back.
+
+### Across replicas
+
+Every WebSocket broadcast already funnelled through one function, so cross-replica fan-out is one
+hook on that function rather than one per channel: it publishes to Redis after delivering
+locally, and `deliverFromPeer` delivers what other replicas publish **without** re-entering the
+hook — otherwise two replicas would bounce the same message between them forever. Each bridge
+tags its own publishes and drops them on receipt.
+
+**"Eval runs stay off the live trace channel" survives this**, and structurally rather than by
+remembering to check twice: the hook lives *inside* `broadcastTo`, downstream of the `isEvalRun`
+gate, so an eval run's step never reaches the bridge to be published in the first place. There is
+deliberately no eval-specific logic in the bridge. `test:eval-off-trace` asserts it with a
+control case — disable the gate and all twenty do cross — so the assertion cannot pass vacuously.
+
+### Capacity, from the load test rather than from arithmetic
+
+`npm run loadtest:queue` (tunable via `JAROKU_LOADTEST_WORKSPACES` / `_JOBS_PER_WS` /
+`_CONCURRENCY`). At 6,000 workspaces × 5 jobs, 64 admitted at once, in-memory backend:
+
+| | |
+|---|---|
+| enqueue | 30,000 jobs, ~135,000/s |
+| drain | 30,000 jobs, ~56,000/s |
+| admit latency | p50 491µs · p95 1.10ms · p99 1.90ms |
+| fairness ratio | 1.000 |
+
+The target is ~6,000 concurrent **sessions** — people with the app open, mostly idle — not 6,000
+concurrent runs; those differ by roughly fifty times. Dispatch at these latencies is nowhere near
+the binding constraint at that session count: the real ceiling is sandbox capacity, which is a
+provisioning question this session does not answer. The harness measures dispatch **only** — no
+sandboxes, no Python, no model calls — because a run's own cost is dominated by a LangGraph
+import and a provider round trip, neither of which this session changed, and folding them in
+would bury the one number that is actually new.
+
+### What this session does not do
+
+Stated plainly, in the same spirit as the sandbox session's own limits:
+
+- **The worker process exists but drains nothing.** `npm run worker` boots, requires Redis,
+  admits, and shuts down gracefully — all tested — but no job class is registered against it.
+  `run.eval` and `judge` are drained **in-process** by `evalRunner.ts` instead. Moving execution
+  to a genuinely separate OS process needs index.ts's trace-ingestion and debug-control surface
+  (pause/resume, MCP confirmation) available there too, which is real work this session scoped
+  out rather than half-built.
+- **`generate`, `plan`, `edit`, `explain` and `mcp.discover` are registered job classes that stay
+  synchronous.** They have real concurrency and timeout numbers written down, but they are short
+  bounded requests a client is actively waiting on, not long-running sandboxed executions
+  competing for scarce capacity. Putting them on an async queue would be a rewrite in search of
+  a problem.
+- **One live interactive run per gateway, still.** The per-workspace reservation is real and
+  acquired on every dispatch, but `runActive`/`activeRunId` remain a single process-wide pair, so
+  `JAROKU_INTERACTIVE_CONCURRENCY` above 1 does not yet do anything. Widening those into a
+  per-workspace map is the next step and is not delivered here.
+- **The cross-replica assertions need a real Redis.** The bridge's envelope logic — origin
+  tagging, self-echo, no re-publish — is proven against an in-process broker and runs everywhere.
+  The genuinely two-process assertions skip loudly without `JAROKU_REDIS_URL` rather than passing
+  on a fake.
 
 ---
 
