@@ -744,6 +744,26 @@ export type SessionVerdict =
 /** How close to expiry a token gets before the client is told to refresh. */
 export const EXPIRY_WARNING_S = 300;
 
+/**
+ * The largest message a client may send over the socket.
+ *
+ * `ws` defaults to 100 MiB, which is not a limit so much as a number. The HTTP router next to
+ * this caps a request body at 64 KiB, and every command that arrives here is the same kind of
+ * thing a request body carries — so without this, the socket was the way around the cap: one
+ * authenticated client, one frame, a hundred megabytes buffered in the server's heap and then
+ * handed to `JSON.parse`, per socket, on a control plane shared by every tenant.
+ *
+ * A megabyte rather than the router's 64 KiB because the fattest command here is a real one: an
+ * eval example or a rubric is prose a user pasted, and refusing a long one would be a product
+ * decision made by a denial-of-service guard. Sixteen times the router's cap and a hundredth of
+ * the library's default is the room that costs nothing.
+ *
+ * Enforced by the library, before a byte is buffered — a frame declaring more is refused at the
+ * protocol level and the socket is closed with 1009. That is the part a check inside the message
+ * handler could not do, because by then the message is already in memory.
+ */
+export const MAX_WS_MESSAGE_BYTES = 1024 * 1024;
+
 /** A refusal with an HTTP status, for the upgrade path. */
 export class UpgradeRefused extends Error {
   constructor(
@@ -880,7 +900,7 @@ export class WsRelay {
     // way to refuse is to close an already-open socket — which the client cannot distinguish
     // from a network drop, and which its reconnect loop then retries forever. Doing the
     // upgrade by hand means a refusal is an HTTP status the client can read and act on.
-    this.wss = new WebSocketServer({ noServer: true });
+    this.wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_MESSAGE_BYTES });
     this.http.on("upgrade", (req, socket, head) => {
       void this.upgrade(req, socket as Socket, head);
     });

@@ -17,7 +17,7 @@ import WebSocket from "ws";
 import { openTestSqlite } from "./db/testDb.ts";
 import { newRequestId, systemContextFor, type TenantContext } from "./db/tenant.ts";
 import { TraceStore } from "./store.ts";
-import { WsRelay, CLOSE_RECONNECT, CLOSE_UNAUTHORISED, type ForwardedCommand, type SessionVerdict } from "./wsRelay.ts";
+import { MAX_WS_MESSAGE_BYTES, WsRelay, CLOSE_RECONNECT, CLOSE_UNAUTHORISED, type ForwardedCommand, type SessionVerdict } from "./wsRelay.ts";
 import type { Run, Step } from "./types.ts";
 
 let failures = 0;
@@ -343,6 +343,33 @@ console.log("\nprovider state is per workspace too");
   const pb = b.inbox.slice(beforeB).filter((m: any) => m.channel === "providers" && m.type === "notice");
   check(pa.length === 1, `A receives its own provider notice (${pa.length})`);
   check(pb.length === 0, `B receives none of A's (${pb.length})`);
+}
+
+console.log("\nhow much one client may send");
+{
+  // The HTTP router next to this refuses a body over 64 KiB; `ws` defaults to a hundred
+  // megabytes. So the socket was the way around the cap — and unlike a request body, an
+  // oversized frame is buffered in the server's heap before anything gets to look at it.
+  commandLog.length = 0;
+  const big = await connect();
+  await sleep(200);
+  const oversized = JSON.stringify({ cmd: "run", agentId: "example_agent", input: "x".repeat(MAX_WS_MESSAGE_BYTES) });
+  check(Buffer.byteLength(oversized) > MAX_WS_MESSAGE_BYTES, `the frame really is over the limit (${Buffer.byteLength(oversized)} bytes)`);
+  big.ws.on("error", () => { /* the close is the answer; the error beside it is noise */ });
+  big.ws.send(oversized);
+  await sleep(500);
+  check(big.ws.readyState !== WebSocket.OPEN, "an oversized frame closes the socket");
+  check(big.closed() === 1009, `...with 1009, the code for a message too big (${big.closed()})`);
+  check(commandLog.length === 0, `...and the command inside it never ran (${commandLog.length})`);
+
+  // The other half: the limit has to leave room for the commands that legitimately carry prose.
+  const roomy = await connect();
+  await sleep(200);
+  commandLog.length = 0;
+  roomy.send({ cmd: "run", agentId: "example_agent", input: "y".repeat(200 * 1024) });
+  await sleep(600);
+  check(commandLog.length === 1, `a 200 KiB command still goes through (${commandLog.length})`);
+  roomy.ws.close();
 }
 
 console.log("\na socket does not outlive the membership that authorised it");
