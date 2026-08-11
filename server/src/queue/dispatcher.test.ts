@@ -1,12 +1,20 @@
-// The fair dispatcher's conformance suite, against both backends.
+// The fair dispatcher's conformance suite, against every backend.
 //
-// InMemoryQueueBackend runs always — nothing installed needed, same posture every suite in
-// this codebase holds to. RedisQueueBackend runs the IDENTICAL scenarios when a real Redis is
-// reachable, and SKIPS loudly rather than silently passing when there isn't one.
+// THREE RUNS, NOT ONE-AND-A-SKIP. InMemoryQueueBackend always. RedisQueueBackend against
+// fixtures/redis/mockRedis.ts always — which executes redisBackend.ts's real Lua source in a real
+// Lua VM, so the atomic admit, the leases and the purge are genuinely exercised on a machine with
+// no Redis installed. And RedisQueueBackend against a REAL Redis when JAROKU_REDIS_URL points at
+// one, which is still the authority and still what a hosted deployment runs.
+//
+// Before the fixture existed this file printed "SKIPPED" for everything but the in-memory backend,
+// which meant the hosted backend's Lua — the load-bearing half of Session 5 — had no coverage at
+// all on any machine without Docker.
 //
 //   docker compose up -d redis
 //   JAROKU_REDIS_URL=redis://127.0.0.1:6380 npm run test:dispatcher
 
+import type { Redis } from "ioredis";
+import { MockRedis } from "../../fixtures/redis/mockRedis.ts";
 import { InMemoryQueueBackend } from "./inMemoryBackend.ts";
 import { RedisQueueBackend } from "./redisBackend.ts";
 import { openRedis, pingRedis, redisUrlFromEnv } from "./redis.ts";
@@ -17,12 +25,17 @@ let failures = 0;
 console.log("\nInMemoryQueueBackend");
 failures += (await runQueueConformance("in-memory", new InMemoryQueueBackend())).failures;
 
+console.log("\nRedisQueueBackend, on the in-process Lua fixture");
+failures += (
+  await runQueueConformance("redis-lua", new RedisQueueBackend(new MockRedis() as unknown as Redis))
+).failures;
+
 const url = redisUrlFromEnv();
 if (!url) {
   console.log(
-    `\nSKIPPED: no JAROKU_REDIS_URL. Start one with \`docker compose up -d redis\` and set\n` +
-      `  JAROKU_REDIS_URL=redis://127.0.0.1:6380\n` +
-      `to run the identical conformance suite against Redis.`,
+    `\nNOTE: no JAROKU_REDIS_URL, so the run above used the in-process Lua fixture rather than a\n` +
+      `real broker. \`docker compose up -d redis\` and JAROKU_REDIS_URL=redis://127.0.0.1:6380 runs\n` +
+      `the identical scenarios against the real thing.`,
   );
 } else {
   const client = openRedis({ url });

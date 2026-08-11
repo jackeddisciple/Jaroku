@@ -4,10 +4,20 @@
 // straggler back explicitly, immediately). This proves the path underneath it: nobody
 // explicitly hands anything back, and the system still recovers, exactly once, on its own.
 //
+// BOTH BACKENDS. The recovery under test is a lease TTL and an atomic claim, and on the hosted
+// path both live in Lua (redisBackend.ts's CLAIM_EXPIRED_SCRIPT is the whole of "two reapers
+// racing the same expired lease still only claim it once"). Running this against the in-memory
+// backend alone proved that property for the implementation that does not have to survive two
+// processes. fixtures/redis/mockRedis.ts runs the real script, so both do now.
+//
 //   npm run test:chaos
 
 import { randomUUID } from "node:crypto";
+import type { Redis } from "ioredis";
+import { MockRedis } from "../../fixtures/redis/mockRedis.ts";
+import type { QueueBackend } from "./backend.ts";
 import { InMemoryQueueBackend } from "./inMemoryBackend.ts";
+import { RedisQueueBackend } from "./redisBackend.ts";
 import { Dispatcher } from "./dispatcher.ts";
 import { WorkerLoop } from "./workerLoop.ts";
 
@@ -24,9 +34,15 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-console.log("\na worker that vanishes mid-job, with no chance to shut down at all");
+const BACKENDS: Array<[string, () => QueueBackend]> = [
+  ["in-memory", () => new InMemoryQueueBackend()],
+  ["redis-lua", () => new RedisQueueBackend(new MockRedis() as unknown as Redis)],
+];
+
+for (const [label, makeBackend] of BACKENDS) {
+console.log(`\n[${label}] a worker that vanishes mid-job, with no chance to shut down at all`);
 {
-  const backend = new InMemoryQueueBackend();
+  const backend = makeBackend();
   const dispatcher = new Dispatcher(backend);
   const ws = `ws-chaos-${randomUUID()}`;
 
@@ -81,9 +97,9 @@ console.log("\na worker that vanishes mid-job, with no chance to shut down at al
   check((await dispatcher.pendingCount("run.eval", ws)) === 0, "and nothing left pending either");
 }
 
-console.log("\ntwo workers racing the same expired lease still only run it once");
+console.log(`\n[${label}] two workers racing the same expired lease still only run it once`);
 {
-  const backend = new InMemoryQueueBackend();
+  const backend = makeBackend();
   const dispatcher = new Dispatcher(backend);
   const ws = `ws-chaos-race-${randomUUID()}`;
 
@@ -98,6 +114,7 @@ console.log("\ntwo workers racing the same expired lease still only run it once"
   const [a, b] = await Promise.all([dispatcher.reapExpired("run.eval"), dispatcher.reapExpired("run.eval")]);
   const totalReclaimed = a.length + b.length;
   check(totalReclaimed === 1, `exactly one of the two racing reap calls claims the job (claimed ${totalReclaimed})`);
+}
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

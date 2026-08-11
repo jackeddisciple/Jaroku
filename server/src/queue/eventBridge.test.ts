@@ -9,6 +9,7 @@
 //   docker compose up -d redis
 //   JAROKU_REDIS_URL=redis://127.0.0.1:6380 npm run test:event-bridge
 
+import { MockRedis } from "../../fixtures/redis/mockRedis.ts";
 import { EventBridge, type PubSubClient } from "./eventBridge.ts";
 import { openRedis, pingRedis, redisUrlFromEnv } from "./redis.ts";
 
@@ -121,23 +122,36 @@ console.log("\nan unparseable message is dropped rather than crashing the subscr
   await other.close();
 }
 
+// --- the cross-replica assertions ---------------------------------------------------------
+//
+// These need two CONNECTIONS that hear each other. The FakeBroker above deliberately is not that
+// — it is one object every client shares, so it proves the envelope logic and nothing about
+// connections, which is why this section used to skip without a broker. fixtures/redis/mockRedis.ts
+// has a real duplicate(): a second client onto the same pub/sub hub, delivering asynchronously the
+// way a broker does rather than inside the publisher's own call stack. Close enough to run every
+// assertion below on a machine with nothing installed — and a real Redis still runs them in
+// preference whenever JAROKU_REDIS_URL points at one, because it is still the authority.
+
 const url = redisUrlFromEnv();
-if (!url) {
-  console.log(
-    `\nSKIPPED: no JAROKU_REDIS_URL. Start one with \`docker compose up -d redis\` and set\n` +
-      `  JAROKU_REDIS_URL=redis://127.0.0.1:6380\n` +
-      `to run the cross-replica assertions, which cannot be faked in-memory.`,
-  );
-} else {
+let realRedisOk = false;
+if (url) {
   const probe = openRedis({ url });
-  const reachable = await pingRedis(probe);
+  realRedisOk = await pingRedis(probe);
   probe.disconnect();
-  if (!reachable) {
-    console.log(`\nSKIPPED: JAROKU_REDIS_URL is set but unreachable at ${url}`);
-  } else {
+  if (!realRedisOk) console.log(`\nNOTE: JAROKU_REDIS_URL is set but unreachable at ${url}`);
+}
+
+{
+  {
+    console.log(realRedisOk ? "\n(against a real Redis)" : "\n(against the in-process pub/sub fixture)");
     // Two bridges = two gateway replicas, each with its own origin id.
-    const replicaA = EventBridge.create({ url })!;
-    const replicaB = EventBridge.create({ url })!;
+    const shared = new MockRedis();
+    const replicaA = realRedisOk
+      ? EventBridge.create({ url })!
+      : EventBridge.withClient(shared as unknown as PubSubClient);
+    const replicaB = realRedisOk
+      ? EventBridge.create({ url })!
+      : EventBridge.withClient(shared.duplicate() as unknown as PubSubClient);
 
     const seenByA: Array<{ workspaceId: string; payload: unknown }> = [];
     const seenByB: Array<{ workspaceId: string; payload: unknown }> = [];

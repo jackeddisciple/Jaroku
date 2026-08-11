@@ -4,6 +4,8 @@
 //   docker compose up -d redis
 //   JAROKU_REDIS_URL=redis://127.0.0.1:6380 npm run test:semaphores
 
+import type { Redis } from "ioredis";
+import { MockRedis } from "../../fixtures/redis/mockRedis.ts";
 import { InMemoryQueueBackend } from "./inMemoryBackend.ts";
 import { RedisQueueBackend } from "./redisBackend.ts";
 import { openRedis, pingRedis, redisUrlFromEnv } from "./redis.ts";
@@ -64,12 +66,20 @@ console.log("\nthe Semaphore convenience wrapper");
 console.log("\nInMemoryQueueBackend");
 failures += (await runSemaphoreConformance("in-memory", new InMemoryQueueBackend())).failures;
 
+// The semaphore scripts are Lua too, and they carry the per-workspace and per-provider caps —
+// the descendants of slot 0 and JAROKU_LIMIT_<PROVIDER>. fixtures/redis/mockRedis.ts runs the
+// real ones, so this no longer waits on a broker being installed. See dispatcher.test.ts.
+console.log("\nRedisQueueBackend, on the in-process Lua fixture");
+failures += (
+  await runSemaphoreConformance("redis-lua", new RedisQueueBackend(new MockRedis() as unknown as Redis))
+).failures;
+
 const url = redisUrlFromEnv();
 if (!url) {
   console.log(
-    `\nSKIPPED: no JAROKU_REDIS_URL. Start one with \`docker compose up -d redis\` and set\n` +
-      `  JAROKU_REDIS_URL=redis://127.0.0.1:6380\n` +
-      `to run the identical conformance suite against Redis.`,
+    `\nNOTE: no JAROKU_REDIS_URL, so the run above used the in-process Lua fixture rather than a\n` +
+      `real broker. \`docker compose up -d redis\` and JAROKU_REDIS_URL=redis://127.0.0.1:6380 runs\n` +
+      `the identical scenarios against the real thing.`,
   );
 } else {
   const client = openRedis({ url });
