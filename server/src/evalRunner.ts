@@ -114,9 +114,31 @@ export interface EvalRunnerDeps {
   /** Called when a job reaches a terminal state, so later stages (aggregation, judging)
    *  can hook in without this file knowing about them. */
   onJobFinished?: (job: EvalJob) => void;
+  /**
+   * Record which workspace a new eval belongs to, before anything else runs.
+   *
+   * `context()` above answers "the workspace of the eval in flight", which it can only do once
+   * something has told it — and everything after this point (the pump, a job's exit, the
+   * judge) reads it. Called inside `start`, between the eval becoming live and the first job
+   * being dispatched, because a gap there is a job whose events are recorded in the wrong
+   * workspace. The caller cannot close that gap itself: it does not know the eval's id until
+   * `start` returns, which is already too late.
+   */
+  bindWorkspace?: (evalId: string, ctx: TenantContext) => void;
 }
 
 export interface StartEvalRequest {
+  /**
+   * The workspace that asked for this eval.
+   *
+   * NOT `deps.context()`, which is what every read and write below used to use. That function
+   * answers "the workspace of the eval currently in flight", and at the moment `start` runs
+   * there is no eval in flight — so it fell back to the server's own workspace. The dataset
+   * lookup then ran in the wrong workspace and found nothing, and every workspace but the
+   * server's was told its own dataset had no examples. Had it found rows, the eval and its
+   * jobs would have been WRITTEN there too.
+   */
+  ctx: TenantContext;
   datasetId: string;
   agentId: string;
   rubricId: string;
@@ -163,7 +185,7 @@ export class EvalRunner {
    * nothing is worse than an error, because it renders as a dashboard full of blanks.
    */
   async start(req: StartEvalRequest): Promise<{ evalId: string } | { error: string }> {
-    const examples = await this.deps.evalStore.listExamples(this.deps.context(), req.datasetId);
+    const examples = await this.deps.evalStore.listExamples(req.ctx, req.datasetId);
     if (!examples.length) return { error: "that dataset has no examples" };
     if (!req.targets.length) return { error: "pick at least one provider to compare" };
 
@@ -174,7 +196,7 @@ export class EvalRunner {
       req.targets.map((t) => ({ example_id: ex.id, provider: t.provider, model: t.model })),
     );
 
-    const evalRun = await this.deps.evalStore.createEvalRun(this.deps.context(), {
+    const evalRun = await this.deps.evalStore.createEvalRun(req.ctx, {
       dataset_id: req.datasetId,
       agent_id: req.agentId,
       rubric_id: req.rubricId,
@@ -183,8 +205,8 @@ export class EvalRunner {
     });
     // Rows first, dispatch second. If the process dies right here, the eval is recoverable
     // rather than a set of runs nothing points at.
-    await this.deps.evalStore.createJobs(this.deps.context(), evalRun.id, spec);
-    await this.deps.evalStore.setEvalStatus(this.deps.context(), evalRun.id, "running");
+    await this.deps.evalStore.createJobs(req.ctx, evalRun.id, spec);
+    await this.deps.evalStore.setEvalStatus(req.ctx, evalRun.id, "running");
 
     this.live.set(evalRun.id, {
       evalId: evalRun.id,
@@ -193,6 +215,9 @@ export class EvalRunner {
       cancelled: false,
       retryTimer: null,
     });
+    // Before the first job, never after: from here on `deps.context()` is what answers for
+    // this eval, and it can only answer once it has been told.
+    this.deps.bindWorkspace?.(evalRun.id, req.ctx);
 
     console.log(
       `[eval] ${evalRun.id} started — ${examples.length} example(s) × ${req.targets.length} target(s) = ${spec.length} job(s)`,

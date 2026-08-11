@@ -828,6 +828,10 @@ evalRunner = new EvalRunner({
   evalStore,
   // One eval runs at a time, so this is the eval in flight.
   context: () => contextForEval(evalRunner?.activeEvalIds()[0] ?? ""),
+  // ...which only answers once the eval has a workspace recorded against it. The runner does
+  // that itself, between the eval becoming live and its first job, because nothing outside
+  // knows the id before then.
+  bindWorkspace: (evalId, ctx) => evalWorkspaces.set(evalId, ctx),
   runtimeDir: RUNTIME_DIR,
   // An eval job's run persists like any other but stays off the live "trace" channel.
   markEvalRun: (runId, isEval) => {
@@ -1528,14 +1532,17 @@ async function handleEvalCommand(ctx: TenantContext, cmd: ForwardedCommand): Pro
         // Recorded before dispatch: its progress arrives on callbacks that have no context
         // of their own, and it belongs to whoever pressed the button.
         const started = await evalRunner.start({
+          ctx,
           datasetId: cmd.datasetId,
           agentId: cmd.agentId,
           rubricId: await rubricIdFor(ctx, cmd.datasetId),
           targets: cmd.targets ?? [],
           budgetUsd: cmd.budgetUsd ?? null,
         });
+        // The workspace was bound inside `start`, before the first job — see bindWorkspace.
+        // Binding it here, on the way back, left a window in which the eval was already
+        // dispatching and `contextForEval` still answered with the server's workspace.
         if ("error" in started) relay.broadcastEval(ctx, { type: "error", message: started.error });
-        else evalWorkspaces.set(started.evalId, ctx);
         return;
       }
       case "cancelEval": {
