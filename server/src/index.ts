@@ -1546,6 +1546,15 @@ async function handleEvalCommand(ctx: TenantContext, cmd: ForwardedCommand): Pro
         return;
       }
       case "cancelEval": {
+        // WHOSE EVAL. The command carries an id and nothing else, and the runner's `live` map
+        // is keyed by id across every workspace — so without this, a workspace holding another
+        // tenant's eval id could kill their run mid-fan-out, and the queued jobs it cancels
+        // would be written off against their rows. `getEvalRun` is scoped, so an eval that is
+        // not this workspace's simply is not there.
+        if (!(await evalStore.getEvalRun(ctx, cmd.evalId))) {
+          relay.broadcastEval(ctx, { type: "error", message: "unknown eval" });
+          return;
+        }
         await evalRunner.cancel(cmd.evalId);
         return;
       }
