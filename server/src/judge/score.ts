@@ -31,6 +31,7 @@ import type { TenantContext } from "../db/tenant.ts";
 import type { EvalJob, EvalStore, RubricCriterion } from "../evalStore.ts";
 import { buildJudgePrompt, parseJudgeVerdict } from "./rubric.ts";
 import { extractAgentOutput } from "./output.ts";
+import { jobClassConfig } from "../queue/jobs.ts";
 
 /** Budget model by default (doc: the judge is per-example-per-provider; cost multiplies). */
 export const JUDGE_MODEL = process.env.JAROKU_JUDGE_MODEL ?? "claude-haiku-4-5";
@@ -43,6 +44,12 @@ const JUDGE_CONCURRENCY = Math.max(1, Number(process.env.JAROKU_JUDGE_CONCURRENC
 
 /** Total attempts per verdict. Bounded — every retry is another paid call. */
 const JUDGE_ATTEMPTS = Math.max(1, Number(process.env.JAROKU_JUDGE_ATTEMPTS ?? 2));
+
+/** Wall-clock ceiling on ONE verdict call, from the same per-class config queue/jobs.ts
+ *  gives run.eval — JAROKU_JOB_TIMEOUT_MS_JUDGE overrides it. A judge call that never
+ *  returns would otherwise hold a JUDGE_CONCURRENCY slot forever, quietly starving every
+ *  other example waiting to be scored. */
+const JUDGE_TIMEOUT_MS = jobClassConfig("judge").timeoutMs ?? 60_000;
 
 export interface ScoredEvent {
   evalId: string;
@@ -172,15 +179,18 @@ export class JudgeScorer {
     let lastError = "the judge did not return a verdict";
     for (let attempt = 1; attempt <= JUDGE_ATTEMPTS; attempt++) {
       try {
-        const res = await anthropicClient().messages.create({
-          model: JUDGE_MODEL,
-          max_tokens: JUDGE_MAX_TOKENS,
-          system: prompt.system,
-          messages: [{ role: "user", content: prompt.user }],
-          // Structured outputs make the verdict SHAPE enforced rather than requested, which
-          // is what lets the parser stay strict without throwing away good verdicts.
-          output_config: { format: { type: "json_schema", schema: prompt.schema } },
-        } as Anthropic.MessageCreateParamsNonStreaming);
+        const res = await anthropicClient().messages.create(
+          {
+            model: JUDGE_MODEL,
+            max_tokens: JUDGE_MAX_TOKENS,
+            system: prompt.system,
+            messages: [{ role: "user", content: prompt.user }],
+            // Structured outputs make the verdict SHAPE enforced rather than requested, which
+            // is what lets the parser stay strict without throwing away good verdicts.
+            output_config: { format: { type: "json_schema", schema: prompt.schema } },
+          } as Anthropic.MessageCreateParamsNonStreaming,
+          { timeout: JUDGE_TIMEOUT_MS },
+        );
 
         // Judge spend is recorded BEFORE the verdict is parsed — the call was billed
         // whether or not its answer was usable.
