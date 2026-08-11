@@ -77,6 +77,12 @@ import { PROVIDER_ENV_KEY, isProviderId, providerStatus, verifyProviderKey } fro
 import { DeployStore } from "./deployStore.ts";
 import { DeployManager, planDeploy, type DeployManagerDeps } from "./deployManager.ts";
 import { RailwayApi, RailwayError, RAILWAY_ENV_KEY } from "./railwayApi.ts";
+import { sandboxKind } from "./sandbox/runSandbox.ts";
+import { RunEventBus } from "./sandbox/eventBus.ts";
+import { resolveRunTokenSigningKey, RunTokenRevocationList } from "./sandbox/runTokens.ts";
+import { registerControlPlaneRoutes } from "./sandbox/controlPlaneRoutes.ts";
+import { sandboxImageRef } from "./sandbox/image.ts";
+import { FlyMachinesSandbox } from "./sandbox/flySandbox.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = resolve(__dirname, "..");
@@ -110,6 +116,33 @@ console.log(`[server] database: ${db.dialect}${db.dialect === "sqlite" ? ` (${DB
 // run under NODE_ENV=production.
 const OBJECT_SIGNING_KEY_PATH = process.env.JAROKU_OBJECT_KEY_PATH ?? join(SERVER_DIR, ".objectkey");
 const objectSigningKey = resolveSigningKey(OBJECT_SIGNING_KEY_PATH);
+
+// AND ONE RUN SANDBOX, chosen here and nowhere else, exactly like the driver and the object
+// store above. `local` spawns exactly the subprocess this codebase has always spawned — see
+// sandbox/runSandbox.ts's own note on why `npm run dev` needs nothing installed and nothing
+// running for this either. `fly` is the hosted path, and it is the only one that ever mints a
+// run token or needs a control plane for a sandboxed run to call home to.
+const RUN_TOKEN_KEY_PATH = process.env.JAROKU_RUN_TOKEN_KEY_PATH ?? join(SERVER_DIR, ".runtokenkey");
+const runTokenSigningKey = resolveRunTokenSigningKey(RUN_TOKEN_KEY_PATH);
+const runEventBus = new RunEventBus();
+const runTokenRevocations = new RunTokenRevocationList();
+setInterval(() => runTokenRevocations.sweep(), 10 * 60_000).unref();
+// The URL a sandboxed run's OWN control-plane HTTP client is told to call — this server's own
+// public address, not something derivable from inside the process. Unset locally: LOCAL sandbox
+// runs mint no token at all (see runPool.ts's launch()), so nothing ever needs this.
+const CONTROL_PLANE_URL = process.env.JAROKU_CONTROL_PLANE_URL;
+const RUN_SANDBOX_KIND = sandboxKind();
+const FLY_APP = process.env.JAROKU_FLY_APP;
+if (RUN_SANDBOX_KIND === "fly" && !CONTROL_PLANE_URL) {
+  throw new Error(
+    "JAROKU_RUN_SANDBOX=fly needs JAROKU_CONTROL_PLANE_URL — a hosted run has to be told where " +
+      "to push its trace and poll for control, and there is no address to guess it from.",
+  );
+}
+if (RUN_SANDBOX_KIND === "fly" && !FLY_APP) {
+  throw new Error("JAROKU_RUN_SANDBOX=fly needs JAROKU_FLY_APP — which Fly app a run's machine is created in.");
+}
+console.log(`[server] run sandbox: ${RUN_SANDBOX_KIND}`);
 const objects = openObjectStore({
   runtimeDir: RUNTIME_DIR,
   signingKeyPath: OBJECT_SIGNING_KEY_PATH,
@@ -167,7 +200,16 @@ const mcpRegistry = new McpRegistry(mcpStore, credentials);
 // inflates every run's latency, which the comparison dashboard then reports as if it were
 // the provider's.
 const EVAL_CONCURRENCY = Math.max(1, Number(process.env.JAROKU_EVAL_CONCURRENCY ?? 4));
-const pool = new RunPool(EVAL_CONCURRENCY);
+const pool = new RunPool(EVAL_CONCURRENCY, {
+  controlPlaneUrl: CONTROL_PLANE_URL,
+  bus: runEventBus,
+  signingKey: runTokenSigningKey,
+  revocations: runTokenRevocations,
+  sandbox:
+    RUN_SANDBOX_KIND === "fly"
+      ? () => new FlyMachinesSandbox({ app: FLY_APP!, bus: runEventBus, image: sandboxImageRef() })
+      : undefined,
+});
 const planner = new Planner();
 
 // Run ids belonging to an in-flight eval job. Their events persist normally but are kept
@@ -625,6 +667,46 @@ router.get(
   readyz({ dialect: db.dialect, probe: () => db.get(`SELECT 1 AS ok`) }),
 );
 
+// THE CONTROL PLANE A HOSTED SANDBOX'S RUNNER CALLS HOME TO — see sandbox/controlPlaneRoutes.ts.
+// Registered unconditionally, not only under JAROKU_RUN_SANDBOX=fly: the routes are inert
+// without a run token to present (pool.eventBus has no entries for a local-only server, since
+// runPool.ts never registers one without both a workspaceId and a configured control plane), so
+// there is nothing to gain and a live/ready toggle to lose by making this conditional.
+registerControlPlaneRoutes(router, {
+  bus: pool.eventBus,
+  signingKey: runTokenSigningKey,
+  revocations: runTokenRevocations,
+  // The hosted twin of the local "tool_confirm" control-line handler further down this file —
+  // same pendingConfirms registration, same broadcast shape, so the UI's modal cannot tell
+  // which kind of run it is looking at. Deferred to a function so it can close over
+  // pendingConfirms/confirmKey/relay, all declared later in this module but not called before
+  // the server actually starts accepting requests.
+  onMcpConfirmRequested: (runId, payload) => handleHostedMcpConfirmRequest(runId, payload),
+});
+
+function handleHostedMcpConfirmRequest(runId: string, payload: Record<string, unknown>): void {
+  const nonce = typeof payload.nonce === "string" ? payload.nonce : "";
+  if (!nonce) return;
+  const runCtx = contextForRun(runId);
+  const server = String(payload.server ?? "unknown");
+  const tool = String(payload.tool ?? "unknown");
+  pendingConfirms.set(confirmKey(runId, nonce), {
+    runId, workspaceId: runCtx.workspaceId, nonce, server, tool, requestedAt: Date.now(),
+  });
+  console.log(`[mcp] ${runId} is waiting for confirmation of ${server}/${tool} (hosted)`);
+  relay.broadcastMcp(runCtx, {
+    type: "confirmRequest",
+    runId,
+    nonce,
+    server,
+    tool,
+    impactReason: String(payload.impact_reason ?? "it is classified high-impact"),
+    args: String(payload.args ?? "{}"),
+    timeoutS: typeof payload.timeout_s === "number" ? payload.timeout_s : 120,
+    requestedAt: new Date().toISOString(),
+  });
+}
+
 // AUTHENTICATION.
 //
 // Provider-agnostic OIDC: three environment variables point this at Clerk, Auth0, Okta or
@@ -1018,7 +1100,12 @@ async function handleMcpCommand(ctx: TenantContext, cmd: McpCommand): Promise<vo
           return;
         }
         pendingConfirms.delete(key);
+        // Both, unconditionally rather than branching on which kind of run this is: a local
+        // run has no bus entry to resolve (resolveMcpConfirm is a no-op returning false), and a
+        // hosted run has no approval file anybody is polling for. Writing to whichever
+        // mechanism the run is NOT using costs one harmless call.
         writeApproval(cmd.runId, cmd.nonce, verdict);
+        pool.eventBus.resolveMcpConfirm(cmd.runId, cmd.nonce, verdict);
         console.log(`[mcp] ${pending.server}/${pending.tool} — ${verdict}`);
         relay.broadcastMcp(ctx, { type: "confirmResolved", runId: cmd.runId, nonce: cmd.nonce, verdict });
         return;

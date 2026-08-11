@@ -51,3 +51,7 @@ server/.objectkey
 # travel with the repository. See server/src/auth/config.ts for why this is a real issuer
 # rather than a flag that skips verification.
 server/.devauth.json
+
+# The key that signs run tokens locally — same reasoning as .objectkey, one level up the
+# stack: see server/src/sandbox/runTokens.ts.
+server/.runtokenkey
