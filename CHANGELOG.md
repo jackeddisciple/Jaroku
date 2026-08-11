@@ -12,7 +12,7 @@ release notes and the commits in that release's range.
 
 Session 3 of the hosted migration. Every assumption that the server, an agent's code and its
 checkpoints share one disk is gone, and each of the three now has two implementations selected by
-config — a local one that needs nothing installed and nothing running, and a hosted one. The local
+config  a local one that needs nothing installed and nothing running, and a hosted one. The local
 path is the default and is unchanged.
 
 ### Added
