@@ -13,6 +13,7 @@ import {
   createMachine,
   destroyMachine,
   getLastExit,
+  FlyError,
   getMachine,
   signalMachine,
   waitForState,
@@ -27,6 +28,11 @@ const DEFAULT_LIMITS = { cpuMillis: 1000, memoryMb: 512, pids: 256, wallClockSec
 /** How often to ask Fly whether the machine has stopped, by default. Not a long-poll — the
  *  Machines API has none for state changes beyond the boot wait, so this is an ordinary poll. */
 const DEFAULT_EXIT_POLL_MS = 2_000;
+
+/** How long past a run's own wall clock the exit poll keeps asking before calling it a timeout.
+ *  Covers a machine that is genuinely still stopping, and a short Fly outage; past it there is no
+ *  longer a machine this poll could be waiting for. */
+const EXIT_POLL_GRACE_SEC = 60;
 
 export interface FlySandboxOptions {
   app: string;
@@ -118,7 +124,7 @@ export class FlyMachinesSandbox extends EventEmitter<SandboxEvents> implements R
 
     const machine = await createMachine(this.opts.app, `jaroku-run-${spec.runId}`, config);
     this.machineId = machine.id;
-    this.pollForExit(machine.id); // started before the stop check, so an exit is still reported
+    this.pollForExit(machine.id, limits.wallClockSec); // before the stop check, so an exit is still reported
     // A stop() that arrived while createMachine() was still in flight had no id to signal and
     // recorded the request instead of silently doing nothing — honour it now that one exists,
     // rather than letting a stop issued a moment too early boot and run to completion anyway.
@@ -129,32 +135,65 @@ export class FlyMachinesSandbox extends EventEmitter<SandboxEvents> implements R
     await waitForState(this.opts.app, machine, "started");
   }
 
-  private pollForExit(machineId: string): void {
+  /**
+   * Ask Fly whether the machine has stopped, until it has — or until one of the two ways it can
+   * stop answering meaningfully.
+   *
+   * THE EXIT EVENT IS THE ONLY THING THAT FREES A POOL SLOT. RunPool releases a slot in its own
+   * `exit` handler and nowhere else, so a poll that can loop forever without emitting one is a
+   * slot lost for the process's lifetime. This loop had two ways to do that, both of which came
+   * from catching every error alike and trying again:
+   *
+   *   A 404 IS NOT A HICCUP. `auto_destroy: true` means Fly reclaims the machine itself once it
+   *   stops, and a reclaimed machine is not "destroyed", it is GONE. getMachine then 404s, every
+   *   two seconds, forever. That is the ordinary end of a run, not a transient failure.
+   *
+   *   FLY BEING DOWN IS NOT FOREVER EITHER. Every other API failure is worth retrying, but not
+   *   without a ceiling: the run has a wall clock, Fly enforces it too (stop_config), and past it
+   *   there is no longer a machine this poll could be waiting for. Report a timeout and let the
+   *   slot go, rather than holding it on the chance Fly comes back.
+   */
+  private pollForExit(machineId: string, wallClockSec: number): void {
+    const deadline = Date.now() + (wallClockSec + EXIT_POLL_GRACE_SEC) * 1000;
+    const finish = (exit: { code: number | null; oom: boolean; timedOut: boolean }, destroy: boolean): void => {
+      if (this.polling) clearInterval(this.polling);
+      this.polling = null;
+      this.stopped = true;
+      this.emit("exit", { code: exit.code, signal: null, oom: exit.oom, timedOut: exit.timedOut });
+      if (this.runId) this.opts.bus.unregister(this.runId);
+      if (destroy) {
+        void destroyMachine(this.opts.app, machineId).catch(() => {
+          /* auto_destroy already asked Fly to do this; a failed explicit destroy is not fatal */
+        });
+      }
+    };
+
     this.polling = setInterval(() => {
       void (async () => {
         try {
           const machine = await getMachine(this.opts.app, machineId);
-          if (machine.state !== "stopped" && machine.state !== "destroyed") return;
-          if (this.polling) clearInterval(this.polling);
-          this.polling = null;
-          this.stopped = true;
+          if (machine.state !== "stopped" && machine.state !== "destroyed") {
+            // Still going — but not past its own wall clock, or nobody is coming.
+            if (Date.now() > deadline) finish({ code: null, oom: false, timedOut: true }, true);
+            return;
+          }
           const exit = await getLastExit(this.opts.app, machineId).catch(() => null);
-          this.emit("exit", {
-            code: exit?.exit_code ?? null,
-            signal: null,
-            oom: exit?.oom_killed ?? false,
-            timedOut: false,
-          });
-          if (this.runId) this.opts.bus.unregister(this.runId);
-          void destroyMachine(this.opts.app, machineId).catch(() => {
-            /* auto_destroy already asked Fly to do this; a failed explicit destroy is not fatal */
-          });
-        } catch {
-          // A transient Fly API hiccup mid-poll is not this run's failure — try again next tick
-          // rather than reporting an exit nobody actually observed.
+          finish({ code: exit?.exit_code ?? null, oom: exit?.oom_killed ?? false, timedOut: false }, true);
+        } catch (err) {
+          if (err instanceof FlyError && err.status === 404) {
+            // Reclaimed by auto_destroy. There is nothing left to ask about and nothing to
+            // destroy; what the process exited with went with it.
+            finish({ code: null, oom: false, timedOut: false }, false);
+            return;
+          }
+          // A genuine hiccup: try again next tick rather than reporting an exit nobody observed
+          // — but not past the point where there could still be a machine to observe.
+          if (Date.now() > deadline) finish({ code: null, oom: false, timedOut: true }, true);
         }
       })();
     }, this.opts.exitPollMs ?? DEFAULT_EXIT_POLL_MS);
+    // A poll must never be the reason the process cannot exit.
+    this.polling.unref?.();
   }
 
   stop(graceMs = 5_000): void {

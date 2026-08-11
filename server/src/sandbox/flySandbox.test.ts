@@ -118,5 +118,48 @@ await withMock(async () => {
   process.env.JAROKU_FLY_API_TOKEN = "fixture-fly-token";
 });
 
+// --- the two ways the exit poll could wait forever -----------------------------------------
+//
+// RunPool frees a slot in its `exit` handler and nowhere else. A poll that keeps asking and never
+// emits one is not a slow run, it is a slot gone for the process's lifetime — and the poll used
+// to catch every error alike and try again, which turns both of these into exactly that.
+
+await withMock(async (mock) => {
+  // `auto_destroy: true` means Fly reclaims the machine ITSELF once it stops. A reclaimed machine
+  // is not in state "destroyed" — it is gone, and getMachine 404s. Forever, every poll interval.
+  const bus = new RunEventBus();
+  const sandbox = new FlyMachinesSandbox({ app: "jaroku-runs", bus, image: IMAGE, exitPollMs: 20 });
+  const exits: Array<{ code: number | null; timedOut?: boolean }> = [];
+  sandbox.on("exit", (e) => exits.push(e));
+
+  sandbox.start(baseSpec("run-fly-vanished"));
+  for (let i = 0; i < 100 && mock.machines.size === 0; i++) await new Promise((r) => setTimeout(r, 20));
+  const id = [...mock.machines.keys()][0]!;
+  mock.machines.delete(id); // Fly reclaimed it out from under us
+
+  for (let i = 0; i < 100 && exits.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+  check("a machine reclaimed by auto_destroy ends the run rather than polling a 404 forever", exits.length === 1);
+  check("...reported as an ordinary end, not a timeout", exits[0]?.timedOut === false);
+  check("...and the bus entry goes with it", !bus.has("run-fly-vanished"));
+});
+
+await withMock(async (mock) => {
+  // Fly stops answering entirely while a machine is still running. Retrying is right; retrying
+  // without a ceiling is not — past the run's own wall clock there is no machine left to wait for.
+  const bus = new RunEventBus();
+  const sandbox = new FlyMachinesSandbox({ app: "jaroku-runs", bus, image: IMAGE, exitPollMs: 20 });
+  const exits: Array<{ code: number | null; timedOut?: boolean }> = [];
+  sandbox.on("exit", (e) => exits.push(e));
+
+  // A negative wall clock puts the deadline already in the past, so this resolves in a test.s
+  // lifetime rather than the ten minutes a real run would wait out.
+  sandbox.start({ ...baseSpec("run-fly-silent"), limits: { cpuMillis: 1000, memoryMb: 512, pids: 64, wallClockSec: -1000, diskMb: 0 } });
+  for (let i = 0; i < 100 && mock.machines.size === 0; i++) await new Promise((r) => setTimeout(r, 20));
+
+  for (let i = 0; i < 100 && exits.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+  check("a machine still 'started' past its wall clock is given up on", exits.length === 1);
+  check("...and reported as a timeout, which is what it is", exits[0]?.timedOut === true);
+});
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);

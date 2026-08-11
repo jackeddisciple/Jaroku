@@ -41,6 +41,11 @@ export class FlyError extends Error {
     readonly kind: FlyFailureKind,
     message: string,
     readonly operation: string,
+    /** The HTTP status, when there was one. Carried separately rather than left to be read back
+     *  out of the message, because callers genuinely need to distinguish one code from the rest:
+     *  a 404 on a machine means it is GONE, which is a terminal answer, where every other API
+     *  failure means "ask again". See flySandbox.ts's exit poll. */
+    readonly status?: number,
   ) {
     super(message);
     this.name = "FlyError";
@@ -109,10 +114,10 @@ async function call<T>(
 
   const text = await res.text();
   if (res.status === 401 || res.status === 403) {
-    throw new FlyError("auth", `Fly refused the request (${res.status})`, op);
+    throw new FlyError("auth", `Fly refused the request (${res.status})`, op, res.status);
   }
   if (!res.ok) {
-    throw new FlyError("api", scrub(`Fly returned ${res.status}: ${text.slice(0, 500)}`, secrets), op);
+    throw new FlyError("api", scrub(`Fly returned ${res.status}: ${text.slice(0, 500)}`, secrets), op, res.status);
   }
   if (!text) return {} as T;
   try {
