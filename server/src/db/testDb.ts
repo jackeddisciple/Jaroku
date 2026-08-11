@@ -7,13 +7,20 @@
 // function that encodes it.
 
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { PostgresDb } from "./postgres.ts";
 import { PG_URL_ENV } from "./open.ts";
 import { migrate } from "./migrate.ts";
 import { SqliteDb } from "./sqlite.ts";
 import { LOCAL_WORKSPACE_ID, newRequestId, systemContextFor, type TenantContext } from "./tenant.ts";
 
-const MIGRATIONS = join(new URL("../..", import.meta.url).pathname, "migrations");
+// fileURLToPath, not `new URL(...).pathname` — the raw pathname of a file:// URL keeps its
+// leading slash even in front of a Windows drive letter ("/C:/Users/..."), which path.join
+// then normalises into "\C:\Users\..." - a path that does not exist. migrate() silently found
+// nothing there and every suite using this helper ran against an unmigrated database, failing
+// on the first table it touched. Every other module in this codebase already goes through
+// fileURLToPath for exactly this reason; this was the one that didn't.
+const MIGRATIONS = join(fileURLToPath(new URL("../..", import.meta.url)), "migrations");
 
 /** An open, fully migrated SQLite database. `:memory:` unless a path is given. */
 export async function openTestSqlite(path = ":memory:"): Promise<SqliteDb> {

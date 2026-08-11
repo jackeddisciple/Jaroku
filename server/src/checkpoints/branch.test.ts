@@ -28,6 +28,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { Db } from "../db/db.ts";
 import { withScratchPostgres } from "../db/testDb.ts";
@@ -104,7 +105,7 @@ await withScratchPostgres(async (db: Db, url: string) => {
   // LangGraph's schema, created by LangGraph. Not a hand-written imitation: a column it adds
   // later has to show up here as a change rather than as silence, which is the entire reason
   // the store reads its column list out of information_schema.
-  const runtimeDir = join(new URL("../../..", import.meta.url).pathname, "runtime");
+  const runtimeDir = join(fileURLToPath(new URL("../../..", import.meta.url)), "runtime");
   const { execFileSync } = await import("node:child_process");
   let langgraphReady = true;
   try {

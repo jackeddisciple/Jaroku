@@ -24,6 +24,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { Db } from "../db/db.ts";
 import { migrate } from "../db/migrate.ts";
@@ -45,7 +46,7 @@ const check = (ok: boolean, msg: string, detail = ""): void => {
   }
 };
 
-const MIGRATIONS = join(new URL("../..", import.meta.url).pathname, "migrations");
+const MIGRATIONS = join(fileURLToPath(new URL("../..", import.meta.url)), "migrations");
 const MASTER = "a-master-key-with-enough-entropy-behind-it-0123456789";
 const OTHER_MASTER = "a-different-master-key-with-enough-entropy-9876543210";
 

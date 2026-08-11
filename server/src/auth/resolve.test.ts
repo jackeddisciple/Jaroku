@@ -11,6 +11,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 
 import type { Db } from "../db/db.ts";
@@ -31,7 +32,7 @@ const check = (ok: boolean, msg: string): void => {
   }
 };
 
-const MIGRATIONS = join(new URL("../..", import.meta.url).pathname, "migrations");
+const MIGRATIONS = join(fileURLToPath(new URL("../..", import.meta.url)), "migrations");
 
 const authFor = (sub: string): AuthContext => ({
   subject: sub,

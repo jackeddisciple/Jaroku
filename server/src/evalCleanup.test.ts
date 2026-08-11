@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { TraceStore } from "./store.ts";
 import { openTestSqlite, testContext, withScratchPostgres } from "./db/testDb.ts";
 import { newRequestId, systemContext, systemContextFor } from "./db/tenant.ts";
@@ -167,7 +168,7 @@ await withScratchPostgres(async (pg, url) => {
       `conn.execute('SET search_path TO ${CHECKPOINT_SCHEMA}')`,
       "PostgresSaver(conn).setup()",
     ].join("\n")], {
-      cwd: join(new URL("../..", import.meta.url).pathname, "runtime"),
+      cwd: join(fileURLToPath(new URL("../..", import.meta.url)), "runtime"),
       env: { ...process.env, URL: url },
       stdio: "pipe",
     });

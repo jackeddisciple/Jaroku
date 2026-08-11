@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { migrate } from "./db/migrate.ts";
 import { SqliteDb } from "./db/sqlite.ts";
@@ -31,7 +32,7 @@ const check = (msg: string, ok: boolean, detail = ""): void => {
 
 const dir = mkdtempSync(join(tmpdir(), "jaroku-agentfiles-"));
 const db = new SqliteDb(join(dir, "a.db"));
-await migrate(db.migrationTarget(), join(new URL("..", import.meta.url).pathname, "migrations", "sqlite"), () => {});
+await migrate(db.migrationTarget(), join(fileURLToPath(new URL("..", import.meta.url)), "migrations", "sqlite"), () => {});
 const agents = new AgentRepository(db);
 const projects = new ProjectStore(new FsObjectStore({ root: join(dir, "objects"), signingKey: randomBytes(32) }), agents);
 const identity = new IdentityRepository(db);

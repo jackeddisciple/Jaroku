@@ -20,6 +20,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { migrate } from "./migrate.ts";
 import { SqliteDb } from "./sqlite.ts";
@@ -37,7 +38,7 @@ const check = (ok: boolean, msg: string): void => {
   }
 };
 
-const MIGRATIONS = join(new URL("../..", import.meta.url).pathname, "migrations");
+const MIGRATIONS = join(fileURLToPath(new URL("../..", import.meta.url)), "migrations");
 
 const runId = randomUUID();
 

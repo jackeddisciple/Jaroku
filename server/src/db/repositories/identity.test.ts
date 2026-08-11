@@ -11,6 +11,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { Db } from "../db.ts";
 import { migrate } from "../migrate.ts";
@@ -28,7 +29,7 @@ const check = (ok: boolean, msg: string): void => {
   }
 };
 
-const MIGRATIONS = join(new URL("../../..", import.meta.url).pathname, "migrations");
+const MIGRATIONS = join(fileURLToPath(new URL("../../..", import.meta.url)), "migrations");
 
 console.log("\nslugs");
 check(slugify("Ada's Team") === "ada-s-team", `a name becomes a url-safe slug (${slugify("Ada's Team")})`);

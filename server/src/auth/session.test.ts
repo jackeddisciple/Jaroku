@@ -15,6 +15,7 @@ import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { Db } from "../db/db.ts";
 import { migrate } from "../db/migrate.ts";
@@ -40,7 +41,7 @@ const check = (ok: boolean, msg: string): void => {
   }
 };
 
-const MIGRATIONS = join(new URL("../..", import.meta.url).pathname, "migrations");
+const MIGRATIONS = join(fileURLToPath(new URL("../..", import.meta.url)), "migrations");
 const keyDir = mkdtempSync(join(tmpdir(), "jaroku-session-"));
 const issuer = new LocalIssuer(join(keyDir, "devauth.json"), DEFAULT_AUDIENCE, () => {});
 

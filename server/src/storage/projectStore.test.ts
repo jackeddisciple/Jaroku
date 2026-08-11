@@ -15,6 +15,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { Db } from "../db/db.ts";
 import { migrate } from "../db/migrate.ts";
@@ -37,7 +38,7 @@ const check = (ok: boolean, msg: string): void => {
   }
 };
 
-const MIGRATIONS = join(new URL("../..", import.meta.url).pathname, "migrations");
+const MIGRATIONS = join(fileURLToPath(new URL("../..", import.meta.url)), "migrations");
 const scratch: string[] = [];
 const tmpDir = (name: string): string => {
   const d = mkdtempSync(join(tmpdir(), `jaroku-${name}-`));

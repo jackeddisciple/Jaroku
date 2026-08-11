@@ -60,7 +60,7 @@ const check = (ok: boolean, msg: string): void => {
   }
 };
 
-const MIGRATIONS = join(new URL("..", import.meta.url).pathname, "migrations");
+const MIGRATIONS = join(fileURLToPath(new URL("..", import.meta.url)), "migrations");
 
 /** Everything one workspace owns, so the same fixture can be built twice. */
 interface Fixture {
