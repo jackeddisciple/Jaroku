@@ -59,8 +59,10 @@ def main(argv: list[str]) -> int:
 
     # Additive, and a no-op unless a hosted control plane is actually configured — see
     # controlplane_http's module docstring. stdout still carries the frozen trace either way.
+    # queue_trace_event batches rather than sending one event per call; flush_trace_events()
+    # below is what sends whatever is left buffered once the run itself is over.
     if controlplane_http.configured():
-        bind_trace_sink(controlplane_http.push_trace_event)
+        bind_trace_sink(controlplane_http.queue_trace_event)
 
     provider = os.environ.get("JAROKU_PROVIDER", "fake").lower()
     if provider not in ("anthropic", "openai"):
@@ -153,6 +155,10 @@ def main(argv: list[str]) -> int:
         if not paused:
             run.ended_at = now_iso()
             emit_run_end(run)
+        # Whatever queue_trace_event has buffered — including run_end itself, which will not
+        # otherwise cross the batch threshold on a short run — has to go now. Nothing calls
+        # this again: a process about to exit gets exactly one more chance to deliver it.
+        controlplane_http.flush_trace_events()
 
     status = "paused" if paused else run.status
     log(f"[jaroku] run {run.id} {status} tokens={run.tokens} cost={run.cost}")

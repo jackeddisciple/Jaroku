@@ -120,6 +120,62 @@ try {
   }
 
   {
+    // Batching: 40 queued events is under the 50-event threshold, so nothing should have been
+    // sent until an explicit flush.
+    const received: unknown[] = [];
+    const emitter = bus.register("run-py-1");
+    const onEvent = (e: unknown) => received.push(e);
+    emitter.on("event", onEvent);
+    const r = await runPython(
+      "from jaroku_runner import controlplane_http as c\n" +
+        "for i in range(40):\n" +
+        "    c.queue_trace_event({'kind':'step','schema_version':1,'step':{'id':str(i),'seq':i}})\n" +
+        "print('queued')",
+      commonEnv,
+    );
+    emitter.off("event", onEvent);
+    check("queueing 40 events under the batch size sends nothing on its own", r.stdout.trim() === "queued" && received.length === 0, `received=${received.length} ${r.stderr.slice(0, 200)}`);
+  }
+
+  {
+    // 60 events crosses the 50-event threshold mid-loop, so one batch of 50 should already have
+    // landed by the time the process exits — proving this is threshold-driven, not merely "the
+    // final flush caught everything".
+    const received: unknown[] = [];
+    const emitter = bus.register("run-py-1");
+    const onEvent = (e: unknown) => received.push(e);
+    emitter.on("event", onEvent);
+    await runPython(
+      "from jaroku_runner import controlplane_http as c\n" +
+        "for i in range(60):\n" +
+        "    c.queue_trace_event({'kind':'step','schema_version':1,'step':{'id':'b-'+str(i),'seq':i}})\n" +
+        "import time; time.sleep(0.3)\n" +  // give the flush's own HTTP round trip time to land
+        "print('done')",
+      commonEnv,
+    );
+    emitter.off("event", onEvent);
+    check("crossing the 50-event threshold flushes a batch without waiting for the process to exit", received.length >= 50, `received=${received.length}`);
+  }
+
+  {
+    // flush_trace_events() at run end (wired into __main__.py's finally block) must not lose a
+    // small, never-thresholded tail.
+    const received: unknown[] = [];
+    const emitter = bus.register("run-py-1");
+    const onEvent = (e: unknown) => received.push(e);
+    emitter.on("event", onEvent);
+    await runPython(
+      "from jaroku_runner import controlplane_http as c\n" +
+        "c.queue_trace_event({'kind':'run_start','schema_version':1,'run':{'id':'run-py-1'}})\n" +
+        "c.flush_trace_events()\n" +
+        "print('flushed')",
+      commonEnv,
+    );
+    emitter.off("event", onEvent);
+    check("an explicit flush sends a partial, under-threshold batch", received.length === 1);
+  }
+
+  {
     const pending = runPython(
       "from jaroku_runner import controlplane_http as c\n" +
         "print(c.request_mcp_confirm('py-nonce-1', {'server':'mock','tool':'send_message'}, 20))",

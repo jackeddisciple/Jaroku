@@ -16,6 +16,7 @@ import { badRequest, forbidden, notFound, unauthorized, type HttpRequest, type R
 import { isTraceEvent, type TraceEvent } from "../types.ts";
 import { RunEventBus } from "./eventBus.ts";
 import { verifyRunToken, type RunTokenRevocationList } from "./runTokens.ts";
+import type { TraceIngestMetrics } from "./traceIngestMetrics.ts";
 
 /** Per the spec: "the timeout still denies." 120s matches mcp_bridge.py's own default so a
  *  hosted run's confirmation gate behaves identically to the local one. */
@@ -31,6 +32,8 @@ export interface ControlPlaneDeps {
   /** Surfaced to the UI/relay as an ordinary control line ("ctrl":"tool_confirm"), exactly the
    *  shape mcp_bridge.py already emits — see index.ts's existing resolveMcpConfirm handler. */
   onMcpConfirmRequested?: (runId: string, payload: Record<string, unknown>) => void;
+  /** Counts what the trace route drops rather than ingests — see traceIngestMetrics.ts. */
+  metrics?: TraceIngestMetrics;
 }
 
 /** The run token this request is bearing, checked against the :runId in the path and against
@@ -91,7 +94,9 @@ async function handleTrace(req: HttpRequest, runId: string, deps: ControlPlaneDe
       deps.bus.pushTrace(runId, candidate as TraceEvent);
       accepted++;
     } else {
-      deps.bus.pushParseError(runId, { line: JSON.stringify(candidate).slice(0, 300), error: "not a recognized trace event" });
+      const line = JSON.stringify(candidate).slice(0, 300);
+      deps.bus.pushParseError(runId, { line, error: "not a recognized trace event" });
+      deps.metrics?.recordDropped({ runId, reason: `not a recognized trace event: ${line}` });
       dropped++;
     }
   }

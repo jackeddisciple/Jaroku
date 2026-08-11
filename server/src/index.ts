@@ -83,6 +83,7 @@ import { resolveRunTokenSigningKey, RunTokenRevocationList } from "./sandbox/run
 import { registerControlPlaneRoutes } from "./sandbox/controlPlaneRoutes.ts";
 import { sandboxImageRef } from "./sandbox/image.ts";
 import { FlyMachinesSandbox } from "./sandbox/flySandbox.ts";
+import { TraceIngestMetrics } from "./sandbox/traceIngestMetrics.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = resolve(__dirname, "..");
@@ -672,10 +673,12 @@ router.get(
 // without a run token to present (pool.eventBus has no entries for a local-only server, since
 // runPool.ts never registers one without both a workspaceId and a configured control plane), so
 // there is nothing to gain and a live/ready toggle to lose by making this conditional.
+const traceIngestMetrics = new TraceIngestMetrics();
 registerControlPlaneRoutes(router, {
   bus: pool.eventBus,
   signingKey: runTokenSigningKey,
   revocations: runTokenRevocations,
+  metrics: traceIngestMetrics,
   // The hosted twin of the local "tool_confirm" control-line handler further down this file —
   // same pendingConfirms registration, same broadcast shape, so the UI's modal cannot tell
   // which kind of run it is looking at. Deferred to a function so it can close over

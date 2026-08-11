@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -80,15 +81,58 @@ def _request(method: str, path: str, body: dict | None, timeout_s: float) -> dic
         return json.loads(raw) if raw else {}
 
 
-def push_trace_event(envelope: dict) -> None:
-    """Push one already-serialised trace envelope (the exact shape schema/events.md defines).
+# Batched the same way the WORKER side of ingestion is (server/src/sandbox — "50 steps or 100ms,
+# whichever comes first"): one HTTP POST per event would mean a step-heavy run paying a full
+# round trip for every LLM call, tool call and state update it makes. A run emits one event at a
+# time, synchronously, so batching here is "buffer until a threshold, flush inline on the next
+# call that crosses it" rather than a background thread — simpler, and correct because
+# jaroku_interceptor.schema.emit already calls this once per event in order.
+_TRACE_BATCH_MAX = 50
+_TRACE_BATCH_WINDOW_S = 0.1
+_trace_buffer: list[dict] = []
+_trace_buffer_opened_at: float | None = None
 
-    Best-effort: a control-plane hiccup must not crash the run — the local stdout write already
-    happened (see jaroku_interceptor/schema.py:emit, which calls this AFTER writing, never
-    instead of), so the worst case is a gap in what the server ingested, not a corrupted or lost
-    local record. Logged loudly on stderr rather than swallowed silently, though, since a run
-    whose every push is failing needs that to be visible somewhere.
+
+def queue_trace_event(envelope: dict) -> None:
+    """Buffer one trace envelope, flushing the batch once it is 50 events or 100ms old.
+
+    Best-effort throughout: a control-plane hiccup must not crash the run — the local stdout
+    write already happened (see jaroku_interceptor/schema.py:emit, which calls this AFTER
+    writing, never instead of), so the worst case of a failed flush is a gap in what the server
+    ingested, not a corrupted or lost local record.
     """
+    global _trace_buffer_opened_at
+    if not configured():
+        return
+    _trace_buffer.append(envelope)
+    if _trace_buffer_opened_at is None:
+        _trace_buffer_opened_at = time.monotonic()
+    if len(_trace_buffer) >= _TRACE_BATCH_MAX or (time.monotonic() - _trace_buffer_opened_at) >= _TRACE_BATCH_WINDOW_S:
+        flush_trace_events()
+
+
+def flush_trace_events() -> None:
+    """Send whatever is buffered right now, even a partial batch. Called on every threshold
+    crossing above, and MUST also be called once at run end (see __main__.py's finally block) —
+    otherwise a run whose last few events never cross a threshold loses them silently."""
+    global _trace_buffer_opened_at
+    if not _trace_buffer:
+        return
+    batch = _trace_buffer[:]
+    _trace_buffer.clear()
+    _trace_buffer_opened_at = None
+    if not configured():
+        return
+    try:
+        _request("POST", f"/v1/runs/{_run_id()}/trace", {"events": batch}, PUSH_TIMEOUT_S)
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        _log(f"failed to push a batch of {len(batch)} trace event(s): {exc}")
+
+
+def push_trace_event(envelope: dict) -> None:
+    """Back-compat single-event push, unbatched. Kept because it is simpler to reason about in
+    a test that pushes exactly one event and checks exactly one thing arrived — production code
+    should use queue_trace_event, which is what jaroku_interceptor's sink is bound to."""
     if not configured():
         return
     try:

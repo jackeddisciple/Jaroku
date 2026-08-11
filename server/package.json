@@ -54,6 +54,7 @@
     "test:pool-tokens": "tsx src/runPool.tokens.test.ts",
     "test:controlplane-http-python": "tsx src/sandbox/controlPlaneHttp.python.test.ts",
     "test:mcp-confirm-http": "tsx src/sandbox/mcpConfirmHttp.test.ts",
+    "test:trace-ingest-metrics": "tsx src/sandbox/traceIngestMetrics.test.ts",
     "test:aggregate": "tsx src/evalAggregate.test.ts",
     "test:retry": "tsx src/evalRetry.test.ts && tsx src/evalOwnership.test.ts",
     "test:judge": "tsx src/judge/rubric.test.ts",
