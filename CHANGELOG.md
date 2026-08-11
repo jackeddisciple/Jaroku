@@ -8,7 +8,7 @@ release notes and the commits in that release's range.
 
 ---
 
-## Unreleased : Storage Isolation
+## v0.2.7 : Storage Isolation
 
 Session 3 of the hosted migration. Every assumption that the server, an agent's code and its
 checkpoints share one disk is gone, and each of the three now has two implementations selected by
