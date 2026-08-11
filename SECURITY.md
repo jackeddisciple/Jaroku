@@ -275,7 +275,10 @@ one is mostly configuration:
   money.
 - **Set `NODE_ENV=production`** for anything that is not a laptop. Several development
   facilities, including the local issuer, refuse to run under it.
-- **Keep `runtime/.env` at `chmod 600` and out of version control.** It is gitignored and
+- **Keep `runtime/.env` at `chmod 600` and out of version control.** It is the development
+  secret store and is one file with no workspace in it, which is why `JAROKU_SECRET_STORE=dotenv`
+  refuses to run under `NODE_ENV=production` — see [storage isolation](README.md#storage-isolation).
+  It is gitignored and
   `.dockerignore`d; keep it that way, and check any image you build.
 - **Scope every provider and connector key to the minimum it needs**, and give agents the
   narrowest MCP grant that works. The manifest is the grant.

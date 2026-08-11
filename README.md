@@ -50,6 +50,7 @@ of the repo and run yourself.
 - [Tests](#tests)
 - [Developing for free (fixtures)](#developing-for-free-fixtures)
 - [The tenancy model](#the-tenancy-model)
+- [Storage isolation](#storage-isolation)
 - [Authentication and membership](#authentication-and-membership)
 - [Where data lives](#where-data-lives)
 - [Security notes](#security-notes)
@@ -1540,6 +1541,13 @@ to happen because a browser cannot put a header on a WebSocket:
 | `JAROKU_ALLOWED_ORIGINS` | the local dev origins | Comma-separated origin allowlist for the WebSocket upgrade. **Required in production** — see [why the origin check is not optional](#why-the-origin-check-is-not-optional) |
 | `JAROKU_DEV_AUTH` | — | `1` opens sockets with **no credential at all**, in the dev workspace. Refuses `NODE_ENV=production` |
 | `JAROKU_DEV_AUTH_KEY` | `server/.devauth.json` | Where the local issuer's signing key is kept (`chmod 600`, gitignored) |
+| `JAROKU_OBJECT_STORE` | `fs` | `fs` \| `s3`. Where an agent's files live. `fs` roots under `runtime/.objects/` and refuses `NODE_ENV=production` — see [storage isolation](#storage-isolation) |
+| `JAROKU_S3_ENDPOINT` / `_BUCKET` / `_REGION` / `_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY` | — | The bucket, when `JAROKU_OBJECT_STORE=s3`. R2, S3 and MinIO all work; `_FORCE_PATH_STYLE=false` for an AWS bucket in the host |
+| `JAROKU_OBJECT_SIGNING_KEY` | generated into `server/.objectkey` | Signs presigned object URLs. **Required in production**: a per-replica key produces URLs that verify on one replica and nowhere else |
+| `JAROKU_SECRET_STORE` | `dotenv` | `dotenv` \| `kms`. `dotenv` is `runtime/.env` and refuses `NODE_ENV=production`, because one file has no workspace in it |
+| `JAROKU_MASTER_KEY` | — | Wraps each workspace's data key when `JAROKU_SECRET_STORE=kms`. No generated fallback: a regenerated master key would make every stored credential permanently unreadable |
+| `JAROKU_CHECKPOINTER` | `sqlite` | `sqlite` \| `postgres`. Where pause/resume/branch state lives |
+| `JAROKU_CHECKPOINT_PG_URL` | — | The checkpointer's OWN connection. Not `JAROKU_PG_URL`: LangGraph never issues `SET LOCAL`, so it must not borrow the pool whose isolation depends on it |
 | `JAROKU_NO_AUTORUN` | — | Set to `1` to skip the startup run |
 | `JAROKU_EVAL_CONCURRENCY` | `4` | Pool slots. Slot 0 is always the interactive run |
 | `JAROKU_LIMIT_<PROVIDER>` | `16` (fake) / `2` (real) | Per-provider concurrent-run cap, e.g. `JAROKU_LIMIT_ANTHROPIC=4` |
@@ -1582,6 +1590,8 @@ should not disagree about who is doing the thinking.
 | `JAROKU_RESUME_RUN_ID` | Resume an existing run from its durable checkpoint |
 | `JAROKU_SEQ_OFFSET` | Where a resumed/branched segment's `seq` continues from |
 | `JAROKU_BRANCH_CHECKPOINT_ID` / `_THREAD_ID` / `_EDIT_FILE` / `_EDIT_NODE` | Branch a new run from a parent's checkpoint, optionally with a state edit |
+| `JAROKU_WORKSPACE_ID` | Which workspace a run's checkpoints belong to. Part of the thread id on the Postgres checkpointer, ignored on SQLite |
+| `JAROKU_AGENT_DIR` | Import the project from THIS directory instead of `runtime/agents/<id>/`. What a version materialised out of the object store is handed to |
 | `JAROKU_CONTROL_DIR` | Where the MCP bridge exchanges confirmation approvals. Its **absence** is how a copied-out project knows nobody is watching |
 | `JAROKU_MCP_CONFIRM` | `require` \| `skip`. Defaults to require under a host, skip standalone |
 | `JAROKU_MCP_CONFIRM_TIMEOUT_S` | `120` — how long the gate waits before **denying** |
@@ -1671,6 +1681,20 @@ npm run test:rls         # the policies, exercised: forced, write-checked, fail-
 npm run test:trace       # trace scoping, and that workspace_id never reaches an emitted event
 npm run test:identity    # users, workspaces, memberships, audit
 npm run test:driver      # the driver choice, and the two combinations it refuses to boot on
+
+# storage — see "Storage isolation"
+npm run test:object-keys # every spelling of a traversal, refused before it becomes a path
+npm run test:objects     # the conformance suite, on BOTH stores, plus AWS's own SigV4 vectors
+npm run test:project-store # versions are immutable; undo is a pointer move, not a copy
+npm run test:generation  # stream, stage, validate, commit — and a rejection leaving nothing
+npm run test:edit-versions # a proposal never touches the live version; apply publishes the next
+npm run test:read-only   # the block list, checked against a real published version
+npm run test:store-reads # the local copy is DELETED, then the graph view and validator still work
+npm run test:secrets     # the local store: a wrapper, with envWriter's refusals intact
+npm run test:vault       # envelope encryption, the row binding, rotation, a wrong master key
+npm run test:secret-refs # names and no values, and both stores answering identically
+npm run test:checkpoint-threads # one thread name, computed in TypeScript and in Python
+npm run test:branch      # a fork copies rows; the parent is hashed before and after
 
 # auth — see "Authentication and membership"
 npm run test:http        # the HTTP layer: error envelope, body caps, log redaction
@@ -1961,6 +1985,156 @@ the projects still live on this machine's disk until Session 3 moves them to an 
 - **Cross-workspace maintenance reads run unscoped** and say so in their signatures — the restart
   reconciliations for interrupted evals and deploys, and the startup checkpoint sweep. Under RLS
   they need an administrative connection rather than the app role.
+
+---
+
+## Storage isolation
+
+Three things in Jaroku were files, and all three assumed the server, the agent's code and the
+checkpoints share one disk. Hosted they do not: a generation lands on one replica, the edit that
+follows on another, and the undo after that on a replica four minutes old. This is what replaced
+each of them, and what stayed the same.
+
+**The local path is unchanged and is still the default.** `npm run dev` needs no bucket, no KMS
+and no second database — the object store is a directory, the secret store is `runtime/.env`, and
+the checkpointer is a SQLite file per run, exactly as before. Each of the three hosted
+implementations refuses to run under `NODE_ENV=production`'s opposite: the *local* ones refuse
+production, loudly, because each is a single-machine assumption wearing an interface.
+
+### Object layout
+
+```
+ws/<workspace_id>/agents/<agent_id>/v<version>/<path>
+ws/<workspace_id>/agents/<agent_id>/staging/<staging_id>/<path>
+ws/<workspace_id>/exports/<eval_run_id>.csv
+```
+
+Every key starts with the workspace, before anything that reads more naturally, so **whose object
+this is can be answered from the key alone** — by anybody holding one, without a database. That is
+what makes a presigned URL checkable against the context of the request presenting it.
+
+The components are uuids, never slugs. Slugs stopped being globally unique in Session 1, and two
+workspaces may each have a `support_bot`; the only user-influenced text in a key is the
+project-relative file path, and that is what `safeObjectPath` exists for.
+
+**`..` is the whole hazard.** S3 will happily store a key containing one — to S3 it is two dots —
+and the traversal happens later, on whatever turns the key back into a path, which locally is a
+directory on somebody's laptop. Both halves are closed: the components a key is built from are
+validated, and the local store re-checks the resolved path against its root anyway. `test:object-keys`
+covers the plain form, the encoded form, the backslash, and the assembled key that never went
+through a builder — because in production a key arrives off a URL and out of a stored manifest at
+least as often as it arrives from the builder.
+
+**Presigned URLs** carry one key, one verb and one expiry, signed. A signature proves the URL was
+minted here; it does not prove who is holding it — so when a request also carries a session, the
+session's workspace must be the one the key names. A URL with a good signature and *no* credential
+still redeems, because that is what presigning is: a short-lived bearer capability for one object,
+usable by something with no session at all.
+
+### Versions
+
+`projectFs.atomicSwap` renamed a staging directory over a live one. That is atomic on one
+filesystem and means nothing across replicas, so it was replaced by two steps that cannot be seen
+half-done: **a version's objects are written first, at keys nothing refers to yet and are never
+rewritten; then one `UPDATE` moves `agents.current_version`.** A reader arriving in between sees
+the previous version whole.
+
+| Operation | Was | Is |
+|---|---|---|
+| Generate | write `.staging/<id>/`, validate, rename into place | stage under a staging id, validate from the store, publish version *N* |
+| Apply an edit | copy the project into `.history/<id>/v<n>/`, rename staging in | publish version *N+1* |
+| Undo | restore the snapshot, pop `history.json` | move `current_version` back one, mark the version it left behind |
+| Read the file list | `readdir` the project | read the version's manifest |
+
+Immutability is what makes undo cheap: the version being replaced was written once and never
+rewritten, so it is still exactly where undo points. No copy, and it works from a replica that has
+never seen the agent.
+
+**The honest cost: history begins at the import.** An installation that already had applied edits
+keeps its `.history/` directory and it is no longer what Undo reads — the first version is the
+project as it stood when it was imported, and Undo covers what has been applied since. Nothing is
+lost from the project; what is lost is stepping back through edits made before the migration,
+which no second replica could ever have done anyway.
+
+`runtime/agents/<slug>/` does not go away. It is still where a run's subprocess imports from, still
+somewhere a user can drop a project by hand, and still portable — it stops being the source of
+truth and becomes a materialisation of one.
+
+### The secret lifecycle
+
+The interface has **no `get(ctx, name)`**, and that absence is the design. A request handler cannot
+ask for a plaintext value, because no method would answer — so no path exists down which a
+credential reaches a socket frame, a log line or a JSON response.
+
+```
+set(ctx, name, value)        in
+getForRun(runId, names[])    out, into a run's environment, and nowhere else
+listNames(ctx)               names, providers, last use — never a value
+delete(ctx, name)
+```
+
+`getForRun` takes a **run id rather than a context** because its caller is the thing assembling a
+run's environment, and a run outlives the request that started it — by then the asking context is
+gone. So the run is the unit of authorisation, and its workspace is resolved from the run.
+
+Locally this wraps `envWriter.ts` unchanged: one writer of `runtime/.env`, the round-trip refusal,
+the in-place rewrite that leaves every other line alone, the `chmod 600`, and the warning when a
+shell variable will shadow the file on the next restart. Hosted, a per-workspace **data key**
+seals the values and a **master key** seals the data key; the master key is configuration and
+never in the database, so a dump without it is a dump of noise.
+
+Each ciphertext is sealed against `<workspace_id>:<name>` as authenticated data. That is the wall
+behind the wall — the repository scope stops the query and RLS backstops the scope, and this makes
+going around both pointless: **a ciphertext copied into another workspace decrypts to nothing, and
+so does the same row relabelled to another variable name.** Both are attempted by hand, at the SQL
+level, in `test:vault`.
+
+Rotation creates a new data key version and re-seals each secret under it; a read uses the key the
+*row* names rather than the workspace's newest, so a row not yet reached stays readable and an
+interrupted rotation is resumable.
+
+`secret_refs` holds what a workspace has configured — names, what each is for, whether it is set,
+when a run last received it — and has no column a value would fit in. Both stores write it, so a
+client cannot tell which one answered. `configured` is a column rather than "the row exists",
+because a name can be *declared* before it is set: that is what an agent's `required_env` produces,
+and the panel asking somebody to fill one in needs to tell "this agent needs it and you have not
+set it" from "nobody has ever mentioned that name".
+
+### Checkpoint namespacing
+
+`JAROKU_CHECKPOINTER=sqlite` writes `runtime/.checkpoints/<run_id>.sqlite`, one file per run, as
+it always has. `postgres` writes through LangGraph's `PostgresSaver`, on **its own connection** in
+**its own schema** (`langgraph`).
+
+Both of those are deliberate. LangGraph never issues `SET LOCAL app.workspace_id`, so it must not
+borrow a pool whose isolation depends on that — and a policy on its tables would match nothing and
+fail every write. And its migrations run on its own timetable, which must not land in a schema
+this repository's forward-only, checksummed runner is supposed to describe.
+
+Which leaves the key as the isolation:
+
+```
+ws:<workspace_id>:run:<run_id>      on Postgres
+<run_id>                            on SQLite, where one file per run is already a namespace
+```
+
+A copied-out project has no workspace and gets the bare form either way. Both sides compute the
+name — the server when it dispatches a branch, the runner when it opens a checkpointer — and
+`test:checkpoint-threads` runs both and compares, because a disagreement would surface exactly
+once, on a branch, as a fork finding no checkpoint at an id the server just read out of its own
+database.
+
+**Branching** was `copyFileSync` of the parent's whole checkpoint database, which bought
+parent-immutability in the crudest possible way and has no file to copy now. It is an
+`INSERT … SELECT` of the parent's checkpoints up to the fork point into a new thread, so every
+statement touching the parent is a `SELECT` — `test:branch` hashes the parent's rows before and
+after. The columns are read from `information_schema` rather than declared, because the tables are
+LangGraph's and it has added one before.
+
+**The sweep** follows the same rules it always did. An eval's checkpoint state is dropped when the
+eval finishes; the run rows, steps, jobs, scores and traces stay; **an interactive run's
+checkpoints are never swept**, and that is true by construction rather than by a filename pattern,
+because the run ids come from the eval's own job rows.
 
 ---
 
@@ -2335,24 +2509,30 @@ that is the fact a future cleanup will not know.
 |---|---|---|
 | browser `localStorage` | `jaroku.token` (the bearer token), `jaroku.workspace` (the last workspace), `jaroku.onboarding.<user id>` (where a person is up to in the first-run flow — *whether* they finished it is `users.onboarded_at`, on the server), `jaroku.input.<workspace id>.<agent>` (last test input). Both of the last two are keyed so a browser two people share never hands one's data to the other. Deleting the first two signs you out; the rest lose nothing that matters | n/a |
 | `server/.devauth.json` | The **local issuer's** RS256 signing key, `chmod 600`. Only exists when no `JAROKU_AUTH_ISSUER` is set | No |
-| `server/jaroku.db` | The local database. Identity (`users`, `workspaces`, `workspace_members`, `workspace_invites`, `ws_tickets`, `audit_log`) + agents (`agents`, `agent_versions`) + traces (`runs`, `steps`) + eval control plane (`datasets`, `dataset_examples`, `rubrics`, `eval_runs`, `eval_jobs`, `eval_scores`) + MCP registry (`mcp_servers`, `mcp_tools`) + deploy records (`deployments`, `deployment_logs`). Every one of them carries a `workspace_id` | No |
+| `server/jaroku.db` | The local database. Identity (`users`, `workspaces`, `workspace_members`, `workspace_invites`, `ws_tickets`, `audit_log`) + agents (`agents`, `agent_versions`) + secrets (`secret_refs`, `workspace_secrets`, `workspace_data_keys`) + traces (`runs`, `steps`) + eval control plane (`datasets`, `dataset_examples`, `rubrics`, `eval_runs`, `eval_jobs`, `eval_scores`) + MCP registry (`mcp_servers`, `mcp_tools`) + deploy records (`deployments`, `deployment_logs`). Every one of them carries a `workspace_id` | No |
 | Postgres (`JAROKU_PG_URL`) | The same schema, hosted, with RLS. Selected by `JAROKU_DB_DRIVER=postgres`; see [the tenancy model](#the-tenancy-model) | No |
-| `runtime/agents/<id>/` | A generated agent project — yours, editable, portable | No (except `example_agent`) |
-| `runtime/agents/.staging/` | In-flight generations and edit proposals. Cleared on server start — a proposal interrupted by a shutdown is an orphan | No |
-| `runtime/agents/.history/<id>/` | Per-agent version snapshots + `history.json`, powering Undo across reloads | No |
-| `runtime/.checkpoints/` | Durable LangGraph checkpoints (`<run_id>.sqlite`) and pause control files | No |
-| `runtime/.env` | Provider, connector and MCP server keys | No |
+| `runtime/.objects/` | The **local object store**: every agent version, every in-flight staging copy, every export, under `ws/<workspace_id>/…`. Selected by `JAROKU_OBJECT_STORE=fs`, which is the default — see [storage isolation](#storage-isolation) | No |
+| R2 / S3 (`JAROKU_OBJECT_STORE=s3`) | The same keys, hosted | No |
+| `server/.objectkey` | The key that signs presigned object URLs, `chmod 600`. Generated on first use; **supplied by config in production**, or replicas disagree | No |
+| `runtime/agents/<id>/` | A generated agent project — yours, editable, portable. A **materialisation** of the current version now, not the source of truth | No (except `example_agent`) |
+| `runtime/agents/.history/<id>/` | Pre-Session-3 edit snapshots. No longer written or read: history is `agent_versions` — see [versions](#versions) | No |
+| `runtime/.checkpoints/` | Durable LangGraph checkpoints (`<run_id>.sqlite`) and pause control files, when `JAROKU_CHECKPOINTER=sqlite` | No |
+| Postgres `langgraph` schema | The same checkpoints, hosted, keyed `ws:<workspace_id>:run:<run_id>`. LangGraph owns the tables; Jaroku owns the schema and the grant | No |
+| `runtime/.env` | Provider, connector and MCP server keys, when `JAROKU_SECRET_STORE=dotenv` (the default) | No |
+| `workspace_secrets` / `workspace_data_keys` | The same credentials, hosted: envelope-encrypted ciphertext, per-workspace data key. Never a plaintext column | No |
+| `secret_refs` | What each workspace has configured — names, providers, last use. **No value column, on purpose** | No |
 | `runtime/agents/<id>/mcp_tools.json` | An agent's MCP grant: servers, tools, schemas, impact. Host-written, read-only to edits | No (with the project) |
 | `runtime/agents/<id>/{serve.py,Dockerfile,.dockerignore,pyproject.toml}` | Deploy tooling. Host-written, read-only to edits, regenerated on every deploy | No (with the project) |
 
 Both SQLite stores share one database file on one connection — a single writer, and
 aggregation can `JOIN` eval jobs against the frozen `steps` table directly.
 
-**Checkpoint sweeping.** When an eval finishes, the resumable-checkpoint blobs its jobs left
-behind are swept (the traces stay — only the pause/resume machinery goes, and nobody resumes a
+**Checkpoint sweeping.** When an eval finishes, the resumable-checkpoint state its jobs left
+behind is swept (the traces stay — only the pause/resume machinery goes, and nobody resumes a
 finished eval job). On startup, orphans from evals whose sweep never ran are collected too.
 **An interactive run's checkpoint is never swept** — it is exactly the thing you might come
-back to branch from.
+back to branch from, and the run ids come from the eval's own job rows rather than from a
+filename pattern, which is what makes that true by construction.
 
 ---
 
@@ -2365,6 +2545,10 @@ back to branch from.
   `..`, and null bytes are rejected. Agent ids are validated against
   `^[a-z][a-z0-9_]{0,63}$` — the same pattern enforced independently on the Python side, so
   a client-supplied id cannot traverse out of `agents/`.
+- **No user string becomes an object key un-normalised.** An object store has no `..` and will
+  store one happily; the traversal happens on whatever turns the key back into a path. Keys are
+  built only from validated uuids and paths that passed the same gate, and the local store
+  re-checks the resolved path against its root anyway — see [object layout](#object-layout).
 - **Generated code is executed.** Validation imports the staged project, and running an agent
   executes it. That is inherent to the product — but it is why validation runs first, why the
   import is sandboxed to a 20-second timeout with stdout captured, and why connector
@@ -2380,9 +2564,14 @@ back to branch from.
   its output is capped and stripped before it reaches a model or a trace, and a tool it did
   not appear in the agent's manifest for cannot be called at all. High-impact calls stop for
   an explicit confirmation, and timing out denies.
-- **MCP credentials are stored as env var names.** The value lives only in `runtime/.env`,
-  is read at the moment of use, and never reaches the database, a generated project, a log
-  line, or the browser.
+- **A credential has no way out.** The secret store's interface has no `get` that returns a
+  plaintext value to a request handler — values go in through `set` and come out only into a
+  run's environment through `getForRun`. Everything else answers *names*. Locally the value
+  lives in `runtime/.env`; hosted it is envelope-encrypted per workspace and bound to
+  `<workspace_id>:<name>`, so a ciphertext moved between workspaces, or relabelled to another
+  variable, decrypts to nothing. See [the secret lifecycle](#the-secret-lifecycle).
+- **MCP credentials are stored as env var names.** The value is read at the moment of use and
+  never reaches a generated project, a log line, or the browser.
 - **Provider keys take exactly that path.** A key entered in the first-run flow or in Settings
   goes through the *same* credential writer — one instance, shared — and lands as one
   correctly-named line in `runtime/.env`. Every other line of that file survives byte for byte,

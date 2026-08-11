@@ -105,6 +105,10 @@ and refused.
 | [ADR-021](ADR-021-single-use-websocket-tickets-and-origin-allowlist.md) | Open sockets with a single use ticket, behind a mandatory Origin allowlist |
 | [ADR-022](ADR-022-roles-as-data-with-one-capability-matrix.md) | Express roles as data in one capability matrix, checked at the door |
 | [ADR-026](ADR-026-credential-handling-names-travel-values-do-not.md) | Handle credentials so that names travel and values do not |
+| [ADR-031](ADR-031-object-store-with-workspace-first-keys.md) | Put an object store behind an interface, and the workspace first in every key |
+| [ADR-032](ADR-032-versions-replace-the-atomic-swap.md) | Replace the atomic directory swap with an immutable version and a pointer |
+| [ADR-033](ADR-033-a-secret-store-with-no-way-to-read-one.md) | Give the secret store no method that returns a plaintext value |
+| [ADR-034](ADR-034-checkpoints-in-their-own-schema-keyed-by-workspace.md) | Keep LangGraph's checkpoints in their own schema, isolated by the thread id |
 
 ### Interface and delivery
 
@@ -131,6 +135,10 @@ together explain the shape of everything else.
 
 **Working on generation or editing.** ADR-006, ADR-007, ADR-008, ADR-009, then ADR-029 for how to
 do it without spending money.
+
+**Working on storage — files, credentials or checkpoints.** ADR-031 through ADR-034, then
+ADR-018 for the scope they all rest on and ADR-026 for the credential rule ADR-033 turns into a
+type.
 
 **Working on tenancy, authentication or anything in `server/src/auth/`.** ADR-018 and ADR-019
 first, then ADR-020, ADR-021 and ADR-022. Read

@@ -6,7 +6,44 @@ The format follows [Keep a Changelog](https://keepachangelog.com/) conventions, 
 follow [Semantic Versioning](https://semver.org/). Every entry is drawn from the published
 release notes and the commits in that release's range.
 
-The repository currently sits on `v0.2.6`, so there is no unreleased section.
+---
+
+## Unreleased : Storage Isolation
+
+Session 3 of the hosted migration. Every assumption that the server, an agent's code and its
+checkpoints share one disk is gone, and each of the three now has two implementations selected by
+config — a local one that needs nothing installed and nothing running, and a hosted one. The local
+path is the default and is unchanged.
+
+### Added
+
+- An `ObjectStore` interface with `FsObjectStore` (rooted under `runtime/.objects/`) and `S3ObjectStore` (R2, S3 or MinIO), selected by `JAROKU_OBJECT_STORE` and defaulting to `fs`.
+- SigV4 request signing in `node:crypto` rather than the AWS SDK, checked against AWS's own published test vectors.
+- A fixture S3 that verifies signatures, so the hosted storage path is exercisable with no cloud account.
+- An object key layout rooted at `ws/<workspace_id>/`, so whose object a key names is answerable from the key alone.
+- Presigned object URLs, and a route that redeems them — checking the signature, re-checking the key, and refusing a URL for one workspace presented by a request scoped to another.
+- Migration 014: an `agent_versions` row records what made a version, the instruction, the summary, the per-file diff stat and whether it has been undone.
+- A `SecretStore` interface with deliberately no method that returns a plaintext value to a request handler.
+- Migration 015: envelope encryption for the hosted secret store — a per-workspace data key, wrapped by a master key that is never in the database, with each value bound to `<workspace_id>:<name>`.
+- Migration 016: `secret_refs`, the store-agnostic record of what a workspace has configured, with no column a value would fit in.
+- Migration 017: a `langgraph` schema for LangGraph's checkpoint tables, kept away from Jaroku's forward-only migration runner.
+- `JAROKU_CHECKPOINTER=postgres`, so pause, resume and branch survive landing on a different worker.
+- Eleven new suites, including a storage conformance suite both object stores must pass, and one that deletes an agent's local copy before asking the graph view and validator to work.
+
+### Changed
+
+- Generation stages into the object store under a staging id, validates what it would publish, and commits as a version row plus a pointer move rather than a directory rename.
+- Applying an edit publishes the next version; undoing one moves the pointer back and marks what it left behind. Neither copies a project.
+- The agent file list, the graph view and the validator all read the current version out of the store, so a replica that has never run an agent answers identically to the one that generated it.
+- A deploy records the artifacts it wrote as a version, so they are visible in the file list and survive onto another replica.
+- Branching copies checkpoint rows bounded at the fork point instead of copying a database file, with the columns read from `information_schema` because the tables are LangGraph's.
+- The checkpoint sweep deletes by thread rather than unlinking files, with the run ids still coming from the eval's own job rows.
+- A run resolves its declared credentials by name through the secret store rather than taking what is ambient in the environment.
+- Slug uniqueness is checked against the workspace's own agents, not against a global directory.
+
+### Fixed
+
+- The read-only block list spelled `tools/mcp_bridge.py` with the platform separator, so on Windows it matched nothing in the object store — silently dropping the one file that scopes an agent's entire MCP access.
 
 ---
 
