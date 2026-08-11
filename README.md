@@ -1578,7 +1578,7 @@ to happen because a browser cannot put a header on a WebSocket:
 | `JAROKU_NO_AUTORUN` | — | Set to `1` to skip the startup run |
 | `JAROKU_REDIS_URL` | — | Jaroku's own Redis. Unset means the queue is unconfigured: the dispatcher falls back to an in-memory backend and no cross-replica bridge is created — see [queueing](#queueing-fairness-and-per-workspace-limits) |
 | `JAROKU_EVAL_CONCURRENCY` | `4` | Slots in the **eval** pool. No longer shares a pool with the interactive run |
-| `JAROKU_INTERACTIVE_CONCURRENCY` | `1` | Slots in the **interactive** pool. Above 1 does nothing yet — see what Session 5 does not do |
+| `JAROKU_INTERACTIVE_CONCURRENCY` | `1` | Slots in the **interactive** pool. Above 1 does nothing yet — see what Session 5 does not do. A run refused a slot now hands its per-workspace reservation straight back rather than holding it for the lease's hour |
 | `JAROKU_WORKSPACE_CONCURRENCY_<CLASS>` | per class | How many of one job class ONE workspace may have in flight, e.g. `JAROKU_WORKSPACE_CONCURRENCY_RUN_EVAL=4` |
 | `JAROKU_LIMIT_<PROVIDER>` | `16` (fake) / `2` (real) | Per-provider concurrent-run cap, e.g. `JAROKU_LIMIT_ANTHROPIC=4`. Now global across every eval, not per eval |
 | `JAROKU_JOB_TIMEOUT_MS` | `180000` | Per-eval-job wall-clock deadline (the `run.eval` class default) |
@@ -2466,10 +2466,59 @@ Stated plainly, in the same spirit as the sandbox session's own limits:
   acquired on every dispatch, but `runActive`/`activeRunId` remain a single process-wide pair, so
   `JAROKU_INTERACTIVE_CONCURRENCY` above 1 does not yet do anything. Widening those into a
   per-workspace map is the next step and is not delivered here.
-- **The cross-replica assertions need a real Redis.** The bridge's envelope logic — origin
-  tagging, self-echo, no re-publish — is proven against an in-process broker and runs everywhere.
-  The genuinely two-process assertions skip loudly without `JAROKU_REDIS_URL` rather than passing
-  on a fake.
+- **The cross-replica assertions no longer need a real Redis, but still prefer one.** See the
+  hardening note below: `fixtures/redis/mockRedis.ts` runs the real Lua and gives `duplicate()`
+  a genuine second connection, so every queue and bridge assertion runs on a machine with
+  nothing installed. A real broker is still the authority and is still used whenever
+  `JAROKU_REDIS_URL` points at one.
+
+### The hardening pass
+
+Sessions 4 and 5 were gone back over deliberately looking for what breaks under load, under
+failure, and under a second tenant. What that turned up, and what it means for anyone reading
+this code:
+
+- **The Redis backend had no test coverage at all.** Its Lua is the load-bearing part of the
+  whole session — the fair admit is one script precisely because "rotate, check capacity, pop,
+  reserve" has to be atomic — and every suite that would have exercised it printed
+  `SKIPPED: no JAROKU_REDIS_URL`. `fixtures/redis/mockRedis.ts` is an in-process Redis for the
+  sixteen commands `redisBackend.ts` issues, executing the real script source in a real Lua VM
+  (fengari, pure JavaScript, no native build). The queue conformance suite, the semaphore suite
+  and the chaos suite now run against `RedisQueueBackend` everywhere. It found the ring bug
+  below within minutes.
+- **The Redis ring ran backwards.** `enqueue` appends a newly-pending workspace to the tail;
+  the admit script rotated with `RPOPLPUSH`, which takes from the tail. So the workspace that
+  had just become pending was served first and the longest-waiting one last — round-robin, so
+  every fairness scenario passed, but not the documented order and not the same order the
+  in-memory backend gives. Conformance now asserts that `ringOrder` equals the order actually
+  served, so the two implementations cannot drift apart again in silence.
+- **An eval against a real provider wedged the event loop.** `providerLimit` is 2 for a real
+  provider and the eval pool has 4 slots, so any eval with a backlog reaches "a free slot, no
+  provider slot" — and a job admitted there goes straight back on the queue, which keeps the
+  queue non-empty, which keeps the loop admitting. Every step resolves as a microtask, so the
+  loop never yields: no timer fires and no socket is read. `drainAvailable` stops on a requeue
+  now and awaits each start.
+- **Reservations outlived what they were reserved for.** A `pool.tryStart` that returned false
+  left a per-workspace interactive reservation with no run coming to release it — one refused
+  start locked that workspace out for the lease's full hour. Reserving and starting are one
+  call now (`interactiveSlot.ts`).
+- **A floating promise that rejects ends the process.** Every driver of the eval runner is
+  floating by construction — an EventEmitter listener cannot be awaited, and neither can a
+  timer — so one SQLITE_BUSY under exactly the concurrency this session is about took down the
+  gateway. They all go through one handler now.
+- **Two `startEval` commands could both be told they were the only one.** `wsRelay` dispatches
+  concurrently and the guard was followed by five awaits, so two overlapping starts both saw
+  `active === false`. Two live evals is a cross-tenant write, not merely slot contention:
+  `contextForEval(activeEvalIds()[0])` attributes the second eval's rows to the first one's
+  workspace. The claim is synchronous and inside `EvalRunner` now.
+
+On the sandbox side: the IPv6 half of the egress block list matched the *text* of an address
+rather than the address, so `::ffff:a9fe:a9fe` — the cloud metadata endpoint, written in hex —
+was admitted and pinned into a run's allowlist; the lines-per-second cap existed on a local
+run's stdout and on nothing at all on the hosted push; `CodeCheckSandbox` read untrusted output
+into a string with no ceiling; a long-poll a client had abandoned could swallow a real pause;
+and a Fly machine reclaimed by `auto_destroy` was polled for its exit forever, holding its pool
+slot. Each is described in its own commit.
 
 ---
 

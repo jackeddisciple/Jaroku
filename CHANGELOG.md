@@ -8,6 +8,117 @@ release notes and the commits in that release's range.
 
 ---
 
+## Unreleased : Sessions 4 and 5, Gone Back Over
+
+A hardening pass across the sandbox session and the queueing session, looking specifically for
+what breaks under load, under failure, and under a second tenant. No new capability: every entry
+here is either something that was already meant to be true and was not, or coverage for a surface
+that had none.
+
+### Added
+
+- `fixtures/redis/mockRedis.ts` — an in-process Redis for the sixteen commands `redisBackend.ts`
+  issues, running the **real Lua source** out of that module in a real Lua VM (fengari; pure
+  JavaScript, no native build). Not a transliteration: a JavaScript paraphrase would only have
+  proved that two things written from one idea agree. The queue conformance suite, the semaphore
+  conformance suite, the chaos suite and the event bridge's cross-replica assertions now all run
+  against `RedisQueueBackend` on a machine with nothing installed. A real Redis is still the
+  authority and still preferred when `JAROKU_REDIS_URL` points at one.
+- `npm run test:eval-stress` — 500 queued jobs against 2 slots, a backend that throws mid-drain,
+  a store that refuses writes between reserving and starting, a cancel racing a live run, and two
+  evals started in the same instant.
+- `npm run test:interactive-slot` — the per-workspace interactive reservation, extracted from
+  `index.ts` into `interactiveSlot.ts` so the rule about it can be tested at all.
+- Conformance now asserts `ringOrder` is the order actually served, and that a workspace pending
+  first is served first — the assertion that would have caught the ring bug below.
+
+### Fixed
+
+**Session 4 — the sandbox boundary**
+
+- `isDeniedAddress` matched the **text** of an IPv6 address rather than the address.
+  `::ffff:169.254.169.254` was denied and `::ffff:a9fe:a9fe` — the same address, the cloud
+  metadata endpoint, in hex — was admitted, along with the IPv4-compatible form, NAT64, 6to4, and
+  every link-local address above `fe80:` (`fe80::/10` is a ten-bit prefix, not four characters).
+  Since `resolveAndPin` **pins what it admits**, a hostname answering AAAA with any of those got
+  the metadata endpoint written into a run's egress allowlist as permitted. Normalised to sixteen
+  bytes; every rule is now a prefix comparison.
+- A host that is already an address no longer goes to DNS. `dns.resolve4` refuses a literal, which
+  surfaced as "did not resolve to any address" — so a control-plane URL, object-store endpoint or
+  `DATABASE_URL` written as a bare public IP could not be granted to a sandbox at all.
+- The lines-per-second cap was enforced on a local run's stdout and on nothing at all on the
+  hosted trace push, despite `backpressure.ts` documenting the same limiter for both. A run
+  pushing small events as fast as it could open connections was bounded only by the 64 MB per-run
+  ceiling, roughly a million events later.
+- `CodeCheckSandbox` accumulated untrusted output into a string with no ceiling. A candidate agent
+  containing `print("x" * 10**10)` — a file being *validated*, before anything is saved — took the
+  control plane's memory rather than being rejected by it. Both streams share a 4 MB budget,
+  checked per chunk, and the check is killed and reports `truncated`.
+- A long-poll a client had stopped reading still held a waiter, and `signal()` hands its action to
+  exactly one — so a hostile run parking a hundred abandoned polls made a real pause a
+  one-in-a-hundred shot. A new poll supersedes the run's earlier ones, which fixes the delivery
+  bug and bounds the run at one waiter and one timer in the same move. The queued-action list is
+  bounded too, and pause/resume collapse to the latest intent.
+- A Fly machine reclaimed by `auto_destroy` — the ordinary end of a run — 404s on `getMachine`,
+  and the exit poll caught every error alike and tried again forever. `RunPool` frees a slot in
+  its `exit` handler and nowhere else, so that was a slot lost for the process's lifetime. A 404
+  is now terminal, and a machine still running past its wall clock plus a grace window is given
+  up on as a timeout. `FlyError` carries the HTTP status rather than leaving callers to parse it
+  out of a message.
+
+**Session 5 — the queue**
+
+- The Redis ring rotated with `RPOPLPUSH` while `enqueue` appended to the tail, so the most
+  recently pending workspace was served first and the longest-waiting one last — the reverse of
+  `ringOrder`'s documented meaning and of what the in-memory backend does for the same queue.
+  Round-robin survived, which is why every fairness scenario passed.
+- `drainAvailable` could wedge the event loop permanently. `providerLimit` is 2 for a real
+  provider and the eval pool defaults to 4 slots, so any eval with a backlog reaches "a free slot,
+  no provider slot" — and a job admitted there goes straight back on the queue, so the queue never
+  empties and `freeSlots > 0` stays true. Every step of it resolves as a microtask, so the loop
+  never yields: no timer fires, no socket is read. The reproduction ran 740,000 iterations without
+  reaching a `setTimeout` scheduled for 50 ms.
+- Every promise `evalRunner.ts` starts and does not await now goes through one handler. They are
+  floating by construction — an EventEmitter listener cannot be awaited and neither can a timer —
+  and a floating rejection is an `unhandledRejection`, which Node has ended the process for since
+  v15. One SQLITE_BUSY under exactly this session's concurrency took the gateway down.
+- `executeAdmitted` holds a dispatcher lease and a provider slot before it starts anything, and
+  there is no exit event coming for a run that never started; a throw in between left both held
+  until their TTLs lapsed. `onRunExit` also releases them **before** asking whether the eval is
+  still live, since an eval can stop being live while a run it started is winding down.
+- A `pool.tryStart` returning false left a per-workspace interactive reservation with nothing
+  coming to release it — the cap is one per workspace on an hour-long lease, so one refused start
+  locked that workspace out for the rest of it. The same two discarded statements appeared at all
+  three call sites; reserving and starting are one call now.
+- Two `startEval` commands could both pass the "one eval at a time" check: `wsRelay` dispatches
+  concurrently and the guard was followed by five awaits. Two live evals is a **cross-tenant
+  write**, not merely slot contention — `contextForEval(activeEvalIds()[0])` attributes the second
+  eval's reads and writes to the first one's workspace.
+- `WorkerLoop.shutdown` re-enqueued work that finished during the hand-back, manufacturing a
+  duplicate in the one method whose purpose is losing nothing and duplicating nothing. Its
+  `drained` count reported how many *classes* the worker was configured for.
+- `InMemoryQueueBackend` never released anything it stopped needing — an expired semaphore holder
+  stayed for the process's lifetime, and a lease id is minted per admission. It is the real queue
+  for any deployment without `JAROKU_REDIS_URL`, not only a test double.
+- The in-flight and semaphore counts used ZCOUNT's inclusive minimum where the in-memory backend
+  uses a strict `expiresAtMs > now`, so a lease expiring on that exact millisecond both held
+  capacity and was reapable.
+- Three env overrides (`JAROKU_JUDGE_CONCURRENCY`, `JAROKU_JOB_TIMEOUT_MS`,
+  `JAROKU_MCP_DISCOVERY_MS`) were read into a table at import, in a file whose comment says
+  overrides are resolved lazily so tests can vary them.
+
+### Verification
+
+- The full suite is green except for failures that reproduce identically at the pre-existing base
+  commit and are properties of this machine rather than the code: Windows `symlink` EPERM
+  (`test:object-keys`, `test:generation`, `test:edit-versions`, `test:read-only`,
+  `test:store-reads`), Windows `chmod` semantics (`test:env-writer`), Python extras not installed
+  (`test:pricing`, `test:mcp-isolation`, `test:checkpoint-threads`), and no Postgres
+  (`test:shape-parity`, `test:rls`).
+- `npm run typecheck` clean on `server/` and `client/` at every commit.
+
+---
+
 ## Unreleased : Queueing, Fairness, and Per-Workspace Limits
 
 Session 5 of the hosted migration. "Who runs next" stops being an index into one pool and becomes
