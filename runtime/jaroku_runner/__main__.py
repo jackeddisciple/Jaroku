@@ -27,8 +27,9 @@ import sys
 import uuid
 
 from jaroku_interceptor import JarokuTracer, Run, load_env
-from jaroku_interceptor.schema import emit_run_end, emit_run_start, now_iso
+from jaroku_interceptor.schema import bind_trace_sink, emit_run_end, emit_run_start, now_iso
 
+from . import controlplane_http
 from .contract import ContractError, load_agent, tools_of
 from .debug import run_with_checkpoints, thread_id_for
 from .guard import install_stdout_guard
@@ -55,6 +56,11 @@ def main(argv: list[str]) -> int:
 
     # Before ANY generated module is imported. Irreversible, by design.
     install_stdout_guard()
+
+    # Additive, and a no-op unless a hosted control plane is actually configured — see
+    # controlplane_http's module docstring. stdout still carries the frozen trace either way.
+    if controlplane_http.configured():
+        bind_trace_sink(controlplane_http.push_trace_event)
 
     provider = os.environ.get("JAROKU_PROVIDER", "fake").lower()
     if provider not in ("anthropic", "openai"):

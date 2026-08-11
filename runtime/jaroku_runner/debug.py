@@ -55,6 +55,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from . import controlplane_http
+
 # runtime/.checkpoints/ — sibling of jaroku_runner/, alongside .staging/ and .history/.
 CHECKPOINT_DIR = Path(__file__).resolve().parent.parent / ".checkpoints"
 
@@ -113,11 +115,28 @@ def control_path(run_id: str) -> Path:
 
 
 def emit_ctrl(obj: dict) -> None:
-    """One control line on stderr, prefixed so the server can separate it from real logs."""
+    """One control line on stderr, prefixed so the server can separate it from real logs.
+
+    ALWAYS emitted, hosted or not — the stderr line is the local mechanism, still read by
+    worker code even hosted (Fly's own log capture, ADR-010's ctrl-plane-on-stderr design).
+    Pushing it over HTTP too is additive: see controlplane_http's module docstring on why a
+    hosted run pushes rather than being read from.
+    """
     print(CTRL_SENTINEL + json.dumps(obj), file=sys.stderr, flush=True)
+    controlplane_http.push_control_line(obj)
 
 
 def _pause_requested(run_id: str) -> bool:
+    """Whether the boundary just reached should stop and hold.
+
+    Hosted, this is controlplane_http's short poll of GET /control — see that module's note on
+    why the boundary check stays effectively instant rather than using the server's full 25s
+    long-poll budget. Locally (the only case a copied-out project ever reaches, since neither
+    JAROKU_CONTROL_PLANE_URL nor JAROKU_RUN_TOKEN exists outside Jaroku) this is unchanged: the
+    control file's mere presence and content, nothing else.
+    """
+    if controlplane_http.configured():
+        return controlplane_http.poll_control() == "pause"
     p = control_path(run_id)
     try:
         return p.exists() and p.read_text().strip() == "pause"

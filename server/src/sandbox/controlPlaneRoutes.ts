@@ -106,9 +106,20 @@ async function handleControlPush(req: HttpRequest, runId: string, deps: ControlP
   return {};
 }
 
+/** The default when a caller does not say how long it can wait, and the ceiling regardless of
+ *  what it asks for. 25s matches the spec's own "long-poll, ≤25s" figure. */
+const DEFAULT_LONG_POLL_MS = 25_000;
+const MAX_LONG_POLL_MS = 25_000;
+
 async function handleControlLongPoll(req: HttpRequest, runId: string, deps: ControlPlaneDeps) {
   authenticate(req, runId, deps);
-  const action = await deps.bus.waitForControl(runId);
+  // The caller states its own patience so the server's wait never outlasts the client's socket
+  // timeout. Mismatched here, a request that times out client-side abandons a WAITER this
+  // module still holds — the next signal() then wakes that dead waiter instead of queuing for
+  // the caller's next, live poll, and a real pause silently misses the run it was meant for.
+  const requested = Number(req.url.searchParams.get("timeoutMs"));
+  const timeoutMs = Number.isFinite(requested) && requested > 0 ? Math.min(requested, MAX_LONG_POLL_MS) : DEFAULT_LONG_POLL_MS;
+  const action = await deps.bus.waitForControl(runId, timeoutMs);
   return { body: action };
 }
 

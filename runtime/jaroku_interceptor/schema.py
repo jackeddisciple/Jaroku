@@ -103,11 +103,31 @@ def _clean(obj: Any) -> dict:
 # JSON object per line, still flushed per event.
 _EVENT_STREAM = None
 
+# An optional second destination for every envelope, ADDITIVE to the stream write above and
+# never a replacement for it — see bind_trace_sink. None locally, where there is nobody hosted
+# to push to. This module stays dependency-free of jaroku_runner on purpose: the hand-written
+# test_agent imports jaroku_interceptor directly, with no runner and no control plane in the
+# picture at all, so the wiring lives in jaroku_runner/__main__.py rather than being imported
+# here.
+_TRACE_SINK = None
+
 
 def bind_event_stream(stream) -> None:
     """Pin event output to ``stream`` instead of the live ``sys.stdout``."""
     global _EVENT_STREAM
     _EVENT_STREAM = stream
+
+
+def bind_trace_sink(sink) -> None:
+    """Register a callable to receive every envelope AFTER it is written to the event stream.
+
+    This is how a hosted run's trace reaches the control plane: stdout still carries the frozen
+    NDJSON stream exactly as it always has (still readable locally, still what a copied-out
+    project produces with no sink bound at all), and the sink is a second, best-effort delivery
+    path on top — never instead of the write above.
+    """
+    global _TRACE_SINK
+    _TRACE_SINK = sink
 
 
 def emit(kind: str, payload_key: str, obj: Any) -> None:
@@ -119,6 +139,8 @@ def emit(kind: str, payload_key: str, obj: Any) -> None:
     out = _EVENT_STREAM if _EVENT_STREAM is not None else sys.stdout
     out.write(json.dumps(envelope, default=str) + "\n")
     out.flush()
+    if _TRACE_SINK is not None:
+        _TRACE_SINK(envelope)
 
 
 def emit_run_start(run: Run) -> None:
