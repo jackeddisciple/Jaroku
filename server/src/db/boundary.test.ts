@@ -238,7 +238,12 @@ function policiedTables(): Set<string> {
  * the eval aggregates were reading `steps` from. `tx.` is deliberately not matched: a `tx` only
  * exists inside `scoped` or `transaction`, and the call that opened it is what this judges.
  */
-const UNSCOPED_CALL = /(?<![\w.])(?:this\.)?db\.(all|get|run|exec|transaction)(?:<[^>(]*>)?\s*\(/g;
+const UNSCOPED_CALLS = [
+  /(?<![\w.])(?:this\.)?db\.(all|get|run|exec|transaction)(?:<[^>(]*>)?\s*\(/g,
+  // `store.database().all(…)` — the trace store handing out its raw connection, which is how
+  // the eval estimate and the eval aggregates were reading `runs` and `steps`.
+  /\.database\(\)\s*\.(all|get|run|exec|transaction)(?:<[^>(]*>)?\s*\(/g,
+];
 
 /** The argument list of a call, from its opening paren to the matching close. */
 function callArguments(text: string, openParen: number): string {
@@ -272,29 +277,39 @@ const UNSCOPED_OK: Record<string, string> = {
   for (const file of files) {
     if (file.endsWith(".test.ts")) continue;
     const text = readFileSync(file, "utf8");
-    UNSCOPED_CALL.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = UNSCOPED_CALL.exec(text))) {
-      const args = callArguments(text, m.index + m[0].length - 1);
-      const table = [...policied].find((t) => new RegExp(`\\b${t}\\b`).test(args));
-      if (!table) continue;
-      const name = relative(SRC, file);
-      const excused = Object.keys(UNSCOPED_OK).find(
-        (k) => k.startsWith(`${name.split("/").pop()}:`) && args.includes(k.slice(k.indexOf(":") + 1)),
-      );
-      if (excused) continue;
-      found.push(`${name}:${text.slice(0, m.index).split("\n").length} — db.${m[1]} names ${table}`);
+    for (const pattern of UNSCOPED_CALLS) {
+      pattern.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = pattern.exec(text))) {
+        const args = callArguments(text, m.index + m[0].length - 1);
+        const table = [...policied].find((t) => new RegExp(`\\b${t}\\b`).test(args));
+        if (!table) continue;
+        const name = relative(SRC, file);
+        const excused = Object.keys(UNSCOPED_OK).find(
+          (k) => k.startsWith(`${name.split("/").pop()}:`) && args.includes(k.slice(k.indexOf(":") + 1)),
+        );
+        if (excused) continue;
+        found.push(`${name}:${text.slice(0, m.index).split("\n").length} — .${m[1]} names ${table}`);
+      }
     }
   }
   if (found.length) fail(`a policied table reached without a scope: ${found.join("; ")}`);
   else ok(`every statement against a policied table goes through a scope (${policied.size} tables)`);
 
   // And the rule can still fail, for the same reason 2c exists.
-  const SYNTHETIC = `class Bad { async x() { return this.db.transaction(async (tx) => tx.all("SELECT * FROM runs")); } }`;
-  UNSCOPED_CALL.lastIndex = 0;
-  const hit = UNSCOPED_CALL.exec(SYNTHETIC);
-  const args = hit ? callArguments(SYNTHETIC, hit.index + hit[0].length - 1) : "";
-  check3(/\bruns\b/.test(args), "an unscoped transaction naming a policied table is caught");
+  for (const [label, SYNTHETIC] of [
+    ["an unscoped transaction", `class Bad { async x() { return this.db.transaction(async (tx) => tx.all("SELECT * FROM runs")); } }`],
+    ["a raw handle out of a store", `async function bad() { return store.database().all<Row>("SELECT * FROM steps"); }`],
+  ] as const) {
+    const pattern = UNSCOPED_CALLS.find((p) => {
+      p.lastIndex = 0;
+      return p.test(SYNTHETIC);
+    });
+    pattern!.lastIndex = 0;
+    const hit = pattern!.exec(SYNTHETIC)!;
+    const args = callArguments(SYNTHETIC, hit.index + hit[0].length - 1);
+    check3(/\b(runs|steps)\b/.test(args), `${label} naming a policied table is caught`);
+  }
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

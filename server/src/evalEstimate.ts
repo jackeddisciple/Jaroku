@@ -85,7 +85,13 @@ async function measureRuns(
 ): Promise<{ input: number; output: number; runs: number } | null> {
   // Only completed runs: a crashed one is a partial sample and would drag the mean down,
   // which is the dangerous direction for an estimate.
-  const raw = await store.database().all<{ run_id: string; tokens: unknown }>(
+  // `forWorkspace`, not the bare handle. The WHERE clause below is the application's scope;
+  // `runs` and `steps` also carry FORCED RLS policies, and those read `app.workspace_id`, which
+  // only a scoped query sets. Unscoped — as the application role a deployment connects with —
+  // this returned nothing, so an eval's cost estimate silently fell back to "no history" for
+  // every agent that had plenty. Correct locally and as the owner the tests connect as, which
+  // is exactly how it survived. See db/boundary.test.ts rule 3.
+  const raw = await store.database().forWorkspace(ctx.workspaceId).all<{ run_id: string; tokens: unknown }>(
     `SELECT r.id AS run_id,
             COALESCE(SUM(s.tokens), 0) AS tokens
      FROM runs r
