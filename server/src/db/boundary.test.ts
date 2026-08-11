@@ -31,6 +31,7 @@ const fail = (msg: string): void => {
   console.log(`  FAIL ${msg}`);
 };
 const ok = (msg: string): void => console.log(`  ok   ${msg}`);
+const check3 = (cond: boolean, msg: string): void => (cond ? ok(msg) : fail(msg));
 
 function walk(dir: string): string[] {
   const out: string[] = [];
@@ -183,6 +184,112 @@ console.log("\nthe rule catches what it is for");
   const same = caught.length === expected.length && expected.every((e) => caught.includes(e));
   if (same) ok(`an unscoped method is caught, generic or not (${caught.join(", ")})`);
   else fail(`the rule caught ${JSON.stringify(caught)}, expected ${JSON.stringify(expected)}`);
+}
+
+
+// --- rule 3: a policied table is reached through a scope ----------------------------------
+
+console.log("\npolicied tables go through a scope");
+
+// THE BUG THIS EXISTS FOR. `workspace_invites` carries an RLS policy, and every statement the
+// invite flow made against it went through `this.db.transaction(...)` — an ordinary
+// transaction, which does not `SET LOCAL app.workspace_id`. On SQLite that is identical to a
+// scoped one; connected as the OWNER, as every test here is, it is identical too, because the
+// owner is exempt from its own policies. As the application role a deployment actually uses,
+// it is not identical at all: reads returned nothing and the INSERT failed the policy's WITH
+// CHECK. So the whole feature worked everywhere except in production, and no test could see
+// it — the tests and production disagreed about who was connected.
+//
+// A behavioural test cannot reach this: the repositories open their own connections, and the
+// RLS suite's `SET LOCAL ROLE` only binds the transaction it is in. So the rule is structural,
+// like the two above. It reads the policied tables out of the MIGRATIONS rather than from a
+// list here, so a table that gains a policy is covered the day it does.
+
+const MIGRATIONS_PG = resolve(SRC, "..", "migrations", "postgres");
+
+function policiedTables(): Set<string> {
+  const out = new Set<string>();
+  for (const file of readdirSync(MIGRATIONS_PG)) {
+    const sql = readFileSync(join(MIGRATIONS_PG, file), "utf8");
+    // The explicit form: CREATE POLICY tenant_isolation ON <table>.
+    for (const m of sql.matchAll(/CREATE POLICY tenant_isolation ON\s+([A-Za-z_][A-Za-z0-9_]*)/g)) {
+      out.add(m[1]!);
+    }
+    // And the loop form, where the table is `%I` and the names are in the ARRAY beside it.
+    for (const block of sql.split("DO $$").slice(1)) {
+      if (!/CREATE POLICY tenant_isolation/.test(block)) continue;
+      const arr = /IN ARRAY ARRAY\[([\s\S]*?)\]/.exec(block);
+      if (arr) for (const q of arr[1]!.matchAll(/'([a-z_]+)'/g)) out.add(q[1]!);
+    }
+  }
+  out.delete("%I");
+  return out;
+}
+
+/**
+ * The unscoped ways to reach the database. `scoped`, `forWorkspace` and `q(ctx)` are the others.
+ *
+ * The optional type-parameter list is not decoration: `this.db.all<Invite>(…)` is how a typed
+ * read is spelled everywhere here, and without it this rule skipped every one of them — which
+ * is the same hole rule 2's METHOD pattern had, found the same way.
+ */
+const UNSCOPED_CALL = /this\.db\.(all|get|run|exec|transaction)(?:<[^>(]*>)?\s*\(/g;
+
+/** The argument list of a call, from its opening paren to the matching close. */
+function callArguments(text: string, openParen: number): string {
+  let depth = 0;
+  for (let i = openParen; i < text.length; i++) {
+    if (text[i] === "(") depth++;
+    else if (text[i] === ")" && --depth === 0) return text.slice(openParen, i + 1);
+  }
+  return text.slice(openParen);
+}
+
+/**
+ * Unscoped statements that are allowed to name a policied table, and why.
+ *
+ * Both are SQLite-only schema patches, guarded by `dialect !== "sqlite"` at the top of their
+ * `init` — so they never run against a database that has policies at all.
+ */
+const UNSCOPED_OK: Record<string, string> = {
+  "evalStore.ts:UPDATE eval_jobs SET position = rowid":
+    "sqlite-only backfill in init(), which returns early on postgres",
+  "deployStore.ts:UPDATE deployments SET created_seq = rowid":
+    "sqlite-only backfill in init(), which returns early on postgres",
+};
+
+{
+  const policied = policiedTables();
+  check3(policied.size > 5, `the migrations name ${policied.size} policied tables`);
+  check3(policied.has("workspace_invites") && policied.has("runs"), "...including the ones this rule was written for");
+
+  const found: string[] = [];
+  for (const file of files) {
+    if (file.endsWith(".test.ts")) continue;
+    const text = readFileSync(file, "utf8");
+    UNSCOPED_CALL.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = UNSCOPED_CALL.exec(text))) {
+      const args = callArguments(text, m.index + m[0].length - 1);
+      const table = [...policied].find((t) => new RegExp(`\\b${t}\\b`).test(args));
+      if (!table) continue;
+      const name = relative(SRC, file);
+      const excused = Object.keys(UNSCOPED_OK).find(
+        (k) => k.startsWith(`${name.split("/").pop()}:`) && args.includes(k.slice(k.indexOf(":") + 1)),
+      );
+      if (excused) continue;
+      found.push(`${name}:${text.slice(0, m.index).split("\n").length} — this.db.${m[1]} names ${table}`);
+    }
+  }
+  if (found.length) fail(`a policied table reached without a scope: ${found.join("; ")}`);
+  else ok(`every statement against a policied table goes through a scope (${policied.size} tables)`);
+
+  // And the rule can still fail, for the same reason 2c exists.
+  const SYNTHETIC = `class Bad { async x() { return this.db.transaction(async (tx) => tx.all("SELECT * FROM runs")); } }`;
+  UNSCOPED_CALL.lastIndex = 0;
+  const hit = UNSCOPED_CALL.exec(SYNTHETIC);
+  const args = hit ? callArguments(SYNTHETIC, hit.index + hit[0].length - 1) : "";
+  check3(/\bruns\b/.test(args), "an unscoped transaction naming a policied table is caught");
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

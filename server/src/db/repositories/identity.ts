@@ -611,7 +611,15 @@ export class IdentityRepository {
       return { error: `"${email.slice(0, 64)}" is not an email address` };
     }
 
-    return this.db.transaction(async (tx) => {
+    // SCOPED, not a bare transaction. `workspace_invites` is the one table in this module that
+    // carries an RLS policy, and a policy reads `app.workspace_id` — which only `scoped` sets.
+    // Run unscoped, as a deployment's application role, the INSERT below fails the policy's
+    // WITH CHECK outright and every read returns nothing. That is invisible on SQLite, which
+    // has no RLS, and invisible to a test connecting as the owner, which is exempt: the whole
+    // invite flow worked everywhere except in production. The other tables touched here —
+    // users, workspace_members, audit_log — are deliberately policy-free, so scoping the
+    // transaction costs them nothing.
+    return this.db.scoped(ctx.workspaceId, async (tx) => {
       // Already in? Then this is not an invite, it is a role change — and saying so is more
       // useful than an invite that succeeds and then does nothing when it is accepted.
       const member = await tx.get<{ user_id: string }>(
@@ -673,7 +681,9 @@ export class IdentityRepository {
   }
 
   async listInvites(ctx: TenantContext): Promise<Invite[]> {
-    return this.db.all<Invite>(
+    // `forWorkspace`, for the reason createInvite is scoped: an unscoped read of a policied
+    // table answers nothing as the application role.
+    return this.db.forWorkspace(ctx.workspaceId).all<Invite>(
       `SELECT id, workspace_id, email, role, invited_by, expires_at, accepted_at, accepted_by,
               revoked_at, created_at
          FROM workspace_invites
@@ -684,7 +694,7 @@ export class IdentityRepository {
   }
 
   async revokeInvite(ctx: TenantContext, inviteId: string): Promise<boolean> {
-    return this.db.transaction(async (tx) => {
+    return this.db.scoped(ctx.workspaceId, async (tx) => {
       const res = await tx.run(
         `UPDATE workspace_invites SET revoked_at = ?
           WHERE id = ? AND workspace_id = ? AND accepted_at IS NULL AND revoked_at IS NULL`,
@@ -726,7 +736,10 @@ export class IdentityRepository {
       return { ok: false, reason: "that invitation link is not valid" };
     }
 
-    return this.db.transaction(async (tx) => {
+    // The scope comes out of the TOKEN, which is what lets this table keep a policy at all —
+    // see migration 012. It authorises nothing on its own: it chooses which rows the digest
+    // below is compared against, and the digest is the whole of the proof.
+    return this.db.scoped(workspaceId, async (tx) => {
       const invite = await tx.get<Invite>(
         `SELECT id, workspace_id, email, role, invited_by, expires_at, accepted_at, accepted_by,
                 revoked_at, created_at
