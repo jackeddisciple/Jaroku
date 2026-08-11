@@ -54,5 +54,45 @@ const sandbox = new LocalCodeCheckSandbox();
   check("the traceback lands in stderr", r.stderr.includes("ZeroDivisionError"));
 }
 
+// --- a check that writes more than a check has any business writing -----------------------
+//
+// This module's whole premise is that it runs untrusted, model-written code — a file being
+// VALIDATED, before anything has been saved. Both streams used to accumulate straight into a
+// string with no ceiling, so `print("x" * 10**10)` inside a candidate agent took the control
+// plane's memory rather than being rejected by it. "10 GB stdout" is one of the named cases in
+// the sandbox escape suite; this is the same case arriving through the door marked "validation".
+
+{
+  const before = Date.now();
+  const r = await sandbox.run({
+    runtimeDir: RUNTIME_DIR,
+    // An unbounded write loop, no newlines — nothing that only inspects completed lines sees it.
+    args: ["-c", "import sys\nwhile True: sys.stdout.write('x' * 65536)"],
+    timeoutMs: 30_000,
+    maxOutputBytes: 1024 * 1024,
+  });
+  const elapsed = Date.now() - before;
+  check("an unbounded writer is cut off rather than buffered whole", r.truncated);
+  check("...and what was kept is bounded", r.stdout.length <= 1024 * 1024, `kept ${r.stdout.length} bytes`);
+  check("...well before the check's own 30s deadline", !r.timedOut && elapsed < 25_000, `elapsed=${elapsed}ms`);
+}
+
+{
+  // A flood on stderr is the same flood. The import check reads stderr for its rejection reason,
+  // which is exactly the stream a hostile file would pick to grow.
+  const r = await sandbox.run({
+    runtimeDir: RUNTIME_DIR,
+    args: ["-c", "import sys\nwhile True: sys.stderr.write('y' * 65536)"],
+    timeoutMs: 30_000,
+    maxOutputBytes: 1024 * 1024,
+  });
+  check("the cap covers stderr too", r.truncated && r.stderr.length <= 1024 * 1024);
+}
+
+{
+  const r = await sandbox.run({ runtimeDir: RUNTIME_DIR, args: ["-c", "print('small')"], timeoutMs: 10_000 });
+  check("an ordinary check is not marked truncated", !r.truncated && r.stdout.trim() === "small");
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);

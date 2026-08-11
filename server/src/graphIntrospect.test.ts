@@ -34,7 +34,7 @@ class FakeStore implements GraphCacheStore {
 }
 
 const ok: GraphResult = { agent_id: "a1", nodes: [{ id: "start", type: "start" }], edges: [] };
-const okResult: CodeCheckResult = { stdout: JSON.stringify(ok), stderr: "", timedOut: false, exitCode: 0, spawnError: null };
+const okResult: CodeCheckResult = { stdout: JSON.stringify(ok), stderr: "", timedOut: false, exitCode: 0, spawnError: null, truncated: false };
 
 await (async () => {
   const sandbox = new FakeSandbox([okResult]);
@@ -63,7 +63,7 @@ await (async () => {
 })();
 
 await (async () => {
-  const failing: CodeCheckResult = { stdout: "", stderr: "boom", timedOut: false, exitCode: 1, spawnError: null };
+  const failing: CodeCheckResult = { stdout: "", stderr: "boom", timedOut: false, exitCode: 1, spawnError: null, truncated: false };
   const sandbox = new FakeSandbox([failing, okResult]);
   const store = new FakeStore();
   const first = await introspectGraphCached("/rt", "a1", 1, store, undefined, sandbox);

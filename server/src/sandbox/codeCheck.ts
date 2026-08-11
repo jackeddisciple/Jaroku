@@ -22,12 +22,27 @@
 
 import { spawn } from "node:child_process";
 
+/**
+ * The most either stream may produce before the check is killed.
+ *
+ * A check runs UNTRUSTED, MODEL-WRITTEN CODE — that is the whole premise of this module — and
+ * "10 GB stdout" is one of the named cases in the sandbox escape suite. A run's stdout has had a
+ * cap since backpressure.ts; a check's did not, and it accumulates straight into a string on the
+ * control plane, so `print("x" * 10**10)` inside a file being VALIDATED took the server down
+ * before the validator ever got to reject it. Generous next to any real check: the largest thing
+ * either caller reads is a graph topology of a few kilobytes, or a Python traceback.
+ */
+const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
+
 export interface CodeCheckSpec {
   runtimeDir: string; // cwd containing the uv project (runtime/)
   /** Positional args to `uv run python`, e.g. ["-c", script] or ["-m", "jaroku_runner.graph", agentId]. */
   args: string[];
   timeoutMs: number;
   env?: NodeJS.ProcessEnv;
+  /** Override MAX_OUTPUT_BYTES. Exists so the test can cross the cap without producing four
+   *  megabytes; no caller in the server sets it. */
+  maxOutputBytes?: number;
 }
 
 export interface CodeCheckResult {
@@ -37,6 +52,10 @@ export interface CodeCheckResult {
   exitCode: number | null;
   /** Only set when the process could not even be spawned (missing uv, bad cwd, ...). */
   spawnError: string | null;
+  /** The check was killed for writing more than it is allowed to. What is in `stdout`/`stderr` is
+   *  the prefix that arrived before the cap; both callers treat it as a failure, since a truncated
+   *  graph topology will not parse and a truncated traceback is still a traceback. */
+  truncated: boolean;
 }
 
 export interface CodeCheckSandbox {
@@ -60,9 +79,11 @@ export class LocalCodeCheckSandbox implements CodeCheckSandbox {
       let stdout = "";
       let stderr = "";
       let settled = false;
+      let truncated = false;
+      const cap = spec.maxOutputBytes ?? MAX_OUTPUT_BYTES;
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
-        finish({ stdout, stderr, timedOut: true, exitCode: null, spawnError: null });
+        finish({ stdout, stderr, timedOut: true, exitCode: null, spawnError: null, truncated });
       }, spec.timeoutMs);
 
       const finish = (result: CodeCheckResult) => {
@@ -72,10 +93,28 @@ export class LocalCodeCheckSandbox implements CodeCheckSandbox {
         resolve(result);
       };
 
-      child.stdout.on("data", (d: Buffer) => (stdout += d.toString("utf8")));
-      child.stderr.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
-      child.on("error", (err) => finish({ stdout, stderr, timedOut: false, exitCode: null, spawnError: err.message }));
-      child.on("exit", (code) => finish({ stdout, stderr, timedOut: false, exitCode: code, spawnError: null }));
+      // Measured and enforced per chunk, not per line: a single write with no newline in it is
+      // exactly how a flood avoids anything that only inspects completed lines — the same
+      // reasoning processManager.ts's onStdout follows for a run's own stdout.
+      const collect = (which: "out" | "err") => (d: Buffer) => {
+        if (settled || truncated) return;
+        const text = d.toString("utf8");
+        if (which === "out") stdout += text;
+        else stderr += text;
+        if (stdout.length + stderr.length <= cap) return;
+        truncated = true;
+        stdout = stdout.slice(0, cap);
+        stderr = stderr.slice(0, cap);
+        child.kill("SIGKILL");
+        finish({ stdout, stderr, timedOut: false, exitCode: null, spawnError: null, truncated: true });
+      };
+
+      child.stdout.on("data", collect("out"));
+      child.stderr.on("data", collect("err"));
+      child.on("error", (err) =>
+        finish({ stdout, stderr, timedOut: false, exitCode: null, spawnError: err.message, truncated }),
+      );
+      child.on("exit", (code) => finish({ stdout, stderr, timedOut: false, exitCode: code, spawnError: null, truncated }));
     });
   }
 }
