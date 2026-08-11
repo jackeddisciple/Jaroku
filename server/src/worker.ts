@@ -11,12 +11,19 @@
 // to exist is being a SEPARATE process from the gateway — an in-memory queue only that one
 // process could ever see, which makes a "worker" indistinguishable from doing nothing.
 //
-// NO HANDLERS ARE REGISTERED YET. This commit builds the loop, the boot sequence and the
-// shutdown path; the real run.eval and judge handlers — the code that actually turns an
-// admitted job into a pool.tryStart() call — are commit 7's, once evalRunner.ts has
-// something to enqueue in the first place. JAROKU_WORKER_CLASSES defaults to empty for
-// exactly that reason: a worker asked to drain a class nobody has wired a handler for yet is
-// a configuration mistake WorkerLoop refuses outright, not a silent no-op.
+// NO HANDLERS ARE REGISTERED HERE, and that stays true for this whole session — not a gap
+// waiting on a later commit. run.eval and judge ended up drained IN-PROCESS by evalRunner.ts
+// itself (drainAvailable()/executeAdmitted(), running inside index.ts's gateway process),
+// not through this file's generic WorkerLoop — see evalRunner.ts's own header for why: moving
+// EXECUTION to a genuinely separate process turned out to need replicating index.ts's entire
+// trace-ingestion and debug-control surface (pause/resume, MCP confirmation) in a second
+// process, which is real work this session scoped out rather than half-building. What this
+// file delivers instead is the machinery a true standalone worker needs once that surface is
+// exported — boot sequence, Redis-required admit loop, graceful shutdown — proven correct by
+// queue/workerLoop.test.ts and queue/chaos.test.ts against a generic handler, with nothing
+// yet plugged into JAROKU_WORKER_CLASSES because there is nothing here that needs its own OS
+// process today. A worker asked to drain a class nobody has wired a handler for still refuses
+// outright at construction, not a silent no-op — that discipline is real regardless.
 
 import { rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";

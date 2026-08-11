@@ -90,6 +90,7 @@
     "test:dispatcher": "tsx src/queue/dispatcher.test.ts",
     "test:semaphores": "tsx src/queue/semaphores.test.ts",
     "test:worker-loop": "tsx src/queue/workerLoop.test.ts",
+    "test:chaos": "tsx src/queue/chaos.test.ts",
     "worker": "tsx src/worker.ts"
   },
   "dependencies": {

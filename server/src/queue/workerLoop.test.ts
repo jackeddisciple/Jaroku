@@ -167,5 +167,52 @@ console.log("\nshutdown stops admitting new work even if it arrives during the d
   );
 }
 
+console.log("\na job still running when the drain window closes is handed back, not abandoned");
+{
+  const backend = new InMemoryQueueBackend();
+  const dispatcher = new Dispatcher(backend);
+  const ws = `ws-${randomUUID()}`;
+  let handlerStarted = 0;
+
+  await dispatcher.enqueue("run.eval", ws, { tag: "slow" });
+
+  const loop = new WorkerLoop({
+    dispatcher,
+    classes: ["run.eval"],
+    handlers: {
+      "run.eval": async () => {
+        handlerStarted++;
+        await sleep(5_000); // deliberately outlives the drain window below
+      },
+    },
+    idlePollMs: 10,
+  });
+  const running = loop.run();
+  for (let i = 0; i < 50 && handlerStarted < 1; i++) await sleep(10);
+
+  const result = await loop.shutdown(100); // window closes long before the handler ever would
+  await running;
+
+  check(result.stillRunning === 1, "shutdown reports the straggler rather than pretending it finished");
+  check((await backend.pendingCount("run.eval", ws)) === 1, "and it is back on the queue immediately");
+  check((await backend.inFlightCount("run.eval")) === 0, "its lease is released, not left to expire on its own");
+
+  // The orphaned handler is still out there, mid-sleep, with no way to cancel it - Node has
+  // no such primitive. A SECOND worker admitting the requeued copy is what proves the system
+  // recovers regardless of whether that straggler ever calls back.
+  let secondHandled = 0;
+  const loop2 = new WorkerLoop({
+    dispatcher,
+    classes: ["run.eval"],
+    handlers: { "run.eval": async () => { secondHandled++; } },
+    idlePollMs: 10,
+  });
+  const running2 = loop2.run();
+  for (let i = 0; i < 50 && secondHandled < 1; i++) await sleep(10);
+  await loop2.shutdown(1000);
+  await running2;
+  check(secondHandled === 1, "a fresh worker picks up the handed-back job and runs it exactly once");
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

@@ -2,15 +2,27 @@
 // without a real database, a real pool, or a real Redis — the same split index.ts itself
 // never got, because index.ts wires concrete dependencies and this wires abstract ones.
 //
-// A HANDLER PER CLASS, not one handler that switches on job.class. Commit 5 (this file)
-// builds the loop; commit 7 registers the real run.eval and judge handlers against it. Until
-// then a worker configured for a class with no handler registered simply never admits
-// anything for it — see the constructor's check — which is the honest state for a producer
-// that doesn't exist yet, not a silent no-op.
+// A HANDLER PER CLASS, not one handler that switches on job.class. This file builds the
+// loop; worker.ts's own default handler registry stays empty until a class genuinely needs a
+// SEPARATE process — see worker.ts's own header for why run.eval and judge ended up drained
+// in-process by evalRunner.ts's drainAvailable() instead, which is a hand-written equivalent
+// of this same admit/execute/ack shape rather than a WorkerLoop instance. A worker configured
+// for a class with no handler registered refuses outright at construction — see below — which
+// is the honest state for a producer that doesn't exist yet, not a silent no-op.
+//
+// THE HANDLER OWNS ITS OWN ack(). This loop calls tryAdmit() and invokes the handler; it
+// never acks on the handler's behalf, because "done" is not always the same moment as
+// "handler function returned" — evalRunner's real admit/execute logic acks only once a run's
+// process has actually exited, well after the call that started it returns. A handler that
+// forgets to ack leaks its lease (and whatever semaphore it holds) until reapExpired's TTL
+// eventually reclaims it — see chaos.test.ts for that recovery path, and workerLoop.test.ts
+// for the explicit hand-back a graceful shutdown does instead of waiting for it.
 
 import type { JobClass, QueueJob } from "./jobs.ts";
 import type { Dispatcher } from "./dispatcher.ts";
 
+/** Handles one admitted job. MUST call `dispatcher.ack(jobClass, leaseId)` itself once the
+ *  work is truly settled — see the file header on why this loop cannot do it automatically. */
 export type JobHandler<T = unknown> = (job: QueueJob<T>, leaseId: string) => Promise<void>;
 
 export interface WorkerLoopOptions {
@@ -48,7 +60,7 @@ export class WorkerLoop {
 
   private stopping = false;
   private stopped = false;
-  private inFlight = new Map<string, Promise<void>>();
+  private inFlight = new Map<string, { jobClass: JobClass; job: QueueJob; promise: Promise<void> }>();
   private lastReapAt = 0;
   private runPromise: Promise<void> | null = null;
 
@@ -111,7 +123,7 @@ export class WorkerLoop {
       .finally(() => {
         this.inFlight.delete(leaseId);
       });
-    this.inFlight.set(leaseId, promise);
+    this.inFlight.set(leaseId, { jobClass, job, promise });
   }
 
   private async maybeReap(): Promise<void> {
@@ -126,17 +138,39 @@ export class WorkerLoop {
 
   /**
    * Stop admitting new work, then wait up to `drainMs` for whatever is already in flight to
-   * finish before returning. Anything still running when the window closes is left running —
-   * this function returns either way, because a worker process exiting out from under a
-   * handler is the caller's decision (see worker.ts), not this loop's.
+   * finish before returning.
+   *
+   * Anything STILL running when the window closes is handed back to the queue explicitly —
+   * acked (so its lease and any semaphore it holds free up right away, not after the reaper
+   * eventually notices) and re-enqueued verbatim, same attempt, no backoff, because it didn't
+   * fail, it just didn't finish before this process had to go. This is what makes the
+   * recovery immediate rather than dependent on some other worker's periodic reap sweep
+   * eventually running — the passive lease-TTL path (queue/backend.ts's reapExpired) still
+   * exists underneath this for the case this process never gets to run this code at all
+   * (a kill -9, a crash) — see workerLoop.chaos.test.ts for that harder case.
+   *
+   * The handler itself is NOT cancelled — Node has no way to abort an arbitrary in-flight
+   * Promise — so it keeps running to whatever end it reaches, harmlessly orphaned: its own
+   * ack() or dispatcher call against a lease this method has already released is a documented
+   * no-op (see backend.ts), never a double-execution, because the JOB has already moved on to
+   * whoever admits the re-enqueued copy.
    */
   async shutdown(drainMs: number): Promise<{ drained: number; stillRunning: number }> {
     this.stopping = true;
     const deadline = Date.now() + drainMs;
     while (this.inFlight.size > 0 && Date.now() < deadline) {
-      await Promise.race([...this.inFlight.values(), sleep(50)]);
+      await Promise.race([...[...this.inFlight.values()].map((e) => e.promise), sleep(50)]);
     }
+    for (const [leaseId, entry] of this.inFlight) {
+      await this.dispatcher.ack(entry.jobClass, leaseId);
+      await this.dispatcher.enqueue(entry.jobClass, entry.job.workspaceId, entry.job.payload, {
+        id: entry.job.id,
+        idempotencyKey: entry.job.idempotencyKey,
+        attempt: entry.job.attempt,
+      });
+    }
+    const stillRunning = this.inFlight.size;
     if (this.runPromise) await this.runPromise;
-    return { drained: this.classes.length, stillRunning: this.inFlight.size };
+    return { drained: this.classes.length, stillRunning };
   }
 }
