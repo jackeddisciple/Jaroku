@@ -122,6 +122,22 @@ redis.call('ZREM', KEYS[1], ARGV[1])
 return 1
 `;
 
+// Removes each ARGV item (the exact serialized job, matched by value — LREM's own contract)
+// from the list, then drops the workspace from the ring if that emptied it. ARGV[1] is the
+// workspace id, ARGV[2..] the items; the caller already knows exactly which serialized jobs
+// to remove because it read them via LRANGE and filtered by idempotencyKey itself — this
+// script's only job is doing the removal atomically against whatever else the ring is doing.
+const PURGE_PENDING_SCRIPT = `
+local removed = 0
+for i = 2, #ARGV do
+  removed = removed + redis.call('LREM', KEYS[1], 1, ARGV[i])
+end
+if redis.call('LLEN', KEYS[1]) == 0 then
+  redis.call('LREM', KEYS[2], 1, ARGV[1])
+end
+return removed
+`;
+
 interface QueueRedis extends Redis {
   jarokuAdmit(
     ring: string,
@@ -139,6 +155,7 @@ interface QueueRedis extends Redis {
   jarokuClaimExpired(index: string, reservedKey: string, leaseId: string, now: string): Promise<string | null>;
   jarokuSemAcquire(semKey: string, now: string, ttl: string, leaseId: string, max: string): Promise<1 | null>;
   jarokuSemRelease(semKey: string, leaseId: string): Promise<number>;
+  jarokuPurgePending(list: string, ring: string, workspaceId: string, ...items: string[]): Promise<number>;
 }
 
 function keys(jobClass: JobClass) {
@@ -171,6 +188,7 @@ export class RedisQueueBackend implements QueueBackend {
       this.client.defineCommand("jarokuClaimExpired", { numberOfKeys: 2, lua: CLAIM_EXPIRED_SCRIPT });
       this.client.defineCommand("jarokuSemAcquire", { numberOfKeys: 1, lua: SEMAPHORE_ACQUIRE_SCRIPT });
       this.client.defineCommand("jarokuSemRelease", { numberOfKeys: 1, lua: SEMAPHORE_RELEASE_SCRIPT });
+      this.client.defineCommand("jarokuPurgePending", { numberOfKeys: 2, lua: PURGE_PENDING_SCRIPT });
     }
   }
 
@@ -246,5 +264,13 @@ export class RedisQueueBackend implements QueueBackend {
   async semaphoreCount(key: string): Promise<number> {
     const now = Date.now();
     return this.client.zcount(semaphoreRedisKey(key), now, "+inf");
+  }
+
+  async purgePending(jobClass: JobClass, workspaceId: string, idempotencyKeys: Set<string>): Promise<number> {
+    const k = keys(jobClass);
+    const raw = await this.client.lrange(k.list(workspaceId), 0, -1);
+    const toRemove = raw.filter((j) => idempotencyKeys.has((JSON.parse(j) as QueueJob).idempotencyKey));
+    if (!toRemove.length) return 0;
+    return this.client.jarokuPurgePending(k.list(workspaceId), k.ring, workspaceId, ...toRemove);
   }
 }

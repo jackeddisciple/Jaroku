@@ -230,5 +230,54 @@ console.log("\nattempts exhaust through the queue, and backoff between them grow
   }
 }
 
+console.log("\ncancelling an eval purges its still-queued jobs from the dispatcher");
+{
+  const pool = new FakePool(1); // one slot, so most jobs queue instead of dispatching at once
+  const dispatcher = new Dispatcher(new InMemoryQueueBackend());
+
+  const runner = new EvalRunner({
+    pool: pool as unknown as RunPool,
+    store,
+    dispatcher,
+    evalStore,
+    runtimeDir: ".",
+    context: () => ctx,
+    markEvalRun: () => {},
+    onStarted: () => {},
+    onProgress: () => {},
+    onFinished: () => {},
+  });
+
+  const ds = await evalStore.createDataset(ctx, "agent_cancel", "cancel path");
+  for (let i = 0; i < 5; i++) await evalStore.addExample(ctx, ds.id, `hello-${i}`, null, null);
+  const rubric = await evalStore.putRubric(ctx, { dataset_id: null, name: "r", criteria: [] });
+
+  const started = await runner.start({
+    ctx, datasetId: ds.id, agentId: "agent_cancel", rubricId: rubric.id,
+    targets: [{ provider: "fake", model: "fake" }], budgetUsd: null,
+  });
+  if ("error" in started) { check(false, `start failed: ${started.error}`); }
+  else {
+    // With one pool slot, exactly one of five jobs should have made it through admission -
+    // the other four are still sitting in the dispatcher's queue, unadmitted.
+    for (let i = 0; i < 40 && pool.started.length < 1; i++) await sleep(15);
+    check(pool.started.length === 1, `exactly one job reached the saturated pool (started ${pool.started.length})`);
+    check((await dispatcher.pendingCount("run.eval", ctx.workspaceId)) === 4, "four are still queued, unadmitted");
+
+    await runner.cancel(started.evalId);
+    check((await dispatcher.pendingCount("run.eval", ctx.workspaceId)) === 0, "cancel purges all four out of the dispatcher");
+
+    // Finish the one that was already running, and confirm nothing further ever dispatches -
+    // even once the pool frees up, there's nothing left in the queue to admit.
+    await store.upsertRun(ctx, {
+      id: pool.started[0]!.runId, agent_id: "agent_cancel", provider: "fake", model: "fake", status: "completed",
+      started_at: new Date().toISOString(), ended_at: new Date().toISOString(), cost: 0, tokens: 0, error: null,
+    });
+    pool.finish(pool.started[0]!.runId);
+    await sleep(300);
+    check(pool.started.length === 1, "no further job was ever admitted after the cancel");
+  }
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

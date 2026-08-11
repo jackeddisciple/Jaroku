@@ -159,6 +159,37 @@ export async function runQueueConformance(
     await drainAll(backend, jobClass);
   }
 
+  // --- purgePending: cancellation pulls unadmitted jobs back out by idempotencyKey -------
+  {
+    const ws = `ws-purge-${randomUUID()}`;
+    const keep = makeJob(jobClass, ws, "keep-me");
+    const drop1 = makeJob(jobClass, ws, "drop-me-1");
+    const drop2 = makeJob(jobClass, ws, "drop-me-2");
+    await backend.enqueue(keep);
+    await backend.enqueue(drop1);
+    await backend.enqueue(drop2);
+
+    const removed = await backend.purgePending(
+      jobClass,
+      ws,
+      new Set([drop1.idempotencyKey, drop2.idempotencyKey, "not-even-enqueued"]),
+    );
+    check(removed === 2, `purgePending reports exactly the two it actually removed (got ${removed})`);
+    check((await backend.pendingCount(jobClass, ws)) === 1, "one job is left pending");
+
+    const admitted = await backend.tryAdmit(jobClass, { leaseId: randomUUID(), leaseTtlMs: 60_000, maxGlobalInFlight: null });
+    check(admitted?.idempotencyKey === keep.idempotencyKey, "and it's the one that was never purged");
+    await drainAll(backend, jobClass);
+
+    // Purging everything empties the workspace out of the ring too, not just its list.
+    const soloWs = `ws-purge-solo-${randomUUID()}`;
+    const solo = makeJob(jobClass, soloWs, "only-job");
+    await backend.enqueue(solo);
+    check((await backend.ringOrder(jobClass)).includes(soloWs), "the workspace enters the ring on enqueue");
+    await backend.purgePending(jobClass, soloWs, new Set([solo.idempotencyKey]));
+    check(!(await backend.ringOrder(jobClass)).includes(soloWs), "and leaves it once its only job is purged");
+  }
+
   return { failures };
 }
 

@@ -84,4 +84,14 @@ export interface QueueBackend {
   releaseSemaphore(key: string, leaseId: string): Promise<void>;
   /** How many slots of `key` are currently held. */
   semaphoreCount(key: string): Promise<number>;
+
+  /**
+   * Pull specific not-yet-admitted jobs back out of one workspace's queue, identified by
+   * idempotencyKey. Best-effort, not the safety mechanism: a job admitted a moment before this
+   * runs is unaffected — the caller (evalRunner.ts's cancel()) still has to check its own
+   * cancelled flag at execution time regardless. This exists to free the ring and the
+   * workspace's list promptly rather than leaving a cancelled eval's jobs to sit until
+   * something eventually pops and drops each one. Returns how many were actually removed.
+   */
+  purgePending(jobClass: JobClass, workspaceId: string, idempotencyKeys: Set<string>): Promise<number>;
 }

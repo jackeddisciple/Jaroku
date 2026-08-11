@@ -133,4 +133,18 @@ export class InMemoryQueueBackend implements QueueBackend {
     for (const expiresAtMs of holders.values()) if (expiresAtMs > now) live++;
     return live;
   }
+
+  async purgePending(jobClass: JobClass, workspaceId: string, idempotencyKeys: Set<string>): Promise<number> {
+    const s = this.state(jobClass);
+    const list = s.lists.get(workspaceId);
+    if (!list || !list.length) return 0;
+    const before = list.length;
+    const kept = list.filter((j) => !idempotencyKeys.has(j.idempotencyKey));
+    s.lists.set(workspaceId, kept);
+    if (kept.length === 0) {
+      const idx = s.ring.indexOf(workspaceId);
+      if (idx >= 0) s.ring.splice(idx, 1);
+    }
+    return before - kept.length;
+  }
 }

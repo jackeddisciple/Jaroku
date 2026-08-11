@@ -64,6 +64,11 @@ export type LoadAgentGraphCommand = { cmd: "loadAgentGraph"; agentId: string };
 // frozen trace stream).
 export type PauseRunCommand = { cmd: "pauseRun"; runId: string };
 export type ResumeRunCommand = { cmd: "resumeRun"; runId: string };
+// Session 5: stop a run outright rather than pausing it at its next boundary. Distinct from
+// pauseRun — a paused run is resumable from its checkpoint, a cancelled one is not; it is
+// killed and its interactive reservation (if it held one) is released immediately rather
+// than waiting for the process to unwind on its own.
+export type CancelRunCommand = { cmd: "cancelRun"; runId: string };
 // Fork a new run from `fromRunId` at step `atSeq` (its node boundary), optionally with a
 // validated domain-field edit applied to the state before continuing. Original run is untouched.
 export type BranchRunCommand = {
@@ -378,6 +383,7 @@ export type ClientCommand =
   | LoadAgentGraphCommand
   | PauseRunCommand
   | ResumeRunCommand
+  | CancelRunCommand
   | BranchRunCommand
   | ExplainCommand
   | EvalCommand
@@ -427,6 +433,7 @@ export type ForwardedCommand =
   | DiscardEditCommand
   | PauseRunCommand
   | ResumeRunCommand
+  | CancelRunCommand
   | BranchRunCommand
   | ExplainCommand
   | EvalCommand
@@ -666,6 +673,7 @@ export type DebugEvent =
   | { type: "resumed"; runId: string; seqOffset: number }
   | { type: "boundary"; runId: string; seq: number; next: string[] }
   | { type: "branched"; parentRunId: string; branchId: string; fromSeq: number }
+  | { type: "cancelled"; runId: string }
   | { type: "error"; runId?: string; message: string };
 
 /**
@@ -716,7 +724,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
 
   planAgent: "gen", discardPlan: "gen", generate: "gen",
   edit: "edit", applyEdit: "edit", undoEdit: "edit", discardEdit: "edit",
-  pauseRun: "debug", resumeRun: "debug", branchRun: "debug",
+  pauseRun: "debug", resumeRun: "debug", cancelRun: "debug", branchRun: "debug",
   explain: "reply",
   createDataset: "eval", renameDataset: "eval", deleteDataset: "eval", listDatasets: "eval",
   loadDataset: "eval", addExample: "eval", updateExample: "eval", deleteExample: "eval",
@@ -1165,6 +1173,8 @@ export class WsRelay {
           } else if (msg.cmd === "pauseRun" && typeof msg.runId === "string") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "resumeRun" && typeof msg.runId === "string") {
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
+          } else if (msg.cmd === "cancelRun" && typeof msg.runId === "string") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "branchRun" && typeof msg.fromRunId === "string" && typeof msg.atSeq === "number") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));

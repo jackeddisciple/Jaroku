@@ -275,11 +275,11 @@ export class EvalRunner {
   /**
    * Stop an eval: kill what's running, cancel what's queued.
    *
-   * A job already sitting in the dispatcher's Redis list (enqueued, not yet admitted) is
-   * NOT pulled back out here — the queue backend has no "remove this one job" operation, only
-   * FIFO pop. `executeAdmitted` checks `live.cancelled` the moment it IS admitted and acks it
-   * unrun instead, so nothing runs and nothing is billed; it just sits queued a little longer
-   * than strictly necessary first. Purging it immediately is commit 10's job.
+   * A job already admitted (leased, mid-execution) is stopped below same as before. A job
+   * still sitting unadmitted in the dispatcher's queue is now pulled back out too — purged by
+   * idempotencyKey, best-effort (see backend.ts's own note on why this isn't the actual
+   * safety mechanism). `executeAdmitted`'s `live.cancelled` check is what still catches
+   * anything that slips past the purge because it was admitted in the same instant.
    */
   async cancel(evalId: string): Promise<void> {
     const live = this.live.get(evalId);
@@ -287,6 +287,11 @@ export class EvalRunner {
     live.cancelled = true;
     if (live.retryTimer) { clearTimeout(live.retryTimer); live.retryTimer = null; }
     await this.deps.evalStore.cancelQueuedJobs(this.deps.context(), evalId, "cancelled");
+    const keys = new Set([...live.enqueuedAttempts].map((attemptKey) => `run.eval:${attemptKey}`));
+    if (keys.size) {
+      const purged = await this.deps.dispatcher.purgePending("run.eval", this.deps.context().workspaceId, keys);
+      if (purged) console.log(`[eval] ${evalId} purged ${purged} still-queued job(s) from the dispatcher`);
+    }
     for (const runId of live.runToJob.keys()) this.deps.pool.stop(runId);
     console.log(`[eval] ${evalId} cancelled`);
   }

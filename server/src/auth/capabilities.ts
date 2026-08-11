@@ -138,6 +138,7 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   run: "run:execute",
   pauseRun: "run:execute",
   resumeRun: "run:execute",
+  cancelRun: "run:execute",
   branchRun: "run:execute",
 
   // eval

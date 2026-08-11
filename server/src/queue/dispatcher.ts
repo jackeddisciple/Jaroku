@@ -98,6 +98,10 @@ export class Dispatcher {
   inFlightCount(jobClass: JobClass): Promise<number> {
     return this.backend.inFlightCount(jobClass);
   }
+
+  purgePending(jobClass: JobClass, workspaceId: string, idempotencyKeys: Set<string>): Promise<number> {
+    return this.backend.purgePending(jobClass, workspaceId, idempotencyKeys);
+  }
 }
 
 /** JAROKU_REDIS_URL set -> Redis, so a worker process actually shares state with the

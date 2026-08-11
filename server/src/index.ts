@@ -953,6 +953,7 @@ const relay = new WsRelay({
     else if (cmd.cmd === "discardEdit") void editor.discard(ctx, cmd.proposalId);
     else if (cmd.cmd === "pauseRun") void pauseRun(ctx, cmd.runId);
     else if (cmd.cmd === "resumeRun") void resumeRun(ctx, cmd.runId);
+    else if (cmd.cmd === "cancelRun") void cancelRun(ctx, cmd.runId);
     else if (cmd.cmd === "branchRun") void branchRun(ctx, cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState);
     else if (cmd.cmd === "explain") explainAgent(ctx, cmd);
     else if (MCP_COMMAND_NAMES.has(cmd.cmd)) void handleMcpCommand(ctx, cmd as McpCommand);
@@ -2459,6 +2460,29 @@ async function resumeRun(ctx: TenantContext, runId: string): Promise<void> {
   runWorkspaces.set(runId, ctx);
   relay.broadcastDebug(ctx, { type: "resumed", runId, seqOffset });
   interactivePool.tryStart({ runId, runtimeDir: RUNTIME_DIR, agentId: run.agent_id, env, workspaceId: ctx.workspaceId });
+}
+
+// Kill a run outright — unlike pauseRun, there is nothing left to resume from. Works on an
+// eval job's run id too (harmless: interactivePool.stop() on a run it doesn't hold is a
+// documented no-op), though cancelEval is the normal way to stop a whole eval; this is for
+// addressing one run directly, same as pauseRun/resumeRun already do.
+async function cancelRun(ctx: TenantContext, runId: string): Promise<void> {
+  // Scoped the same way pauseRun is: a run that is not this workspace's simply is not there.
+  const run = await store.getRun(ctx, runId);
+  if (!run) {
+    console.log(`[debug] cancelRun refused — ${runId} is not this workspace's run`);
+    return;
+  }
+  console.log(`[debug] cancel requested for run ${runId}`);
+  clearControl(runId); // no stale pause/resume request outlives a cancel
+  await store.markRunCancelled(ctx, runId);
+  relay.broadcastDebug(ctx, { type: "cancelled", runId });
+  // The exit handler (onBothPools("exit", ...)) does the rest once the process actually
+  // dies: clears runActive/activeRunId if this was the interactive run, and releases its
+  // reservation — the same teardown a normal completion goes through, just triggered here
+  // instead of by the runner finishing on its own.
+  interactivePool.stop(runId);
+  evalPool.stop(runId);
 }
 
 // Fork a NEW run from a parent run's checkpoint at a step's node boundary, optionally with a

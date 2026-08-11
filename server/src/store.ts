@@ -216,6 +216,20 @@ export class TraceStore {
     return rows.map((r) => r.id);
   }
 
+  // A live cancellation (Session 5's cancelRun), not a restart reconciliation — the process is
+  // about to be killed, not already gone, so this always writes rather than only touching rows
+  // a restart found still marked 'running'. A hard kill never reaches the runner's own
+  // run_end (SIGKILL leaves no chance to run its `finally`), so without this the row would
+  // read 'running' forever — the same silence reconcileInterruptedRuns exists to close, just
+  // triggered by a click instead of a restart.
+  async markRunCancelled(ctx: TenantContext, runId: string): Promise<void> {
+    await this.q(ctx).run(
+      `UPDATE runs SET status = 'error', ended_at = ?, error = ?
+        WHERE id = ? AND workspace_id = ? AND status != 'completed'`,
+      [new Date().toISOString(), "cancelled by user", runId, ctx.workspaceId],
+    );
+  }
+
   // The run's current highest seq — the offset a resumed subprocess continues its timeline from.
   async maxSeqForRun(ctx: TenantContext, runId: string): Promise<number> {
     const row = await this.q(ctx).get<{ m: unknown }>(
