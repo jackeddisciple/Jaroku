@@ -7,6 +7,9 @@
 #   docker compose up -d postgres
 #   JAROKU_DB_DRIVER=postgres JAROKU_PG_URL=postgres://jaroku:jaroku@127.0.0.1:5433/jaroku \
 #     npm run dev        # (in server/)
+#
+#   docker compose up -d redis
+#   JAROKU_REDIS_URL=redis://127.0.0.1:6380 npm run dev        # (in server/)
 
 services:
   postgres:
@@ -26,6 +29,19 @@ services:
       # `npm run migrate` against a server still starting up fails in a way that reads like a
       # configuration problem, so the compose file answers the question itself.
       test: ["CMD-SHELL", "pg_isready -U jaroku -d jaroku"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    container_name: jaroku-redis
+    ports:
+      # 6380, not 6379, for the same reason Postgres above is on 5433: a dev queue that
+      # quietly attaches to some other Redis on the machine is a bad afternoon.
+      - "127.0.0.1:6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 2s
       timeout: 3s
       retries: 30

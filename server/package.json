@@ -83,12 +83,14 @@
     "mock:mcp": "tsx fixtures/mcp/mockServer.ts",
     "mock:s3": "tsx fixtures/s3/mockS3.ts",
     "mock:fly": "tsx fixtures/fly/mockFlyApi.ts",
-    "test:fly-sandbox": "tsx src/sandbox/flySandbox.test.ts"
+    "test:fly-sandbox": "tsx src/sandbox/flySandbox.test.ts",
+    "test:redis": "tsx src/queue/redis.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "diff": "^8.0.4",
+    "ioredis": "^6.0.0",
     "pg": "^8.22.0",
     "ws": "^8.18.0"
   },
