@@ -33,16 +33,23 @@ export interface SandboxLimits {
   diskMb: number;
 }
 
-/** Everything one execution needs, independent of where it runs. */
+/**
+ * Everything one execution needs, independent of where it runs.
+ *
+ * `workspaceId`, `env` and `limits` are optional here because the local path — a trusted
+ * developer's own machine, run today exactly as it always has been — has no workspace to scope
+ * a checkpoint thread to on SQLite and enforces no resource ceiling on itself. A hosted
+ * RunSandbox requires all three and refuses to start without them; see flySandbox.ts.
+ */
 export interface SandboxSpec {
   runId: string;
-  workspaceId: string;
+  workspaceId?: string;
   runtimeDir: string;
   /** A generated project under runtime/agents/. Omitted -> the hand-written fixture agent. */
   agentId?: string;
   input?: string;
   /** Secrets and configuration for this run only. Never inherited ambiently on the hosted path. */
-  env: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv;
   limits?: Partial<SandboxLimits>;
 }
 

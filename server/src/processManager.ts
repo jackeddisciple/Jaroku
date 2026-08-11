@@ -1,10 +1,17 @@
-// Process manager (doc §8, 🔴): spawn/kill the Python LangGraph subprocess, read its
-// stdout stream line-by-line, parse each line as a Jaroku trace event. Must survive: non-zero
-// exit, mid-run crash, zombie processes, and partial/garbled lines.
+// The LOCAL implementation of RunSandbox (see sandbox/runSandbox.ts): spawn/kill the Python
+// LangGraph subprocess on THIS machine, read its stdout stream line-by-line, parse each line as
+// a Jaroku trace event. Must survive: non-zero exit, mid-run crash, zombie processes, and
+// partial/garbled lines.
+//
+// This is the trusted-developer's-own-machine path, and per the standing rule it is not deleted
+// or degraded by the sandbox migration — `npm run dev` spawns exactly this, unchanged. A hosted
+// RunSandbox satisfies the same interface from inside a per-run micro-VM with no shared disk;
+// see sandbox/flySandbox.ts.
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { RAILWAY_ENV_KEY } from "./railwayApi.ts";
+import type { RunSandbox, SandboxEvents, SandboxSpec } from "./sandbox/runSandbox.ts";
 import { isTraceEvent, type TraceEvent } from "./types.ts";
 
 // Debug-depth control plane: the runner writes one `@@JAROKU_CTRL@@ {json}` line per node
@@ -21,17 +28,11 @@ export interface AgentRunOptions {
   agentId?: string;
 }
 
-// Typed events emitted by the manager.
-export interface ProcessManagerEvents {
-  event: [TraceEvent]; // a well-formed trace event
-  parseError: [{ line: string; error: string }]; // a stdout line that wasn't valid JSON/event
-  stderr: [string]; // human logs from the agent
-  control: [Record<string, unknown>]; // debug-depth boundary/paused control event (off stdout)
-  exit: [{ code: number | null; signal: NodeJS.Signals | null }];
-  spawnError: [Error];
-}
+/** Accepts both the pool's existing loose options and a full SandboxSpec — the local path
+ *  ignores fields (limits, workspaceId) it has no use enforcing on a developer's own machine. */
+export type LocalRunOptions = AgentRunOptions | SandboxSpec;
 
-export class ProcessManager extends EventEmitter<ProcessManagerEvents> {
+export class LocalSubprocessSandbox extends EventEmitter<SandboxEvents> implements RunSandbox {
   private child: ChildProcessWithoutNullStreams | null = null;
   private stdoutBuf = "";
   private stderrBuf = "";
@@ -40,7 +41,7 @@ export class ProcessManager extends EventEmitter<ProcessManagerEvents> {
     return this.child !== null && this.child.exitCode === null && !this.child.killed;
   }
 
-  start(opts: AgentRunOptions): void {
+  start(opts: LocalRunOptions): void {
     if (this.running) throw new Error("agent already running");
 
     // Generated agents run through jaroku_runner, which owns all trace wiring; the fixture

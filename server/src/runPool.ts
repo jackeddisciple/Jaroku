@@ -23,8 +23,14 @@
 // the wedge it prevents.
 
 import { EventEmitter } from "node:events";
-import { ProcessManager, type AgentRunOptions } from "./processManager.ts";
+import { LocalSubprocessSandbox, type AgentRunOptions } from "./processManager.ts";
+import type { RunSandbox } from "./sandbox/runSandbox.ts";
 import type { TraceEvent } from "./types.ts";
+
+/** Builds the RunSandbox a slot drives. Local by default (see sandbox/runSandbox.ts); a hosted
+ *  kind is injected by the caller once one exists, so the pool never hardcodes which it runs. */
+export type SandboxFactory = () => RunSandbox;
+const defaultSandboxFactory: SandboxFactory = () => new LocalSubprocessSandbox();
 
 export interface PoolRunOptions extends AgentRunOptions {
   /** Server-minted run id, so the caller can address the run before run_start races back. */
@@ -49,7 +55,7 @@ export interface RunPoolEvents {
 
 interface Slot {
   index: number;
-  manager: ProcessManager;
+  manager: RunSandbox;
   runId: string | null;
   timer: NodeJS.Timeout | null;
   timedOut: boolean;
@@ -60,21 +66,25 @@ const INTERACTIVE_SLOT = 0;
 
 export class RunPool extends EventEmitter<RunPoolEvents> {
   private slots: Slot[] = [];
+  private sandbox: SandboxFactory;
 
   /**
    * @param concurrency how many runs may execute at once IN ADDITION to the interactive
    *   one. Kept modest by default: each slot is a Python subprocess with a LangGraph import,
    *   and oversubscribing the machine makes every run slower and its latency numbers — which
    *   the comparison dashboard reports — meaningless.
+   * @param sandbox what a slot actually runs on. Defaults to the local subprocess; a hosted
+   *   RunSandbox is passed in once one exists, so the pool itself never chooses.
    */
-  constructor(concurrency: number) {
+  constructor(concurrency: number, sandbox: SandboxFactory = defaultSandboxFactory) {
     super();
+    this.sandbox = sandbox;
     const total = Math.max(1, concurrency) + 1; // +1 for the reserved interactive slot
     for (let i = 0; i < total; i++) this.slots.push(this.makeSlot(i));
   }
 
   private makeSlot(index: number): Slot {
-    const slot: Slot = { index, manager: new ProcessManager(), runId: null, timer: null, timedOut: false };
+    const slot: Slot = { index, manager: this.sandbox(), runId: null, timer: null, timedOut: false };
 
     // Attribute every event to the run that produced it. Listeners are permanent — the
     // slot's runId at emit time is the attribution, so a slot can be reused safely.
