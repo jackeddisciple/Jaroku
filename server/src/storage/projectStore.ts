@@ -51,9 +51,17 @@ export function sha256Of(content: string | Buffer): string {
   return createHash("sha256").update(typeof content === "string" ? Buffer.from(content, "utf8") : content).digest("hex");
 }
 
-/** {path: {sha256, bytes}} for a set of files. One function, so two callers cannot disagree. */
+/**
+ * {path: {sha256, bytes}} for a set of files. One function, so two callers cannot disagree.
+ *
+ * `Object.create(null)` and not `{}`, because the keys here are file paths a model chose. On a
+ * plain object `out["__proto__"] = entry` is a call to a setter, not a property: the entry is
+ * swallowed, the file drops out of the manifest, and — since publish writes objects from `files`
+ * and readVersion reads them back from the MANIFEST — the version silently loses a file that is
+ * sitting in the store. A prototype-less object has no such key, so a path is only ever a path.
+ */
 export function manifestFor(files: StoredFile[]): VersionManifest {
-  const out: VersionManifest = {};
+  const out: VersionManifest = Object.create(null) as VersionManifest;
   for (const f of files) {
     out[f.path] = { sha256: sha256Of(f.content), bytes: Buffer.byteLength(f.content, "utf8") };
   }

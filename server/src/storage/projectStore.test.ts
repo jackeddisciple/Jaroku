@@ -274,6 +274,35 @@ async function suite(label: string, db: Db): Promise<void> {
     refused = true;
   }
   check(refused, "publishing a traversing path is refused before a single object is written");
+
+  // --- a filename that is a javascript keyword ------------------------------------------
+  //
+  // `__proto__` is a legal filename and an illegal object key in the sense that matters here:
+  // assigning to it on a plain `{}` sets a prototype instead of adding a property. The manifest
+  // is a path-keyed object built from names a model chose, so the file would be written to the
+  // store, left out of the manifest, and thus absent from the version that supposedly holds it.
+  const trap = await agents.upsertFromDisk(ctx, { slug: "trap_bot", display_name: "Trap" });
+  const trapped = await projects.publish(
+    ctx,
+    trap.id,
+    [
+      { path: "agent.py", content: AGENT_PY },
+      { path: "__proto__", content: "# a file, not a prototype\n" },
+      { path: "constructor", content: "# nor a constructor\n" },
+      { path: "tools/__proto__.py", content: "# and not in a subdirectory either\n" },
+    ],
+    { source: "generation", summary: "booby-trapped names" },
+  );
+  check(Object.keys(trapped.manifest).length === 4, `every name reaches the manifest (${Object.keys(trapped.manifest).length})`);
+  const trapRead = await projects.readVersion(ctx, trap.id, trapped.version);
+  check(
+    trapRead.map((f) => f.path).join(",") === "__proto__,agent.py,constructor,tools/__proto__.py",
+    "...and survives the round trip through the database's json",
+  );
+  check(
+    trapRead.find((f) => f.path === "__proto__")?.content === "# a file, not a prototype\n",
+    "...as a file with its own bytes",
+  );
 }
 
 // --- the disk half ---------------------------------------------------------------------
