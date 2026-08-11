@@ -86,16 +86,114 @@ function inIpv4Block(ip: string, block: string, prefix: number): boolean {
   return (ipv4ToInt(ip) & mask) === (ipv4ToInt(block) & mask);
 }
 
-/** True for loopback, link-local, unique-local and the IPv4-mapped form of any denied IPv4. */
+/**
+ * An IPv6 address as its sixteen bytes, or null if it is not one.
+ *
+ * TEXT MATCHING IS NOT ENOUGH, and this function exists because the previous version of this
+ * module tried it. `::ffff:169.254.169.254` and `::ffff:a9fe:a9fe` are the SAME ADDRESS — the
+ * metadata endpoint — written two ways, and a rule that pattern-matches the dotted spelling
+ * admits the hex one. Likewise `fe80::/10` is not "starts with fe80:": `febf::1` is link-local
+ * too. Normalising to bytes first means every rule below is a prefix comparison against the
+ * address itself rather than against one of its spellings.
+ */
+function ipv6ToBytes(ip: string): Uint8Array | null {
+  let text = ip.toLowerCase();
+  const zone = text.indexOf("%"); // fe80::1%eth0 — the scope id is not part of the address
+  if (zone >= 0) text = text.slice(0, zone);
+
+  // A trailing dotted quad (::ffff:1.2.3.4) is rewritten as the two hex groups it stands for,
+  // so the group parser below sees one uniform notation rather than two.
+  const dotted = text.lastIndexOf(":");
+  if (dotted >= 0 && text.slice(dotted + 1).includes(".")) {
+    const quad = text.slice(dotted + 1);
+    if (isIP(quad) !== 4) return null;
+    const [a, b, c, d] = quad.split(".").map(Number) as [number, number, number, number];
+    text = `${text.slice(0, dotted + 1)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+
+  const halves = text.split("::");
+  if (halves.length > 2) return null;
+  const parse = (part: string): number[] | null => {
+    if (part === "") return [];
+    const out: number[] = [];
+    for (const group of part.split(":")) {
+      if (!/^[0-9a-f]{1,4}$/.test(group)) return null;
+      const v = parseInt(group, 16);
+      out.push((v >> 8) & 0xff, v & 0xff);
+    }
+    return out;
+  };
+  const head = parse(halves[0] ?? "");
+  const rest = halves.length === 2 ? parse(halves[1] ?? "") : [];
+  if (head === null || rest === null) return null;
+
+  const fixed = head.length + rest.length;
+  if (fixed > 16) return null;
+  if (halves.length === 1 && fixed !== 16) return null;
+  const gap = halves.length === 2 ? 16 - fixed : 0;
+  return Uint8Array.from([...head, ...new Array(gap).fill(0), ...rest]);
+}
+
+/** Does `bytes` start with `prefix` for the first `bits`? The one comparison every v6 rule below
+ *  is expressed as. */
+function hasPrefix(bytes: Uint8Array, prefix: number[], bits: number): boolean {
+  for (let i = 0; i < Math.floor(bits / 8); i++) if (bytes[i] !== prefix[i]) return false;
+  const spare = bits % 8;
+  if (spare === 0) return true;
+  const mask = (0xff << (8 - spare)) & 0xff;
+  const i = Math.floor(bits / 8);
+  return ((bytes[i]! ^ (prefix[i] ?? 0)) & mask) === 0;
+}
+
+/** IPv6 blocks refused outright, by prefix — the v6 counterpart of DENIED_IPV4_BLOCKS. */
+const DENIED_IPV6_PREFIXES: Array<[number[], number, string]> = [
+  [[0xfe, 0x80], 10, "fe80::/10 link-local"],
+  [[0xfc], 7, "fc00::/7 unique local"],
+  [[0xff], 8, "ff00::/8 multicast"],
+  [[0x20, 0x01, 0x0d, 0xb8], 32, "2001:db8::/32 documentation"],
+  // Teredo tunnels an IPv4 destination inside the address, obfuscated by a bitwise complement.
+  // Rather than unwrap it, refuse the whole block: nothing a sandbox legitimately needs is
+  // reachable only over Teredo.
+  [[0x20, 0x01, 0x00, 0x00], 32, "2001::/32 Teredo"],
+  // NAT64 translates an IPv4 destination into this prefix, at an offset that depends on the
+  // prefix length (RFC 6052). Refusing the whole well-known block is both simpler and safer than
+  // unwrapping four different offsets — nothing a sandbox needs is reachable only over NAT64.
+  [[0x00, 0x64, 0xff, 0x9b], 32, "64:ff9b::/32 NAT64 well-known prefix"],
+];
+
+/**
+ * Prefixes that CARRY AN IPv4 ADDRESS in their last four bytes. Each is unwrapped and re-checked
+ * against the IPv4 block list, so the v4 rules cannot be walked around by wearing a v6 suit —
+ * which is exactly what `::ffff:a9fe:a9fe` is.
+ */
+const IPV4_BEARING_PREFIXES: Array<[number[], number]> = [
+  [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff], 96], // ::ffff:0:0/96 — IPv4-mapped
+  [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 96], // ::/96 — the deprecated IPv4-compatible form
+];
+
+function embeddedIpv4(bytes: Uint8Array, at: number): string {
+  return `${bytes[at]}.${bytes[at + 1]}.${bytes[at + 2]}.${bytes[at + 3]}`;
+}
+
+/** True for loopback, link-local, unique-local, and any denied IPv4 smuggled inside a v6 form. */
 function isDeniedIpv6(ip: string): boolean {
-  const lower = ip.toLowerCase();
-  if (lower === "::1" || lower === "::") return true;
-  if (lower.startsWith("fe80:")) return true; // link-local
-  if (/^f[cd][0-9a-f]{2}:/.test(lower)) return true; // fc00::/7 unique local
-  // ::ffff:a.b.c.d — an IPv4 address wearing a v6 suit. Unwrap and re-check, or the v4 rules
-  // above are a fence with a gate in it.
-  const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return isDeniedIpv4(mapped[1]!);
+  const bytes = ipv6ToBytes(ip);
+  if (!bytes) return true; // unparseable — refuse rather than guess
+
+  const allZero = bytes.every((b) => b === 0);
+  if (allZero) return true; // ::
+  if (hasPrefix(bytes, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], 128)) return true; // ::1
+
+  for (const [prefix, bits] of DENIED_IPV6_PREFIXES) {
+    if (hasPrefix(bytes, prefix, bits)) return true;
+  }
+
+  for (const [prefix, bits] of IPV4_BEARING_PREFIXES) {
+    if (hasPrefix(bytes, prefix, bits) && isDeniedIpv4(embeddedIpv4(bytes, 12))) return true;
+  }
+  // 6to4: 2002:V4ADDR::/48 carries its gateway's IPv4 in bytes 2-5 rather than the last four.
+  if (hasPrefix(bytes, [0x20, 0x02], 16) && isDeniedIpv4(embeddedIpv4(bytes, 2))) return true;
+
   return false;
 }
 
@@ -131,6 +229,22 @@ export const realResolver: Resolver = async (host) => {
  * next lookup, and pinning is supposed to remove exactly that non-determinism.
  */
 export async function resolveAndPin(host: string, resolver: Resolver = realResolver): Promise<string[]> {
+  // A host that IS an address needs no lookup, and must not be sent to one: dns.resolve4() on a
+  // literal refuses it as "not a hostname", which the catch below turns into "did not resolve to
+  // any address". That read as a policy refusal, so a control-plane URL, an object-store
+  // endpoint or a DATABASE_URL written as a bare public IP — all ordinary — could not be granted
+  // to a sandbox at all. It is still put through the same denial check; it just skips the step
+  // that had nothing to answer.
+  const literal = isIP(host) ? host : isIP(host.replace(/^\[|\]$/g, "")) ? host.replace(/^\[|\]$/g, "") : null;
+  if (literal) {
+    if (isDeniedAddress(literal)) {
+      throw new EgressPolicyError(
+        `${JSON.stringify(host)} is a private/link-local/reserved address and cannot be granted to a sandbox`,
+      );
+    }
+    return [literal];
+  }
+
   let records: string[];
   try {
     const { v4, v6 } = await resolver(host);
