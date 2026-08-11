@@ -378,7 +378,8 @@ const SCOPED_API: Record<string, string[]> = {
   // a WHERE on this table, and a missing join would be invisible in a single-tenant test.
   AgentRepository: [
     "list", "bySlug", "byId", "create", "upsertFromDisk", "syncFromDisk", "addVersion",
-    "plannedNextVersion", "version", "versions", "undoVersion", "editCounts",
+    "plannedNextVersion", "reserveVersion", "promoteVersion", "version", "versions",
+    "undoVersion", "editCounts",
   ],
   // Session 2. These decide who can see a workspace AT ALL, so a cross-tenant bug in any of
   // them is worse than one in the stores above — it does not leak a row, it hands over the
@@ -672,6 +673,24 @@ async function remainder(db: Db): Promise<void> {
   check((await refs.get(B.ctx, "B_ONLY_TOKEN"))?.last_used_at === null, "nor record a use of it");
   await refs.forget(A.ctx, "B_DECLARED_TOKEN");
   check((await refs.get(B.ctx, "B_DECLARED_TOKEN")) !== undefined, "nor forget one B declared");
+
+  // reserve/promote are the two halves of a publish. Neither may reach an agent of B's — the
+  // first would write a version row against it, the second would move its live pointer.
+  let reserveRefused = false;
+  try {
+    await agents.reserveVersion(A.ctx, theirAgent.id, { "x.py": { sha256: "x", bytes: 1 } });
+  } catch {
+    reserveRefused = true;
+  }
+  check(reserveRefused, "reserveVersion refuses an agent uuid from B");
+  let promoteRefused = false;
+  try {
+    await agents.promoteVersion(A.ctx, theirAgent.id, 1);
+  } catch {
+    promoteRefused = true;
+  }
+  check(promoteRefused, "promoteVersion cannot move B's pointer");
+  check((await agents.bySlug(B.ctx, "support_bot"))!.current_version === 2, "...which is where B left it");
 
   let plannedRefused = false;
   try {

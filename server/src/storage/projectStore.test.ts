@@ -237,6 +237,35 @@ async function suite(label: string, db: Db): Promise<void> {
   }
   check(reportedMissing, "a manifest naming an object that is gone reports it rather than returning a short project");
 
+  // --- two publishes at once -------------------------------------------------------------
+  //
+  // The failure this defends against corrupted an agent outright. Both publishes predicted the
+  // same version number, both wrote objects to it, and the loser — which had already bumped the
+  // pointer — deleted the winner's objects on its way out, leaving `current_version` on a
+  // version with no files.
+  const racer = await agents.upsertFromDisk(ctx, { slug: "racer" });
+  const raced = await Promise.allSettled([
+    projects.publish(ctx, racer.id, [{ path: "agent.py", content: "# one\n" }], { source: "edit", summary: "one" }),
+    projects.publish(ctx, racer.id, [{ path: "agent.py", content: "# two\n" }], { source: "edit", summary: "two" }),
+  ]);
+  check(raced.every((r) => r.status === "fulfilled"), "two concurrent publishes both succeed");
+  const numbers = raced.map((r) => (r.status === "fulfilled" ? r.value.version : -1));
+  check(new Set(numbers).size === 2, `...taking different version numbers (${numbers.join(", ")})`);
+
+  const racedAgent = (await agents.bySlug(ctx, "racer"))!;
+  check(numbers.includes(racedAgent.current_version), "the pointer is on one of them");
+  const racedFiles = await projects.readVersion(ctx, racer.id, racedAgent.current_version);
+  check(racedFiles.length === 1, "...and that version's objects are there");
+  const racedRow = await agents.version(ctx, racer.id, racedAgent.current_version);
+  check(
+    racedFiles[0]!.content === `# ${racedRow!.summary}\n`,
+    "...and are the ones its own manifest describes, not the other publish's",
+  );
+  // The loser is a complete version too — nothing deleted it, and nothing half-wrote it.
+  for (const v of numbers) {
+    check((await projects.readVersion(ctx, racer.id, v)).length === 1, `v${v} is readable in full`);
+  }
+
   // --- refusing a path that should never be a key ---------------------------------------
   let refused = false;
   try {

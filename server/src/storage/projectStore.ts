@@ -33,7 +33,7 @@ import type {
 } from "../db/repositories/agents.ts";
 import type { TenantContext } from "../db/tenant.ts";
 import {
-  agentStagingKey, agentStagingPrefix, agentVersionKey, agentVersionPrefix, safeObjectPath,
+  agentStagingKey, agentStagingPrefix, agentVersionKey, safeObjectPath,
 } from "./keys.ts";
 import { ObjectNotFound, type ObjectStore } from "./objectStore.ts";
 import type { Presigned } from "./presign.ts";
@@ -74,9 +74,23 @@ export class ProjectStore {
   /**
    * Write `files` as a new immutable version and make it current.
    *
-   * Objects first, pointer second, and the order is the whole safety property — see the note at
-   * the top of this file. A failure part-way through leaves objects at keys no row points at,
-   * which is garbage a retention sweep collects and is not a corrupted agent.
+   * THREE STEPS, AND THE ORDER IS THE SAFETY PROPERTY.
+   *
+   *   1. RESERVE the version number, as a row that is not current yet.
+   *   2. WRITE the objects under it. They are at keys nothing refers to, and are never
+   *      rewritten afterwards.
+   *   3. PROMOTE: one UPDATE moves `agents.current_version`.
+   *
+   * A reader arriving at any point sees the previous version whole, which is what the directory
+   * rename used to promise. A crash between 1 and 3 leaves an unpromoted row and some objects —
+   * garbage a retention sweep collects, and not a corrupted agent.
+   *
+   * THIS REPLACED A PREDICT-AND-CHECK VERSION THAT COULD CORRUPT AN AGENT. It read the next
+   * number, wrote objects there, and then compared what the insert actually gave it. Two
+   * concurrent publishes both predicted N and both wrote to N's prefix; the one that lost had
+   * ALREADY bumped the pointer, and its cleanup then deleted the winner's objects — leaving
+   * `current_version` on a version with no files at all. Reserving first removes the guess:
+   * two callers get two numbers, each writes its own objects, and nothing deletes anything.
    */
   async publish(
     ctx: TenantContext,
@@ -90,31 +104,14 @@ export class ProjectStore {
       }
     }
 
-    // The version number is decided by the repository, inside its transaction, so two
-    // concurrent publishes cannot pick the same one. Which means the objects have to be written
-    // to a version whose number is not known yet — so they go to the NEXT number, read here, and
-    // the insert refuses if somebody else took it. The refusal is the correct outcome: an edit
-    // and a generation racing on one agent is a case the editor already refuses at a higher
-    // level (`inFlight`), and losing that race must not produce a version pointing at another
-    // publish's bytes.
     const manifest = manifestFor(files);
-    const nextVersion = await this.agents.plannedNextVersion(ctx, agentId);
+    const version = await this.agents.reserveVersion(ctx, agentId, manifest, meta);
     for (const f of files) {
-      await this.objects.put(agentVersionKey(ctx.workspaceId, agentId, nextVersion, f.path), f.content, {
+      await this.objects.put(agentVersionKey(ctx.workspaceId, agentId, version, f.path), f.content, {
         contentType: contentTypeFor(f.path),
       });
     }
-
-    const version = await this.agents.addVersion(ctx, agentId, manifest, meta);
-    if (version !== nextVersion) {
-      // Somebody published between the two. The objects just written belong to a version number
-      // that is now somebody else's, so they are removed rather than left to be read as part of
-      // a version they were not built for.
-      await this.objects.deletePrefix(agentVersionPrefix(ctx.workspaceId, agentId, nextVersion));
-      throw new Error(
-        `another publish for this agent landed first (expected v${nextVersion}, got v${version}) — try again`,
-      );
-    }
+    await this.agents.promoteVersion(ctx, agentId, version);
     return { version, manifest };
   }
 

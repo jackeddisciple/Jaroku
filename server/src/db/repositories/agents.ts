@@ -280,42 +280,74 @@ export class AgentRepository {
     manifest: VersionManifest,
     meta: VersionMeta = {},
   ): Promise<number> {
-    return this.db.scoped(ctx.workspaceId, async (tx) => {
-      // The agent is re-read inside the transaction rather than trusted from a caller's earlier
-      // lookup: two edits applied at once would otherwise both compute the same "next" and the
-      // second would violate the (agent_id, version) unique constraint — which is the right
-      // outcome, but only because this read is inside the same transaction as the write.
-      const row = await tx.get<{ current_version: unknown }>(
-        `SELECT current_version FROM agents WHERE id = ? AND workspace_id = ?`,
-        [agentId, ctx.workspaceId],
-      );
-      if (!row) throw new Error(`no such agent in this workspace: ${agentId}`);
-      // The highest version ever written, not the current one. After an undo, `current_version`
-      // points backwards; a new edit has to land ABOVE everything that exists or it would
-      // collide with the version it is superseding.
-      const top = await tx.get<{ top: unknown }>(
-        `SELECT MAX(version) AS top FROM agent_versions WHERE agent_id = ?`,
-        [agentId],
-      );
-      const next = nextVersionNumber(asInt(row.current_version, 0), asInt(top?.top, 0));
-      const totalBytes = Object.values(manifest).reduce((n, f) => n + f.bytes, 0);
-      await tx.run(
-        `INSERT INTO agent_versions (id, agent_id, version, manifest, source, instruction,
-           summary, file_stats, total_bytes, created_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          randomUUID(), agentId, next, JSON.stringify(manifest), meta.source ?? "import",
-          meta.instruction ?? null, meta.summary ?? null, JSON.stringify(meta.fileStats ?? []),
-          totalBytes, ctx.actorUserId, new Date().toISOString(),
-        ],
-      );
-      await tx.run(`UPDATE agents SET current_version = ? WHERE id = ? AND workspace_id = ?`, [
-        next,
-        agentId,
-        ctx.workspaceId,
-      ]);
-      return next;
-    });
+    const version = await this.reserveVersion(ctx, agentId, manifest, meta);
+    await this.promoteVersion(ctx, agentId, version);
+    return version;
+  }
+
+  /**
+   * Write a version row WITHOUT making it current.
+   *
+   * The first half of a publish, and the half that has to happen before the objects exist —
+   * because the objects are written under the version's own number and nothing can know that
+   * number until a row claims it.
+   *
+   * PREDICTING THE NUMBER AND CHECKING AFTERWARDS DOES NOT WORK, which is what this replaced.
+   * Two publishes both predicted N, both wrote objects to N's prefix, and then one of them
+   * found it had been given N+1 — at which point it had already bumped the pointer to a
+   * version whose objects were the other publish's, and its cleanup deleted them. The agent was
+   * left pointing at a version with no files at all.
+   *
+   * Reserving first fixes it by construction: two callers get two numbers, each writes its own
+   * objects, and the pointer moves only after the bytes exist. The retry is for Postgres, where
+   * two transactions genuinely run in parallel and can compute the same number — one insert
+   * wins the unique constraint and the other simply asks again.
+   */
+  async reserveVersion(
+    ctx: TenantContext,
+    agentId: string,
+    manifest: VersionManifest,
+    meta: VersionMeta = {},
+  ): Promise<number> {
+    const totalBytes = Object.values(manifest).reduce((n, f) => n + f.bytes, 0);
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const next = await this.plannedNextVersion(ctx, agentId);
+      try {
+        await this.q(ctx).run(
+          `INSERT INTO agent_versions (id, agent_id, version, manifest, source, instruction,
+             summary, file_stats, total_bytes, created_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            randomUUID(), agentId, next, JSON.stringify(manifest), meta.source ?? "import",
+            meta.instruction ?? null, meta.summary ?? null, JSON.stringify(meta.fileStats ?? []),
+            totalBytes, ctx.actorUserId, new Date().toISOString(),
+          ],
+        );
+        return next;
+      } catch (err) {
+        // The (agent_id, version) unique constraint: somebody else took this number between the
+        // read and the insert. Ask again — the loop is bounded so a genuinely broken insert
+        // surfaces rather than spinning.
+        lastError = err;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  }
+
+  /**
+   * Make a reserved version current.
+   *
+   * The second half, and the only statement that moves what anybody reads. It runs after the
+   * objects are in place, so `agents.current_version` never points at a version whose files do
+   * not exist — the invariant the predict-and-check version could not hold.
+   */
+  async promoteVersion(ctx: TenantContext, agentId: string, version: number): Promise<void> {
+    const result = await this.q(ctx).run(
+      `UPDATE agents SET current_version = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+      [version, agentId, ctx.workspaceId],
+    );
+    if (result.changes === 0) throw new Error(`no such agent in this workspace: ${agentId}`);
   }
 
   /**
