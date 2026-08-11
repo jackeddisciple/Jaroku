@@ -96,6 +96,19 @@ interface PendingProposal {
   /** The slug, for the events and for the local materialisation. A display concern. */
   agentId: string;
   stagingId: string;
+  /**
+   * The version the staged copy was built from.
+   *
+   * A proposal is the current version's files with the model's applied on top, and it is staged
+   * once and applied later — an unbounded window in which anything else may publish. A deploy
+   * does exactly that: it adds four artifacts and moves the pointer. Applying afterwards would
+   * publish a copy assembled from the older version and silently drop them.
+   *
+   * So the base is recorded and checked at apply time. Refusing is the only honest answer: the
+   * diff the user approved was against files that are no longer current, and rebasing it
+   * silently would be applying an edit nobody reviewed.
+   */
+  baseVersion: number;
   instruction: string;
   summary: string;
   files: FileDiff[];
@@ -341,7 +354,8 @@ export class Editor extends EventEmitter<EditorEvents> {
 
       const proposalId = randomUUID();
       this.pending.set(proposalId, {
-        proposalId, ctx, agentUuid: agent.id, agentId, stagingId, instruction, summary, files,
+        proposalId, ctx, agentUuid: agent.id, agentId, stagingId,
+        baseVersion: agent.current_version, instruction, summary, files,
       });
       this.emit("proposal", { proposalId, agentId, instruction, summary, files, usage });
     } catch (err) {
@@ -368,6 +382,28 @@ export class Editor extends EventEmitter<EditorEvents> {
     const refusal = this.opts.canMutate?.();
     if (refusal) {
       this.fail({ message: refusal, proposalId, agentId: rec.agentId });
+      return;
+    }
+
+    // THE VERSION THIS WAS DIFFED AGAINST MUST STILL BE THE LIVE ONE. `canMutate` covers a run
+    // reading the files; it does not cover something else PUBLISHING, and a deploy does exactly
+    // that. Applying a copy assembled from an older version would drop whatever landed in
+    // between — silently, because the staged copy is complete and looks perfectly valid.
+    const agent = await this.opts.agents.bySlug(rec.ctx, rec.agentId);
+    if (!agent) {
+      this.fail({ message: `agent "${rec.agentId}" was not found`, proposalId, agentId: rec.agentId });
+      return;
+    }
+    if (agent.current_version !== rec.baseVersion) {
+      await this.discard(proposalId);
+      this.fail({
+        message:
+          `this agent changed while the proposal was open (it was v${rec.baseVersion}, it is now ` +
+          `v${agent.current_version}), so the diff you reviewed is no longer against what is live. ` +
+          `Ask for the edit again.`,
+        proposalId,
+        agentId: rec.agentId,
+      });
       return;
     }
 

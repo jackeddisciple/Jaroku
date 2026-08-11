@@ -300,6 +300,45 @@ console.log("\nanother workspace");
   );
 }
 
+// --- 8. a proposal whose base moved underneath it --------------------------------------------
+//
+// The window between propose and apply is unbounded, and something else can publish inside it —
+// a deploy does exactly that, adding four artifacts and moving the pointer. Applying a copy
+// assembled from the older version would drop them, silently, because the staged copy is
+// complete and validates perfectly well.
+console.log("\na proposal whose base version moved");
+{
+  process.env.JAROKU_EDIT_FIXTURE = join(FIXTURES, "edit-prompt-tweak.txt");
+  const out = await propose(editor, A, "support_bot", "warmer again");
+  check(out.kind === "proposal", "a proposal is made", out.kind === "error" ? out.message : "");
+  if (out.kind !== "proposal") throw new Error("cannot continue");
+
+  const before = (await agents.bySlug(A, "support_bot"))!.current_version;
+  const baseFiles = await projects.readVersion(A, agent.id, before);
+  await projects.publish(A, agent.id, [...baseFiles, { path: "serve.py", content: "# a deploy wrote this\n" }], {
+    source: "deploy",
+    summary: "deploy artifacts",
+  });
+  const moved = (await agents.bySlug(A, "support_bot"))!.current_version;
+  check(moved > before, `something else published in between (v${before} -> v${moved})`);
+
+  const applied = await apply(editor, out.proposalId);
+  check(applied.error !== undefined, "applying the stale proposal is refused");
+  check(
+    (applied.error ?? "").includes(`v${before}`) && (applied.error ?? "").includes(`v${moved}`),
+    "...naming both versions, so the message says what changed",
+    applied.error,
+  );
+  const now = (await agents.bySlug(A, "support_bot"))!;
+  check(now.current_version === moved, "...leaving the pointer where the other publish put it");
+  const files = await projects.readVersion(A, agent.id, now.current_version);
+  check(files.some((f) => f.path === "serve.py"), "...and the file it added still there");
+  check(
+    (await objects.list(workspacePrefix(A.workspaceId))).filter((o) => o.key.includes("/staging/")).length === 0,
+    "...with the refused proposal's staging cleared",
+  );
+}
+
 delete process.env.JAROKU_EDIT_FIXTURE;
 await db.close();
 for (const d of scratch) rmSync(d, { recursive: true, force: true });
