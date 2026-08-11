@@ -45,6 +45,7 @@
     "test:plan": "tsx src/planProtocol.test.ts && tsx src/planOwnership.test.ts",
     "test:pricing": "tsx src/pricing.test.ts",
     "test:pool": "tsx src/runPool.test.ts",
+    "test:sandbox-image": "tsx src/sandbox/image.test.ts",
     "test:aggregate": "tsx src/evalAggregate.test.ts",
     "test:retry": "tsx src/evalRetry.test.ts && tsx src/evalOwnership.test.ts",
     "test:judge": "tsx src/judge/rubric.test.ts",
