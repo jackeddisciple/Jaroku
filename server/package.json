@@ -93,6 +93,7 @@
     "test:chaos": "tsx src/queue/chaos.test.ts",
     "test:event-bridge": "tsx src/queue/eventBridge.test.ts",
     "test:eval-off-trace": "tsx src/queue/evalOffTrace.test.ts",
+    "loadtest:queue": "tsx src/queue/loadTest.ts",
     "worker": "tsx src/worker.ts"
   },
   "dependencies": {
