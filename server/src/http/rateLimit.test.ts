@@ -186,14 +186,26 @@ await suite("MemoryRateLimiter", (now) => new MemoryRateLimiter(now));
 await suite("RedisRateLimiter (mock Redis, real Lua)", (now) => new RedisRateLimiter(new MockRedis() as never, now));
 
 if (redisUrlFromEnv()) {
-  const client = openRedis();
-  if (await pingRedis(client)) {
+  const probe = openRedis();
+  if (await pingRedis(probe)) {
     // A real server, with a namespace of its own so a developer's queue keys are untouched.
-    await suite("RedisRateLimiter (real Redis)", (now) => new RedisRateLimiter(client, now));
+    //
+    // ONE CLIENT PER LIMITER, and the shared one that used to be here is why. `suite` builds
+    // three limiters — the main one and a fresh one for each of the last two sections — and a
+    // RedisRateLimiter QUITS ITS CLIENT in `close()`. That is correct and is what production
+    // gives it: `openRateLimiter()` calls `openRedis()` itself, so the limiter owns the
+    // connection it closes. Handing all three the same client meant the first `close()` shut
+    // the socket underneath the other two, and the next `take()` wrote to it.
+    //
+    // The failure was not an assertion. Every check in the real-Redis pass printed `ok`, and
+    // then ioredis raised `write EPIPE` from an error event with no handler on it, which ends
+    // the process — so a green suite exited 1 and the log's last useful line was a passing
+    // check. Only reachable with a real Redis, so it never happened on a machine without one.
+    await suite("RedisRateLimiter (real Redis)", (now) => new RedisRateLimiter(openRedis(), now));
   } else {
     console.log("\nSKIPPED: JAROKU_REDIS_URL is set but nothing answered");
   }
-  await client.quit().catch(() => {});
+  await probe.quit().catch(() => {});
 } else {
   console.log("\n(no JAROKU_REDIS_URL — the real-Redis pass was skipped; the mock ran the same Lua)");
 }
