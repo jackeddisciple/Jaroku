@@ -67,10 +67,30 @@ const PY = existsSync(join(RUNTIME_DIR, ".venv/bin/python"))
   ? join(RUNTIME_DIR, ".venv/bin/python")
   : "python3";
 
+// LOADED INTO A STAND-IN PACKAGE rather than imported, and the import is why this suite could
+// not run. `from jaroku_interceptor.pricing import cost_for` executes the package's
+// __init__.py first, which imports `.callback`, which imports langchain_core — so comparing two
+// arithmetic implementations required the entire hosted extra to be installed. It is not
+// installed in CI and it is not installed on a machine that has only ever run `npm run dev`,
+// which is most of them; the suite reported `could not run the Python reader (python3)` and the
+// parity it exists to check went unchecked.
+//
+// `pricing.py` imports json, dataclasses, pathlib and typing. Nothing else. So the package is
+// faked — an empty module carrying a __path__, registered under the real name — and the module
+// is loaded into it by path. __init__.py never runs, `__file__` stays where it belongs so the
+// price table beside it still resolves, and a relative import would still work if this module
+// ever grows one. Same shape as the loader in checkpoints/threads.test.ts, for the same reason.
 const script = `
-import json, sys
-sys.path.insert(0, ${JSON.stringify(RUNTIME_DIR)})
-from jaroku_interceptor.pricing import cost_for
+import importlib.util, json, os, sys, types
+PKG = os.path.join(${JSON.stringify(RUNTIME_DIR)}, "jaroku_interceptor")
+pkg = types.ModuleType("jaroku_interceptor")
+pkg.__path__ = [PKG]
+sys.modules["jaroku_interceptor"] = pkg
+spec = importlib.util.spec_from_file_location("jaroku_interceptor.pricing", os.path.join(PKG, "pricing.py"))
+mod = importlib.util.module_from_spec(spec)
+sys.modules["jaroku_interceptor.pricing"] = mod
+spec.loader.exec_module(mod)
+cost_for = mod.cost_for
 out = []
 for c in json.load(sys.stdin):
     v = cost_for(
