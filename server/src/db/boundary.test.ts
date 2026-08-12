@@ -284,7 +284,16 @@ const UNSCOPED_OK: Record<string, string> = {
         const args = callArguments(text, m.index + m[0].length - 1);
         const table = [...policied].find((t) => new RegExp(`\\b${t}\\b`).test(args));
         if (!table) continue;
-        const name = relative(SRC, file);
+        // FORWARD SLASHES, ON EVERY PLATFORM. `relative` returns the host separator, and the
+        // excuse lookup below takes a basename by splitting on "/" — which on Windows never
+        // splits, so the whole path is compared against a key that is a filename and no
+        // exemption for a file in a SUBDIRECTORY ever matched. `evalStore.ts` and
+        // `deployStore.ts` are the two entries this map had, both sit directly in src/, and both
+        // therefore worked by accident. The failure is one-directional and quiet in the worse
+        // direction: a Windows developer sees excused statements reported as violations and
+        // cannot tell them from real ones, so the rule reads as noise on the machine most likely
+        // to be running it before a push.
+        const name = relative(SRC, file).replaceAll(sep, "/");
         const excused = Object.keys(UNSCOPED_OK).find(
           (k) => k.startsWith(`${name.split("/").pop()}:`) && args.includes(k.slice(k.indexOf(":") + 1)),
         );
