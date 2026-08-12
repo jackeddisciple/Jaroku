@@ -218,15 +218,42 @@ try {
     wrongly.length === 0,
     `audit_log and workspace_members stay policy-free (${wrongly.join(", ") || "correct"})`,
   );
+} catch (err) {
+  // A THROW IS A FAILURE, NOT A CRASH.
+  //
+  // Every assertion here goes through `check`, which counts and keeps going, so anything that
+  // escapes to this point is a statement that could not run at all — a missing table, a role
+  // that does not exist, a connection that went away. Left to propagate it exits with a stack
+  // and no test output at all, and worse, it hands the `finally` below the chance to throw over
+  // it: for one CI run the reported error was `relation "steps" does not exist` from the CLEANUP
+  // delete, while the actual first failure was the same missing schema six statements earlier.
+  // Recorded as a failure with its stack, it stays the last thing in the log and the exit code
+  // is still 1.
+  failures++;
+  console.log(`  FAIL the suite could not finish — ${(err as Error).stack ?? String(err)}`);
 } finally {
+  // CLEANUP REPORTS, IT DOES NOT REPLACE. Each delete is on its own so one impossible statement
+  // does not skip the rest, and a cleanup that fails is counted rather than thrown — the run
+  // that just failed has a reason, and this is not it.
+  const tidy = async (what: string, fn: () => Promise<unknown>): Promise<void> => {
+    try {
+      await fn();
+    } catch (err) {
+      failures++;
+      console.log(`  FAIL cleanup left ${what} behind — ${(err as Error).message}`);
+    }
+  };
   // Owner + scope, because the owner is not exempt.
   for (const [ws, id] of [[A, runA], [B, runB]] as const) {
-    await db.scoped(ws, async (tx) => {
-      await tx.run(`DELETE FROM steps WHERE run_id = ?`, [id]);
-      await tx.run(`DELETE FROM runs WHERE id = ?`, [id]);
-    });
+    await tidy(`the trace for run ${id.slice(0, 8)}`, () =>
+      db.scoped(ws, async (tx) => {
+        await tx.run(`DELETE FROM steps WHERE run_id = ?`, [id]);
+        await tx.run(`DELETE FROM runs WHERE id = ?`, [id]);
+      }));
   }
-  await db.run(`DELETE FROM workspaces WHERE id IN (?, ?)`, [A, B]);
+  await tidy("two workspaces", () => db.run(`DELETE FROM workspaces WHERE id IN (?, ?)`, [A, B]));
+  // Unguarded on purpose: an open pool keeps the process alive, so this has to run even if
+  // everything above it went wrong.
   await db.close();
 }
 
