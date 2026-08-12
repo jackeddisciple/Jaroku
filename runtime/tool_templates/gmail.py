@@ -3,9 +3,25 @@
 Reviewed template. Copied byte-for-byte into generated projects; the builder model is shown
 only the signatures and may not rewrite it.
 
-Auth: OAuth2 with a pre-obtained refresh token, supplied via the environment. Jaroku does
-not run the interactive consent flow (that arrives later with the secrets manager) — the
-user obtains a refresh token once, out of band, and pastes it into runtime/.env.
+Auth: OAuth2, by either of two routes, and the template does not care which.
+
+    GMAIL_ACCESS_TOKEN   a short-lived access token, already obtained. What a hosted run
+                         gets: Jaroku owns the OAuth app, the user granted it access by
+                         clicking Connect, and the control plane injects an access token
+                         with a lifetime a little longer than the run's own.
+    GMAIL_CLIENT_ID      the pre-obtained refresh token, supplied by hand. What a local
+    GMAIL_CLIENT_SECRET  install and an exported project use: the user obtains a refresh
+    GMAIL_REFRESH_TOKEN  token once, out of band, and pastes all three into runtime/.env.
+
+The access token is preferred when present, and this is the whole of the difference. A
+REFRESH token is a permanent grant to somebody's mailbox; an ACCESS token is an hour. What
+runs here is model-written Python responding to a stranger's prompt, so hosted Jaroku hands
+it the short half and keeps the permanent one in its vault, on the control plane, where the
+sandbox cannot reach it. Locally there is no vault and no sandbox — the user owns the
+machine, the app and the mailbox alike — so the refresh-token path stays exactly as it was.
+
+Neither route changes the contract: both are read from os.environ, and a project copied out
+of Jaroku runs standalone against a hand-written .env precisely as it always has.
 
 Scopes requested are the narrowest that support these two tools:
     gmail.readonly   read messages
@@ -45,6 +61,17 @@ from email.message import EmailMessage
 from langchain_core.tools import tool
 
 REQUIRED_ENV = ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"]
+ACCESS_TOKEN_ENV = "GMAIL_ACCESS_TOKEN"
+
+# Names that ALSO configure this connector, without being required for the hand-configured
+# route. `REQUIRED_ENV` stays exactly what it was — it is what `.env.example` is built from and
+# what check_catalog() compares against the catalog — and this is the second door.
+#
+# It exists so `check_failures_raise()` strips it too. That check runs with the connector's
+# variables removed and asserts every tool RAISES rather than returning its own error text as if
+# it were an answer; a second way to be configured that the check did not know about would make
+# it pass on a machine where a hosted token happened to be exported.
+OPTIONAL_ENV = [ACCESS_TOKEN_ENV]
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -59,26 +86,34 @@ _MISSING_DEPS = (
 )
 
 
-def _service():
-    """Build an authorized Gmail client, or raise RuntimeError with an actionable message.
+def _credentials():
+    """Build Gmail credentials from whichever of the two routes is configured.
 
-    Credentials are constructed with no access token: google-auth exchanges the refresh
-    token on first use and keeps it fresh. Secret values are never logged or returned.
+    The access token wins when it is there. It arrives from a host that already did the
+    consent dance and already holds the refresh token, so there is nothing here to refresh
+    with and nothing here that should be able to: google-auth is handed a bearer token and
+    no refresh material, which is precisely the reduced authority intended.
+
+    Otherwise the refresh-token triple, exactly as before — constructed with no access
+    token, so google-auth exchanges the refresh token on first use and keeps it fresh.
+
+    Secret values are never logged or returned on either path.
     """
+    from google.oauth2.credentials import Credentials
+
+    access_token = os.environ.get(ACCESS_TOKEN_ENV)
+    if access_token:
+        return Credentials(token=access_token, scopes=SCOPES)
+
     missing = [name for name in REQUIRED_ENV if not os.environ.get(name)]
     if missing:
         raise RuntimeError(
-            f"Gmail is not configured: {', '.join(missing)} not set in the environment. "
-            "Add them to runtime/.env."
+            f"Gmail is not configured: neither {ACCESS_TOKEN_ENV} nor "
+            f"{', '.join(missing)} is set in the environment. Connect Gmail in Jaroku, or "
+            "add the client id, client secret and refresh token to runtime/.env."
         )
 
-    try:
-        from google.oauth2.credentials import Credentials
-        from googleapiclient.discovery import build
-    except ImportError as exc:
-        raise RuntimeError(_MISSING_DEPS) from exc
-
-    creds = Credentials(
+    return Credentials(
         token=None,
         refresh_token=os.environ["GMAIL_REFRESH_TOKEN"],
         client_id=os.environ["GMAIL_CLIENT_ID"],
@@ -86,6 +121,20 @@ def _service():
         token_uri=TOKEN_URI,
         scopes=SCOPES,
     )
+
+
+def _service():
+    """Build an authorized Gmail client, or raise RuntimeError with an actionable message."""
+    try:
+        from googleapiclient.discovery import build
+    except ImportError as exc:
+        raise RuntimeError(_MISSING_DEPS) from exc
+
+    try:
+        creds = _credentials()
+    except ImportError as exc:
+        raise RuntimeError(_MISSING_DEPS) from exc
+
     return build("gmail", "v1", credentials=creds, cache_discovery=False)
 
 

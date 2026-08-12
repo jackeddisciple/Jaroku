@@ -87,6 +87,7 @@
     "test:oauth-google": "tsx src/oauth/google.test.ts",
     "test:oauth-slack": "tsx src/oauth/slack.test.ts",
     "test:oauth-refresh": "tsx src/oauth/refresh.test.ts",
+    "test:oauth-injection": "tsx src/oauth/injection.test.ts",
     "test:providers": "tsx src/providers.test.ts",
     "test:deploy-artifacts": "tsx src/deployArtifacts.test.ts",
     "test:deploy-secrets": "tsx src/deploySecrets.test.ts",

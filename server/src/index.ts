@@ -75,6 +75,13 @@ import { McpRegistry } from "./mcpRegistry.ts";
 import { fileCredentialWriter } from "./envWriter.ts";
 import { openSecretStore } from "./secrets/open.ts";
 import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
+import { OAuthRepository } from "./db/repositories/oauth.ts";
+import { OAuthService } from "./oauth/service.ts";
+import { TokenRefresher } from "./oauth/refresh.ts";
+import { resolveClientConfig } from "./oauth/provider.ts";
+import { GOOGLE } from "./oauth/google.ts";
+import { SLACK } from "./oauth/slack.ts";
+import { connectorRunEnv } from "./oauth/injection.ts";
 import { BillingRepository } from "./db/repositories/billing.ts";
 import { assertPlanRegistry } from "./billing/plans.ts";
 import { UsageMeter, usageKey, type Payer } from "./billing/usage.ts";
@@ -664,6 +671,51 @@ const agentRepo = new AgentRepository(store.database());
 // that read it would tell six thousand workspaces they have a provider connected because the
 // server does.
 const providerKeys = new WorkspaceProviderKeys(secrets, billing);
+
+// A WORKSPACE'S CONNECTIONS TO SOMEBODY ELSE'S ACCOUNT.
+//
+// The same shape as the provider keys above and for the same reasons: one module knows where a
+// connector's credential lives, which run may receive it, and what a client is allowed to learn
+// about it (a status and an account label, never a token).
+//
+// Both providers are registered unconditionally, and neither needs configuration to be REGISTERED
+// — `configured()` is what says whether this deployment could actually run the flow, and locally
+// the answer is no. Registering them anyway is what lets the connections panel list Gmail and
+// Slack with a sentence naming the two environment variables somebody has to set, rather than
+// showing an empty page that looks like the feature does not exist.
+const oauthRepo = new OAuthRepository(store.database());
+const oauth = new OAuthService({
+  repo: oauthRepo,
+  secrets,
+  providers: [GOOGLE, SLACK],
+  // Read per call, not captured — the same rule the Stripe config and the billing rates follow.
+  // A deployment that registers an OAuth app should not need a restart to start using it.
+  config: (providerId) => resolveClientConfig(providerId, process.env, PORT),
+  audit: async (ctx, action, detail) => {
+    await identityRepo.appendAudit(ctx, {
+      action,
+      targetType: "connector",
+      targetId: typeof detail["connector"] === "string" ? detail["connector"] : null,
+      metadata: detail,
+    });
+  },
+});
+const tokenRefresher = new TokenRefresher({
+  repo: oauthRepo,
+  secrets,
+  providers: [GOOGLE, SLACK],
+  config: (providerId) => resolveClientConfig(providerId, process.env, PORT),
+  // The same service, so client authentication and the token endpoint's timeout are one
+  // implementation rather than two that drift.
+  service: oauth,
+  // A connection that needs a human is told to the workspace on the channel it already watches
+  // for what it is connected to. A banner beats a run failing with somebody else's 401.
+  onReauthRequired: (ctx, connection, reason) =>
+    relay.broadcastProviders(ctx, {
+      type: "notice",
+      message: `the ${connection.connector_id} connection needs reconnecting — ${reason}`,
+    }),
+});
 
 // WHAT EACH WORKSPACE IS HOLDING, SAMPLED HOURLY.
 //
@@ -2929,6 +2981,31 @@ async function runAgent(
     const own = await providerKeys.runEnv(runId, provider);
     Object.assign(env, own);
     runPayer = Object.keys(own).length > 0 ? "workspace" : "platform";
+
+    // AND THE CONNECTORS THIS AGENT WAS GENERATED WITH, each as a SHORT-LIVED access token.
+    //
+    // Resolved from the agent's own declared connector list, never from anything a client sent,
+    // and refreshed first if the token is close enough to expiry that this run could outlive it.
+    // The refresh token stays in the vault: what goes into the sandbox is the hour-long half, so
+    // a value that leaks out of a log the agent wrote expires on its own.
+    //
+    // Written AFTER the required_env resolution above, deliberately. A workspace that has both
+    // connected Gmail and pasted a `GMAIL_ACCESS_TOKEN` by hand should get the connection — the
+    // hand-set one is the local development path, and hosted it is the one nobody is maintaining.
+    const connectors = await connectorRunEnv(ctx, tokenRefresher, oauth, {
+      connectors: agent?.connectors ?? [],
+    });
+    Object.assign(env, connectors.env);
+    // Said out loud before the run rather than left for the first tool call to discover. "This
+    // workspace's Gmail connection needs reconnecting" is a sentence somebody can act on; a 401
+    // from Google surfacing as a red tool_call step twenty seconds into a graph is not.
+    //
+    // On the providers channel rather than the log, because it is a fact about what this
+    // workspace is CONNECTED to — the same channel the refresher raises a reauth banner on, and
+    // the same one the connections panel is already listening to.
+    for (const credential of connectors.credentials) {
+      if (credential.unavailable) relay.broadcastProviders(ctx, { type: "notice", message: credential.unavailable });
+    }
   } catch (err) {
     console.warn(`[manager] could not resolve credentials for ${runId}: ${(err as Error).message}`);
   }

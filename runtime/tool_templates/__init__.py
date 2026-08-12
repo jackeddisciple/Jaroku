@@ -127,7 +127,17 @@ def check_failures_raise() -> list[str]:
     import os
 
     problems: list[str] = []
-    stripped = {k: os.environ.pop(k, None) for k in required_env(list(CONNECTORS))}
+    # Every name that could configure a connector, not only the required ones. A template with a
+    # second route to being configured — Gmail's hosted access token — would otherwise leave this
+    # check passing on a machine where that route happens to be set, which is the one machine the
+    # check is least able to be trusted on.
+    names = list(required_env(list(CONNECTORS)))
+    for entry in CONNECTORS.values():
+        module = importlib.import_module(f"{__name__}.{entry['module']}")
+        for name in getattr(module, "OPTIONAL_ENV", []):
+            if name not in names:
+                names.append(name)
+    stripped = {k: os.environ.pop(k, None) for k in names}
     try:
         for cid, entry in CONNECTORS.items():
             module = importlib.import_module(f"{__name__}.{entry['module']}")
