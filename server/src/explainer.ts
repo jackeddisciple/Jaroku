@@ -21,10 +21,29 @@ export function hasAnthropicKey(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY);
 }
 
+/** What one explain call consumed. The SDK reports `input` EXCLUSIVE of the cached counts. */
+export interface ExplainUsage {
+  model: string;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
 export interface ExplainCallbacks {
   onDelta: (text: string) => void;
   onDone: () => void;
   onError: (message: string) => void;
+  /**
+   * What the call cost, when there was one.
+   *
+   * Optional, and reported SEPARATELY from `onDone` rather than as a field on it, because the
+   * two are not the same event: the no-key path streams the raw context and completes without
+   * ever talking to a provider, and a `usage` field on `onDone` would then have to be an empty
+   * summary — a zero that means "no call" sitting where a zero meaning "free" would go. Not
+   * calling this at all is the unambiguous version.
+   */
+  onUsage?: (usage: ExplainUsage) => void;
 }
 
 /** Stream a haiku answer for `question` grounded in `context`. Falls back (on any API error) to
@@ -44,7 +63,17 @@ export async function streamExplain(context: string, question: string, cb: Expla
       messages: [{ role: "user", content: `Context:\n${context}\n\nDeveloper's question: ${question}` }],
     });
     stream.on("text", (t: string) => cb.onDelta(t));
-    await stream.finalMessage();
+    const final = await stream.finalMessage();
+    // Reported before `onDone` so a caller that meters cannot see the answer complete and the
+    // charge arrive afterwards — the same "record first, then say it happened" order the trace
+    // ingest chain keeps between persisting a step and broadcasting it.
+    cb.onUsage?.({
+      model: EXPLAIN_MODEL,
+      input: final.usage?.input_tokens ?? 0,
+      output: final.usage?.output_tokens ?? 0,
+      cacheRead: final.usage?.cache_read_input_tokens ?? 0,
+      cacheWrite: final.usage?.cache_creation_input_tokens ?? 0,
+    });
     cb.onDone();
   } catch (err) {
     // Surface the failure but still hand back the factual context rather than nothing.

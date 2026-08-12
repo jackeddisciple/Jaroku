@@ -226,6 +226,102 @@ console.log("\nthe run's model is resolved even with nothing cached");
     "a cache miss falls back to the run row rather than recording an anonymous charge");
 }
 
+console.log("\nthe platform's own calls are metered too, each as its own kind");
+
+{
+  const before = (await billing.recentEvents(ctx, 500)).length;
+  const kinds = ["llm.generation", "llm.plan", "llm.edit", "llm.explain"] as const;
+  for (const kind of kinds) {
+    check(
+      await meter.meterModelCall(ctx, kind, {
+        model: "claude-haiku-4-5",
+        inputTokens: 3_000,
+        outputTokens: 400,
+        cacheReadTokens: 1_000,
+      }),
+      `${kind} records a row`,
+    );
+  }
+  const rows = (await billing.recentEvents(ctx, 500)).slice(0, kinds.length);
+  check(rows.length === kinds.length, `${kinds.length} new rows`);
+  check(
+    kinds.every((k) => rows.some((r) => r.kind === k)),
+    "one per kind — generation, plan, edit and explain never collapse into each other",
+  );
+  check(rows.every((r) => r.provider === "anthropic"), "each names the provider that was actually billed");
+  check(
+    rows.every((r) => r.input_tokens === 3_000 && r.output_tokens === 400 && r.cached_input_tokens === 1_000),
+    "the split is recorded, because a platform call knows it",
+  );
+  check(rows.every((r) => r.total_tokens === 4_400), "and the total is derived rather than asked for twice");
+  check(rows.every((r) => r.cost_known && (r.cost_usd ?? 0) > 0), "each is priced");
+  check((await billing.recentEvents(ctx, 500)).length === before + kinds.length, "and nothing else was written");
+}
+
+console.log("\nan unpriced platform model costs unknown, not zero");
+
+{
+  // The trap this defends against is real and it is one function away: claude.ts's
+  // `summarizeUsage` coalesces an unpriced model's cost to 0 for display. Reading that number
+  // into the ledger would record a paid call as free. The meter prices the call itself.
+  check(
+    await meter.meterModelCall(ctx, "llm.explain", {
+      model: "some-model-nobody-priced",
+      inputTokens: 1_000,
+      outputTokens: 100,
+    }),
+    "an unpriced explain call is still metered",
+  );
+  const [row] = await billing.recentEvents(ctx, 1);
+  check(row?.cost_usd === null, "with a null cost rather than the 0 a UsageSummary would report");
+  check(row?.cost_known === false, "and cost_known false");
+  check(row?.total_tokens === 1_100, "the tokens are known even though the price is not");
+}
+
+console.log("\nkeys: random where nothing is redelivered, deterministic where something is");
+
+{
+  // Two genuine generations of the same brief are two charges. A key derived from the inputs
+  // would deduplicate the second one and silently un-bill it.
+  const call = { model: "claude-haiku-4-5", inputTokens: 100, outputTokens: 10 } as const;
+  check(await meter.meterModelCall(ctx, "llm.generation", call), "one generation records");
+  check(await meter.meterModelCall(ctx, "llm.generation", call), "an identical second generation records too");
+
+  // A judge call is retried on a bounded, numbered loop, so (job, attempt) names exactly one
+  // paid call — and names it the same way if the same attempt somehow reports twice.
+  const jobId = randomUUID();
+  const judged = { model: "claude-haiku-4-5", inputTokens: 700, outputTokens: 130 };
+  check(
+    await meter.meterModelCall(ctx, "llm.judge", { ...judged, idempotencyKey: usageKey("llm.judge", jobId, "1") }),
+    "the judge's first attempt records",
+  );
+  check(
+    !(await meter.meterModelCall(ctx, "llm.judge", { ...judged, idempotencyKey: usageKey("llm.judge", jobId, "1") })),
+    "and the same attempt reported twice does not",
+  );
+  check(
+    await meter.meterModelCall(ctx, "llm.judge", { ...judged, idempotencyKey: usageKey("llm.judge", jobId, "2") }),
+    "while a second attempt is a second paid call and does",
+  );
+}
+
+console.log("\nkinds can be rolled up apart from one another");
+
+{
+  // What BYOK needs from the schema: token spend and platform spend are separable at query
+  // time, because they were separable at write time.
+  const provider = await billing.spendSince(ctx, EPOCH, ["llm.provider"]);
+  const platform = await billing.spendSince(ctx, EPOCH, [
+    "llm.generation", "llm.plan", "llm.edit", "llm.explain", "llm.judge",
+  ]);
+  const all = await billing.spendSince(ctx, EPOCH);
+  check(provider.usd > 0 && platform.usd > 0, "both halves have spend in them");
+  check(
+    Math.abs(all.usd - (provider.usd + platform.usd)) < 1e-9,
+    "and they add up to the whole, with nothing in a kind nobody asked about",
+  );
+}
+
 await db.close();
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

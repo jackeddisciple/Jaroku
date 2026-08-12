@@ -65,6 +65,28 @@ export interface JudgeScorerDeps {
   evalStore: EvalStore;
   onScored: (e: ScoredEvent) => void;
   onScoringFinished: (e: { evalId: string; scored: number; unscored: number }) => void;
+  /**
+   * One judge call, for the workspace's ledger.
+   *
+   * SEPARATE FROM `addJudgeCost`, which is not a duplicate of it. That accumulates on the
+   * eval, so the comparison dashboard can show judge overhead apart from any provider's agent
+   * cost — rule 3 above, and it stays exactly as it is. This is the same money arriving in the
+   * workspace's usage ledger, where a run's steps and a generation also land, so that "what did
+   * this workspace spend" has one answer rather than three tables to add up by hand.
+   *
+   * Optional, so a scorer constructed without billing (every existing suite) is unchanged.
+   */
+  onJudgeCall?: (e: {
+    evalId: string;
+    jobId: string;
+    /** 1-based, and part of the idempotency key: each attempt is a distinct paid call. */
+    attempt: number;
+    model: string;
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+  }) => void;
 }
 
 interface Pending {
@@ -195,6 +217,16 @@ export class JudgeScorer {
         // Judge spend is recorded BEFORE the verdict is parsed — the call was billed
         // whether or not its answer was usable.
         await this.recordJudgeCost(evalId, res.usage);
+        this.deps.onJudgeCall?.({
+          evalId,
+          jobId: job.id,
+          attempt,
+          model: JUDGE_MODEL,
+          input: res.usage?.input_tokens ?? 0,
+          output: res.usage?.output_tokens ?? 0,
+          cacheRead: res.usage?.cache_read_input_tokens ?? 0,
+          cacheWrite: res.usage?.cache_creation_input_tokens ?? 0,
+        });
 
         if (res.stop_reason === "refusal") {
           await this.markUnscored(evalId, job, "the judge declined to grade this response");

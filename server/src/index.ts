@@ -75,7 +75,8 @@ import { openSecretStore } from "./secrets/open.ts";
 import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
 import { BillingRepository } from "./db/repositories/billing.ts";
 import { assertPlanRegistry } from "./billing/plans.ts";
-import { UsageMeter } from "./billing/usage.ts";
+import { UsageMeter, usageKey } from "./billing/usage.ts";
+import { GENERATION_MODEL } from "./claude.ts";
 import { isSecretName } from "./secrets/secretStore.ts";
 import { PROVIDER_ENV_KEY, isProviderId, providerStatus, verifyProviderKey } from "./providers.ts";
 import { DeployStore } from "./deployStore.ts";
@@ -208,6 +209,49 @@ const meter = new UsageMeter(billing, async (ctx, runId) => {
   const run = await store.getRun(ctx, runId);
   return run ? { provider: run.provider, model: run.model } : null;
 });
+
+/**
+ * Meter a call the platform made on somebody's behalf, without ever being able to break it.
+ *
+ * Floating and caught, deliberately. Every call site below is on a request path a user is
+ * watching — a generation streaming into the build pane, an explanation streaming into the
+ * composer — and none of them may be made to wait on, or fail because of, a ledger write. A
+ * missed usage row is money we did not charge for; a generation that died recording one is the
+ * product. `void p.catch(...)` rather than a bare `void` for the reason EvalRunner.guard
+ * exists: an unhandled rejection ends the process.
+ */
+function meterPlatformCall(
+  ctx: TenantContext,
+  kind: "llm.generation" | "llm.plan" | "llm.edit" | "llm.explain" | "llm.judge",
+  call: {
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+    idempotencyKey?: string;
+  },
+): void {
+  void meter.meterModelCall(ctx, kind, call).catch((err) => {
+    console.error(`[billing] failed to meter a ${kind} call:`, (err as Error)?.message ?? err);
+  });
+}
+
+/** The shape claude.ts's `UsageSummary` has, narrowed to what the ledger needs from it. */
+function tokensOf(usage: unknown): {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+} {
+  const u = (usage ?? {}) as Partial<UsageSummary>;
+  return {
+    inputTokens: u.input_tokens ?? 0,
+    outputTokens: u.output_tokens ?? 0,
+    cacheReadTokens: u.cache_read_input_tokens ?? 0,
+    cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
+  };
+}
 // Eval's control-plane tables live in the same database file, on the same connection
 // (single writer; aggregation JOINs eval_jobs against the frozen `steps` table). Nothing
 // here touches schema/events.md — an eval is a batch of ordinary runs.
@@ -1013,6 +1057,24 @@ const judge = new JudgeScorer({
   evalStore,
   context: serverContext,
   onScored: (e) => relay.broadcastEval(contextForEval(e.evalId), { type: "scored", ...e }),
+  // The judge's own spend, in the workspace's ledger. NOT a replacement for `addJudgeCost`,
+  // which keeps accumulating on the eval so the comparison can show judge overhead apart from
+  // any provider's agent cost — that separation is rule 3 in judge/score.ts and stays. This is
+  // the same money arriving where a run's steps and a generation also land, so "what did this
+  // workspace spend" has one answer instead of three tables to add up by hand.
+  //
+  // The key is deterministic here, unlike the other four platform calls: a judge call is
+  // retried on a bounded, numbered attempt loop, so (job, attempt) names exactly one paid call
+  // and names it the same way twice.
+  onJudgeCall: (e) =>
+    meterPlatformCall(contextForEval(e.evalId), "llm.judge", {
+      model: e.model,
+      inputTokens: e.input,
+      outputTokens: e.output,
+      cacheReadTokens: e.cacheRead,
+      cacheWriteTokens: e.cacheWrite,
+      idempotencyKey: usageKey("llm.judge", e.jobId, String(e.attempt)),
+    }),
   onScoringFinished: (e) => {
     console.log(`[eval] ${e.evalId} scoring done — ${e.scored} scored, ${e.unscored} unscored`);
     relay.broadcastEval(contextForEval(e.evalId), { type: "scoringFinished", ...e });
@@ -2124,6 +2186,10 @@ planner.on("plan", (e) => {
       `$${(usage?.cost_usd ?? 0).toFixed(5)}`,
   );
   for (const w of e.warnings) console.log(`  ! ${w}`);
+  // The plan gate is a paid call the platform made for this workspace, and it is metered here
+  // — once, at the moment it happened. The generation that follows meters itself; it must not
+  // also meter `planUsage`, which is the same call reported a second time for display.
+  meterPlatformCall(contextForPlan(), "llm.plan", { model: GENERATION_MODEL, ...tokensOf(e.usage) });
   relay.broadcastGen(contextForPlan(), { type: "plan", ...e });
 });
 
@@ -2288,6 +2354,11 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
         // understate it every single time.
         (planCost ? ` + $${planCost.toFixed(5)} plan = $${(planCost + (usage?.cost_usd ?? 0)).toFixed(5)}` : ""),
     );
+    // `e.usage` ONLY. `planUsage` rides along so the UI can show what the agent cost in total,
+    // but the plan was already metered when the plan gate ran — see planner.on("plan"). Adding
+    // it again here would bill every planned generation for its plan twice, and the second
+    // charge would look exactly like the first.
+    meterPlatformCall(contextForGen(), "llm.generation", { model: GENERATION_MODEL, ...tokensOf(e.usage) });
     relay.broadcastGen(contextForGen(), { type: "done", ...e });
     void syncAgents().then(() => relay.broadcastAgents());
     cleanup();
@@ -2327,6 +2398,10 @@ editor.on("proposal", (e) => {
   console.log(
     `[edit] proposal for ${e.agentId} — ${e.files.length} file(s): ${e.summary}`,
   );
+  // Metered on the PROPOSAL, not on apply. The model call is what costs money; applying a
+  // proposal is a version pointer moving, and undoing one is the same pointer moving back.
+  // Billing on apply would mean a rejected proposal was free, which it was not.
+  meterPlatformCall(contextForEdit(), "llm.edit", { model: GENERATION_MODEL, ...tokensOf(e.usage) });
   relay.broadcastEdit(contextForEdit(), { type: "proposal", ...e });
 });
 
@@ -2715,6 +2790,16 @@ async function explainAgent(ctx: TenantContext, cmd: ExplainCommand): Promise<vo
   const context = await buildExplainContext(ctx, cmd);
   void streamExplain(context, cmd.question, {
     onDelta: (text) => relay.broadcastReply(contextForReply(), { type: "delta", agentId: cmd.agentId, text }),
+    // Only fires when a model was actually asked. The no-key path streams the raw context and
+    // completes without a call, and a workspace must not be billed for the fallback.
+    onUsage: (u) =>
+      meterPlatformCall(ctx, "llm.explain", {
+        model: u.model,
+        inputTokens: u.input,
+        outputTokens: u.output,
+        cacheReadTokens: u.cacheRead,
+        cacheWriteTokens: u.cacheWrite,
+      }),
     onDone: () => { explaining = false; relay.broadcastReply(contextForReply(), { type: "done", agentId: cmd.agentId }); },
     onError: (message) => { explaining = false; relay.broadcastReply(contextForReply(), { type: "error", agentId: cmd.agentId, message }); },
   });

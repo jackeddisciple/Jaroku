@@ -22,8 +22,10 @@
 //   "meter everything, bill some of it" is a distinction that cannot be retrofitted onto rows
 //   that never recorded which was which.
 
+import { randomUUID } from "node:crypto";
 import type { BillingRepository } from "../db/repositories/billing.ts";
 import type { TenantContext } from "../db/tenant.ts";
+import { costFor } from "../pricing.ts";
 import type { Step } from "../types.ts";
 
 /** Every kind of thing a `usage_events` row can describe. */
@@ -153,6 +155,68 @@ export class UsageMeter {
       totalTokens: step.tokens,
       costUsd: step.cost,
       occurredAt: step.started_at,
+    });
+  }
+
+  /**
+   * Meter a model call the PLATFORM made on a workspace's behalf.
+   *
+   * Generation, the plan gate, the fix loop, explain and the judge. These are not run steps and
+   * never will be: they happen on the request path, produce no trace, and are Anthropic-only
+   * regardless of which provider the workspace's agents run on. Under BYOK they are the calls
+   * the platform genuinely pays for, which is why they get kinds of their own rather than being
+   * folded into `llm.provider` — "meter everything, bill some of it" needs the rows to say
+   * which is which.
+   *
+   * THE COST IS COMPUTED HERE RATHER THAN TAKEN FROM THE CALLER. Every one of these call sites
+   * already has a `UsageSummary`, whose `cost_usd` coalesces an unpriced model to 0 — which is
+   * fine for the "this generation cost $0.004" line in the UI, where the model is a constant
+   * this repo prices, and is not fine for a ledger row. `costFor` returns null for a model with
+   * no pricing entry, and null is what gets written. The day somebody points
+   * JAROKU_JUDGE_MODEL or JAROKU_EXPLAIN_MODEL at something unpriced, the bill says "unknown"
+   * instead of "free".
+   *
+   * ON THE IDEMPOTENCY KEY BEING OPTIONAL. It exists to make a REDELIVERABLE event safe, and
+   * these calls are not redeliverable: they happen once, synchronously, on a request nobody
+   * replays. So a fresh uuid is the honest key. The alternative — deriving one from, say, the
+   * agent and the prompt — would silently un-bill the second of two genuine generations of the
+   * same brief, which is a real thing a user does. Callers that DO have a redelivery story (the
+   * judge, whose attempts are bounded and numbered) pass their own.
+   */
+  async meterModelCall(
+    ctx: TenantContext,
+    kind: Exclude<UsageKind, "llm.provider" | "sandbox.seconds" | "storage.bytes">,
+    call: {
+      model: string;
+      inputTokens: number;
+      outputTokens: number;
+      /** The Anthropic SDK reports `input_tokens` EXCLUSIVE of these, so they are priced apart. */
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
+      idempotencyKey?: string;
+      runId?: string | null;
+    },
+  ): Promise<boolean> {
+    const cost = costFor(call.model, {
+      inputTokens: call.inputTokens,
+      outputTokens: call.outputTokens,
+      cacheReadTokens: call.cacheReadTokens ?? 0,
+      cacheWriteTokens: call.cacheWriteTokens ?? 0,
+    });
+    return this.billing.record(ctx, {
+      kind,
+      idempotencyKey: call.idempotencyKey ?? usageKey(kind, randomUUID()),
+      runId: call.runId ?? null,
+      // Every platform-side call is Anthropic's: planning, generation, the fix loop, explain and
+      // the judge are all Anthropic-only (see providers.ts's `powers_jaroku`). Recorded rather
+      // than left null so a future second provider is a change to this line and not a schema
+      // question.
+      provider: "anthropic",
+      model: call.model,
+      inputTokens: call.inputTokens,
+      outputTokens: call.outputTokens,
+      cachedInputTokens: (call.cacheReadTokens ?? 0) + (call.cacheWriteTokens ?? 0),
+      costUsd: cost,
     });
   }
 
