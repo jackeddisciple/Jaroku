@@ -81,6 +81,7 @@ import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
 import { OAuthRepository } from "./db/repositories/oauth.ts";
 import { OAuthError, OAuthService } from "./oauth/service.ts";
 import { TokenRefresher } from "./oauth/refresh.ts";
+import { ConnectionRevoker } from "./oauth/revoke.ts";
 import { resolveClientConfig } from "./oauth/provider.ts";
 import { oauthRoutes } from "./http/oauth.ts";
 import { GOOGLE } from "./oauth/google.ts";
@@ -777,6 +778,18 @@ const oauth = new OAuthService({
 // and pinned on the way out. See connectorSecrets.ts for why doing it once would be doing it at
 // the moment it proves nothing.
 const connectorSecrets = new ConnectorSecrets({ secrets });
+
+// AND ENDING A GRANT, WHICH IS NOT THE SAME OPERATION AS FORGETTING ONE.
+//
+// Deleting our copy of a credential is housekeeping. Revoking it is what the Disconnect button
+// appears to promise, and without it a user who pressed it still appears in their own Google
+// account's connected apps, with a refresh token that still works. See oauth/revoke.ts.
+const connectionRevoker = new ConnectionRevoker({
+  repo: oauthRepo,
+  secrets,
+  providers: [GOOGLE, SLACK],
+  config: (providerId) => resolveClientConfig(providerId, process.env, PORT),
+});
 
 /**
  * Everything one run may talk to, denied by default.
@@ -1875,18 +1888,24 @@ async function handleConnectionCommand(ctx: TenantContext, cmd: ConnectionComman
       await broadcastConnections(ctx);
       return;
     }
-    await secrets.delete(ctx, row.access_secret_name);
-    if (row.refresh_secret_name) await secrets.delete(ctx, row.refresh_secret_name);
-    await oauthRepo.markRevoked(ctx, row.id);
+    // REVOKED AT THE PROVIDER, then forgotten here. The order matters and the reasoning is in
+    // oauth/revoke.ts: a crash between the two must leave a dead grant we still know about
+    // rather than a live one nothing points at.
+    const ended = await connectionRevoker.disconnect(ctx, row);
     await identityRepo.appendAudit(ctx, {
       action: "connector.disconnected",
       targetType: "connector",
       targetId: connectorId,
-      metadata: { provider: row.provider, account: row.external_account_label },
+      // The RECEIPT. Which of the outcomes it was, recorded where somebody answering a support
+      // question can find it — "we could not reach Google" and "Google says it is gone" are
+      // different answers and only one of them means the user should go and check.
+      metadata: { provider: row.provider, account: row.external_account_label, remote: ended.remote },
     });
     relay.broadcastConnections(ctx, {
       type: "notice",
-      message: `${connectorId} is disconnected — agents using it will report it at their next tool call`,
+      message:
+        ended.message ??
+        `${connectorId} is disconnected — agents using it will report it at their next tool call`,
       connectorId,
     });
     await broadcastConnections(ctx);

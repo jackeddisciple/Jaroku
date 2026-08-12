@@ -262,6 +262,23 @@ export class OAuthRepository {
     );
   }
 
+  /**
+   * The same, with a note about what happened at the far end.
+   *
+   * Separate from `markRevoked` rather than a parameter on it, because the common case has
+   * nothing to say and a method whose last argument is usually null invites callers to pass one
+   * they have not thought about. This is the exception: the provider could not be told, the
+   * credential is gone from here anyway, and the user needs to know to check their own account's
+   * connected apps. See oauth/revoke.ts.
+   */
+  async markRevokedWithNote(ctx: TenantContext, id: string, note: string): Promise<void> {
+    await this.q(ctx).run(
+      `UPDATE oauth_connections SET last_error = ?, updated_at = ?
+        WHERE workspace_id = ? AND id = ?`,
+      [note.slice(0, 500), new Date(this.now()).toISOString(), ctx.workspaceId, id],
+    );
+  }
+
   // --- flows ----------------------------------------------------------------------------------
 
   /**
