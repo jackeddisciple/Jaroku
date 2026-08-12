@@ -73,6 +73,8 @@ import { McpRegistry } from "./mcpRegistry.ts";
 import { fileCredentialWriter } from "./envWriter.ts";
 import { openSecretStore } from "./secrets/open.ts";
 import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
+import { BillingRepository } from "./db/repositories/billing.ts";
+import { assertPlanRegistry } from "./billing/plans.ts";
 import { isSecretName } from "./secrets/secretStore.ts";
 import { PROVIDER_ENV_KEY, isProviderId, providerStatus, verifyProviderKey } from "./providers.ts";
 import { DeployStore } from "./deployStore.ts";
@@ -179,6 +181,17 @@ const serverContext = (): TenantContext => devTenancy.context();
 // request that happens to touch it.
 await migrate(db.migrationTarget(), join(SERVER_DIR, "migrations", db.dialect));
 devTenancy = await resolveDevTenancy(db);
+
+// WHAT THIS DEPLOYMENT SELLS, CHECKED AGAINST WHAT THE CODE THINKS EACH PLAN MEANS.
+//
+// The `plans` table holds only what varies per deployment — a price id, and whether a plan can
+// be bought today. Every number a plan implies is in billing/plans.ts. A row with no definition
+// there resolves through `planFor` to the FREE limits, so a workspace that paid for Scale would
+// silently get a free workspace's ceiling and concurrency, and nothing anywhere would say so.
+// Checked here for the same reason the migrations are applied here: a mismatch is a deployment
+// mistake, and the useful moment to learn about one is during the deployment.
+const billing = new BillingRepository(db);
+assertPlanRegistry(await billing.listPlans(systemContext(newRequestId())));
 
 const store = new TraceStore(db);
 await store.init();
