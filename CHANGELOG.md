@@ -119,7 +119,7 @@ that had none.
 
 ---
 
-## Unreleased : Queueing, Fairness, and Per-Workspace Limits
+## v0.2.9 : Queueing, Fairness, and Per-Workspace Limits
 
 Session 5 of the hosted migration. "Who runs next" stops being an index into one pool and becomes
 a fair dispatcher: work enqueued per workspace, admitted round-robin, capped by named leases. The
