@@ -88,14 +88,28 @@ console.log("\nthe Python runner computes the same name");
       [
         "-c",
         [
-          // Loaded BY PATH rather than as `jaroku_runner.debug`, so importing it does not pull
-          // in the package's __init__, which reaches for langchain_core. `debug.py` itself
-          // imports nothing outside the standard library at module level — deliberately, so the
-          // stdout guard and the control plane load before any generated code does — and that
-          // is what makes this check runnable against a bare interpreter.
-          "import importlib.util, os, sys",
-          "spec = importlib.util.spec_from_file_location('jdebug', os.path.join(os.environ['RT'], 'jaroku_runner', 'debug.py'))",
+          // LOADED INTO A STAND-IN PACKAGE, which is two requirements at once and used to be
+          // one. `jaroku_runner/__init__.py` reaches for langchain_core, so this must not
+          // import the package — a test that needed the hosted extra installed in order to
+          // compare a string would not run in CI, which is the same as not existing. But
+          // `debug.py` is a module IN that package and says so: `from . import
+          // controlplane_http`. Loaded by path under a bare name it has no parent, and the
+          // relative import fails before the first assertion.
+          //
+          // So the package is faked rather than imported: an empty module object carrying only
+          // a __path__, registered under the real name. `from . import …` resolves against that
+          // path and finds the sibling; __init__.py never runs. `controlplane_http` imports
+          // nothing outside the standard library, which is what keeps this runnable against a
+          // bare interpreter — the property the original by-path load was reaching for and
+          // stopped providing the day debug.py gained an intra-package import.
+          "import importlib.util, os, sys, types",
+          "PKG = os.path.join(os.environ['RT'], 'jaroku_runner')",
+          "pkg = types.ModuleType('jaroku_runner')",
+          "pkg.__path__ = [PKG]",
+          "sys.modules['jaroku_runner'] = pkg",
+          "spec = importlib.util.spec_from_file_location('jaroku_runner.debug', os.path.join(PKG, 'debug.py'))",
           "mod = importlib.util.module_from_spec(spec)",
+          "sys.modules['jaroku_runner.debug'] = mod",
           "spec.loader.exec_module(mod)",
           "print(mod.thread_id_for(sys.argv[1]))",
         ].join("\n"),
