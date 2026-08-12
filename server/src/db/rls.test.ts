@@ -188,9 +188,15 @@ try {
     // the whole workspace, and "we also encrypted it" is not a reason to skip the scope.
     "workspace_data_keys", "workspace_secrets", "secret_refs",
   ];
+  // `'p'` AS WELL AS `'r'`, because a partitioned table is not an ordinary one.
+  //
+  // `steps` became `relkind = 'p'` in migration 029 and this filter stopped matching it, so the
+  // table with the most tenant data in the system was reported missing from a check it had in
+  // fact passed. The failure was loud, which is luck rather than design: the same filter would
+  // have said nothing at all if the list had been built from the catalogue instead of by hand.
   const guarded = await db.all<{ relname: string; relrowsecurity: boolean; relforcerowsecurity: boolean }>(
     `SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class
-      WHERE relname = ANY(?) AND relkind = 'r'`,
+      WHERE relname = ANY(?) AND relkind IN ('r', 'p')`,
     [TENANT_TABLES],
   );
   const missing = TENANT_TABLES.filter(
@@ -212,6 +218,46 @@ try {
   // that value. Scoping the lookup by the answer it is computing would return nothing, every
   // time. Issuing is fully scoped — the repository takes a TenantContext — and the rows hold
   // a digest, an id and a role for thirty seconds.
+  // --- and every partition of the one partitioned table ------------------------------------
+  //
+  // WHAT 029 CLAIMS AND WHAT POSTGRES ACTUALLY DOES. The migration says the policy is "declared
+  // on the PARENT and inherited by every partition". That is true of a query that goes THROUGH
+  // the parent — `FROM steps` applies the parent's policy to every partition it touches, which
+  // is every query this codebase writes. It is not true of a query that names a partition:
+  // `FROM steps_2026_08` sees only that table's own RLS settings, and `ALTER TABLE steps ENABLE
+  // ROW LEVEL SECURITY` did not set them. Neither does `CREATE TABLE … PARTITION OF`, which is
+  // what `lifecycle/partitions.ts` runs every month at RUNTIME, unreviewed, forever.
+  //
+  // So the invariant is not "every partition has RLS". It is that a partition must not be
+  // REACHABLE by the application role without it — and today the thing that holds is the other
+  // half: privileges on a partitioned parent do not cascade either, so `jaroku_app` was granted
+  // on `steps` and on nothing beneath it. Two defaults happen to line up.
+  //
+  // Written as the implication rather than as either half, because either half could change
+  // alone. A GRANT loop that helpfully includes partitions, or a partition created by hand
+  // during an incident, turns a month of every tenant's traces into rows any workspace can read
+  // by naming the table. That is the failure mode 029's own header calls out and then guards
+  // against with a mechanism that does not reach this far.
+  const partitions = await db.all<{
+    relname: string; relrowsecurity: boolean; relforcerowsecurity: boolean; app_can_read: boolean;
+  }>(
+    `SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
+            has_table_privilege('jaroku_app', c.oid, 'SELECT') AS app_can_read
+       FROM pg_inherits i
+       JOIN pg_class c ON c.oid = i.inhrelid
+       JOIN pg_class p ON p.oid = i.inhparent
+      WHERE p.relname = 'steps'`,
+  );
+  check(partitions.length > 0, `steps has partitions to check (${partitions.length})`);
+  const reachable = partitions.filter(
+    (p) => p.app_can_read && !(p.relrowsecurity && p.relforcerowsecurity),
+  );
+  check(
+    reachable.length === 0,
+    `no partition of steps is readable by the app role without a policy ` +
+      `(${reachable.map((p) => p.relname).join(", ") || "none is"})`,
+  );
+
   const exempt = ["audit_log", "workspace_members", "ws_tickets"];
   const wrongly = exempt.filter((t) => policies.some((p) => p.tablename === t));
   check(
