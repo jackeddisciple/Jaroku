@@ -183,6 +183,19 @@ export interface QueueJob<T = unknown> {
   enqueuedAt: string;
   attempt: number;
   payload: T;
+  /**
+   * The W3C `traceparent` of whatever enqueued this, or absent.
+   *
+   * ON THE JOB RATHER THAN IN THE PAYLOAD, because it is not part of the work — it is how the
+   * work is joined to the request that asked for it. A worker in another process has nothing
+   * else to go on: no socket, no request, no memory of the gateway that took the call, and four
+   * unrelated log streams describing one second of somebody's afternoon. See obs/trace.ts.
+   *
+   * Optional, so every existing enqueue and every job already sitting in a queue when this
+   * deploys keeps working — a job with no traceparent starts a trace of its own rather than
+   * failing to be admitted.
+   */
+  traceparent?: string;
 }
 
 /**

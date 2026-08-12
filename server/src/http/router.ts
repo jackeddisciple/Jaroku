@@ -223,6 +223,14 @@ export interface RouterOptions {
    * allocates the megabytes it declared.
    */
   beforeHandle?: (req: HttpRequest) => Promise<void> | void;
+  /**
+   * Wrap a matched request in a span.
+   *
+   * A hook rather than an import, so the router stays a router: it knows what was requested and
+   * what was answered, and `obs/trace.ts` knows what a span is. Absent in the router's own tests
+   * and in any deployment with no collector configured.
+   */
+  trace?: (req: HttpRequest, run: () => Promise<{ status: number }>) => Promise<{ status: number }>;
 }
 
 export class Router {
@@ -233,6 +241,7 @@ export class Router {
   private security: Record<string, string>;
   private defaultTimeoutMs: number;
   private beforeHandle?: (req: HttpRequest) => Promise<void> | void;
+  private trace?: RouterOptions["trace"];
 
   constructor(opts: RouterOptions = {}) {
     this.log = opts.log ?? ((line) => console.log(line));
@@ -241,6 +250,7 @@ export class Router {
     this.security = opts.securityHeaders ?? {};
     this.defaultTimeoutMs = opts.defaultTimeoutMs ?? DEFAULT_HANDLER_TIMEOUT_MS;
     this.beforeHandle = opts.beforeHandle;
+    this.trace = opts.trace;
   }
 
   get(path: string, handler: Handler, opts?: RouteOptions): this {
@@ -363,6 +373,11 @@ export class Router {
     // retry-versus-stop distinction lib/socket.ts is built around, defeated at the last step.
     const cors = this.corsHeaders(origin);
     let status = 500;
+    // ONE SPAN PER REQUEST, COVERING THE REFUSALS TOO — a rate-limited or unauthorised request is
+    // exactly the one somebody is trying to explain, and a trace containing only the successes
+    // explains nothing. The wrapper returns the status so the span can record whichever branch
+    // below produced it; with no collector configured `trace` is absent and this is one `??`.
+    const answer = async (): Promise<{ status: number }> => {
     try {
       // RACED, not cancelled. Nothing here can stop a handler that is waiting on a socket
       // somebody else owns — what it can do is stop the CLIENT waiting on us, free the
@@ -385,6 +400,9 @@ export class Router {
       // A refusal's own headers — `Retry-After` on a 429 — travel with it. See HttpError.
       this.respond(res, requestId, status, { error: { code, message } }, { ...cors, ...(e.headers ?? {}) });
     }
+      return { status };
+    };
+    await (this.trace ? this.trace(req, answer) : answer());
     if (!this.quiet(path)) {
       this.log(`[http] ${requestId} ${method} ${this.redact(url)} ${status} ${Date.now() - started}ms`);
     }

@@ -82,6 +82,7 @@ import { streamExplain } from "./explainer.ts";
 import type { ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
+import { formatTraceparent, openTracer, parseTraceparent } from "./obs/trace.ts";
 import { McpStore } from "./mcpStore.ts";
 import { McpRegistry } from "./mcpRegistry.ts";
 import { MCP_DISCOVER_CLASS, McpDiscoveryQueue } from "./mcpDiscovery.ts";
@@ -518,6 +519,15 @@ const isEvalRun = (runId: string): boolean => evalRunIds.has(runId);
 // startup autorun, and any run whose id somehow reaches ingestion without having been
 // dispatched here.
 const runWorkspaces = new Map<string, TenantContext>();
+
+/**
+ * runId -> the span covering that run, ended when the process exits.
+ *
+ * Beside `runWorkspaces` and for the same reason: a run outlives the command that started it, and
+ * the thing that knows it is over is the pool's exit event minutes later. A span nobody ends is a
+ * span that never leaves this process, so the map is the only way the two moments can meet.
+ */
+const runSpans = new Map<string, { set: (k: string, v: string | number | boolean | undefined) => void; end: () => void }>();
 function contextForRun(runId: string): TenantContext {
   return runWorkspaces.get(runId) ?? serverContext();
 }
@@ -630,6 +640,20 @@ const exporter = new WorkspaceExporter({
     return out;
   },
 });
+/**
+ * The run id a control-plane path names, or undefined.
+ *
+ * `/v1/runs/<id>/trace` and its siblings are the sandbox tier's own requests, and tagging them
+ * with the run makes "everything that happened for this run" one query rather than a join
+ * somebody performs by eye.
+ */
+function runIdFromPath(path: string): string | undefined {
+  if (!path.startsWith("/v1/runs/")) return undefined;
+  const rest = path.slice("/v1/runs/".length);
+  const slash = rest.indexOf("/");
+  return slash > 0 ? rest.slice(0, slash) : undefined;
+}
+
 /** The class an export runs under. Named once, so the route and the loop cannot disagree. */
 const EXPORT_CLASS: JobClass = "workspace.export";
 const exportLoop = new WorkerLoop({
@@ -647,6 +671,18 @@ const exportLoop = new WorkerLoop({
   },
   onHandlerError: (_class, job, error) =>
     console.error(`[export] ${job.workspaceId} failed:`, (error as Error)?.message ?? error),
+  // TIER THREE. The job carries the traceparent of whatever enqueued it, so an export that took
+  // four minutes is a span under the request that asked for it rather than an orphan.
+  trace: (job, run) =>
+    tracer.in(
+      `job ${job.class}`,
+      {
+        tier: "worker",
+        parent: parseTraceparent(job.traceparent),
+        attributes: { "jaroku.workspace_id": job.workspaceId, "jaroku.job_id": job.id },
+      },
+      run,
+    ),
 });
 void exportLoop.run();
 
@@ -654,6 +690,12 @@ const mcpDiscoveryLoop = new WorkerLoop({
   dispatcher,
   classes: [MCP_DISCOVER_CLASS],
   handlers: { [MCP_DISCOVER_CLASS]: mcpDiscovery.handler() as never },
+  trace: (job, run) =>
+    tracer.in(
+      `job ${job.class}`,
+      { tier: "worker", parent: parseTraceparent(job.traceparent), attributes: { "jaroku.workspace_id": job.workspaceId } },
+      run,
+    ),
 });
 void mcpDiscoveryLoop.run();
 
@@ -1309,6 +1351,15 @@ if (securityResponseHeaders["strict-transport-security"]) {
 const rateLimiter = openRateLimiter();
 console.log(`[server] rate limiter: ${rateLimiter.kind}`);
 
+// AND THE THING THAT JOINS FOUR PROCESSES INTO ONE STORY.
+//
+// A gateway replica answers the request, a queue holds the work, a worker on another machine
+// picks it up, and a sandbox on a third machine calls home. Four request ids in four log streams
+// describe the same second of somebody's afternoon and nothing joins them; a trace is the join.
+// Inert with no JAROKU_OTLP_ENDPOINT — see obs/trace.ts on why inert rather than absent.
+const { tracer, exporter: traceExporter } = openTracer("gateway");
+if (traceExporter) console.log(`[server] tracing: exporting to ${process.env["JAROKU_OTLP_ENDPOINT"]}`);
+
 // AND WHAT THE PLATFORM HAS OBSERVED, WHICH IS A DIFFERENT QUESTION FROM WHAT IT REFUSED.
 //
 // A rate limit answers one request. This accumulates a SHAPE — the four-minute sandbox that made
@@ -1359,6 +1410,28 @@ const abuseGate = new AbuseGate({
 const router = new Router({
   cors: originPolicy,
   securityHeaders: securityResponseHeaders,
+  // TIER ONE. Continues an incoming `traceparent` when there is one — a browser or a sandbox
+  // that already has a trace — and starts a root when there is not. The run id goes on when the
+  // path names one, because that is the attribute the other three tiers are correlated by.
+  trace: async (req, run) =>
+    tracer.in(
+      `${req.method} ${req.path}`,
+      {
+        parent: parseTraceparent(req.header("traceparent")),
+        attributes: {
+          "http.method": req.method,
+          "http.route": req.path,
+          "jaroku.request_id": req.requestId,
+          "jaroku.run_id": runIdFromPath(req.path),
+        },
+      },
+      async (span) => {
+        const out = await run();
+        span.set("http.status_code", out.status);
+        if (out.status >= 500) span.set("error", true);
+        return out;
+      },
+    ),
   // THE PER-IP LAYER. Per-workspace-per-action is the other half and lives on the socket, where
   // the workspace is — see the command gate below.
   beforeHandle: async (req) => {
@@ -3310,6 +3383,17 @@ onBothPools("exit", ({ runId, code, signal, timedOut, elapsedMs }) => {
   // workspace once `runWorkspaces` forgets this run, which would put somebody else's sandbox
   // seconds on the server's ledger.
   const billedCtx = contextForRun(runId);
+  // The run's own span closes here, where the machine actually stopped existing — the same
+  // moment, and for the same reason, that its sandbox seconds are metered. `timedOut` and a
+  // non-zero exit go on it, so a trace shows WHY a run ended and not only that it did.
+  const span = runSpans.get(runId);
+  if (span) {
+    runSpans.delete(runId);
+    span.set("jaroku.exit_code", code ?? -1);
+    span.set("jaroku.timed_out", Boolean(timedOut));
+    if (signal) span.set("jaroku.signal", signal);
+    span.end();
+  }
   void meter
     .meterSandboxSeconds(billedCtx, { runId, elapsedMs })
     .catch((err) => console.error("[billing] failed to meter sandbox time:", (err as Error)?.message ?? err));
@@ -3717,8 +3801,22 @@ async function runAgent(
   // JAROKU_CONTROL_DIR is where tools/mcp_bridge.py exchanges confirmation approvals with
   // this process. Its ABSENCE is how a copied-out project knows nobody is watching — see the
   // gate's standalone branch. Set on every interactive run, so the gate always has a route.
+  // TIER FOUR: THE SANDBOX'S OWN CONTEXT, handed to it in its environment.
+  //
+  // A run is a process on another machine that will call back over HTTP for control, for
+  // confirmations, and to push its trace. Given a `TRACEPARENT` it makes those calls inside the
+  // same trace as the click that started it, and "everything that happened for this run" stays
+  // one query rather than four. A span rather than a bare id, so the run's own duration is
+  // recorded here — the sandbox cannot end a span it did not create.
+  const runSpan = tracer.start(`run ${agentId ?? "test_agent"}`, {
+    attributes: { "jaroku.run_id": runId, "jaroku.workspace_id": ctx.workspaceId, "jaroku.agent": agentId ?? "test_agent" },
+  });
+  runSpans.set(runId, runSpan);
   const env: NodeJS.ProcessEnv = {
     JAROKU_RUN_ID: runId,
+    // The W3C header name, spelled as an environment variable exactly as the OTel SDKs read it,
+    // so a generated project that happens to use one picks it up without being told about us.
+    TRACEPARENT: formatTraceparent(runSpan.context),
     JAROKU_CONTROL_DIR: CHECKPOINT_DIR,
     // WHICH WORKSPACE THIS RUN'S CHECKPOINTS BELONG TO.
     //

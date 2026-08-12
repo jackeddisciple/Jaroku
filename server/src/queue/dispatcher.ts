@@ -42,7 +42,7 @@ export class Dispatcher {
     jobClass: JobClass,
     workspaceId: string,
     payload: T,
-    opts: { id?: string; idempotencyKey?: string; attempt?: number } = {},
+    opts: { id?: string; idempotencyKey?: string; attempt?: number; traceparent?: string } = {},
   ): Promise<QueueJob<T>> {
     const id = opts.id ?? randomUUID();
     const job: QueueJob<T> = {
@@ -53,6 +53,9 @@ export class Dispatcher {
       enqueuedAt: new Date().toISOString(),
       attempt: opts.attempt ?? 1,
       payload,
+      // Carried, never generated here. The dispatcher does not know what a span is; it knows
+      // that a job belongs to whatever asked for it, and this is that string.
+      ...(opts.traceparent ? { traceparent: opts.traceparent } : {}),
     };
     await this.backend.enqueue(job as QueueJob);
     return job;

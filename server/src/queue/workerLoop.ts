@@ -39,6 +39,14 @@ export interface WorkerLoopOptions {
   onAdmit?: (jobClass: JobClass, job: QueueJob) => void;
   onHandlerError?: (jobClass: JobClass, job: QueueJob, error: unknown) => void;
   onReaped?: (jobClass: JobClass, jobs: QueueJob[]) => void;
+  /**
+   * Wrap one job's execution in a span, continuing whatever trace enqueued it.
+   *
+   * A hook rather than an import, exactly as the router's is: the worker loop knows when a job
+   * starts and stops, and `obs/trace.ts` knows what a span is. `job.traceparent` is the whole of
+   * the context — a worker in another process has no socket and no request to inherit from.
+   */
+  trace?: (job: QueueJob, run: () => Promise<void>) => Promise<void>;
 }
 
 const DEFAULT_IDLE_POLL_MS = 250;
@@ -57,6 +65,7 @@ export class WorkerLoop {
   private readonly onAdmit: WorkerLoopOptions["onAdmit"];
   private readonly onHandlerError: WorkerLoopOptions["onHandlerError"];
   private readonly onReaped: WorkerLoopOptions["onReaped"];
+  private readonly trace: WorkerLoopOptions["trace"];
 
   private stopping = false;
   private stopped = false;
@@ -78,6 +87,7 @@ export class WorkerLoop {
     this.onAdmit = opts.onAdmit;
     this.onHandlerError = opts.onHandlerError;
     this.onReaped = opts.onReaped;
+    this.trace = opts.trace;
   }
 
   /** How many jobs this worker is currently handling — the "how far into a drain window am
@@ -118,7 +128,8 @@ export class WorkerLoop {
 
   private handle(jobClass: JobClass, job: QueueJob, leaseId: string): void {
     const handler = this.handlers[jobClass]!;
-    const promise = handler(job, leaseId)
+    const run = (): Promise<void> => handler(job, leaseId);
+    const promise = (this.trace ? this.trace(job, run) : run())
       .catch((error) => this.onHandlerError?.(jobClass, job, error))
       .finally(() => {
         this.inFlight.delete(leaseId);
