@@ -144,6 +144,20 @@ export interface EvalRunnerDeps {
    * `start` returns, which is already too late.
    */
   bindWorkspace?: (evalId: string, ctx: TenantContext) => void;
+  /**
+   * Whether the WORKSPACE has run out of room, and why — or null when it has not.
+   *
+   * Distinct from the eval's own `budget_usd`, which is a ceiling somebody set on this
+   * comparison. This is the workspace's ceiling for the period, and it has to be consulted here
+   * as well as at start: a five-hundred-job fan-out is five hundred things being STARTED, and a
+   * gate that only ran once would let the first job's authorisation cover all of them. The eval
+   * budget has always been checked on every pump for exactly this reason; the workspace's is
+   * checked in the same place, on the same rule.
+   *
+   * Optional, so a runner constructed without billing — every existing suite — behaves exactly
+   * as it did.
+   */
+  workspaceOverBudget?: () => Promise<string | null>;
 }
 
 export interface StartEvalRequest {
@@ -363,17 +377,31 @@ export class EvalRunner {
     // It bounds what is STARTED, not what is spent: a job already in flight runs to
     // completion, so the final total can exceed the ceiling by at most the cost of the
     // runs already going. Stopping mid-run would spend the money and throw away the result.
-    if (!live.cancelled && (await this.overBudget(evalId))) {
-      const cancelled = await this.deps.evalStore.cancelQueuedJobs(this.deps.context(), evalId, "budget ceiling reached");
+    // TWO CEILINGS, ONE RULE. The eval's own `budget_usd` is a limit somebody set on this
+    // comparison; the workspace's is the limit on everything it starts this period. Both bound
+    // what is STARTED, both are checked on every pump for the same reason — a fan-out is many
+    // starts, not one — and both stop the queue rather than the jobs already running.
+    const workspaceReason = live.cancelled ? null : ((await this.deps.workspaceOverBudget?.()) ?? null);
+    if (!live.cancelled && (workspaceReason !== null || (await this.overBudget(evalId)))) {
+      const cancelled = await this.deps.evalStore.cancelQueuedJobs(
+        this.deps.context(),
+        evalId,
+        workspaceReason ?? "budget ceiling reached",
+      );
       live.cancelled = true;
       const spent = await this.deps.evalStore.trueSpend(this.deps.context(), evalId);
       const ceiling = (await this.deps.evalStore.getEvalRun(this.deps.context(), evalId))?.budget_usd;
-      await this.deps.evalStore.setEvalStatus(this.deps.context(), 
+      await this.deps.evalStore.setEvalStatus(this.deps.context(),
         evalId,
         "aborted_over_budget",
-        `stopped after $${spent.toFixed(4)} of a $${ceiling?.toFixed(4)} budget`,
+        // Which ceiling stopped it, in the words the user will read. "Over budget" with no
+        // subject leaves somebody raising the wrong number and watching it stop again.
+        workspaceReason ?? `stopped after $${spent.toFixed(4)} of a $${ceiling?.toFixed(4)} budget`,
       );
-      console.log(`[eval] ${evalId} hit its budget ceiling — ${cancelled} queued job(s) cancelled`);
+      console.log(
+        `[eval] ${evalId} stopped — ${cancelled} queued job(s) cancelled ` +
+          `(${workspaceReason ? "workspace ceiling" : "this eval's budget"})`,
+      );
     }
 
     // WHICH QUEUED JOBS NEED TO REACH THE DISPATCHER — reconciliation against the persisted
@@ -686,7 +714,11 @@ export class EvalRunner {
       !live.cancelled &&
       attempt < MAX_ATTEMPTS &&
       isTransientFailure(error, timedOut) &&
-      !(await this.overBudget(live.evalId)); // never spend past the ceiling to retry
+      // Never spend past EITHER ceiling to retry. A retry is another start, and the workspace's
+      // limit binds it exactly as the eval's own does — without this, a workspace that ran out
+      // mid-eval would keep paying for attempts on the jobs that happened to fail.
+      !(await this.overBudget(live.evalId)) &&
+      ((await this.deps.workspaceOverBudget?.()) ?? null) === null;
 
     if (retryable) {
       // Exponential backoff: a rate limit retried immediately is a rate limit again.

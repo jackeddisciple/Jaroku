@@ -78,7 +78,7 @@ import { assertPlanRegistry } from "./billing/plans.ts";
 import { UsageMeter, usageKey } from "./billing/usage.ts";
 import { SAMPLE_INTERVAL_MS, sampleStorage } from "./billing/storage.ts";
 import { Balances } from "./billing/balances.ts";
-import { BudgetGate } from "./billing/gate.ts";
+import { BudgetGate, ceilingRefusal } from "./billing/gate.ts";
 import { GENERATION_MODEL } from "./claude.ts";
 import { isSecretName } from "./secrets/secretStore.ts";
 import { PROVIDER_ENV_KEY, isProviderId, providerStatus, verifyProviderKey } from "./providers.ts";
@@ -255,6 +255,31 @@ function meterPlatformCall(
  * settles in milliseconds instead of waiting out an hour-long lease.
  */
 const runHolds = new Map<string, string>();
+
+/**
+ * evalId -> the hold taken for it. Same shape and same caveat as `runHolds`.
+ *
+ * Separate from it rather than one map with a prefixed key, because the two settle from
+ * different places: a run's real cost is the sum of its own usage rows, an eval's is
+ * `trueSpend` — every attempt of every job plus the judge, which is a figure the eval store
+ * already computes and which no per-run query would reproduce.
+ */
+const evalHolds = new Map<string, string>();
+
+/** Give an eval's hold back, settled against its true spend. Idempotent, like every release. */
+async function settleEval(ctx: TenantContext, evalId: string): Promise<void> {
+  const holdId = evalHolds.get(evalId);
+  if (!holdId) return;
+  evalHolds.delete(evalId);
+  try {
+    // TRUE spend: every attempt, succeeded or not, plus judge cost. Never the comparison
+    // figure, which excludes failures — settling on that would hand back money a retry storm
+    // had already spent, which is exactly when the difference is largest.
+    await balances.release(ctx, holdId, { settleUsd: await evalStore.trueSpend(ctx, evalId) });
+  } catch (err) {
+    console.error(`[billing] failed to settle eval ${evalId}:`, (err as Error)?.message ?? err);
+  }
+}
 
 /**
  * Give a run's hold back, and take what it really spent out of the balance.
@@ -1175,6 +1200,18 @@ evalRunner = new EvalRunner({
   // that itself, between the eval becoming live and its first job, because nothing outside
   // knows the id before then.
   bindWorkspace: (evalId, ctx) => evalWorkspaces.set(evalId, ctx),
+  // The WORKSPACE's ceiling, checked on every pump beside the eval's own. A five-hundred-job
+  // fan-out is five hundred things being started, and a gate that only ran at the button would
+  // let the first job's authorisation cover all of them. Returns the sentence the user reads,
+  // so the eval's stop reason names which ceiling stopped it rather than leaving somebody to
+  // raise the wrong number and watch it stop again.
+  workspaceOverBudget: async () => {
+    const evalId = evalRunner?.activeEvalIds()[0];
+    if (!evalId) return null;
+    const ctx = contextForEval(evalId);
+    const status = await budgetGate.status(ctx);
+    return status.overCeiling ? ceilingRefusal(status) : null;
+  },
   runtimeDir: RUNTIME_DIR,
   // An eval job's run persists like any other but stays off the live "trace" channel.
   markEvalRun: (runId, isEval) => {
@@ -1187,6 +1224,10 @@ evalRunner = new EvalRunner({
   // alongside the rest of the row instead of appearing all at once minutes later.
   onJobFinished: (job) => judge.enqueue(job.eval_id, job),
   onFinished: (e) => {
+    // The hold comes back here, settled against what the eval really spent. Whatever the
+    // outcome — completed, cancelled, or stopped by a ceiling — the money it did not use is
+    // the workspace's again the moment nothing is left to spend it.
+    void settleEval(contextForEval(e.evalId), e.evalId);
     relay.broadcastEval(contextForEval(e.evalId), { type: "evalFinished", ...e });
     // The eval's runs are now in history like any other; refresh so drill-down can reach
     // them without a reconnect.
@@ -1892,6 +1933,28 @@ async function handleEvalCommand(ctx: TenantContext, cmd: ForwardedCommand): Pro
           relay.broadcastEval(ctx, { type: "error", message: `invalid agent id: ${cmd.agentId}` });
           return;
         }
+        // MONEY ASKS FIRST, here as on the interactive path — and here it matters more, because
+        // an eval is the one thing in this product that multiplies cost by examples x providers
+        // and then adds a judge call per cell. The estimate is the same one the UI showed before
+        // the button was pressed, computed by the same function over the same history.
+        const evalEstimate = await estimateEval(ctx, store, evalStore, {
+          datasetId: cmd.datasetId,
+          agentId: cmd.agentId,
+          targets: cmd.targets ?? [],
+          judgeEnabled: JudgeScorer.available(),
+        }).catch(() => null);
+        const verdict = await budgetGate.mayStart(ctx, {
+          // The HIGH end. An estimate that undershoots is the dangerous direction — it is the
+          // one that talks somebody into a run they would have declined — and a hold sized from
+          // the low end would leave the difference unprotected.
+          estimateUsd: evalEstimate?.hasUnpricedTarget ? null : (evalEstimate?.totalHighUsd ?? null),
+          purpose: "eval",
+        });
+        if (!verdict.ok) {
+          relay.broadcastEval(ctx, { type: "error", message: verdict.message ?? "this eval was refused" });
+          return;
+        }
+
         // Recorded before dispatch: its progress arrives on callbacks that have no context
         // of their own, and it belongs to whoever pressed the button.
         const started = await evalRunner.start({
@@ -1905,7 +1968,17 @@ async function handleEvalCommand(ctx: TenantContext, cmd: ForwardedCommand): Pro
         // The workspace was bound inside `start`, before the first job — see bindWorkspace.
         // Binding it here, on the way back, left a window in which the eval was already
         // dispatching and `contextForEval` still answered with the server's workspace.
-        if ("error" in started) relay.broadcastEval(ctx, { type: "error", message: started.error });
+        if ("error" in started) {
+          // No eval, so no `evalFinished` is coming to settle the hold. Give it back now rather
+          // than leaving it to the sweeper — the same shape as a run refused a pool slot.
+          if (verdict.holdId) await balances.release(ctx, verdict.holdId);
+          relay.broadcastEval(ctx, { type: "error", message: started.error });
+          return;
+        }
+        // Whose hold to settle when this eval finishes. Keyed by the eval id, which only exists
+        // once `start` has returned — which is why the hold was taken against no subject and is
+        // attributed here.
+        if (verdict.holdId) evalHolds.set(started.evalId, verdict.holdId);
         return;
       }
       case "cancelEval": {
