@@ -64,6 +64,17 @@ def check_catalog() -> list[str]:
                 f"vs module {sorted(actual)}"
             )
 
+        # `auth` decides what the connections panel offers, what .env.example says about each
+        # key, and what the generation prompt tells the model about where a credential comes
+        # from. A connector with none of those decided would quietly behave as `user_secret`
+        # everywhere, which for Gmail means telling a user to obtain a refresh token by hand —
+        # the exact instruction the Connect button exists to make unnecessary.
+        auth = entry.get("auth")
+        if auth not in {"oauth", "user_secret", "none"}:
+            problems.append(
+                f"{cid}: auth is {auth!r} — it must be 'oauth', 'user_secret' or 'none'"
+            )
+
         catalog_tools = {t["name"] for t in entry["tools"]}
         module_tools = {t.name for t in getattr(module, "TEMPLATE_TOOLS", [])}
         if catalog_tools != module_tools:

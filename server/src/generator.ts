@@ -22,7 +22,9 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative } from "node:path";
 import { anthropicClient, emptyUsage, summarizeUsage, type UsageSummary } from "./claude.ts";
-import { loadConnectors, requiredEnv, resolveSelected, templatesDir, type Connector } from "./connectors.ts";
+import {
+  connectionSuppliedEnv, loadConnectors, requiredEnv, resolveSelected, templatesDir, type Connector,
+} from "./connectors.ts";
 import { FileProtocolParser, type ProtocolEvent } from "./fileProtocol.ts";
 import { round8 } from "./pricing.ts";
 import type { AgentRepository } from "./db/repositories/agents.ts";
@@ -486,12 +488,41 @@ export class Generator extends EventEmitter<GeneratorEvents> {
 
     // Merge connector env into whatever the model wrote, so .env.example is complete even
     // if the model forgot a key.
+    //
+    // TWO BLOCKS NOW, BECAUSE THE KEYS MEAN TWO DIFFERENT THINGS. A `user_secret` connector's
+    // keys are a to-do list — nothing works until somebody pastes a value in. An `oauth`
+    // connector's keys are documentation: hosted, they are filled by a connection the workspace
+    // made by clicking Connect, and presenting `GMAIL_REFRESH_TOKEN=` as a blank would tell a
+    // user to go and do by hand precisely the thing that button exists to do for them.
+    //
+    // The names stay in the file either way, and that is deliberate rather than tidiness: this
+    // project is portable, and a copy of it running outside Jaroku has no connection to ask.
+    // What changes is only what the file SAYS about them.
+    const connectionFilled = connectionSuppliedEnv(meta.selected);
     const existing = staged.get(".env.example") ?? "";
     const missing = env.filter((k) => !existing.includes(k));
+    const toFill = missing.filter((k) => !connectionFilled.includes(k));
+    const documented = missing.filter((k) => connectionFilled.includes(k));
     let envExample = existing;
-    if (missing.length) {
-      const block = ["", "# Required by the connectors and MCP servers this agent uses:", ...missing.map((k) => `${k}=`), ""].join("\n");
-      envExample = `${existing.trimEnd()}\n${block}`;
+    const blocks: string[] = [];
+    if (toFill.length) {
+      blocks.push(
+        "",
+        "# Required by the connectors and MCP servers this agent uses:",
+        ...toFill.map((k) => `${k}=`),
+      );
+    }
+    if (documented.length) {
+      blocks.push(
+        "",
+        "# Filled in for you when this agent runs in Jaroku, from the connection this",
+        "# workspace made. Set them by hand only if you are running this project on your",
+        "# own, outside Jaroku:",
+        ...documented.map((k) => `# ${k}=`),
+      );
+    }
+    if (blocks.length) {
+      envExample = `${existing.trimEnd()}\n${[...blocks, ""].join("\n")}`;
     } else if (!existing) {
       envExample = "# This agent needs no credentials.\n";
     }

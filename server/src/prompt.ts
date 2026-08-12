@@ -24,7 +24,7 @@
 // every signature goes in the user message. Putting them in the prefix would silently cost
 // a cache miss on every single generation.
 
-import type { Connector } from "./connectors.ts";
+import { authModeOf, connectionSuppliedEnv, userSuppliedEnv, type Connector } from "./connectors.ts";
 import type { McpToolView } from "./mcpRegistry.ts";
 
 export interface GenerationRequest {
@@ -188,11 +188,21 @@ function renderConnectorReference(connectors: Connector[]): string {
       const tools = c.tools
         .map((t) => `    ${t.signature}\n        ${t.summary}`)
         .join("\n");
+      // WHERE the credential comes from, not only what it is called. A model told only that a
+      // connector "requires env: GMAIL_REFRESH_TOKEN" writes a README telling the user to obtain
+      // one by hand, which for an OAuth connector is advice to redo the thing the Connect button
+      // already did — and it is the sort of instruction that ends up quoted in a support ticket.
+      const supply =
+        authModeOf(c) === "oauth"
+          ? "supplied by the workspace's connection to this service; the user does not paste it"
+          : authModeOf(c) === "none"
+            ? "no credential needed"
+            : "supplied by the user";
       return [
         `  ${c.id}  (file will exist at tools/${c.file})`,
         `    ${c.description}`,
         `    import like: from .${c.module} import ${c.tools.map((t) => t.name).join(", ")}`,
-        `    requires env: ${c.required_env.join(", ")}`,
+        `    requires env: ${c.required_env.join(", ")}  (${supply})`,
         tools,
       ].join("\n");
     })
@@ -627,10 +637,22 @@ export function buildUserPrompt(req: GenerationRequest): string {
         .join("\n")
     : "  (none — write any tools this agent needs yourself)";
 
-  const env = req.connectors.flatMap((c) => c.required_env);
-  const envNote = env.length
-    ? `\nThese connector env keys must appear in .env.example: ${env.join(", ")}`
-    : "";
+  // Split by where the value comes from, because the model writes the file's prose and a key a
+  // connection fills in is not a key to instruct somebody to go and obtain. The host merges both
+  // lists in afterwards either way (generator.hostFiles), so this shapes the wording rather than
+  // deciding the contents.
+  const supplied = userSuppliedEnv(req.connectors);
+  const connected = connectionSuppliedEnv(req.connectors);
+  const envNote = [
+    supplied.length
+      ? `\nThese connector env keys must appear in .env.example for the user to fill in: ${supplied.join(", ")}`
+      : "",
+    connected.length
+      ? `\nThese are filled in by the workspace's connection when this agent runs in Jaroku — mention` +
+        ` them in .env.example only as a note for running the project standalone, never as` +
+        ` something to obtain by hand: ${connected.join(", ")}`
+      : "",
+  ].join("");
 
   // Every signature the model is allowed to call, and nothing else. The list IS the grant:
   // the host writes a manifest containing exactly these, so a tool invented here would not
