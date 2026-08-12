@@ -41,6 +41,7 @@ import { resolveRunTokenSigningKey, RunTokenRevocationList } from "./sandbox/run
 import { sandboxImageRef } from "./sandbox/image.ts";
 import { FlyMachinesSandbox } from "./sandbox/flySandbox.ts";
 import { loadRuntimeEnv } from "./env.ts";
+import { installLogRedaction, protectEnv } from "./obs/log.ts";
 import { REDIS_URL_ENV, openRedis, pingRedis, redisUrlFromEnv } from "./queue/redis.ts";
 import { RedisQueueBackend } from "./queue/redisBackend.ts";
 import { Dispatcher } from "./queue/dispatcher.ts";
@@ -53,6 +54,22 @@ const REPO_DIR = resolve(SERVER_DIR, "..");
 const RUNTIME_DIR = join(REPO_DIR, "runtime");
 const DB_PATH = process.env.JAROKU_DB ?? join(SERVER_DIR, "jaroku.db");
 const WORKER_ID = process.env.JAROKU_WORKER_ID ?? `worker-${process.pid}`;
+
+// THE FILTER OVER EVERY LOG SINK, BEFORE ANYTHING IS LOGGED. The same three lines index.ts opens
+// with, and their absence here was not a smaller version of the same gap — it was the whole of
+// it, in this process. `installLogRedaction` replaces `console` for the process that calls it,
+// and nothing in a second entrypoint inherits the first one's.
+//
+// The first line this file used to print was the leak. `[worker …] redis: <url>` writes the
+// connection string verbatim, and a hosted Redis URL is `rediss://user:password@host` — a
+// credential, on a boot line, on the happy path, with no error involved. The filter's
+// url-credentials rule has always caught it; nothing here was running the filter.
+//
+// obs/log.ts's header says the guarantee has to hold "for code that has not been written yet".
+// A second entrypoint is that case exactly: this one has no job handlers wired to it today, so
+// the day it gets one is the day it starts logging around provider keys, and the filter has to
+// predate that rather than be remembered alongside it.
+installLogRedaction();
 
 const url = redisUrlFromEnv();
 if (!url) {
@@ -69,6 +86,11 @@ if (!(await pingRedis(redisClient))) {
 console.log(`[worker ${WORKER_ID}] redis: ${url}`);
 
 const loadedKeys = loadRuntimeEnv(join(RUNTIME_DIR, ".env"));
+// AND THE VALUES REGISTERED, which is the half that makes a leak impossible rather than
+// unlikely. Shapes catch a key that looks like one; a registered value is matched literally, so
+// a provider quoting the key it just rejected is caught whatever it looks like. This process
+// loads the same file index.ts does and was registering none of it.
+protectEnv(process.env, loadedKeys);
 if (loadedKeys.length) {
   console.log(`[worker ${WORKER_ID}] loaded ${loadedKeys.length} var(s) from runtime/.env`);
 }

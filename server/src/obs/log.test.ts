@@ -15,7 +15,7 @@
 //   npm run test:log-redaction
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -251,6 +251,42 @@ console.log("\ninstalling twice");
   uninstallLogRedaction();
   console.log = realLog;
   check(captured[0] === "x [redacted:ANTHROPIC_API_KEY]", "installing twice does not nest the filter");
+}
+
+console.log("\nevery process that loads credentials also filters and registers them");
+{
+  // STRUCTURAL, LIKE db/boundary.test.ts, AND FOR THE SAME REASON. `installLogRedaction` replaces
+  // `console` for the process that calls it, and a second entrypoint inherits nothing from the
+  // first. worker.ts called neither it nor `protectEnv`, so the whole of this file's guarantee
+  // was absent from that process — and its first log line was `[worker …] redis: <url>`, which
+  // on a hosted deployment is `rediss://user:password@host`: a credential, on a boot line, on the
+  // happy path, with no error involved.
+  //
+  // A behavioural test cannot reach this. Both files are top-level scripts that open sockets and
+  // connect to Redis on import, so the only thing that can ask the question is a reader. The
+  // callers are DISCOVERED rather than listed: anything that loads runtime/.env is a process
+  // holding credentials, which is the property that matters, so a third entrypoint is covered
+  // the day it is written rather than the day somebody remembers this file.
+  const SRC = join(import.meta.dirname, "..");
+  const holders = readdirSync(SRC)
+    .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+    .map((f) => ({ name: f, text: readFileSync(join(SRC, f), "utf8") }))
+    // Calls it, rather than declares it: env.ts is the loader, not a process that loads.
+    .filter((f) => /\bloadRuntimeEnv\s*\(/.test(f.text) && !/function\s+loadRuntimeEnv\b/.test(f.text));
+
+  check(holders.length >= 2, `both entrypoints load runtime/.env (${holders.map((h) => h.name).join(", ")})`);
+  for (const { name, text } of holders) {
+    check(/\binstallLogRedaction\s*\(\s*\)/.test(text), `${name}: installs the filter over console`);
+    check(/\bprotectEnv\s*\(/.test(text), `${name}: registers what it loaded, so the values match literally`);
+    // Before anything is logged, or the lines printed while booting are the ones outside it —
+    // and booting is when a process prints its connection strings.
+    const installedAt = text.search(/\binstallLogRedaction\s*\(\s*\)/);
+    const firstLog = text.search(/^\s*console\.(log|error|warn|info|debug)\s*\(/m);
+    check(
+      firstLog === -1 || installedAt < firstLog,
+      `${name}: ...and does it before its first console call`,
+    );
+  }
 }
 
 console.log("\nregistering an environment");
