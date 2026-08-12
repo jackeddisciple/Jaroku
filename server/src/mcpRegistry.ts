@@ -21,7 +21,8 @@
 //     still stops for a confirmation.
 
 import { discover, type DiscoveryResult } from "./mcpClient.ts";
-import { authEnvKeyFor, type CredentialWriter } from "./envWriter.ts";
+import { authEnvKeyFor } from "./envWriter.ts";
+import type { SecretStore } from "./secrets/secretStore.ts";
 import type { TenantContext } from "./db/tenant.ts";
 import { classify } from "./mcpImpact.ts";
 import {
@@ -122,12 +123,23 @@ export interface AddServerOptions {
 
 export class McpRegistry {
   /**
-   * The credential writer is injected rather than imported so this module never decides
-   * where secrets live, and so a test can register a server without touching a real .env.
-   * When it is absent, a server needing a credential can still be registered — it will
-   * simply report `configured: false` until the key is set some other way.
+   * THE SECRET STORE, NOT A FILE, AND THAT IS THIS COMMIT'S WHOLE POINT.
+   *
+   * Until now an MCP token lived in `process.env`, written there by `envWriter`. That is correct
+   * for one user on one machine and is a cross-tenant leak the moment there are two: the process
+   * environment has no notion of a workspace, so `JAROKU_MCP_LINEAR_TOKEN` is ONE VALUE for the
+   * whole server. Two workspaces connecting the same service — the ordinary case, since a server
+   * id is a slug like "linear" and both derive the same env key — would overwrite each other's
+   * credential and then authenticate to Linear as whoever wrote last.
+   *
+   * `SecretStore` fixes it by being the thing that has a workspace in it. Locally it is
+   * `DotEnvSecretStore`, which wraps the same writer and reads the same `process.env`, so
+   * `npm run dev` is byte-for-byte what it was; hosted it is per-workspace ciphertext.
+   *
+   * Still optional, and for the reason the writer was: a test can register a server without one,
+   * and a server needing a credential simply reports `configured: false`.
    */
-  constructor(private store: McpStore, private credentials?: CredentialWriter) {}
+  constructor(private store: McpStore, private secrets?: SecretStore) {}
 
   // --- reads -----------------------------------------------------------------
 
@@ -142,15 +154,35 @@ export class McpRegistry {
    * runtime/.env is loaded into process.env at startup by the same loader every other key
    * goes through (env.ts), so this is a presence check and never a file read.
    */
-  private configured(server: McpServer): boolean {
-    if (!server.auth_env_key) return false;
-    return Boolean(process.env[server.auth_env_key]);
+  private async configured(ctx: TenantContext, server: McpServer): Promise<boolean> {
+    if (!server.auth_env_key || !this.secrets) return false;
+    // BY NAME, from the WORKSPACE's own listing. Never `process.env`, which hosted holds the
+    // PLATFORM's variables — reading it would tell every workspace it has a credential because
+    // the server does, which is the identical mistake `listProviders` was fixed for in Session 6.
+    const names = await this.secrets.listNames(ctx);
+    return names.some((r) => r.name === server.auth_env_key);
   }
 
-  /** Read the credential at the moment of use. The value never leaves this call. */
-  private token(server: McpServer): string | null {
+  /**
+   * Read the credential at the moment of use. The value never leaves this call.
+   *
+   * Through `getForPlatformCall`, which is the right exit rather than a convenient one. A
+   * discovery is exactly what that method exists for: a call the CONTROL PLANE makes to a third
+   * party on a workspace's behalf, scoped by the asking context rather than by a run — there is
+   * no run here, and a synthetic run id would resolve to no workspace on the hosted store and
+   * attribute the use to something that does not exist. See secrets/secretStore.ts, which argues
+   * the same case at length for the platform's own model calls.
+   */
+  private async token(ctx: TenantContext, server: McpServer): Promise<string | null> {
     if (!server.auth_env_key) return null;
-    return process.env[server.auth_env_key] ?? null;
+    return this.credentialFor(ctx, server.auth_env_key);
+  }
+
+  /** The same read, by name, for the one caller that holds a name and not yet a row. */
+  private async credentialFor(ctx: TenantContext, name: string): Promise<string | null> {
+    if (!this.secrets) return null;
+    const env = await this.secrets.getForPlatformCall(ctx, [name]);
+    return env[name] ?? null;
   }
 
   private viewTool(tool: McpTool): McpToolView {
@@ -173,7 +205,7 @@ export class McpRegistry {
     const tools = await this.store.listTools(ctx, server.id);
     return {
       ...server,
-      configured: this.configured(server),
+      configured: await this.configured(ctx, server),
       tools: tools.map((t) => this.viewTool(t)),
     };
   }
@@ -234,8 +266,8 @@ export class McpRegistry {
     let credentialWarning: string | null = null;
     if (opts.token) {
       authEnvKey = authEnvKey ?? authEnvKeyFor(id);
-      if (this.credentials) {
-        const written = this.credentials.set(authEnvKey, opts.token);
+      if (this.secrets) {
+        const written = await this.secrets.set(ctx, authEnvKey, opts.token);
         if (!written.ok) {
           return { ok: false, server: null, message: written.warning ?? "could not store the credential" };
         }
@@ -245,7 +277,12 @@ export class McpRegistry {
 
     const result = await discover({
       endpoint,
-      token: authEnvKey ? (process.env[authEnvKey] ?? null) : null,
+      // Read back through the store rather than reused from `opts.token`, so the value the
+      // handshake presents is the one that was actually stored — a credential the store refused
+      // or altered must not appear to work once and fail on every re-discovery. And read through
+      // the WORKSPACE's store, which is what makes two workspaces on one endpoint present two
+      // different tokens.
+      token: authEnvKey ? await this.credentialFor(ctx, authEnvKey) : null,
     });
 
     const base = {
@@ -298,7 +335,7 @@ export class McpRegistry {
     const server = await this.store.getServer(ctx, id);
     if (!server) return { ok: false, server: null, message: `no server called "${id}"` };
 
-    const result = await discover({ endpoint: server.endpoint, token: this.token(server) });
+    const result = await discover({ endpoint: server.endpoint, token: await this.token(ctx, server) });
 
     if (!result.ok) {
       await this.store.setServerStatus(ctx, id, result.status, result.error);
@@ -354,12 +391,12 @@ export class McpRegistry {
     const key = server.auth_env_key ?? authEnvKeyFor(id);
 
     if (token === null) {
-      this.credentials?.clear(key);
+      await this.secrets?.delete(ctx, key);
       await this.store.setServerAuthEnvKey(ctx, id, null);
       return { result: { ok: true, server: await this.get(ctx, id), message: null }, warning: null };
     }
 
-    const written = this.credentials?.set(key, token) ?? { ok: true, warning: null };
+    const written = (await this.secrets?.set(ctx, key, token)) ?? { ok: true, warning: null };
     if (!written.ok) {
       return {
         result: {

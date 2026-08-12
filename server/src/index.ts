@@ -380,7 +380,6 @@ await evalStore.init();
 const credentials = fileCredentialWriter(join(RUNTIME_DIR, ".env"));
 
 const mcpStore = new McpStore(store.database());
-const mcpRegistry = new McpRegistry(mcpStore, credentials);
 
 // TWO POOLS, SESSION 5. Before this, one pool reserved slot 0 for the interactive run and
 // lent the rest to the eval fan-out — a single, process-wide reservation, because there was
@@ -491,6 +490,20 @@ const secrets = openSecretStore({
             : null,
 });
 console.log(`[server] secret store: ${secrets.kind}${secrets.kind === "dotenv" ? " (runtime/.env)" : ""}`);
+
+// AND THE MCP REGISTRY, WHICH NOW READS ITS CREDENTIALS THROUGH THAT STORE RATHER THAN THE
+// PROCESS ENVIRONMENT.
+//
+// Constructed HERE rather than beside `mcpStore` above, purely because it needs the store that
+// is built on this line — the note two hundred lines up said the registry "keeps talking to the
+// writer directly for now" and would move onto this in the commit that gives credentials a
+// workspace. This is that commit.
+//
+// What changes: `JAROKU_MCP_<SERVER>_TOKEN` stops being one process-wide value and becomes one
+// value PER WORKSPACE. Two workspaces connecting the same service derive the same env key —
+// a server id is a slug — and before this the second to save a token silently replaced the
+// first's, so both then authenticated as whoever wrote last.
+const mcpRegistry = new McpRegistry(mcpStore, secrets);
 
 // The same problem for the three orchestrators, which emit through callbacks registered once
 // at boot and therefore have no argument to carry a context on.
