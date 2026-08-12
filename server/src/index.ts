@@ -82,6 +82,8 @@ import { resolveClientConfig } from "./oauth/provider.ts";
 import { GOOGLE } from "./oauth/google.ts";
 import { SLACK } from "./oauth/slack.ts";
 import { connectorRunEnv } from "./oauth/injection.ts";
+import { ConnectorSecrets } from "./connectorSecrets.ts";
+import { buildEgressPolicy, EgressPolicyError, type EgressPolicy } from "./sandbox/egressPolicy.ts";
 import { BillingRepository } from "./db/repositories/billing.ts";
 import { assertPlanRegistry } from "./billing/plans.ts";
 import { UsageMeter, usageKey, type Payer } from "./billing/usage.ts";
@@ -700,6 +702,56 @@ const oauth = new OAuthService({
     });
   },
 });
+// AND THE ONE CONNECTOR NOBODY CAN CONNECT FOR YOU.
+//
+// Postgres has no consent screen: the connection string IS the credential, so it stays a
+// `user_secret` in the vault. Which also makes it the only connector whose HOST a user chooses,
+// and therefore the SSRF vector the migration spec names — validated on the way in and re-resolved
+// and pinned on the way out. See connectorSecrets.ts for why doing it once would be doing it at
+// the moment it proves nothing.
+const connectorSecrets = new ConnectorSecrets({ secrets });
+
+/**
+ * Everything one run may talk to, denied by default.
+ *
+ * NEVER THROWS, and that is a decision worth stating. An egress policy that could not be built is
+ * a run with no policy, which on the hosted path is a configuration error the sandbox itself
+ * refuses — and locally is the situation every run has been in since the product was written.
+ * Failing the run here instead would mean a DNS blip stops somebody working, and would put the
+ * refusal in the least informative possible place. The reason is logged and the run proceeds
+ * exactly as it did before this existed.
+ *
+ * The postgres rule is the one that can legitimately refuse: a workspace whose DATABASE_URL now
+ * resolves to a private address gets a policy WITHOUT that host rather than one that admits it,
+ * because `buildEgressPolicy` refuses to build a postgres run with no validated URL — so the
+ * whole policy comes back undefined and the log says which connector caused it.
+ */
+async function buildRunEgress(
+  runId: string,
+  provider: string | undefined,
+  connectors: string[],
+): Promise<EgressPolicy | undefined> {
+  try {
+    // Resolved fresh at policy-build time and pinned. Reading something the save path recorded
+    // would be the DNS-rebinding hole this exists to close — see connectorSecrets.ts.
+    const databaseUrl = connectors.includes("postgres")
+      ? ((await connectorSecrets.postgresEgress(runId)) ?? undefined)
+      : undefined;
+    return await buildEgressPolicy({
+      runId,
+      provider: provider ?? "fake",
+      connectors,
+      databaseUrl,
+      controlPlaneHost: CONTROL_PLANE_URL ? new URL(CONTROL_PLANE_URL).hostname : undefined,
+      controlPlanePort: CONTROL_PLANE_URL ? Number(new URL(CONTROL_PLANE_URL).port || 443) : undefined,
+    });
+  } catch (err) {
+    const why = err instanceof EgressPolicyError ? err.message : (err as Error).message;
+    console.warn(`[sandbox] no egress policy for run ${runId}: ${why}`);
+    return undefined;
+  }
+}
+
 const tokenRefresher = new TokenRefresher({
   repo: oauthRepo,
   secrets,
@@ -2936,6 +2988,9 @@ async function runAgent(
   // recorded on the meter before the first step arrives — it cannot be recovered afterwards,
   // because whether a run used its workspace's key depends on what was configured at the time.
   let runPayer: Payer = "platform";
+  // What this run may reach, or undefined when no policy could be computed. Undefined is the
+  // local default and is NOT "allow everything" on the hosted path — see SandboxSpec.egress.
+  let runEgress: EgressPolicy | undefined;
   clearControl(runId); // no stale pause request from a prior life
   console.log(`[manager] starting ${agentId ?? "test_agent"}${input ? ` — "${input}"` : ""} (run ${runId})`);
   // Model is forwarded explicitly so a real-provider run can't silently fall back to
@@ -3006,6 +3061,17 @@ async function runAgent(
     for (const credential of connectors.credentials) {
       if (credential.unavailable) relay.broadcastProviders(ctx, { type: "notice", message: credential.unavailable });
     }
+
+    // AND WHAT THIS RUN MAY TALK TO, computed from the same declarations the credentials came
+    // from: the one provider it names, the connectors it was generated with, the control plane,
+    // and — for postgres — the workspace's own DATABASE_URL, re-resolved and pinned NOW rather
+    // than trusted from whenever it was saved. Everything else denied.
+    //
+    // Built here and carried on the spec because the two sandbox implementations enforce it in
+    // completely different places and neither should be deciding what the rules are. Locally
+    // nothing enforces it at all — a child process shares this machine's network — which is why
+    // LocalSubprocessSandbox refuses to start under NODE_ENV=production.
+    runEgress = await buildRunEgress(runId, provider, agent?.connectors ?? []);
   } catch (err) {
     console.warn(`[manager] could not resolve credentials for ${runId}: ${(err as Error).message}`);
   }
@@ -3071,7 +3137,10 @@ async function runAgent(
   // and model from, and by then the environment that decided the payer is gone.
   runPayers.set(runId, runPayer);
   const outcome = await interactiveSlots.reserveAndStart(ctx.workspaceId, runId, () =>
-    interactivePool.tryStart({ runId, runtimeDir: RUNTIME_DIR, input, agentId, env, workspaceId: ctx.workspaceId }),
+    interactivePool.tryStart({
+      runId, runtimeDir: RUNTIME_DIR, input, agentId, env, workspaceId: ctx.workspaceId,
+      egress: runEgress,
+    }),
   );
   if (outcome !== "started") {
     runWorkspaces.delete(runId);

@@ -22,6 +22,7 @@
 
 import type { EventEmitter } from "node:events";
 import type { TraceEvent } from "../types.ts";
+import type { EgressPolicy } from "./egressPolicy.ts";
 
 /** Resource ceilings a sandbox enforces on the code it runs. Every field is required on the
  *  hosted path; the local path is a trusted developer's own machine and does not enforce them. */
@@ -58,6 +59,20 @@ export interface SandboxSpec {
    *  extracts this into the tmpfs scratch mount before executing anything. Absent locally: the
    *  project is already on this machine's disk under runtime/agents/<id>/. */
   files?: { presignedTarUrl: string };
+  /**
+   * Everything this run may talk to, as literal pinned addresses (sandbox/egressPolicy.ts).
+   *
+   * Computed per run, denied by default, and carried on the spec rather than derived inside an
+   * implementation — because the two implementations enforce it in completely different places
+   * and neither should be deciding WHAT the rules are. The hosted one turns these into per-machine
+   * firewall rules; `LocalSubprocessSandbox` cannot enforce anything (a child process shares this
+   * machine's network, and pretending otherwise would be the most dangerous kind of comment) and
+   * ignores it, which is exactly why that implementation refuses to start under NODE_ENV=production.
+   *
+   * Absent means no policy was computed, which is the local default and is NOT "allow everything"
+   * on the hosted path: a hosted sandbox with no policy is a configuration error, not a wildcard.
+   */
+  egress?: EgressPolicy;
 }
 
 /** Typed events every RunSandbox implementation emits. Identical to what processManager.ts

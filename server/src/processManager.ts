@@ -12,6 +12,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { RAILWAY_ENV_KEY } from "./railwayApi.ts";
 import { BackpressureTracker, describeViolation, type BackpressureViolation } from "./sandbox/backpressure.ts";
+import type { EgressPolicy } from "./sandbox/egressPolicy.ts";
 import type { RunSandbox, SandboxEvents, SandboxSpec } from "./sandbox/runSandbox.ts";
 import { isTraceEvent, type TraceEvent } from "./types.ts";
 
@@ -31,6 +32,17 @@ export interface AgentRunOptions {
   // A generated project under runtime/agents/. Omitted -> the hand-written fixture agent,
   // which is kept as a spawn path so the original pipeline stays regression-testable.
   agentId?: string;
+  /**
+   * What this run may reach — see SandboxSpec.egress, which this mirrors.
+   *
+   * IGNORED HERE, DELIBERATELY AND VISIBLY. A child process shares this machine's network stack;
+   * there is no route this implementation could take away, and a comment claiming otherwise would
+   * be the most dangerous kind. The field is on the options so the ONE caller that assembles a
+   * run does so identically whichever sandbox it is talking to — the hosted implementation turns
+   * these rules into per-machine firewall rules, and a policy that only appeared on the hosted
+   * path would be a policy nobody exercises until production.
+   */
+  egress?: EgressPolicy;
 }
 
 /** Accepts both the pool's existing loose options and a full SandboxSpec — the local path
