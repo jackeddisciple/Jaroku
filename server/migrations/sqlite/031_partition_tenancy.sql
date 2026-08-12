@@ -1,0 +1,14 @@
+-- 031_partition_tenancy — nothing to do on this driver, for two reasons rather than one.
+--
+-- There are no partitions here: 029 was a comment on this side too, because partitioning buys
+-- retention as a catalogue update and a local database's retention is a DELETE that finishes
+-- instantly. No partitions, no partitions to police.
+--
+-- And there is no row-level security to extend to them if there were. SQLite has no policies and
+-- no roles; the repository layer taking a TenantContext on every method IS the enforcement here,
+-- which is the point `test:tenancy` exists to keep true. The postgres half of this version closes
+-- a hole in a SECOND wall — one this driver has never had and does not pretend to.
+--
+-- The file exists because the runner requires both dialects to hold the same versions under the
+-- same names, and a version present on one side only is a drift nobody notices until the other
+-- driver runs. See `compareDialects`.

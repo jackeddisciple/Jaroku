@@ -258,6 +258,61 @@ try {
       `(${reachable.map((p) => p.relname).join(", ") || "none is"})`,
   );
 
+  // --- and the same question asked of the data rather than the catalogue --------------------
+  //
+  // The check above reads flags. This one reads rows, because the fix in migration 031 rests on
+  // a claim about POSTGRES — that a query routed through a declaratively partitioned parent is
+  // authorised against the parent, so revoking the app role's privileges on the partitions costs
+  // it nothing — and a claim about Postgres that this codebase has bet its trace ingestion on
+  // should be exercised rather than cited. Both directions, because either could fail alone: a
+  // revoke that also broke the parent would take every read and write of `steps` with it, and
+  // CI's own connection is a superuser, so nothing else here would notice.
+  const stepA = randomUUID();
+  const stepB = randomUUID();
+  const seedStep = async (ws: string, runId: string, id: string): Promise<void> => {
+    await db.scoped(ws, (tx) =>
+      tx.run(
+        `INSERT INTO steps (id, workspace_id, run_id, seq, type, name, started_at)
+         VALUES (?, ?, ?, 0, 'state_update', 'rls', ?)`,
+        [id, ws, runId, new Date().toISOString()],
+      ),
+    );
+  };
+  await seedStep(A, runA, stepA);
+  await seedStep(B, runB, stepB);
+
+  const stepsSeenByA = await asApp(A, (tx) => tx.all<{ id: string }>(`SELECT id FROM steps`));
+  check(
+    stepsSeenByA.some((s) => s.id === stepA) && !stepsSeenByA.some((s) => s.id === stepB),
+    `the app role still reads its own steps through the parent (${stepsSeenByA.length} row(s))`,
+  );
+
+  // Which partition B's step actually landed in — asked of the row rather than computed from
+  // the date, so the test cannot disagree with the bounds the migration wrote.
+  const home = await db.scoped(B, (tx) =>
+    tx.get<{ part: string }>(`SELECT tableoid::regclass::text AS part FROM steps WHERE id = ?`, [stepB]),
+  );
+  const part = home?.part ?? "";
+  check(/^steps_[a-z0-9_]+$/.test(part), `B's step lives in a partition (${part || "none found"})`);
+  if (/^steps_[a-z0-9_]+$/.test(part)) {
+    // Refused is the expected answer and empty is an acceptable one — the first is the REVOKE,
+    // the second would be the policy if the privilege were ever handed back. What must never
+    // happen is a row.
+    let leaked: string[] = [];
+    let refused = false;
+    try {
+      const rows = await asApp(A, (tx) => tx.all<{ id: string }>(`SELECT id FROM ${part}`));
+      leaked = rows.map((r) => r.id);
+    } catch {
+      refused = true;
+    }
+    check(
+      !leaked.includes(stepB),
+      `naming a partition directly does not reach another workspace ` +
+        `(${refused ? "refused outright" : `${leaked.length} row(s) visible`})`,
+    );
+  }
+
   const exempt = ["audit_log", "workspace_members", "ws_tickets"];
   const wrongly = exempt.filter((t) => policies.some((p) => p.tablename === t));
   check(

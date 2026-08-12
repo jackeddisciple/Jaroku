@@ -116,6 +116,30 @@ export interface PartitionSummary {
 }
 
 /**
+ * The statements that make a new partition as tenant-safe as the table it belongs to.
+ *
+ * A PARTITION IS A TABLE, AND IT ARRIVES WITH NEITHER OF THE TWO THINGS `steps` HAS. The policy
+ * on the parent governs queries routed through the parent — all of this codebase's — and says
+ * nothing about `SELECT * FROM steps_2026_08`. And 009's `ALTER DEFAULT PRIVILEGES` grants
+ * `jaroku_app` full DML on every table created in `public` from then on, which includes every
+ * month this function has ever created. Left alone, each new partition is a month of every
+ * tenant's trace readable by naming it. See migration 031, which fixed the ones that already
+ * existed and argues the design; this is the half that keeps it true next month.
+ *
+ * Concatenated onto the CREATE rather than issued separately, because `exec` sends them as one
+ * simple query and Postgres wraps that in an implicit transaction: there is no instant in which
+ * the partition exists granted and unpoliced. Separate calls would leave one, and it would be
+ * during boot, which is exactly when something else is scanning.
+ */
+const tenancyFor = (name: string): string =>
+  `REVOKE ALL ON TABLE ${name} FROM jaroku_app;` +
+  `ALTER TABLE ${name} ENABLE ROW LEVEL SECURITY;` +
+  `DROP POLICY IF EXISTS tenant_isolation ON ${name};` +
+  `CREATE POLICY tenant_isolation ON ${name} ` +
+  `USING      (workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid) ` +
+  `WITH CHECK (workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid);`;
+
+/**
  * Create whatever months are missing. Idempotent, and safe to run at every boot.
  *
  * `CREATE TABLE IF NOT EXISTS … PARTITION OF` is the whole of the concurrency handling: two
@@ -139,7 +163,8 @@ export async function ensurePartitions(db: Db, now = new Date(), aheadMonths = M
     // interpolation acceptable where `db.ts`'s header says it never is.
     await db.exec(
       `CREATE TABLE IF NOT EXISTS ${name} PARTITION OF ${PARTITIONED_TABLE} ` +
-        `FOR VALUES FROM ('${bound(month)}') TO ('${bound(addMonths(month, 1))}')`,
+        `FOR VALUES FROM ('${bound(month)}') TO ('${bound(addMonths(month, 1))}');` +
+        tenancyFor(name),
     );
     created.push(name);
   }
