@@ -34,7 +34,7 @@
 import type { TenantContext } from "../db/tenant.ts";
 import type { BillingRepository } from "../db/repositories/billing.ts";
 import type { IdentityRepository } from "../db/repositories/identity.ts";
-import { limitsFor } from "./plans.ts";
+import { limitsUnderEnforcement, type EnforcementLevel } from "../abuse/enforcement.ts";
 import { round8 } from "../pricing.ts";
 
 /**
@@ -61,6 +61,15 @@ export class PlatformKeyGate {
   constructor(
     private billing: BillingRepository,
     private identity: IdentityRepository,
+    /**
+     * The abuse rung in force, or nothing.
+     *
+     * Optional, and absent everywhere except the wiring in index.ts — this gate is constructed in
+     * three test suites that have no enforcement table, and a required dependency would make the
+     * money rules depend on the abuse rules being present. Absent means `none`, which is exactly
+     * what a deployment with no enforcement has.
+     */
+    private enforcement?: (ctx: TenantContext) => Promise<EnforcementLevel>,
   ) {}
 
   /**
@@ -96,7 +105,16 @@ export class PlatformKeyGate {
 
     const balance = await this.billing.balance(ctx);
     const workspace = await this.identity.workspaceById(ctx, ctx.workspaceId);
-    const limits = limitsFor(workspace?.plan, balance.limit_overrides);
+    // THE PLAN, THE WORKSPACE'S NEGOTIATED EXCEPTIONS, AND THEN THE ABUSE LADDER — in that order,
+    // because a workspace with a generous negotiated ceiling that is currently under a soft limit
+    // should get the limit's number rather than its contract's. Session 8: `soft_limit` and
+    // everything above it put `platformKeyCeilingUsd` to zero, which is what makes the first rung
+    // of the ladder cost the platform nothing while leaving a BYOK workspace working.
+    const limits = limitsUnderEnforcement(
+      workspace?.plan,
+      balance.limit_overrides,
+      (await this.enforcement?.(ctx)) ?? "none",
+    );
 
     if (!limits.features.platformKey) {
       return {

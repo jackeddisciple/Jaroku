@@ -42,6 +42,9 @@ import {
 } from "./http/rateLimit.ts";
 import { SIGNALS, signalsFromRun, subjectDigest, type DetectedSignal } from "./abuse/signals.ts";
 import { AbuseRepository } from "./db/repositories/abuse.ts";
+import { AbuseGate } from "./abuse/gate.ts";
+import { enforcementRefusal, limitsUnderEnforcement } from "./abuse/enforcement.ts";
+import { EnforcementRepository } from "./db/repositories/enforcement.ts";
 import { healthz, readyz } from "./http/health.ts";
 import { AUTH_ENV, resolveAuthConfig } from "./auth/config.ts";
 import { LocalIssuer } from "./auth/localIssuer.ts";
@@ -640,7 +643,7 @@ const budgetGate = new BudgetGate(billing, balances, bootIdentity);
 // The other gate, and a different question: not "may this workspace spend" but "may it spend
 // OURS". Separate from the budget gate because the two protect different people — see
 // billing/platformKey.ts.
-const platformKeyGate = new PlatformKeyGate(billing, bootIdentity);
+const platformKeyGate = new PlatformKeyGate(billing, bootIdentity, async (ctx) => (await abuseGate.check(ctx)).level);
 const workspaceIds = await bootIdentity.listWorkspaceIds(systemContext(newRequestId()));
 const workspaceContexts = workspaceIds.map((id) => systemContextFor(id, newRequestId()));
 
@@ -1198,10 +1201,30 @@ const abuseSubject = (address: string): string => subjectDigest(address, objectS
  */
 function observe(ctx: TenantContext, signal: DetectedSignal): void {
   console.warn(`[abuse] ${ctx.workspaceId} ${signal.kind} (+${signal.weight}) ${JSON.stringify(signal.detail)}`);
-  void abuse.record(ctx, signal).catch((err) => {
-    console.error(`[abuse] failed to record ${signal.kind}:`, (err as Error)?.message ?? err);
-  });
+  void abuse
+    .record(ctx, signal)
+    // AND THEN RE-DECIDE, but only after the row is in. Evaluating first would score the state
+    // before the thing that just happened, which is exactly one signal short every time and
+    // means the rung is always applied one observation late.
+    .then(() => abuseGate.evaluate(ctx))
+    .catch((err) => {
+      console.error(`[abuse] failed to record ${signal.kind}:`, (err as Error)?.message ?? err);
+    });
 }
+
+// AND WHAT IS DONE ABOUT AN ACCUMULATED SCORE — see abuse/enforcement.ts for the ladder, and in
+// particular for why the machine may climb only as far as a reversible inconvenience. The two
+// rungs that stop somebody working require a person, recorded by name on the row.
+const enforcementRepo = new EnforcementRepository(db);
+const abuseGate = new AbuseGate({
+  signals: abuse,
+  enforcement: enforcementRepo,
+  // Told on the providers channel, which is where a workspace already learns what it may spend
+  // and what it is connected with. A limit nobody is told about is a workspace whose runs simply
+  // stop working, and a support ticket that begins with "is it broken".
+  notify: (ctx, e) => relay.broadcastProviders(ctx, { type: "notice", message: e.message }),
+  log: (line) => console.warn(line),
+});
 
 const router = new Router({
   cors: originPolicy,
@@ -1620,6 +1643,18 @@ const COMMAND_RATE_ACTIONS: Partial<Record<string, RateAction>> = {
 async function admitCommand(ctx: TenantContext, cmd: ForwardedCommand): Promise<boolean> {
   const action = COMMAND_RATE_ACTIONS[cmd.cmd];
   if (!action) return true;
+  // THE LADDER FIRST, THEN THE BUCKET. A workspace that may not start work at all should be told
+  // that rather than told it is going too fast — and a rung is the more informative refusal, so
+  // it is the one worth spending the check on first. Only the commands with a rate action are
+  // gated, which is the same set that consumes: reading is never refused by an enforcement, for
+  // the reason enforcement.ts gives about not holding data hostage.
+  const verdict = await abuseGate.mayStartWork(ctx);
+  if (!verdict.ok) {
+    const message = enforcementRefusal(verdict.state);
+    console.warn(`[abuse] ${ctx.workspaceId} refused ${cmd.cmd} — ${verdict.state.level}`);
+    refuseCommand(ctx, action, message);
+    return false;
+  }
   let decision;
   try {
     decision = await rateLimiter.take(action, ctx.workspaceId);
@@ -1628,11 +1663,22 @@ async function admitCommand(ctx: TenantContext, cmd: ForwardedCommand): Promise<
     return true;
   }
   if (decision.ok) return true;
-  const message = rateRefusal(decision);
   console.warn(`[rate] workspace ${ctx.workspaceId} refused ${action} for ${retryAfterSeconds(decision)}s`);
   // Nearly weightless on purpose — see abuse/signals.ts. Tripping a limit is a client with a
   // loop in it and the limiter has already dealt with it; what this makes visible is a PATTERN.
   observe(ctx, { kind: "rate.limit_tripped", weight: SIGNALS["rate.limit_tripped"].weight, detail: { action } });
+  refuseCommand(ctx, action, rateRefusal(decision));
+  return false;
+}
+
+/**
+ * Tell whoever sent a command that it was refused, on the channel their UI is already watching.
+ *
+ * One mapping shared by both gates, because a refusal that lands somewhere nobody has open is
+ * indistinguishable from the product being broken — and there is deliberately no general-purpose
+ * "the server said no" channel to invent one on.
+ */
+function refuseCommand(ctx: TenantContext, action: RateAction, message: string): void {
   if (action === "agent.generate" || action === "agent.plan") relay.broadcastGen(ctx, { type: "error", message });
   else if (action === "agent.edit") relay.broadcastEdit(ctx, { type: "error", message });
   else if (action === "agent.explain") relay.broadcastReply(ctx, { type: "error", agentId: "", message });
@@ -1641,7 +1687,6 @@ async function admitCommand(ctx: TenantContext, cmd: ForwardedCommand): Promise<
   else if (action === "member.invite") relay.broadcastMembers(ctx, { type: "error", message });
   else if (action === "connector.connect") relay.broadcastConnections(ctx, { type: "error", message });
   else relay.broadcastDebug(ctx, { type: "error", message });
-  return false;
 }
 
 // AND THE OTHER HALF: deliver what OTHER replicas publish to sockets THIS one holds.
