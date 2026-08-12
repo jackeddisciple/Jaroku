@@ -75,6 +75,7 @@ import { openSecretStore } from "./secrets/open.ts";
 import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
 import { BillingRepository } from "./db/repositories/billing.ts";
 import { assertPlanRegistry } from "./billing/plans.ts";
+import { UsageMeter } from "./billing/usage.ts";
 import { isSecretName } from "./secrets/secretStore.ts";
 import { PROVIDER_ENV_KEY, isProviderId, providerStatus, verifyProviderKey } from "./providers.ts";
 import { DeployStore } from "./deployStore.ts";
@@ -195,6 +196,18 @@ assertPlanRegistry(await billing.listPlans(systemContext(newRequestId())));
 
 const store = new TraceStore(db);
 await store.init();
+
+// WHAT A RUN COSTS, WRITTEN DOWN AS IT HAPPENS.
+//
+// Fed from the ingest chain below, one row per llm_call step, keyed by the step's own id so a
+// redelivered batch cannot bill twice. It records; it decides nothing. Whether a workspace may
+// start the next run is a separate question asked against these rows, and keeping the two apart
+// is what lets metering be unconditional while billing is not — which is exactly what BYOK
+// needs, since a BYOK workspace wants the dashboard and does not want the invoice.
+const meter = new UsageMeter(billing, async (ctx, runId) => {
+  const run = await store.getRun(ctx, runId);
+  return run ? { provider: run.provider, model: run.model } : null;
+});
 // Eval's control-plane tables live in the same database file, on the same connection
 // (single writer; aggregation JOINs eval_jobs against the frozen `steps` table). Nothing
 // here touches schema/events.md — an eval is a batch of ordinary runs.
@@ -1923,8 +1936,29 @@ onBothPools("event", ({ runId, event }) => {
     try {
       if (event.kind === "run_start" || event.kind === "run_end") {
         await store.upsertRun(runCtx, event.run);
+        // What this run is executing on, cached for the steps that follow. A step does not
+        // carry provider or model — the frozen schema puts them on the run — so without this
+        // every metered step would be a second query on the one chain that must not become
+        // chatty. See UsageMeter.
+        if (event.kind === "run_start") meter.noteRun(event.run.id, event.run.provider, event.run.model);
       } else if (event.kind === "step") {
         await store.insertStep(runCtx, event.step);
+        // METERED AFTER THE STEP IS PERSISTED, AND ON THE SAME CHAIN.
+        //
+        // After, because a usage row for a step the database rejected would be a charge with
+        // no evidence behind it — the trace is the record a bill has to be defensible against.
+        // On the same chain, because ingestion is at-least-once and both writes are keyed by
+        // the same step id: a redelivered batch re-runs both, and both are no-ops the second
+        // time. Off the chain they could interleave with the next batch and stop agreeing.
+        //
+        // Its own try, because metering must never be able to lose a step. A billing failure
+        // is money we did not charge for; a persist failure that took the trace with it is
+        // the product.
+        try {
+          await meter.meterStep(runCtx, event.step);
+        } catch (err) {
+          console.error("[billing] failed to meter a step:", (err as Error).message);
+        }
       }
     } catch (err) {
       console.error("[store] failed to persist event:", (err as Error).message);
@@ -2058,7 +2092,13 @@ onBothPools("exit", ({ runId, code, signal, timedOut }) => {
   }
   // A paused run is coming back — resume re-registers it, and dropping it here would send
   // the resumed segment's events to the server's workspace instead of its own.
-  if (runId !== pausedRunId) runWorkspaces.delete(runId);
+  if (runId !== pausedRunId) {
+    runWorkspaces.delete(runId);
+    // Same condition, same reason: a resumed segment's steps still need to know what the run
+    // is executing on, and the meter's fallback would otherwise re-read the run row once.
+    // Harmless either way — this is a cache, not a record.
+    meter.forgetRun(runId);
+  }
   console.log(
     `[manager] agent exited (run=${runId} code=${code} signal=${signal}${timedOut ? " TIMED OUT" : ""})`,
   );

@@ -1,0 +1,23 @@
+-- 021_usage_total_tokens — the column the frozen schema forces.
+--
+-- 020 gave `usage_events` an input/output/cached split, which is the shape a provider's own
+-- billing API reports and the shape every platform-side call this system makes (generation, the
+-- plan gate, the fix loop, explain, the judge) really has. It is not the shape a RUN has.
+--
+-- `schema/events.md` v1 gives a Step one combined `tokens` figure and no split, and v1 is
+-- frozen — that is the whole premise of this migration, not an inconvenience to work around.
+-- The interceptor computes cost from the split it sees inside the call and then reports the
+-- total, because the total is what the trace's consumers need and a wider event is a schema
+-- change. So a usage row DERIVED from a step genuinely does not know its split.
+--
+-- Without this column the biggest category of metered usage — the agent's own model calls —
+-- would have to record either nothing (three NULLs, and a dashboard that cannot show a
+-- workspace its token count) or a guess (the total written into `input_tokens`, which is a
+-- number that reads like a measurement and is not one). Neither is acceptable, so the honest
+-- third option gets a column: the total is recorded where it is known, the split is recorded
+-- where THAT is known, and a NULL means the row genuinely does not have it.
+--
+-- This is a second migration rather than an edit to 020 because migrations are forward-only
+-- and 020 has run. That rule is exactly what makes it findable later: the file that adds a
+-- column is the file that explains why the column was not there to begin with.
+ALTER TABLE usage_events ADD COLUMN total_tokens bigint;

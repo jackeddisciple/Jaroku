@@ -53,6 +53,14 @@ export interface UsageEventInput {
   outputTokens?: number | null;
   cachedInputTokens?: number | null;
   /**
+   * Every token the call consumed, when the split is not known.
+   *
+   * The frozen event schema gives a Step one combined figure and no split, so a usage row
+   * derived from a run's trace can only ever fill this one — see migration 021. A platform-side
+   * call fills the split AND this, because it knows both.
+   */
+  totalTokens?: number | null;
+  /**
    * USD, or null for UNKNOWN.
    *
    * Null and 0 are different claims and this interface refuses to let them blur: passing null
@@ -73,6 +81,7 @@ export interface UsageEventRow {
   input_tokens: number | null;
   output_tokens: number | null;
   cached_input_tokens: number | null;
+  total_tokens: number | null;
   cost_usd: number | null;
   cost_known: boolean;
   occurred_at: string;
@@ -107,6 +116,8 @@ export interface SubscriptionRow {
 export interface SpendTotals {
   /** Sum of the rows that HAD a cost. A floor when `costKnown` is false. */
   usd: number;
+  /** Every token metered over the same rows, priced or not. */
+  tokens: number;
   /** How many rows were metered but could not be priced. */
   unpricedEvents: number;
   /** False when `unpricedEvents > 0` — the total is an undercount, and must be shown as one. */
@@ -115,12 +126,27 @@ export interface SpendTotals {
 
 const nowIso = (): string => new Date().toISOString();
 
+/**
+ * The total a split implies, or null when there is no split to add up.
+ *
+ * Null rather than 0, and that distinction is the same one `cost_usd` draws: a call with no
+ * token information recorded is not a call that used no tokens. Cached input counts — it was
+ * read, it was charged for (at a cache rate, which `costFor` already applies), and leaving it
+ * out would make the total disagree with the cost computed from the same three numbers.
+ */
+function sumTokens(e: UsageEventInput): number | null {
+  const parts = [e.inputTokens, e.outputTokens, e.cachedInputTokens].filter(
+    (n): n is number => typeof n === "number",
+  );
+  return parts.length ? parts.reduce((a, b) => a + b, 0) : null;
+}
+
 /** The statuses that mean a subscription is in force. Matches the partial unique index. */
 export const LIVE_SUBSCRIPTION_STATUSES = ["incomplete", "active", "past_due"] as const;
 
 const USAGE_COLUMNS = `id, workspace_id, run_id, kind, provider, model, input_tokens,
-                       output_tokens, cached_input_tokens, cost_usd, cost_known, occurred_at,
-                       idempotency_key`;
+                       output_tokens, cached_input_tokens, total_tokens, cost_usd, cost_known,
+                       occurred_at, idempotency_key`;
 const HOLD_COLUMNS = `id, workspace_id, amount_usd, purpose, subject_id, created_at,
                       expires_at, released_at`;
 const SUBSCRIPTION_COLUMNS = `id, workspace_id, plan_id, status, external_customer_id,
@@ -260,8 +286,9 @@ export class BillingRepository {
     const known = e.costUsd !== null && e.costUsd !== undefined;
     const res = await this.q(ctx).run(
       `INSERT INTO usage_events (workspace_id, run_id, kind, provider, model, input_tokens,
-         output_tokens, cached_input_tokens, cost_usd, cost_known, occurred_at, idempotency_key)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         output_tokens, cached_input_tokens, total_tokens, cost_usd, cost_known, occurred_at,
+         idempotency_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (idempotency_key) DO NOTHING`,
       [
         ctx.workspaceId,
@@ -272,6 +299,9 @@ export class BillingRepository {
         e.inputTokens ?? null,
         e.outputTokens ?? null,
         e.cachedInputTokens ?? null,
+        // Derived rather than demanded: a caller that gave a split has already said what the
+        // total is, and asking for it twice is asking for two numbers that can disagree.
+        e.totalTokens ?? sumTokens(e),
         known ? e.costUsd : null,
         known ? 1 : 0,
         e.occurredAt ?? nowIso(),
@@ -294,15 +324,21 @@ export class BillingRepository {
     const args = kinds?.length
       ? [ctx.workspaceId, since, ...kinds]
       : [ctx.workspaceId, since];
-    const row = await this.q(ctx).get<{ total: unknown; unpriced: unknown }>(
+    const row = await this.q(ctx).get<{ total: unknown; tokens: unknown; unpriced: unknown }>(
       `SELECT COALESCE(SUM(cost_usd), 0) AS total,
+              COALESCE(SUM(total_tokens), 0) AS tokens,
               COUNT(CASE WHEN cost_usd IS NULL THEN 1 END) AS unpriced
          FROM usage_events
         WHERE workspace_id = ? AND occurred_at >= ? ${filter}`,
       args,
     );
     const unpriced = asInt(row?.unpriced);
-    return { usd: Number(row?.total ?? 0), unpricedEvents: unpriced, costKnown: unpriced === 0 };
+    return {
+      usd: Number(row?.total ?? 0),
+      tokens: asInt(row?.tokens),
+      unpricedEvents: unpriced,
+      costKnown: unpriced === 0,
+    };
   }
 
   /** Every event for one run, oldest first. The dashboard's per-run drill-down. */
@@ -339,6 +375,7 @@ export class BillingRepository {
         r["cached_input_tokens"] === null || r["cached_input_tokens"] === undefined
           ? null
           : asInt(r["cached_input_tokens"]),
+      total_tokens: r["total_tokens"] === null || r["total_tokens"] === undefined ? null : asInt(r["total_tokens"]),
       cost_usd: r["cost_usd"] === null || r["cost_usd"] === undefined ? null : Number(r["cost_usd"]),
       cost_known: asBool(r["cost_known"]),
       occurred_at: String(r["occurred_at"]),
