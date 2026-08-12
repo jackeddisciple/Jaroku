@@ -17,6 +17,7 @@ import { dirname, join, resolve } from "node:path";
 import { RunPool, type RunPoolEvents } from "./runPool.ts";
 import { TraceStore } from "./store.ts";
 import { migrate } from "./db/migrate.ts";
+import { describePartitions, ensurePartitions } from "./lifecycle/partitions.ts";
 import { openDb } from "./db/open.ts";
 import { newRequestId, systemContext, systemContextFor, type TenantContext } from "./db/tenant.ts";
 import { EvalStore, type Rubric, type RubricCriterion } from "./evalStore.ts";
@@ -216,6 +217,33 @@ const serverContext = (): TenantContext => devTenancy.context();
 // request that happens to touch it.
 await migrate(db.migrationTarget(), join(SERVER_DIR, "migrations", db.dialect));
 devTenancy = await resolveDevTenancy(db);
+
+// AND THE MONTHS AHEAD OF THE TRACE.
+//
+// Migration 029 made `steps` one table per month, which is what turns retention into a catalogue
+// update instead of a multi-hour DELETE — and which introduces the one failure this call exists
+// to prevent: an INSERT with no matching partition FAILS, and the row it fails on is a trace
+// step. So the months are created ahead of time, at boot and then daily, and the DEFAULT
+// partition catches anything that still falls through. A no-op on SQLite. Unref'd: maintenance
+// must never be the reason a process will not exit.
+const ensureStepPartitions = async (): Promise<void> => {
+  const created = await ensurePartitions(db);
+  if (created.length) console.log(`[lifecycle] ${created.length} step partition(s) ensured through ${created.at(-1)}`);
+  const { defaultRows } = await describePartitions(db);
+  if (defaultRows > 0) {
+    // Not fatal, and not silent. Rows here cannot be dropped by month, so a filling default is a
+    // retention promise quietly not being kept — see lifecycle/partitions.ts.
+    console.warn(`[lifecycle] ${defaultRows} step(s) are in the DEFAULT partition and cannot be dropped by month`);
+  }
+};
+await ensureStepPartitions().catch((err) =>
+  console.error("[lifecycle] could not ensure step partitions:", (err as Error)?.message ?? err),
+);
+setInterval(() => {
+  void ensureStepPartitions().catch((err) =>
+    console.error("[lifecycle] could not ensure step partitions:", (err as Error)?.message ?? err),
+  );
+}, 24 * 3_600_000).unref();
 
 // WHAT THIS DEPLOYMENT SELLS, CHECKED AGAINST WHAT THE CODE THINKS EACH PLAN MEANS.
 //

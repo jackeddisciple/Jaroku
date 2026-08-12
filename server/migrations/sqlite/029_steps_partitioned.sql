@@ -1,0 +1,17 @@
+-- 029_steps_partitioned — nothing to do on this driver.
+--
+-- SQLite has no partitioning, and would have no use for it if it did. Partitioning `steps` buys
+-- exactly one thing: retention as a catalogue update instead of a multi-hour DELETE over tens of
+-- millions of rows. A local development database holds a few thousand steps, `DELETE` over it is
+-- instantaneous, and a scheme that split it across files would be complexity bought for a
+-- problem this driver does not have.
+--
+-- The version exists as a file anyway, and that is the migration runner's rule rather than
+-- ceremony: `migrations/postgres/` and `migrations/sqlite/` hold the same versions under the
+-- same names, so a version one dialect has nothing to do for is a comment-only file rather than
+-- a missing one. Two sequences that can silently drift apart is the failure this prevents.
+--
+-- The consequence for the code above: `lifecycle/partitions.ts` is a no-op on SQLite, and the
+-- retention sweeper falls back to a scoped DELETE there. Both paths are exercised by the suite;
+-- see that module's header for why the fallback is not a lesser implementation but the correct
+-- one for a single-file database.

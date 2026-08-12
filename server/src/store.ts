@@ -18,7 +18,7 @@
 import { randomUUID } from "node:crypto";
 import { asInt, asIntOrNull, jsonFromColumn, type Db, type Queryable } from "./db/db.ts";
 import type { TenantContext } from "./db/tenant.ts";
-import type { Run, Step } from "./types.ts";
+import type { Run, Step, StepType } from "./types.ts";
 
 // A run plus a cheap derived step count, for the sidebar history list. The frozen Run
 // schema is unchanged — step_count is a read-side convenience, not part of the event schema.
@@ -370,10 +370,10 @@ export class TraceStore {
    * miner detector is the caller: "held a sandbox for four minutes and called no model" is two
    * numbers, and this is the second of them.
    */
-  async countSteps(ctx: TenantContext, runId: string, kind: string): Promise<number> {
+  async countSteps(ctx: TenantContext, runId: string, type: StepType): Promise<number> {
     const row = await this.q(ctx).get<{ n: unknown }>(
-      `SELECT COUNT(*) AS n FROM steps WHERE run_id = ? AND workspace_id = ? AND kind = ?`,
-      [runId, ctx.workspaceId, kind],
+      `SELECT COUNT(*) AS n FROM steps WHERE run_id = ? AND workspace_id = ? AND type = ?`,
+      [runId, ctx.workspaceId, type],
     );
     return Number(row?.n ?? 0);
   }
