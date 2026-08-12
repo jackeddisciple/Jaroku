@@ -374,16 +374,32 @@ function collectTenantTables(rawSql: string, out: Set<string>): void {
   // Comments are stripped first: several of these tables are documented in prose that names
   // `workspace_id` while explaining why the table does NOT have one.
   const sql = rawSql.replace(/--[^\n]*/g, "");
-  // The closing paren may be followed by `PARTITION BY …` before the semicolon — `steps` is, and
-  // it is the largest tenant table there is.
-  for (const m of sql.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?([a-z_][a-z0-9_]*)\s*\(([\s\S]*?)\n\)[^;]*;/gi)) {
-    if (/\bworkspace_id\b/.test(m[2]!)) out.add(m[1]!);
+  // IN FILE ORDER, one alternation rather than four passes, because these statements UNDO each
+  // other and a pass per kind applies them in the wrong sequence. Migration 029 is the case that
+  // proves it: `steps` is renamed aside, a new `steps` is created, and the old one is dropped.
+  // Handling every CREATE before every RENAME turns that into "steps was renamed away" and loses
+  // the largest tenant table in the schema.
+  //
+  // The four shapes are: a table created WITH a workspace_id (the closing paren may be followed
+  // by `PARTITION BY …`, as `steps` is); a table given one later, which is how Session 4 added
+  // tenancy to tables that predated it; a table dropped; and the rebuild idiom SQLite needs to
+  // alter a table at all — create `x_new`, copy, drop `x`, rename `x_new` to `x`.
+  const STATEMENT =
+    /CREATE TABLE (?:IF NOT EXISTS )?([a-z_][a-z0-9_]*)\s*\(([\s\S]*?)\n\)[^;]*;|ALTER TABLE ([a-z_][a-z0-9_]*)\s+ADD COLUMN (?:IF NOT EXISTS )?workspace_id|DROP TABLE (?:IF EXISTS )?([a-z_][a-z0-9_]*)|ALTER TABLE ([a-z_][a-z0-9_]*)\s+RENAME TO ([a-z_][a-z0-9_]*)/gi;
+  for (const m of sql.matchAll(STATEMENT)) {
+    const [, created, body, altered, dropped, renamedFrom, renamedTo] = m;
+    if (created) {
+      if (/\bworkspace_id\b/.test(body ?? "")) out.add(created);
+    } else if (altered) {
+      out.add(altered);
+    } else if (dropped) {
+      out.delete(dropped);
+    } else if (renamedFrom && renamedTo) {
+      // Only carries tenancy across if the old name had it — a rebuild of a table with no
+      // workspace_id must not invent one for its replacement.
+      if (out.delete(renamedFrom)) out.add(renamedTo);
+    }
   }
-  // Session 4 added tenancy to tables that predated it, one ALTER at a time.
-  for (const m of sql.matchAll(/ALTER TABLE ([a-z_][a-z0-9_]*)\s+ADD COLUMN (?:IF NOT EXISTS )?workspace_id/gi)) {
-    out.add(m[1]!);
-  }
-  for (const m of sql.matchAll(/DROP TABLE (?:IF EXISTS )?([a-z_][a-z0-9_]*)/gi)) out.delete(m[1]!);
 }
 
 /** Every table the migrations give a `workspace_id`, and every one they take away. */
@@ -458,16 +474,59 @@ const NO_POLICY_BY_DESIGN: Record<string, string> = {
       "CREATE TABLE gone_again (id uuid, workspace_id uuid",
       ");",
       "DROP TABLE gone_again;",
+      // The rebuild idiom, in the order the migrations actually write it. Read out of order this
+      // leaves `rebuilt_table` deleted and `rebuilt_table_new` standing — which is what it did.
+      "CREATE TABLE rebuilt_table_new (id uuid, workspace_id uuid",
+      ");",
+      "DROP TABLE rebuilt_table;",
+      "ALTER TABLE rebuilt_table_new RENAME TO rebuilt_table;",
+      // And a rename of a table that never had tenancy must not invent it.
+      "ALTER TABLE plain_thing RENAME TO plain_thing_v2;",
     ].join("\n"),
     synthetic,
   );
-  const expected = ["lonely_table", "older_table", "partitioned_table"];
+  const expected = ["lonely_table", "older_table", "partitioned_table", "rebuilt_table"];
   check3(
     [...synthetic].sort().join(",") === expected.join(","),
     `the reader still finds a tenant table, partitioned or altered into one ([${[...synthetic].sort().join(", ")}])`,
   );
   check3(!synthetic.has("no_tenant_here"), "...and does not invent one that has no workspace_id");
   check3(!synthetic.has("gone_again"), "...nor keep one that was dropped");
+  check3(!synthetic.has("rebuilt_table_new"), "...nor mistake a rebuild's scaffolding for the table itself");
+  check3(!synthetic.has("plain_thing_v2"), "...nor give tenancy to a renamed table that never had it");
+
+  // --- and the two dialects agree about which tables those are ------------------------------
+  //
+  // `compareDialects` already checks that both directories hold the same VERSIONS. It says
+  // nothing about what those versions do, and a version is free to create a table on one driver
+  // and not the other — several deliberately do exactly that, which is why the parity worth
+  // checking is over the tenant tables rather than over every table.
+  //
+  // WHAT DRIFT WOULD COST, and it is not this rule. `export.test.ts` asks the same question a
+  // different way: it reads a live SQLite schema, finds every table with a `workspace_id`, and
+  // fails if one is neither exported nor explicitly excluded — the assertion that keeps "a
+  // workspace can download everything it has" true as tables are added. Read from SQLite, it
+  // cannot see a table that exists only on Postgres. That table would be tenant data, in the
+  // hosted driver, silently outside a portability export and outside the check that exists to
+  // prevent exactly that.
+  //
+  // Twenty-nine each and identical today. This is what keeps the export's check trustworthy on
+  // the driver it does not read.
+  const sqliteTenant = new Set<string>();
+  const MIGRATIONS_LITE = resolve(SRC, "..", "migrations", "sqlite");
+  for (const file of readdirSync(MIGRATIONS_LITE).sort()) {
+    collectTenantTables(readFileSync(join(MIGRATIONS_LITE, file), "utf8"), sqliteTenant);
+  }
+  const pgOnly = [...tenant].filter((t) => !sqliteTenant.has(t)).sort();
+  const litOnly = [...sqliteTenant].filter((t) => !tenant.has(t)).sort();
+  check3(
+    pgOnly.length === 0,
+    `no tenant table exists on postgres alone, where the export's own check cannot see it (${pgOnly.join(", ") || "none does"})`,
+  );
+  check3(
+    litOnly.length === 0,
+    `...nor on sqlite alone, which would be a table the hosted driver never got (${litOnly.join(", ") || "none does"})`,
+  );
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
