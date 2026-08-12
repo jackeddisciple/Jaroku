@@ -1580,11 +1580,15 @@ const contextResolver = new ContextResolver({
   // asking to act in a workspace they are not a member of. The audit row is written inside the
   // resolver; this is the part that accumulates, so a single probe is visible as a probe and a
   // hundred of them is visible as an attack.
+  // THE COUNTER WHOSE EXPECTED VALUE IS ZERO, and whose alert fires on any non-zero value with
+  // no threshold and no window. See obs/slo.ts: a threshold here would be a decision that some
+  // cross-tenant attempts are acceptable.
+  //
+  // On `onCrossTenantAttempt` rather than beside the signal below, which is the difference
+  // between counting the probes and counting the thirty-second windows they arrived in. See the
+  // resolver: a negative membership decision is cached, and this used to be gated on that cache.
+  onCrossTenantAttempt: () => metrics.increment("cross_tenant_denials_total", { reason: "not_a_member" }),
   onCrossTenantDenial: ({ workspaceId, userId, requestId }) => {
-    // THE COUNTER WHOSE EXPECTED VALUE IS ZERO, and whose alert fires on any non-zero value with
-    // no threshold and no window. See obs/slo.ts: a threshold here would be a decision that some
-    // cross-tenant attempts are acceptable.
-    metrics.increment("cross_tenant_denials_total", { reason: "not_a_member" });
     observe(systemContextFor(workspaceId, requestId), {
       kind: "tenancy.cross_denied",
       weight: SIGNALS["tenancy.cross_denied"].weight,

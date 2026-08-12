@@ -123,6 +123,52 @@ async function suite(driver: string, db: Db): Promise<void> {
     );
   }
 
+  console.log("  · what is counted, and what is written down");
+  {
+    // THE COUNTER AND THE AUDIT ROW ARE NOT THE SAME PROMISE, and they used to share a gate.
+    // A negative membership decision is cached for thirty seconds, and BOTH were skipped for a
+    // cached refusal — so a session probing one workspace produced one counted denial per
+    // window however hard it probed. index.ts calls this counter "the part that accumulates, so
+    // a single probe is visible as a probe and a hundred of them is visible as an attack"; the
+    // cache collapsed the hundred to one, and the alert kept firing, so what was wrong was the
+    // number an operator reads while deciding how bad it is.
+    const attempts: string[] = [];
+    const recorded: string[] = [];
+    const dave = await identity.provisionUser(sys, {
+      externalId: `dave-${label}`,
+      email: `dave-${label}@example.com`,
+    });
+    const counting = new ContextResolver({
+      identity,
+      log: () => {},
+      onCrossTenantAttempt: ({ workspaceId }) => attempts.push(workspaceId),
+      onCrossTenantDenial: ({ workspaceId }) => recorded.push(workspaceId),
+    });
+
+    const beforeRows = (await db.all(`SELECT id FROM audit_log`)).length;
+    for (let i = 0; i < 10; i++) {
+      await refused(counting.resolve(authFor(`dave-${label}`), team.id, newRequestId()));
+    }
+    const afterRows = (await db.all(`SELECT id FROM audit_log`)).length;
+
+    check(attempts.length === 10, `ten probes are ten counted attempts (${attempts.length})`);
+    check(recorded.length === 1, `...and one recorded denial, because nine were cached (${recorded.length})`);
+    check(afterRows - beforeRows === 1, `...and one audit row, not ten (${afterRows - beforeRows})`);
+
+    // The existence condition survives the change, and it is the one an outsider could otherwise
+    // lean on: an alert somebody can drive by naming ids that do not exist is an alert that gets
+    // muted. Probing the SAME nonexistent id is the case that matters — the second and later
+    // attempts are served from the membership cache, which is exactly where a naive "count every
+    // refusal" would start counting.
+    const ghost = randomUUID();
+    attempts.length = 0;
+    for (let i = 0; i < 10; i++) {
+      await refused(counting.resolve(authFor(`dave-${label}`), ghost, newRequestId()));
+    }
+    check(attempts.length === 0, `probing a workspace that does not exist counts nothing (${attempts.length})`);
+    check(dave.user.id.length > 0, "...and the prober is a real, authenticated user, which is the point");
+  }
+
   console.log("  · the cache, and what it must not outlive");
   {
     let clock = 1_000_000;
