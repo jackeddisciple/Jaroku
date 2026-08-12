@@ -70,6 +70,26 @@ jobs:
           npm run edge:render -- --check
           npm run obs:render -- --check
 
+      # MOST OF THE POSTGRES SUITES DO NOT NEED THIS, and that is why it was missing. Eighteen of
+      # them go through `withScratchPostgres`, which CREATEs its own database, migrates it, and
+      # drops it — hermetic, order-independent, and needing nothing of the service container but
+      # a connection. `rls.test.ts` is the exception on purpose: row-level security is a property
+      # of a real database's roles and policies, so it connects to JAROKU_PG_URL itself and
+      # expects the schema to be there. Nothing put it there, so every RLS assertion ran against
+      # an empty database.
+      #
+      # It failed as `relation "steps" does not exist` from the CLEANUP block, which is the least
+      # informative sentence available: the first statement in the suite had already failed for
+      # the same reason and the `finally` overwrote it on the way out.
+      #
+      # This is also the only step in the job that applies migrations the way a deploy does —
+      # against a database that already exists, rather than into one created a moment earlier.
+      - name: migrate the service database
+        working-directory: server
+        env:
+          JAROKU_DB_DRIVER: postgres
+        run: npm run migrate
+
       - name: the database and tenancy
         working-directory: server
         run: |
