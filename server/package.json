@@ -49,6 +49,7 @@
     "test:balances": "tsx src/billing/balances.test.ts",
     "test:gate": "tsx src/billing/gate.test.ts",
     "test:eval-budget": "tsx src/billing/evalBudget.test.ts",
+    "test:estimate": "tsx src/billing/estimate.test.ts",
     "test:pool": "tsx src/runPool.test.ts",
     "test:interactive-slot": "tsx src/interactiveSlot.test.ts",
     "test:sandbox-image": "tsx src/sandbox/image.test.ts",

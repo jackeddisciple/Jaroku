@@ -24,6 +24,7 @@ import { asInt } from "./db/db.ts";
 import type { TenantContext } from "./db/tenant.ts";
 import { costFor, isPriced, round8 } from "./pricing.ts";
 import { JUDGE_MODEL } from "./judge/score.ts";
+import { ceilingRefusal, type BudgetStatus } from "./billing/gate.ts";
 
 /**
  * Fallback per-run token usage when there is no history to calibrate from.
@@ -60,6 +61,43 @@ export interface TargetEstimate {
   priced: boolean;
 }
 
+/**
+ * Whether this workspace can actually afford the estimate above it.
+ *
+ * NEW IN THE HOSTED PATH, and deliberately a separate block rather than fields mixed into the
+ * estimate. The estimate is a projection about an eval; this is a fact about a workspace. A
+ * shape that blurred them would make "we think this costs $2" and "you have $1" read as one
+ * claim of the same quality, and they are not — the first is a guess with a stated basis and
+ * the second is arithmetic over rows.
+ *
+ * THE ESTIMATE INFORMS; THE CEILING ENFORCES. Every figure here comes from the same
+ * `BudgetGate.status` the gate itself decides with, so what the dialog says before the button
+ * and what the refusal says after it cannot disagree — which is the failure that makes a budget
+ * feature untrustworthy even when both halves are individually right.
+ */
+export interface Affordability {
+  /** The effective ceiling — the workspace's own, else its plan's. Null means none. */
+  ceilingUsd: number | null;
+  /** Spend so far this period. A FLOOR when `spentIsComplete` is false. */
+  spentUsd: number;
+  spentIsComplete: boolean;
+  /** Ceiling minus spend, or null when there is no ceiling. */
+  headroomUsd: number | null;
+  /** Platform credit not already spoken for. Zero under BYOK, where nothing consults it. */
+  availableCreditUsd: number;
+  /** Whether pressing Start right now would be refused, and the sentence that would say so. */
+  wouldRefuse: boolean;
+  refusalMessage: string | null;
+  /**
+   * Whether the high end of the estimate exceeds what is left.
+   *
+   * `null` when any target is unpriced: part of the cost is unknown, so whether it fits is
+   * unknown too. Reporting `false` there would be the same lie as pricing an unpriced model at
+   * zero — it would read as "this fits" when what we mean is "we cannot say".
+   */
+  mayNotFinish: boolean | null;
+}
+
 export interface EvalEstimate {
   examples: number;
   targets: number;
@@ -74,6 +112,8 @@ export interface EvalEstimate {
   hasUnpricedTarget: boolean;
   /** Human-readable caveats to show alongside the number. */
   notes: string[];
+  /** What the workspace can afford, when the caller supplied its budget. Null locally. */
+  affordability: Affordability | null;
 }
 
 /** Mean input/output tokens per run for this agent on this model, from real history. */
@@ -170,7 +210,21 @@ export async function estimateEval(
   ctx: TenantContext,
   store: TraceStore,
   evalStore: EvalStore,
-  opts: { datasetId: string; agentId: string; targets: EvalTarget[]; judgeEnabled: boolean },
+  opts: {
+    datasetId: string;
+    agentId: string;
+    targets: EvalTarget[];
+    judgeEnabled: boolean;
+    /**
+     * The workspace's budget position, from the same `BudgetGate.status` the gate decides with.
+     *
+     * OPTIONAL, and its absence is meaningful rather than a default. Locally there is no
+     * billing to report and `affordability` comes back null — which the UI renders as nothing
+     * at all, rather than as a workspace with no ceiling and no credit, which is a different
+     * and alarming claim.
+     */
+    budget?: BudgetStatus;
+  },
 ): Promise<EvalEstimate> {
   const examples = await evalStore.listExamples(ctx, opts.datasetId);
   const notes: string[] = [];
@@ -243,6 +297,37 @@ export async function estimateEval(
   }
   if (opts.judgeEnabled) notes.push(`includes one judge call per cell (${cells}) on ${JUDGE_MODEL}`);
 
+  const totalLow = round8(perTarget.reduce((s, t) => s + (t.lowUsd ?? 0), 0) + judgeLow);
+  const totalHigh = round8(perTarget.reduce((s, t) => s + (t.highUsd ?? 0), 0) + judgeHigh);
+
+  let affordability: Affordability | null = null;
+  if (opts.budget) {
+    const b = opts.budget;
+    // What is actually left to spend: the ceiling's headroom, and — when there is platform
+    // credit at stake — what of it is unreserved. The tighter of the two binds, because either
+    // one refusing is a refusal.
+    const limits = [b.headroomUsd, b.availableUsd > 0 ? b.availableUsd : null]
+      .filter((n): n is number => n !== null);
+    const room = limits.length ? Math.min(...limits) : null;
+    affordability = {
+      ceilingUsd: b.ceilingUsd,
+      spentUsd: b.spentUsd,
+      spentIsComplete: b.costKnown,
+      headroomUsd: b.headroomUsd,
+      availableCreditUsd: b.availableUsd,
+      wouldRefuse: b.overCeiling,
+      refusalMessage: b.overCeiling ? ceilingRefusal(b) : null,
+      // Unknown, not false, when part of the cost is unpriced. See the field's own note.
+      mayNotFinish: hasUnpriced ? null : room === null ? false : totalHigh > room,
+    };
+    if (affordability.mayNotFinish) {
+      notes.push(
+        "the high end of this estimate is more than the room left this period — the eval may " +
+          "stop part-way, which leaves the comparison incomplete rather than wrong",
+      );
+    }
+  }
+
   return {
     examples: examples.length,
     targets: opts.targets.length,
@@ -250,9 +335,10 @@ export async function estimateEval(
     perTarget,
     judgeLowUsd: judgeLow,
     judgeHighUsd: judgeHigh,
-    totalLowUsd: round8(perTarget.reduce((s, t) => s + (t.lowUsd ?? 0), 0) + judgeLow),
-    totalHighUsd: round8(perTarget.reduce((s, t) => s + (t.highUsd ?? 0), 0) + judgeHigh),
+    totalLowUsd: totalLow,
+    totalHighUsd: totalHigh,
     hasUnpricedTarget: hasUnpriced,
     notes,
+    affordability,
   };
 }

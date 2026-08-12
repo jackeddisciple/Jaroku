@@ -1942,6 +1942,7 @@ async function handleEvalCommand(ctx: TenantContext, cmd: ForwardedCommand): Pro
           agentId: cmd.agentId,
           targets: cmd.targets ?? [],
           judgeEnabled: JudgeScorer.available(),
+          budget: await budgetGate.status(ctx),
         }).catch(() => null);
         const verdict = await budgetGate.mayStart(ctx, {
           // The HIGH end. An estimate that undershoots is the dangerous direction — it is the
@@ -2002,6 +2003,9 @@ async function handleEvalCommand(ctx: TenantContext, cmd: ForwardedCommand): Pro
             agentId: cmd.agentId,
             targets: cmd.targets ?? [],
             judgeEnabled: JudgeScorer.available(),
+            // The same status the gate itself decides with, so what this dialog says before
+            // the button and what a refusal says after it cannot disagree.
+            budget: await budgetGate.status(ctx),
           }),
         });
         return;
