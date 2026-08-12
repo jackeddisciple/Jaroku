@@ -34,6 +34,7 @@
     "test:relay": "tsx src/wsRelay.test.ts",
     "test:channels": "tsx src/channels.test.ts",
     "test:http": "tsx src/http/router.test.ts",
+    "test:security-headers": "tsx src/http/security.test.ts",
     "test:jwks": "tsx src/auth/jwks.test.ts",
     "test:jwt": "tsx src/auth/jwt.test.ts",
     "test:session": "tsx src/auth/session.test.ts",

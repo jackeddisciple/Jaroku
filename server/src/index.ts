@@ -36,6 +36,7 @@ import {
   type ProviderCommand,
 } from "./wsRelay.ts";
 import { Router } from "./http/router.ts";
+import { securityHeaders } from "./http/security.ts";
 import { healthz, readyz } from "./http/health.ts";
 import { AUTH_ENV, resolveAuthConfig } from "./auth/config.ts";
 import { LocalIssuer } from "./auth/localIssuer.ts";
@@ -1153,7 +1154,15 @@ async function agentGraph(ctx: TenantContext, agentId: string): Promise<GraphRes
 // on another port, so every request it makes here is cross-origin — without this the browser
 // blocks the response to the sign-in exchange and the app cannot sign anybody in at all.
 const originPolicy = resolveOriginPolicy();
-const router = new Router({ cors: originPolicy });
+// AND THE HEADERS EVERY ANSWER CARRIES. Session 8: CORS says which origins may READ a response,
+// and this says what a browser may do with one once it has. They are different questions with
+// different failure modes — see http/security.ts, including why HSTS rides on an explicit
+// JAROKU_PUBLIC_TLS rather than on NODE_ENV.
+const securityResponseHeaders = securityHeaders();
+if (securityResponseHeaders["strict-transport-security"]) {
+  console.log(`[server] HSTS: ${securityResponseHeaders["strict-transport-security"]}`);
+}
+const router = new Router({ cors: originPolicy, securityHeaders: securityResponseHeaders });
 router.get("/healthz", healthz());
 router.get(
   "/readyz",

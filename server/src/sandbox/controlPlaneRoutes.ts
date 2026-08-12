@@ -80,7 +80,14 @@ export function registerControlPlaneRoutes(router: Router, deps: ControlPlaneDep
     if (tail === "control") return handleControlPush(req, runId, deps);
     if (tail === "mcp-confirm") return handleMcpConfirm(req, runId, deps);
     throw notFound("no such control-plane route");
-  });
+    // THE CONFIRMATION IS A BLOCKING REQUEST BY DESIGN, so this route states its own deadline
+    // rather than taking the router's. A confirmation waits for a HUMAN — up to
+    // MAX_MCP_CONFIRM_TIMEOUT_MS of one — and the router's ordinary fifteen seconds would answer
+    // it while somebody was still reading the arguments. The margin above the confirm ceiling is
+    // what keeps the DENY the timeout produces coming from mcp_bridge's own clock, which is
+    // where "timing out denies" is implemented and tested; a router deadline that fired first
+    // would turn a denial into a transport error and lose the red tool_call step that records it.
+  }, { timeoutMs: MAX_MCP_CONFIRM_TIMEOUT_MS + 15_000 });
 
   router.prefixRoute("GET", "/v1/runs/", async (req) => {
     const rest = req.path.slice("/v1/runs/".length);
@@ -90,7 +97,11 @@ export function registerControlPlaneRoutes(router: Router, deps: ControlPlaneDep
     const tail = rest.slice(slash + 1);
     if (tail !== "control") throw notFound("no such control-plane route");
     return handleControlLongPoll(req, runId, deps);
-  });
+    // A long-poll holds for MAX_LONG_POLL_MS on purpose — that is the mechanism, not a delay —
+    // so it gets a deadline just past its own ceiling. Comfortably inside the router's default
+    // in the ordinary case, and the explicit number is what stops a later change to that default
+    // from silently capping the poll at something shorter than the wait it exists to perform.
+  }, { timeoutMs: MAX_LONG_POLL_MS + 5_000 });
 }
 
 async function handleTrace(req: HttpRequest, runId: string, deps: ControlPlaneDeps) {

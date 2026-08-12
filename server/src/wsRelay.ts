@@ -10,6 +10,13 @@ import type { TraceStore } from "./store.ts";
 import type { TenantContext } from "./db/tenant.ts";
 import type { TraceEvent } from "./types.ts";
 import type { Router } from "./http/router.ts";
+import {
+  CONNECTIONS_CHECK_INTERVAL_MS,
+  documentSecurityHeaders,
+  HEADERS_READ_TIMEOUT_MS,
+  KEEP_ALIVE_TIMEOUT_MS,
+  REQUEST_READ_TIMEOUT_MS,
+} from "./http/security.ts";
 import { can, capabilityFor } from "./auth/capabilities.ts";
 
 export type RunCommand = {
@@ -1052,9 +1059,30 @@ export class WsRelay {
     this.store = opts.store;
     this.onCommand = opts.onCommand;
 
-    this.http = createServer((req, res) => {
-      void this.serveHttp(req, res);
-    });
+    // SLOWLORIS, WHICH IS NOT THE SAME PROBLEM AS A SLOW HANDLER. The router puts a deadline on
+    // OUR work; these bound how long somebody else is allowed to take dribbling a request in.
+    // Node's defaults — 60s of headers, 300s of body — mean a few hundred sockets each sending a
+    // byte a minute cost an attacker nothing and cost this process its connection table. The
+    // keep-alive number is deliberately longer than a browser needs between the session call and
+    // the ws-ticket that follows it, and deliberately shorter than a load balancer's own idle
+    // timeout: a connection the balancer thinks is alive and this process has already closed is
+    // the classic source of sporadic 502s, so we are the side that hangs up.
+    //
+    // `connectionsCheckingInterval` is here rather than left at its default because the other
+    // three are swept rather than timed — see http/security.ts. At the default thirty seconds a
+    // twenty-second request timeout is enforced somewhere in the next fifty, which is most of
+    // the protection given away for nothing.
+    this.http = createServer(
+      {
+        headersTimeout: HEADERS_READ_TIMEOUT_MS,
+        requestTimeout: REQUEST_READ_TIMEOUT_MS,
+        keepAliveTimeout: KEEP_ALIVE_TIMEOUT_MS,
+        connectionsCheckingInterval: CONNECTIONS_CHECK_INTERVAL_MS,
+      },
+      (req, res) => {
+        void this.serveHttp(req, res);
+      },
+    );
     // `noServer`, not `server`. With `server` the library completes the handshake and the only
     // way to refuse is to close an already-open socket — which the client cannot distinguish
     // from a network drop, and which its reconnect loop then retries forever. Doing the
@@ -1450,17 +1478,23 @@ export class WsRelay {
 
   private async serveStatic(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const path = (req.url ?? "/").split("?")[0];
+    // The DOCUMENT policy, not the API's. `debug-client.html` is one file with its style and its
+    // script inside it, so the policy that permits nothing would serve a blank page — see
+    // http/security.ts for what it still forbids, which is everything that turns an injection
+    // into an exfiltration. The 404 and the 500 get it too: both are documents as far as a
+    // browser is concerned, and a response with no policy is the one worth finding.
+    const secure = documentSecurityHeaders();
     if (path === "/" || path === "/index.html") {
       try {
         const html = await readFile(this.opts.clientHtmlPath);
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.writeHead(200, { ...secure, "content-type": "text/html; charset=utf-8" });
         res.end(html);
       } catch {
-        res.writeHead(500).end("debug client not found");
+        res.writeHead(500, secure).end("debug client not found");
       }
       return;
     }
-    res.writeHead(404).end("not found");
+    res.writeHead(404, secure).end("not found");
   }
 
   private sendTo(ws: WebSocket, payload: unknown): void {

@@ -50,6 +50,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { newRequestId } from "../db/tenant.ts";
+import { DEFAULT_HANDLER_TIMEOUT_MS } from "./security.ts";
 
 /** Query parameters whose values must never reach a log line. */
 const REDACTED_PARAMS = new Set(["ticket", "token", "key", "access_token", "code"]);
@@ -105,6 +106,7 @@ export class HttpError extends Error {
 }
 
 export const badRequest = (m: string): HttpError => new HttpError(400, "bad_request", m);
+export const timedOut = (m: string): HttpError => new HttpError(504, "handler_timeout", m);
 export const unauthorized = (m: string): HttpError => new HttpError(401, "unauthorized", m);
 export const forbidden = (m: string): HttpError => new HttpError(403, "forbidden", m);
 export const notFound = (m: string): HttpError => new HttpError(404, "not_found", m);
@@ -146,6 +148,20 @@ export interface HttpResponse {
 
 export type Handler = (req: HttpRequest) => Promise<HttpResponse> | HttpResponse;
 
+/** What a route may say about itself beyond its path and its handler. */
+export interface RouteOptions {
+  /**
+   * How long this handler may take before the request is answered without it.
+   *
+   * Absent means `DEFAULT_HANDLER_TIMEOUT_MS`. Set explicitly by the two routes that are
+   * long-polls by design — a control poll waits 25 seconds for a pause that may never come, and
+   * an MCP confirmation waits two minutes for a person — because the default is chosen for
+   * handlers that are supposed to be quick, and applying it to those would break the feature
+   * rather than protect the process.
+   */
+  timeoutMs?: number;
+}
+
 interface Route {
   method: string;
   /**
@@ -161,6 +177,7 @@ interface Route {
   path: string;
   prefix?: boolean;
   handler: Handler;
+  timeoutMs?: number;
 }
 
 export interface RouterOptions {
@@ -174,6 +191,16 @@ export interface RouterOptions {
    * consult them.
    */
   cors?: CorsPolicy;
+  /**
+   * Headers on every answer, including the failures and the preflights.
+   *
+   * `http/security.ts`'s set in production and in `npm run dev`; absent in the router's own
+   * tests, which assert what a route returns rather than what a browser is told about it. Route
+   * headers win on a collision — the object route sets its own `content-type` and must keep it.
+   */
+  securityHeaders?: Record<string, string>;
+  /** The deadline for a route that does not state one. Defaults to the number in security.ts. */
+  defaultTimeoutMs?: number;
 }
 
 export class Router {
@@ -181,33 +208,37 @@ export class Router {
   private log: (line: string) => void;
   private quiet: (path: string) => boolean;
   private cors?: CorsPolicy;
+  private security: Record<string, string>;
+  private defaultTimeoutMs: number;
 
   constructor(opts: RouterOptions = {}) {
     this.log = opts.log ?? ((line) => console.log(line));
     this.quiet = opts.quiet ?? ((path) => path === "/healthz");
     this.cors = opts.cors;
+    this.security = opts.securityHeaders ?? {};
+    this.defaultTimeoutMs = opts.defaultTimeoutMs ?? DEFAULT_HANDLER_TIMEOUT_MS;
   }
 
-  get(path: string, handler: Handler): this {
-    return this.add("GET", path, handler);
+  get(path: string, handler: Handler, opts?: RouteOptions): this {
+    return this.add("GET", path, handler, opts);
   }
 
-  post(path: string, handler: Handler): this {
-    return this.add("POST", path, handler);
+  post(path: string, handler: Handler, opts?: RouteOptions): this {
+    return this.add("POST", path, handler, opts);
   }
 
-  put(path: string, handler: Handler): this {
-    return this.add("PUT", path, handler);
+  put(path: string, handler: Handler, opts?: RouteOptions): this {
+    return this.add("PUT", path, handler, opts);
   }
 
   /** Everything under `prefix`, for a route whose tail is data rather than a path. */
-  prefixRoute(method: "GET" | "PUT" | "POST", prefix: string, handler: Handler): this {
-    this.routes.push({ method, path: prefix, prefix: true, handler });
+  prefixRoute(method: "GET" | "PUT" | "POST", prefix: string, handler: Handler, opts?: RouteOptions): this {
+    this.routes.push({ method, path: prefix, prefix: true, handler, timeoutMs: opts?.timeoutMs });
     return this;
   }
 
-  private add(method: string, path: string, handler: Handler): this {
-    this.routes.push({ method, path, handler });
+  private add(method: string, path: string, handler: Handler, opts?: RouteOptions): this {
+    this.routes.push({ method, path, handler, timeoutMs: opts?.timeoutMs });
     return this;
   }
 
@@ -308,7 +339,12 @@ export class Router {
     const cors = this.corsHeaders(origin);
     let status = 500;
     try {
-      const out = await route.handler(req);
+      // RACED, not cancelled. Nothing here can stop a handler that is waiting on a socket
+      // somebody else owns — what it can do is stop the CLIENT waiting on us, free the
+      // connection, and leave the handler to finish into a `respond` that no-ops because the
+      // response already ended. A request that never answers is how a process runs out of
+      // sockets; a request answered late by nobody is merely a slow query somebody has to fix.
+      const out = await withDeadline(route.handler(req), route.timeoutMs ?? this.defaultTimeoutMs, path);
       status = out.status ?? (out.body === undefined ? 204 : 200);
       this.respond(res, requestId, status, out.body, { ...cors, ...out.headers });
     } catch (err) {
@@ -348,7 +384,9 @@ export class Router {
     if (res.writableEnded) return;
     // On the response as well as in the log, so a user reporting a failure can name the exact
     // request and somebody can find its line.
-    const base: Record<string, string> = { "x-request-id": requestId, ...headers };
+    // The security set BEFORE the caller's, so a route that sets its own `content-type` keeps
+    // it and nothing can quietly drop the policy by returning a header of the same name.
+    const base: Record<string, string> = { "x-request-id": requestId, ...this.security, ...headers };
     if (body === undefined) {
       res.writeHead(status, base).end();
       return;
@@ -401,6 +439,29 @@ export class Router {
         return bytes;
       },
     };
+  }
+}
+
+/**
+ * `p`, or a 504 when it has taken too long.
+ *
+ * The timer is `unref`'d: a deadline on a request must never be the reason a process refuses to
+ * exit, and a pending timeout on an idle server is exactly that. Cleared on the way out either
+ * way, so a fast handler does not leave one behind per request.
+ */
+async function withDeadline<T>(p: Promise<T> | T, ms: number, path: string): Promise<T> {
+  if (!Number.isFinite(ms) || ms <= 0) return p;
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(timedOut(`${path} did not answer within ${ms}ms`)), ms);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
