@@ -416,7 +416,7 @@ const SCOPED_API: Record<string, string[]> = {
   // opposite of what the table is for. Everything else here decides or records money.
   BillingRepository: [
     "balance", "addCredit", "setCeiling", "setLimitOverrides", "record", "spendSince",
-    "eventsForRun", "recentEvents", "hold", "liveHolds", "expiredHolds", "liveSubscription",
+    "eventsForRun", "recentEvents", "runSpend", "hold", "liveHolds", "expiredHolds", "liveSubscription",
     "subscriptions", "upsertSubscription",
   ],
 };
@@ -764,6 +764,7 @@ async function remainder(db: Db): Promise<void> {
     costUsd: 0.25,
   });
   check((await billing.spendSince(A.ctx, "1970-01-01T00:00:00.000Z")).usd === 0, "spendSince counts none of B's usage");
+  check((await billing.runSpend(A.ctx, B.runId)).usd === 0, "runSpend cannot settle against B's run");
   check((await billing.eventsForRun(A.ctx, B.runId)).length === 0, "eventsForRun cannot read B's run's usage");
   check((await billing.recentEvents(A.ctx)).length === 0, "recentEvents lists none of B's");
 

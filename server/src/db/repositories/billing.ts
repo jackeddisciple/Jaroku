@@ -353,6 +353,31 @@ export class BillingRepository {
     };
   }
 
+  /**
+   * What one run actually cost, across every kind metered against it.
+   *
+   * The settle figure. A hold is an estimate and this is the bill — see billing/balances.ts on
+   * why releasing and settling are two movements rather than one. Carries the same
+   * unpriced-row count `spendSince` does, so a caller that settles against an incomplete total
+   * can know it is settling a floor rather than discovering it later.
+   */
+  async runSpend(ctx: TenantContext, runId: string): Promise<SpendTotals> {
+    const row = await this.q(ctx).get<{ total: unknown; tokens: unknown; unpriced: unknown }>(
+      `SELECT COALESCE(SUM(cost_usd), 0) AS total,
+              COALESCE(SUM(total_tokens), 0) AS tokens,
+              COUNT(CASE WHEN cost_usd IS NULL THEN 1 END) AS unpriced
+         FROM usage_events WHERE workspace_id = ? AND run_id = ?`,
+      [ctx.workspaceId, runId],
+    );
+    const unpriced = asInt(row?.unpriced);
+    return {
+      usd: Number(row?.total ?? 0),
+      tokens: asInt(row?.tokens),
+      unpricedEvents: unpriced,
+      costKnown: unpriced === 0,
+    };
+  }
+
   /** Every event for one run, oldest first. The dashboard's per-run drill-down. */
   async eventsForRun(ctx: TenantContext, runId: string): Promise<UsageEventRow[]> {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
