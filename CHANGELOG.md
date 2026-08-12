@@ -8,7 +8,7 @@ release notes and the commits in that release's range.
 
 ---
 
-## Unreleased : Connector OAuth and the Credential Vault
+## v0.2.12 : Connector OAuth and the Credential Vault
 
 Session 7 of the hosted migration. Connecting Gmail used to mean obtaining a refresh token out of
 band and pasting three variables into `runtime/.env`. Jaroku now owns the OAuth app and a user
