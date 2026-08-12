@@ -48,15 +48,24 @@ export interface ExplainCallbacks {
 
 /** Stream a haiku answer for `question` grounded in `context`. Falls back (on any API error) to
  *  streaming the factual context, so the caller always gets a reply. */
-export async function streamExplain(context: string, question: string, cb: ExplainCallbacks): Promise<void> {
-  if (!hasAnthropicKey()) {
+export async function streamExplain(
+  context: string,
+  question: string,
+  cb: ExplainCallbacks,
+  /** The workspace's own key, when it has opted its key in. See billing/providerKeys.ts. */
+  apiKey?: string,
+): Promise<void> {
+  // `apiKey` counts as a key. Without this, a workspace running entirely on its own credential
+  // — no platform key configured at all — would get the raw-context fallback for every
+  // explanation, on a deployment where an explanation was perfectly affordable.
+  if (!apiKey && !hasAnthropicKey()) {
     // No key — the factual context IS the answer (no LLM synthesis available).
     cb.onDelta(`(No Anthropic key set — showing the raw context.)\n\n${context}`);
     cb.onDone();
     return;
   }
   try {
-    const stream = anthropicClient().messages.stream({
+    const stream = anthropicClient(apiKey).messages.stream({
       model: EXPLAIN_MODEL,
       max_tokens: 700,
       system: SYSTEM,

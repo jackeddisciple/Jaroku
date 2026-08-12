@@ -66,6 +66,15 @@ export interface JudgeScorerDeps {
   onScored: (e: ScoredEvent) => void;
   onScoringFinished: (e: { evalId: string; scored: number; unscored: number }) => void;
   /**
+   * The workspace's own Anthropic key, when it has opted its key in for platform calls.
+   *
+   * A function rather than a value, matching `context` above and the deploy manager's `token`:
+   * it is read at the moment of use, so a workspace that turns the option off stops using its
+   * key on the next verdict rather than on the next restart. Returning undefined — the default,
+   * and what a workspace that never opted in always gets — means the platform's key.
+   */
+  apiKey?: () => Promise<string | undefined>;
+  /**
    * One judge call, for the workspace's ledger.
    *
    * SEPARATE FROM `addJudgeCost`, which is not a duplicate of it. That accumulates on the
@@ -176,7 +185,9 @@ export class JudgeScorer {
       await this.markUnscored(evalId, job, "not scored — the eval hit its budget ceiling");
       return;
     }
-    if (!JudgeScorer.available()) {
+    // A workspace's own key counts. Without this, a deployment with no platform key at all
+    // would report every cell unscored for a workspace that is paying for its own judging.
+    if (!JudgeScorer.available() && !(await this.deps.apiKey?.())) {
       // The free dry-run path still produces a complete eval: every other column is real,
       // and the quality column says plainly why it's blank.
       await this.markUnscored(evalId, job, "not scored — no ANTHROPIC_API_KEY for the judge");
@@ -198,10 +209,15 @@ export class JudgeScorer {
       criteria,
     );
 
+    // Resolved once per verdict rather than per attempt: a retry is the same call again, and
+    // re-reading the credential between two of them would let a mid-eval change of mind split
+    // one verdict's attempts across two accounts.
+    const apiKey = await this.deps.apiKey?.();
+
     let lastError = "the judge did not return a verdict";
     for (let attempt = 1; attempt <= JUDGE_ATTEMPTS; attempt++) {
       try {
-        const res = await anthropicClient().messages.create(
+        const res = await anthropicClient(apiKey).messages.create(
           {
             model: JUDGE_MODEL,
             max_tokens: JUDGE_MAX_TOKENS,

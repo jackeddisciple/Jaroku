@@ -52,6 +52,21 @@ export async function runSecretConformance(
   const forRun = await store.getForRun(runId, [NAME]);
   check(forRun[NAME] === VALUE, "...and reaches a run's environment byte for byte, multi-byte characters included");
 
+  // The second plaintext exit, and the only other one there will be. A platform-side model call
+  // — a generation, a judge verdict — is a value flowing INTO a call and never back out, the
+  // same shape as a run's environment, which is why it is a method and not a `get`. Asserted
+  // portably so the two stores cannot answer it differently.
+  const forPlatform = await store.getForPlatformCall(ctx, [NAME]);
+  check(forPlatform[NAME] === VALUE, "...and reaches a platform-side call the same way");
+  check(
+    Object.keys(await store.getForPlatformCall(ctx, [])).length === 0,
+    "asking for no names returns nothing rather than everything",
+  );
+  check(
+    !("JAROKU_MCP_NEVER_SET_TOKEN" in (await store.getForPlatformCall(ctx, ["JAROKU_MCP_NEVER_SET_TOKEN"]))),
+    "a name with no value is absent rather than an empty string, here too",
+  );
+
   // --- the surface that does not exist -----------------------------------------------
   check(
     !("get" in store) || typeof (store as unknown as { get?: unknown }).get !== "function",

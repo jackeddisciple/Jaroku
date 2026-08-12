@@ -79,6 +79,7 @@ import { UsageMeter, usageKey } from "./billing/usage.ts";
 import { SAMPLE_INTERVAL_MS, sampleStorage } from "./billing/storage.ts";
 import { Balances } from "./billing/balances.ts";
 import { BudgetGate, ceilingRefusal } from "./billing/gate.ts";
+import { WorkspaceProviderKeys } from "./billing/providerKeys.ts";
 import { GENERATION_MODEL } from "./claude.ts";
 import { isSecretName } from "./secrets/secretStore.ts";
 import { PROVIDER_ENV_KEY, isProviderId, providerStatus, verifyProviderKey } from "./providers.ts";
@@ -621,6 +622,15 @@ await deployStore.init();
 // the only three things that do.
 const agentRepo = new AgentRepository(store.database());
 
+// A WORKSPACE'S OWN PROVIDER KEYS.
+//
+// The one place that knows where a key is stored, which run may receive it, and whether it is
+// allowed to pay for the platform's own thinking. Everything else asks this rather than reading
+// `process.env` — which locally is the same answer and hosted is the PLATFORM's key, and a panel
+// that read it would tell six thousand workspaces they have a provider connected because the
+// server does.
+const providerKeys = new WorkspaceProviderKeys(secrets, billing);
+
 // WHAT EACH WORKSPACE IS HOLDING, SAMPLED HOURLY.
 //
 // The one billable thing here that is not an event: a stored object just sits there costing
@@ -1110,8 +1120,9 @@ const relay = new WsRelay({
       ? agentGraph(ctx, agentId)
       : { agent_id: agentId, error: "no such agent in this workspace" },
   listMcpServers: (ctx) => mcpRegistry.list(ctx),
-  // By name only. The client learns THAT a key is set, never what it is.
-  listProviders: () => providerStatus(),
+  // By name only, and per WORKSPACE. The client learns THAT a key is set, never what it is —
+  // and learns it about its own workspace rather than about the machine.
+  listProviders: async (ctx) => providerStatus(await providerKeys.configuredNames(ctx)),
   // Same: env_keys are names, railwayConfigured is a boolean. No value crosses this.
   listDeployments: (ctx) => deploySnapshot(ctx),
   // THE ASKING SOCKET'S WORKSPACE, forwarded rather than discarded.
@@ -1164,6 +1175,12 @@ const judge = new JudgeScorer({
   store,
   evalStore,
   context: serverContext,
+  // The eval's own workspace, resolved at the moment of use. A judge verdict is a platform call
+  // like a generation, and it bills to the platform's key unless the workspace opted its own in.
+  apiKey: async () => {
+    const evalId = evalRunner?.activeEvalIds()[0];
+    return evalId ? providerKeys.platformKey(contextForEval(evalId)) : undefined;
+  },
   onScored: (e) => relay.broadcastEval(contextForEval(e.evalId), { type: "scored", ...e }),
   // The judge's own spend, in the workspace's ledger. NOT a replacement for `addJudgeCost`,
   // which keeps accumulating on the eval so the comparison can show judge overhead apart from
@@ -1473,12 +1490,40 @@ async function handleMcpCommand(ctx: TenantContext, cmd: McpCommand): Promise<vo
 
 const PROVIDER_COMMAND_NAMES = new Set(["setProviderKey", "testProviderKey"]);
 
-function broadcastProviders(ctx: TenantContext): void {
-  relay.broadcastProviders(ctx, { type: "providers", providers: providerStatus() });
+async function broadcastProviders(ctx: TenantContext): Promise<void> {
+  relay.broadcastProviders(ctx, {
+    type: "providers",
+    // The workspace's OWN configured names, not the server's environment. Locally these are the
+    // same set — the local store is the process environment — and hosted they are emphatically
+    // not: reading process.env there would tell every workspace it has a provider connected
+    // because the server does.
+    providers: providerStatus(await providerKeys.configuredNames(ctx)),
+    ownKeyForPlatform: await providerKeys.ownKeyForPlatform(ctx),
+  });
 }
 
 async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): Promise<void> {
   try {
+    // Not a credential command at all: it decides which of two keys pays for the platform's own
+    // calls. Handled first so nothing below has to reason about a command with no provider on it.
+    if (cmd.cmd === "setOwnKeyForPlatform") {
+      const on = cmd.on === true;
+      if (on && !(await providerKeys.configuredNames(ctx)).has(PROVIDER_ENV_KEY.anthropic)) {
+        // Refused rather than accepted-and-inert. A workspace that turned this on with no key
+        // would keep being billed platform credit while believing it was not, which is a
+        // surprise on an invoice rather than an error at the moment of the mistake.
+        relay.broadcastProviders(ctx, {
+          type: "error",
+          message: "connect an Anthropic key first — that is the key this would spend",
+          provider: "anthropic",
+        });
+        return;
+      }
+      await providerKeys.setOwnKeyForPlatform(ctx, on);
+      console.log(`[providers] own key for platform calls: ${on ? "on" : "off"} (${ctx.workspaceId})`);
+      await broadcastProviders(ctx);
+      return;
+    }
     if (!isProviderId(cmd.provider)) {
       // Named rather than echoed: `cmd.provider` is client-supplied and about to be rendered.
       relay.broadcastProviders(ctx, {
@@ -1503,20 +1548,27 @@ async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): 
       return;
     }
 
-    // setProviderKey. Straight through the one credential writer — the value is used by
-    // `set` and nowhere else in this function.
-    const written = credentials.set(PROVIDER_ENV_KEY[provider], key);
+    // setProviderKey. Through the SecretStore, which is what makes it the WORKSPACE's key
+    // rather than the machine's: locally that store still wraps the one writer of runtime/.env
+    // and the file is byte-for-byte what it was, and hosted it is envelope-encrypted ciphertext
+    // scoped to this workspace. The value is used by `save` and nowhere else in this function.
+    //
+    // PROVED BEFORE IT IS STORED — `save` probes with a models-list call, which authenticates as
+    // conclusively as a completion and costs nothing. Without that, the first thing to discover
+    // a mistyped key is a run, after a sandbox start and a Python import, reporting somebody
+    // else's 401.
+    const written = await providerKeys.save(ctx, provider, key);
     if (!written.ok) {
       relay.broadcastProviders(ctx, {
         type: "error",
-        message: written.warning ?? "could not store that key",
+        message: written.message ?? "could not store that key",
         provider,
       });
       return;
     }
     // Names only, exactly as loadRuntimeEnv logs them on the way in.
     console.log(`[providers] ${provider} key set (${PROVIDER_ENV_KEY[provider]})`);
-    broadcastProviders(ctx);
+    await broadcastProviders(ctx);
     // A key shadowed by the server's own shell works now and reverts on restart. Saying so is
     // the difference between a puzzling regression tomorrow and a sentence today.
     if (written.warning) {
@@ -2401,6 +2453,10 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
   void planner.plan({
     runtimeDir: RUNTIME_DIR,
     workspaceId: ctx.workspaceId,
+    // WHOSE KEY THINKS. Undefined for every workspace that has not opted in, which is all of
+    // them by default and is the whole local path — and undefined means the platform's own key,
+    // exactly as before. See billing/providerKeys.ts.
+    apiKey: await providerKeys.platformKey(ctx),
     prompt: cmd.prompt,
     connectors: cmd.connectors,
     // Resolved here rather than in the planner, so the planner keeps its single dependency
@@ -2565,6 +2621,9 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   const mcpServers = await mcpRegistry.list(genCtx);
   void generator.generate({
     runtimeDir: RUNTIME_DIR, ctx: genCtx, prompt, connectors, mcpTools, mcpServers, name, plan, planUsage,
+    // See planAgent: undefined unless this workspace asked that its own key pay for the
+    // platform's calls, and undefined is the platform's key.
+    apiKey: await providerKeys.platformKey(genCtx),
   });
 }
 
@@ -2625,7 +2684,13 @@ function editAgent(ctx: TenantContext, agentId: string, instruction: string): vo
   editContext = ctx;
   console.log(`[edit] ${agentId} — "${instruction.slice(0, 80)}"`);
   relay.broadcastEdit(contextForEdit(), { type: "started", agentId, instruction });
-  void editor.propose(ctx, agentId, instruction);
+  void providerKeys
+    .platformKey(ctx)
+    .then((apiKey) => editor.propose(ctx, agentId, instruction, apiKey))
+    .catch((err) => {
+      console.error(`[edit] could not start: ${(err as Error)?.message ?? err}`);
+      relay.broadcastEdit(ctx, { type: "error", message: "could not start the edit", agentId });
+    });
 }
 
 // --- run trigger ------------------------------------------------------------
@@ -2690,6 +2755,12 @@ async function runAgent(
     const agent = agentId ? await agentRepo.bySlug(ctx, agentId) : undefined;
     const names = (agent?.required_env ?? []).filter(isSecretName);
     if (names.length) Object.assign(env, await secrets.getForRun(runId, names));
+    // AND THE WORKSPACE'S OWN PROVIDER KEY — for the provider this run actually names, and no
+    // other. An agent on Anthropic does not receive OPENAI_API_KEY even when the workspace has
+    // configured one: that is the same least-privilege rule the egress policy applies to the
+    // socket, applied to the credential, and it matters more here because what receives it is
+    // model-written Python. An unnamed provider is the dry-run one, which needs no key at all.
+    Object.assign(env, await providerKeys.runEnv(runId, provider));
   } catch (err) {
     console.warn(`[manager] could not resolve credentials for ${runId}: ${(err as Error).message}`);
   }
@@ -3017,7 +3088,7 @@ async function explainAgent(ctx: TenantContext, cmd: ExplainCommand): Promise<vo
       }),
     onDone: () => { explaining = false; relay.broadcastReply(contextForReply(), { type: "done", agentId: cmd.agentId }); },
     onError: (message) => { explaining = false; relay.broadcastReply(contextForReply(), { type: "error", agentId: cmd.agentId, message }); },
-  });
+  }, await providerKeys.platformKey(ctx));
 }
 
 // Kick off one run on startup unless suppressed (set JAROKU_NO_AUTORUN=1 to just serve).

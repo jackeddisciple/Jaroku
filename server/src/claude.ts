@@ -18,6 +18,22 @@ export interface UsageSummary {
 // price is a copy that drifts.
 export const GENERATION_MODEL = "claude-haiku-4-5";
 
+/**
+ * Clients keyed by the credential they were built with.
+ *
+ * A map rather than one memoized client, because there is now more than one key in play: the
+ * platform's own, and — for each workspace that opted in — its own. Keying by the value keeps
+ * the property the single client already had (a key replaced mid-session takes effect without a
+ * restart) and adds the one BYOK needs (two workspaces' calls never share a client).
+ *
+ * Bounded by hand, because it is keyed by a secret and an unbounded map of those is a leak
+ * waiting for a heap dump. The platform's own key is the overwhelmingly common case and is
+ * memoized separately below; this holds the opted-in workspaces, and the least recently built
+ * entry is dropped rather than kept forever.
+ */
+const byokClients = new Map<string, Anthropic>();
+const MAX_BYOK_CLIENTS = 64;
+
 let client: Anthropic | null = null;
 // The key the memoized client was built with.
 //
@@ -28,7 +44,31 @@ let client: Anthropic | null = null;
 // makes "connect a provider" take effect without a restart.
 let clientKey: string | null = null;
 
-export function anthropicClient(): Anthropic {
+/**
+ * The client a platform-side call should use.
+ *
+ * `apiKey` is a workspace's OWN credential, supplied only when that workspace opted its key in
+ * — see billing/providerKeys.ts. Absent, this is exactly what it always was: the platform's key
+ * out of the environment, memoized on its value so a key replaced mid-session takes effect
+ * without a restart.
+ *
+ * The key is never logged and never returned; it is used to construct a client and to index the
+ * cache, both of which stay inside this module.
+ */
+export function anthropicClient(apiKey?: string): Anthropic {
+  if (apiKey) {
+    const existing = byokClients.get(apiKey);
+    if (existing) return existing;
+    // Oldest first — Map preserves insertion order, so the first key is the least recently
+    // built. Evicting a client costs one object construction on its next use and nothing else.
+    if (byokClients.size >= MAX_BYOK_CLIENTS) {
+      const oldest = byokClients.keys().next().value;
+      if (oldest !== undefined) byokClients.delete(oldest);
+    }
+    const built = new Anthropic({ apiKey });
+    byokClients.set(apiKey, built);
+    return built;
+  }
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) throw new Error("ANTHROPIC_API_KEY is not set (expected in runtime/.env)");
   if (!client || clientKey !== key) {

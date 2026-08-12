@@ -82,6 +82,32 @@ export interface SecretStore {
    */
   getForRun(runId: string, names: string[]): Promise<Record<string, string>>;
 
+  /**
+   * The values a PLATFORM-SIDE model call needs, for a workspace that asked us to use its own.
+   *
+   * THE SECOND AND LAST PLAINTEXT EXIT, and adding it was a decision rather than an oversight,
+   * so here is the reasoning in full.
+   *
+   * The rule at the top of this file is that no method returns a plaintext value TO A REQUEST
+   * HANDLER — that is what closes the path down which a credential reaches a WebSocket frame, a
+   * log line or a JSON response. `getForRun` is not an exception to that rule; it is a value
+   * flowing INTO an execution and never back out. This is the same shape: generation, the plan
+   * gate, the fix loop, explain and the judge are model calls the platform makes on a
+   * workspace's behalf, and a workspace that has opted its own key in is asking for its
+   * credential to go into those calls exactly as it already goes into its runs.
+   *
+   * It could have been expressed as `getForRun` against a synthetic run id, and that would have
+   * been worse in two specific ways: the hosted store resolves a workspace FROM the run id, so a
+   * made-up one resolves to nothing and the feature would silently not work; and `last_used_at`
+   * would be attributed to a run that does not exist. A method that says what it is for is
+   * cheaper to audit than a real method being used dishonestly.
+   *
+   * What it is NOT: a general `get`. It takes a list of names and returns a map, it is never
+   * called by anything that serialises its result, and — like `getForRun` — a name that is not
+   * configured is simply absent rather than an empty string.
+   */
+  getForPlatformCall(ctx: TenantContext, names: string[]): Promise<Record<string, string>>;
+
   /** What this workspace has configured. Names only. */
   listNames(ctx: TenantContext): Promise<SecretRef[]>;
 

@@ -61,30 +61,39 @@ SLACK_BOT_TOKEN=xoxb-123
   check("a non-string provider id is refused", !isProviderId(undefined));
 }
 
+/**
+ * The set a hosted deployment builds from `SecretStore.listNames(ctx)`, and which locally is
+ * exactly what the process environment holds — the local store IS the process environment.
+ * Written as a helper so these assertions keep testing the same rule they always did rather
+ * than testing that a Set literal contains what was just put in it.
+ */
+const namesFromEnv = (): ReadonlySet<string> =>
+  new Set(["ANTHROPIC_API_KEY", "OPENAI_API_KEY"].filter((n) => Boolean(process.env[n])));
+
 // --- 2. configured is a presence check, by name ------------------------------------------
 {
   const before = process.env.OPENAI_API_KEY;
   delete process.env.OPENAI_API_KEY;
-  const unset = providerStatus().find((p) => p.id === "openai");
+  const unset = providerStatus(namesFromEnv()).find((p) => p.id === "openai");
   check("an unset provider reports configured: false", unset?.configured === false);
   check("...and still reports the NAME of the variable it wants",
     unset?.env_key === "OPENAI_API_KEY");
 
   process.env.OPENAI_API_KEY = "sk-test-presence";
-  const set = providerStatus().find((p) => p.id === "openai");
+  const set = providerStatus(namesFromEnv()).find((p) => p.id === "openai");
   check("a set provider reports configured: true", set?.configured === true);
 
   // The whole point of the shape: a snapshot can go to a browser as-is.
   check("a status snapshot carries no key material",
-    !JSON.stringify(providerStatus()).includes("sk-test-presence"),
-    JSON.stringify(providerStatus()));
+    !JSON.stringify(providerStatus(namesFromEnv())).includes("sk-test-presence"),
+    JSON.stringify(providerStatus(namesFromEnv())));
 
   // Which provider Jaroku itself thinks with. Reported rather than hardcoded in the UI,
   // because connecting OpenAI alone lets an AGENT run on GPT and does not make planning or
   // generation work — a user told that up front does not go looking for the bug.
   check("anthropic is flagged as the one that powers Jaroku itself",
-    providerStatus().find((p) => p.id === "anthropic")?.powers_jaroku === true);
-  check("openai is not", providerStatus().find((p) => p.id === "openai")?.powers_jaroku === false);
+    providerStatus(namesFromEnv()).find((p) => p.id === "anthropic")?.powers_jaroku === true);
+  check("openai is not", providerStatus(namesFromEnv()).find((p) => p.id === "openai")?.powers_jaroku === false);
 
   if (before === undefined) delete process.env.OPENAI_API_KEY;
   else process.env.OPENAI_API_KEY = before;
@@ -126,7 +135,7 @@ SLACK_BOT_TOKEN=xoxb-123
   check("the key round-trips through the real loader",
     process.env.ANTHROPIC_API_KEY === key);
   check("...so providerStatus now says configured",
-    providerStatus().find((x) => x.id === "anthropic")?.configured === true);
+    providerStatus(namesFromEnv()).find((x) => x.id === "anthropic")?.configured === true);
 
   check("the write result hands nothing back", !JSON.stringify(res).includes(key), JSON.stringify(res));
   delete process.env.ANTHROPIC_API_KEY;

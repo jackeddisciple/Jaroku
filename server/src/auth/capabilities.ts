@@ -176,6 +176,10 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   listProviders: "provider:read",
   setProviderKey: "provider:manage",
   testProviderKey: "provider:manage",
+  // provider:manage rather than billing:manage. It decides which of two credentials pays for a
+  // call, not what the workspace is subscribed to — and the person who connected the key is the
+  // one who knows whether their provider account should carry the platform's calls too.
+  setOwnKeyForPlatform: "provider:manage",
 
   // membership
   listMembers: "member:read",

@@ -226,9 +226,22 @@ export type TestProviderKeyCommand = { cmd: "testProviderKey"; provider: string;
 export type ListProvidersCommand = { cmd: "listProviders" };
 
 /** Provider-channel commands, grouped so the forwarding switch stays readable. */
-export type ProviderCommand = SetProviderKeyCommand | TestProviderKeyCommand;
+/**
+ * Decide whether THIS WORKSPACE'S key pays for the platform's own calls on its behalf —
+ * generation, the plan gate, the fix loop, explain, the judge.
+ *
+ * An explicit boolean rather than a toggle, so two clicks racing end up where the user last
+ * said rather than wherever the ordering left them. Carries no credential: the key is already
+ * stored, and this decides only what it is allowed to pay for.
+ */
+export type SetOwnKeyForPlatformCommand = { cmd: "setOwnKeyForPlatform"; on: boolean };
 
-const PROVIDER_COMMANDS = new Set(["setProviderKey", "testProviderKey"]);
+export type ProviderCommand =
+  | SetProviderKeyCommand
+  | TestProviderKeyCommand
+  | SetOwnKeyForPlatformCommand;
+
+const PROVIDER_COMMANDS = new Set(["setProviderKey", "testProviderKey", "setOwnKeyForPlatform"]);
 
 // Deploy. Everything below rides beside the frozen schema in a new channel, exactly as
 // pause/resume, the eval engine and the MCP registry did — a deploy is not an agent run and
@@ -587,7 +600,12 @@ export type McpEvent =
 // so a client replaces rather than merges. And like them, nothing here ever carries a
 // credential — `configured` says a NAMED VARIABLE IS SET, and that is the whole of it.
 export type ProviderEvent =
-  | { type: "providers"; providers: unknown[] }
+  // `ownKeyForPlatform` is a preference, not a credential: whether THIS WORKSPACE'S key pays
+  // for the platform's own calls on its behalf — generation, the plan gate, the fix loop,
+  // explain, the judge. It rides the providers snapshot because it is meaningless without the
+  // list of what is connected, and because a client that had to ask twice could render a
+  // checkbox out of step with the keys beside it.
+  | { type: "providers"; providers: unknown[]; ownKeyForPlatform?: boolean }
   // The answer to "Test connection": did that key authenticate. Nothing was written.
   | { type: "testResult"; provider: string; ok: boolean; message: string | null }
   // A write that could not happen (an unknown provider, a value the .env format cannot store
@@ -733,6 +751,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   listMcpServers: "mcp", addMcpServer: "mcp", removeMcpServer: "mcp", rediscoverMcpServer: "mcp",
   setMcpServerAuth: "mcp", setMcpToolImpact: "mcp", resolveMcpConfirm: "mcp",
   listProviders: "providers", setProviderKey: "providers", testProviderKey: "providers",
+  setOwnKeyForPlatform: "providers",
   listMembers: "members", inviteMember: "members", revokeInvite: "members",
   setMemberRole: "members", removeMember: "members",
   listDeployments: "deploy", planDeploy: "deploy", deploy: "deploy", cancelDeploy: "deploy",
@@ -858,8 +877,15 @@ export interface RelayOptions {
   listAgentFiles?: (ctx: TenantContext, agentId: string) => unknown[] | Promise<unknown[]>;
   getAgentGraph?: (ctx: TenantContext, agentId: string) => Promise<unknown>;
   listMcpServers?: (ctx: TenantContext) => unknown[] | Promise<unknown[]>;
-  /** Which provider keys are set, by name. Never a value — see providers.ts. */
-  listProviders?: () => unknown[];
+  /**
+   * Which provider keys are set, by name. Never a value — see providers.ts.
+   *
+   * Takes the asking socket's context, like every other read here. It used to take nothing,
+   * because a provider key lived in one `runtime/.env` and genuinely was process-wide. Hosted
+   * it is per workspace, and a snapshot answered without a scope would tell every connected
+   * client that a provider is connected because the SERVER has one.
+   */
+  listProviders?: (ctx: TenantContext) => unknown[] | Promise<unknown[]>;
   /**
    * Re-check an open socket's session. Called on a timer; absent means never.
    *
@@ -946,7 +972,11 @@ export class WsRelay {
         this.sendTo(ws, { channel: "mcp", type: "servers", servers: (await this.opts.listMcpServers?.(ctx)) ?? [] });
         // Which providers are connected, so a first-run client knows on frame one whether it
         // is looking at a configured install or an empty one.
-        this.sendTo(ws, { channel: "providers", type: "providers", providers: this.opts.listProviders?.() ?? [] });
+        this.sendTo(ws, {
+          channel: "providers",
+          type: "providers",
+          providers: (await this.opts.listProviders?.(ctx)) ?? [],
+        });
         // And what is deployed, so the sidebar's Deployed filter is right on frame one rather
         // than after a round trip.
         const deploySnapshot = (await this.opts.listDeployments?.(ctx)) ?? {
@@ -1197,11 +1227,12 @@ export class WsRelay {
               ...((await this.opts.listDeployments?.(ctx)) ?? { deployments: [], railwayConfigured: false }),
             }), live);
           } else if (msg.cmd === "listProviders") {
-            this.sendTo(ws, {
-              channel: "providers",
-              type: "providers",
-              providers: this.opts.listProviders?.() ?? [],
-            });
+            void withContext(async (ctx) =>
+              this.sendTo(ws, {
+                channel: "providers",
+                type: "providers",
+                providers: (await this.opts.listProviders?.(ctx)) ?? [],
+              }));
           } else if (DEPLOY_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the deploy manager and can answer with a
             // precise error on the "deploy" channel rather than dropping the message here.

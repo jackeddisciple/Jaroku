@@ -61,12 +61,24 @@ export interface ProviderStatus {
   powers_jaroku: boolean;
 }
 
-/** Which provider keys are set, by name. The single source is process.env, as everywhere else. */
-export function providerStatus(): ProviderStatus[] {
+/**
+ * Which provider keys are set, by name.
+ *
+ * TAKES THE CONFIGURED NAMES RATHER THAN READING process.env, and that is the whole of what
+ * hosting changed here. Locally the two are the same thing: the local secret store IS the
+ * process environment, loaded from `runtime/.env` at boot, so `npm run dev` reports exactly
+ * what it always did. Hosted they are not remotely the same thing — the process environment
+ * holds the PLATFORM's key, and reading it would tell all six thousand workspaces that they
+ * have a provider connected because the server does.
+ *
+ * `configured` still means A NAMED VARIABLE IS SET, still never carries a value, and is still
+ * deliberately not "this provider is fine". Same rule, a per-workspace answer.
+ */
+export function providerStatus(configuredNames: ReadonlySet<string>): ProviderStatus[] {
   return PROVIDER_IDS.map((id) => ({
     id,
     env_key: PROVIDER_ENV_KEY[id],
-    configured: Boolean(process.env[PROVIDER_ENV_KEY[id]]),
+    configured: configuredNames.has(PROVIDER_ENV_KEY[id]),
     powers_jaroku: id === "anthropic",
   }));
 }

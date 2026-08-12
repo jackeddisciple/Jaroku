@@ -113,6 +113,19 @@ export class DotEnvSecretStore implements SecretStore {
   }
 
   /**
+   * The same values, for a platform-side call rather than for a run.
+   *
+   * Locally these are the same thing: `runtime/.env` has no notion of a workspace in it, so
+   * both answer from the process environment. The two methods exist apart because on the hosted
+   * store they resolve their scope differently — a run from its own id, a platform call from the
+   * asking context — and a local store that collapsed them would make the call site
+   * implementation-specific, which is the one thing an interface is for.
+   */
+  async getForPlatformCall(_ctx: TenantContext, names: string[]): Promise<Record<string, string>> {
+    return this.getForRun("", names);
+  }
+
+  /**
    * What is configured, by name.
    *
    * Read back out of the file with the REAL parser rather than a regex, so what is reported as

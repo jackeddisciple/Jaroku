@@ -166,7 +166,14 @@ export class Editor extends EventEmitter<EditorEvents> {
     this.emit("error", e);
   }
 
-  async propose(ctx: TenantContext, agentId: string, instruction: string): Promise<void> {
+  async propose(
+    ctx: TenantContext,
+    agentId: string,
+    instruction: string,
+    /** The workspace's own Anthropic key, when it has opted its key in for platform calls.
+     *  Absent — the default, and the local path — means the platform's own. */
+    apiKey?: string,
+  ): Promise<void> {
     if (this.busy) {
       this.fail({ message: "an edit is already in progress", agentId });
       return;
@@ -291,6 +298,7 @@ export class Editor extends EventEmitter<EditorEvents> {
           },
           (chunk) => parser.push(chunk),
           (u) => (usage = u),
+          apiKey,
         );
         if (fixture) (await import("node:fs")).writeFileSync(fixture, raw, "utf8");
       }
@@ -550,9 +558,10 @@ export class Editor extends EventEmitter<EditorEvents> {
     },
     onChunk: (text: string) => void,
     onUsage: (u: UsageSummary) => void,
+    apiKey?: string,
   ): Promise<string> {
     let raw = "";
-    const stream = anthropicClient().messages.stream({
+    const stream = anthropicClient(apiKey).messages.stream({
       model: EDIT_MODEL,
       max_tokens: MAX_TOKENS,
       system: [

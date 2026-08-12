@@ -1,0 +1,23 @@
+-- 023_own_key_for_platform — whose key pays for the platform's own thinking.
+--
+-- A workspace's provider key is for its AGENTS. That is the default and it is the whole of
+-- BYOK: the key goes into a run's environment, the agent's model calls bill to the user's own
+-- account, and the platform's spend on them is zero. Planning, generation, the fix loop,
+-- explain and the judge are a different thing — the platform thinking on somebody's behalf —
+-- and those bill to the platform's key.
+--
+-- SO WHY OFFER TO SWAP THEM. Because for a workspace that has a provider account already, "my
+-- key, my bill, all of it" is a coherent position and a cheaper one, and refusing it would mean
+-- charging them platform credit for calls they would rather pay for directly. The flag exists
+-- so that is a choice somebody makes rather than a thing that quietly happens.
+--
+-- DEFAULT FALSE, AND THAT DEFAULT IS THE SECURITY PROPERTY. Using a tenant's credential for a
+-- call they did not ask for is a use they did not consent to, whatever the accounting says. A
+-- column that defaulted true would make every existing workspace opt in retroactively, in a
+-- migration, without anybody being asked.
+--
+-- ON `workspace_balances` RATHER THAN A TABLE OF ITS OWN. It decides whose money pays for a
+-- call, which is what every other column here decides. A separate `workspace_preferences` table
+-- would put one boolean somewhere the budget gate has to join to read.
+ALTER TABLE workspace_balances
+  ADD COLUMN own_key_for_platform boolean NOT NULL DEFAULT false;

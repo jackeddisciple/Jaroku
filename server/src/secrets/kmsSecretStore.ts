@@ -102,7 +102,14 @@ export class KmsSecretStore implements SecretStore {
     const workspaceId = await this.opts.runWorkspace(runId);
     // No such run means no secrets. Never "all of them", and never the caller's own scope: a
     // run id that does not resolve is the one case where guessing is a cross-tenant leak.
-    if (!workspaceId || !names.length) return {};
+    if (!workspaceId) return {};
+    return this.decryptInto(workspaceId, names);
+  }
+
+  /** The decryption itself, shared by the two plaintext exits so they cannot drift apart in how
+   *  they validate a name, which key version they open a row with, or what they record as a use. */
+  private async decryptInto(workspaceId: string, names: string[]): Promise<Record<string, string>> {
+    if (!names.length) return {};
 
     const wanted = names.filter((n) => {
       try {
@@ -132,6 +139,19 @@ export class KmsSecretStore implements SecretStore {
     // last receive this" is one fact in one place whichever store answered.
     await this.opts.refs.touch(workspaceId, Object.keys(out));
     return out;
+  }
+
+  /**
+   * The same decryption, scoped by the asking CONTEXT rather than by a run.
+   *
+   * The only difference from `getForRun`, and it is the whole reason the two are separate
+   * methods: there is no run to resolve a workspace from, because a generation or a judge
+   * verdict is not a run. The context is the scope, exactly as it is for every other method on
+   * this store — which is also why this one cannot be reached by anything holding only a run id,
+   * and therefore cannot be used to read a workspace's key from inside a sandbox.
+   */
+  async getForPlatformCall(ctx: TenantContext, names: string[]): Promise<Record<string, string>> {
+    return this.decryptInto(ctx.workspaceId, names);
   }
 
   async listNames(ctx: TenantContext): Promise<SecretRef[]> {

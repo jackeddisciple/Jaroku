@@ -39,6 +39,14 @@ export interface BalanceRow {
   ceiling_usd: number | null;
   /** This workspace's negotiated exceptions to its plan's limits. Usually empty. */
   limit_overrides: Record<string, unknown>;
+  /**
+   * Whether this workspace's OWN provider key pays for the platform's calls on its behalf —
+   * generation, the plan gate, the fix loop, explain and the judge.
+   *
+   * False by default and by design. A tenant's credential used for a call they did not ask for
+   * is a use they did not consent to, whatever the accounting says. See migration 023.
+   */
+  own_key_for_platform: boolean;
   updated_at: string;
 }
 
@@ -247,6 +255,21 @@ export class BillingRepository {
     );
   }
 
+  /**
+   * Decide whether this workspace's own provider key pays for the platform's own calls.
+   *
+   * An explicit boolean rather than a toggle, so the caller states the intent it wants rather
+   * than the change it thinks is needed — two clicks racing on a toggle end up wherever the
+   * ordering left them.
+   */
+  async setOwnKeyForPlatform(ctx: TenantContext, on: boolean): Promise<void> {
+    await this.balance(ctx);
+    await this.q(ctx).run(
+      `UPDATE workspace_balances SET own_key_for_platform = ?, updated_at = ? WHERE workspace_id = ?`,
+      [on ? 1 : 0, nowIso(), ctx.workspaceId],
+    );
+  }
+
   /** Replace this workspace's negotiated exceptions to its plan's limits. */
   async setLimitOverrides(ctx: TenantContext, overrides: Record<string, unknown>): Promise<void> {
     await this.balance(ctx);
@@ -258,7 +281,8 @@ export class BillingRepository {
 
   private async readBalance(q: Queryable, workspaceId: string): Promise<BalanceRow | undefined> {
     const row = await q.get<Record<string, unknown>>(
-      `SELECT workspace_id, balance_usd, reserved_usd, ceiling_usd, limit_overrides, updated_at
+      `SELECT workspace_id, balance_usd, reserved_usd, ceiling_usd, limit_overrides,
+              own_key_for_platform, updated_at
          FROM workspace_balances WHERE workspace_id = ?`,
       [workspaceId],
     );
@@ -273,6 +297,7 @@ export class BillingRepository {
         : Number(row["ceiling_usd"]),
       limit_overrides:
         overrides && typeof overrides === "object" ? (overrides as Record<string, unknown>) : {},
+      own_key_for_platform: asBool(row["own_key_for_platform"]),
       updated_at: String(row["updated_at"]),
     };
   }

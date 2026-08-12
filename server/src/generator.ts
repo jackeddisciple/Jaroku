@@ -52,6 +52,15 @@ export interface GeneratorDeps {
 
 export interface GenerateOptions {
   runtimeDir: string;
+  /**
+   * The workspace's OWN Anthropic key, when it has asked that its key pay for the platform's
+   * calls on its behalf. Absent — the default, and the local path — means the platform's own.
+   *
+   * Passed per call rather than held, so a workspace that turns the option off stops using its
+   * key on the very next request rather than on the next restart. See billing/providerKeys.ts.
+   */
+  apiKey?: string;
+
   /** Whose agent this is. Every key the generation writes is built from its workspace id. */
   ctx: TenantContext;
   prompt: string;
@@ -276,6 +285,7 @@ export class Generator extends EventEmitter<GeneratorEvents> {
           generationRequest(opts, slug, name, selected),
           (chunk) => parser.push(chunk),
           (u) => (usage = u),
+          opts.apiKey,
         );
         if (fixture) writeFileSync(fixture, raw, "utf8"); // record for future free runs
       }
@@ -370,9 +380,10 @@ export class Generator extends EventEmitter<GeneratorEvents> {
     req: GenerationRequest,
     onChunk: (text: string) => void,
     onUsage: (u: UsageSummary) => void,
+    apiKey?: string,
   ): Promise<string> {
     let raw = "";
-    const stream = anthropicClient().messages.stream({
+    const stream = anthropicClient(apiKey).messages.stream({
       model: GENERATION_MODEL,
       max_tokens: MAX_TOKENS,
       system: [

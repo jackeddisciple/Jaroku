@@ -36,6 +36,15 @@ const MAX_TOKENS = 600;
 
 export interface PlanOptions {
   runtimeDir: string;
+  /**
+   * The workspace's OWN Anthropic key, when it has asked that its key pay for the platform's
+   * calls on its behalf. Absent — the default, and the local path — means the platform's own.
+   *
+   * Passed per call rather than held, so a workspace that turns the option off stops using its
+   * key on the very next request rather than on the next restart. See billing/providerKeys.ts.
+   */
+  apiKey?: string;
+
   /** The workspace asking. A plan is one workspace's, and only that one may spend it. */
   workspaceId: string;
   prompt: string;
@@ -213,6 +222,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
           },
           (chunk) => this.emit("delta", { text: chunk }),
           (u) => (usage = u),
+          opts.apiKey,
         );
         if (fixture) writeFileSync(fixture, raw, "utf8"); // record for future free runs
       }
@@ -248,9 +258,10 @@ export class Planner extends EventEmitter<PlannerEvents> {
     req: Parameters<typeof buildPlanUserPrompt>[0],
     onChunk: (text: string) => void,
     onUsage: (u: UsageSummary) => void,
+    apiKey?: string,
   ): Promise<string> {
     let raw = "";
-    const stream = anthropicClient().messages.stream({
+    const stream = anthropicClient(apiKey).messages.stream({
       model: PLAN_MODEL,
       max_tokens: MAX_TOKENS,
       system: [
