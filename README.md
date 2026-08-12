@@ -53,6 +53,8 @@ of the repo and run yourself.
 - [Storage isolation](#storage-isolation)
 - [Sandboxed execution and the distributed control plane](#sandboxed-execution-and-the-distributed-control-plane)
 - [Queueing, fairness, and per-workspace limits](#queueing-fairness-and-per-workspace-limits)
+- [Cost metering, budgets, and billing](#cost-metering-budgets-and-billing)
+- [Connector OAuth and the credential vault](#connector-oauth-and-the-credential-vault)
 - [Authentication and membership](#authentication-and-membership)
 - [Where data lives](#where-data-lives)
 - [Security notes](#security-notes)
@@ -942,8 +944,13 @@ Each template lazy-imports its SDK, so the base install stays light and a missin
 produces a clear message rather than an import crash. Install them with
 `uv sync --extra connectors`.
 
-Adding a connector means: write the template, add its entry to `catalog.json`, and run the
-`check_catalog()` verification in `tool_templates/__init__.py`.
+Adding a connector means: write the template, add its entry to `catalog.json` — including its
+`auth` mode — and run the `check_catalog()` verification in `tool_templates/__init__.py`.
+
+Hosted, **the required env above is no longer something a user pastes in for Gmail and Slack**:
+Jaroku owns the OAuth app, the user clicks Connect, and a short-lived access token reaches the
+run under the same variable name the template already reads. Postgres stays a `user_secret`.
+See [Connector OAuth and the credential vault](#connector-oauth-and-the-credential-vault).
 
 ---
 
@@ -1019,8 +1026,12 @@ for is told it was dropped, rather than left to conclude the server does not off
 
 ### Credentials
 
-A token entered in the UI is written to `runtime/.env` under a derived name
-(`JAROKU_MCP_<SERVER>_TOKEN`), and that is the last time anything holds it. From then on it is
+A token entered in the UI is stored under a derived name (`JAROKU_MCP_<SERVER>_TOKEN`) through
+the [secret store](#the-secret-lifecycle) — `runtime/.env` locally, per-workspace ciphertext
+hosted — and that is the last time anything holds it. **The name is derived from the server id,
+so two workspaces connecting one service derive the same name; the store is what keeps them two
+different values.** See
+[Connector OAuth and the credential vault](#connector-oauth-and-the-credential-vault). From then on it is
 read from the environment at the moment a request is made. It is never logged, never stored in
 the database, never written into a generated project, and never sent back to the browser —
 what a client learns is `configured: true`, meaning a named variable is set.
@@ -1034,9 +1045,17 @@ Two things worth knowing:
   (see [Configuration](#configuration)). Writing one that is shadowed warns you, because a
   token that silently reverts is a baffling thing to debug.
 
-**OAuth is not supported.** A server that answers a handshake with an OAuth challenge says so
-explicitly rather than failing as a generic "unauthorized" — otherwise you would go hunting for
-a key that does not exist.
+**OAuth against an MCP server is not supported.** A server that answers a handshake with an OAuth
+challenge says so explicitly rather than failing as a generic "unauthorized" — otherwise you
+would go hunting for a key that does not exist. (Jaroku *does* run OAuth for its reviewed
+connectors; that is a different thing, and it is
+[here](#connector-oauth-and-the-credential-vault).)
+
+**An endpoint is validated before anything connects to it, and again before every
+re-discovery.** A user-supplied URL fetched by the control plane is an SSRF vector: private,
+link-local and loopback addresses are refused, the resolved addresses are pinned, and a
+hostname repointed after registration is refused at the next handshake — while keeping the tool
+list it already had.
 
 ### Impact classification
 
@@ -1499,6 +1518,7 @@ frozen event schema, and everything added since rides beside it.
 | `session` | The only channel about the CONNECTION rather than the work: `expiring`, `expired`, `revoked`, `workspace_changed`, `role_changed` |
 | `members` | Who is in the workspace, who has been invited, and the one-shot invite link |
 | `providers` | Which provider keys are set (`configured: true/false`, by name), test results, and whether the workspace's own key pays for platform calls |
+| `connections` | Which third-party accounts this workspace has authorised, their status and granted scopes, and the URL a consent flow must be started at. Never a token |
 | `billing` | What this workspace has spent this period, against which ceilings — see [cost metering](#cost-metering-budgets-and-billing) |
 | `reply` | Streaming "explain" answers |
 | `log` | stderr lines and parse errors, for visibility |
@@ -1577,6 +1597,11 @@ to happen because a browser cannot put a header on a WebSocket:
 | `JAROKU_OBJECT_SIGNING_KEY` | generated into `server/.objectkey` | Signs presigned object URLs. **Required in production**: a per-replica key produces URLs that verify on one replica and nowhere else |
 | `JAROKU_SECRET_STORE` | `dotenv` | `dotenv` \| `kms`. `dotenv` is `runtime/.env` and refuses `NODE_ENV=production`, because one file has no workspace in it |
 | `JAROKU_MASTER_KEY` | — | Wraps each workspace's data key when `JAROKU_SECRET_STORE=kms`. No generated fallback: a regenerated master key would make every stored credential permanently unreadable |
+| `JAROKU_OAUTH_GOOGLE_CLIENT_ID` / `_SECRET` | — | The Google OAuth app the Gmail connector is granted through. Unset means the connector is listed as unavailable, which is the local default and not an error |
+| `JAROKU_OAUTH_SLACK_CLIENT_ID` / `_SECRET` | — | The same, for Slack |
+| `JAROKU_OAUTH_REDIRECT_BASE` | `http://localhost:<port>` | Where a provider sends the browser back. `{base}/v1/oauth/{provider}/callback` must be registered as an authorised redirect URI |
+| `JAROKU_APP_URL` | `http://localhost:5173` | Where the browser is sent once a flow finishes. A `returnTo` is a PATH joined to this and never a URL of its own — see [the flow](#the-flow-and-the-two-things-that-defend-it) |
+| `JAROKU_MCP_ALLOW_LOOPBACK` | on in dev | `0` refuses loopback MCP endpoints locally too. Always off under `NODE_ENV=production`, and no value overrides that — it exists so `npm run mock:mcp` keeps working |
 | `JAROKU_CHECKPOINTER` | `sqlite` | `sqlite` \| `postgres`. Where pause/resume/branch state lives |
 | `JAROKU_CHECKPOINT_PG_URL` | — | The checkpointer's OWN connection. Not `JAROKU_PG_URL`: LangGraph never issues `SET LOCAL`, so it must not borrow the pool whose isolation depends on it |
 | `JAROKU_RUN_SANDBOX` | `local` | `local` \| `fly`. Where a run's code actually executes — see [Sandboxed execution](#sandboxed-execution-and-the-distributed-control-plane) |
@@ -1767,6 +1792,20 @@ npm run test:graph-introspect # a version's graph is introspected at most once, 
 npm run test:fly-sandbox   # FlyMachinesSandbox against a fixture Fly Machines API
 npm run test:escape-suite  # each named attack vector, proven against the real refusing code
 npm run test:tenancy-isolation # two workspaces, two run tokens, neither reaches the other's run
+
+# connector OAuth and MCP at scale — see "Connector OAuth and the credential vault"
+npm run test:oauth-state     # PKCE, and a state that works once even when two callbacks race
+npm run test:oauth-service   # the flow end to end; tokens appear in nothing it returns or stores
+npm run test:oauth-google    # the scopes asked for, and the four that are not
+npm run test:oauth-slack     # errors arriving with a 200; a user token refused as a bot token
+npm run test:oauth-refresh   # twelve concurrent callers, ONE call to the token endpoint
+npm run test:oauth-injection # a run gets the access token; no token reaches any file
+npm run test:oauth-revoke    # disconnect tells the provider, and forgets it either way
+npm run test:connector-auth  # every connector declares where its credential comes from
+npm run test:connector-secrets # DATABASE_URL: refused at save, re-pinned at run
+npm run test:mcp-tenancy     # two workspaces, one endpoint, two credentials
+npm run test:mcp-url         # the hostile fixtures, at discovery AND at re-discovery
+npm run test:mcp-discovery-queue # off the request path, collapsed, and the tool list survives
 
 # queueing and fairness — see "Queueing, fairness, and per-workspace limits"
 npm run test:redis       # the connection, and that an unset URL refuses rather than defaults
@@ -2818,6 +2857,321 @@ it and the number beside it is a floor.
 
 ---
 
+## Connector OAuth and the credential vault
+
+Session 7 of the hosted migration. Until now, connecting Gmail meant obtaining a refresh token
+out of band and pasting three variables into `runtime/.env` by hand. That is a reasonable
+instruction for one person on their own machine, and it is not an instruction you can give six
+thousand people — so **Jaroku now owns the OAuth app, and a user grants it access by clicking a
+button.**
+
+That is a different security posture, not a nicer form. The credential is no longer something the
+user holds and shares with us; it is a grant *somebody else's system* made to us, against a real
+mailbox, which can be revoked from the far end at any moment and which we are now responsible for
+handing back when asked.
+
+### Where a credential comes from, per connector
+
+`runtime/tool_templates/catalog.json` gains one field, `auth`, and it decides three things: what
+the Connections panel offers, what `.env.example` says about each key, and what the generation
+prompt tells the model about where a value comes from.
+
+| Connector | `auth` | What a run receives | What the user does |
+|---|---|---|---|
+| **Gmail** | `oauth` | `GMAIL_ACCESS_TOKEN` — short-lived | clicks Connect |
+| **Slack** | `oauth` | `SLACK_BOT_TOKEN` — `xoxb-…`, no expiry | clicks Connect |
+| **Postgres** | `user_secret` | `DATABASE_URL` | pastes a connection string |
+
+Postgres stays a `user_secret` and always will: there is no consent screen for "the database at
+the other end of this connection string", and the string *is* the credential.
+
+**The names stay in `.env.example` either way, and that is deliberate.** A generated project is
+portable — the README has always promised it runs standalone, and `test:acceptance` proves it — so
+a copy running outside Jaroku has no connection to ask and needs those names documented. What
+changed is what the file *says* about them: a key a connection fills in is rendered as a comment
+explaining that, not as a blank to paste into. Telling somebody to go and obtain a refresh token
+by hand is telling them to redo, badly, the thing the button just did.
+
+### What a run is given, and what it is not
+
+A run receives an **access token**. It does not receive the refresh token.
+
+That is the whole of the injection design. A refresh token is a permanent grant to somebody's
+mailbox; an access token is an hour. What executes in a sandbox is model-written Python responding
+to a stranger's prompt, so it gets the short half, and the permanent one stays in the vault on the
+control plane where the sandbox has no route to it. The token is refreshed *before* the run when
+the run's own deadline could outlive it, with ten minutes of grace, so a graph does not lose its
+Gmail access halfway through a tool call it cannot retry.
+
+`slack.py` needed no change at all — an OAuth install yields the `xoxb-…` token it already reads.
+`gmail.py` gained exactly one additive branch: it prefers `GMAIL_ACCESS_TOKEN` when present and
+falls back to the client-id/secret/refresh-token triple when it is not. **The migration spec said
+the connector Python should not need to change, and for Gmail that turned out not to be quite
+true** — keeping it literally unchanged would have meant injecting a refresh token into untrusted
+code, which contradicts this session's own acceptance criterion. The contract is untouched: both
+routes are read from `os.environ`, and the standalone path works exactly as before.
+
+### Refresh, and the bug that makes it a module
+
+Concurrent refreshes of one connection are how you *lose* a connection.
+
+A workspace fans out an eval: twelve runs start within a second, each needs a Gmail token, each
+finds the same one thirty seconds from expiry, and each refreshes it. Under a provider that
+rotates refresh tokens the first refresh retires the old one — and the other eleven then present a
+token the provider has already invalidated. A provider seeing a retired refresh token does not
+answer "try again"; it treats the reuse as evidence of theft and **revokes the entire grant**.
+Twelve concurrent runs would disconnect the integration and require a human to reconnect it.
+
+So there is one refresh in flight per connection and everybody else awaits the same promise — not
+"checks again afterwards", which would leave a window in which the first has retired the old token
+and not yet written the new one. `test:oauth-refresh` fires twelve concurrent callers and asserts
+the token endpoint is called exactly once.
+
+The mutex is **per process**, and that is honest rather than complete: two API replicas can still
+race. What makes the in-process version worth having on its own is the shape of the traffic — a
+fan-out is one workspace's dispatch, and a dispatcher hands its jobs to workers rather than
+scattering them — and the residual race needs two replicas to touch one connection inside the same
+five-minute window *and* the provider to rotate.
+
+Two smaller rules that pull in opposite directions and are both load-bearing:
+
+- **An absent `refresh_token` in a response means keep the stored one.** Google's ordinary refresh
+  response has no such field, so an implementation that stored what it was given would destroy a
+  working connection on the first refresh.
+- **A `refresh_token` that differs from the stored one replaces it, under the same name.** A second
+  name would be a credential nothing reads while the thing everything reads is already dead.
+
+And `invalid_grant` is **terminal**. It means the grant is gone — revoked in the provider's
+console, expired by policy, invalidated by a password change — and retrying it is a loop against
+somebody's real account that ends in a lockout rather than a reconnection. The connection is marked
+`reauth_required`, the workspace is told once, and nothing tries again until a human reconnects.
+Fail-closed, the same posture the MCP confirmation gate takes when it times out.
+
+### Scopes are the product promise, enforced by somebody else
+
+`gmail.py` creates drafts and never sends, and has said so in prose since it was written. Hosted,
+*we* ask for the scopes, so that promise becomes something Google enforces on our behalf.
+
+| Provider | Scopes | Why not more |
+|---|---|---|
+| Google | `gmail.readonly`, `gmail.compose`, `openid`, `email` | **not** `gmail.send`, **not** `gmail.modify`, and emphatically not `https://mail.google.com/` — which is full access including permanent deletion, and is what a lazy integration asks for |
+| Slack | `channels:read`, `channels:history`, `chat:write` | nothing that reaches private conversations, files or administration |
+
+`openid` and `email` are non-sensitive and buy one thing: an account label. A connections panel
+that cannot say **which** mailbox an agent is reading is a panel nobody can audit, and a workspace
+with two Google accounts connected has no way to tell which one to disconnect.
+
+`test:oauth-google` asserts the forbidden scopes individually, so a widening that arrives by
+somebody copying a wider example from a tutorial fails a named test rather than a consent screen a
+user reads too quickly.
+
+**Google verification is the long pole of this session and it is not a code problem.** Both Gmail
+scopes are *restricted*, which means the OAuth app must pass Google's verification **and** a
+third-party security assessment before it may serve more than a hundred users. That has a lead time
+measured in weeks and, for the assessment, a real invoice. Until it completes the app runs in
+testing mode: it works, for a list of test users entered by hand, behind an unmissable "Google
+hasn't verified this app" screen. Nothing in this codebase changes that, and nothing in it pretends
+to. The scope justifications above are written the way they are because they are what the
+submission argues.
+
+### What a user is consenting to
+
+Rendered in sentences, **before** the button, from the connector spec rather than from a scope
+string:
+
+> - Read the messages in your mailbox, so an agent can search it
+> - Create draft replies in your mailbox
+> - It cannot send mail, delete anything, or change your settings
+
+The exact granted scopes are shown too, and second. The sentences come first because
+`https://www.googleapis.com/auth/gmail.compose` tells nobody whether an agent can email their
+customers; the strings are kept because they are the only exact statement of what was granted, and
+an interface that only paraphrased would be one you cannot audit.
+
+**What is shown is what was GRANTED, not what was asked for.** Google's incremental consent lets
+somebody tick one box and not the other, and a partial grant connects — refusing it would mean a
+person happy to let an agent read their mail but not draft replies cannot connect at all. The panel
+says which scope was withheld so the tools that need it are known to be broken before one fails.
+
+### The flow, and the two things that defend it
+
+`state` and PKCE are constantly confused for each other. They defend different things and a flow
+needs both.
+
+- **`state` defends the callback.** Without it, anyone can send a victim's browser to our callback
+  carrying an authorization code for *their* account, and quietly connect their mailbox to the
+  victim's workspace — a login-CSRF that ends with a workspace's agents reading, and writing into,
+  an attacker's inbox.
+- **`code_verifier` defends the code.** An authorization code intercepted from a log, a `Referer`
+  or a shared machine's history cannot be redeemed by whoever took it. PKCE is routinely skipped by
+  confidential clients on the grounds that the client secret already proves who is exchanging — but
+  that reasoning is about the *client* and says nothing about the *code*, which travels through a
+  user agent either way. Always `S256`; `plain` makes the exercise decorative.
+
+The state row is **hashed at rest, single-use, and ten minutes old at most**, and consuming it is a
+`DELETE` whose row count *is* the decision — the same shape `ws_tickets` uses, because it is the
+same problem, and two spellings of one solution is how they eventually disagree.
+
+`GET /v1/oauth/{provider}/callback` is **unauthenticated by construction**, exactly as the payment
+webhook is: a provider redirects a *browser*, carrying no bearer token and no socket. The state is
+the whole of the authentication. There is deliberately no session check on top, because the person
+completing a flow may be on a different device than the one that started it, and a check that broke
+that would stop no attack — anyone who can present a valid state already has the thing it would
+verify.
+
+Every outcome ends in a **redirect**, not JSON. A white page reading
+`{"error":{"code":"unauthorized"}}` is the worst possible end to a consent flow. And the redirect
+target is never something the request chose: `returnTo` is a *path*, re-joined to this deployment's
+own app URL, and anything that could be absolute is **discarded rather than sanitised** — `//evil.example`
+and `/\evil.example` are both absolute to a browser, and a cleanup pass is a thing to get subtly
+wrong. A callback that redirects wherever it is told is a phishing primitive hosted on our own
+domain, wearing our own certificate, reached by a link that genuinely came from Google.
+
+The failure kind travels on the URL; the **message does not**. A message on a URL is a string an
+attacker chooses by choosing what to send to the callback, and a page that renders it renders
+their words under our domain.
+
+### Disconnecting means revoking
+
+Deleting our copy of a credential is housekeeping. **Revoking it is what the button appears to
+promise**, and without the second a user who pressed Disconnect still appears in their own Google
+account's connected apps, holding a refresh token that still works. They believe they have ended
+something they have not.
+
+So: revoke at the provider, *then* forget locally. A crash between the two leaves a grant that is
+dead at the far end and still recorded here — visible, wrong in the harmless direction, fixed by
+pressing the button again. The other order leaves a live grant nothing points at, which is
+unrecoverable.
+
+The refresh token is preferred over the access token when there is one, and for Google that is the
+difference between ending the grant and ending an hour of it.
+
+A provider that refuses or cannot be reached **does not keep the credential here** — retrying
+forever holds a user in a state they asked to leave, and our copy of somebody else's credential is
+not leverage over their outage. What happened is recorded instead, because these are different
+answers to a support question:
+
+| Outcome | What it means |
+|---|---|
+| `revoked` | the provider confirmed it |
+| `already_gone` | the provider says the token was not valid — the outcome asked for, not a failure |
+| `unreachable` | we could not tell it. The credential is gone from here; **check your connected apps** |
+| `unsupported` | the provider publishes no revocation endpoint |
+| `no_credential` | there was nothing stored to revoke with |
+
+`endAllGrants` ends every OAuth connection *and* deletes every MCP credential a workspace holds. It
+is not called from a delete button yet — workspace and account deletion is Session 8's — and it is
+built here, where the revocation logic lives, so that Session 8 does not have to invent the half
+that makes a deletion honest rather than merely thorough.
+
+### MCP at multi-tenant scale
+
+Every MCP property in this README survives: the impact ratchet, `readOnlyHint` being ignored,
+override voiding on schema change, one-name-one-tool, the confirmation gate that denies on timeout,
+and a failed refresh never destroying a working tool list. Three things changed around them.
+
+**An MCP token stops being one value for the whole server.** This was not hypothetical. A server id
+is a slug derived from the endpoint's hostname, so two workspaces connecting `mcp.linear.app` both
+get `linear` and both derive `JAROKU_MCP_MCP_LINEAR_APP_TOKEN` — and the process environment has no
+workspace in it. The second workspace to save a token overwrote the first's, and from then on
+**both** workspaces authenticated to Linear as whoever wrote last, silently, with `configured: true`
+on both panels. Credentials now go through `SecretStore`, and `configured` reads the workspace's own
+listing rather than `process.env` — the same mistake `listProviders` was fixed for in Session 6.
+
+**Discovery moved onto the queue.** It is the only registered job class that is a round trip to a
+*third party* rather than to a provider we have a contract with. `mcpClient` has always bounded it
+— a per-request timeout and a whole-discovery deadline — but nothing bounded *how many* could be in
+flight, and thirty seconds of a request handler is a hundred concurrent pending fetches when a
+popular endpoint has a bad afternoon and every workspace that connected it retries at once. Jobs are
+collapsed by `(workspace, server)`, so six presses of Re-discover are one round trip to a server
+that is probably already struggling. Not retryable at the queue level: discovery classifies its own
+failures and returns rather than throwing, so there is nothing for a retry to improve.
+
+**A user-supplied MCP URL is an SSRF vector, and it is fetched twice.** Once by the control plane at
+discovery — where there is no sandbox and no egress policy, only this check — and again by the
+sandbox at call time, where a pinned egress rule holds. Both are covered.
+
+- The refusal is `egressPolicy`'s own, not a second copy: it already knows `::ffff:a9fe:a9fe` and
+  `169.254.169.254` are one address written two ways, that `febf::1` is link-local, and that a 6to4
+  address carries an IPv4 in bytes 2–5.
+- **Re-checked before every handshake, not once at registration.** A hostname is not a promise:
+  `mcp.example.com` can be repointed at the metadata endpoint the day after it was added, and a
+  re-discovery is exactly when that would be used. A repointed server stops being talked to **and
+  keeps its tool list** — those two rules pull in opposite directions if you implement the first by
+  wiping the row.
+- Ports are a **denylist**, unlike `DATABASE_URL`'s allowlist. Postgres has conventions; MCP has
+  none, and self-hosted servers legitimately sit on 3000 and 8080 and whatever a container was
+  given. The address check is the defence; the port list is depth against an operator whose
+  infrastructure has a public address.
+
+**Loopback has a development seam**, because `npm run mock:mcp` listens on `127.0.0.1` and the
+fixture path must keep working. It admits *literal* loopback only — never RFC1918, never
+link-local, and never a hostname that merely *resolves* to loopback, which would be the rebinding
+shape again — and it is off under `NODE_ENV=production` **unoverridably**. Setting
+`JAROKU_MCP_ALLOW_LOOPBACK=1` in production does nothing. `JAROKU_MCP_ALLOW_LOOPBACK=0` turns it off
+locally for somebody who wants the production posture.
+
+### The Connections tab
+
+Its own channel, beside `providers` rather than folded into it: a provider key is a credential the
+workspace *holds*; a connection is a grant made to us, revocable from the far end, with a
+`reauth_required` state no API key has. Full-snapshot discipline like every channel beside it, and
+**nothing on it is a credential** — a status, the granted scopes, and an account label is the whole
+of what the browser is told.
+
+`connector:read` is a **member** capability; `connector:manage` is an **admin** one, for the reason
+`mcp:manage` is and rather more so: connecting Gmail points every agent in the workspace at one
+person's mailbox, and the grant is made against *their* account. Disconnecting is the same
+capability, not a lesser one — the ability to break every agent that depends on a connection is not
+a read.
+
+`connectionStore` is registered in `WORKSPACE_STORES`, so a workspace switch empties it before the
+new socket opens. An account label held across a switch is one tenant's email address shown under
+another tenant's name, beside a Disconnect button that would act in the wrong workspace.
+
+### Setting up the OAuth apps
+
+Two variables per provider, read **per call** so a deployment that registers an app does not need a
+restart:
+
+```bash
+JAROKU_OAUTH_GOOGLE_CLIENT_ID=...
+JAROKU_OAUTH_GOOGLE_CLIENT_SECRET=...
+JAROKU_OAUTH_SLACK_CLIENT_ID=...
+JAROKU_OAUTH_SLACK_CLIENT_SECRET=...
+
+# Where the callback lands. Defaults to http://localhost:<port>.
+JAROKU_OAUTH_REDIRECT_BASE=https://api.jaroku.example.com
+# Where the browser is sent afterwards. Defaults to http://localhost:5173.
+JAROKU_APP_URL=https://app.jaroku.example.com
+```
+
+Register `{JAROKU_OAUTH_REDIRECT_BASE}/v1/oauth/google/callback` and `.../v1/oauth/slack/callback`
+as authorised redirect URIs on the respective apps. **A deployment with neither set is not an error
+state** — it is the local default. The panel lists the connector with a sentence naming the two
+variables somebody has to set, rather than hiding it, because an empty page reads as a missing
+feature.
+
+### What this session does not do
+
+- **The Google verification is not done.** It cannot be done from a repository. Until it is, the app
+  serves a hand-entered list of test users behind an unverified-app screen.
+- **The refresh mutex is per process.** Two API replicas can still race one connection; closing that
+  needs the distributed lock Session 5 built for the queue.
+- **Workspace deletion does not exist yet.** `endAllGrants` is the provider-side half, built and
+  tested; the cascade across Postgres, the object store, the checkpoints and the queue is Session
+  8's, and so is the receipt and the stated window.
+- **One connection per connector per workspace.** A workspace cannot connect two Slack teams. A
+  design admitting several needs a rule for picking one at run time and a UI for setting it, and
+  neither is worth inventing before somebody asks.
+- **The sandbox does not enforce the egress policy locally.** It is computed per run and carried on
+  the spec; a child process shares this machine's network stack and there is no route to take away,
+  which is why `LocalSubprocessSandbox` refuses to start under `NODE_ENV=production`.
+- **No connector token is metered.** Sandbox seconds and provider tokens are; a Gmail API call costs
+  nothing and is not a billable event.
+
+---
+
 ## Authentication and membership
 
 Session 2 of the hosted migration. There are now real users, real sessions, and a client that
@@ -3199,6 +3553,8 @@ that is the fact a future cleanup will not know.
 | `runtime/.checkpoints/` | Durable LangGraph checkpoints (`<run_id>.sqlite`) and pause control files, when `JAROKU_CHECKPOINTER=sqlite` | No |
 | Postgres `langgraph` schema | The same checkpoints, hosted, keyed `ws:<workspace_id>:run:<run_id>`. LangGraph owns the tables; Jaroku owns the schema and the grant | No |
 | `runtime/.env` | Provider, connector and MCP server keys, when `JAROKU_SECRET_STORE=dotenv` (the default) | No |
+| `oauth_connections` | Which connectors a workspace has authorised, whose account, which scopes were granted, and the NAMES its tokens live under. No token columns exist | No |
+| `oauth_states` | A hashed, single-use, ten-minute flow. Gone the moment a callback consumes it | No |
 | `workspace_secrets` / `workspace_data_keys` | The same credentials, hosted: envelope-encrypted ciphertext, per-workspace data key. Never a plaintext column | No |
 | `secret_refs` | What each workspace has configured — names, providers, last use. **No value column, on purpose** | No |
 | `usage_events` | One row per metered thing: what was bought, whose money bought it, what it cost, and whether that cost is an answer. Traces contain user data; this contains only the shape and price of a call | No |

@@ -66,6 +66,13 @@ The shortest list, with the tests that defend them:
 | A ceiling bounds what is STARTED, never what is spent | `test:gate`, `test:eval-budget` |
 | A workspace's provider key reaches its own run's provider and nothing else | `test:byok` |
 | An unsigned or replayed payment webhook changes nothing | `test:stripe` |
+| A run receives an hour-long access token, never the refresh token behind it | `test:oauth-injection` |
+| Concurrent runs refresh one connection exactly once | `test:oauth-refresh` |
+| A rejected grant is terminal, and is never retried into a lockout | `test:oauth-refresh` |
+| Disconnecting revokes at the provider, not only locally | `test:oauth-revoke` |
+| An OAuth state works exactly once, even when two callbacks race | `test:oauth-state` |
+| A user-supplied MCP URL cannot reach private space, at discovery or at call time | `test:mcp-url` |
+| Two workspaces on one MCP endpoint hold two different credentials | `test:mcp-tenancy`, `test:tenancy` |
 
 ## Commits
 
@@ -109,6 +116,25 @@ And the rule that outranks all three: **an unpriced call is metered with a null 
 dropped and never zero.** Dropping it makes an unpriced model look like a model nobody used;
 zeroing it makes a paid call look free. Both turn a workspace's total into a confident undercount
 instead of a flagged one. `npm run test:metering` asserts each.
+
+## A new connector needs an auth mode, and a credential needs a lifetime
+
+Two rules, and the second is the one that is easy to get wrong in the safe-looking direction.
+
+**Every connector in `catalog.json` declares `auth`**: `oauth`, `user_secret` or `none`.
+`check_catalog()` refuses a connector without one, because a missing mode reads as
+`user_secret` everywhere — which for an OAuth connector means `.env.example` telling somebody to
+obtain by hand the credential the Connect button exists to obtain for them.
+
+**A credential that reaches a sandbox is the SHORT-LIVED half.** What executes there is
+model-written Python responding to a stranger's prompt. An access token is an hour; a refresh
+token is a permanent grant to somebody's account, and it stays on the control plane. If a
+connector template cannot use a short-lived credential, the template changes — see `gmail.py`,
+which gained one additive branch rather than being handed a refresh token.
+
+And a corollary that has its own test: **no credential rides on a queue payload.** A token on a
+job is a token in Redis, which is neither encrypted at rest nor scoped to a tenant. The job
+names what it needs; the handler reads the value from the vault at the moment it makes the call.
 
 ## A new plan limit goes in `plans.ts`, not in the `plans` table
 

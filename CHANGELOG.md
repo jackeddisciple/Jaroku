@@ -8,7 +8,86 @@ release notes and the commits in that release's range.
 
 ---
 
-## Unreleased : Cost Metering, Budgets, and Billing
+## Unreleased : Connector OAuth and the Credential Vault
+
+Session 7 of the hosted migration. Connecting Gmail used to mean obtaining a refresh token out of
+band and pasting three variables into `runtime/.env`. Jaroku now owns the OAuth app and a user
+grants it access by clicking a button — which is a different security posture rather than a nicer
+form, because the credential is now a grant *somebody else's system* made to us, against a real
+mailbox, revocable from the far end.
+
+### Added
+
+- **`oauth_connections` + `oauth_states`** (migration 026, both dialects). Neither has a token
+  column: the connection records the NAMES its credentials live under in `SecretStore`, the same
+  shape `mcp_servers.auth_env_key` has. The state row is hashed at rest, single-use, ten minutes
+  old at most, and consumed by a `DELETE` whose row count is the decision.
+- **A provider-agnostic OAuth service**, with Google and Slack as data. Authorize-URL
+  construction, callback handling, token exchange, and a failure classification that decides
+  behaviour rather than wording: `denied` is not an error, `invalid_grant` is terminal, a 503 is
+  worth retrying, `invalid_client` is our app being wrong.
+- **PKCE, always `S256`**, alongside `state` — they defend different things and a flow needs both:
+  `state` defends the callback against a login-CSRF that would connect an attacker's mailbox to a
+  victim's workspace; `code_verifier` defends the authorization code against whoever intercepts it.
+- **`TokenRefresher`**, with one refresh in flight per connection. Twelve concurrent runs
+  refreshing one rotating token would have the provider treat the reuse as theft and revoke the
+  entire grant — so an eval fan-out would disconnect the integration. `test:oauth-refresh` fires
+  twelve callers and asserts the token endpoint is called once.
+- **`ConnectionRevoker`** — Disconnect hands the grant back at the provider before forgetting it
+  here, and forgets it anyway when the provider cannot be told, recording which of the two
+  happened. `endAllGrants` is the provider-side half of the workspace deletion Session 8 owns.
+- **A Connections tab** on a channel of its own, with consent shown in sentences before the button
+  and the exact granted scopes after it. `connector:read` is a member capability;
+  `connector:manage` is an admin one.
+- **`mcpUrl.ts`** — the second SSRF vector the migration spec names, closed at discovery time (where
+  the control plane fetches, with no sandbox around it) and again at call time (a pinned egress
+  rule), and re-checked before every re-discovery rather than trusted from registration.
+- Eleven suites: `test:oauth-state`, `test:oauth-service`, `test:oauth-google`, `test:oauth-slack`,
+  `test:oauth-refresh`, `test:oauth-injection`, `test:oauth-revoke`, `test:connector-auth`,
+  `test:connector-secrets`, `test:mcp-tenancy`, `test:mcp-url`, `test:mcp-discovery-queue`.
+
+### Changed
+
+- **An MCP token stops being one value for the whole server.** A server id is a slug, so two
+  workspaces connecting `mcp.linear.app` both derived `JAROKU_MCP_MCP_LINEAR_APP_TOKEN` — and
+  `process.env` has no workspace in it, so the second to save a token overwrote the first's and
+  both then authenticated as whoever wrote last. Credentials go through `SecretStore` now, and
+  `configured` reads the workspace's own listing rather than the environment.
+- **`mcp.discover` is a queued job class**, the only registered one that is a round trip to a third
+  party rather than to a provider we have a contract with. Collapsed by `(workspace, server)`, so
+  six presses of Re-discover are one round trip. Not retryable: discovery classifies its own
+  failures and returns rather than throwing.
+- **`catalog.json` gains `auth`** per connector — `oauth`, `user_secret` or `none` — and
+  `.env.example` stops presenting a key a connection fills in as a blank to paste into. The names
+  stay in the file, because an exported project has no Jaroku to ask.
+- **`gmail.py` prefers `GMAIL_ACCESS_TOKEN`** when present, falling back to the refresh-token
+  triple. The migration spec said the connector Python should not need to change; for Gmail that
+  was not quite true, and keeping it literally unchanged would have meant injecting a permanent
+  grant into model-written Python.
+- **`DATABASE_URL` goes through the vault**, validated at save to produce a sentence and
+  re-resolved and pinned at run time to close DNS rebinding.
+- `SandboxSpec` and the run pool carry an `egress` policy, computed per run from the provider, the
+  connectors, the control plane, the workspace's own `DATABASE_URL` and the MCP servers the agent
+  was granted.
+
+### Fixed
+
+- **`upsert` stamped `last_refreshed_at` on a connection that had never been refreshed.** Caught by
+  the tenancy suite, which asserted that a cross-tenant `recordRefresh` could not set the field and
+  found it already set. "Last refreshed" now means what it says rather than "last touched".
+- `check_failures_raise()` strips a connector's `OPTIONAL_ENV` as well as its `REQUIRED_ENV`. A
+  second route to being configured that the check did not know about would have left it passing on
+  the one machine it is least able to be trusted on.
+
+### Migrations
+
+- `026_oauth` — `oauth_connections`, `oauth_states`, RLS on the first and deliberately not on the
+  second (consuming a state is the operation that *produces* a workspace scope, the same exemption
+  `ws_tickets` has).
+
+---
+
+## v0.2.11 : Cost Metering, Budgets, and Billing
 
 Session 6 of the hosted migration. The cost arithmetic is untouched — `runtime/pricing.json` is
 still the one table both runtimes read, cost is still summed from `steps` and never from
