@@ -185,3 +185,31 @@ jobs:
         working-directory: client
       - run: npm run typecheck
         working-directory: client
+
+      # THE CLIENT HAS NINE SUITES AND THIS JOB RAN NONE OF THEM. It typechecked and stopped,
+      # which is a check that the types agree and no check at all that the code works — every one
+      # of these existed, passed, and had never been run by anything but the person who wrote it.
+      #
+      # `test:reset` is the reason this is not a tidy-up. The server can be flawless — every query
+      # scoped, every broadcast filtered, RLS behind all of it — and the app can still show one
+      # workspace's runs under another workspace's name, because the browser kept them. That is a
+      # cross-tenant leak in the UI, and it is the one the spec names in "things that will bite
+      # you". Its second assertion reads the store directory and fails on a store that is neither
+      # reset nor excluded, so it catches the leak that actually happens: not in a store somebody
+      # tested, but in the one added six months later that nobody wired in. A rule like that is
+      # worth exactly as much as the number of times it runs.
+      #
+      # The server's suites are one `run:` per group; these are one step, because they are quick
+      # and none of them needs a service.
+      - name: the client's own suites
+        working-directory: client
+        run: |
+          npm run test:reset
+          npm run test:auth
+          npm run test:plan-flow
+          npm run test:deploy-store
+          npm run test:note-kind
+          npm run test:inline-code
+          npm run test:title
+          npm run test:export
+          npm run test:csv
