@@ -8,7 +8,7 @@ release notes and the commits in that release's range.
 
 ---
 
-## Unreleased : Sessions 4 and 5, Gone Back Over
+## v0.2.10 : Bug Fixes on Queue, Sandbox, and Distributed Execution Hardening
 
 A hardening pass across the sandbox session and the queueing session, looking specifically for
 what breaks under load, under failure, and under a second tenant. No new capability: every entry
@@ -34,7 +34,7 @@ that had none.
 
 ### Fixed
 
-**Session 4 — the sandbox boundary**
+**the sandbox boundary**
 
 - `isDeniedAddress` matched the **text** of an IPv6 address rather than the address.
   `::ffff:169.254.169.254` was denied and `::ffff:a9fe:a9fe` — the same address, the cloud
@@ -66,7 +66,7 @@ that had none.
   up on as a timeout. `FlyError` carries the HTTP status rather than leaving callers to parse it
   out of a message.
 
-**Session 5 — the queue**
+**Fixing the queue**
 
 - The Redis ring rotated with `RPOPLPUSH` while `enqueue` appended to the tail, so the most
   recently pending workspace was served first and the longest-waiting one last — the reverse of
