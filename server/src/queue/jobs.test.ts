@@ -26,13 +26,20 @@ for (const jc of JOB_CLASSES) {
 check(isJobClass("run.eval"), "isJobClass recognises a real class");
 check(!isJobClass("run.something-made-up"), "isJobClass refuses a made-up one");
 
-console.log("\nwhich classes are actually queued this session");
+console.log("\nwhich classes are actually queued");
 
 check(jobClassConfig("run.interactive").queued, "run.interactive is queued");
 check(jobClassConfig("run.eval").queued, "run.eval is queued");
 check(jobClassConfig("judge").queued, "judge is queued");
-for (const jc of ["generate", "plan", "edit", "explain", "mcp.discover"] as const) {
-  check(!jobClassConfig(jc).queued, `${jc} stays synchronous this session`);
+// Session 7. The only registered class that is a round trip to a THIRD PARTY rather than to a
+// provider we have a contract with — see jobs.ts and mcpDiscovery.ts on why that is the line.
+check(jobClassConfig("mcp.discover").queued, "mcp.discover is queued");
+check(
+  !jobClassConfig("mcp.discover").retryable,
+  "...and is not retryable: discovery classifies its own failures and returns rather than throwing",
+);
+for (const jc of ["generate", "plan", "edit", "explain"] as const) {
+  check(!jobClassConfig(jc).queued, `${jc} stays synchronous — a client is actively waiting on it`);
 }
 
 console.log("\ntimeouts");

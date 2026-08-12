@@ -72,6 +72,8 @@ import type { ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCo
 import { loadRuntimeEnv } from "./env.ts";
 import { McpStore } from "./mcpStore.ts";
 import { McpRegistry } from "./mcpRegistry.ts";
+import { MCP_DISCOVER_CLASS, McpDiscoveryQueue } from "./mcpDiscovery.ts";
+import { WorkerLoop } from "./queue/workerLoop.ts";
 import { fileCredentialWriter } from "./envWriter.ts";
 import { openSecretStore } from "./secrets/open.ts";
 import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
@@ -504,6 +506,56 @@ console.log(`[server] secret store: ${secrets.kind}${secrets.kind === "dotenv" ?
 // a server id is a slug — and before this the second to save a token silently replaced the
 // first's, so both then authenticated as whoever wrote last.
 const mcpRegistry = new McpRegistry(mcpStore, secrets);
+
+// AND DISCOVERY MOVES OFF THE REQUEST PATH.
+//
+// A handshake is a round trip to a third party nobody here controls, bounded by mcpClient's own
+// timeouts and by nothing else — which is fine at one user and is a hundred concurrent pending
+// fetches when a popular endpoint has a bad afternoon and every workspace that connected it
+// retries at once. See mcpDiscovery.ts.
+//
+// DRAINED IN THIS PROCESS, and that is a choice rather than a stopgap. Session 5's worker.ts
+// exists for classes that genuinely need a separate process — long-running sandboxed executions
+// competing for scarce capacity. A discovery is seconds of waiting on somebody else's socket and
+// holds nothing but a connection, so what it needs is a per-workspace CONCURRENCY LIMIT, which
+// the dispatcher gives it either way. The loop runs here so `npm run dev` keeps working with no
+// worker process and no Redis, exactly as every other local default in this file does.
+const mcpDiscovery = new McpDiscoveryQueue({
+  dispatcher,
+  registry: mcpRegistry,
+  onResult: (ctx, payload, result) => {
+    console.log(
+      `[mcp] ${payload.kind} ${payload.serverId} — ` +
+        (result.ok ? `connected, ${result.server?.tools.length ?? 0} tool(s)` : `failed: ${result.server?.status}`),
+    );
+    // The snapshot first, then the message: a client that got a notice before the list it is
+    // about would render an error against a row that still says "discovering".
+    broadcastMcpServers();
+    if (!result.ok && result.message) {
+      relay.broadcastMcp(ctx, { type: "error", message: result.message, serverId: payload.serverId });
+    } else if (result.message) {
+      relay.broadcastMcp(ctx, { type: "notice", message: result.message, serverId: payload.serverId });
+    }
+  },
+  onError: (ctx, payload, err) => {
+    console.error(`[mcp] ${payload.kind} ${payload.serverId} threw:`, err);
+    relay.broadcastMcp(ctx, {
+      type: "error",
+      // Not the exception's text. Everything below a thrown error here is a bug in this
+      // codebase, and its message describes the inside of the server — the same rule the HTTP
+      // router applies to a 500.
+      message: "that discovery could not be completed",
+      serverId: payload.serverId,
+    });
+    broadcastMcpServers();
+  },
+});
+const mcpDiscoveryLoop = new WorkerLoop({
+  dispatcher,
+  classes: [MCP_DISCOVER_CLASS],
+  handlers: { [MCP_DISCOVER_CLASS]: mcpDiscovery.handler() as never },
+});
+void mcpDiscoveryLoop.run();
 
 // The same problem for the three orchestrators, which emit through callbacks registered once
 // at boot and therefore have no argument to carry a context on.
@@ -1577,21 +1629,36 @@ async function handleMcpCommand(ctx: TenantContext, cmd: McpCommand): Promise<vo
         // A handshake against someone else's server takes as long as it takes. Saying so
         // is the difference between "connecting" and "the button did nothing".
         relay.broadcastMcp(ctx, { type: "discovering", serverId: null, endpoint: cmd.endpoint });
-        const added = await mcpRegistry.addServer(ctx, {
+
+        // THE ID AND THE CREDENTIAL ARE DECIDED HERE, SYNCHRONOUSLY; THE HANDSHAKE IS NOT.
+        //
+        // Both halves have to be, and for different reasons. The id has to be allocated against
+        // the workspace's existing servers, which is a read this request can do and a background
+        // job would have to redo under a race. The token has to be written now because a job
+        // payload must never carry one — a credential on a queue is a credential in Redis, which
+        // is neither encrypted at rest nor scoped to a tenant. See mcpDiscovery.ts.
+        const prepared = await mcpRegistry.prepare(ctx, {
           endpoint: cmd.endpoint,
           label: cmd.label,
           token: cmd.token,
         });
-        // The endpoint may carry a path or query a user would not want echoed, and the
-        // server's own name is a claim; log the id we assigned and what happened to it.
-        console.log(
-          `[mcp] add ${added.server?.id ?? "?"} — ${added.ok ? `connected, ${added.server?.tools.length ?? 0} tool(s)` : `failed: ${added.server?.status}`}`,
-        );
-        broadcastMcpServers();
-        if (!added.ok && added.message) {
-          relay.broadcastMcp(ctx, { type: "error", message: added.message, ...(added.server ? { serverId: added.server.id } : {}) });
-        } else if (added.message && added.server) {
-          relay.broadcastMcp(ctx, { type: "notice", message: added.message, serverId: added.server.id });
+        if (!prepared.ok) {
+          relay.broadcastMcp(ctx, { type: "error", message: prepared.message ?? "that server could not be added" });
+          broadcastMcpServers();
+          return;
+        }
+        await mcpDiscovery.enqueue(ctx, {
+          kind: "add",
+          serverId: prepared.id,
+          endpoint: cmd.endpoint,
+          label: cmd.label,
+          hasToken: Boolean(cmd.token),
+        });
+        // The endpoint may carry a path or query a user would not want echoed; log the id we
+        // assigned and let the job's own completion log what happened to it.
+        console.log(`[mcp] add ${prepared.id} queued`);
+        if (prepared.message) {
+          relay.broadcastMcp(ctx, { type: "notice", message: prepared.message, serverId: prepared.id });
         }
         return;
       }
@@ -1603,16 +1670,11 @@ async function handleMcpCommand(ctx: TenantContext, cmd: McpCommand): Promise<vo
           serverId: cmd.serverId,
           endpoint: (await mcpRegistry.get(ctx, cmd.serverId))?.endpoint ?? "",
         });
-        const res = await mcpRegistry.rediscover(ctx, cmd.serverId);
-        console.log(
-          `[mcp] rediscover ${cmd.serverId} — ${res.ok ? `${res.server?.tools.length ?? 0} tool(s)` : `failed: ${res.server?.status ?? "unknown"}`}`,
-        );
-        broadcastMcpServers();
-        if (!res.ok && res.message) {
-          relay.broadcastMcp(ctx, { type: "error", message: res.message, serverId: cmd.serverId });
-        } else if (res.message) {
-          relay.broadcastMcp(ctx, { type: "notice", message: res.message, serverId: cmd.serverId });
-        }
+        // Queued, with an idempotency key of (workspace, server) and no attempt number — so
+        // somebody pressing the button six times enqueues one discovery rather than six against
+        // a server that is probably already struggling. See mcpDiscovery.ts.
+        await mcpDiscovery.enqueue(ctx, { kind: "rediscover", serverId: cmd.serverId });
+        console.log(`[mcp] rediscover ${cmd.serverId} queued`);
         return;
       }
 

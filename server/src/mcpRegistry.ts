@@ -235,6 +235,54 @@ export class McpRegistry {
   // --- writes ----------------------------------------------------------------
 
   /**
+   * Everything about adding a server that must happen SYNCHRONOUSLY, and nothing that need not.
+   *
+   * Two things, and each is here for its own reason.
+   *
+   *   THE ID IS ALLOCATED AGAINST THIS WORKSPACE'S EXISTING SERVERS. `uniqueServerId` reads them
+   *   to pick a free slug, which is a read the request can do while it has the user waiting and
+   *   which a background job would have to redo under a race — two adds of the same endpoint
+   *   arriving together would otherwise both pick `linear` and the second would replace the first.
+   *
+   *   THE CREDENTIAL IS WRITTEN NOW, BECAUSE A JOB PAYLOAD MUST NEVER CARRY ONE. A token on a
+   *   queue is a token in whatever backs the queue — Redis, hosted, which is neither encrypted at
+   *   rest nor scoped to a tenant. It goes into the vault here and the job reads it back from
+   *   there at the moment it makes the call.
+   *
+   * What is deliberately NOT here is the handshake. See mcpDiscovery.ts.
+   */
+  async prepare(
+    ctx: TenantContext,
+    opts: AddServerOptions,
+  ): Promise<{ ok: boolean; id: string; message: string | null }> {
+    const endpoint = opts.endpoint.trim();
+    if (!endpoint) return { ok: false, id: "", message: "an endpoint is required" };
+
+    const requested = opts.id?.trim() || slugifyServerId(opts.label?.trim() || endpoint);
+    if (!SERVER_ID_RE.test(requested)) {
+      return {
+        ok: false,
+        id: "",
+        message: `"${requested}" is not a usable server id — lowercase letters, digits and underscores, starting with a letter`,
+      };
+    }
+    if (opts.id && (await this.store.getServer(ctx, opts.id))) {
+      return { ok: false, id: "", message: `a server called "${opts.id}" is already connected` };
+    }
+    const id = opts.id ?? (await uniqueServerId(ctx, this.store, requested));
+
+    let message: string | null = null;
+    if (opts.token && this.secrets) {
+      const written = await this.secrets.set(ctx, authEnvKeyFor(id), opts.token);
+      if (!written.ok) {
+        return { ok: false, id: "", message: written.warning ?? "could not store the credential" };
+      }
+      message = written.warning;
+    }
+    return { ok: true, id, message };
+  }
+
+  /**
    * Register a server: handshake first, persist second.
    *
    * A row is written even when the handshake fails, because "I added this and it did not

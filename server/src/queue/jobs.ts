@@ -3,16 +3,21 @@
 // every call site is how two copies of the same number quietly drift. One table, one place
 // that reads it.
 //
-// EVERY CLASS NAMED HERE IS NOT YET DISPATCHED THROUGH REDIS. `queued: true` marks the three
-// this session actually routes through queue/dispatcher.ts: `run.interactive` (commit 6),
-// `run.eval` (commit 7) and `judge` (also commit 7, since scoring already shares the eval's
-// concurrency budget). `generate`, `plan`, `edit`, `explain` and `mcp.discover` are registered
-// here — with real concurrency and timeout numbers, because the classification and the caps
-// are worth writing down now — but stay on the synchronous request/response path they are on
-// today. They are short, bounded operations a client is actively waiting on, not long-running
-// sandboxed executions competing with other workspaces for scarce capacity; forcing them
-// through an async queue this session would be a rewrite in search of a problem. Documented
-// as a deliberate scope line, not a silent gap — see the Session 5 README section.
+// `queued: true` MARKS WHAT ACTUALLY GOES THROUGH queue/dispatcher.ts. Session 5 routed three:
+// `run.interactive`, `run.eval` and `judge`. Session 7 adds a fourth, `mcp.discover`, and the
+// reason is the one Session 5's own note anticipated by calling the rest "short, bounded
+// operations a client is actively waiting on".
+//
+// A DISCOVERY IS NOT ONE OF THOSE, and it is the only registered class that never was. It is a
+// network round trip to a THIRD PARTY nobody here controls — not a call to a model provider we
+// have a contract with, but whatever endpoint a user typed — and its worst case is bounded only
+// by the timeouts mcpClient.ts imposes on itself. Thirty seconds of a request handler is fine
+// with one user and is a hundred concurrent pending fetches when a popular MCP endpoint has a
+// bad afternoon and every workspace that connected it retries at once. See mcpDiscovery.ts.
+//
+// `generate`, `plan`, `edit` and `explain` stay synchronous, and stay registered here for their
+// numbers. They are calls to a provider on a request a client is actively waiting on, and
+// forcing them through an async queue would still be a rewrite in search of a problem.
 
 export const JOB_CLASSES = [
   "run.interactive",
@@ -107,7 +112,12 @@ const DEFAULTS: Record<JobClass, Omit<JobClassConfig, "perWorkspaceConcurrency" 
   plan: { label: "the plan gate", globalConcurrency: null, retryable: false, queued: false },
   edit: { label: "the fix loop", globalConcurrency: null, retryable: false, queued: false },
   explain: { label: "an explain answer", globalConcurrency: null, retryable: false, queued: false },
-  "mcp.discover": { label: "MCP tool discovery", globalConcurrency: null, retryable: false, queued: false },
+  // NOT RETRYABLE, and that is not an oversight about a network call. `mcpClient.discover`
+  // classifies every failure and RETURNS rather than throwing — an unreachable server is a
+  // recorded status, not an exception — so there is nothing here for a queue-level retry to
+  // improve. A user pressing Re-discover is the retry, and it is the one that knows whether the
+  // server has been fixed.
+  "mcp.discover": { label: "MCP tool discovery", globalConcurrency: null, retryable: false, queued: true },
 };
 
 const PER_WORKSPACE_DEFAULT: Record<JobClass, () => number> = {
