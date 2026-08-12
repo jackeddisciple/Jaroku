@@ -614,6 +614,54 @@ export class BillingRepository {
     return this.hydrateSubscription(row);
   }
 
+  // --- webhook events -----------------------------------------------------------------------
+  //
+  // No context, and no scope. A webhook arrives before we know whose it is — resolving a
+  // customer id to a workspace is the handler's first job — so a row that required the answer in
+  // order to record the question could not be written for the events that fail to resolve, which
+  // are exactly the ones worth keeping. See migration 025.
+
+  /**
+   * Claim an event id. Returns false when something already has it.
+   *
+   * INSERT ... ON CONFLICT DO NOTHING, never a SELECT first. Two deliveries of the same event
+   * genuinely do arrive together — a provider retrying because a response was slow, while the
+   * original is still in flight — and a check that precedes the write is both of them finding
+   * nothing and both of them acting. The primary key is the only thing that can arbitrate.
+   */
+  async claimWebhookEvent(id: string, type: string): Promise<boolean> {
+    const res = await this.db.run(
+      `INSERT INTO billing_webhook_events (id, type, received_at) VALUES (?, ?, ?)
+       ON CONFLICT (id) DO NOTHING`,
+      [id, type, nowIso()],
+    );
+    return res.changes > 0;
+  }
+
+  /**
+   * Mark an event finished, with what became of it.
+   *
+   * An event left unfinished — this never called, because the handler threw — is the queue an
+   * operator replays. That is why it is a second statement rather than a column set at insert:
+   * "arrived" and "acted on" are different facts and a crash lands between them.
+   */
+  async finishWebhookEvent(id: string, workspaceId: string | null, outcome: string): Promise<void> {
+    await this.db.run(
+      `UPDATE billing_webhook_events SET processed_at = ?, workspace_id = ?, outcome = ?
+        WHERE id = ?`,
+      [nowIso(), workspaceId, outcome.slice(0, 500), id],
+    );
+  }
+
+  /** Events that arrived and never finished. What a replay would start from. */
+  async unprocessedWebhookEvents(limit = 100): Promise<{ id: string; type: string; received_at: string }[]> {
+    return this.db.all<{ id: string; type: string; received_at: string }>(
+      `SELECT id, type, received_at FROM billing_webhook_events
+        WHERE processed_at IS NULL ORDER BY received_at ASC LIMIT ?`,
+      [limit],
+    );
+  }
+
   private hydrateSubscription(r: Record<string, unknown>): SubscriptionRow {
     return {
       id: String(r["id"]),

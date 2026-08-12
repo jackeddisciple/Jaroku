@@ -40,7 +40,7 @@ import { healthz, readyz } from "./http/health.ts";
 import { AUTH_ENV, resolveAuthConfig } from "./auth/config.ts";
 import { LocalIssuer } from "./auth/localIssuer.ts";
 import { TokenVerifier } from "./auth/verifier.ts";
-import { sessionRoutes } from "./auth/session.ts";
+import { authenticate, sessionRoutes } from "./auth/session.ts";
 import { ContextResolver } from "./auth/resolve.ts";
 import { resolveOriginPolicy } from "./auth/origin.ts";
 import { resolveSocketAuth } from "./auth/socketAuth.ts";
@@ -59,6 +59,8 @@ import { openObjectStore } from "./storage/open.ts";
 import { resolveSigningKey } from "./storage/presign.ts";
 import { filesFromDirectory, ProjectStore } from "./storage/projectStore.ts";
 import { objectRoutes } from "./http/objects.ts";
+import { billingRoutes } from "./http/billing.ts";
+import { stripeConfigFromEnv } from "./billing/stripe.ts";
 import { readAgentFiles, slugsOwnedElsewhere, type AgentFilesDeps } from "./agentFiles.ts";
 import {
   CHECKPOINT_SCHEMA, checkpointThreadId, checkpointerKindFromEnv,
@@ -1032,6 +1034,44 @@ for (const route of sessionRoutes({
 })) {
   if (route.method === "GET") router.get(route.path, route.handler);
   else router.post(route.path, route.handler);
+}
+
+// BILLING'S TWO HTTP SURFACES, and neither could have been a socket command.
+//
+// The checkout answers with a URL the browser has to NAVIGATE to, which is not a message shape.
+// The webhook is unauthenticated by construction — a payment provider cannot present a bearer
+// token and has no socket — so its SIGNATURE is its authentication, checked over the raw bytes
+// before anything parses them. See http/billing.ts.
+for (const route of billingRoutes({
+  billing,
+  identity: identityRepo,
+  // Read per request, not captured: the same reason every other override in this codebase is a
+  // function. A deployment that configures Stripe should not need a restart to start selling.
+  config: () => stripeConfigFromEnv(),
+  contextFor: async (req) => {
+    const auth = await authenticate(req, tokenVerifier);
+    const body = await req.json<{ workspaceId?: unknown }>();
+    const requested = typeof body.workspaceId === "string" && body.workspaceId ? body.workspaceId : null;
+    // Through the resolver, exactly like `/v1/ws-ticket`. Nothing below this line sees a
+    // workspace id the client chose, which for a route that starts a PAYMENT matters rather more
+    // than for one that opens a socket.
+    return (await contextResolver.resolve(auth, requested, req.requestId, req.ip)).context;
+  },
+  emailFor: async (ctx) =>
+    ctx.actorUserId ? ((await identityRepo.userById(ctx, ctx.actorUserId))?.email ?? null) : null,
+  // Told on the providers channel, which is where a workspace already learns what it is
+  // connected to and what it is paying with. A failed renewal is exactly the kind of thing that
+  // must not wait for somebody to open a settings page.
+  notify: (ctx, e) =>
+    relay.broadcastProviders(ctx, {
+      type: "notice",
+      message:
+        e.kind === "attention"
+          ? `a payment for this workspace did not go through (${e.status}) — update the card before the retries run out`
+          : `this workspace is now on the ${e.plan} plan`,
+    }),
+})) {
+  router.post(route.path, route.handler);
 }
 
 // THE OBJECT ROUTE, which is what makes the local store's presigned URLs real.

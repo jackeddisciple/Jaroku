@@ -401,6 +401,8 @@ const SCOPED_API: Record<string, string[]> = {
   IdentityRepository: [
     "listMembers", "addMember", "removeMember", "setMemberRole",
     "createInvite", "listInvites", "revokeInvite", "acceptInvite", "listAudit",
+    // Session 6 — the one writer of `workspaces.plan`, and therefore of every limit read from it.
+    "setWorkspacePlan",
   ],
   // `sweep` is deliberately absent: it deletes EXPIRED rows across every workspace, which is
   // maintenance rather than a scoped operation, and asserting it "cannot reach another
@@ -796,6 +798,14 @@ async function remainder(db: Db): Promise<void> {
     externalCustomerId: "cus_b",
   });
   check((await billing.liveSubscription(A.ctx)) === undefined, "liveSubscription never returns B's");
+  // The one plan write in the system. A workspace that could move another's plan could grant
+  // itself a paid tier, or take one away.
+  const identityRepo = new IdentityRepository(db);
+  await identityRepo.setWorkspacePlan(A.ctx, "scale");
+  check(
+    (await identityRepo.workspaceById(B.ctx, B.ctx.workspaceId))?.plan !== "scale",
+    "setWorkspacePlan cannot move B's plan",
+  );
   check((await billing.subscriptions(A.ctx)).length === 0, "nor does the full history");
 }
 

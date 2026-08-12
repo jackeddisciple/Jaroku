@@ -374,6 +374,38 @@ export class IdentityRepository {
     );
   }
 
+  /**
+   * Move a workspace onto a plan.
+   *
+   * THE ONLY WRITER OF `workspaces.plan`, and it takes a TenantContext even though `workspaces`
+   * carries no RLS policy — a plan change is a change to what a workspace IS, and the scope is
+   * what makes it auditable as one. Its caller is billing/subscriptions.ts, which is the only
+   * place a provider's opinion is allowed to become this system's.
+   *
+   * The audit row is not decoration. "Why am I on the free plan" is a question somebody asks
+   * weeks after a failed renewal, and the answer has to survive in something other than a log
+   * that rotated.
+   */
+  async setWorkspacePlan(ctx: AnyContext, plan: string): Promise<void> {
+    const workspaceId = "workspaceId" in ctx ? (ctx as TenantContext).workspaceId : null;
+    if (!workspaceId) throw new Error("setWorkspacePlan needs a workspace");
+    await this.db.transaction(async (tx) => {
+      const before = await tx.get<{ plan: string }>(
+        `SELECT plan FROM workspaces WHERE id = ? AND deleted_at IS NULL`,
+        [workspaceId],
+      );
+      if (!before || before.plan === plan) return;
+      await tx.run(`UPDATE workspaces SET plan = ? WHERE id = ? AND deleted_at IS NULL`, [plan, workspaceId]);
+      await this.appendAuditIn(tx, ctx, {
+        workspaceId,
+        action: "workspace.plan_changed",
+        targetType: "workspace",
+        targetId: workspaceId,
+        metadata: { from: before.plan, to: plan },
+      });
+    });
+  }
+
   /** Create a workspace and make `ownerUserId` its owner, in one transaction. */
   async createWorkspace(
     ctx: SystemContext | TenantContext,
