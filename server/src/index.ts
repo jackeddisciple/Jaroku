@@ -812,6 +812,7 @@ setInterval(() => {
   void sweepHolds().catch((err) => console.error("[billing] hold sweep failed:", (err as Error)?.message ?? err));
 }, 5 * 60_000).unref();
 
+
 // True from spawn until run_end (or exit) of the INTERACTIVE run. Deliberately NOT
 // interactivePool.busy: the process outlives its run_end by a beat while it tears down, and
 // refusing an apply/undo in that window is a race the user would hit by clicking right after
@@ -1413,6 +1414,36 @@ const abuseGate = new AbuseGate({
   notify: (ctx, e) => relay.broadcastProviders(ctx, { type: "notice", message: e.message }),
   log: (line) => console.warn(line),
 });
+
+// HOW MANY WORKSPACES ARE UNDER A RUNG, WHICH NOTHING WAS ANSWERING.
+//
+// `workspaces_enforced` has been declared since commit 12 and carries an alert, and nothing had
+// ever set it — so the alert could not fire and the panel was permanently empty, which is the
+// state metrics.ts's own header calls "worse than no alert because it looks like cover".
+//
+// EVERY LEVEL IS SET, INCLUDING THE ZEROES. A gauge that is only written when it is non-zero
+// never comes back DOWN: the last value stands forever, so a workspace that was suspended in
+// March reads as suspended in June. Writing every rung each pass is what makes the series
+// describe now rather than the last time something happened.
+//
+// Through `asPlatform`, because this is the query that returns nothing unscoped — see migration
+// 032. It is also the reason this gauge is worth having: the number it reports is the one an
+// operator would otherwise get by asking the database a question that silently answers "none".
+const REPORTED_RUNGS = ["watch", "soft_limit", "verify", "suspended", "blocked"] as const;
+const sampleEnforcement = async (): Promise<void> => {
+  const rows = await enforcementRepo.workspacesAt(systemContext(newRequestId()), REPORTED_RUNGS);
+  const byLevel = new Map<string, number>(REPORTED_RUNGS.map((l) => [l, 0]));
+  for (const row of rows) byLevel.set(row.level, (byLevel.get(row.level) ?? 0) + 1);
+  for (const [level, n] of byLevel) metrics.set("workspaces_enforced", n, { level });
+};
+await sampleEnforcement().catch((err) =>
+  console.error("[abuse] could not sample enforcement:", (err as Error)?.message ?? err),
+);
+setInterval(() => {
+  void sampleEnforcement().catch((err) =>
+    console.error("[abuse] could not sample enforcement:", (err as Error)?.message ?? err),
+  );
+}, 5 * 60_000).unref();
 
 const router = new Router({
   cors: originPolicy,
@@ -3308,6 +3339,21 @@ onBothPools("event", ({ runId, event }) => {
         }
       } else if (event.kind === "step") {
         await store.insertStep(runCtx, event.step);
+        // INGESTION LAG, MEASURED FROM WHEN THE STEP ENDED RATHER THAN WHEN IT STARTED.
+        //
+        // The gauge is "time between a step being emitted in a sandbox and being persisted", and
+        // a step is emitted when it finishes — so the emit instant is `started_at + latency_ms`,
+        // not `started_at`. Measuring from the start would report a thirty-second model call as
+        // thirty seconds of ingestion lag, and the SLO on this metric would then be an alert
+        // about how slow the models are.
+        //
+        // Clamped at zero because the two clocks are different machines: a sandbox running a few
+        // hundred milliseconds ahead of the gateway would otherwise contribute negative samples
+        // to a histogram, which is a bucket boundary nobody can interpret.
+        const emittedAt = Date.parse(event.step.started_at) + (event.step.latency_ms ?? 0);
+        if (Number.isFinite(emittedAt)) {
+          metrics.observe("trace_ingest_lag_seconds", Math.max(0, (Date.now() - emittedAt) / 1000));
+        }
         // METERED AFTER THE STEP IS PERSISTED, AND ON THE SAME CHAIN.
         //
         // After, because a usage row for a step the database rejected would be a charge with
