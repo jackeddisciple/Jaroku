@@ -349,5 +349,126 @@ const UNSCOPED_OK: Record<string, string> = {
   }
 }
 
+// --- rule 4: a table with a workspace_id has a policy, or a reason -------------------------
+
+console.log("\nevery tenant table is policied, or says why not");
+
+// WHAT THIS IS FOR. `test:rls` checks that the tenant tables carry a policy — against a list of
+// twenty-odd names written by hand in that file. A table added with a `workspace_id` and no
+// policy is not caught by it; it is simply absent from the list, and the check goes on reporting
+// that everything it knows about is fine. That is the failure mode this session already hit
+// once, when `steps` became a partitioned table and dropped out of a catalogue query silently.
+//
+// So the question is asked of the SCHEMA instead. Every table the migrations give a
+// `workspace_id` is a table holding one tenant's rows, and it either has `tenant_isolation` or
+// it appears below with a reason somebody wrote down.
+//
+// HERE RATHER THAN IN test:rls, because it needs no database. The behavioural half — that the
+// policy is ENABLED, FORCEd and actually refuses a cross-tenant read — can only be asked of a
+// real Postgres, and that suite skips entirely without one. This half is a property of the
+// files, so it runs on every machine and in every CI job, which is where a rule about a table
+// somebody just added needs to run.
+
+/** Fold one migration's tables into `out`: those that gain a `workspace_id`, those that go. */
+function collectTenantTables(rawSql: string, out: Set<string>): void {
+  // Comments are stripped first: several of these tables are documented in prose that names
+  // `workspace_id` while explaining why the table does NOT have one.
+  const sql = rawSql.replace(/--[^\n]*/g, "");
+  // The closing paren may be followed by `PARTITION BY …` before the semicolon — `steps` is, and
+  // it is the largest tenant table there is.
+  for (const m of sql.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?([a-z_][a-z0-9_]*)\s*\(([\s\S]*?)\n\)[^;]*;/gi)) {
+    if (/\bworkspace_id\b/.test(m[2]!)) out.add(m[1]!);
+  }
+  // Session 4 added tenancy to tables that predated it, one ALTER at a time.
+  for (const m of sql.matchAll(/ALTER TABLE ([a-z_][a-z0-9_]*)\s+ADD COLUMN (?:IF NOT EXISTS )?workspace_id/gi)) {
+    out.add(m[1]!);
+  }
+  for (const m of sql.matchAll(/DROP TABLE (?:IF EXISTS )?([a-z_][a-z0-9_]*)/gi)) out.delete(m[1]!);
+}
+
+/** Every table the migrations give a `workspace_id`, and every one they take away. */
+function tenantTables(): Set<string> {
+  const out = new Set<string>();
+  for (const file of readdirSync(MIGRATIONS_PG).sort()) {
+    collectTenantTables(readFileSync(join(MIGRATIONS_PG, file), "utf8"), out);
+  }
+  return out;
+}
+
+/**
+ * Tables that hold a `workspace_id` and deliberately carry no policy.
+ *
+ * Every one of these is already argued in its own migration. Restated here because a reason in a
+ * migration is prose nothing reads, and the point of this rule is that adding the SIXTH one has
+ * to be a decision somebody writes down rather than a column somebody adds.
+ */
+const NO_POLICY_BY_DESIGN: Record<string, string> = {
+  audit_log:
+    "the record of what was denied; a policy on it would scope the evidence to the tenant it is evidence about — 004",
+  workspace_members:
+    "the query that PRODUCES app.workspace_id. A policy reading it could only be satisfied by already knowing the answer — 009",
+  ws_tickets:
+    "same as workspace_members: redeeming a ticket is the operation that produces the scope — 010",
+  oauth_states:
+    "the CSRF state of a flow that has not resolved to a workspace yet, and says so — 026",
+  billing_webhook_events:
+    "a platform-level log of what the provider sent; its workspace_id is nullable and informational, filled in once resolved, and an event for a customer nobody recognises is the row that matters most — 025",
+};
+
+{
+  const policied = policiedTables();
+  const tenant = tenantTables();
+  check3(tenant.size > 20, `the migrations give ${tenant.size} tables a workspace_id`);
+  check3(tenant.has("steps") && tenant.has("runs"), "...including the two that hold the most of it");
+
+  const unguarded = [...tenant].filter((t) => !policied.has(t) && !(t in NO_POLICY_BY_DESIGN)).sort();
+  check3(
+    unguarded.length === 0,
+    `every tenant table has tenant_isolation or a stated reason (${unguarded.join(", ") || "none missing"})`,
+  );
+
+  // And the reasons are not a graveyard. An entry for a table that no longer exists is a rule
+  // getting quietly weaker, exactly as rule 2b says of the method allowlist above.
+  const stale = Object.keys(NO_POLICY_BY_DESIGN).filter((t) => !tenant.has(t));
+  check3(stale.length === 0, `every stated reason still names a real tenant table (${stale.join(", ") || "all do"})`);
+
+  // A table cannot be both excused and policied — that means somebody added the policy and left
+  // the excuse behind, and the next reader believes the excuse.
+  const both = Object.keys(NO_POLICY_BY_DESIGN).filter((t) => policied.has(t)).sort();
+  check3(both.length === 0, `and nothing is both excused and policied (${both.join(", ") || "none is"})`);
+
+  // And the rule can still fail, for the same reason 2c and 3 carry one. A reader of migrations
+  // that has quietly stopped recognising a CREATE TABLE reports that every tenant table is
+  // policied, forever, and the sentence is true only because it can no longer see any.
+  const synthetic = new Set<string>();
+  collectTenantTables(
+    [
+      "CREATE TABLE lonely_table (",
+      "  id uuid PRIMARY KEY,",
+      "  workspace_id uuid NOT NULL REFERENCES workspaces(id)",
+      ");",
+      "CREATE TABLE partitioned_table (",
+      "  id text NOT NULL,",
+      "  workspace_id uuid NOT NULL,",
+      "  started_at text NOT NULL",
+      ") PARTITION BY RANGE (started_at);",
+      "CREATE TABLE no_tenant_here (id uuid PRIMARY KEY, note text",
+      ");",
+      "ALTER TABLE older_table ADD COLUMN workspace_id uuid;",
+      "CREATE TABLE gone_again (id uuid, workspace_id uuid",
+      ");",
+      "DROP TABLE gone_again;",
+    ].join("\n"),
+    synthetic,
+  );
+  const expected = ["lonely_table", "older_table", "partitioned_table"];
+  check3(
+    [...synthetic].sort().join(",") === expected.join(","),
+    `the reader still finds a tenant table, partitioned or altered into one ([${[...synthetic].sort().join(", ")}])`,
+  );
+  check3(!synthetic.has("no_tenant_here"), "...and does not invent one that has no workspace_id");
+  check3(!synthetic.has("gone_again"), "...nor keep one that was dropped");
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);
