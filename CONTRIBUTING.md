@@ -73,6 +73,17 @@ The shortest list, with the tests that defend them:
 | An OAuth state works exactly once, even when two callbacks race | `test:oauth-state` |
 | A user-supplied MCP URL cannot reach private space, at discovery or at call time | `test:mcp-url` |
 | Two workspaces on one MCP endpoint hold two different credentials | `test:mcp-tenancy`, `test:tenancy` |
+| Every response carries a content policy — including the 500 nobody remembers | `test:security-headers` |
+| A rate limit's `Retry-After` is computed from the refill, never guessed | `test:rate-limit` |
+| The edge and the application exempt the same paths | `test:edge-rules` |
+| Nothing automatic suspends a workspace; a human's decision does not lapse | `test:enforcement` |
+| Retention is per workspace, and a plan's window is kept to the day | `test:retention`, `test:partitions` |
+| An export contains no credential, and no table is silently omitted from one | `test:workspace-export` |
+| Deleting a workspace leaves every other workspace's rows untouched | `test:deletion` |
+| A registered secret value cannot reach any log sink | `test:log-redaction` |
+| One trace spans four tiers, and every span carries the run id | `test:tracing` |
+| Every alert names a metric something actually emits | `test:metrics` |
+| A migration cannot break the version currently serving | `test:migration-gate`, `migrate:check` |
 
 ## Commits
 
@@ -172,3 +183,56 @@ workspace data is emptied when the workspace changes, *before* the new socket op
 named in the short list of deliberate exclusions. Add a store, add it to `WORKSPACE_STORES`. If
 it genuinely holds nothing a workspace owns, say so in `NOT_WORKSPACE_SCOPED` and expect to
 justify it — the list is two entries long and the test asserts its exact contents.
+
+
+## A new table needs a policy, a tenancy test — and now an answer about its end
+
+Sessions 1 and 7 added the first two: a table without `workspace_id`, an RLS policy and a case in
+`test:tenancy` is rejected. Session 8 adds a third question, and it has to be answered rather than
+deferred:
+
+| Question | Where the answer goes |
+|---|---|
+| Is it **exported** when a workspace asks for its data? | `EXPORTED_TABLES` in `lifecycle/export.ts` — or `EXCLUDED_TABLES`, **with a reason** |
+| Is it **deleted** when a workspace is? | `DELETION_ORDER` in `lifecycle/deletion.ts`, children before parents |
+| Does it **expire**? | the retention sweeper, or a note in the migration saying why it does not |
+
+`test:workspace-export` reads the schema and fails when a workspace-scoped table is in neither
+list. That check exists because forgetting is the failure mode: a table added next year silently
+stops being part of "everything you have", and nobody finds out until somebody asks for their
+data and gets an incomplete archive.
+
+## A schema change is three deploys, not one
+
+Migrations run before the new version takes traffic, so for the length of every rolling deploy the
+**old code runs against the new schema**. Expand, migrate, contract — and `npm run migrate:check`
+fails the build on a statement that would break the version currently serving, so this is a gate
+rather than a convention.
+
+If a change genuinely *is* the contract step, say so in the migration itself:
+
+```sql
+-- jaroku:contract-step: nothing has read runs.legacy since v0.2.9
+ALTER TABLE runs DROP COLUMN legacy;
+```
+
+A comment rather than a flag, because a flag is invisible in review. The gate prints every
+overridden statement in the deploy log, so the claim is visible when it turns out to be wrong.
+
+## A new metric needs a label set, and an alert needs a metric
+
+Add it to `METRICS` in `obs/metrics.ts` with its labels declared. **An undeclared label is refused
+at the call site** — every distinct value is a new series forever, and a label holding a run id is
+the standard way a metrics bill becomes an incident.
+
+An alert goes in `ALERTS` in `obs/slo.ts` and must name a metric that exists; `test:metrics`
+asserts it, because an alert on a metric nobody emits never fires and looks like cover. Then run
+`npm run obs:render` — CI checks the committed file against the table.
+
+## A new log line needs nothing, and that is the point
+
+`console.log` is filtered: the redactor is installed over the console at boot, so an existing call
+and a new one are equally safe. What *does* need saying is a new **credential**: if code holds a
+plaintext value the process did not load from `runtime/.env`, register it with `protectSecret(value,
+"NAME")` at the moment it is obtained. Registered values are matched literally, which is the only
+recogniser that cannot be wrong.

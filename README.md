@@ -55,6 +55,7 @@ of the repo and run yourself.
 - [Queueing, fairness, and per-workspace limits](#queueing-fairness-and-per-workspace-limits)
 - [Cost metering, budgets, and billing](#cost-metering-budgets-and-billing)
 - [Connector OAuth and the credential vault](#connector-oauth-and-the-credential-vault)
+- [Hardening, abuse, data lifecycle, observability, deploy](#hardening-abuse-data-lifecycle-observability-deploy)
 - [Authentication and membership](#authentication-and-membership)
 - [Where data lives](#where-data-lives)
 - [Security notes](#security-notes)
@@ -1830,6 +1831,23 @@ npm run test:byok        # a key reaches its own run's provider and nothing else
 npm run test:platform-key # the kill switch, the plan, and a ceiling on what WE pay
 npm run test:stripe      # signature, replay window, rotation, and the state machine
 
+# hardening, abuse and the data lifecycle — see "Hardening, abuse, data lifecycle, observability, deploy"
+npm run test:security-headers # a policy on EVERY answer, including the 500 nobody remembers
+npm run test:rate-limit  # token buckets on both backends, and an honest Retry-After
+npm run test:edge-rules  # the edge's exempt list and the application's are the same list
+npm run test:abuse-signals # the shape of a miner; a score that decays; a keyed subject digest
+npm run test:enforcement # nothing automatic suspends; a human's decision does not lapse
+npm run test:partitions  # month arithmetic, and the two mistakes that cost data
+npm run test:retention   # a run one day inside the window survives; a longer plan keeps more
+npm run test:workspace-export # a real secret, and the archive greped for its value
+npm run test:deletion    # the bystander workspace still has everything; the receipt outlives it
+npm run test:log-redaction # a known key, and eight sinks it must not reach
+npm run test:tracing     # four tiers, one trace id, the run id on every span
+npm run test:metrics     # every alert names a metric something actually emits
+npm run test:migration-gate # what breaks a version that is still serving
+npm run migrate:check    # ...and the same check, as the gate the deploy pipeline runs
+npm run drill:restore    # restore into a scratch database and verify what came back
+
 # auth — see "Authentication and membership"
 npm run test:http        # the HTTP layer: error envelope, body caps, log redaction
 npm run test:jwks        # key caching, forced refresh with a leash, symmetric keys refused
@@ -3172,6 +3190,293 @@ feature.
 
 ---
 
+## Hardening, abuse, data lifecycle, observability, deploy
+
+Session 8 of the hosted migration, and the last one. Everything before it made the platform
+multi-tenant; this makes it safe to point the public at. Nothing here adds a feature — it adds
+the layers that decide what happens when somebody is hostile, when data has outlived its promise,
+when a deploy goes wrong, and when nobody is watching.
+
+### What changed about "runs on your machine"
+
+The README opened, and still opens, by calling Jaroku local-first. That is still true of the
+thing you install, and it is no longer the whole story:
+
+| | Local (`npm run dev`, unchanged) | Hosted |
+|---|---|---|
+| Where an agent runs | a subprocess on your machine | a per-run micro-VM with an egress allowlist |
+| Where its files live | `runtime/agents/<id>/` | an object store, keyed by workspace and version |
+| Where its keys live | `runtime/.env`, on your disk | envelope-encrypted per workspace, injected into a run's environment only |
+| Who can read the trace | you | the workspace it belongs to, and nobody else |
+| What the server binds | localhost | a public origin behind an edge, with everything below |
+
+**"Keys stay local" now means something narrower and more precise.** Locally it means what it
+always did: your provider key is a line in a file on your disk, and the only process that reads
+it is the one you started. Hosted it means a key never leaves the vault except into the
+environment of a run that is entitled to it — it is not readable back by any request handler, not
+returned to a browser, not written to a file that outlives a run, and not printable to a log (see
+[the redaction filter](#nothing-a-credential-can-reach)). What a client learns is `configured:
+true`.
+
+**The local path is not a degraded mode of the hosted one.** `npm run dev` still needs nothing
+installed and nothing running: SQLite, a directory of objects, `runtime/.env`, a local subprocess,
+an in-memory queue, an in-memory rate limiter, and no collector. Every abstraction this migration
+introduced has two implementations, and the local one is the default in all eight sessions.
+
+### The layers in front of the application
+
+Three of them, and each refuses a different thing in a different place.
+
+| Layer | Refuses | Where it runs | Costs us |
+|---|---|---|---|
+| **Edge** (`deploy/edge/`) | volumetric floods, scanners, absurd bodies | somebody else's datacentre | nothing |
+| **Per-IP bucket** (`http/rateLimit.ts`) | a stranger hammering a route | this process, after routing | a TCP handshake |
+| **Per-workspace-per-action** | a signed-in tenant degrading the others | this process, per command | a Redis round trip |
+
+They are not redundant. The edge cannot tell a generation from a list of datasets; the per-IP
+limit cannot bound a workspace whose members are on twenty addresses; the per-workspace limit
+cannot see somebody with no account. The edge's rules are **data in this repository**, rendered
+to the provider's configuration by `npm run edge:render`, and `test:edge-rules` asserts that its
+exempt list and the application's are the same list — because when those two disagree the failure
+is not a red test, it is every sandbox in a Fly region being served a JavaScript challenge.
+
+**`/healthz` and `/v1/runs/…` are exempt at both layers.** A rate-limited health check is an
+instance pulled from rotation for being healthy, and every sandbox in a region shares one egress
+address, so an IP counter on the control plane is a global cap on how many runs may exist.
+
+### Every response, and what a browser may do with it
+
+A JSON API needs a Content Security Policy for one reason: `Content-Type` is a claim a browser is
+willing to second-guess. An echoed string, served without `nosniff`, fetched as a top-level
+navigation, is script on the origin where the bearer token lives. So every answer carries a policy
+that permits nothing — `default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action
+'none'` — plus `nosniff`, `no-referrer` (a URL here can carry a ws-ticket), a permissions policy
+and the framing headers. `debug-client.html` gets its own policy admitting its two inline blocks
+and `connect-src 'self'`, because the policy that permits nothing would serve a blank page.
+
+**HSTS rides on an explicit `JAROKU_PUBLIC_TLS=1`, not on `NODE_ENV`.** Sent over plaintext it is
+ignored; sent by a deployment somebody reaches at `http://localhost:4317` behind a TLS-terminating
+proxy it is honoured, and a browser then refuses plain HTTP to `localhost` — for every other
+project on that machine — for two years.
+
+**And two clocks.** A handler has a deadline (raced, not cancelled: nothing here can stop a wait
+on somebody else's socket, but it can stop the client waiting on us), and the HTTP server has
+read timeouts replacing Node's sixty-and-three-hundred-second defaults. `connectionsCheckingInterval`
+comes with them, because those are swept rather than timed and at the default thirty-second sweep
+the numbers are decoration. The control long-poll and the MCP confirmation state their own
+deadlines: the router's fifteen seconds would answer a confirmation while somebody was still
+reading the arguments.
+
+### Abuse is a shape over time
+
+Hosted agent execution attracts three things, and none is identifiable from a single event:
+
+- **crypto miners** want CPU, and look exactly like a slow agent until you notice a run held its
+  sandbox for four minutes and made no model calls — twice an hour, all week;
+- **proxy and scraping farms** want egress, and the allowlist already bounds *where*, which is
+  what makes *volume* the remaining question;
+- **spam senders** want a connector, and this is the signal whose false positives hurt most,
+  because a legitimate notification agent is a Slack-posting agent.
+
+So observations become rows (`abuse_signals`), each carrying **what it weighed at the time** —
+re-tuning a signal must not silently re-sentence every workspace that already tripped it, and an
+appeal has to be arguable against the numbers actually applied. Scores **decay** with a day-long
+half-life: a cumulative counter only goes up, so every account eventually crosses every threshold
+and "who is abusing us" resolves to "the oldest customers".
+
+Signup velocity is observed **before a workspace exists**, so a row is keyed by a subject digest
+instead — HMAC, not a plain hash, because an unkeyed SHA-256 of an IPv4 address is reversible in
+an afternoon.
+
+### The ladder, and the two rungs a machine may not climb
+
+| Rung | Applied by | Expires | What it does |
+|---|---|---|---|
+| `watch` | the score | 24h | nothing but a record |
+| `soft_limit` | the score | 24h | one run at a time; no platform credit |
+| `verify` | the score | 7d | nothing new starts until a human verifies |
+| `suspended` | **a person** | never | nothing new starts |
+| `blocked` | **a person** | never | as above, harder |
+
+**Nothing automatic passes `verify`.** An automatic system that can suspend accounts will
+eventually suspend the wrong one at 3am with nobody watching, and the cost of that is somebody's
+business rather than somebody's afternoon. The two rungs that stop a person working require a
+human, recorded by name on the row.
+
+The hole this design is shaped around: **a suspended workspace runs nothing, so it produces no
+signals, so its score decays to zero within days.** An automatic lift on that basis would
+un-suspend everything it ever suspended. So a human's decision never lapses and is never replaced
+by an automatic rung underneath it.
+
+Every rung **bounds what is started, never what is running** — the rule the budget ceiling has
+followed since the eval engine landed. And none of them touches roles, readability or export: a
+platform that holds data hostage over an automated score is worse than the abuse it is
+responding to. Rows are append-only with a `lifted_at`, the evidence is copied in (signals are
+swept at thirty days and an appeal arrives later than that), and there is a column to appeal in,
+because a promise of an appeal with nowhere to make one is a sentence in a README.
+
+### Prompt injection, restated honestly
+
+The README has always said that framing MCP output is *not* a defence against prompt injection —
+nothing is. Multi-tenant, that is unchanged, and three things are worth adding:
+
+- **An agent's blast radius is bounded by its grants**, which is the actual mitigation and was
+  already true: the egress allowlist, the connector scopes, and the MCP manifest are what an
+  injected instruction is confined to.
+- **High-impact calls still stop for a confirmation**, and timing out still denies.
+- **The confirmation UI shows the arguments as the body**, which is precisely the surface where an
+  injected instruction becomes visible to a human.
+
+### Data has an end date now
+
+`retentionDays` has been on every plan since Session 6 with a note saying this session would
+enforce it. Until now it was a promise nothing kept.
+
+- **`steps` is partitioned by month**, so retention is `DROP TABLE steps_2026_01` rather than a
+  multi-hour `DELETE` over tens of millions of rows. Partitioned on the ISO-8601 `text` column
+  rather than converting it to `timestamptz`: the format sorts lexicographically exactly as it
+  sorts chronologically — that is why it was chosen — and changing the column type would change
+  the shape a step reads back as, which `test:shape-parity` exists to catch.
+- **Months are created two ahead, at boot and daily**, with a `DEFAULT` partition behind them. An
+  `INSERT` with no matching partition *fails*, and the row it fails on is a trace step: a
+  deployment out of partitions would not slow down, it would stop recording. A non-empty default
+  is a metric with an alert on it.
+- **The partition drop is an optimisation over the delete, not a replacement.** A partition is a
+  month and a month holds every workspace's steps, so it can only go once it is past the longest
+  retention any live workspace has. The per-workspace `DELETE` is what keeps a fourteen-day
+  promise inside a partition that will not be droppable for a year.
+- **Checkpoints go with their runs** — a resumable pointer into a deleted trace is worse than
+  either — **exports expire on the plan's own clock**, because an export is a copy of exactly the
+  same regulated content, and **staging expires on hours regardless of plan**, because it belongs
+  to a process that died.
+
+### Taking it with you, and taking it away
+
+**Export** is one file: an NDJSON per table plus every agent's current source, in a tar this
+repository writes itself. The absences are the design — no vault ciphertext, no data key, no
+OAuth token; `secret_refs` and `oauth_connections` are carried redacted to exactly what the client
+already sees, and the manifest names every excluded table with its reason. `test:workspace-export`
+writes a real secret and greps the archive for the value, and reads the schema to assert that
+every workspace-scoped table is either exported or explicitly excluded. It is HTTP rather than a
+socket command, because what it produces is a file a browser downloads; the status check needs no
+job table, since the worker writes the archive at a key derived from the export id.
+
+**Deletion** is a claim about five systems: rows, objects, checkpoint threads, queued jobs, and
+**grants at somebody else's company**. A user who deletes their workspace and still appears in
+their own Google account's connected apps has not had their data deleted — they have had our copy
+of it forgotten. The order is the design: mark deleted first so the rest is a cleanup rather than
+a race; revoke at the provider second, while the credentials that can end a grant still exist;
+rows last, because the run ids and agent ids the other steps need are in them. The receipt goes
+to `audit_log`, whose `workspace_id` is nullable and not a foreign key, so **the record survives
+the deletion it records** — and it names every provider that could not be told, because a
+clean-looking deletion with a standing grant is the dishonest outcome.
+
+Deleting an *account* takes their personal workspace and any where they were the last owner, and
+leaves a team's alone. A shared workspace is not one member's to take on the way out.
+
+### Nothing a credential can reach
+
+"We are careful with secrets" means every `console.log` anybody ever writes is a place to be
+careful in, forever — including the ones added in a hurry by somebody debugging exactly the code
+that handles credentials. So the redaction filter is installed **over `console` itself**, at the
+top of boot, and the hundreds of existing calls go through it without being rewritten. It is the
+same reasoning as `dup2(2,1)` running before any generated code is imported: the guarantee has to
+hold for code that has not been written yet, and the only way is to own the sink.
+
+Three recognisers, deliberately different in kind: **registered values** (everything loaded from
+`runtime/.env`, plus every credential assembled into a run's environment) matched literally;
+**field names**, so a field called `token` is redacted whatever it holds; and **shapes**, which is
+the weakest and the only one that catches a provider's error message quoting the key we just sent
+it. A uuid and a sha256 are deliberately *not* shapes — redacting those makes the logs useless in
+the incident that needs them. A redacted line names the credential (`[redacted:ANTHROPIC_API_KEY]`),
+because during an incident "which one was in this line" is the whole question.
+
+### One trace, four tiers; one metric, all of them
+
+A trace explains **one** request across the four processes it touched. A metric explains **all**
+of them. Neither substitutes for the other — sampling a trace makes it useless as a rate,
+aggregating a counter makes it useless as an explanation.
+
+Both are written here rather than installed, and in both cases **the protocol is not
+reinvented**: `traceparent` is the W3C spec's, the export is OTLP/HTTP JSON, and `/metrics`
+answers Prometheus text exposition. A job carries the traceparent of whatever enqueued it; a run's
+environment carries one under the name the OTel SDKs already read, so `jaroku.run_id` on every
+span makes "everything that happened for this run" a single query across the gateway, the queue,
+the worker and the sandbox. Sampling is decided once at the root and inherited — a tier deciding
+for itself produces traces with holes, and a missing span reads as a step that did not happen.
+
+An **undeclared metric label is refused at the call site**. The standard way a metrics bill
+becomes an incident is somebody adding a label holding a run id; every distinct value is a new
+series forever.
+
+**SLOs and alerts are a table in code**, rendered to `deploy/observability/alerts.json` with a
+`--check` in CI, which is what makes it possible to assert that every alert names a metric
+something actually emits — an alert on a metric nobody emits never fires, which is worse than no
+alert because it looks like cover. Four alerts page. **`CrossTenantDenial` fires on any non-zero
+value, immediately, with no threshold and no window**, because a threshold there would be a
+decision that some cross-tenant access attempts are acceptable.
+
+### Deploying, and the rule that makes a rollback possible
+
+Migrations run **before** the new version takes traffic, which means that for the length of every
+rolling deploy the **old code runs against the new schema**. A migration that removed something it
+uses makes the old replicas fail *during* the deploy — looking like the new version broke, and
+appearing to be fixed by rolling back to code that no longer matches the database.
+
+So a schema change is three deploys — **expand, migrate, contract** — and `npm run migrate:check`
+turns that from a habit into a build failure: `DROP COLUMN`, a rename, `SET NOT NULL`, `ADD COLUMN
+… NOT NULL` with no default, and a non-`CONCURRENTLY` index on `steps`, which is minutes of a
+write lock on the hottest path in the system. When a deploy genuinely *is* the contract step, the
+override is a comment in the migration (`-- jaroku:contract-step`) rather than a flag on a
+command: a flag is invisible in review and gets copied between deploys, while a comment sits
+beside the statement and appears in the diff. Overridden statements are printed in the deploy log
+anyway, because the claim should be visible when it turns out to be wrong.
+
+There is no rollback step in the pipeline, because a rollback is a deploy of the previous digest —
+and that is only safe if the rule above held.
+
+### The restore drill, and what it found
+
+An untested backup is not a backup, so `npm run drill:restore` is a script with an exit code: it
+builds a target by running this checkout's migrations, copies every row through the `Db`
+interface, and verifies counts, the migration ledger, the tenancy and one trace read back in `seq`
+order. Row by row rather than a file copy, deliberately — a file copy proves a file can be copied;
+this proves the schema in the repository can hold the data in production.
+
+It got three things wrong on the first run, and `deploy/backup/RUNBOOK.md` is written from them:
+`schema_migrations` is not data (the target wrote its own ledger by migrating); some rows are
+created *by* the migrations, so a plain `INSERT` fails on `plans` and the `Local` workspace; and
+the isolation probe was testing Postgres's mechanism on SQLite, where `forWorkspace` is the
+connection and the repository layer is the whole of the enforcement.
+
+**Redis is deliberately not backed up.** `eval_jobs` is the source of truth and the queue was
+always a dispatch mechanism over it.
+
+### What this session deliberately did not do
+
+- **No penetration test has been performed.** The acceptance criterion for this session names one,
+  and an external test is a thing somebody is hired to do rather than a thing a commit can claim.
+  What exists is the escape suite, the tenancy suite on both drivers, and the isolation assertions
+  in every session's own tests.
+- **The abuse weights are a starting point, not a calibration.** They are chosen so that the
+  interesting combinations cross the thresholds and the boring ones do not; tuning them honestly
+  means running the ladder against real traffic first.
+- **PII redaction of trace payloads is not implemented.** The data-lifecycle spec names it as an
+  option for regulated customers. The trace deliberately contains what the agent read, and
+  redacting it at ingestion is a different feature with a different contract — not a filter to
+  slip in beside the log redactor.
+- **`planConcurrency` is still not wired to the dispatcher.** Session 5 introduced it as the
+  plan-aware layer over the flat defaults and left it unwired; the enforcement ladder states its
+  concurrency numbers so that the day it is wired the rungs are already correct, but today the
+  soft limit's teeth are the platform-key ceiling.
+- **The edge configuration is rendered, not applied.** Nothing here has credentials for a WAF. The
+  JSON is the input to whatever mechanism an account uses, and the pipeline only asserts it has
+  not drifted from the table it came from.
+- **A workspace export has no UI.** It is an authenticated HTTP route with a capability check; the
+  client work to put a button on it is not in this session.
+
+---
+
 ## Authentication and membership
 
 Session 2 of the hosted migration. There are now real users, real sessions, and a client that
@@ -3556,6 +3861,10 @@ that is the fact a future cleanup will not know.
 | `oauth_connections` | Which connectors a workspace has authorised, whose account, which scopes were granted, and the NAMES its tokens live under. No token columns exist | No |
 | `oauth_states` | A hashed, single-use, ten-minute flow. Gone the moment a callback consumes it | No |
 | `workspace_secrets` / `workspace_data_keys` | The same credentials, hosted: envelope-encrypted ciphertext, per-workspace data key. Never a plaintext column | No |
+| `abuse_signals` | What a workspace — or an address with no workspace — has been observed doing, with the weight each observation carried at the time. Swept after 30 days | No |
+| `workspace_enforcements` | Which rung a workspace is under, who decided, the evidence at the time, and the appeal. Append-only, with a `lifted_at` | No |
+| `steps_YYYY_MM` | On Postgres, `steps` is one table per month — see [the data lifecycle](#data-has-an-end-date-now). `steps_default` catches anything outside the created months and should always be empty | No |
+| `ws/<id>/exports/workspace-<uuid>.tar` | A workspace's full export: one NDJSON per table plus every agent's current source. No credential of any kind is in it. Expires on the plan's retention | No |
 | `secret_refs` | What each workspace has configured — names, providers, last use. **No value column, on purpose** | No |
 | `usage_events` | One row per metered thing: what was bought, whose money bought it, what it cost, and whether that cost is an answer. Traces contain user data; this contains only the shape and price of a call | No |
 | `runtime/agents/<id>/mcp_tools.json` | An agent's MCP grant: servers, tools, schemas, impact. Host-written, read-only to edits | No (with the project) |
@@ -3629,12 +3938,29 @@ filename pattern, which is what makes that true by construction.
   request. Deployed agents run with `JAROKU_MCP_CONFIRM=require`.
 - **The server authenticates every request and every socket.** A verified OIDC token, a
   membership lookup, a single-use ticket, an origin allowlist, and a capability check at the
-  door — see [authentication and membership](#authentication-and-membership). What it does
-  *not* yet have is the rest of the hosted posture: rate limits, security headers, a WAF and
-  abuse detection are Session 8, and the sandbox that stops model-written Python running on the
-  control plane is Session 4. **So it still binds localhost and should still not be put on a
-  network.** That sentence used to be true because there was no authentication; it is now true
-  because authentication is not the whole of it.
+  door — see [authentication and membership](#authentication-and-membership).
+- **The network posture, stated plainly.** This README said for seven sessions that the server
+  binds localhost and should not be put on a network. That sentence is now false and is replaced
+  rather than deleted, because what replaced it is a list rather than a promise:
+
+  | | What defends it |
+  |---|---|
+  | Untrusted code | a per-run micro-VM with a computed egress allowlist; nothing model-written runs on the control plane, including the import check and the graph introspection |
+  | Cross-tenant reads | a repository layer that cannot be called without a context, and Postgres RLS as the backstop |
+  | Credentials | a vault with no method that returns a plaintext value to a request handler, and a redaction filter installed over every log sink |
+  | Volume | an edge WAF, a per-IP bucket, and a per-workspace-per-action bucket |
+  | Browsers | CORS from one allowlist, an Origin check on the upgrade, a policy that permits nothing, HSTS, and body limits on every route |
+  | Abuse | recorded signals, a decaying score, and a ladder whose last two rungs need a human |
+
+  **What the local mode still assumes has not changed.** `npm run dev` binds localhost, runs
+  agents as subprocesses of the server, keeps keys in `runtime/.env`, and is meant for one
+  person on one machine. Several facilities exist only there and refuse to start under
+  `NODE_ENV=production` rather than degrading quietly: the local subprocess sandbox, the
+  filesystem object store, `JAROKU_DEV_AUTH=1`, and the local token issuer. A local install put
+  on a network is still a local install put on a network.
+- **An external penetration test has not been performed.** The hosted posture above is what the
+  code does and what its suites assert; it is not a third party's opinion, and this README will
+  not imply that it is until one exists.
 - **`JAROKU_DEV_AUTH=1` and the local issuer are development facilities**, and both refuse to
   start under `NODE_ENV=production`. The first opens sockets with no credential at all; the
   second mints real, verifiable tokens for any address with no password. Both announce

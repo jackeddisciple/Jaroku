@@ -8,6 +8,89 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.2.13 : Hardening, Abuse, Data Lifecycle, Observability, Deploy
+
+Session 8 of the hosted migration, and the last one. Nothing here is a feature: it is the layers
+that decide what happens when somebody is hostile, when data has outlived its promise, when a
+deploy goes wrong, and when nobody is watching.
+
+### Added
+
+- **A policy on every response.** A content policy that permits nothing, `nosniff`, `no-referrer`,
+  a permissions policy and the framing headers — on the 200s, the 429s, the preflights and the 500
+  nobody remembers. `debug-client.html` gets its own, admitting its two inline blocks. HSTS rides
+  on an explicit `JAROKU_PUBLIC_TLS=1` rather than on `NODE_ENV`, because sent by a deployment
+  reached at `localhost` behind a proxy it refuses plain HTTP to that host for two years.
+- **Two rate limits, because one address and one workspace are different problems.** Token
+  buckets, Redis when there is one and a Map when there is not, with `Retry-After` computed from
+  the refill rate — a guessed wait that is too short is how a limit becomes a retry storm.
+  `/healthz` and the sandbox control plane are exempt at every layer.
+- **The edge, as data in this repository** (`deploy/edge/`), rendered to a provider's
+  configuration with a `--check` in CI. `test:edge-rules` asserts its exempt list and the
+  application's are the same list.
+- **`abuse_signals`** (migration 027): observations with the weight each carried at the time, and
+  a score that decays with a day-long half-life. Signup velocity is recorded against an HMAC of
+  the address, before any workspace exists.
+- **An enforcement ladder** (migration 028), append-only with a `lifted_at`. The machine may climb
+  three rungs; `suspended` and `blocked` require a human recorded by name. A human's decision never
+  lapses — a suspended workspace produces no signals, so an automatic lift would un-suspend
+  everything it ever suspended.
+- **`steps` partitioned by month** (migration 029), so retention is a catalogue update rather than
+  a multi-hour DELETE. Partitioned on the ISO-8601 `text` column, which sorts lexicographically as
+  it sorts chronologically — converting to `timestamptz` would change the shape a step reads back
+  as. Months are created two ahead, with a DEFAULT partition behind them and an alert on it.
+- **A retention sweeper**, per workspace, on each plan's own clock: steps then runs, checkpoints
+  with their runs, exports on the plan's clock and staging on hours regardless of plan.
+- **A workspace export** — one tar of NDJSON per table plus every agent's current source, with no
+  credential of any kind in it, behind an hour-long presigned link. The status check needs no job
+  table: the worker writes at a key derived from the export id.
+- **Workspace and account deletion**, across rows, objects, checkpoints, the queue and the grants
+  at the providers themselves, with a receipt in `audit_log` that survives the deletion and names
+  every provider that could not be told.
+- **A redaction filter installed over `console` itself**, so the hundreds of existing log calls are
+  covered without being rewritten. Registered values, secret field names, and vendor shapes — but
+  not uuids or digests, which would make the logs useless in the incident that needs them.
+- **Tracing across four tiers**, W3C `traceparent` and OTLP/HTTP JSON, with `jaroku.run_id` on
+  every span. A job carries the traceparent that enqueued it; a run's environment carries one under
+  the name the OTel SDKs already read.
+- **Metrics on `/metrics`**, Prometheus text exposition, with an undeclared label refused at the
+  call site. SLOs and alerts are a table in code; `CrossTenantDenial` pages on any non-zero value,
+  immediately, with no threshold.
+- **A migration gate** (`npm run migrate:check`) enforcing expand/migrate/contract, with the
+  override as a comment in the migration rather than a flag on a command.
+- **IaC and a pipeline** (`deploy/fly/`, `.github/workflows/`): migrations run in the release
+  command before any new machine takes traffic; the gateway rolls, the workers are replaced at
+  once.
+- **A restore drill that was performed** (`npm run drill:restore`), and a runbook written from
+  what it found rather than from what a restore was imagined to do.
+- Sixteen suites: `test:security-headers`, `test:rate-limit`, `test:edge-rules`,
+  `test:abuse-signals`, `test:enforcement`, `test:partitions`, `test:retention`,
+  `test:workspace-export`, `test:deletion`, `test:log-redaction`, `test:tracing`, `test:metrics`,
+  `test:migration-gate`, plus `migrate:check`, `edge:render --check` and `obs:render --check` as
+  gates that are not tests.
+
+### Changed
+
+- **The README's network posture.** "The server binds to localhost and is not built to be exposed
+  to a network" was true for seven sessions and is now false. It is replaced by what actually
+  defends each thing, plus a paragraph on what the local mode still assumes — which has not
+  changed at all.
+- **`QueueBackend` gains `purgeWorkspace`**, distinct from `purgePending`: deletion knows a
+  workspace is gone and knows nothing about the payloads it had queued.
+- **`PlatformKeyGate` consults the abuse ladder**, applied after the plan and after any negotiated
+  override — a generous negotiated ceiling should not survive a soft limit.
+- **The run pool's exit path** now closes the run's span and records the run's outcome as a metric,
+  in the same place its sandbox seconds are metered.
+
+### Fixed
+
+- **A workspace deletion swept every other workspace's checkpoints.** `FileCheckpointStore.runsHeld`
+  ignores the context it is given — correctly, for the single-user path it was written for — so
+  asking it "what does this workspace hold" answered with the whole directory. Run ids now come
+  from the scoped rows; `runsHeld` is consulted only on the store that filters by workspace.
+
+---
+
 ## v0.2.12 : Connector OAuth and the Credential Vault
 
 Session 7 of the hosted migration. Connecting Gmail used to mean obtaining a refresh token out of
