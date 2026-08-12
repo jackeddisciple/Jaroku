@@ -245,40 +245,64 @@ console.log("\nFsObjectStore");
   const elsewhere = tmpRoot();
   const linkedVersion = join(root, "ws", WS_A, "agents", AGENT, "v7");
   mkdirSync(dirname(linkedVersion), { recursive: true });
-  symlinkSync(elsewhere, linkedVersion);
-
-  let wroteThrough = false;
+  // CREATING ONE IS A PRIVILEGE ON WINDOWS. Without Developer Mode or an elevated shell,
+  // `symlinkSync` raises EPERM — and it did so here at the top level of the file, so the suite
+  // did not fail, it ABORTED: a raw errno stack, no test output, and every assertion after this
+  // point unreported. A security suite that ends in an unreadable crash on a developer's own
+  // machine is a security suite that developer stops running.
+  //
+  // Probed rather than assumed from `process.platform`, because the answer is a privilege and not
+  // an operating system: the same Windows machine with Developer Mode on runs all of it.
+  //
+  // SKIPPED OUT LOUD, never quietly passed. These are the checks that a key whose components are
+  // all legal names still cannot escape the root through a link — which `resolve()`, string
+  // arithmetic that never touches the filesystem, cannot see. Reporting them as `ok` when they
+  // did not run would be worse than the crash.
+  let symlinksAllowed = true;
   try {
-    await store.put(agentVersionKey(WS_A, AGENT, 7, "escaped.py"), "outside the root");
-    wroteThrough = true;
-  } catch {
-    /* refused, as it must be */
-  }
-  check(
-    "a key passing through a symlinked directory cannot write outside the root",
-    !wroteThrough && !existsSync(join(elsewhere, "escaped.py")),
-  );
-  let readThrough = true;
-  try {
-    await store.get(agentVersionKey(WS_A, AGENT, 7, "escaped.py"));
-  } catch {
-    readThrough = false;
-  }
-  check("...nor read through one", !readThrough);
-
-  // A link that points back up its own tree. Following it is an infinite walk, and `stat`ing
-  // it is ELOOP — either one takes a whole workspace's listing down.
-  const cycle = join(root, "ws", WS_A, "agents", AGENT, "loop");
-  symlinkSync(join(root, "ws", WS_A), cycle);
-  let listed: number | string;
-  try {
-    listed = (await store.list(`ws/${WS_A}/`)).length;
+    symlinkSync(elsewhere, linkedVersion);
   } catch (err) {
-    listed = (err as Error).message;
+    symlinksAllowed = false;
+    console.log(
+      `  SKIP the three symlink escapes — this process may not create one ` +
+        `(${(err as NodeJS.ErrnoException).code ?? "unknown"}); on Windows that is Developer Mode. CI runs them.`,
+    );
   }
-  check("a symlink cycle is skipped rather than raising ELOOP", typeof listed === "number", String(listed));
-  rmSync(cycle, { force: true });
-  rmSync(linkedVersion, { force: true });
+
+  if (symlinksAllowed) {
+    let wroteThrough = false;
+    try {
+      await store.put(agentVersionKey(WS_A, AGENT, 7, "escaped.py"), "outside the root");
+      wroteThrough = true;
+    } catch {
+      /* refused, as it must be */
+    }
+    check(
+      "a key passing through a symlinked directory cannot write outside the root",
+      !wroteThrough && !existsSync(join(elsewhere, "escaped.py")),
+    );
+    let readThrough = true;
+    try {
+      await store.get(agentVersionKey(WS_A, AGENT, 7, "escaped.py"));
+    } catch {
+      readThrough = false;
+    }
+    check("...nor read through one", !readThrough);
+
+    // A link that points back up its own tree. Following it is an infinite walk, and `stat`ing
+    // it is ELOOP — either one takes a whole workspace's listing down.
+    const cycle = join(root, "ws", WS_A, "agents", AGENT, "loop");
+    symlinkSync(join(root, "ws", WS_A), cycle);
+    let listed: number | string;
+    try {
+      listed = (await store.list(`ws/${WS_A}/`)).length;
+    } catch (err) {
+      listed = (err as Error).message;
+    }
+    check("a symlink cycle is skipped rather than raising ELOOP", typeof listed === "number", String(listed));
+    rmSync(cycle, { force: true });
+    rmSync(linkedVersion, { force: true });
+  }
 
   // Written directly, bypassing the store, so nothing was validated on the way in.
   const stray = join(root, "ws", WS_A, "agents", AGENT, "v2", "agent.py.tmp-abc");
