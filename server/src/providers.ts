@@ -44,6 +44,20 @@ export function isProviderId(id: unknown): id is ProviderId {
   return typeof id === "string" && id in PROVIDER_ENV_KEY;
 }
 
+/**
+ * Whether a run on this provider costs anybody anything.
+ *
+ * The same predicate as `isProviderId` today and NOT a duplicate of it, because the two are
+ * asking different questions and will diverge. `isProviderId` asks "is this a provider a user
+ * can connect a key for". This asks "will this run spend money", which is what the platform-key
+ * gate needs — an unset provider and `fake` are both the dry-run path, which needs no key and
+ * costs nothing, and refusing one of those for budget would refuse the free path this product
+ * is rightly proud of.
+ */
+export function isRealProvider(provider: string | undefined | null): provider is ProviderId {
+  return isProviderId(provider);
+}
+
 export interface ProviderStatus {
   id: ProviderId;
   /** The NAME of the variable holding this provider's key. Never a value. */

@@ -17,7 +17,7 @@
 import { randomUUID } from "node:crypto";
 import { asBool, asInt, jsonFromColumn, type Db, type Queryable } from "../db.ts";
 import type { AnyContext, TenantContext } from "../tenant.ts";
-import type { UsageKind } from "../../billing/usage.ts";
+import type { Payer, UsageKind } from "../../billing/usage.ts";
 
 // --- row shapes ---------------------------------------------------------------------------
 
@@ -77,6 +77,14 @@ export interface UsageEventInput {
   quantity?: number | null;
   unit?: string | null;
   /**
+   * Whose money paid. `platform` unless the call went out on the workspace's own key.
+   *
+   * Defaults to the platform when a caller does not say, which is the tighter direction: the
+   * platform-key ceiling then counts a row it might not have needed to, and the failure is a
+   * workspace being throttled rather than the platform paying for something silently.
+   */
+  payer?: Payer;
+  /**
    * USD, or null for UNKNOWN.
    *
    * Null and 0 are different claims and this interface refuses to let them blur: passing null
@@ -100,6 +108,7 @@ export interface UsageEventRow {
   total_tokens: number | null;
   quantity: number | null;
   unit: string | null;
+  payer: string;
   cost_usd: number | null;
   cost_known: boolean;
   occurred_at: string;
@@ -163,7 +172,7 @@ function sumTokens(e: UsageEventInput): number | null {
 export const LIVE_SUBSCRIPTION_STATUSES = ["incomplete", "active", "past_due"] as const;
 
 const USAGE_COLUMNS = `id, workspace_id, run_id, kind, provider, model, input_tokens,
-                       output_tokens, cached_input_tokens, total_tokens, quantity, unit,
+                       output_tokens, cached_input_tokens, total_tokens, quantity, unit, payer,
                        cost_usd, cost_known, occurred_at, idempotency_key`;
 const HOLD_COLUMNS = `id, workspace_id, amount_usd, purpose, subject_id, created_at,
                       expires_at, released_at`;
@@ -321,9 +330,9 @@ export class BillingRepository {
     const known = e.costUsd !== null && e.costUsd !== undefined;
     const res = await this.q(ctx).run(
       `INSERT INTO usage_events (workspace_id, run_id, kind, provider, model, input_tokens,
-         output_tokens, cached_input_tokens, total_tokens, quantity, unit, cost_usd, cost_known,
-         occurred_at, idempotency_key)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         output_tokens, cached_input_tokens, total_tokens, quantity, unit, payer, cost_usd,
+         cost_known, occurred_at, idempotency_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (idempotency_key) DO NOTHING`,
       [
         ctx.workspaceId,
@@ -339,6 +348,7 @@ export class BillingRepository {
         e.totalTokens ?? sumTokens(e),
         e.quantity ?? null,
         e.unit ?? null,
+        e.payer ?? "platform",
         known ? e.costUsd : null,
         known ? 1 : 0,
         e.occurredAt ?? nowIso(),
@@ -403,6 +413,33 @@ export class BillingRepository {
     };
   }
 
+  /**
+   * What the PLATFORM paid on this workspace's behalf, this period.
+   *
+   * `payer = 'platform'` and nothing else — not a kind filter. Counting by kind would count an
+   * `llm.provider` call a workspace made on its own key, and the platform-key ceiling would then
+   * throttle somebody for spending their own money. Sandbox seconds and stored bytes are
+   * included because they are ours to pay for whoever the agent's key belonged to, and a free
+   * tier farmed for compute rather than for tokens shows up in no token counter.
+   */
+  async platformSpendSince(ctx: TenantContext, since: string): Promise<SpendTotals> {
+    const row = await this.q(ctx).get<{ total: unknown; tokens: unknown; unpriced: unknown }>(
+      `SELECT COALESCE(SUM(cost_usd), 0) AS total,
+              COALESCE(SUM(total_tokens), 0) AS tokens,
+              COUNT(CASE WHEN cost_usd IS NULL THEN 1 END) AS unpriced
+         FROM usage_events
+        WHERE workspace_id = ? AND occurred_at >= ? AND payer = 'platform'`,
+      [ctx.workspaceId, since],
+    );
+    const unpriced = asInt(row?.unpriced);
+    return {
+      usd: Number(row?.total ?? 0),
+      tokens: asInt(row?.tokens),
+      unpricedEvents: unpriced,
+      costKnown: unpriced === 0,
+    };
+  }
+
   /** Every event for one run, oldest first. The dashboard's per-run drill-down. */
   async eventsForRun(ctx: TenantContext, runId: string): Promise<UsageEventRow[]> {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
@@ -440,6 +477,7 @@ export class BillingRepository {
       total_tokens: r["total_tokens"] === null || r["total_tokens"] === undefined ? null : asInt(r["total_tokens"]),
       quantity: r["quantity"] === null || r["quantity"] === undefined ? null : Number(r["quantity"]),
       unit: (r["unit"] as string | null) ?? null,
+      payer: String(r["payer"] ?? "platform"),
       cost_usd: r["cost_usd"] === null || r["cost_usd"] === undefined ? null : Number(r["cost_usd"]),
       cost_known: asBool(r["cost_known"]),
       occurred_at: String(r["occurred_at"]),

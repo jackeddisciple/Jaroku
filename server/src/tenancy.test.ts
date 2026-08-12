@@ -417,7 +417,7 @@ const SCOPED_API: Record<string, string[]> = {
   BillingRepository: [
     "balance", "addCredit", "setCeiling", "setLimitOverrides", "record", "spendSince",
     "eventsForRun", "recentEvents", "runSpend", "hold", "liveHolds", "expiredHolds", "liveSubscription",
-    "subscriptions", "upsertSubscription",
+    "subscriptions", "upsertSubscription", "platformSpendSince", "setOwnKeyForPlatform",
   ],
 };
 
@@ -765,6 +765,15 @@ async function remainder(db: Db): Promise<void> {
   });
   check((await billing.spendSince(A.ctx, "1970-01-01T00:00:00.000Z")).usd === 0, "spendSince counts none of B's usage");
   check((await billing.runSpend(A.ctx, B.runId)).usd === 0, "runSpend cannot settle against B's run");
+  check(
+    (await billing.platformSpendSince(A.ctx, "1970-01-01T00:00:00.000Z")).usd === 0,
+    "platformSpendSince counts none of B's — a platform-key ceiling must not throttle A for B's spending",
+  );
+  await billing.setOwnKeyForPlatform(A.ctx, true);
+  check(
+    (await billing.balance(B.ctx)).own_key_for_platform === false,
+    "setOwnKeyForPlatform cannot decide whose key B's platform calls spend",
+  );
   check((await billing.eventsForRun(A.ctx, B.runId)).length === 0, "eventsForRun cannot read B's run's usage");
   check((await billing.recentEvents(A.ctx)).length === 0, "recentEvents lists none of B's");
 

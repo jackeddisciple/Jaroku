@@ -71,6 +71,22 @@ export interface PlanLimits {
    */
   budgetCeilingUsd: number | null;
   /**
+   * The most the PLATFORM will spend on this workspace's behalf in one period, or null for no
+   * limit of its own.
+   *
+   * NOT the same number as `budgetCeilingUsd`, and the separation is load-bearing rather than
+   * tidy. The budget ceiling bounds what a workspace STARTS, whoever pays, and exists to protect
+   * the user from their own fan-out. This bounds what WE pay when a workspace runs on the
+   * platform's key, and exists to protect the platform. A workspace on its own key can be
+   * nowhere near this one while sitting on its budget ceiling, and collapsing them into a single
+   * number would make each mean the other's thing half the time.
+   *
+   * Smaller than the budget ceiling on every plan, deliberately: our money is the tighter
+   * constraint, and a plan where they were equal would be a plan where the distinction never
+   * mattered and would quietly rot.
+   */
+  platformKeyCeilingUsd: number | null;
+  /**
    * Per-workspace concurrency by job class, overriding `jobClassConfig`'s flat default.
    *
    * Partial on purpose: a class absent here is one whose limit is not a plan decision, and
@@ -98,6 +114,9 @@ const FREE: PlanLimits = {
   // Python are the reason this number is small rather than generous.
   monthlyCreditsUsd: 5,
   budgetCeilingUsd: 5,
+  // The whole of the free tier's exposure. Small on purpose: this is the number a farmer would
+  // be trying to maximise, and it is the one thing here that costs real money to get wrong.
+  platformKeyCeilingUsd: 2,
   // The shape Session 5 already assumed for a free workspace: one interactive run, two eval
   // jobs. Stated here rather than left as jobs.ts's default so that raising the default for
   // everybody and raising it for paying workspaces stay two different edits.
@@ -113,6 +132,7 @@ const PRO: PlanLimits = {
   label: "Pro",
   monthlyCreditsUsd: 50,
   budgetCeilingUsd: 200,
+  platformKeyCeilingUsd: 50,
   concurrency: { "run.interactive": 3, "run.eval": 8, judge: 8 },
   retentionDays: 90,
   seats: 10,
@@ -125,6 +145,10 @@ const SCALE: PlanLimits = {
   id: "scale",
   label: "Scale",
   monthlyCreditsUsd: 250,
+  // Still a ceiling, even on the plan whose budget has none. `budgetCeilingUsd: null` is us
+  // declining to guess on the customer's behalf about their own money; this is our money, and
+  // there is no version of "unlimited" for that which is not an incident waiting to happen.
+  platformKeyCeilingUsd: 250,
   // No ceiling from the plan. That is not "unlimited spend": `workspace_balances.ceiling_usd`
   // is still checked, and an account that has not set one is bounded by its balance. A plan
   // whose ceiling is null is a plan that stops guessing on the customer's behalf.
@@ -154,6 +178,7 @@ export function planFor(plan: string | null | undefined): PlanLimits {
 const OVERRIDABLE = [
   "monthlyCreditsUsd",
   "budgetCeilingUsd",
+  "platformKeyCeilingUsd",
   "retentionDays",
   "seats",
   "concurrency",
@@ -187,6 +212,7 @@ export function limitsFor(
         if (typeof v === "number" && Number.isFinite(v) && v >= 0) out[key] = v;
         break;
       case "budgetCeilingUsd":
+      case "platformKeyCeilingUsd":
       case "seats":
         // null is meaningful — "no ceiling", "no seat limit" — so it is accepted alongside a
         // number rather than falling through to the plan's value.

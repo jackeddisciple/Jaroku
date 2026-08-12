@@ -43,6 +43,17 @@ export const USAGE_KINDS = [
 
 export type UsageKind = (typeof USAGE_KINDS)[number];
 
+/**
+ * Whose money paid for a metered call.
+ *
+ * Beside the kinds rather than in the schema, for the reason the kinds are: `kind` says what was
+ * bought and this says who bought it, and under BYOK those are different questions about the
+ * same row. An `llm.provider` call on a workspace's own key is their bill; the identical call on
+ * ours is ours. See migration 024.
+ */
+export const PAYERS = ["platform", "workspace"] as const;
+export type Payer = (typeof PAYERS)[number];
+
 export function isUsageKind(v: unknown): v is UsageKind {
   return typeof v === "string" && (USAGE_KINDS as readonly string[]).includes(v);
 }
@@ -96,7 +107,7 @@ export class UsageMeter {
    * restart there is nothing cached at all. `meterStep` falls back to the run row and then
    * remembers it, so the miss costs one query per run rather than one per step.
    */
-  private runModels = new Map<string, { provider: string; model: string }>();
+  private runModels = new Map<string, { provider: string; model: string; payer: Payer }>();
 
   constructor(
     private billing: BillingRepository,
@@ -105,9 +116,16 @@ export class UsageMeter {
     private lookupRun: (ctx: TenantContext, runId: string) => Promise<{ provider: string; model: string } | null>,
   ) {}
 
-  /** Remember what a run is executing on. Called from the `run_start` the ingest chain sees. */
-  noteRun(runId: string, provider: string, model: string): void {
-    this.runModels.set(runId, { provider, model });
+  /**
+   * Remember what a run is executing on, and whose key is paying for it.
+   *
+   * `payer` cannot be recovered later: whether a run used its workspace's own key depends on
+   * what was configured AT THE TIME, and a workspace that connects a key tomorrow would
+   * retroactively change what today's rows mean. So it is recorded when the run starts, by the
+   * one caller that knows — the thing that built the run's environment.
+   */
+  noteRun(runId: string, provider: string, model: string, payer: Payer = "platform"): void {
+    this.runModels.set(runId, { provider, model, payer });
   }
 
   /** Forget a finished run. The cache is a cache, not a record. */
@@ -153,6 +171,12 @@ export class UsageMeter {
       runId: step.run_id,
       provider: target?.provider ?? null,
       model: target?.model ?? null,
+      // Defaults to the platform when nothing recorded a payer — a cache miss, a resumed
+      // segment after a restart. Over-attributing to the platform makes the platform-key
+      // ceiling tighter than it needs to be, which is the direction to be wrong in: the failure
+      // is a workspace being throttled, not the platform paying for something it did not agree
+      // to.
+      payer: target?.payer ?? "platform",
       totalTokens: step.tokens,
       costUsd: step.cost,
       occurredAt: step.started_at,
@@ -196,6 +220,8 @@ export class UsageMeter {
       cacheWriteTokens?: number;
       idempotencyKey?: string;
       runId?: string | null;
+      /** `workspace` when the call went out on the workspace's own key. Defaults to us. */
+      payer?: Payer;
     },
   ): Promise<boolean> {
     const cost = costFor(call.model, {
@@ -213,6 +239,7 @@ export class UsageMeter {
       // than left null so a future second provider is a change to this line and not a schema
       // question.
       provider: "anthropic",
+      payer: call.payer ?? "platform",
       model: call.model,
       inputTokens: call.inputTokens,
       outputTokens: call.outputTokens,
@@ -253,6 +280,10 @@ export class UsageMeter {
       runId: run.runId,
       quantity: seconds,
       unit: "second",
+      // Always ours. A micro-VM is hosting the platform pays a provider for, whoever's key the
+      // agent inside it was using — which is exactly why sandbox seconds are what BYOK still
+      // bills for.
+      payer: "platform",
       // A deployment with no rate set does not charge for sandbox time, and says so as a
       // priced zero rather than as an unknown — see billing/rates.ts. Rounded through the same
       // helper every other USD figure in this codebase goes through, so a sum of sandbox rows
@@ -289,6 +320,8 @@ export class UsageMeter {
       idempotencyKey: usageKey("storage.bytes", ctx.workspaceId, sample.intervalStart),
       quantity: sample.bytes,
       unit: "byte",
+      payer: "platform", // storage is ours to pay for, same as sandbox time
+
       costUsd: round8((gibHours / HOURS_PER_MONTH) * rates.storageUsdPerGibMonth),
       occurredAt: sample.intervalStart,
     });
@@ -297,11 +330,16 @@ export class UsageMeter {
   private async modelFor(
     ctx: TenantContext,
     runId: string,
-  ): Promise<{ provider: string; model: string } | null> {
+  ): Promise<{ provider: string; model: string; payer: Payer } | null> {
     const cached = this.runModels.get(runId);
     if (cached) return cached;
     const looked = await this.lookupRun(ctx, runId);
-    if (looked) this.runModels.set(runId, looked);
-    return looked;
+    if (!looked) return null;
+    // The run row carries the provider and the model and cannot carry the payer — whose key was
+    // used is not a property of the trace. A miss therefore attributes to the platform, which is
+    // the tighter of the two answers: see meterStep's own note.
+    const filled = { ...looked, payer: "platform" as Payer };
+    this.runModels.set(runId, filled);
+    return filled;
   }
 }

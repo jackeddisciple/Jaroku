@@ -75,14 +75,18 @@ import { openSecretStore } from "./secrets/open.ts";
 import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
 import { BillingRepository } from "./db/repositories/billing.ts";
 import { assertPlanRegistry } from "./billing/plans.ts";
-import { UsageMeter, usageKey } from "./billing/usage.ts";
+import { UsageMeter, usageKey, type Payer } from "./billing/usage.ts";
 import { SAMPLE_INTERVAL_MS, sampleStorage } from "./billing/storage.ts";
 import { Balances } from "./billing/balances.ts";
-import { BudgetGate, ceilingRefusal } from "./billing/gate.ts";
+import { BudgetGate, billingPeriod, ceilingRefusal } from "./billing/gate.ts";
 import { WorkspaceProviderKeys } from "./billing/providerKeys.ts";
+import { PlatformKeyGate } from "./billing/platformKey.ts";
 import { GENERATION_MODEL } from "./claude.ts";
 import { isSecretName } from "./secrets/secretStore.ts";
-import { PROVIDER_ENV_KEY, isProviderId, providerStatus, verifyProviderKey } from "./providers.ts";
+import {
+  PROVIDER_ENV_KEY, isProviderId, isRealProvider, providerStatus, verifyProviderKey,
+  type ProviderId,
+} from "./providers.ts";
 import { DeployStore } from "./deployStore.ts";
 import { DeployManager, planDeploy, type DeployManagerDeps } from "./deployManager.ts";
 import { RailwayApi, RailwayError, RAILWAY_ENV_KEY } from "./railwayApi.ts";
@@ -240,6 +244,8 @@ function meterPlatformCall(
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
     idempotencyKey?: string;
+    /** `workspace` when the call went out on the workspace's own key. Defaults to us. */
+    payer?: Payer;
   },
 ): void {
   void meter.meterModelCall(ctx, kind, call).catch((err) => {
@@ -256,6 +262,28 @@ function meterPlatformCall(
  * settles in milliseconds instead of waiting out an hour-long lease.
  */
 const runHolds = new Map<string, string>();
+
+/**
+ * runId -> whose key that run spends.
+ *
+ * Recorded where the run's environment is built, which is the only place that knows, and read
+ * where its first trace event lands. It cannot be derived from the run row: whether a run used
+ * its workspace's key depends on what was configured at the time, and a workspace that connects
+ * a key tomorrow would retroactively change what today's rows mean.
+ */
+const runPayers = new Map<string, Payer>();
+
+/**
+ * Whose key the one in-flight plan / generation / edit is spending.
+ *
+ * Module state beside `planContext`, `genContext` and `editContext`, and safe for the same
+ * reason those are: each of the three is single-slot and refuses a second while one is running.
+ * Recorded where the key is resolved and read where the usage row is written, because the
+ * emitter in between carries a UsageSummary and no notion of who paid for it.
+ */
+let planPayer: Payer = "platform";
+let genPayer: Payer = "platform";
+let editPayer: Payer = "platform";
 
 /**
  * evalId -> the hold taken for it. Same shape and same caveat as `runHolds`.
@@ -524,6 +552,10 @@ const rubricIdFor = async (ctx: TenantContext, datasetId: string): Promise<strin
 // precisely so this list is readable, and each workspace is then reconciled in its own scope.
 const bootIdentity = new IdentityRepository(db);
 const budgetGate = new BudgetGate(billing, balances, bootIdentity);
+// The other gate, and a different question: not "may this workspace spend" but "may it spend
+// OURS". Separate from the budget gate because the two protect different people — see
+// billing/platformKey.ts.
+const platformKeyGate = new PlatformKeyGate(billing, bootIdentity);
 const workspaceIds = await bootIdentity.listWorkspaceIds(systemContext(newRequestId()));
 const workspaceContexts = workspaceIds.map((id) => systemContextFor(id, newRequestId()));
 
@@ -1199,6 +1231,10 @@ const judge = new JudgeScorer({
       cacheReadTokens: e.cacheRead,
       cacheWriteTokens: e.cacheWrite,
       idempotencyKey: usageKey("llm.judge", e.jobId, String(e.attempt)),
+      // Reported by the scorer rather than re-resolved here: only it knows which key the verdict
+      // actually went out on, and re-reading the preference at metering time would mis-attribute
+      // a call made a moment before somebody changed their mind.
+      payer: e.usedOwnKey ? "workspace" : "platform",
     }),
   onScoringFinished: (e) => {
     console.log(`[eval] ${e.evalId} scoring done — ${e.scored} scored, ${e.unscored} unscored`);
@@ -2214,7 +2250,9 @@ onBothPools("event", ({ runId, event }) => {
         // carry provider or model — the frozen schema puts them on the run — so without this
         // every metered step would be a second query on the one chain that must not become
         // chatty. See UsageMeter.
-        if (event.kind === "run_start") meter.noteRun(event.run.id, event.run.provider, event.run.model);
+        if (event.kind === "run_start") {
+          meter.noteRun(event.run.id, event.run.provider, event.run.model, runPayers.get(event.run.id) ?? "platform");
+        }
       } else if (event.kind === "step") {
         await store.insertStep(runCtx, event.step);
         // METERED AFTER THE STEP IS PERSISTED, AND ON THE SAME CHAIN.
@@ -2389,6 +2427,7 @@ onBothPools("exit", ({ runId, code, signal, timedOut, elapsedMs }) => {
   // the resumed segment's events to the server's workspace instead of its own.
   if (runId !== pausedRunId) {
     runWorkspaces.delete(runId);
+    runPayers.delete(runId);
     // Same condition, same reason: a resumed segment's steps still need to know what the run
     // is executing on, and the meter's fallback would otherwise re-read the run row once.
     // Harmless either way — this is a cache, not a record.
@@ -2422,7 +2461,9 @@ planner.on("plan", (e) => {
   // The plan gate is a paid call the platform made for this workspace, and it is metered here
   // — once, at the moment it happened. The generation that follows meters itself; it must not
   // also meter `planUsage`, which is the same call reported a second time for display.
-  meterPlatformCall(contextForPlan(), "llm.plan", { model: GENERATION_MODEL, ...tokensOf(e.usage) });
+  meterPlatformCall(contextForPlan(), "llm.plan", {
+    model: GENERATION_MODEL, ...tokensOf(e.usage), payer: planPayer,
+  });
   relay.broadcastGen(contextForPlan(), { type: "plan", ...e });
 });
 
@@ -2450,13 +2491,15 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
   console.log(
     `[plan] planning${cmd.revisePlanId ? " (revision)" : ""} — "${cmd.prompt.slice(0, 80)}"`,
   );
+  const planKey = await providerKeys.platformKey(ctx);
+  planPayer = planKey ? "workspace" : "platform";
   void planner.plan({
     runtimeDir: RUNTIME_DIR,
     workspaceId: ctx.workspaceId,
     // WHOSE KEY THINKS. Undefined for every workspace that has not opted in, which is all of
     // them by default and is the whole local path — and undefined means the platform's own key,
     // exactly as before. See billing/providerKeys.ts.
-    apiKey: await providerKeys.platformKey(ctx),
+    apiKey: planKey,
     prompt: cmd.prompt,
     connectors: cmd.connectors,
     // Resolved here rather than in the planner, so the planner keeps its single dependency
@@ -2595,7 +2638,9 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     // but the plan was already metered when the plan gate ran — see planner.on("plan"). Adding
     // it again here would bill every planned generation for its plan twice, and the second
     // charge would look exactly like the first.
-    meterPlatformCall(contextForGen(), "llm.generation", { model: GENERATION_MODEL, ...tokensOf(e.usage) });
+    meterPlatformCall(contextForGen(), "llm.generation", {
+      model: GENERATION_MODEL, ...tokensOf(e.usage), payer: genPayer,
+    });
     relay.broadcastGen(contextForGen(), { type: "done", ...e });
     void syncAgents().then(() => relay.broadcastAgents());
     cleanup();
@@ -2617,13 +2662,15 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   // Resolved fresh at build time, so the manifest carries the schemas and impact ratings as
   // they stand now rather than as they stood when the plan was written.
   const genCtx = ctx;
+  const genKey = await providerKeys.platformKey(genCtx);
+  genPayer = genKey ? "workspace" : "platform";
   const mcpTools = await mcpRegistry.resolve(genCtx, mcpRefs);
   const mcpServers = await mcpRegistry.list(genCtx);
   void generator.generate({
     runtimeDir: RUNTIME_DIR, ctx: genCtx, prompt, connectors, mcpTools, mcpServers, name, plan, planUsage,
     // See planAgent: undefined unless this workspace asked that its own key pay for the
     // platform's calls, and undefined is the platform's key.
-    apiKey: await providerKeys.platformKey(genCtx),
+    apiKey: genKey,
   });
 }
 
@@ -2641,7 +2688,9 @@ editor.on("proposal", (e) => {
   // Metered on the PROPOSAL, not on apply. The model call is what costs money; applying a
   // proposal is a version pointer moving, and undoing one is the same pointer moving back.
   // Billing on apply would mean a rejected proposal was free, which it was not.
-  meterPlatformCall(contextForEdit(), "llm.edit", { model: GENERATION_MODEL, ...tokensOf(e.usage) });
+  meterPlatformCall(contextForEdit(), "llm.edit", {
+    model: GENERATION_MODEL, ...tokensOf(e.usage), payer: editPayer,
+  });
   relay.broadcastEdit(contextForEdit(), { type: "proposal", ...e });
 });
 
@@ -2686,7 +2735,10 @@ function editAgent(ctx: TenantContext, agentId: string, instruction: string): vo
   relay.broadcastEdit(contextForEdit(), { type: "started", agentId, instruction });
   void providerKeys
     .platformKey(ctx)
-    .then((apiKey) => editor.propose(ctx, agentId, instruction, apiKey))
+    .then((apiKey) => {
+      editPayer = apiKey ? "workspace" : "platform";
+      return editor.propose(ctx, agentId, instruction, apiKey);
+    })
     .catch((err) => {
       console.error(`[edit] could not start: ${(err as Error)?.message ?? err}`);
       relay.broadcastEdit(ctx, { type: "error", message: "could not start the edit", agentId });
@@ -2718,6 +2770,10 @@ async function runAgent(
   // Mint the run id server-side so we can address the run (e.g. pause it) before run_start races
   // back. The runner uses JAROKU_RUN_ID when present, else mints its own — back-compatible.
   const runId = randomUUID();
+  // Whose key this run turns out to spend. Decided below, when the environment is assembled, and
+  // recorded on the meter before the first step arrives — it cannot be recovered afterwards,
+  // because whether a run used its workspace's key depends on what was configured at the time.
+  let runPayer: Payer = "platform";
   clearControl(runId); // no stale pause request from a prior life
   console.log(`[manager] starting ${agentId ?? "test_agent"}${input ? ` — "${input}"` : ""} (run ${runId})`);
   // Model is forwarded explicitly so a real-provider run can't silently fall back to
@@ -2760,9 +2816,34 @@ async function runAgent(
     // configured one: that is the same least-privilege rule the egress policy applies to the
     // socket, applied to the credential, and it matters more here because what receives it is
     // model-written Python. An unnamed provider is the dry-run one, which needs no key at all.
-    Object.assign(env, await providerKeys.runEnv(runId, provider));
+    const own = await providerKeys.runEnv(runId, provider);
+    Object.assign(env, own);
+    runPayer = Object.keys(own).length > 0 ? "workspace" : "platform";
   } catch (err) {
     console.warn(`[manager] could not resolve credentials for ${runId}: ${(err as Error).message}`);
+  }
+
+  // NO KEY OF ITS OWN — so this run would spend OURS. The only place in this system where the
+  // platform's money is spent by somebody else's decision, and therefore the only one that needs
+  // a switch nobody has to remember to use. See billing/platformKey.ts for the three gates and
+  // why the platform-key ceiling is a different number from the budget ceiling.
+  //
+  // Checked only when it applies: a workspace running on its own key never reaches this at all,
+  // which is why the refusals below say "connect a key" rather than "you are over budget". For
+  // the population this can refuse, connecting a key is genuinely the fix.
+  if (runPayer === "platform" && isRealProvider(provider)) {
+    const lent = await platformKeyGate.mayUsePlatformKey(ctx, billingPeriod().start);
+    if (!lent.allowed) {
+      console.log(`[billing] refused run ${runId} on the platform key (${lent.reason}): ${lent.message}`);
+      relay.broadcastDebug(ctx, { type: "error", message: lent.message });
+      return;
+    }
+    // Handed over EXPLICITLY rather than left to inheritance. Locally the subprocess inherits
+    // this process's environment and would have found it anyway; a hosted sandbox has an
+    // explicit `env` and no inheritance at all, so the seam has to be filled here or the same
+    // run works in development and cannot authenticate in production.
+    const platformValue = process.env[PROVIDER_ENV_KEY[provider as ProviderId]];
+    if (platformValue) env[PROVIDER_ENV_KEY[provider as ProviderId]] = platformValue;
   }
   // MONEY ASKS FIRST — before a slot, before a subprocess, before anything that costs.
   //
@@ -2799,6 +2880,9 @@ async function runAgent(
   // it is the mechanism that has to exist and be exercised now for a future session to widen
   // the process-wide check above into a per-workspace one without also inventing this.
   runWorkspaces.set(runId, ctx); // before the start: its first events arrive on their own tick
+  // Before the start, for the same reason: `run_start` is what the ingest chain caches provider
+  // and model from, and by then the environment that decided the payer is gone.
+  runPayers.set(runId, runPayer);
   const outcome = await interactiveSlots.reserveAndStart(ctx.workspaceId, runId, () =>
     interactivePool.tryStart({ runId, runtimeDir: RUNTIME_DIR, input, agentId, env, workspaceId: ctx.workspaceId }),
   );
@@ -3074,6 +3158,7 @@ async function explainAgent(ctx: TenantContext, cmd: ExplainCommand): Promise<vo
   explaining = true;
   relay.broadcastReply(contextForReply(), { type: "started", agentId: cmd.agentId, question: cmd.question });
   const context = await buildExplainContext(ctx, cmd);
+  const explainKey = await providerKeys.platformKey(ctx);
   void streamExplain(context, cmd.question, {
     onDelta: (text) => relay.broadcastReply(contextForReply(), { type: "delta", agentId: cmd.agentId, text }),
     // Only fires when a model was actually asked. The no-key path streams the raw context and
@@ -3085,10 +3170,11 @@ async function explainAgent(ctx: TenantContext, cmd: ExplainCommand): Promise<vo
         outputTokens: u.output,
         cacheReadTokens: u.cacheRead,
         cacheWriteTokens: u.cacheWrite,
+        payer: explainKey ? "workspace" : "platform",
       }),
     onDone: () => { explaining = false; relay.broadcastReply(contextForReply(), { type: "done", agentId: cmd.agentId }); },
     onError: (message) => { explaining = false; relay.broadcastReply(contextForReply(), { type: "error", agentId: cmd.agentId, message }); },
-  }, await providerKeys.platformKey(ctx));
+  }, explainKey);
 }
 
 // Kick off one run on startup unless suppressed (set JAROKU_NO_AUTORUN=1 to just serve).

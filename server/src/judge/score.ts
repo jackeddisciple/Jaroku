@@ -90,6 +90,9 @@ export interface JudgeScorerDeps {
     jobId: string;
     /** 1-based, and part of the idempotency key: each attempt is a distinct paid call. */
     attempt: number;
+    /** Whether this verdict went out on the WORKSPACE's key. Reported rather than inferred:
+     *  only the scorer knows which key it actually used, and the ledger has to record it. */
+    usedOwnKey: boolean;
     model: string;
     input: number;
     output: number;
@@ -237,6 +240,7 @@ export class JudgeScorer {
           evalId,
           jobId: job.id,
           attempt,
+          usedOwnKey: apiKey !== undefined,
           model: JUDGE_MODEL,
           input: res.usage?.input_tokens ?? 0,
           output: res.usage?.output_tokens ?? 0,
