@@ -1486,7 +1486,21 @@ const router = new Router({
       { forwardedFor: req.header("x-forwarded-for"), realIp: req.header("x-real-ip") },
       req.ip,
     );
-    const decision = await rateLimiter.take(action, address);
+    // FAILS OPEN, exactly as the socket path does and for the same reason — see `admitCommand`.
+    // This half did not: `take` was awaited bare, so a limiter that could not answer turned every
+    // request into a 500 rather than letting it through. Worse before the limiter grew a timeout,
+    // because it did not answer at ALL and this line runs OUTSIDE the router's handler deadline:
+    // one unreachable Redis and the gateway stops responding to anything.
+    //
+    // A limiter is a protection against volume, not a boundary against a person. Every actual
+    // authorisation happens further in and is untouched by this.
+    let decision;
+    try {
+      decision = await rateLimiter.take(action, address);
+    } catch (err) {
+      console.error(`[rate] limiter failed for ${action}, admitting:`, (err as Error)?.message ?? err);
+      return;
+    }
     if (decision.ok) return;
     console.warn(`[rate] ${address} refused ${action} for ${retryAfterSeconds(decision)}s`);
     metrics.increment("rate_limited_total", { action });

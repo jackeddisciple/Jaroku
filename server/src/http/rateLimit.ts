@@ -305,6 +305,31 @@ interface RateRedis extends Redis {
   ): Promise<[number, number, number]>;
 }
 
+/** How long the Redis limiter waits for an answer before failing instead of hanging. */
+export const TAKE_TIMEOUT_MS = 1_000;
+
+/**
+ * Reject if `p` has not settled in `ms`.
+ *
+ * RACED, NOT CANCELLED — the same arrangement, and the same wording, as the router's own
+ * `withDeadline`: nothing here can stop a command ioredis has queued, and it does not need to.
+ * What it stops is the CALLER waiting on it. The timer is cleared either way so an answer that
+ * arrives in time does not leave a pending timeout holding the process open.
+ */
+async function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export class RedisRateLimiter implements RateLimiter {
   readonly kind = "redis";
   private client: RateRedis;
@@ -313,6 +338,8 @@ export class RedisRateLimiter implements RateLimiter {
     client: Redis,
     /** Injected so a suite can move time without sleeping. Production passes nothing. */
     private now: () => number = Date.now,
+    /** The bound on one call. Injected so a suite can prove it without waiting a second for it. */
+    private timeoutMs: number = TAKE_TIMEOUT_MS,
   ) {
     this.client = client as RateRedis;
     if (typeof this.client.jarokuRateTake !== "function") {
@@ -320,16 +347,40 @@ export class RedisRateLimiter implements RateLimiter {
     }
   }
 
+  /**
+   * Spend a token, or give up trying.
+   *
+   * A BOUND, BECAUSE THE ALTERNATIVE IS NOT AN ERROR — IT IS A HANG. Callers of this method are
+   * written to fail open: `admitCommand` catches, logs and admits, on the stated grounds that "a
+   * Redis blip that stopped everybody generating would be an outage caused by the safety rail".
+   * That policy was unreachable. `openRedis` sets `maxRetriesPerRequest: null` and leaves the
+   * offline queue on — correct for a JOB QUEUE, where a command waiting out a reconnect is a job
+   * not lost — so a command issued while Redis is unreachable is queued and retried forever. It
+   * does not reject. The promise simply never settles, and neither does the request holding it.
+   *
+   * The gateway's own timeouts do not save it either: `beforeHandle` runs OUTSIDE the router's
+   * handler deadline, so a per-IP check on a dead Redis hangs every HTTP request rather than
+   * failing one handler. A rate limiter that cannot answer would have taken the whole gateway
+   * down with it, which is the exact outcome its fail-open comment exists to prevent.
+   *
+   * A second is three orders of magnitude more than this call needs — it is one round trip and a
+   * short Lua script — so the bound only ever fires when something is genuinely wrong, and the
+   * failure it produces is the one every caller already knows how to handle.
+   */
   async take(action: RateAction, subject: string, cost = 1): Promise<RateDecision> {
     const rule = RATE_RULES[action];
     const perMs = rule.perMinute / 60_000;
-    const [allowed, milliTokens, retry] = await this.client.jarokuRateTake(
-      rateKey(action, subject),
-      String(rule.capacity),
-      String(perMs),
-      String(this.now()),
-      String(cost),
-      String(idleTtlMs(rule)),
+    const [allowed, milliTokens, retry] = await withTimeout(
+      this.client.jarokuRateTake(
+        rateKey(action, subject),
+        String(rule.capacity),
+        String(perMs),
+        String(this.now()),
+        String(cost),
+        String(idleTtlMs(rule)),
+      ),
+      this.timeoutMs,
+      `the rate limiter did not answer within ${this.timeoutMs}ms`,
     );
     return {
       ok: allowed === 1,

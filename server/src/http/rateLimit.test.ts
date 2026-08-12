@@ -267,6 +267,39 @@ console.log("\non the wire");
   await limiter.close();
 }
 
+// --- a limiter that cannot answer ---------------------------------------------------------------
+
+console.log("\nwhen Redis does not answer at all");
+
+// THE FAIL-OPEN POLICY WAS UNREACHABLE, and this is the case that proves the bound now makes it
+// reachable. Both callers are written to catch and admit — `admitCommand` says so at length, on
+// the grounds that "a Redis blip that stopped everybody generating would be an outage caused by
+// the safety rail". Neither could: `openRedis` sets `maxRetriesPerRequest: null` and leaves the
+// offline queue on, which is right for a job queue and means a command issued while Redis is
+// unreachable is queued and retried forever rather than rejected. It never settles.
+//
+// Against a dead port the real client demonstrates it in about four seconds of nothing. Here the
+// stall is exact and instant: a client whose script returns a promise that is never resolved.
+{
+  const stalled = {
+    jarokuRateTake: () => new Promise<never>(() => {}),
+    defineCommand: () => {},
+    quit: async () => {},
+  };
+  const limiter = new RedisRateLimiter(stalled as never, Date.now, 25);
+  const started = Date.now();
+  let threw: Error | undefined;
+  try {
+    await limiter.take("agent.generate", "ws-a");
+  } catch (err) {
+    threw = err as Error;
+  }
+  check(!!threw, "a limiter that never answers REJECTS rather than hanging the caller forever");
+  check(/did not answer/.test(threw?.message ?? ""), "...saying so, which is what gets logged before it admits");
+  check(Date.now() - started < 1_000, `...within its bound (${Date.now() - started}ms)`);
+  await limiter.close();
+}
+
 // --- what the ladder can actually refuse ------------------------------------------------------
 
 console.log("\nthe commands that consume are the commands with an action");
