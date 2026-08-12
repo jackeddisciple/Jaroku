@@ -134,13 +134,26 @@ export class TraceStore {
   // ON CONFLICT DO NOTHING rather than SQLite's INSERT OR IGNORE: the same meaning, in the
   // spelling both dialects understand. A step arriving twice — a resumed segment replaying
   // its boundary, an at-least-once ingest — must be ignored, never duplicated.
+  //
+  // THE ARBITER IS `(id, started_at)` AND NOT `(id)`, which is not a widening of the dedup key
+  // so much as the only one this table can offer. `steps` is partitioned by `started_at`, and
+  // Postgres will not let a unique index on a partitioned table omit the partition key — so
+  // there is no unique index on `id` alone for a conflict target to name, and Postgres does not
+  // accept a prefix of a wider one (42P10, `infer_arbiter_indexes`). Migration 030 explains the
+  // rest and adds the matching index on SQLite so this stays one statement.
+  //
+  // It still deduplicates what the ingest can actually produce: a redelivery replays the same
+  // buffered event object, so `started_at` is byte-identical on the second attempt. What it
+  // cannot do is stop one id from appearing twice under two different timestamps — those land in
+  // different partitions and no index spans them. That is the price of partitioning on a value
+  // the producer supplies, and it is paid for retention being a catalogue update.
   async insertStep(ctx: TenantContext, step: Step): Promise<void> {
     await this.q(ctx).run(
       `INSERT INTO steps
          (id, workspace_id, run_id, seq, type, name, input, output, state_before, state_after,
           tokens, cost, latency_ms, error, parent_step_id, started_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO NOTHING`,
+       ON CONFLICT(id, started_at) DO NOTHING`,
       [
         step.id, ctx.workspaceId, step.run_id, step.seq, step.type, step.name,
         TraceStore.j(step.input), TraceStore.j(step.output),

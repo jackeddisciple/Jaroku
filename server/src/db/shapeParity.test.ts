@@ -102,9 +102,23 @@ const steps: Step[] = [
 
 const ctx = systemContextFor(LOCAL_WORKSPACE_ID, newRequestId());
 
+/**
+ * Every write happens TWICE, because at-least-once ingest is not a hypothetical.
+ *
+ * The relay redelivers a buffered batch on reconnect and the store's answer is `ON CONFLICT DO
+ * NOTHING`, so the second pass has to be a no-op on both drivers — and the conflict target it
+ * names has to be one both drivers can resolve. Inserting once proves neither: it was a single
+ * insert per step that let a conflict target no Postgres index could match reach production,
+ * green on SQLite the whole way. The duplicate pass is one line and it is the line that fails.
+ *
+ * The existing "both drivers return every step" assertion below is what catches the other half —
+ * a target that resolves but does not actually deduplicate returns twice the steps.
+ */
 async function roundTrip(store: TraceStore): Promise<{ run: Run | undefined; steps: Step[] }> {
-  await store.upsertRun(ctx, run);
-  for (const s of steps) await store.insertStep(ctx, s);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await store.upsertRun(ctx, run);
+    for (const s of steps) await store.insertStep(ctx, s);
+  }
   return { run: await store.getRun(ctx, runId), steps: await store.stepsForRun(ctx, runId) };
 }
 

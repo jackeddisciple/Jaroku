@@ -1,0 +1,42 @@
+-- 030_steps_conflict_target — the arbiter `insertStep` names, and a correction to 029's header.
+--
+-- WHAT 029 GOT WRONG. Its header says the ingest's conflict target "stays `(id)`, which Postgres
+-- resolves against the PRIMARY KEY above", and names a `steps_id_key` it never creates. Both
+-- halves are false, and the second is the tell: there is no unique index on `(id)` alone, because
+-- on a table PARTITIONED BY RANGE (started_at) there cannot be one. Postgres requires every
+-- unique index on a partitioned table to contain the partition key — that is the same rule 029
+-- correctly cites when it widens the primary key to `(id, started_at)`.
+--
+-- Postgres does not infer an arbiter from a PREFIX of a unique index. `ON CONFLICT (id)` against
+-- a table whose only unique indexes are `(id, started_at)` is not a narrower match, it is no
+-- match:
+--
+--   ERROR 42P10: there is no unique or exclusion constraint matching the ON CONFLICT
+--   specification
+--
+-- Every trace step insert raised that from the moment 029 applied. It survived review because
+-- SQLite still had `id` as a bare PRIMARY KEY and answered `ON CONFLICT (id)` happily, and the
+-- Postgres half of the suite skips without JAROKU_PG_URL — so a local run was green and the
+-- first run with a real Postgres in front of it was the CI job added three commits later.
+--
+-- THE FIX IS IN THE QUERY, NOT THE SCHEMA. `insertStep` now names `(id, started_at)`, which the
+-- primary key already satisfies. That is why this file has no DDL for this dialect: 029 built
+-- the right index and then described it wrongly, and a migration that "fixed" the schema here
+-- would be adding a second index to the hottest write path in the system to make a comment true.
+--
+-- WHAT THE WIDER KEY COSTS, STATED PLAINLY. `(id, started_at)` deduplicates a REDELIVERY, which
+-- is the property at-least-once ingest actually needs: the relay replays a buffered event object,
+-- so both columns are byte-identical on the second attempt. It does NOT enforce that a step id is
+-- globally unique — two rows with one id and different timestamps land in different partitions and
+-- neither index sees the other. Partitioning by a value the producer supplies buys instant
+-- retention and gives up exactly that, and no arrangement of indexes on this table can buy it
+-- back. `test:shape-parity` now inserts every step twice on both drivers, which is the case the
+-- ingest can actually produce and the one that was broken.
+--
+-- THE SQLITE HALF OF THIS VERSION IS NOT A COMMENT. It adds the unique index that makes
+-- `(id, started_at)` a nameable conflict target there too, so one spelling of the statement works
+-- on both drivers — see that file.
+
+-- No DDL for this dialect. The primary key `steps (id, started_at)` created in 029 is the
+-- arbiter, and this version exists so the correction above sits in the migration sequence rather
+-- than only in a commit message.

@@ -1,0 +1,27 @@
+-- 030_steps_conflict_target — the index that lets one INSERT statement serve both drivers.
+--
+-- Read the postgres half of this version first: it explains why `insertStep` had to stop naming
+-- `(id)` as its conflict target, and why on a partitioned table it could never have named it.
+--
+-- WHAT THIS DIALECT NEEDS. SQLite resolves `ON CONFLICT (a, b)` against a unique index on exactly
+-- those columns; a PRIMARY KEY on `id` is not a match for `(id, started_at)` any more than the
+-- reverse was on Postgres. Without this index the ingest would simply have failed here instead,
+-- which is not a trade — it is the same bug pointing the other way.
+--
+-- The index is genuinely redundant as a CONSTRAINT: `id` is already the primary key, so no two
+-- rows can share it and every `(id, started_at)` pair is unique for free. It is not redundant as
+-- an ARBITER, and that is the whole reason it exists. Naming that here rather than leaving a
+-- future reader to wonder why a unique index sits on top of a primary key.
+--
+-- `id` STAYS THE PRIMARY KEY, and the drivers are therefore not identical. On SQLite a second
+-- step carrying an existing id with a DIFFERENT started_at raises a constraint violation; on
+-- Postgres it inserts a second row in another partition. Neither is reachable from the ingest —
+-- a redelivery replays the same event object, both columns included — and the alternative is
+-- dropping a real constraint on the local driver to make it match a limitation of the hosted one.
+-- The stricter driver keeps its guarantee.
+--
+-- Not gated by `migrate:check`: that gate reads `migrations/postgres/` only, because rolling
+-- deploys are what expand/migrate/contract is about and this driver is one process holding one
+-- file. See gate.cli.ts.
+
+CREATE UNIQUE INDEX IF NOT EXISTS steps_id_started ON steps (id, started_at);
