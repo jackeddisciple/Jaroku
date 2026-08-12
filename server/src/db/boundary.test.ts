@@ -258,14 +258,42 @@ function callArguments(text: string, openParen: number): string {
 /**
  * Unscoped statements that are allowed to name a policied table, and why.
  *
- * Both are SQLite-only schema patches, guarded by `dialect !== "sqlite"` at the top of their
- * `init` — so they never run against a database that has policies at all.
+ * THE REASON IS THE POINT OF THIS MAP, not the exemption. "Unscoped on purpose" is what every
+ * one of these said in a doc comment, and two statements that said exactly that were reaching no
+ * rows at all in production until three commits ago — the intent was right, the mechanism was
+ * missing, and a doc comment cannot tell those apart. An entry here is a specific claim that the
+ * statement REACHES ITS ROWS under row-level security, and each names the policy or the driver
+ * that makes it true.
+ *
+ * A statement that merely wants to cross workspaces does not belong here. It belongs in
+ * `db.asPlatform`, which is the mechanism for that, and which this rule does not flag because
+ * the handle inside it is a `tx`.
  */
 const UNSCOPED_OK: Record<string, string> = {
   "evalStore.ts:UPDATE eval_jobs SET position = rowid":
     "sqlite-only backfill in init(), which returns early on postgres",
   "deployStore.ts:UPDATE deployments SET created_seq = rowid":
     "sqlite-only backfill in init(), which returns early on postgres",
+  // The subject-keyed abuse signals, written and read before a workspace exists — signup
+  // velocity is a question about an address. Their rows carry a NULL workspace_id and are
+  // reached by `platform_subject_rows` (migration 027), whose predicate REQUIRES that no
+  // workspace be in scope. Scoping these is what would break them.
+  //
+  // Keyed on the NULL and on the `subject` predicate rather than on the table name, so the
+  // excuse covers THESE two statements and not the next unscoped one somebody writes against
+  // `abuse_signals`. An exemption that names a table is a hole with a comment on it.
+  "abuse.ts:VALUES (NULL, ?, ?, ?, ?, ?, ?, ?)":
+    "workspace_id NULL, admitted by platform_subject_rows, which requires the absence of a scope",
+  "abuse.ts:WHERE subject = ?":
+    "the same NULL-tenant rows read back by subject, under the same policy",
+  // `seedForDrill` builds a source database for the restore drill and is only ever handed a
+  // `SqliteDb` — drill.cli.ts constructs one and migrates it from migrations/sqlite. That driver
+  // has no policies. It seeds two workspaces deliberately, so the restore has a tenancy boundary
+  // to verify rather than one workspace's rows to count.
+  "restoreDrill.ts:INSERT INTO runs":
+    "drill fixture, only ever called with a SqliteDb source — see drill.cli.ts",
+  "restoreDrill.ts:INSERT INTO steps":
+    "drill fixture, only ever called with a SqliteDb source — see drill.cli.ts",
 };
 
 {
