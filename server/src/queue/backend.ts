@@ -94,4 +94,18 @@ export interface QueueBackend {
    * something eventually pops and drops each one. Returns how many were actually removed.
    */
   purgePending(jobClass: JobClass, workspaceId: string, idempotencyKeys: Set<string>): Promise<number>;
+
+  /**
+   * Drop EVERY not-yet-admitted job of this class for one workspace, and take it out of the
+   * rotation. Returns how many were removed.
+   *
+   * Distinct from `purgePending` rather than a special case of it, because they answer different
+   * questions. Purging by idempotency key is "these particular jobs were cancelled" — the caller
+   * knows which, and Redis removes them by value. This is "this workspace is gone", where the
+   * caller knows nothing about the payloads and the point is that nothing of it is left. Session
+   * 8's workspace deletion is the only caller: a job admitted a moment earlier is already running
+   * and finishes, and one still waiting must not start against a workspace whose files have been
+   * deleted out from under it.
+   */
+  purgeWorkspace(jobClass: JobClass, workspaceId: string): Promise<number>;
 }

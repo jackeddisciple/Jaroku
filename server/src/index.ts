@@ -86,6 +86,8 @@ import { McpRegistry } from "./mcpRegistry.ts";
 import { MCP_DISCOVER_CLASS, McpDiscoveryQueue } from "./mcpDiscovery.ts";
 import { WorkspaceExporter } from "./lifecycle/export.ts";
 import { lifecycleRoutes } from "./http/lifecycle.ts";
+import { WorkspaceDeleter } from "./lifecycle/deletion.ts";
+import { endAllGrants } from "./oauth/revoke.ts";
 import { buildIdempotencyKey, type JobClass, type QueueJob } from "./queue/jobs.ts";
 import { mcpEgressRules } from "./mcpUrl.ts";
 import { WorkerLoop } from "./queue/workerLoop.ts";
@@ -1578,6 +1580,48 @@ for (const route of objectRoutes({
   router.prefixRoute(route.method, route.prefix, route.handler);
 }
 
+// AND THE DELETER, constructed here because it needs everything: the rows, the objects, the
+// checkpoints, the queue, and the revoker that ends grants at the providers themselves.
+const workspaceDeleter = new WorkspaceDeleter({
+  db,
+  identity: identityRepo,
+  objects,
+  checkpoints,
+  endGrants: async (ctx) => {
+    const ended = await endAllGrants(ctx, {
+      revoker: connectionRevoker,
+      secrets,
+      // The names this workspace's MCP credentials live under. Deleted rather than revoked —
+      // an MCP token is a bearer value somebody pasted, and there is no endpoint to hand it back
+      // to. See oauth/revoke.ts.
+      mcpAuthKeys: async () => (await mcpStore.listServers(ctx)).map((s) => s.auth_env_key).filter((k): k is string => Boolean(k)),
+    });
+    // `already_gone` counts as revoked, because it is the same outcome — the grant does not
+    // exist at the far end. `unsupported` and `unreachable` do NOT: the first means the provider
+    // publishes no revocation endpoint and the grant is standing until a human removes it in
+    // their account, and the second means we could not tell it. Both belong in the receipt as
+    // failures, because a deletion that reports them as successes is the dishonest one.
+    const done = ended.connections.filter((r) => r.remote === "revoked" || r.remote === "already_gone" || r.remote === "no_credential");
+    return {
+      revoked: done.length,
+      failed: ended.connections
+        .filter((r) => !done.includes(r))
+        .map((r) => `${r.remote}: ${r.message ?? "the provider could not be told"}`),
+      credentialsDeleted: ended.mcpCredentialsDeleted,
+    };
+  },
+  // Best-effort, and only what has not started. A job already admitted is running against files
+  // that still exist for as long as it takes to finish, which is the same rule every ceiling in
+  // this codebase follows: bound what is started, never what is running.
+  purgeQueue: async (ctx) => {
+    let purged = 0;
+    for (const jobClass of ["run.eval", "judge", "mcp.discover", "workspace.export"] as JobClass[]) {
+      purged += await dispatcher.backend.purgeWorkspace(jobClass, ctx.workspaceId).catch(() => 0);
+    }
+    return purged;
+  },
+});
+
 // A WORKSPACE ASKING FOR EVERYTHING IT HAS — see http/lifecycle.ts for why this is HTTP rather
 // than a socket command, and why the status check needs no job table.
 for (const route of lifecycleRoutes({
@@ -1599,6 +1643,12 @@ for (const route of lifecycleRoutes({
       { idempotencyKey: buildIdempotencyKey(EXPORT_CLASS, ctx.workspaceId, exportId) },
     );
   },
+  // AND THE OTHER HALF OF A DATA LIFECYCLE: taking it all away, everywhere it is.
+  //
+  // Rows, objects, checkpoints, queued work, and — the half nobody remembers — the grants at
+  // somebody else's company. Session 7 built `endAllGrants` and called it the provider-side half
+  // of the deletion this session owns; this is where the two meet.
+  deleteWorkspace: (ctx) => workspaceDeleter.deleteWorkspace(ctx),
   audit: async (ctx, action, detail) => {
     await identityRepo.appendAudit(ctx, {
       action,

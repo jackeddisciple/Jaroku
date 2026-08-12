@@ -109,6 +109,9 @@ class CountingBackend implements QueueBackend {
   purgePending(jobClass: JobClass, workspaceId: string, keys: Set<string>): Promise<number> {
     return this.inner.purgePending(jobClass, workspaceId, keys);
   }
+  purgeWorkspace(jobClass: JobClass, workspaceId: string): Promise<number> {
+    return this.inner.purgeWorkspace(jobClass, workspaceId);
+  }
 }
 
 const db = await openTestSqlite();
@@ -256,6 +259,7 @@ console.log("\na backend that throws mid-drain");
     releaseSemaphore: (k, l) => inner.releaseSemaphore(k, l),
     semaphoreCount: (k) => inner.semaphoreCount(k),
     purgePending: (c, w, k) => inner.purgePending(c, w, k),
+    purgeWorkspace: (c, w) => inner.purgeWorkspace(c, w),
   };
   const pool = new FakePool(2);
   const dispatcher = new Dispatcher(flaky);

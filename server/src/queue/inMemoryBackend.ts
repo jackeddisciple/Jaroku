@@ -189,4 +189,13 @@ export class InMemoryQueueBackend implements QueueBackend {
     }
     return before - kept.length;
   }
+
+  async purgeWorkspace(jobClass: JobClass, workspaceId: string): Promise<number> {
+    const s = this.state(jobClass);
+    const removed = s.lists.get(workspaceId)?.length ?? 0;
+    s.lists.delete(workspaceId);
+    const idx = s.ring.indexOf(workspaceId);
+    if (idx >= 0) s.ring.splice(idx, 1);
+    return removed;
+  }
 }

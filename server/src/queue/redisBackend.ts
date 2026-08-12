@@ -140,6 +140,21 @@ return 1
 // workspace id, ARGV[2..] the items; the caller already knows exactly which serialized jobs
 // to remove because it read them via LRANGE and filtered by idempotencyKey itself — this
 // script's only job is doing the removal atomically against whatever else the ring is doing.
+/**
+ * Everything of one workspace, in one step: how long the list was, gone, and out of the ring.
+ *
+ * The length is read BEFORE the delete because DEL answers how many KEYS it removed, which is
+ * one, and the caller's receipt wants how many JOBS it removed.
+ */
+const PURGE_WORKSPACE_SCRIPT = `
+local n = redis.call('LLEN', KEYS[1])
+if n > 0 then
+  redis.call('DEL', KEYS[1])
+end
+redis.call('LREM', KEYS[2], 1, ARGV[1])
+return n
+`;
+
 const PURGE_PENDING_SCRIPT = `
 local removed = 0
 for i = 2, #ARGV do
@@ -169,6 +184,7 @@ interface QueueRedis extends Redis {
   jarokuSemAcquire(semKey: string, now: string, ttl: string, leaseId: string, max: string): Promise<1 | null>;
   jarokuSemRelease(semKey: string, leaseId: string): Promise<number>;
   jarokuPurgePending(list: string, ring: string, workspaceId: string, ...items: string[]): Promise<number>;
+  jarokuPurgeWorkspace(list: string, ring: string, workspaceId: string): Promise<number>;
 }
 
 function keys(jobClass: JobClass) {
@@ -202,6 +218,7 @@ export class RedisQueueBackend implements QueueBackend {
       this.client.defineCommand("jarokuSemAcquire", { numberOfKeys: 1, lua: SEMAPHORE_ACQUIRE_SCRIPT });
       this.client.defineCommand("jarokuSemRelease", { numberOfKeys: 1, lua: SEMAPHORE_RELEASE_SCRIPT });
       this.client.defineCommand("jarokuPurgePending", { numberOfKeys: 2, lua: PURGE_PENDING_SCRIPT });
+      this.client.defineCommand("jarokuPurgeWorkspace", { numberOfKeys: 2, lua: PURGE_WORKSPACE_SCRIPT });
     }
   }
 
@@ -284,5 +301,10 @@ export class RedisQueueBackend implements QueueBackend {
     const toRemove = raw.filter((j) => idempotencyKeys.has((JSON.parse(j) as QueueJob).idempotencyKey));
     if (!toRemove.length) return 0;
     return this.client.jarokuPurgePending(k.list(workspaceId), k.ring, workspaceId, ...toRemove);
+  }
+
+  async purgeWorkspace(jobClass: JobClass, workspaceId: string): Promise<number> {
+    const k = keys(jobClass);
+    return this.client.jarokuPurgeWorkspace(k.list(workspaceId), k.ring, workspaceId);
   }
 }

@@ -28,6 +28,8 @@ import { EXPORT_URL_TTL_S, WorkspaceExporter } from "../lifecycle/export.ts";
 import { badRequest, type Handler, type HttpRequest } from "./router.ts";
 
 export interface LifecycleRouteDeps {
+  /** Delete the workspace and everything of it, returning the receipt. */
+  deleteWorkspace?: (ctx: TenantContext) => Promise<unknown>;
   /** The workspace this request is acting in, resolved exactly as every other route resolves it. */
   contextFor: (req: HttpRequest) => Promise<TenantContext>;
   objects: ObjectStore;
@@ -107,6 +109,32 @@ export function lifecycleRoutes(deps: LifecycleRouteDeps): LifecycleRoute[] {
             expiresAt: download.expiresAt,
           },
         };
+      },
+    },
+    {
+      method: "POST",
+      path: "/v1/workspace/delete",
+      handler: async (req) => {
+        const ctx = await deps.contextFor(req);
+        requireCapability(ctx, "workspace:manage");
+        if (!deps.deleteWorkspace) throw badRequest("this deployment cannot delete a workspace");
+
+        // TYPED CONFIRMATION, AND IT IS NOT DECORATION. Every other destructive action in this
+        // product is reversible — an undo is a version pointer, a suspension is a row somebody
+        // lifts — and this one is not. A body carrying the workspace's own id is the cheapest
+        // possible proof that the caller knows which workspace they are about to lose, and it is
+        // the same shape every platform's delete dialog uses for the same reason.
+        const body = await req.json<{ confirm?: unknown }>();
+        if (body.confirm !== ctx.workspaceId) {
+          throw badRequest(`to delete this workspace, send {"confirm": "<its id>"}`);
+        }
+
+        const receipt = await deps.deleteWorkspace(ctx);
+        await deps.audit?.(ctx, "workspace.delete_requested", { via: "http" });
+        // The receipt is the answer, not a 204. Somebody asked for their data to be destroyed and
+        // is entitled to the count of what was — including whatever could not be revoked at a
+        // provider, which is the part a silent success would hide.
+        return { body: receipt as Record<string, unknown> };
       },
     },
   ];

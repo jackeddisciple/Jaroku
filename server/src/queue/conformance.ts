@@ -224,6 +224,29 @@ export async function runQueueConformance(
     check(!(await backend.ringOrder(jobClass)).includes(soloWs), "and leaves it once its only job is purged");
   }
 
+  // --- purgeWorkspace: a workspace is gone, and nothing of it may still be admitted -----------
+  //
+  // Session 8's deletion is the caller. What it needs and `purgePending` cannot give it: removal
+  // WITHOUT knowing the payloads, because by the time a workspace is being deleted nobody is
+  // holding a list of what it had queued.
+  {
+    const doomed = `ws-deleted-${randomUUID()}`;
+    const other = `ws-survives-${randomUUID()}`;
+    for (let i = 0; i < 3; i++) await backend.enqueue(makeJob(jobClass, doomed, `doomed-${i}`));
+    await backend.enqueue(makeJob(jobClass, other, "untouched"));
+
+    const removed = await backend.purgeWorkspace(jobClass, doomed);
+    check(removed === 3, `purgeWorkspace reports how many JOBS went, not how many keys (got ${removed})`);
+    check((await backend.pendingCount(jobClass, doomed)) === 0, "nothing of it is left pending");
+    check(!(await backend.ringOrder(jobClass)).includes(doomed), "...and it is out of the rotation");
+    check((await backend.pendingCount(jobClass, other)) === 1, "and another workspace's work is untouched");
+    check((await backend.purgeWorkspace(jobClass, doomed)) === 0, "purging a workspace twice is not an error");
+
+    const next = await backend.tryAdmit(jobClass, { leaseId: randomUUID(), leaseTtlMs: 60_000, maxGlobalInFlight: null });
+    check(next?.workspaceId === other, "...and the next admission is the surviving workspace's");
+    await drainAll(backend, jobClass);
+  }
+
   return { failures };
 }
 
