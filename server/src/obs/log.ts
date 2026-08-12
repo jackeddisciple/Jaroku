@@ -300,6 +300,45 @@ let installed = false;
  * makes a console line readable, and stringifying everything here to filter it would trade the
  * readability of every line for the redaction of a few.
  */
+/**
+ * The two sinks `console` is not.
+ *
+ * NODE PRINTS A FATAL ERROR ITSELF. An exception nobody caught, and — since Node 15 — a rejection
+ * nobody handled, are written to stderr by the runtime's own fatal path: not through `console`,
+ * not through anything this module wrapped, straight out. So the guarantee in this file's header
+ * held for every line anybody writes on purpose and failed on the one class of line nobody
+ * writes at all.
+ *
+ * IT IS NOT A THEORETICAL PATH AND IT IS NOT AN UNLIKELY MESSAGE. These are the errors that
+ * quote credentials, because they come from the code that holds them: a driver reporting which
+ * connection string it could not connect with, a queue client naming its URL, a fetch rejecting
+ * against a presigned download link with the signature still in the query string, a provider's
+ * error body repeating the key it just refused. `redactValue` already handles an Error's stack
+ * for exactly this reason — it simply never saw these.
+ *
+ * WHAT IT MUST NOT DO IS KEEP THE PROCESS ALIVE. Registering a listener suppresses the default,
+ * and a crash silently downgraded to a running process in an unknown state is far worse than the
+ * leak this closes: the exit code is what a supervisor restarts on and what CI fails on. So the
+ * handler prints through the filter and then dies the way Node would have — unless something
+ * ELSE has also registered, in which case that code has taken responsibility for what happens
+ * next and this only redacts, which is all it was ever for.
+ *
+ * `process.exit` truncates an in-flight write to a pipe, and stderr is a pipe under every
+ * supervisor and every CI runner there is, so the exit is a tick later. That is the difference
+ * between a redacted message and no message.
+ */
+const onFatal =
+  (kind: string) =>
+  (value: unknown): void => {
+    console.error(`[${kind}]`, value);
+    if (process.listenerCount(kind as "uncaughtException") > 1) return;
+    process.exitCode = 1;
+    setTimeout(() => process.exit(1), 0);
+  };
+
+const fatalException = onFatal("uncaughtException");
+const fatalRejection = onFatal("unhandledRejection");
+
 export function installLogRedaction(): void {
   if (installed) return;
   installed = true;
@@ -319,12 +358,16 @@ export function installLogRedaction(): void {
   console.warn = wrap(previous.warn!);
   console.info = wrap(previous.info!);
   console.debug = wrap(previous.debug!);
+  process.on("uncaughtException", fatalException);
+  process.on("unhandledRejection", fatalRejection);
 }
 
 /** Put back whatever was there. For tests, which need to assert on what a sink received. */
 export function uninstallLogRedaction(): void {
   if (!installed) return;
   installed = false;
+  process.off("uncaughtException", fatalException);
+  process.off("unhandledRejection", fatalRejection);
   console.log = previous.log ?? rawLog;
   console.error = previous.error ?? rawError;
   console.warn = previous.warn ?? rawWarn;

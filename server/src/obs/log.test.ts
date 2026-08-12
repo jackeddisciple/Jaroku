@@ -14,6 +14,10 @@
 //
 //   npm run test:log-redaction
 
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   Logger,
   describeProtection,
@@ -160,6 +164,80 @@ console.log("\nthe sink nobody rewrote");
   check(captured.every((line) => !line.includes("hunter2")), "...nor the password in a connection string");
   check(captured[0]!.includes("[providers] key set:"), "...while the rest of the line is intact");
   check(captured[0]!.includes("[redacted:ANTHROPIC_API_KEY]"), "...and says WHICH credential it was, by name");
+}
+
+console.log("\nthe sink Node writes to itself");
+{
+  // THE ONE CLASS OF LINE NOBODY WRITES. An uncaught exception, and since Node 15 an unhandled
+  // rejection, are printed to stderr by the runtime's own fatal path — not through `console`, so
+  // not through anything the section above covers. The suite proved the filter over every line
+  // somebody writes on purpose and had never looked at the line the process writes on its way
+  // out, which is the one most likely to be quoting a credential: it comes from the code that
+  // holds them.
+  //
+  // A REAL CHILD PROCESS, because the assertion is about what a dying process leaves on stderr
+  // and about the exit code it leaves with. Asserting the first without the second would be the
+  // dangerous half of this fix: a handler that redacts and then lets the process carry on in an
+  // unknown state trades a leak for a crash a supervisor never sees.
+  const dir = mkdtempSync(join(tmpdir(), "jaroku-fatal-"));
+  const run = (mode: string): { out: string; code: number | null } => {
+    const file = join(dir, `${mode}.ts`);
+    writeFileSync(
+      file,
+      [
+        `import { installLogRedaction, protectSecret } from ${JSON.stringify(join(import.meta.dirname, "log.ts"))};`,
+        `protectSecret(${JSON.stringify(SECRET)}, "ANTHROPIC_API_KEY");`,
+        "installLogRedaction();",
+        mode === "throw"
+          ? `throw new Error("connect failed for " + ${JSON.stringify(SECRET)});`
+          : `void Promise.reject(new Error("connect failed for " + ${JSON.stringify(SECRET)}));`,
+      ].join("\n"),
+    );
+    const r = spawnSync(process.execPath, ["--import", "tsx", file], { encoding: "utf8" });
+    return { out: `${r.stdout}${r.stderr}`, code: r.status };
+  };
+
+  for (const mode of ["throw", "reject"] as const) {
+    const { out, code } = run(mode);
+    const label = mode === "throw" ? "an uncaught exception" : "an unhandled rejection";
+    check(!out.includes(SECRET), `${label} does not carry the value to stderr`);
+    check(out.includes("[redacted:ANTHROPIC_API_KEY]"), `...it is named there instead`);
+    check(out.includes("connect failed for"), "...and the rest of the message survives");
+    check(out.includes(`${mode}.ts`), "...with the stack, which is where a driver quotes its URL");
+    // The half that matters as much as the redaction: it still died, and said so.
+    check(code === 1, `...and the process still exits 1 (${code})`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+console.log("\nwhen something else has taken responsibility");
+{
+  // The handler suppresses Node's default by existing, so it has to reinstate it — but only when
+  // it is the only one listening. A second listener is somebody else deciding what happens next,
+  // and exiting out from under them would be this module overriding a decision that is not its
+  // to make. Then it only redacts, which is all it was ever for.
+  const captured: string[] = [];
+  const realError = console.error;
+  const other = (): void => {};
+  process.on("uncaughtException", other);
+  console.error = (...args: unknown[]) => captured.push(args.map((a) => JSON.stringify(a)).join(" "));
+  installLogRedaction();
+
+  const ours = process.listeners("uncaughtException").filter((l) => l !== other);
+  check(ours.length === 1, "the filter registered exactly one handler");
+  // Calling it directly: with `other` also listening it must NOT exit, which is what makes this
+  // safe to run inside the suite's own process.
+  ours[0]!(new Error(`boom ${SECRET}`), "uncaughtException");
+
+  uninstallLogRedaction();
+  console.error = realError;
+  process.off("uncaughtException", other);
+
+  check(captured.length === 1 && !captured[0]!.includes(SECRET), "it still redacts");
+  check(
+    process.listeners("uncaughtException").length === 0,
+    "and uninstalling takes its handlers back off, so a test can assert on a raw sink",
+  );
 }
 
 console.log("\ninstalling twice");
