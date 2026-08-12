@@ -35,8 +35,11 @@ import {
   type MemberCommand,
   type ProviderCommand,
 } from "./wsRelay.ts";
-import { Router } from "./http/router.ts";
+import { Router, tooMany } from "./http/router.ts";
 import { securityHeaders } from "./http/security.ts";
+import {
+  clientAddress, ipRuleFor, openRateLimiter, rateRefusal, retryAfterSeconds, type RateAction,
+} from "./http/rateLimit.ts";
 import { healthz, readyz } from "./http/health.ts";
 import { AUTH_ENV, resolveAuthConfig } from "./auth/config.ts";
 import { LocalIssuer } from "./auth/localIssuer.ts";
@@ -1162,7 +1165,36 @@ const securityResponseHeaders = securityHeaders();
 if (securityResponseHeaders["strict-transport-security"]) {
   console.log(`[server] HSTS: ${securityResponseHeaders["strict-transport-security"]}`);
 }
-const router = new Router({ cors: originPolicy, securityHeaders: securityResponseHeaders });
+
+// AND HOW OFTEN ANY OF IT MAY BE ASKED FOR.
+//
+// Redis when there is one, a Map when there is not — see http/rateLimit.ts, including why the
+// in-memory version is honest rather than adequate once there are six replicas, and why
+// `/healthz` and the sandbox control plane are deliberately not IP-limited.
+const rateLimiter = openRateLimiter();
+console.log(`[server] rate limiter: ${rateLimiter.kind}`);
+
+const router = new Router({
+  cors: originPolicy,
+  securityHeaders: securityResponseHeaders,
+  // THE PER-IP LAYER. Per-workspace-per-action is the other half and lives on the socket, where
+  // the workspace is — see the command gate below.
+  beforeHandle: async (req) => {
+    const action = ipRuleFor(req.path);
+    if (!action) return;
+    const address = clientAddress(
+      { forwardedFor: req.header("x-forwarded-for"), realIp: req.header("x-real-ip") },
+      req.ip,
+    );
+    const decision = await rateLimiter.take(action, address);
+    if (decision.ok) return;
+    console.warn(`[rate] ${address} refused ${action} for ${retryAfterSeconds(decision)}s`);
+    throw tooMany(rateRefusal(decision), retryAfterSeconds(decision), {
+      "x-ratelimit-limit": String(decision.limit),
+      "x-ratelimit-remaining": "0",
+    });
+  },
+});
 router.get("/healthz", healthz());
 router.get(
   "/readyz",
@@ -1452,7 +1484,24 @@ const relay = new WsRelay({
   // The relay resolves a context per connection; before this it was thrown away here and
   // every handler reached for the server's own instead. With one workspace the two are the
   // same object, which is exactly why it would have gone unnoticed until it was not.
-  onCommand: (cmd: ForwardedCommand, ctx: TenantContext) => {
+  onCommand: (cmd: ForwardedCommand, ctx: TenantContext) => void dispatchCommand(cmd, ctx),
+});
+
+/**
+ * Every socket command, after the per-workspace rate limit has had its say.
+ *
+ * THE PER-WORKSPACE HALF OF THE RATE LIMIT IS HERE rather than at the edge, and that is the
+ * reason it exists at all: only this process knows that `generate` costs a model call that
+ * writes a whole project while `listDatasets` costs a SELECT. A WAF sees one socket and one
+ * frame either way.
+ *
+ * Checked once, before dispatch, so there is a single place to read for "what is bounded" — and
+ * a command with no rule falls through untouched, which is most of them and is deliberate: a
+ * limit on reading is a limit on the UI working.
+ */
+async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promise<void> {
+  if (!(await admitCommand(ctx, cmd))) return;
+  {
     if (cmd.cmd === "run") void runAgent(ctx, cmd.input, cmd.provider, cmd.model, cmd.agentId);
     else if (cmd.cmd === "generate") generateAgent(ctx, cmd);
     else if (cmd.cmd === "planAgent") planAgent(ctx, cmd);
@@ -1473,8 +1522,67 @@ const relay = new WsRelay({
     else if (MEMBER_COMMAND_NAMES.has(cmd.cmd)) void handleMemberCommand(ctx, cmd as MemberCommand);
     else if (cmd.cmd === "loadUsage") void broadcastUsage(ctx);
     else void handleEvalCommand(ctx, cmd);
-  },
-});
+  }
+}
+
+/**
+ * Which bucket a command spends from, or null for one that costs a query and nothing else.
+ *
+ * A TABLE RATHER THAN A CHECK PER HANDLER, for the reason `capabilities.ts` is a table: the
+ * useful question is "what is limited", asked of all of them at once, and fifteen scattered
+ * checks answer it only for whoever reads all fifteen.
+ */
+const COMMAND_RATE_ACTIONS: Partial<Record<string, RateAction>> = {
+  generate: "agent.generate",
+  planAgent: "agent.plan",
+  edit: "agent.edit",
+  explain: "agent.explain",
+  run: "run.start",
+  branchRun: "run.start",
+  resumeRun: "run.start",
+  startEval: "eval.start",
+  addMcpServer: "mcp.discover",
+  rediscoverMcpServer: "mcp.discover",
+  inviteMember: "member.invite",
+  connectConnector: "connector.connect",
+};
+
+/**
+ * Spend a token for this command, and tell whoever sent it when there is none.
+ *
+ * The refusal goes back on the channel the command's own family already uses for errors, so it
+ * lands where the user is looking — a generation refusal in the build pane, an eval refusal on
+ * the eval channel. There is no general-purpose "the server said no" channel, and inventing one
+ * for this would put every refusal somewhere nobody has open.
+ *
+ * FAILS OPEN, deliberately and narrowly: if the limiter itself throws — Redis is down — the
+ * command proceeds and the failure is logged. A limiter is a protection against volume, not a
+ * boundary against a person; every actual authorisation happens elsewhere and is unaffected, and
+ * a Redis blip that stopped everybody generating would be an outage caused by the safety rail.
+ */
+async function admitCommand(ctx: TenantContext, cmd: ForwardedCommand): Promise<boolean> {
+  const action = COMMAND_RATE_ACTIONS[cmd.cmd];
+  if (!action) return true;
+  let decision;
+  try {
+    decision = await rateLimiter.take(action, ctx.workspaceId);
+  } catch (err) {
+    console.error(`[rate] limiter failed for ${action}, admitting:`, (err as Error)?.message ?? err);
+    return true;
+  }
+  if (decision.ok) return true;
+  const message = rateRefusal(decision);
+  console.warn(`[rate] workspace ${ctx.workspaceId} refused ${action} for ${retryAfterSeconds(decision)}s`);
+  if (action === "agent.generate" || action === "agent.plan") relay.broadcastGen(ctx, { type: "error", message });
+  else if (action === "agent.edit") relay.broadcastEdit(ctx, { type: "error", message });
+  else if (action === "agent.explain") relay.broadcastReply(ctx, { type: "error", agentId: "", message });
+  else if (action === "eval.start") relay.broadcastEval(ctx, { type: "error", message });
+  else if (action === "mcp.discover") relay.broadcastMcp(ctx, { type: "error", message });
+  else if (action === "member.invite") relay.broadcastMembers(ctx, { type: "error", message });
+  else if (action === "connector.connect") relay.broadcastConnections(ctx, { type: "error", message });
+  else relay.broadcastDebug(ctx, { type: "error", message });
+  return false;
+}
 
 // AND THE OTHER HALF: deliver what OTHER replicas publish to sockets THIS one holds.
 // deliverFromPeer, deliberately not broadcastTo — see wsRelay.ts's own note on why using the

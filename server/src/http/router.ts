@@ -99,6 +99,15 @@ export class HttpError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /**
+     * Headers this refusal needs on the response.
+     *
+     * Exists for exactly one of them: a 429 without `Retry-After` is a refusal that tells a
+     * client to guess, and a client that guesses guesses too soon. Carried on the error rather
+     * than assembled at the catch site, because the number is known where the decision is made
+     * and nowhere else.
+     */
+    readonly headers?: Record<string, string>,
   ) {
     super(message);
     this.name = "HttpError";
@@ -111,6 +120,9 @@ export const unauthorized = (m: string): HttpError => new HttpError(401, "unauth
 export const forbidden = (m: string): HttpError => new HttpError(403, "forbidden", m);
 export const notFound = (m: string): HttpError => new HttpError(404, "not_found", m);
 export const tooLarge = (m: string): HttpError => new HttpError(413, "payload_too_large", m);
+/** 429, with the honest wait. See http/rateLimit.ts for where the number comes from. */
+export const tooMany = (m: string, retryAfterS: number, extra: Record<string, string> = {}): HttpError =>
+  new HttpError(429, "rate_limited", m, { "retry-after": String(retryAfterS), ...extra });
 
 /** What a handler is given. Everything it needs about the request, and nothing more. */
 export interface HttpRequest {
@@ -201,6 +213,16 @@ export interface RouterOptions {
   securityHeaders?: Record<string, string>;
   /** The deadline for a route that does not state one. Defaults to the number in security.ts. */
   defaultTimeoutMs?: number;
+  /**
+   * Run before a matched route's handler, and throw to refuse it.
+   *
+   * One hook rather than a middleware chain, because there is one thing that needs to happen
+   * before every handler — the per-IP rate limit — and a chain is what you build when you have
+   * stopped being able to name them. It runs AFTER routing, so a request to a path that does not
+   * exist costs a bucket nothing, and BEFORE the body is read, so a refused request never
+   * allocates the megabytes it declared.
+   */
+  beforeHandle?: (req: HttpRequest) => Promise<void> | void;
 }
 
 export class Router {
@@ -210,6 +232,7 @@ export class Router {
   private cors?: CorsPolicy;
   private security: Record<string, string>;
   private defaultTimeoutMs: number;
+  private beforeHandle?: (req: HttpRequest) => Promise<void> | void;
 
   constructor(opts: RouterOptions = {}) {
     this.log = opts.log ?? ((line) => console.log(line));
@@ -217,6 +240,7 @@ export class Router {
     this.cors = opts.cors;
     this.security = opts.securityHeaders ?? {};
     this.defaultTimeoutMs = opts.defaultTimeoutMs ?? DEFAULT_HANDLER_TIMEOUT_MS;
+    this.beforeHandle = opts.beforeHandle;
   }
 
   get(path: string, handler: Handler, opts?: RouteOptions): this {
@@ -274,8 +298,9 @@ export class Router {
     return {
       "access-control-allow-origin": origin,
       // So a client can report the id of the request that failed, which is the entire reason
-      // it is on the response.
-      "access-control-expose-headers": "x-request-id",
+      // it is on the response — and so it can read the wait on a 429, which a browser otherwise
+      // hides from script exactly like every other unexposed response header.
+      "access-control-expose-headers": "x-request-id, retry-after",
       vary: "origin",
     };
   }
@@ -344,6 +369,7 @@ export class Router {
       // connection, and leave the handler to finish into a `respond` that no-ops because the
       // response already ended. A request that never answers is how a process runs out of
       // sockets; a request answered late by nobody is merely a slow query somebody has to fix.
+      await this.beforeHandle?.(req);
       const out = await withDeadline(route.handler(req), route.timeoutMs ?? this.defaultTimeoutMs, path);
       status = out.status ?? (out.body === undefined ? 204 : 200);
       this.respond(res, requestId, status, out.body, { ...cors, ...out.headers });
@@ -356,7 +382,8 @@ export class Router {
       // anything else is a bug, and its text describes the inside of the server.
       const message = status < 500 ? String((err as Error).message) : "the server failed to handle that";
       if (status >= 500) console.error(`[http] ${requestId} ${method} ${path}:`, err);
-      this.respond(res, requestId, status, { error: { code, message } }, cors);
+      // A refusal's own headers — `Retry-After` on a 429 — travel with it. See HttpError.
+      this.respond(res, requestId, status, { error: { code, message } }, { ...cors, ...(e.headers ?? {}) });
     }
     if (!this.quiet(path)) {
       this.log(`[http] ${requestId} ${method} ${this.redact(url)} ${status} ${Date.now() - started}ms`);
