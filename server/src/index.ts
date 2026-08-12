@@ -18,6 +18,7 @@ import { RunPool, type RunPoolEvents } from "./runPool.ts";
 import { TraceStore } from "./store.ts";
 import { migrate } from "./db/migrate.ts";
 import { describePartitions, ensurePartitions } from "./lifecycle/partitions.ts";
+import { RetentionSweeper, describeSweep } from "./lifecycle/retention.ts";
 import { openDb } from "./db/open.ts";
 import { newRequestId, systemContext, systemContextFor, type TenantContext } from "./db/tenant.ts";
 import { EvalStore, type Rubric, type RubricCriterion } from "./evalStore.ts";
@@ -934,6 +935,47 @@ const sampleStoredBytes = (): void => {
 };
 sampleStoredBytes();
 setInterval(sampleStoredBytes, SAMPLE_INTERVAL_MS).unref();
+
+// AND WHAT EACH WORKSPACE HAS STOPPED BEING ENTITLED TO KEEP.
+//
+// `retentionDays` has been on every plan since Session 6, with a note saying Session 8 would
+// enforce it; until this line it was a promise nothing kept. A trace holds the body of somebody's
+// email and rows out of somebody's database, so "we keep it for fourteen days" has to be a thing
+// that happens rather than a thing on a pricing page.
+//
+// DAILY, AND NOT AT BOOT. Every other sweeper in this file runs once at startup because it is
+// reconciling something a crash left behind — this one is deleting data, and a deployment that
+// restarts twenty times during an incident should not delete twenty times while somebody is
+// trying to read a trace to work out what happened. Unref'd, like all of them.
+const retention = new RetentionSweeper({
+  db,
+  workspaces: async (ctx) => {
+    const ids = await bootIdentity.listWorkspaceIds(ctx);
+    const out: { id: string; plan: string }[] = [];
+    for (const id of ids) {
+      const ws = await bootIdentity.workspaceById(systemContextFor(id, newRequestId()), id);
+      out.push({ id, plan: ws?.plan ?? "free" });
+    }
+    return out;
+  },
+  // A workspace may have negotiated a longer retention than its plan gives. The same overrides
+  // the budget gate reads, from the same row — two places deciding how long data lives would
+  // eventually give two answers, and one of them would be the one somebody was promised.
+  overridesFor: async (ctx) => (await billing.balance(ctx)).limit_overrides,
+  checkpoints,
+  objects,
+  log: (line) => console.log(line),
+});
+const sweepRetention = (): void => {
+  void retention
+    .sweep()
+    .then((report) => {
+      const line = describeSweep(report);
+      if (line) console.log(line);
+    })
+    .catch((err) => console.error("[retention] sweep failed:", (err as Error)?.message ?? err));
+};
+setInterval(sweepRetention, 24 * 3_600_000).unref();
 
 // THE FILES, AS VERSIONS.
 //
