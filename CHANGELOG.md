@@ -8,6 +8,95 @@ release notes and the commits in that release's range.
 
 ---
 
+## Unreleased : Cost Metering, Budgets, and Billing
+
+Session 6 of the hosted migration. The cost arithmetic is untouched — `runtime/pricing.json` is
+still the one table both runtimes read, cost is still summed from `steps` and never from
+`runs.cost`, and an unpriced model still costs `null` rather than `$0`. What is new is where those
+numbers are written down, what may be started against them, and whose money is being spent.
+
+### Added
+
+- **`usage_events`** — one row per metered thing, with `kind` (what was bought), `payer` (whose
+  money bought it), `cost_usd` and `cost_known`. Fed from the ingest chain, one row per `llm_call`
+  step, keyed by the step's own id so a redelivered batch cannot bill twice. Eight kinds:
+  `llm.provider`, `llm.judge`, `llm.generation`, `llm.plan`, `llm.edit`, `llm.explain`,
+  `sandbox.seconds`, `storage.bytes`.
+- **`workspace_balances` + `billing_holds`** — credit, what is reserved against it, and the rows
+  that make a reservation releasable. Taking a hold is one atomic `UPDATE` whose `WHERE` is the
+  check, so ten simultaneous runs against a balance that covers three admit exactly three.
+- **`plans` + `subscriptions` + `billing_webhook_events`**, and `server/src/billing/plans.ts`,
+  which is where every plan LIMIT lives. The table holds only what varies per deployment (a price
+  id, whether a plan is purchasable) and the two are checked against each other at boot.
+- **`BudgetGate`** — the pre-dispatch gate for interactive runs and evals. The ceiling bounds what
+  is STARTED, never what is spent; a fan-out is re-checked on every pump; every refusal names the
+  figure, the limit, the plan that set it, the window and the two things that would clear it.
+- **`PlatformKeyGate`** — the platform's own key, lent to a workspace that has none, behind a
+  global kill switch (`JAROKU_PLATFORM_KEY=off`, read per call), the plan's own feature flag, and
+  a per-workspace ceiling that is deliberately a *different number* from the budget ceiling.
+- **`WorkspaceProviderKeys`** — a workspace's own provider keys, through `SecretStore`, proved
+  with a models-list probe before they are stored, injected into a run's environment for the
+  provider that run named and no other.
+- **Stripe, by hand** — checkout, and a webhook whose signature is its authentication: verified
+  over the raw bytes, inside a five-minute replay window, tolerating a multi-secret rotation.
+  Plus a subscription state machine in which a failed renewal does **not** downgrade.
+- **A Usage tab**, with the period total against its ceiling, what the platform paid against its
+  own, credit and holds, and a breakdown by agent, by run and by kind — plus a CSV export that
+  carries every caveat the screen does.
+- Nine suites: `test:plans`, `test:metering`, `test:balances`, `test:gate`, `test:eval-budget`,
+  `test:estimate`, `test:byok`, `test:platform-key`, `test:stripe`.
+
+### Changed
+
+- `estimateEval` gains an `affordability` block, computed from the same `BudgetGate.status` the
+  gate itself decides with — so the dialog before the button and the refusal after it are one
+  computation. Three states, kept distinct: refused, may-not-finish, and unknown-because-unpriced.
+- `providerStatus` takes the configured NAMES rather than reading `process.env`, and
+  `listProviders` takes the asking socket's context. Hosted, the process environment holds the
+  PLATFORM's key, and reading it would have told every workspace it has a provider connected
+  because the server does.
+- `SecretStore` gains `getForPlatformCall`, its second and last plaintext exit, for the workspaces
+  that opt their own key in to platform-side calls. Covered by the conformance suite on both
+  stores.
+- `RunPool`'s `exit` event carries `elapsedMs`. The pool launches the sandbox and hears it go, so
+  it is the only thing that knows how long the machine actually existed.
+- `workspaces.plan` gains its only writer, which appends an audit row in the same transaction.
+- `billing:read` is a MEMBER capability. A member whose run is refused for budget has to be able
+  to see the number it was refused against.
+
+### Fixed
+
+- **A per-cell cost that was a floor rendered, and exported, as a clean measurement.** The
+  per-leg rollup has flagged `costIncomplete` since the eval dashboard was written; the per-CELL
+  shape never carried it, though `eval_jobs.cost_complete` was in the table the whole time. The
+  drill-down now shows `≥` against the figure and the CSV gains a `cost_complete` column — three
+  states, not two: `cost_known: no` is "we could not price it at all", `cost_complete: no` is "we
+  priced some of it and this is a floor".
+- The four env-shaped rate and switch readers (`JAROKU_SANDBOX_USD_PER_SECOND`,
+  `JAROKU_STORAGE_USD_PER_GIB_MONTH`, `JAROKU_PLATFORM_KEY`) are read per call rather than at
+  import, so a rate change or a kill switch takes effect without a restart — the same trap
+  `queue/jobs.ts` was fixed for in the previous release.
+
+### Migrations
+
+`020` billing tables · `021` `usage_events.total_tokens` (the frozen event schema gives a Step one
+combined figure and no split, so a split-only usage table could record no tokens at all for the
+largest kind) · `022` `quantity` + `unit` (sandbox seconds and stored bytes are not measured in
+tokens) · `023` `own_key_for_platform` · `024` `usage_events.payer` · `025`
+`billing_webhook_events`.
+
+### Verification
+
+- The full suite is green except for the failures that reproduce identically at the pre-existing
+  base commit and are properties of this machine rather than the code: Windows `symlink` EPERM
+  (`test:object-keys`, `test:generation`, `test:edit-versions`, `test:read-only`,
+  `test:store-reads`), Windows `chmod` semantics (`test:env-writer`), Python extras not installed
+  (`test:pricing`, `test:mcp-isolation`, `test:checkpoint-threads`), and no Postgres
+  (`test:shape-parity`, `test:rls`, and the Postgres half of `test:tenancy`).
+- `npm run typecheck` clean on `server/` and `client/` at every commit.
+
+---
+
 ## v0.2.10 : Bug Fixes on Queue, Sandbox, and Distributed Execution Hardening
 
 A hardening pass across the sandbox session and the queueing session, looking specifically for

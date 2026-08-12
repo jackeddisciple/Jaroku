@@ -592,6 +592,15 @@ exists so a fresh checkout has something to run before anything has been generat
 | `queue/workerLoop.ts` | The admit loop a worker process runs, and the drain window that hands stragglers back. |
 | `queue/eventBridge.ts` | Cross-replica broadcast fan-out over Redis pub/sub, with the self-echo defence. |
 | `worker.ts` | The second entrypoint (`npm run worker`). Boots, requires Redis, drains nothing yet — see [queueing](#queueing-fairness-and-per-workspace-limits). |
+| `billing/usage.ts` | The eight metered kinds, the two payers, and the meter that turns steps and platform calls into ledger rows. |
+| `billing/plans.ts` | Every plan LIMIT, as data. Not the `plans` table — see [what each plan limits](#what-each-plan-actually-limits). |
+| `billing/balances.ts` | The atomic claim against a balance, the hold row it writes, and the sweeper that reclaims what nobody released. |
+| `billing/gate.ts` | The one place that answers "may this workspace start this", and the sentences it refuses with. |
+| `billing/platformKey.ts` | The kill switch, the plan gate and the separate ceiling on what the platform pays. |
+| `billing/providerKeys.ts` | Where a workspace's own key is stored, which run may receive it, and whether it may pay for platform calls. |
+| `billing/stripe.ts` / `subscriptions.ts` | The signature check and the checkout call; and the state machine that decides when a plan actually moves. |
+| `billing/rates.ts` / `storage.ts` | What sandbox time and storage cost this deployment, and the hourly sampler that meters bytes held. |
+| `http/billing.ts` | The two HTTP surfaces: checkout, and the webhook whose signature is its authentication. |
 
 ---
 
@@ -1489,7 +1498,8 @@ frozen event schema, and everything added since rides beside it.
 | `deploy` | Deployment snapshots, the pre-deploy plan, live stage transitions, scrubbed build-log lines, and the one-shot serve token |
 | `session` | The only channel about the CONNECTION rather than the work: `expiring`, `expired`, `revoked`, `workspace_changed`, `role_changed` |
 | `members` | Who is in the workspace, who has been invited, and the one-shot invite link |
-| `providers` | Which provider keys are set (`configured: true/false`, by name) and test results |
+| `providers` | Which provider keys are set (`configured: true/false`, by name), test results, and whether the workspace's own key pays for platform calls |
+| `billing` | What this workspace has spent this period, against which ceilings — see [cost metering](#cost-metering-budgets-and-billing) |
 | `reply` | Streaming "explain" answers |
 | `log` | stderr lines and parse errors, for visibility |
 
@@ -1503,7 +1513,8 @@ frozen event schema, and everything added since rides beside it.
 `loadEvalResults` · `listEvals` · `loadRubric` · `saveRubric` · and the MCP set:
 `listMcpServers` · `addMcpServer` · `removeMcpServer` · `rediscoverMcpServer` ·
 `setMcpServerAuth` · `setMcpToolImpact` · `resolveMcpConfirm` · and the provider set:
-`listProviders` · `setProviderKey` · `testProviderKey` · and the deploy set: `listDeployments` · `planDeploy` ·
+`listProviders` · `setProviderKey` · `testProviderKey` · `setOwnKeyForPlatform` · and
+`loadUsage` · and the deploy set: `listDeployments` · `planDeploy` ·
 `deploy` · `cancelDeploy` · `forgetDeployment` · `loadDeployLogs` · `setRailwayToken` ·
 `testRailwayToken` · and the membership set: `listMembers` · `inviteMember` · `revokeInvite` ·
 `setMemberRole` · `removeMember`
@@ -1590,6 +1601,13 @@ to happen because a browser cannot put a header on a WebSocket:
 | `JAROKU_RETRY_BASE_MS` | `2000` | Base for exponential retry backoff |
 | `JAROKU_MCP_TIMEOUT_MS` | `10000` | Per-request ceiling during MCP discovery |
 | `JAROKU_MCP_DISCOVERY_MS` | `30000` | Whole-discovery ceiling, so slow pages can't stall forever |
+| `JAROKU_PLATFORM_KEY` | on | `off` / `0` / `false` / `no` stops the platform's provider key being lent to any workspace, without a restart. The kill switch for a free tier being farmed — see [BYOK and the platform key](#byok-and-the-platform-key) |
+| `JAROKU_SANDBOX_USD_PER_SECOND` | `0` | What a second of sandbox wall clock costs this deployment. Zero means it is not charged for, which is a priced zero and not an unknown |
+| `JAROKU_STORAGE_USD_PER_GIB_MONTH` | `0` | What a GiB held for a month costs. Per month because that is the unit every object store quotes, so the number can be copied off an invoice rather than divided by hand |
+| `STRIPE_SECRET_KEY` | — | Payments are off until this AND the webhook secret are both set. An unverifiable webhook is worse than none |
+| `STRIPE_WEBHOOK_SECRET` | — | Verifies the webhook signature, which is that endpoint's whole authentication |
+| `STRIPE_SUCCESS_URL` / `STRIPE_CANCEL_URL` | — | Where a checkout returns the browser |
+| `STRIPE_API_BASE` | `https://api.stripe.com` | Overridable to point at a fixture rather than at Stripe |
 | `RAILWAY_API_TOKEN` | — | Your Railway **account** token. Written by the deploy panel, never by hand |
 | `JAROKU_RAILWAY_API` | `https://backboard.railway.com/graphql/v2` | Railway's GraphQL endpoint |
 | `JAROKU_RAILWAY_CLI` | `railway` | The CLI binary used to upload a project |
@@ -1761,6 +1779,17 @@ npm run test:event-bridge # self-echo, no re-publish, a garbage message; cross-p
 npm run test:eval-off-trace # twenty eval runs stay off `trace` even across replicas
 npm run test:eval-dispatch # enqueue → admit → run → retry/exhaust, through the real dispatcher
 npm run loadtest:queue   # N workspaces x M jobs: admit p50/p95, fairness ratio, head-of-line
+
+# cost, budgets and billing — see "Cost metering, budgets, and billing"
+npm run test:plans       # every plan complete, the nesting nests, table and code agree at boot
+npm run test:metering    # cost from steps, redelivery, unpriced-not-zero, a branch bills nothing
+npm run test:balances    # ten simultaneous runs against one balance, and no overdraft
+npm run test:gate        # the ceiling bounds what is STARTED; a refusal names what would clear it
+npm run test:eval-budget # a fan-out is many starts; the running job is never killed
+npm run test:estimate    # range, basis, null-for-unpriced — and affordability from the same gate
+npm run test:byok        # a key reaches its own run's provider and nothing else
+npm run test:platform-key # the kill switch, the plan, and a ceiling on what WE pay
+npm run test:stripe      # signature, replay window, rotation, and the state machine
 
 # auth — see "Authentication and membership"
 npm run test:http        # the HTTP layer: error envelope, body caps, log redaction
@@ -2522,6 +2551,273 @@ slot. Each is described in its own commit.
 
 ---
 
+## Cost metering, budgets, and billing
+
+Session 6 of the hosted migration. The arithmetic did not change: `runtime/pricing.json` is still
+the one table both runtimes read, cost is still summed from `steps` and never from `runs.cost`,
+and an unpriced model still costs `null` rather than `$0`. What this session adds is **where
+those numbers are written down, what may be started against them, and whose money is being
+spent** — enforcement, not new maths.
+
+### The ledger
+
+Every metered thing is a row in `usage_events`, and every row says four things: what was bought
+(`kind`), whose money bought it (`payer`), what it cost, and whether that cost is an answer.
+
+| Kind | What it is | Who pays under BYOK |
+|---|---|---|
+| `llm.provider` | the agent's own model calls, from its trace steps | the workspace |
+| `llm.judge` | the eval judge — eval overhead, never a provider's agent cost | the platform |
+| `llm.generation` · `llm.plan` · `llm.edit` · `llm.explain` | the platform thinking on a workspace's behalf | the platform |
+| `sandbox.seconds` · `storage.bytes` | infrastructure | the platform |
+
+**`kind` does not say who paid, which is why `payer` exists.** An `llm.provider` call made on a
+workspace's own key is their bill; the identical call on ours is ours. A platform-key ceiling
+that counted by kind would throttle somebody for spending their own money. It cannot be inferred
+later either: whether a run used its workspace's key depends on what was configured *at the
+time*, and a workspace that connects a key tomorrow would retroactively change what today's rows
+mean. So it is recorded where the run's environment is assembled, which is the only place that
+knows.
+
+**`cost_usd` is nullable and `cost_known` is not**, which is "unknown is not zero" written as a
+schema. A NULL cost with `cost_known = false` says we metered real tokens against an unpriced
+model; a `0` with `cost_known = true` says the model is genuinely free, which the dry-run
+provider is. Every rollup carries the count of rows it could not price, so a total is never
+presented without the flag that says it is a floor.
+
+**The idempotency key is what makes at-least-once ingestion safe for billing.** A usage row is
+*derived* from a step rather than sent as one, so it has no id of its own to lean on — the
+derivation names itself from the step's id, which is the one thing that survives redelivery.
+Anything from the moment of ingestion would charge a redelivered batch twice, and there will be
+redelivered batches. The judge's own calls key on `(job, attempt)` for the same reason; the four
+synchronous platform calls key on a fresh uuid, deliberately, because they are not redeliverable
+and a derived key would silently un-bill the second of two genuine generations of the same brief.
+
+Two things are metered that are not model calls. **Sandbox seconds are wall clock, not CPU** — a
+micro-VM is reserved for the whole time it exists, and billing CPU would charge the agent that
+waits on I/O less than the one that spins, which is backwards from what the platform pays for.
+**Storage is sampled hourly rather than metered on write**: a version publish *is* an event, so
+metering bytes as they are written looks like it fits — and it would charge a workspace once for
+a file and nothing at all for keeping it, which is the opposite of what an object store bills.
+Each sample is keyed by `(workspace, clock hour)`, so several replicas sampling the same hour
+produce one charge.
+
+### What may be started
+
+Two gates, and they protect different people.
+
+```
+                    ┌──────────────────────────────────────────────┐
+  a run, an eval ──▶│  BudgetGate — has this workspace already      │
+                    │  spent more than IT is allowed to?            │
+                    └───────────────────┬──────────────────────────┘
+                                        │  under the ceiling
+                    ┌───────────────────┴──────────────────────────┐
+                    │  Balances — is there platform credit to       │  only when there is
+                    │  cover it? Claimed atomically, and held.      │  a balance at stake
+                    └───────────────────┬──────────────────────────┘
+                                        │  no key of its own
+                    ┌───────────────────┴──────────────────────────┐
+                    │  PlatformKeyGate — kill switch, plan, and a   │
+                    │  SEPARATE ceiling on what WE pay.             │
+                    └──────────────────────────────────────────────┘
+```
+
+**The ceiling bounds what is STARTED, not what is spent.** A workspace under its limit may start
+a run that takes it over; a run already going is never killed. Stopping mid-graph would spend the
+money and throw away the result, which is the rule the eval budget has followed since the eval
+engine landed. The consequence is stated rather than hidden: a final total can exceed the ceiling
+by at most the cost of what was already in flight. A fan-out is checked on every pump rather than
+once at the button, because five hundred jobs are five hundred things being started.
+
+**A hold, because checking a balance first is not a check.** Ten runs each read the same balance,
+each conclude there is room, and all ten start — no care at the call site closes that, because
+the call sites are on different machines. So the check and the claim are one statement:
+
+```sql
+UPDATE workspace_balances SET reserved_usd = reserved_usd + $2
+ WHERE workspace_id = $1 AND (balance_usd - reserved_usd) >= $2
+```
+
+Zero rows means refused. It is the same shape as the queue's Lua admit script and for the same
+reason: the database is the only thing that can arbitrate between two requests that arrive
+together.
+
+**And a hold is a row, not a number.** Something has to move that counter back by exactly the
+same amount later, including when the process that took it is gone — Session 5 learned this in
+the small when a per-workspace interactive reservation was taken for a run that never started and
+held for the lease's full hour. Money is the worse version: a leaked slot costs a workspace an
+hour, a leaked hold costs it the balance. So a hold carries an amount and an expiry, and a
+sweeper reclaims what nobody released.
+
+**Releasing and settling are two movements.** A release frees what was *held*; a settle deducts
+what was *used*, read from `usage_events` and never from the estimate the hold was sized with.
+They are almost never the same number, and a settle may exceed its hold — a run already in flight
+completes, and clamping would mean the platform ate the difference every time an estimate ran
+low, which is the direction estimates run. An eval settles on `trueSpend`: every attempt of every
+job plus the judge, never the comparison figure, which counts successes only.
+
+**Every refusal names what would clear it.** The figure, the limit, the plan that set it, the
+window, and the two things that would change it. And a period total that is a floor says "at
+least" and says why — a number somebody may reasonably dispute is one they should hear about from
+us rather than derive from the itemisation.
+
+### BYOK, and the platform key
+
+Bring-your-own-key is the enforced default and the platform's token spend under it is zero. A
+workspace's key goes through `SecretStore` — locally still `runtime/.env` through the one writer,
+hosted envelope-encrypted ciphertext scoped to the workspace — and reaches exactly one
+destination.
+
+**A run gets the key for the provider it named, and no other.** An agent on Anthropic does not
+receive `OPENAI_API_KEY` even when the workspace has configured one. That is the least-privilege
+rule the egress policy already applies to the socket, applied to the credential, and it matters
+more here because what receives it is model-written Python.
+
+**A key is proved before it is stored.** The probe is a models-list call: it authenticates as
+conclusively as a completion and costs nothing, which matters because the alternative is billing
+somebody for finding out whether they typed their own key correctly. Without it, the first thing
+to discover a mistyped key is a run — after a sandbox start and a Python import — reporting
+somebody else's 401.
+
+**A workspace's key does not pay for the platform's own thinking unless somebody said so.**
+Planning, generation, the fix loop, explain and the judge bill to the platform's key by default,
+because using a tenant's credential for a call they did not ask for is a use they did not consent
+to whatever the accounting says. `own_key_for_platform` is how somebody says otherwise; it
+defaults to false and no migration turns it on. Opting in with no key falls back to the
+platform's rather than failing every generation with an authentication error; turning it *on*
+with no key is refused outright, because being billed platform credit while believing otherwise
+is a surprise on an invoice rather than an error at the moment of the mistake.
+
+That opt-in is why `SecretStore` gained its second — and last — plaintext exit,
+`getForPlatformCall`. The rule it must not break is that no method returns a value to a *request
+handler*; `getForRun` is not an exception to that, it is a value flowing **into** an execution and
+never back out, and a platform-side model call is the same shape. Expressing it as `getForRun`
+against a synthetic run id would have been worse in two specific ways: the hosted store resolves
+a workspace *from* the run id, so a made-up one silently returns nothing, and `last_used_at`
+would be attributed to a run that does not exist.
+
+The other path is a workspace with no key of its own running on ours, and it is the only place in
+this system where the platform's money is spent by somebody else's decision. Three gates, in
+order:
+
+1. **`JAROKU_PLATFORM_KEY=off`** stops the key being lent to anybody, immediately, without
+   touching a plan or a workspace or a database. It exists for one situation — somebody is
+   farming the free tier faster than the per-workspace ceilings are catching it — and a response
+   that requires a migration is not a response. Read per call, so flipping it needs no restart,
+   and it answers to `off` / `0` / `false` / `no` in any case: a kill switch that recognised one
+   spelling is one somebody sets to `0` at three in the morning and watches do nothing.
+2. **The plan.** A refusal here carries no figure: the workspace is not being throttled, it is
+   being told about the arrangement it agreed to.
+3. **`platformKeyCeilingUsd`**, which is a *different number* from `budgetCeilingUsd`. That one
+   bounds what a workspace starts, whoever pays, and protects the user from their own fan-out.
+   This bounds what we pay, and protects the platform. A workspace can sit on either while
+   nowhere near the other, in both directions. Sandbox seconds and stored bytes count against it,
+   because a free tier farmed for compute rather than for tokens shows up in no token counter.
+
+### What each plan actually limits
+
+The numbers live in `server/src/billing/plans.ts`, not in the `plans` table — the same reasoning
+as roles in `auth/capabilities.ts` and job classes in `queue/jobs.ts`. What *is* in the table is
+the part that genuinely varies per deployment: which payment-provider price a plan maps to, and
+whether it can be bought today. The two are checked against each other at boot, in both
+directions: a row nothing defines would resolve to the free limits, so a workspace that paid for
+Scale would get a free workspace's ceiling with no error and no symptom except its own
+throughput.
+
+| | Free | Pro | Scale |
+|---|---|---|---|
+| Monthly credit | $5 | $50 | $250 |
+| Budget ceiling — what may be **started** | $5 | $200 | none |
+| On **our** provider key | $2 | $50 | $250 |
+| Interactive runs at once | 1 | 3 | 10 |
+| Eval jobs at once | 2 | 8 | 32 |
+| Trace retention | 14 days | 90 days | 365 days |
+| Seats | 3 | 10 | unlimited |
+| Deploy | — | ✓ | ✓ |
+
+Plans **nest by spreading**, so a limit added to the base is a limit every plan has — written as
+three independent objects, the day somebody adds a flag and updates one of them is the day a paid
+plan silently has less than a free one. `test:plans` asserts the direction holds on every axis.
+
+A workspace's own negotiated exceptions live in `workspace_balances.limit_overrides`, and one
+detail there is load-bearing: `budgetCeilingUsd: null` is a real answer ("no ceiling from the
+plan") and has to be distinguishable from the key being absent, so `hasOwnProperty` decides
+rather than truthiness. An override of `0` is kept too, because `0` is what suspending a
+workspace sets. An unrecognised key is ignored rather than refused — a workspace whose overrides
+were written by an older version must fall back to its plan, not fail to resolve at all.
+
+The period is the **calendar month, in UTC**, and it is stated rather than derived from a
+subscription's anniversary: a period that moved per workspace would mean two people looking at
+"this month's spend" are looking at different windows, and a support conversation about a figure
+would start by working out which.
+
+### Payments
+
+Stripe by hand — no SDK, for the reason there is no OpenAI SDK on the Node side and no framework
+under the HTTP router. What an SDK would give here is a form-encoder and an HMAC, and a
+dependency in the path a payment takes is a supply chain in the path a payment takes.
+
+The webhook is public and unauthenticated by construction, so **the signature is the
+authentication**. It is checked over the raw bytes before anything parses them, because
+`JSON.parse` followed by `JSON.stringify` does not reproduce what was signed. The timestamp is
+inside the MAC and has to be recent, which is what makes replay bounded rather than theoretical —
+a signature stays validly signed forever, so one captured `invoice.paid` would otherwise replay a
+year later and verify perfectly. More than one `v1=` is normal during a secret rotation, and all
+of them are tried.
+
+The state machine's load-bearing transition is the one it is most tempting to get wrong: **a
+failed renewal does not downgrade.** A card that expired on renewal day is the ordinary case, the
+provider retries for weeks, and stopping somebody's agents while their payment is still being
+attempted is worse than a fortnight of unpaid Pro — so they are told instead, on the `providers`
+channel. `canceled` and `unpaid` are what downgrade. A status this system has never heard of
+moves nothing at all: a default that downgraded would turn a vocabulary change into an outage for
+paying customers, and one that upgraded would give the plan away. A completed checkout does not
+grant the plan either — it means the form was submitted, not that the charge settled.
+
+`billing_webhook_events` records what has been acted on, and it is a separate table from
+`usage_events.idempotency_key` rather than another key in it: a usage row is idempotent because
+writing it twice records one charge twice, and a webhook is idempotent because *acting* twice
+applies a state transition twice — a plan change reapplied after a later one superseded it, a
+cancellation undone by its own retry. An event that fails mid-transition is left unprocessed on
+purpose, because that is the queue an operator replays.
+
+### The dashboard, and the export
+
+The Usage tab shows the period total against its ceiling, what the platform paid against its own,
+credit and what is held, and a breakdown by agent, by run and by kind. **Nothing on it is
+computed client-side** — every figure comes from the same `BudgetGate.status` the server refuses
+a run with, so the number on the page and the number in a refusal are one computation. A billing
+page that disagrees with a refusal is worse than no billing page.
+
+Every figure that could be incomplete carries its flag, on screen and in the export. Session 6
+found one place where that was not true: the per-leg rollup has flagged `costIncomplete` since
+the eval dashboard was written, and the per-**cell** shape never carried it — so a cell whose
+cost was a floor rendered, and exported, as a clean measurement. There are three states, not two.
+`cost_known: no` means we could not price it at all; `cost_complete: no` means we priced some of
+it and the number beside it is a floor.
+
+### What this session does not do
+
+- **Retention is decided but not enforced.** `retentionDays` is a plan promise made here and kept
+  in Session 8's sweeper; nothing deletes a trace yet.
+- **Seat limits are a number, not a gate.** `seats` is written down and the invite path does not
+  consult it.
+- **A workspace's monthly credit is not granted on a schedule.** `monthlyCreditsUsd` describes
+  what a plan includes; credit arrives from `invoice.paid` and from an operator, and a periodic
+  grant is a scheduler this session did not add.
+- **A pause/resume cycle is billed as its first segment only.** Sandbox seconds key on the run id
+  alone, and a resumed run is a new subprocess under the same id. That undercharges, which is the
+  right direction to be wrong in while the alternative is a key derived from a timestamp that
+  would double-charge a redelivered exit; a segment counter is the proper fix and is not here.
+- **The plan does not yet change the dispatcher's caps.** `planConcurrency` returns the right
+  number for a class a plan speaks about, and the queue still reads `jobClassConfig`'s flat one.
+  Composing them is a change to the admit path rather than to this file, and it is the next step.
+- **There is no invoice.** Everything here is metering and enforcement; producing a document
+  somebody could file is a payment-provider feature this session leans on rather than rebuilds.
+
+---
+
 ## Authentication and membership
 
 Session 2 of the hosted migration. There are now real users, real sessions, and a client that
@@ -2893,7 +3189,7 @@ that is the fact a future cleanup will not know.
 |---|---|---|
 | browser `localStorage` | `jaroku.token` (the bearer token), `jaroku.workspace` (the last workspace), `jaroku.onboarding.<user id>` (where a person is up to in the first-run flow — *whether* they finished it is `users.onboarded_at`, on the server), `jaroku.input.<workspace id>.<agent>` (last test input). Both of the last two are keyed so a browser two people share never hands one's data to the other. Deleting the first two signs you out; the rest lose nothing that matters | n/a |
 | `server/.devauth.json` | The **local issuer's** RS256 signing key, `chmod 600`. Only exists when no `JAROKU_AUTH_ISSUER` is set | No |
-| `server/jaroku.db` | The local database. Identity (`users`, `workspaces`, `workspace_members`, `workspace_invites`, `ws_tickets`, `audit_log`) + agents (`agents`, `agent_versions`) + secrets (`secret_refs`, `workspace_secrets`, `workspace_data_keys`) + traces (`runs`, `steps`) + eval control plane (`datasets`, `dataset_examples`, `rubrics`, `eval_runs`, `eval_jobs`, `eval_scores`) + MCP registry (`mcp_servers`, `mcp_tools`) + deploy records (`deployments`, `deployment_logs`). Every one of them carries a `workspace_id` | No |
+| `server/jaroku.db` | The local database. Identity (`users`, `workspaces`, `workspace_members`, `workspace_invites`, `ws_tickets`, `audit_log`) + agents (`agents`, `agent_versions`) + secrets (`secret_refs`, `workspace_secrets`, `workspace_data_keys`) + traces (`runs`, `steps`) + eval control plane (`datasets`, `dataset_examples`, `rubrics`, `eval_runs`, `eval_jobs`, `eval_scores`) + MCP registry (`mcp_servers`, `mcp_tools`) + deploy records (`deployments`, `deployment_logs`) + billing (`workspace_balances`, `usage_events`, `billing_holds`, `subscriptions`, and the platform-level `plans` and `billing_webhook_events`). Every one of them carries a `workspace_id`, except the last two, which are the platform's own catalogue and its delivery log | No |
 | Postgres (`JAROKU_PG_URL`) | The same schema, hosted, with RLS. Selected by `JAROKU_DB_DRIVER=postgres`; see [the tenancy model](#the-tenancy-model) | No |
 | `runtime/.objects/` | The **local object store**: every agent version, every in-flight staging copy, every export, under `ws/<workspace_id>/…`. Selected by `JAROKU_OBJECT_STORE=fs`, which is the default — see [storage isolation](#storage-isolation) | No |
 | R2 / S3 (`JAROKU_OBJECT_STORE=s3`) | The same keys, hosted | No |
@@ -2905,6 +3201,7 @@ that is the fact a future cleanup will not know.
 | `runtime/.env` | Provider, connector and MCP server keys, when `JAROKU_SECRET_STORE=dotenv` (the default) | No |
 | `workspace_secrets` / `workspace_data_keys` | The same credentials, hosted: envelope-encrypted ciphertext, per-workspace data key. Never a plaintext column | No |
 | `secret_refs` | What each workspace has configured — names, providers, last use. **No value column, on purpose** | No |
+| `usage_events` | One row per metered thing: what was bought, whose money bought it, what it cost, and whether that cost is an answer. Traces contain user data; this contains only the shape and price of a call | No |
 | `runtime/agents/<id>/mcp_tools.json` | An agent's MCP grant: servers, tools, schemas, impact. Host-written, read-only to edits | No (with the project) |
 | `runtime/agents/<id>/{serve.py,Dockerfile,.dockerignore,pyproject.toml}` | Deploy tooling. Host-written, read-only to edits, regenerated on every deploy | No (with the project) |
 

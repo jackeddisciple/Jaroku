@@ -61,6 +61,11 @@ The shortest list, with the tests that defend them:
 | One workspace's backlog never delays another's work | `test:dispatcher`, `loadtest:queue` |
 | A job survives the worker that was running it | `test:chaos`, `test:worker-loop` |
 | Eval runs stay off the live trace channel, across replicas too | `test:eval-off-trace` |
+| A redelivered trace batch cannot bill twice | `test:metering` |
+| Concurrent runs cannot overdraw one balance | `test:balances` |
+| A ceiling bounds what is STARTED, never what is spent | `test:gate`, `test:eval-budget` |
+| A workspace's provider key reaches its own run's provider and nothing else | `test:byok` |
+| An unsigned or replayed payment webhook changes nothing | `test:stripe` |
 
 ## Commits
 
@@ -84,6 +89,39 @@ Two entries, both in the same commit as the command:
    unrelated one shows an error about something it never did. `log` is a legitimate answer for a
    command whose own channel carries data rather than errors — but it has to be written down, so
    "log because that is right" and "log because nobody decided" cannot look the same.
+
+## A new thing that costs money needs a kind, a payer and a key
+
+Money is metered in one place — `server/src/billing/usage.ts` — and a row that reaches
+`usage_events` without all three of those is a row nobody can defend against an invoice.
+
+1. **A `kind`**, from the closed list. Deciding which one means looking at every other kind at
+   once, which is the point of the list being closed.
+2. **A `payer`.** `kind` says what was bought; this says whose money bought it, and under BYOK
+   those are different questions about the same row. It cannot be recovered later — whether a
+   run used its workspace's key depends on what was configured at the time — so it is recorded
+   where the call is set up, not inferred where the row is read.
+3. **An idempotency key that does not vary between two deliveries of the same event.** No
+   timestamp, no fresh uuid at the call site, unless the thing genuinely is not redeliverable —
+   and if it is not, say so in a comment, because a random key looks like a mistake.
+
+And the rule that outranks all three: **an unpriced call is metered with a null cost, never
+dropped and never zero.** Dropping it makes an unpriced model look like a model nobody used;
+zeroing it makes a paid call look free. Both turn a workspace's total into a confident undercount
+instead of a flagged one. `npm run test:metering` asserts each.
+
+## A new plan limit goes in `plans.ts`, not in the `plans` table
+
+Concurrency, credits, ceilings, retention and seat counts are data in
+`server/src/billing/plans.ts`, for the same reason roles and job classes are data in theirs. The
+table holds only what varies per deployment — a price id, and whether a plan can be bought today
+— and `npm run test:plans` fails at boot when the two disagree in either direction. A plan row
+nothing defines resolves to the FREE limits, so the failure it prevents is a workspace that paid
+for Scale quietly getting a free workspace's ceiling.
+
+Plans nest by spreading (`PRO` starts from `FREE`), and the suite asserts a paid plan is never
+worse than a free one on any axis. Add a limit to the base and every plan has it; add three
+independent objects and the day somebody updates one of them is the day that stops being true.
 
 ## A new job class needs a config entry, not a hardcoded number
 
