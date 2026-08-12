@@ -208,8 +208,29 @@ export function limitsFor(
     const v = overrides[key];
     switch (key) {
       case "monthlyCreditsUsd":
-      case "retentionDays":
+        // Zero is meaningful here: a workspace with no monthly credit is an ordinary arrangement.
         if (typeof v === "number" && Number.isFinite(v) && v >= 0) out[key] = v;
+        break;
+      case "retentionDays":
+        // STRICTLY POSITIVE, and this is the one bound in this function whose absence destroys
+        // data rather than blocking work.
+        //
+        // The sweeper reads this number as `now - retentionDays * a day` and deletes every run,
+        // step, checkpoint and export older than the result. At zero the cutoff is NOW: the next
+        // nightly pass takes the workspace's entire trace history, including the run that
+        // finished a second ago, and a trace is the product. There is no undo and no backup that
+        // distinguishes it from an intended deletion.
+        //
+        // A negative value was already ignored, and zero is far likelier than minus three: it is
+        // what an empty form field, a parsed empty string and a misplaced default all produce.
+        // Refusing both means the only way to reach it is a plan, and `plans.test.ts` asserts
+        // every plan's retention is positive.
+        //
+        // "Keep nothing" is therefore not expressible as an override, deliberately. It is
+        // indistinguishable from a typo at the point it is written and unrecoverable at the point
+        // it takes effect, so if it is ever wanted it should arrive as a named policy somebody
+        // has to spell out — the same argument concurrency makes two cases below about zero.
+        if (typeof v === "number" && Number.isFinite(v) && v > 0) out[key] = v;
         break;
       case "budgetCeilingUsd":
       case "platformKeyCeilingUsd":

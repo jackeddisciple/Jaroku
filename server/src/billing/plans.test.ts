@@ -119,6 +119,19 @@ console.log("\noverrides fold in without rewriting the plan");
   check(l.budgetCeilingUsd === 5, "a non-numeric ceiling is ignored rather than becoming NaN");
   check(l.retentionDays === PLANS.free.retentionDays, "a negative retention is ignored");
   check(l.concurrency["run.eval"] === 2, "a concurrency of zero is ignored — it would admit nothing, ever");
+  // AND A RETENTION OF ZERO, which is the same trap pointed at the data instead of at the work.
+  // The sweeper reads this as `now - 0` and deletes every run, step, checkpoint and export older
+  // than NOW — the whole trace history, including the run that finished a second ago, on the next
+  // nightly pass. Minus three was already refused; zero is what an empty field, a parsed empty
+  // string and a misplaced default all produce, and it was accepted.
+  check(
+    limitsFor("free", { retentionDays: 0 }).retentionDays === PLANS.free.retentionDays,
+    "a retention of ZERO is ignored too — it is a typo's value and its effect is unrecoverable",
+  );
+  check(
+    limitsFor("free", { retentionDays: 400 }).retentionDays === 400,
+    "...while a longer negotiated retention still applies",
+  );
   check(l.seats === PLANS.free.seats, "so is a seat count that is not a number");
   check(l.id === "free", "and an unrecognised key does not void the whole override object");
 }
