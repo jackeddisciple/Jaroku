@@ -26,6 +26,8 @@ import { sendLoadUsage, sendLoadRun } from "../lib/socket.ts";
 import { fmtCost, fmtTokens } from "../lib/format.ts";
 import { ICON, STATUS, TEXT } from "../lib/tokens.ts";
 import { EmptyState } from "./EmptyState.tsx";
+import { quietBtn } from "./buttons.ts";
+import { download, usageStem, usageToCsv } from "../lib/evalExport.ts";
 import { AlertTriangleIcon, DatabaseIcon, InfoIcon } from "./panelIcons.tsx";
 
 /** A date somebody reads, from an ISO timestamp. Never the time — a period boundary is a day. */
@@ -152,8 +154,19 @@ export function UsagePanel() {
     <div className="h-full overflow-y-auto px-4 py-3">
       <div className="flex items-baseline justify-between gap-3">
         <div className="text-[13px] font-medium text-ink">{usage.plan.label} plan</div>
-        <div className="text-[11px] text-faint">
-          {day(usage.periodStart)} – {day(usage.periodEnd)}
+        <div className="flex items-baseline gap-3">
+          <span className="text-[11px] text-faint">
+            {day(usage.periodStart)} – {day(usage.periodEnd)}
+          </span>
+          {/* The same rule as the eval exports, on the newest surface: every caveat on this
+              page survives into the file. See usageToCsv — an unpriced row is an empty cell
+              with `cost_known: no` beside it, never a zero somebody sums. */}
+          <button
+            className={quietBtn}
+            onClick={() => download(`${usageStem(usage)}.csv`, usageToCsv(usage), "text/csv")}
+          >
+            Export CSV
+          </button>
         </div>
       </div>
 

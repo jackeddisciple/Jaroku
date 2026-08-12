@@ -165,6 +165,15 @@ export interface ExampleCell {
   /** The ordinary run this job produced — the handle drill-down opens the full trace with. */
   runId: string | null;
   costUsd: number | null;
+  /**
+   * False when some llm_call in this cell's run had tokens but no cost — `costUsd` is a FLOOR.
+   *
+   * The per-leg rollup has carried this since the dashboard was written (`costIncomplete`), and
+   * the cell did not — so a cell whose cost was an undercount exported as a clean number with
+   * `cost_known: yes` beside it, which is exactly the laundering the export rule forbids. The
+   * flag existed on the job row the whole time; it simply never made it this far.
+   */
+  costComplete: boolean;
   latencyMs: number | null;
   attempt: number;
   error: string | null;
@@ -302,6 +311,10 @@ export async function aggregateEval(
         status: j.status,
         runId: j.run_id,
         costUsd: j.cost_usd,
+        // `cost_complete` is stored as 0/1 — SQLite has no boolean — and 0 is the only value
+        // that means incomplete. Anything else, including a row written before the column
+        // existed, means nothing was found to be unpriced.
+        costComplete: j.cost_complete !== 0,
         latencyMs: j.latency_ms,
         attempt: j.attempt,
         error: j.error,

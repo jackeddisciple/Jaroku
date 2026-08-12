@@ -9,7 +9,7 @@
 // unscored run is an empty score WITH the judge's reason. Both are machine-readable and
 // neither can be mistaken for a measurement.
 
-import type { EvalResults } from "../types.ts";
+import type { EvalResults, UsageSnapshot } from "../types.ts";
 
 /** RFC-4180 field: quote when the value contains a delimiter, quote, or newline. */
 function cell(v: unknown): string {
@@ -31,7 +31,7 @@ export function resultsToCsv(results: EvalResults): string {
     "example", "input", "expected",
     "provider", "model", "status", "attempt",
     "score", "score_known", "score_note",
-    "cost_usd", "cost_known",
+    "cost_usd", "cost_known", "cost_complete",
     "latency_ms", "run_id", "error",
   ];
 
@@ -54,6 +54,12 @@ export function resultsToCsv(results: EvalResults): string {
         scoreKnown ? "" : (c.scoreError ?? "not scored"),
         costKnown ? c.costUsd : "",
         costKnown ? "yes" : "no",
+        // A THIRD state, and it is not a refinement of the other two. `cost_known: no` means we
+        // could not price this cell at all; `cost_complete: no` means we priced SOME of it and
+        // the number beside it is a floor. Without this column that second case exported as a
+        // clean measurement — the exact laundering this file exists to prevent, and it was
+        // happening on the per-cell export for as long as the per-leg rollup has flagged it.
+        c.costComplete ? "yes" : "no",
         c.latencyMs ?? "",
         c.runId ?? "",
         c.error ?? "",
@@ -100,6 +106,59 @@ export function summaryToCsv(results: EvalResults): string {
   ];
 
   return rows([header, ...body, ...totals]);
+}
+
+/**
+ * The usage dashboard, as a spreadsheet, with every caveat intact.
+ *
+ * Same rule as the eval exports and the same reason it needs restating: a spend figure lands in
+ * a spreadsheet and is quoted as fact, and the qualification that made it honest on screen is
+ * the first thing to fall off. So `cost_known` rides beside every total here too, at every level
+ * — the period, each agent, each run, each kind — and an unpriced row is an EMPTY cell rather
+ * than a zero.
+ *
+ * Sections rather than one wide table. An agent, a run and a kind are different units and a
+ * single flat sheet would need a `type` column and a lot of empty ones; a spreadsheet reader
+ * splits on the blank line, and a human reads it top to bottom.
+ */
+export function usageToCsv(usage: UsageSnapshot): string {
+  const out: unknown[][] = [
+    ["period_start", usage.periodStart],
+    ["period_end", usage.periodEnd],
+    ["plan", usage.plan.id],
+    // Empty, not zero, when nothing could be priced at all. `cost_known` beside it is what
+    // distinguishes "we spent nothing" from "we cannot tell you what we spent".
+    ["spent_usd", usage.spentUsd],
+    ["cost_known", usage.costKnown ? "yes" : "no"],
+    ["ceiling_usd", usage.ceilingUsd ?? ""],
+    ["headroom_usd", usage.headroomUsd ?? ""],
+    ["over_ceiling", usage.overCeiling ? "yes" : "no"],
+    ["platform_spent_usd", usage.platformSpentUsd],
+    ["platform_ceiling_usd", usage.platformCeilingUsd ?? ""],
+    ["credit_available_usd", usage.availableUsd],
+    ["credit_reserved_usd", usage.reservedUsd],
+    [],
+    ["agent", "runs", "tokens", "cost_usd", "cost_known"],
+    ...usage.byAgent.map((a) => [
+      a.label, a.runs, a.tokens, a.costKnown ? a.usd : "", a.costKnown ? "yes" : "no",
+    ]),
+    [],
+    ["run_id", "agent", "tokens", "cost_usd", "cost_known"],
+    ...usage.byRun.map((r) => [
+      r.runId, r.label ?? "", r.tokens, r.costKnown ? r.usd : "", r.costKnown ? "yes" : "no",
+    ]),
+    [],
+    ["kind", "payer", "tokens", "cost_usd", "cost_known"],
+    ...usage.byKind.map((k) => [
+      k.kind, k.payer, k.tokens, k.costKnown ? k.usd : "", k.costKnown ? "yes" : "no",
+    ]),
+  ];
+  return rows(out);
+}
+
+/** Short, sortable filename stem for a usage export. */
+export function usageStem(usage: UsageSnapshot): string {
+  return `jaroku-usage-${usage.periodStart.slice(0, 10)}`;
 }
 
 /** Everything, unmodified — the lossless form. */

@@ -73,7 +73,16 @@ function CellDetail({ cell, criteria }: { cell: ExampleCell; criteria: string[] 
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[11px]">
         <span className="font-mono text-ink">{cell.model}</span>
         <span className={cell.status === "succeeded" ? "text-muted" : "text-err"}>{cell.status}</span>
-        <span className="text-muted tabular-nums">{fmtCost(cell.costUsd)}</span>
+        {/* The floor marker, where the number is. `cost_complete` has ridden the per-leg rollup
+            since the dashboard was written and never reached the cell — so a cost that was an
+            undercount rendered, and exported, as a clean measurement. A "≥" is the smallest
+            thing that says otherwise and it goes beside the figure, not in a legend. */}
+        <span
+          className="text-muted tabular-nums"
+          title={cell.costComplete ? undefined : "some step reported tokens with no price — this is a floor"}
+        >
+          {cell.costComplete ? "" : "≥ "}{fmtCost(cell.costUsd)}
+        </span>
         <span className="text-muted tabular-nums">{fmtLatency(cell.latencyMs)}</span>
         {cell.attempt > 0 && (
           <span className="text-run" title="this job was retried after a transient failure">

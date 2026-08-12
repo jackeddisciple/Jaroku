@@ -11,9 +11,13 @@
 //
 //   npm run test:export
 
-import { resultsToCsv, resultsToJson, summaryToCsv } from "./evalExport.ts";
+import { resultsToCsv, resultsToJson, summaryToCsv, usageStem, usageToCsv } from "./evalExport.ts";
 import { parseCsv } from "./csv.ts";
-import type { EvalResults } from "../types.ts";
+import type { EvalResults, UsageSnapshot } from "../types.ts";
+
+/** The line ending RFC-4180 specifies and `evalExport` writes. Named so the assertions below
+ *  are about the export's content rather than about whatever this file's own endings are. */
+const CRLF = String.fromCharCode(13, 10);
 
 let fail = 0;
 const check = (n: string, ok: boolean, d = "") => {
@@ -39,11 +43,13 @@ const results: EvalResults = {
   rows: [
     { exampleId: "e1", input: `Where is order 1042, and "why" is it late?`, expected: "Shipped\nTuesday",
       cells: [
+        // A cell we COULD price, and only partly: some step reported tokens and no cost, so
+        // 0.00269 is a floor. The dangerous cell, because it looks exactly like a measurement.
         { jobId: "j1", provider: "anthropic", model: "claude-haiku-4-5", status: "succeeded", runId: "r1",
-          costUsd: 0.00269, latencyMs: 4100, attempt: 0, error: null, score: 0.18, scoreError: null,
+          costUsd: 0.00269, costComplete: false, latencyMs: 4100, attempt: 0, error: null, score: 0.18, scoreError: null,
           perCriterion: { correctness: 1, grounding: 2, tone: 2 }, rationale: 'Partly right, comma, "quoted"' },
         { jobId: "j2", provider: "mystery", model: "unreleased-x", status: "succeeded", runId: "r2",
-          costUsd: null, latencyMs: 700, attempt: 0, error: null, score: null,
+          costUsd: null, costComplete: true, latencyMs: 700, attempt: 0, error: null, score: null,
           scoreError: "judge failed: rate limit", perCriterion: null, rationale: null },
       ] },
   ],
@@ -66,6 +72,53 @@ check("UNSCORED is empty, never 0", col(r2, "score") === "", JSON.stringify(col(
 check("score_known flag distinguishes it", col(r1, "score_known") === "yes" && col(r2, "score_known") === "no");
 check("the judge failure reason is carried", col(r2, "score_note") === "judge failed: rate limit");
 check("run_id is exported so a row traces back to its trace", col(r1, "run_id") === "r1");
+
+// THE THIRD STATE, and the one that used to be lost. `cost_known: no` means we could not price
+// this cell at all. `cost_complete: no` means we priced SOME of it and the number beside it is a
+// floor — which, without a column of its own, exported as a clean measurement.
+check("a partly-priced cell exports its cost AND says the number is a floor",
+  col(r1, "cost_usd") === "0.00269" && col(r1, "cost_known") === "yes" && col(r1, "cost_complete") === "no");
+check("and a fully-priced-or-unpriced cell does not claim to be a floor",
+  col(r2, "cost_complete") === "yes");
+
+// --- usage ------------------------------------------------------------------------------
+//
+// The same rule on the newest surface. A spend figure lands in a spreadsheet and gets quoted as
+// fact, and the qualification that made it honest on screen is the first thing to fall off.
+{
+  const usage: UsageSnapshot = {
+    periodStart: "2026-08-01T00:00:00.000Z", periodEnd: "2026-09-01T00:00:00.000Z",
+    plan: { id: "free", label: "Free" },
+    spentUsd: 4.2, costKnown: false,
+    ceilingUsd: 5, headroomUsd: 0.8, overCeiling: false,
+    balanceUsd: 0, reservedUsd: 0, availableUsd: 0,
+    platformSpentUsd: 1.1, platformCeilingUsd: 2, ownKeyForPlatform: false,
+    byAgent: [
+      { agentId: "a1", label: "support_bot", usd: 3.1, tokens: 40_000, costKnown: true, runs: 4 },
+      // An agent whose total could not be priced. Must not export as $0.
+      { agentId: "a2", label: "mystery_bot", usd: 0, tokens: 900, costKnown: false, runs: 1 },
+    ],
+    byRun: [{ runId: "r1", label: "support_bot", usd: 1.4, tokens: 20_000, costKnown: true }],
+    byKind: [{ kind: "llm.provider", payer: "workspace", usd: 3.1, tokens: 40_000, costKnown: true }],
+  };
+  const lines = usageToCsv(usage).split(CRLF);
+  const find = (k: string) => lines.find((l) => l.startsWith(`${k},`))?.split(",")[1];
+  check("usage: the period total is exported", find("spent_usd") === "4.2");
+  check("usage: with the flag that says it is a floor", find("cost_known") === "no");
+  check("usage: the ceiling travels with it", find("ceiling_usd") === "5");
+  check("usage: and what the PLATFORM paid is a separate figure", find("platform_spent_usd") === "1.1");
+
+  const agentRows = parseCsv(
+    lines.slice(lines.indexOf("agent,runs,tokens,cost_usd,cost_known")).join(CRLF),
+  ).rows;
+  const priced = agentRows.find((r) => r[0] === "support_bot")!;
+  const unpriced = agentRows.find((r) => r[0] === "mystery_bot")!;
+  check("usage: a priced agent exports its number", priced[3] === "3.1" && priced[4] === "yes");
+  check("usage: an UNPRICED agent exports an empty cell, never 0",
+    unpriced[3] === "" && unpriced[4] === "no", JSON.stringify(unpriced));
+  check("usage: the stem names the period rather than the moment it was downloaded",
+    usageStem(usage) === "jaroku-usage-2026-08-01");
+}
 
 // --- summary ---------------------------------------------------------------------------
 const sum = parseCsv(summaryToCsv(results)).rows;

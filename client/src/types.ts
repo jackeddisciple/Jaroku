@@ -309,6 +309,8 @@ export interface ExampleCell {
   /** The ordinary run this produced — the handle for opening the full trace. */
   runId: string | null;
   costUsd: number | null;
+  /** False when this cell's cost is a FLOOR — some step had tokens and no price. */
+  costComplete: boolean;
   latencyMs: number | null;
   attempt: number;
   error: string | null;

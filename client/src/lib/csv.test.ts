@@ -49,6 +49,24 @@ eq("blank inputs dropped", csvToExamples("input,expected\n,x\nreal,y").examples,
 }
 check("warns on an unterminated quote", parseCsv(`"unterminated`).warnings.length > 0);
 
+// --- what a SECTIONED export does to this parser ---------------------------------------
+//
+// The usage export writes several tables into one file, separated by a blank line — an agent, a
+// run and a kind are different units, and one flat sheet would need a `type` column and a lot of
+// empty ones. That blank line is not a trailing newline and must not be read as one: this parser
+// drops empty rows so a file ending in a newline does not become an example, and the same rule
+// applied to a separator would silently weld two tables together with mismatched headers.
+{
+  const sectioned = ["a,b", "1,2", "", "c,d", "3,4"].join(String.fromCharCode(13, 10));
+  const parsed = parseCsv(sectioned);
+  const headers = parsed.rows.filter((r) => r[0] === "a" || r[0] === "c").length;
+  check("two headers survive a blank separator", headers === 2);
+  check(
+    "and the rows after the separator are not folded into the first table",
+    parsed.rows.some((r) => r[0] === "3" && r[1] === "4"),
+  );
+}
+
 // --- the case this all exists for ------------------------------------------------------
 eq("realistic support query with commas and quotes",
   csvToExamples(`input,expected\n"Where is order #123, and why is it late?","Order 123 is delayed"`).examples,
