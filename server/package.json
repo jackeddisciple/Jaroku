@@ -47,6 +47,7 @@
     "test:plans": "tsx src/billing/plans.test.ts",
     "test:metering": "tsx src/billing/metering.test.ts",
     "test:balances": "tsx src/billing/balances.test.ts",
+    "test:gate": "tsx src/billing/gate.test.ts",
     "test:pool": "tsx src/runPool.test.ts",
     "test:interactive-slot": "tsx src/interactiveSlot.test.ts",
     "test:sandbox-image": "tsx src/sandbox/image.test.ts",

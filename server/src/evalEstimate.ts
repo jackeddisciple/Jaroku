@@ -122,6 +122,50 @@ async function measureRuns(
   };
 }
 
+/**
+ * What ONE run of this agent on this model is likely to cost.
+ *
+ * The same projection an eval target gets, for a single run — extracted rather than
+ * reimplemented so that the number the budget gate sizes a hold with and the number the eval
+ * estimate shows are computed by the same code over the same history. Two projections of the
+ * same thing that disagreed would be a support conversation nobody can win.
+ *
+ * Every rule at the top of this file survives: it is a RANGE, it says what it is BASED ON, and
+ * an unpriced model estimates to null rather than to zero. The gate treats that null as "hold
+ * nothing" — see its own note on why holding a made-up number is worse than holding none.
+ */
+export async function estimateRun(
+  ctx: TenantContext,
+  store: TraceStore,
+  opts: { agentId: string; model: string },
+): Promise<{ lowUsd: number | null; highUsd: number | null; basis: Basis; sampleSize: number; priced: boolean }> {
+  const priced = isPriced(opts.model);
+  let basis: Basis = "default";
+  let sample = { input: DEFAULT_INPUT_TOKENS, output: DEFAULT_OUTPUT_TOKENS, runs: 0 };
+  const sameModel = await measureRuns(ctx, store, opts.agentId, opts.model);
+  if (sameModel) {
+    basis = "measured";
+    sample = sameModel;
+  } else {
+    const anyModel = await measureRuns(ctx, store, opts.agentId, null);
+    if (anyModel) {
+      basis = "other-model";
+      sample = anyModel;
+    }
+  }
+  const perRun = priced
+    ? costFor(opts.model, { inputTokens: sample.input, outputTokens: sample.output })
+    : null;
+  const spread = basis === "default" ? DEFAULT_SPREAD : MEASURED_SPREAD;
+  return {
+    lowUsd: perRun === null ? null : round8(perRun * (1 - spread)),
+    highUsd: perRun === null ? null : round8(perRun * (1 + spread)),
+    basis,
+    sampleSize: sample.runs,
+    priced,
+  };
+}
+
 export async function estimateEval(
   ctx: TenantContext,
   store: TraceStore,

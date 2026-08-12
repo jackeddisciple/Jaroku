@@ -24,7 +24,7 @@ import { EvalRunner } from "./evalRunner.ts";
 import { DEFAULT_CRITERIA } from "./judge/rubric.ts";
 import { JudgeScorer } from "./judge/score.ts";
 import { aggregateEval } from "./evalAggregate.ts";
-import { estimateEval } from "./evalEstimate.ts";
+import { estimateEval, estimateRun } from "./evalEstimate.ts";
 import { fmtBytes, sweepEvalArtifacts, sweepOrphanedEvalArtifacts } from "./evalCleanup.ts";
 import {
   WsRelay,
@@ -77,6 +77,8 @@ import { BillingRepository } from "./db/repositories/billing.ts";
 import { assertPlanRegistry } from "./billing/plans.ts";
 import { UsageMeter, usageKey } from "./billing/usage.ts";
 import { SAMPLE_INTERVAL_MS, sampleStorage } from "./billing/storage.ts";
+import { Balances } from "./billing/balances.ts";
+import { BudgetGate } from "./billing/gate.ts";
 import { GENERATION_MODEL } from "./claude.ts";
 import { isSecretName } from "./secrets/secretStore.ts";
 import { PROVIDER_ENV_KEY, isProviderId, providerStatus, verifyProviderKey } from "./providers.ts";
@@ -211,6 +213,12 @@ const meter = new UsageMeter(billing, async (ctx, runId) => {
   return run ? { provider: run.provider, model: run.model } : null;
 });
 
+// The other half: what may be STARTED, as opposed to what is recorded once it has been.
+// `balances` is the mechanism (an atomic claim against a balance, and a row that can be given
+// back); `budgetGate` is the policy that decides whether to use it. See billing/gate.ts for why
+// the ceiling applies to every workspace and the reservation only to those with platform credit.
+const balances = new Balances(db, billing);
+
 /**
  * Meter a call the platform made on somebody's behalf, without ever being able to break it.
  *
@@ -236,6 +244,41 @@ function meterPlatformCall(
   void meter.meterModelCall(ctx, kind, call).catch((err) => {
     console.error(`[billing] failed to meter a ${kind} call:`, (err as Error)?.message ?? err);
   });
+}
+
+/**
+ * runId -> the hold taken for it, so the run's exit knows what to give back.
+ *
+ * In memory, and that is not the safety mechanism. A gateway that dies takes this map with it
+ * and the holds it describes are left standing — which is precisely why a hold is a row with an
+ * expiry and why `sweepExpired` runs below. This map is the FAST path: a run that ends normally
+ * settles in milliseconds instead of waiting out an hour-long lease.
+ */
+const runHolds = new Map<string, string>();
+
+/**
+ * Give a run's hold back, and take what it really spent out of the balance.
+ *
+ * SETTLED FROM `usage_events`, never from the estimate the hold was sized with. The hold is a
+ * projection; the ledger is what the run actually did, assembled from its steps by the ingest
+ * chain. Deducting the hold would charge every run its estimate — which is wrong in both
+ * directions and wrong most often for the agents whose cost varies, which is all of them.
+ *
+ * Idempotent because `release` is: a run whose exit fires while a sweeper has already decided
+ * the lease lapsed settles exactly once, whichever gets there first.
+ */
+async function settleRun(ctx: TenantContext, runId: string): Promise<void> {
+  const holdId = runHolds.get(runId);
+  if (!holdId) return;
+  runHolds.delete(runId);
+  try {
+    const spent = await billing.runSpend(ctx, runId);
+    await balances.release(ctx, holdId, { settleUsd: spent.usd });
+  } catch (err) {
+    // Left standing rather than force-released: the sweeper will reclaim it, and reclaiming
+    // late is better than releasing a hold whose spend we failed to read.
+    console.error(`[billing] failed to settle run ${runId}:`, (err as Error)?.message ?? err);
+  }
 }
 
 /** The shape claude.ts's `UsageSummary` has, narrowed to what the ledger needs from it. */
@@ -454,6 +497,7 @@ const rubricIdFor = async (ctx: TenantContext, datasetId: string): Promise<strin
 // did nothing and interrupted evals stayed "running" forever. `workspaces` carries no policy
 // precisely so this list is readable, and each workspace is then reconciled in its own scope.
 const bootIdentity = new IdentityRepository(db);
+const budgetGate = new BudgetGate(billing, balances, bootIdentity);
 const workspaceIds = await bootIdentity.listWorkspaceIds(systemContext(newRequestId()));
 const workspaceContexts = workspaceIds.map((id) => systemContextFor(id, newRequestId()));
 
@@ -468,6 +512,22 @@ for (const ctx of workspaceContexts) {
     console.log(`[manager] run ${id} was interrupted by a restart`);
   }
 }
+
+// HOLDS NOBODY RELEASED. The safety net, not the release path — a run that ends normally gives
+// its own hold back in milliseconds. This is for the run whose gateway died holding one, which
+// is exactly the case a restart is evidence of. Swept at boot and then on a timer, workspace by
+// workspace for the reason the reconciliations above are: an unscoped query returns nothing at
+// all as the application role, so a "platform-wide" sweep would reclaim nothing in the one
+// deployment that needs it. Unref'd — reclaiming money must never hold a process open.
+const sweepHolds = async (): Promise<void> => {
+  for (const id of await bootIdentity.listWorkspaceIds(systemContext(newRequestId()))) {
+    await balances.sweepExpired(systemContextFor(id, newRequestId()));
+  }
+};
+await sweepHolds().catch((err) => console.error("[billing] hold sweep failed:", (err as Error)?.message ?? err));
+setInterval(() => {
+  void sweepHolds().catch((err) => console.error("[billing] hold sweep failed:", (err as Error)?.message ?? err));
+}, 5 * 60_000).unref();
 
 // True from spawn until run_end (or exit) of the INTERACTIVE run. Deliberately NOT
 // interactivePool.busy: the process outlives its run_end by a beat while it tears down, and
@@ -2166,9 +2226,18 @@ onBothPools("exit", ({ runId, code, signal, timedOut, elapsedMs }) => {
   // Read before the context is dropped below: `contextForRun` falls back to the server's own
   // workspace once `runWorkspaces` forgets this run, which would put somebody else's sandbox
   // seconds on the server's ledger.
+  const billedCtx = contextForRun(runId);
   void meter
-    .meterSandboxSeconds(contextForRun(runId), { runId, elapsedMs })
+    .meterSandboxSeconds(billedCtx, { runId, elapsedMs })
     .catch((err) => console.error("[billing] failed to meter sandbox time:", (err as Error)?.message ?? err));
+  // AND THEN SETTLE, on the ingest chain rather than here.
+  //
+  // The steps this run emitted are metered as they are persisted, and the exit event can and
+  // does arrive before the last of them has been written — the chain is what orders those, and
+  // nothing else does. Settling straight from this handler would read the ledger while the end
+  // of the run was still landing in it, and charge a number that is short by the last few
+  // steps. Queued behind the chain, it reads a complete one.
+  ingest(() => settleRun(billedCtx, runId));
   // The subprocess is gone, so any question it was waiting on is moot. Left standing, a run
   // that crashed while blocked would leave a modal asking about a process that no longer
   // exists, and answering it would write a file nobody will ever read.
@@ -2547,6 +2616,36 @@ async function runAgent(
   } catch (err) {
     console.warn(`[manager] could not resolve credentials for ${runId}: ${(err as Error).message}`);
   }
+  // MONEY ASKS FIRST — before a slot, before a subprocess, before anything that costs.
+  //
+  // Ordered after the credential resolution above and before the pool, deliberately: a run
+  // refused for budget must not have consumed a slot, and a run about to be refused must not
+  // have had a sandbox started for it. The estimate is the same projection the eval estimate
+  // uses, so the number this holds against and the number the UI shows a user before an eval
+  // are computed by the same code over the same history.
+  //
+  // An unpriced model estimates to null and holds nothing. Refusing a run on the strength of a
+  // number we invented would be worse than letting it through and settling what it really
+  // cost, which is what happens either way at exit.
+  const estimate = await estimateRun(ctx, store, {
+    agentId: agentId ?? "",
+    model: model ?? "",
+  }).catch(() => ({ highUsd: null as number | null }));
+  const verdict = await budgetGate.mayStart(ctx, {
+    estimateUsd: estimate.highUsd,
+    purpose: "run",
+    subjectId: runId,
+  });
+  if (!verdict.ok) {
+    console.log(`[billing] refused run ${runId} for ${ctx.workspaceId}: ${verdict.message}`);
+    relay.broadcastDebug(ctx, { type: "error", message: verdict.message ?? "this run was refused" });
+    return;
+  }
+  // Whose hold to release when this run ends. Recorded before the start for the same reason
+  // `runWorkspaces` is: the exit arrives on its own tick, and a hold nothing can find is a
+  // hold that stands until its TTL lapses.
+  if (verdict.holdId) runHolds.set(runId, verdict.holdId);
+
   // The reservation. interactivePool.busy already refused a second run process-wide, so this
   // should never actually be denied today — it is acquired anyway, unconditionally, because
   // it is the mechanism that has to exist and be exercised now for a future session to widen
@@ -2557,6 +2656,10 @@ async function runAgent(
   );
   if (outcome !== "started") {
     runWorkspaces.delete(runId);
+    // The run that never started still holds money. There is no exit event coming for it, so
+    // the release has to happen here — the same rule Session 5 learned about the interactive
+    // reservation, applied to the thing that is worse to leak.
+    void settleRun(ctx, runId);
     console.warn(`[manager] interactive run ${runId} refused for workspace ${ctx.workspaceId}: ${outcome}`);
     relay.broadcastDebug(ctx, {
       type: "error",
