@@ -236,12 +236,36 @@ export type ListProvidersCommand = { cmd: "listProviders" };
  */
 export type SetOwnKeyForPlatformCommand = { cmd: "setOwnKeyForPlatform"; on: boolean };
 
+/**
+ * What this workspace has spent this period, and against what.
+ *
+ * Its own channel rather than a field on `providers`, because the two answer different questions
+ * at different rates: what is connected changes when somebody pastes a key, and what has been
+ * spent changes on every step of every run. A snapshot that carried both would either be sent
+ * far too often or be stale half the time.
+ */
+export type LoadUsageCommand = { cmd: "loadUsage" };
+
+/** The billing channel. A full snapshot, like every other channel here — never a merge. */
+export type BillingEvent =
+  | { type: "usage"; usage: unknown }
+  | { type: "error"; message: string };
+
 export type ProviderCommand =
   | SetProviderKeyCommand
   | TestProviderKeyCommand
   | SetOwnKeyForPlatformCommand;
 
 const PROVIDER_COMMANDS = new Set(["setProviderKey", "testProviderKey", "setOwnKeyForPlatform"]);
+
+/**
+ * Forwarded, not answered locally — unlike `listProviders` and `listAgents` beside it.
+ *
+ * The relay holds no billing repository and should not grow one. What it would have to reach for
+ * is a balance, a plan, a period rollup and a ceiling, which is four dependencies for one read;
+ * the app already owns all four and answers on the `billing` channel.
+ */
+const BILLING_COMMANDS = new Set(["loadUsage"]);
 
 // Deploy. Everything below rides beside the frozen schema in a new channel, exactly as
 // pause/resume, the eval engine and the MCP registry did — a deploy is not an agent run and
@@ -404,6 +428,7 @@ export type ClientCommand =
   | ListMcpServersCommand
   | ProviderCommand
   | ListProvidersCommand
+  | LoadUsageCommand
   | DeployChannelCommand
   | ListDeploymentsCommand
   | MemberCommand;
@@ -453,7 +478,8 @@ export type ForwardedCommand =
   | McpCommand
   | ProviderCommand
   | DeployChannelCommand
-  | MemberCommand;
+  | MemberCommand
+  | LoadUsageCommand;
 
 // Generation rides its own channel, deliberately parallel to "trace". It never enters the
 // trace store or the event schema — schema/events.md v1 stays frozen.
@@ -752,6 +778,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   setMcpServerAuth: "mcp", setMcpToolImpact: "mcp", resolveMcpConfirm: "mcp",
   listProviders: "providers", setProviderKey: "providers", testProviderKey: "providers",
   setOwnKeyForPlatform: "providers",
+  loadUsage: "billing",
   listMembers: "members", inviteMember: "members", revokeInvite: "members",
   setMemberRole: "members", removeMember: "members",
   listDeployments: "deploy", planDeploy: "deploy", deploy: "deploy", cancelDeploy: "deploy",
@@ -1237,6 +1264,9 @@ export class WsRelay {
             // Shape-checked in the app, which owns the deploy manager and can answer with a
             // precise error on the "deploy" channel rather than dropping the message here.
             void withContext((ctx) => this.onCommand?.(msg as DeployChannelCommand, ctx));
+          } else if (BILLING_COMMANDS.has(msg.cmd)) {
+            // Forwarded like a mutation even though it is a read — see BILLING_COMMANDS.
+            void withContext((ctx) => this.onCommand?.(msg as LoadUsageCommand, ctx));
           } else if (PROVIDER_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the credential writer and can answer with a
             // precise error on the "providers" channel rather than dropping the message here.
@@ -1523,6 +1553,17 @@ export class WsRelay {
    */
   broadcastProviders(ctx: TenantContext, event: ProviderEvent): void {
     this.broadcastTo(ctx, { channel: "providers", ...event });
+  }
+
+  /**
+   * What a workspace has spent, and against what.
+   *
+   * Scoped like every other broadcast, and it matters more here than on most of them: a spend
+   * figure sent to the wrong workspace is not a leak of a row, it is one tenant reading another's
+   * invoice.
+   */
+  broadcastBilling(ctx: TenantContext, event: BillingEvent): void {
+    this.broadcastTo(ctx, { channel: "billing", ...event });
   }
 
   // Push a refreshed run-history snapshot to everyone (e.g. after a branch is created, so the new

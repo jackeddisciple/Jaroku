@@ -46,6 +46,16 @@ export const CAPABILITIES = [
   "provider:read",
   "deploy:read",
   "member:read",
+  /**
+   * See what this workspace has spent, and against which ceiling.
+   *
+   * A MEMBER capability, not an owner one, and that is a decision rather than an oversight. A
+   * member whose run is refused for budget has to be able to see the number it was refused
+   * against, or the refusal is unactionable and they open a ticket. Spend is not a secret from
+   * the people generating it; CHANGING what may be spent is `billing:manage`, which is the
+   * owner's.
+   */
+  "billing:read",
 
   // --- commits the workspace to something outside itself: admin ---------------------------
   /** Connect, re-discover, remove or re-classify a third-party MCP server. */
@@ -78,6 +88,7 @@ const MEMBER: readonly Capability[] = [
   "provider:read",
   "deploy:read",
   "member:read",
+  "billing:read",
 ];
 
 /** What an admin adds. Nested, so a new member capability is automatically an admin's too. */
@@ -182,6 +193,8 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   setOwnKeyForPlatform: "provider:manage",
 
   // membership
+  loadUsage: "billing:read",
+
   listMembers: "member:read",
   inviteMember: "member:manage",
   revokeInvite: "member:manage",

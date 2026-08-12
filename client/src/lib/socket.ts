@@ -9,6 +9,7 @@ import { useGraphStore } from "../store/graphStore.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { useMcpStore } from "../store/mcpStore.ts";
 import { useProviderStore } from "../store/providerStore.ts";
+import { useBillingStore } from "../store/billingStore.ts";
 import { useDeployStore } from "../store/deployStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useMemberStore } from "../store/memberStore.ts";
@@ -172,6 +173,15 @@ function dispatch(msg: ServerMessage): void {
       else if (msg.type === "testResult") p.setTestResult({ provider: msg.provider, ok: msg.ok, message: msg.message });
       else if (msg.type === "error") p.setError(msg.message);
       else if (msg.type === "notice") p.setNotice(msg.message);
+      break;
+    }
+    case "billing": {
+      // What this workspace has spent. A full snapshot like every other channel here, and
+      // nothing on it is recomputed client-side — see billingStore for why that matters more
+      // here than elsewhere.
+      const b = useBillingStore.getState();
+      if (msg.type === "usage") b.setUsage(msg.usage);
+      else if (msg.type === "error") b.setError(msg.message);
       break;
     }
     case "deploy": {
@@ -493,6 +503,11 @@ export function sendPlanAgent(
 
 export function sendDiscardPlan(planId: string): void {
   send({ cmd: "discardPlan", planId });
+}
+
+/** Ask for a fresh usage snapshot. Sent when the panel opens, never on a timer — see UsagePanel. */
+export function sendLoadUsage(): void {
+  send({ cmd: "loadUsage" });
 }
 
 export function sendListAgents(): void {

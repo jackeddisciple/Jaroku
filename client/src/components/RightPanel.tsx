@@ -12,6 +12,7 @@ import { GraphView } from "./GraphView.tsx";
 import { EvalsPanel } from "./EvalsPanel.tsx";
 import { McpPanel } from "./McpPanel.tsx";
 import { DeployPanel } from "./DeployPanel.tsx";
+import { UsagePanel } from "./UsagePanel.tsx";
 import { useDeployStore } from "../store/deployStore.ts";
 import { isDeployInFlight } from "../types.ts";
 import { StepDetailPanel } from "./StepDetailPanel.tsx";
@@ -22,6 +23,7 @@ const TABS: { id: RightTab; label: string }[] = [
   { id: "evals", label: "Evals" },
   { id: "mcp", label: "MCP" },
   { id: "deploy", label: "Deploy" },
+  { id: "usage", label: "Usage" },
 ];
 
 export function RightPanel() {
@@ -73,6 +75,7 @@ export function RightPanel() {
           : tab === "evals" ? <EvalsPanel />
           : tab === "mcp" ? <McpPanel />
           : tab === "deploy" ? <DeployPanel />
+          : tab === "usage" ? <UsagePanel />
           : <TraceTimeline />}
       </div>
 

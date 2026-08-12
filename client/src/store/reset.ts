@@ -19,6 +19,7 @@
 // looks empty in the devtools panel somebody happens to open, and the field nobody looked at
 // still holds the last tenant's data.
 
+import { useBillingStore } from "./billingStore.ts";
 import { useBuildStore } from "./buildStore.ts";
 import { useChatStore } from "./chatStore.ts";
 import { useDeployStore } from "./deployStore.ts";
@@ -50,6 +51,9 @@ interface Resettable {
  *   onboarding and then switched workspace would be sent back to the welcome screen.
  */
 export const WORKSPACE_STORES: Record<string, Resettable> = {
+  // A spend figure held across a switch is one workspace's invoice shown under another's name —
+  // the same class of leak as a trace row, and rather harder to explain afterwards.
+  billingStore: useBillingStore as unknown as Resettable,
   buildStore: useBuildStore as unknown as Resettable,
   chatStore: useChatStore as unknown as Resettable,
   deployStore: useDeployStore as unknown as Resettable,

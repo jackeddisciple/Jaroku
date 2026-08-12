@@ -17,6 +17,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { NOT_WORKSPACE_SCOPED, WORKSPACE_STORES, resetWorkspaceStores } from "./reset.ts";
+import { useBillingStore } from "./billingStore.ts";
 import { useBuildStore } from "./buildStore.ts";
 import { useChatStore } from "./chatStore.ts";
 import { useDeployStore } from "./deployStore.ts";
@@ -79,6 +80,12 @@ console.log("\nfilling every store with one workspace's data");
   useMemberStore.setState({ members: [{ email: TENANT_A }], invites: [{ email: TENANT_A }] } as never);
   useProviderStore.setState({ providers: [{ id: "anthropic", configured: true, note: TENANT_A }] } as never);
   useDeployStore.setState({ deployments: [{ id: "d1", agent_id: TENANT_A }] } as never);
+  // Session 6. A spend figure held across a switch is one workspace's invoice shown under
+  // another's name — the same class of leak as a trace row, and harder to explain afterwards.
+  useBillingStore.setState({
+    usage: { plan: { id: "free", label: TENANT_A }, byAgent: [{ label: TENANT_A }] },
+    loaded: true,
+  } as never);
 
   // The fixture has to actually be findable, or the assertion below passes on an empty app.
   const before = Object.entries(WORKSPACE_STORES).filter(([, s]) =>

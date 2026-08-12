@@ -6,7 +6,7 @@
 import { create } from "zustand";
 import { useSessionStore } from "./sessionStore.ts";
 
-export type RightTab = "graph" | "trace" | "evals" | "mcp" | "deploy" | "code";
+export type RightTab = "graph" | "trace" | "evals" | "mcp" | "deploy" | "usage" | "code";
 
 // The single composer has two send modes: "chat" talks to Jaroku (generate/edit/explain/…),
 // "test" sends the agent's runtime input (a Run). Lifted here so it survives re-renders and the

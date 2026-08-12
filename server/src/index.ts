@@ -1220,6 +1220,7 @@ const relay = new WsRelay({
     else if (DEPLOY_COMMAND_NAMES.has(cmd.cmd)) void handleDeployCommand(ctx, cmd as DeployChannelCommand);
     else if (PROVIDER_COMMAND_NAMES.has(cmd.cmd)) void handleProviderCommand(ctx, cmd as ProviderCommand);
     else if (MEMBER_COMMAND_NAMES.has(cmd.cmd)) void handleMemberCommand(ctx, cmd as MemberCommand);
+    else if (cmd.cmd === "loadUsage") void broadcastUsage(ctx);
     else void handleEvalCommand(ctx, cmd);
   },
 });
@@ -1654,6 +1655,75 @@ async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): 
     const message = (err as Error)?.message ?? String(err);
     console.error(`[providers] ${cmd.cmd} failed: ${message}`);
     relay.broadcastProviders(ctx, { type: "error", message: `${cmd.cmd} failed: ${message}` });
+  }
+}
+
+/**
+ * What this workspace has spent, and against what.
+ *
+ * ONE COMPUTATION, SHARED WITH THE GATE. `budgetGate.status` is what refuses a run; every figure
+ * below comes from it rather than from a second set of queries. A dashboard that computed its own
+ * total would eventually disagree with the refusal a user is looking at, and a billing page that
+ * disagrees with a refusal is worse than no billing page.
+ *
+ * COST-INCOMPLETE IS SURFACED, NOT HIDDEN. Every rollup here carries whether it could price
+ * everything it counted, at every level — the period total, each agent, each run. A number
+ * presented without that flag is a floor being read as a total, which is the one thing the whole
+ * cost model has been arranged since the beginning to avoid.
+ */
+async function broadcastUsage(ctx: TenantContext): Promise<void> {
+  try {
+    const status = await budgetGate.status(ctx);
+    const period = status.periodStart;
+    const [byAgent, byRun, byKind, platform, agents] = await Promise.all([
+      billing.spendByAgent(ctx, period),
+      billing.spendByRun(ctx, period),
+      billing.spendByKind(ctx, period),
+      billing.platformSpendSince(ctx, period),
+      agentRepo.list(ctx),
+    ]);
+    // Slugs, because an agent uuid means nothing to a person reading a bill. Resolved here
+    // rather than joined in SQL so the query stays about money.
+    const slugById = new Map(agents.map((a) => [a.id, a.slug]));
+    relay.broadcastBilling(ctx, {
+      type: "usage",
+      usage: {
+        periodStart: status.periodStart,
+        periodEnd: status.periodEnd,
+        plan: { id: status.plan.id, label: status.plan.label },
+        spentUsd: status.spentUsd,
+        costKnown: status.costKnown,
+        ceilingUsd: status.ceilingUsd,
+        headroomUsd: status.headroomUsd,
+        overCeiling: status.overCeiling,
+        balanceUsd: status.balanceUsd,
+        reservedUsd: status.reservedUsd,
+        availableUsd: status.availableUsd,
+        // What WE paid, against the ceiling that bounds it. A workspace on its own key sees
+        // zero here and a full figure above, which is exactly the distinction BYOK is about.
+        platformSpentUsd: platform.usd,
+        platformCeilingUsd: status.plan.platformKeyCeilingUsd,
+        ownKeyForPlatform: await providerKeys.ownKeyForPlatform(ctx),
+        byAgent: byAgent.map((a) => ({
+          agentId: a.agentId,
+          // Null is not "unknown agent" — it is spend with no run behind it: a generation, a
+          // plan, a judge verdict. Named rather than dropped, or the breakdown would not add up
+          // to the total above it.
+          label: a.agentId ? (slugById.get(a.agentId) ?? a.agentId) : "the platform, on your behalf",
+          usd: a.usd, tokens: a.tokens, costKnown: a.costKnown, runs: a.runs,
+        })),
+        byRun: byRun.map((r) => ({
+          runId: r.runId,
+          label: r.agentId ? (slugById.get(r.agentId) ?? r.agentId) : null,
+          usd: r.usd, tokens: r.tokens, costKnown: r.costKnown,
+        })),
+        byKind,
+      },
+    });
+  } catch (err) {
+    const message = (err as Error)?.message ?? String(err);
+    console.error(`[billing] loadUsage failed: ${message}`);
+    relay.broadcastBilling(ctx, { type: "error", message: `could not load usage: ${message}` });
   }
 }
 

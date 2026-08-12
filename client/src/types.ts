@@ -505,6 +505,50 @@ export type ProviderMessage =
   | { channel: "providers"; type: "error"; message: string; provider?: string }
   | { channel: "providers"; type: "notice"; message: string; provider?: string };
 
+// --- billing (see server/src/billing/) ---
+//
+// What this workspace has spent, and against which limits. Every figure here is computed by the
+// server's own budget gate — the same one that refuses a run — rather than assembled from parts
+// the client could recombine differently. A page that disagreed with a refusal would be worse
+// than no page.
+//
+// `costKnown` travels with EVERY figure, at every level, and that is the point rather than
+// thoroughness: `false` means something in that rollup could not be priced, so the number is a
+// FLOOR. The whole cost model has been arranged since the beginning so that unknown and zero
+// never collapse into each other, and a dashboard is the last place that could quietly happen.
+
+export interface UsageBreakdown {
+  usd: number;
+  tokens: number;
+  costKnown: boolean;
+}
+
+export interface UsageSnapshot {
+  periodStart: string;
+  periodEnd: string;
+  plan: { id: string; label: string };
+  spentUsd: number;
+  costKnown: boolean;
+  /** The effective ceiling — the workspace's own, else its plan's. Null means none. */
+  ceilingUsd: number | null;
+  headroomUsd: number | null;
+  overCeiling: boolean;
+  balanceUsd: number;
+  reservedUsd: number;
+  availableUsd: number;
+  /** What the PLATFORM paid on this workspace's behalf, and the ceiling bounding it. */
+  platformSpentUsd: number;
+  platformCeilingUsd: number | null;
+  ownKeyForPlatform: boolean;
+  byAgent: (UsageBreakdown & { agentId: string | null; label: string; runs: number })[];
+  byRun: (UsageBreakdown & { runId: string; label: string | null })[];
+  byKind: (UsageBreakdown & { kind: string; payer: string })[];
+}
+
+export type BillingMessage =
+  | { channel: "billing"; type: "usage"; usage: UsageSnapshot }
+  | { channel: "billing"; type: "error"; message: string };
+
 // --- deploy (see server/src/deployStore.ts, deployManager.ts) ---
 //
 // Jaroku orchestrates a deploy; it hosts nothing. The agent goes to the USER's own Railway
@@ -620,6 +664,7 @@ export type ServerMessage =
   | { channel: "reply"; type: "done"; agentId: string }
   | { channel: "reply"; type: "error"; agentId: string; message: string }
   | GenMessage
+  | BillingMessage
   | EditMessage
   | EvalMessage
   | McpMessage
@@ -688,6 +733,7 @@ export type ClientCommand =
   // echoed back. `testProviderKey` proves a key works and writes nothing — which is why it is
   // a separate command rather than a flag on the one that stores it.
   | { cmd: "listProviders" }
+  | { cmd: "loadUsage" }
   | { cmd: "setProviderKey"; provider: ProviderId; key: string }
   | { cmd: "testProviderKey"; provider: ProviderId; key: string }
   // Deploy. `envKeys` are NAMES the user ticked — the server reads the values from its own

@@ -440,6 +440,101 @@ export class BillingRepository {
     };
   }
 
+  /**
+   * Spend this period, grouped by the AGENT whose run produced it.
+   *
+   * Joined through `runs` rather than stored on the usage row, and that is deliberate: an agent
+   * can be renamed, deleted or replaced, and a usage row that carried a copy of its id would go
+   * on describing an agent that no longer means what it did. The join answers "what does this
+   * spend belong to NOW", which is the question a dashboard is actually asking.
+   *
+   * Rows with no run — a generation, a plan, a judge verdict — are grouped under a null agent
+   * rather than dropped. They are real money and a breakdown that omitted them would not add up
+   * to the total shown above it, which is the fastest way to make somebody stop believing a
+   * billing page.
+   */
+  async spendByAgent(
+    ctx: TenantContext,
+    since: string,
+  ): Promise<{ agentId: string | null; usd: number; tokens: number; costKnown: boolean; runs: number }[]> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT r.agent_id AS agent_id,
+              COALESCE(SUM(u.cost_usd), 0) AS usd,
+              COALESCE(SUM(u.total_tokens), 0) AS tokens,
+              COUNT(CASE WHEN u.cost_usd IS NULL THEN 1 END) AS unpriced,
+              COUNT(DISTINCT u.run_id) AS runs
+         FROM usage_events u
+         LEFT JOIN runs r ON r.id = u.run_id AND r.workspace_id = u.workspace_id
+        WHERE u.workspace_id = ? AND u.occurred_at >= ?
+        GROUP BY r.agent_id`,
+      [ctx.workspaceId, since],
+    );
+    return rows
+      .map((r) => ({
+        agentId: (r["agent_id"] as string | null) ?? null,
+        usd: Number(r["usd"] ?? 0),
+        tokens: asInt(r["tokens"]),
+        costKnown: asInt(r["unpriced"]) === 0,
+        runs: asInt(r["runs"]),
+      }))
+      .sort((a, b) => b.usd - a.usd);
+  }
+
+  /** The most expensive runs this period. The row a per-run drill-down opens from. */
+  async spendByRun(
+    ctx: TenantContext,
+    since: string,
+    limit = 20,
+  ): Promise<{ runId: string; agentId: string | null; usd: number; tokens: number; costKnown: boolean }[]> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT u.run_id AS run_id,
+              r.agent_id AS agent_id,
+              COALESCE(SUM(u.cost_usd), 0) AS usd,
+              COALESCE(SUM(u.total_tokens), 0) AS tokens,
+              COUNT(CASE WHEN u.cost_usd IS NULL THEN 1 END) AS unpriced
+         FROM usage_events u
+         LEFT JOIN runs r ON r.id = u.run_id AND r.workspace_id = u.workspace_id
+        WHERE u.workspace_id = ? AND u.occurred_at >= ? AND u.run_id IS NOT NULL
+        GROUP BY u.run_id, r.agent_id
+        ORDER BY usd DESC
+        LIMIT ?`,
+      [ctx.workspaceId, since, limit],
+    );
+    return rows.map((r) => ({
+      runId: String(r["run_id"]),
+      agentId: (r["agent_id"] as string | null) ?? null,
+      usd: Number(r["usd"] ?? 0),
+      tokens: asInt(r["tokens"]),
+      costKnown: asInt(r["unpriced"]) === 0,
+    }));
+  }
+
+  /** Spend this period by kind. What separates "our agents" from "the platform" on a bill. */
+  async spendByKind(
+    ctx: TenantContext,
+    since: string,
+  ): Promise<{ kind: string; payer: string; usd: number; tokens: number; costKnown: boolean }[]> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT kind, payer,
+              COALESCE(SUM(cost_usd), 0) AS usd,
+              COALESCE(SUM(total_tokens), 0) AS tokens,
+              COUNT(CASE WHEN cost_usd IS NULL THEN 1 END) AS unpriced
+         FROM usage_events
+        WHERE workspace_id = ? AND occurred_at >= ?
+        GROUP BY kind, payer`,
+      [ctx.workspaceId, since],
+    );
+    return rows
+      .map((r) => ({
+        kind: String(r["kind"]),
+        payer: String(r["payer"] ?? "platform"),
+        usd: Number(r["usd"] ?? 0),
+        tokens: asInt(r["tokens"]),
+        costKnown: asInt(r["unpriced"]) === 0,
+      }))
+      .sort((a, b) => b.usd - a.usd);
+  }
+
   /** Every event for one run, oldest first. The dashboard's per-run drill-down. */
   async eventsForRun(ctx: TenantContext, runId: string): Promise<UsageEventRow[]> {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
