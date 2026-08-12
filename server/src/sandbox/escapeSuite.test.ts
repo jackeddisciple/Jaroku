@@ -135,13 +135,26 @@ except Exception as e:
 `.trim();
   const target = join(RUNTIME_DIR, ".escape-suite-scratch");
   try {
+    // `python3`, NOT `uv run python`, AND NOT A PATH PREPENDED WITH /opt/homebrew/bin.
+    //
+    // `safe_extract` lives in sandbox/boot.py, which imports os, sys, tarfile, urllib.request
+    // and pathlib — the standard library and nothing else. So the project's environment manager
+    // was never needed to run it, and requiring one meant this check ran on the machines that
+    // happened to have `uv` installed and nowhere else. GitHub's runner does not, and the shape
+    // of the failure was the worst available: `spawn uv ENOENT` is emitted as an 'error' event,
+    // nothing was listening, and an unhandled 'error' event ends the process. A sandbox-escape
+    // assertion took the whole suite down by not being runnable.
+    //
+    // The 'error' handler stays regardless of which binary this is, because 'error' and 'exit'
+    // are alternatives: a spawn that fails emits the first and never the second, so a promise
+    // settled only on 'exit' hangs forever the moment the interpreter is missing. Resolved with
+    // a string that starts with neither REFUSED nor EXTRACTED, so the check below FAILS rather
+    // than passing quietly — this one is a security property, and "could not run" is not a pass.
     const out = await new Promise<string>((res) => {
-      const p = spawn("uv", ["run", "python", "-c", driver, target], {
-        cwd: RUNTIME_DIR,
-        env: { ...process.env, PATH: `/opt/homebrew/bin:${process.env.PATH ?? ""}` },
-      });
+      const p = spawn("python3", ["-c", driver, target], { cwd: RUNTIME_DIR });
       let stdout = "";
       p.stdout.on("data", (d) => (stdout += d));
+      p.on("error", (err) => res(`COULD NOT RUN python3: ${err.message}`));
       p.on("exit", () => res(stdout.trim()));
     });
     check("a deeply-relative path escaping the extraction root is refused", out.startsWith("REFUSED:"), out);
