@@ -1951,6 +1951,17 @@ const COMMAND_RATE_ACTIONS: Partial<Record<string, RateAction>> = {
   branchRun: "run.start",
   resumeRun: "run.start",
   startEval: "eval.start",
+  // DEPLOY WAS MISSING, and it is the one in its family that consumes. `enforcement.ts` says a
+  // rung takes away "the ability to CONSUME: to start runs, evals, generations and deploys" —
+  // three of those four were gated. A suspended workspace could still build an image and leave a
+  // service running, which is the most durable thing on the list: a run ends by itself and a
+  // deploy costs until somebody tears it down.
+  //
+  // Its siblings stay ungated on purpose. `planDeploy` reads the project directory and calls no
+  // model, `loadDeployLogs` and `listDeployments` are reads, and `cancelDeploy` and
+  // `forgetDeployment` REDUCE what is running — refusing those under a rung would trap a
+  // workspace with a deploy it is not allowed to stop.
+  deploy: "deploy.start",
   addMcpServer: "mcp.discover",
   rediscoverMcpServer: "mcp.discover",
   inviteMember: "member.invite",
@@ -2017,6 +2028,10 @@ function refuseCommand(ctx: TenantContext, action: RateAction, message: string):
   else if (action === "mcp.discover") relay.broadcastMcp(ctx, { type: "error", message });
   else if (action === "member.invite") relay.broadcastMembers(ctx, { type: "error", message });
   else if (action === "connector.connect") relay.broadcastConnections(ctx, { type: "error", message });
+  // The deploy panel, which is where every other deploy error already goes. Without this the
+  // refusal would fall to the `else` and land on the debug channel — a deploy button that does
+  // nothing, and the explanation in a pane the person pressing it is not looking at.
+  else if (action === "deploy.start") relay.broadcastDeploy(ctx, { type: "error", message });
   else relay.broadcastDebug(ctx, { type: "error", message });
 }
 

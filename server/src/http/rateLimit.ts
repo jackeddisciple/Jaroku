@@ -58,6 +58,7 @@ export type RateAction =
   | "agent.explain"
   | "run.start"
   | "eval.start"
+  | "deploy.start"
   | "mcp.discover"
   | "member.invite"
   | "connector.connect"
@@ -108,6 +109,12 @@ export const RATE_RULES: Record<RateAction, RateRule> = {
   "run.start": { capacity: 20, perMinute: 60, scope: "workspace" },
   // An eval is a fan-out — one press is up to five hundred jobs — so the press itself is rare.
   "eval.start": { capacity: 5, perMinute: 10, scope: "workspace" },
+  // A DEPLOY BUILDS AN IMAGE AND LEAVES A SERVICE RUNNING on somebody's infrastructure, which is
+  // the most durable thing a workspace can start: a run ends, a deploy keeps costing until it is
+  // torn down. Ten an hour, which is more redeploying than debugging takes and far less than a
+  // farm wants. The process serialises deploys anyway; this is the wall that does not depend on
+  // that remaining true, and it is the action `abuseGate` reads to decide whether a rung refuses.
+  "deploy.start": { capacity: 10, perMinute: 10 / 60, scope: "workspace" },
   // A round trip to a third party nobody here controls. The discovery queue already collapses
   // duplicates; this bounds how fast distinct ones can be asked for.
   "mcp.discover": { capacity: 10, perMinute: 20, scope: "workspace" },

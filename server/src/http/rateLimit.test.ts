@@ -15,6 +15,8 @@
 //   JAROKU_REDIS_URL=redis://127.0.0.1:6380 npm run test:rate-limit
 
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { MockRedis } from "../../fixtures/redis/mockRedis.ts";
 import { openRedis, pingRedis, redisUrlFromEnv } from "../queue/redis.ts";
@@ -263,6 +265,66 @@ console.log("\non the wire");
 
   http.close();
   await limiter.close();
+}
+
+// --- what the ladder can actually refuse ------------------------------------------------------
+
+console.log("\nthe commands that consume are the commands with an action");
+
+// STRUCTURAL, BECAUSE index.ts IS A SCRIPT. It opens sockets and connects to Redis on import, so
+// nothing can import it to read `COMMAND_RATE_ACTIONS` — the same reason obs/log.test.ts reads
+// the entrypoints as text rather than loading them.
+//
+// WHAT IT IS FOR. `abuseGate.mayStartWork` is consulted in exactly one place, `admitCommand`, and
+// only for commands that have a rate action — so that map is not merely the rate limiter's
+// business, it is the list of things an enforcement rung can refuse. `deploy` was missing from
+// it, which meant a suspended workspace could still build an image and leave a service running:
+// the most durable thing on the list, since a run ends by itself and a deploy costs until
+// somebody tears it down. enforcement.ts's own header says a rung takes away "the ability to
+// CONSUME: to start runs, evals, generations and deploys", and three of those four were gated.
+{
+  const indexSrc = readFileSync(join(import.meta.dirname, "..", "index.ts"), "utf8");
+  const block = /const COMMAND_RATE_ACTIONS[^=]*=\s*\{([\s\S]*?)\n\};/.exec(indexSrc);
+  check(!!block, "found COMMAND_RATE_ACTIONS in index.ts");
+  const gated = new Map<string, string>();
+  for (const m of (block?.[1] ?? "").matchAll(/^\s*([A-Za-z]+):\s*"([a-z.]+)"/gm)) gated.set(m[1]!, m[2]!);
+  check(gated.size >= 12, `it names ${gated.size} commands`);
+
+  // The commands that START BILLABLE WORK. Listed rather than discovered, because "does this
+  // spend money" is a judgement — the same reason boundary.test.ts lists its scoped modules.
+  // Everything absent is a read, a piece of CRUD, or a setting; `planDeploy` reads the project
+  // directory and calls no model, and `cancelDeploy` REDUCES what is running, which is why
+  // refusing it under a rung would trap a workspace with a deploy it is not allowed to stop.
+  const CONSUMES = ["generate", "planAgent", "edit", "explain", "run", "branchRun", "resumeRun", "startEval", "deploy"];
+  const ungated = CONSUMES.filter((c) => !gated.has(c));
+  check(ungated.length === 0, `every command that starts billable work is gated (${ungated.join(", ") || "all are"})`);
+
+  // Every action named there has to be a real rule, or the bucket silently does not exist.
+  const unknown = [...gated.values()].filter((a) => !(a in RATE_RULES));
+  check(unknown.length === 0, `...and each names a rule that exists (${unknown.join(", ") || "all do"})`);
+
+  // AND THE REFUSAL HAS TO LAND WHERE THE PERSON IS LOOKING. `refuseCommand` routes by action and
+  // ends in an `else` that broadcasts on the debug channel; an action that falls through it is a
+  // button that does nothing and an explanation in a pane nobody has open. This was very nearly
+  // the shape of the deploy fix itself.
+  //
+  // One action reaches that `else` on purpose and is named here rather than exempted silently:
+  // the debug channel carries a run's control events — pause, resume, boundary, branched — so it
+  // IS the run pane's channel, and a run refusal belongs on it. Stating that is what keeps a NEW
+  // action arriving at the same `else` by accident from being mistaken for this one.
+  const DEBUG_CHANNEL_BY_DESIGN: Record<string, string> = {
+    "run.start": "the debug channel is the run pane's own control channel, so a run refusal is already there",
+  };
+  const refuse = /function refuseCommand\([\s\S]*?\n\}/.exec(indexSrc)?.[0] ?? "";
+  const unrouted = [...new Set(gated.values())].filter(
+    (a) => !refuse.includes(`"${a}"`) && !(a in DEBUG_CHANNEL_BY_DESIGN),
+  );
+  check(
+    unrouted.length === 0,
+    `...and every gated action names its own channel rather than falling to the debug one (${unrouted.join(", ") || "all do"})`,
+  );
+  const staleRouting = Object.keys(DEBUG_CHANNEL_BY_DESIGN).filter((a) => !new Set(gated.values()).has(a));
+  check(staleRouting.length === 0, `...and that exception still names a gated action (${staleRouting.join(", ") || "it does"})`);
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
