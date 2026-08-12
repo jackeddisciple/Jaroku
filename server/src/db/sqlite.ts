@@ -124,6 +124,18 @@ export class SqliteDb implements Db {
   }
 
   /**
+   * Also an ordinary transaction, and for the same reason `scoped` is one.
+   *
+   * On Postgres this sets a marker that a policy answers to; here there are no policies, so
+   * there is nothing to unlock and nothing that was locked. The distinction between platform
+   * work and tenant work is still real on this driver — it is just carried by the context type
+   * in the signature rather than by the connection, which is what `test:tenancy` checks.
+   */
+  async asPlatform<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+    return this.transaction(fn);
+  }
+
+  /**
    * The connection itself. There is no RLS here to scope, and wrapping every read in a
    * transaction would take SQLite's write lock to answer a question.
    */

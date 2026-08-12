@@ -85,6 +85,34 @@ export interface Db extends Queryable {
    */
   forWorkspace(workspaceId: string): Queryable;
   /**
+   * Run `fn` as the PLATFORM: across every workspace, on purpose, and said out loud.
+   *
+   * THE HOLE THIS FILLS. A handful of operations genuinely are not on any tenant's behalf — the
+   * abuse-signal retention sweep, the "which workspaces are suspended" gauge — and they were
+   * written as bare `this.db.all(…)` and `this.db.run(…)`. Unscoped, which reads like the honest
+   * spelling of "all workspaces" and is the opposite under RLS: with no `app.workspace_id` set,
+   * `tenant_isolation` is false for every row, so the read returned nothing and the DELETE
+   * removed nothing. Both were silent. Both passed every test, because a test connects as a
+   * superuser and a superuser has no policies. ADR-019 calls for "an administrative connection"
+   * for exactly these and this is it.
+   *
+   * A POSITIVE MARKER, NEVER THE ABSENCE OF ONE. The obvious policy — "if no workspace is set,
+   * you may see everything" — would make a forgotten scope escalate into a full read of every
+   * tenant's rows, turning the one failure this design is built to survive into the worst
+   * outcome available. `app.platform` has to be set to 'on' by code that meant to, so a missing
+   * scope still sees nothing and only a deliberate statement sees more. `SET LOCAL` again, so it
+   * dies with the transaction.
+   *
+   * IT IS NOT A SKELETON KEY. The marker unlocks only what a policy names: migration 032 grants
+   * it DELETE on `abuse_signals` and SELECT on `workspace_enforcements`, and nothing else in the
+   * schema answers to it. A new platform-wide statement needs a new policy, written where
+   * somebody reviews it, rather than a flag that already opens everything.
+   *
+   * On SQLite it is an ordinary transaction, like `scoped`: no policies, nothing to unlock, and
+   * the repository layer remains the whole of the enforcement.
+   */
+  asPlatform<T>(fn: (tx: Tx) => Promise<T>): Promise<T>;
+  /**
    * Run `fn` inside a single transaction on a single connection: committed if it returns,
    * rolled back if it throws, and never partly either.
    *

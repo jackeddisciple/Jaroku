@@ -262,6 +262,34 @@ export class PostgresDb implements Db {
   }
 
   /**
+   * The same transaction with `app.platform` set instead of `app.workspace_id`. See `Db`.
+   *
+   * The two markers are never both set: this deliberately does NOT establish a workspace scope,
+   * so `tenant_isolation` stays false throughout and the only rows reachable are the ones a
+   * platform policy names. That is the difference between an administrative connection and a
+   * superuser one, and it is why this is a `SET LOCAL` rather than a role.
+   */
+  async asPlatform<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT set_config('app.platform', 'on', true)");
+      const out = await fn(queryable(client));
+      await client.query("COMMIT");
+      return out;
+    } catch (err) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* already gone; releasing below discards it */
+      }
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * A `Queryable` that carries the scope on every statement.
    *
    * Each call is its own one-statement transaction with its own SET LOCAL, which is a real

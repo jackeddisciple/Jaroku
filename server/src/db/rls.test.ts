@@ -313,6 +313,78 @@ try {
     );
   }
 
+  // --- the platform marker opens exactly one door, and only when asked -----------------------
+  //
+  // Migration 032 gives two statements a way to cross workspaces on purpose. The danger in any
+  // such mechanism is that it becomes the answer to "no scope set", which would turn the one
+  // failure this design exists to survive — a forgotten `SET LOCAL` — into a full read of every
+  // tenant's rows. So the three cases are asserted together: unscoped sees nothing, scoped sees
+  // its own, and only `app.platform` sees across.
+  console.log("\nthe platform marker");
+
+  // AS THE APP ROLE, not through `db.asPlatform` itself. That method sets the marker on this
+  // connection, which is the owner and — in CI and on most development machines — a superuser
+  // with no policies at all, so calling it here would assert that a superuser can read a table.
+  // The claim worth checking is about the POLICY, so the marker is set the same way `asPlatform`
+  // sets it and then the role is dropped to the one a deployment serves as.
+  const asPlatformApp = <T>(fn: (tx: Parameters<Parameters<typeof db.transaction>[0]>[0]) => Promise<T>): Promise<T> =>
+    db.transaction(async (tx) => {
+      await tx.run("SELECT set_config('app.platform', ?, true)", ["on"]);
+      await tx.exec("SET LOCAL ROLE jaroku_app");
+      return fn(tx);
+    });
+
+  const enf = randomUUID();
+  await db.scoped(B, (tx) =>
+    tx.run(
+      `INSERT INTO workspace_enforcements (id, workspace_id, level, reason, applied_at)
+       VALUES (?, ?, 'suspended', 'rls probe', now())`,
+      [enf, B],
+    ),
+  );
+
+  const unscopedEnf = await asApp(null, (tx) =>
+    tx.all<{ id: string }>(`SELECT id FROM workspace_enforcements`),
+  );
+  check(
+    unscopedEnf.length === 0,
+    `a missing scope still sees no enforcements — the marker is not its absence (${unscopedEnf.length} row(s))`,
+  );
+
+  const wrongTenantEnf = await asApp(A, (tx) =>
+    tx.all<{ id: string }>(`SELECT id FROM workspace_enforcements`),
+  );
+  check(
+    !wrongTenantEnf.some((r) => r.id === enf),
+    `and a scoped read sees only its own (${wrongTenantEnf.length} row(s))`,
+  );
+
+  const acrossAll = await asPlatformApp((tx) =>
+    tx.all<{ id: string }>(`SELECT id FROM workspace_enforcements`),
+  );
+  check(
+    acrossAll.some((r) => r.id === enf),
+    `the marker reaches across workspaces when it is set (${acrossAll.length} row(s))`,
+  );
+
+  // A door, not a skeleton key: 032 grants the marker SELECT on this table and nothing else, so
+  // the INSERT falls to `tenant_isolation`'s WITH CHECK with no workspace in scope.
+  let writeRefused = false;
+  try {
+    await asPlatformApp((tx) =>
+      tx.run(
+        `INSERT INTO workspace_enforcements (id, workspace_id, level, reason, applied_at)
+         VALUES (?, ?, 'blocked', 'should not be possible', now())`,
+        [randomUUID(), A],
+      ),
+    );
+  } catch {
+    writeRefused = true;
+  }
+  check(writeRefused, "...and it does not carry a write it was never granted");
+
+  await db.scoped(B, (tx) => tx.run(`DELETE FROM workspace_enforcements WHERE id = ?`, [enf]));
+
   const exempt = ["audit_log", "workspace_members", "ws_tickets"];
   const wrongly = exempt.filter((t) => policies.some((p) => p.tablename === t));
   check(

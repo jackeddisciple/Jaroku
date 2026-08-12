@@ -158,14 +158,22 @@ export class AbuseRepository {
   /**
    * Drop observations past their retention.
    *
-   * Unscoped on purpose and run as the platform, not on a workspace's behalf: it takes the
-   * subject-keyed rows too, and those belong to nobody. The number is `SIGNAL_RETENTION_DAYS` —
-   * long enough for a weekly pattern and an appeal, short enough that this is not a permanent
-   * dossier on everybody who ever hit a rate limit.
+   * Run as the platform, not on a workspace's behalf: it takes the subject-keyed rows too, and
+   * those belong to nobody. The number is `SIGNAL_RETENTION_DAYS` — long enough for a weekly
+   * pattern and an appeal, short enough that this is not a permanent dossier on everybody who
+   * ever hit a rate limit.
+   *
+   * `asPlatform` RATHER THAN A BARE STATEMENT, and the difference was not cosmetic. Unscoped,
+   * this DELETE matched only the rows `platform_subject_rows` admits — the ones with a NULL
+   * workspace_id — because `tenant_isolation` is false for everything else when no workspace is
+   * set. Every workspace-attributed signal was retained forever, silently, and the only test
+   * that could have noticed connects as a superuser. See migration 032.
    */
   async sweep(_ctx: SystemContext, now = Date.now()): Promise<number> {
     const cutoff = new Date(now - SIGNAL_RETENTION_DAYS * 86_400_000).toISOString();
-    const res = await this.db.run(`DELETE FROM abuse_signals WHERE observed_at < ?`, [cutoff]);
+    const res = await this.db.asPlatform((tx) =>
+      tx.run(`DELETE FROM abuse_signals WHERE observed_at < ?`, [cutoff]),
+    );
     return res.changes;
   }
 

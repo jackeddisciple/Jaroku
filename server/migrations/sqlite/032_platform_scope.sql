@@ -1,0 +1,14 @@
+-- 032_platform_scope — nothing to do on this driver.
+--
+-- The postgres half adds two policies that a marker set by `Db.asPlatform` unlocks. There are no
+-- policies here and no marker: `asPlatform` is an ordinary transaction on SQLite, exactly as
+-- `scoped` is, because there is no second wall to open a door in.
+--
+-- The distinction it draws is still real on this driver. It is carried by the signature — a
+-- method that crosses workspaces takes a `SystemContext` and one that does not takes a
+-- `TenantContext` — and `test:tenancy` is what keeps that from being decoration. On Postgres the
+-- type and the policy say the same thing twice, which is the arrangement this codebase wants:
+-- the repository layer enforces, and RLS catches the day it does not.
+--
+-- Present as a file because the runner requires both dialects to hold the same versions under
+-- the same names. See `compareDialects`.

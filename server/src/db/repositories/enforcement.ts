@@ -215,18 +215,28 @@ export class EnforcementRepository {
   /**
    * Every workspace currently under a rung at or above `level`.
    *
-   * Unscoped, and for the platform rather than for a tenant — hence the SystemContext. It is
-   * what an operator's "who is suspended" question reads, and what the metrics in commit 12
-   * export as a gauge.
+   * For the platform rather than for a tenant — hence the SystemContext. It is what an
+   * operator's "who is suspended" question reads, and what the metrics in commit 12 export as a
+   * gauge.
+   *
+   * `asPlatform` RATHER THAN A BARE READ, because a bare read returned nothing. With no
+   * `app.workspace_id` established, `tenant_isolation` is false for every row of this table and
+   * there was no second policy to catch them — 027 gave `abuse_signals` one for its NULL-tenant
+   * rows and 028 gave this table nothing, because every row here has a real workspace. So the
+   * suspended-workspace gauge reported an empty list on every deployment that had ever
+   * suspended anybody, and no test disagreed: they connect as a superuser. Migration 032 adds
+   * the SELECT policy this now unlocks.
    */
   async workspacesAt(_ctx: SystemContext, levels: readonly EnforcementLevel[]): Promise<{ workspace_id: string; level: EnforcementLevel }[]> {
     if (levels.length === 0) return [];
     const placeholders = levels.map(() => "?").join(", ");
-    return this.db.all<{ workspace_id: string; level: EnforcementLevel }>(
-      `SELECT workspace_id, level FROM workspace_enforcements
-        WHERE lifted_at IS NULL AND level IN (${placeholders})
-        ORDER BY applied_at DESC`,
-      [...levels],
+    return this.db.asPlatform((tx) =>
+      tx.all<{ workspace_id: string; level: EnforcementLevel }>(
+        `SELECT workspace_id, level FROM workspace_enforcements
+          WHERE lifted_at IS NULL AND level IN (${placeholders})
+          ORDER BY applied_at DESC`,
+        [...levels],
+      ),
     );
   }
 }
