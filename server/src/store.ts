@@ -361,6 +361,23 @@ export class TraceStore {
     return rows.map((r) => this.hydrateStep(r));
   }
 
+  /**
+   * How many steps of one kind a run recorded.
+   *
+   * A COUNT rather than `stepsForRun(…).filter(…)`, because the caller that wants this is asking
+   * a yes-or-no question about a run that may have emitted thousands of steps, and pulling every
+   * payload across to count them is how a cheap check becomes an expensive one. Session 8's
+   * miner detector is the caller: "held a sandbox for four minutes and called no model" is two
+   * numbers, and this is the second of them.
+   */
+  async countSteps(ctx: TenantContext, runId: string, kind: string): Promise<number> {
+    const row = await this.q(ctx).get<{ n: unknown }>(
+      `SELECT COUNT(*) AS n FROM steps WHERE run_id = ? AND workspace_id = ? AND kind = ?`,
+      [runId, ctx.workspaceId, kind],
+    );
+    return Number(row?.n ?? 0);
+  }
+
   async close(): Promise<void> {
     await this.db.close();
   }

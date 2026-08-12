@@ -40,6 +40,8 @@ import { securityHeaders } from "./http/security.ts";
 import {
   clientAddress, ipRuleFor, openRateLimiter, rateRefusal, retryAfterSeconds, type RateAction,
 } from "./http/rateLimit.ts";
+import { SIGNALS, signalsFromRun, subjectDigest, type DetectedSignal } from "./abuse/signals.ts";
+import { AbuseRepository } from "./db/repositories/abuse.ts";
 import { healthz, readyz } from "./http/health.ts";
 import { AUTH_ENV, resolveAuthConfig } from "./auth/config.ts";
 import { LocalIssuer } from "./auth/localIssuer.ts";
@@ -1174,6 +1176,33 @@ if (securityResponseHeaders["strict-transport-security"]) {
 const rateLimiter = openRateLimiter();
 console.log(`[server] rate limiter: ${rateLimiter.kind}`);
 
+// AND WHAT THE PLATFORM HAS OBSERVED, WHICH IS A DIFFERENT QUESTION FROM WHAT IT REFUSED.
+//
+// A rate limit answers one request. This accumulates a SHAPE — the four-minute sandbox that made
+// no model calls, twice an hour, all week — because that is what a miner, a proxy farm and a
+// spam sender each look like, and none of them is identifiable from a single event. It decides
+// nothing: see abuse/signals.ts on why recording and enforcing are deliberately separate.
+const abuse = new AbuseRepository(db);
+// The key that turns an address into a subject digest. Reuses the object store's signing key,
+// which every replica already has to share for presigned URLs to verify across them — a second
+// key with the same requirement would be a second thing to get wrong at deploy time, and this
+// one is never used to authenticate anything an attacker can present.
+const abuseSubject = (address: string): string => subjectDigest(address, objectSigningKey);
+
+/**
+ * Write an observation down, and never let doing so break what was being observed.
+ *
+ * Floating and caught, exactly as `meterPlatformCall` is: every call site is on a path somebody
+ * is waiting on, and a detector that could fail a run would be a detector that costs more than
+ * the abuse. A missed signal is a slower detection; a run that died recording one is the product.
+ */
+function observe(ctx: TenantContext, signal: DetectedSignal): void {
+  console.warn(`[abuse] ${ctx.workspaceId} ${signal.kind} (+${signal.weight}) ${JSON.stringify(signal.detail)}`);
+  void abuse.record(ctx, signal).catch((err) => {
+    console.error(`[abuse] failed to record ${signal.kind}:`, (err as Error)?.message ?? err);
+  });
+}
+
 const router = new Router({
   cors: originPolicy,
   securityHeaders: securityResponseHeaders,
@@ -1189,6 +1218,19 @@ const router = new Router({
     const decision = await rateLimiter.take(action, address);
     if (decision.ok) return;
     console.warn(`[rate] ${address} refused ${action} for ${retryAfterSeconds(decision)}s`);
+    // SIGNUP VELOCITY IS THE ONE OBSERVATION MADE BEFORE A WORKSPACE EXISTS, so it is recorded
+    // against a keyed digest of the address rather than a tenant. Recorded only for the signup
+    // bucket: a browser reconnecting too fast is a client with a loop, not a farm.
+    if (action === "auth.signup" || action === "auth.session") {
+      const sys = systemContext(req.requestId);
+      void abuse
+        .recordForSubject(sys, abuseSubject(address), {
+          kind: "signup.velocity",
+          weight: SIGNALS["signup.velocity"].weight,
+          detail: { action },
+        })
+        .catch((err) => console.error("[abuse] failed to record signup velocity:", (err as Error)?.message ?? err));
+    }
     throw tooMany(rateRefusal(decision), retryAfterSeconds(decision), {
       "x-ratelimit-limit": String(decision.limit),
       "x-ratelimit-remaining": "0",
@@ -1270,7 +1312,22 @@ const localIssuer =
     : undefined;
 const tokenVerifier = new TokenVerifier(authConfig);
 const identityRepo = new IdentityRepository(db);
-const contextResolver = new ContextResolver({ identity: identityRepo });
+const contextResolver = new ContextResolver({
+  identity: identityRepo,
+  // THE HEAVIEST SIGNAL ON THE LIST, and the only one that is not about resources: somebody
+  // asking to act in a workspace they are not a member of. The audit row is written inside the
+  // resolver; this is the part that accumulates, so a single probe is visible as a probe and a
+  // hundred of them is visible as an attack.
+  onCrossTenantDenial: ({ workspaceId, userId, requestId }) => {
+    observe(systemContextFor(workspaceId, requestId), {
+      kind: "tenancy.cross_denied",
+      weight: SIGNALS["tenancy.cross_denied"].weight,
+      detail: { userId },
+      targetType: "workspace",
+      targetId: workspaceId,
+    });
+  },
+});
 // Backed by the database rather than a Map, and rather than Redis. A ticket issued by one
 // replica has to be consumable by another, which rules out the Map; and `DELETE … RETURNING`
 // against the Postgres already here has exactly the property GETDEL was wanted for. Session 5
@@ -1573,6 +1630,9 @@ async function admitCommand(ctx: TenantContext, cmd: ForwardedCommand): Promise<
   if (decision.ok) return true;
   const message = rateRefusal(decision);
   console.warn(`[rate] workspace ${ctx.workspaceId} refused ${action} for ${retryAfterSeconds(decision)}s`);
+  // Nearly weightless on purpose — see abuse/signals.ts. Tripping a limit is a client with a
+  // loop in it and the limiter has already dealt with it; what this makes visible is a PATTERN.
+  observe(ctx, { kind: "rate.limit_tripped", weight: SIGNALS["rate.limit_tripped"].weight, detail: { action } });
   if (action === "agent.generate" || action === "agent.plan") relay.broadcastGen(ctx, { type: "error", message });
   else if (action === "agent.edit") relay.broadcastEdit(ctx, { type: "error", message });
   else if (action === "agent.explain") relay.broadcastReply(ctx, { type: "error", agentId: "", message });
@@ -3003,6 +3063,23 @@ onBothPools("exit", ({ runId, code, signal, timedOut, elapsedMs }) => {
   // of the run was still landing in it, and charge a number that is short by the last few
   // steps. Queued behind the chain, it reads a complete one.
   ingest(() => settleRun(billedCtx, runId));
+  // AND WHAT THE RUN LOOKED LIKE, which the same two numbers already answer.
+  //
+  // A miner is a run that holds its sandbox for minutes and calls no model — and the platform
+  // measures both halves of that already, one line above for the seconds and in the trace for
+  // the calls. Queued behind the ingest chain for the same reason the settlement is: the exit
+  // arrives before the last steps have landed, and a count of model calls taken early would read
+  // zero for every run that ended promptly. See abuse/signals.ts for why the floor exists.
+  ingest(async () => {
+    try {
+      const llmCalls = await store.countSteps(billedCtx, runId, "llm_call");
+      for (const signal of signalsFromRun({ runId, sandboxSeconds: elapsedMs / 1000, llmCalls })) {
+        observe(billedCtx, signal);
+      }
+    } catch (err) {
+      console.error(`[abuse] could not classify run ${runId}:`, (err as Error)?.message ?? err);
+    }
+  });
   // The subprocess is gone, so any question it was waiting on is moot. Left standing, a run
   // that crashed while blocked would leave a modal asking about a process that no longer
   // exists, and answering it would write a file nobody will ever read.
