@@ -1,0 +1,192 @@
+{
+  "version": 1,
+  "generatedFrom": "server/src/obs/slo.ts",
+  "slos": [
+    {
+      "id": "tenant-isolation",
+      "objective": "No request ever succeeds in a workspace the actor is not a member of.",
+      "metric": "cross_tenant_denials_total",
+      "target": null,
+      "kind": "absolute",
+      "window": "always"
+    },
+    {
+      "id": "run-success-rate",
+      "objective": "99% of interactive runs reach a terminal state without a platform error.",
+      "metric": "runs_total",
+      "target": 0.99,
+      "kind": "ratio",
+      "window": "28d"
+    },
+    {
+      "id": "sandbox-start-p95",
+      "objective": "A sandbox is ready to receive work within 10 seconds, 95% of the time.",
+      "metric": "sandbox_start_seconds",
+      "target": 10,
+      "kind": "quantile",
+      "quantile": 0.95,
+      "window": "28d"
+    },
+    {
+      "id": "trace-ingest-lag-p95",
+      "objective": "A step is persisted within 2 seconds of being emitted, 95% of the time.",
+      "metric": "trace_ingest_lag_seconds",
+      "target": 2,
+      "kind": "quantile",
+      "quantile": 0.95,
+      "window": "7d"
+    },
+    {
+      "id": "api-latency-p95",
+      "objective": "An API request is answered within 500ms, 95% of the time.",
+      "metric": "http_request_seconds",
+      "target": 0.5,
+      "kind": "quantile",
+      "quantile": 0.95,
+      "window": "28d"
+    },
+    {
+      "id": "queue-freshness",
+      "objective": "No eval job waits more than 5 minutes before being admitted.",
+      "metric": "queue_oldest_pending_seconds",
+      "target": 300,
+      "kind": "absolute",
+      "window": "7d"
+    }
+  ],
+  "groups": [
+    {
+      "name": "jaroku",
+      "rules": [
+        {
+          "alert": "CrossTenantDenial",
+          "expr": "increase(jaroku_cross_tenant_denials_total[5m]) > 0",
+          "labels": {
+            "severity": "page",
+            "metric": "jaroku_cross_tenant_denials_total"
+          },
+          "annotations": {
+            "summary": "Somebody was refused access to a workspace they are not a member of.",
+            "runbook": "This should never fire. Find the audit_log rows with action='workspace.access_denied' for the window, identify the actor, and establish whether it is a probe, a bug in a client, or a real attempt. The refusal itself worked — this alert is about knowing it happened."
+          }
+        },
+        {
+          "alert": "SandboxStartSlow",
+          "expr": "histogram_quantile(0.95, sum(rate(jaroku_sandbox_start_seconds_bucket[10m])) by (le)) > 10",
+          "for": "15m",
+          "labels": {
+            "severity": "page",
+            "metric": "jaroku_sandbox_start_seconds"
+          },
+          "annotations": {
+            "summary": "Sandboxes are taking more than 10s at p95 to become ready.",
+            "runbook": "Check the substrate's own status first (Fly machine creation), then whether the image digest changed in the last deploy — a cold image is the usual cause. Runs still work; they start slowly, so this is a page rather than a ticket only because it precedes a queue backup."
+          }
+        },
+        {
+          "alert": "TraceIngestBacklog",
+          "expr": "histogram_quantile(0.95, sum(rate(jaroku_trace_ingest_lag_seconds_bucket[10m])) by (le)) > 30",
+          "for": "10m",
+          "labels": {
+            "severity": "page",
+            "metric": "jaroku_trace_ingest_lag_seconds"
+          },
+          "annotations": {
+            "summary": "Steps are taking more than 30s to be persisted.",
+            "runbook": "The trace is the product; a run whose steps arrive minutes late is a run nobody can watch. Check database write latency and the ingest batch size. At-least-once delivery means nothing is lost while this is firing — it is late, not gone."
+          }
+        },
+        {
+          "alert": "RunFailureRate",
+          "expr": "sum(rate(jaroku_runs_total{status=\"error\"}[15m])) / clamp_min(sum(rate(jaroku_runs_total[15m])), 0.001) > 0.1",
+          "for": "15m",
+          "labels": {
+            "severity": "page",
+            "metric": "jaroku_runs_total"
+          },
+          "annotations": {
+            "summary": "More than 10% of runs are ending in error.",
+            "runbook": "Distinguish a provider outage (see jaroku_provider_errors_total by provider) from a platform fault. A provider's bad afternoon is not ours to fix and should be visible on the status page rather than paged on; anything else is."
+          }
+        },
+        {
+          "alert": "QueueStarvation",
+          "expr": "max(jaroku_queue_oldest_pending_seconds) > 900",
+          "for": "10m",
+          "labels": {
+            "severity": "ticket",
+            "metric": "jaroku_queue_oldest_pending_seconds"
+          },
+          "annotations": {
+            "summary": "A job has been waiting more than 15 minutes.",
+            "runbook": "Depth alone does not show this — one workspace's 500-job eval can leave another's single job waiting while the ring rotates. Check the fairness ratio in the load-test report and whether worker replicas are healthy."
+          }
+        },
+        {
+          "alert": "DefaultPartitionFilling",
+          "expr": "jaroku_steps_default_partition_rows > 0",
+          "for": "1h",
+          "labels": {
+            "severity": "ticket",
+            "metric": "jaroku_steps_default_partition_rows"
+          },
+          "annotations": {
+            "summary": "Steps are landing in the DEFAULT partition.",
+            "runbook": "Rows there cannot be dropped by month, so the retention promise is quietly not being kept for them. Usually means the partition-ensuring job has not run. Create the missing months and move the rows, in that order."
+          }
+        },
+        {
+          "alert": "ProviderErrorRate",
+          "expr": "sum(rate(jaroku_provider_errors_total[10m])) by (provider) > 1",
+          "for": "15m",
+          "labels": {
+            "severity": "ticket",
+            "metric": "jaroku_provider_errors_total"
+          },
+          "annotations": {
+            "summary": "A model provider is failing more than one call a second.",
+            "runbook": "Check the provider's status page before anything else. Then whether one workspace's key is being rate limited."
+          }
+        },
+        {
+          "alert": "AbuseSpike",
+          "expr": "sum(increase(jaroku_abuse_signals_total[1h])) by (kind) > 50",
+          "labels": {
+            "severity": "ticket",
+            "metric": "jaroku_abuse_signals_total"
+          },
+          "annotations": {
+            "summary": "An unusual number of abuse signals in the last hour.",
+            "runbook": "Not necessarily abuse: a detector that has started misfiring produces exactly this shape. Check which kind, and whether it is one workspace or many, before touching an enforcement."
+          }
+        },
+        {
+          "alert": "EnforcementWave",
+          "expr": "sum(jaroku_workspaces_enforced) > 20",
+          "for": "30m",
+          "labels": {
+            "severity": "ticket",
+            "metric": "jaroku_workspaces_enforced"
+          },
+          "annotations": {
+            "summary": "An unusual number of workspaces are under an enforcement rung.",
+            "runbook": "The ladder is automatic up to `verify`, so a mis-tuned weight can limit a lot of people at once. Compare against the signal counts; if the signals are flat and the enforcements are not, the thresholds are wrong rather than the customers."
+          }
+        },
+        {
+          "alert": "RateLimitSurge",
+          "expr": "sum(rate(jaroku_rate_limited_total[5m])) by (action) > 5",
+          "for": "10m",
+          "labels": {
+            "severity": "watch",
+            "metric": "jaroku_rate_limited_total"
+          },
+          "annotations": {
+            "summary": "A lot of requests are being refused by a rate limit.",
+            "runbook": "Usually a client with a retry loop. Check whether it is one address or many before changing a limit."
+          }
+        }
+      ]
+    }
+  ]
+}

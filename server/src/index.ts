@@ -10,7 +10,7 @@
 // Then open http://localhost:4317 to watch traces live.
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -37,7 +37,7 @@ import {
   type MemberCommand,
   type ProviderCommand,
 } from "./wsRelay.ts";
-import { Router, tooMany } from "./http/router.ts";
+import { Router, forbidden, tooMany, unauthorized } from "./http/router.ts";
 import { securityHeaders } from "./http/security.ts";
 import {
   clientAddress, ipRuleFor, openRateLimiter, rateRefusal, retryAfterSeconds, type RateAction,
@@ -83,6 +83,7 @@ import type { ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCo
 import { loadRuntimeEnv } from "./env.ts";
 import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
 import { formatTraceparent, openTracer, parseTraceparent } from "./obs/trace.ts";
+import { metrics, routeLabel, statusClass } from "./obs/metrics.ts";
 import { McpStore } from "./mcpStore.ts";
 import { McpRegistry } from "./mcpRegistry.ts";
 import { MCP_DISCOVER_CLASS, McpDiscoveryQueue } from "./mcpDiscovery.ts";
@@ -251,6 +252,7 @@ const ensureStepPartitions = async (): Promise<void> => {
   const created = await ensurePartitions(db);
   if (created.length) console.log(`[lifecycle] ${created.length} step partition(s) ensured through ${created.at(-1)}`);
   const { defaultRows } = await describePartitions(db);
+  metrics.set("steps_default_partition_rows", defaultRows);
   if (defaultRows > 0) {
     // Not fatal, and not silent. Rows here cannot be dropped by month, so a filling default is a
     // retention promise quietly not being kept — see lifecycle/partitions.ts.
@@ -1381,6 +1383,7 @@ const abuseSubject = (address: string): string => subjectDigest(address, objectS
  * the abuse. A missed signal is a slower detection; a run that died recording one is the product.
  */
 function observe(ctx: TenantContext, signal: DetectedSignal): void {
+  metrics.increment("abuse_signals_total", { kind: signal.kind });
   console.warn(`[abuse] ${ctx.workspaceId} ${signal.kind} (+${signal.weight}) ${JSON.stringify(signal.detail)}`);
   void abuse
     .record(ctx, signal)
@@ -1426,9 +1429,16 @@ const router = new Router({
         },
       },
       async (span) => {
+        const startedAt = Date.now();
         const out = await run();
         span.set("http.status_code", out.status);
         if (out.status >= 500) span.set("error", true);
+        // AND THE AGGREGATE, beside the trace. The span explains this request; these two explain
+        // all of them. `routeLabel` collapses the ids out of the path — a run id as a label is
+        // the standard way a metrics backend falls over.
+        const route = routeLabel(req.path);
+        metrics.increment("http_requests_total", { route, status: statusClass(out.status) });
+        metrics.observe("http_request_seconds", (Date.now() - startedAt) / 1000, { route });
         return out;
       },
     ),
@@ -1444,6 +1454,7 @@ const router = new Router({
     const decision = await rateLimiter.take(action, address);
     if (decision.ok) return;
     console.warn(`[rate] ${address} refused ${action} for ${retryAfterSeconds(decision)}s`);
+    metrics.increment("rate_limited_total", { action });
     // SIGNUP VELOCITY IS THE ONE OBSERVATION MADE BEFORE A WORKSPACE EXISTS, so it is recorded
     // against a keyed digest of the address rather than a tenant. Recorded only for the signup
     // bucket: a browser reconnecting too fast is a client with a loop, not a farm.
@@ -1464,6 +1475,31 @@ const router = new Router({
   },
 });
 router.get("/healthz", healthz());
+// THE SCRAPE ENDPOINT.
+//
+// Bearer-authenticated when JAROKU_METRICS_TOKEN is set, and refused entirely in production when
+// it is not. The numbers here are not secrets in the way a credential is — but queue depths,
+// spend and enforcement counts are a description of the business, and an unauthenticated
+// `/metrics` on a public origin is that description published. Constant-time comparison for the
+// same reason the deployed agent's bearer check is: a token compared with `===` leaks its prefix.
+router.get("/metrics", (req) => {
+  const expected = process.env["JAROKU_METRICS_TOKEN"];
+  if (!expected) {
+    if (process.env["NODE_ENV"] === "production") {
+      throw forbidden("set JAROKU_METRICS_TOKEN to expose metrics on this deployment");
+    }
+  } else {
+    const presented = (req.header("authorization") ?? "").replace(/^Bearer\s+/i, "");
+    const a = Buffer.from(presented);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) throw unauthorized("bad metrics token");
+  }
+  return {
+    body: Buffer.from(metrics.render(), "utf8"),
+    // The exposition format's own content type, version and all — a scraper checks it.
+    headers: { "content-type": "text/plain; version=0.0.4; charset=utf-8" },
+  };
+});
 router.get(
   "/readyz",
   readyz({ dialect: db.dialect, probe: () => db.get(`SELECT 1 AS ok`) }),
@@ -1545,6 +1581,10 @@ const contextResolver = new ContextResolver({
   // resolver; this is the part that accumulates, so a single probe is visible as a probe and a
   // hundred of them is visible as an attack.
   onCrossTenantDenial: ({ workspaceId, userId, requestId }) => {
+    // THE COUNTER WHOSE EXPECTED VALUE IS ZERO, and whose alert fires on any non-zero value with
+    // no threshold and no window. See obs/slo.ts: a threshold here would be a decision that some
+    // cross-tenant attempts are acceptable.
+    metrics.increment("cross_tenant_denials_total", { reason: "not_a_member" });
     observe(systemContextFor(workspaceId, requestId), {
       kind: "tenancy.cross_denied",
       weight: SIGNALS["tenancy.cross_denied"].weight,
@@ -1950,6 +1990,7 @@ async function admitCommand(ctx: TenantContext, cmd: ForwardedCommand): Promise<
   }
   if (decision.ok) return true;
   console.warn(`[rate] workspace ${ctx.workspaceId} refused ${action} for ${retryAfterSeconds(decision)}s`);
+  metrics.increment("rate_limited_total", { action });
   // Nearly weightless on purpose — see abuse/signals.ts. Tripping a limit is a client with a
   // loop in it and the limiter has already dealt with it; what this makes visible is a PATTERN.
   observe(ctx, { kind: "rate.limit_tripped", weight: SIGNALS["rate.limit_tripped"].weight, detail: { action } });
@@ -3386,6 +3427,10 @@ onBothPools("exit", ({ runId, code, signal, timedOut, elapsedMs }) => {
   // The run's own span closes here, where the machine actually stopped existing — the same
   // moment, and for the same reason, that its sandbox seconds are metered. `timedOut` and a
   // non-zero exit go on it, so a trace shows WHY a run ended and not only that it did.
+  metrics.increment("runs_total", {
+    status: timedOut ? "timeout" : code === 0 ? "ok" : "error",
+    kind: isEvalRun(runId) ? "eval" : "interactive",
+  });
   const span = runSpans.get(runId);
   if (span) {
     runSpans.delete(runId);
