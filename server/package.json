@@ -101,6 +101,7 @@
     "test:mcp-registry": "tsx src/mcpRegistry.test.ts",
     "test:mcp-tenancy": "tsx src/mcpTenancy.test.ts",
     "test:mcp-discovery-queue": "tsx src/mcpDiscoveryQueue.test.ts",
+    "test:mcp-url": "tsx src/mcpUrl.test.ts",
     "test:mcp-hardening": "tsx src/mcpHardening.test.ts",
     "mock:mcp": "tsx fixtures/mcp/mockServer.ts",
     "mock:s3": "tsx fixtures/s3/mockS3.ts",

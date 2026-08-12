@@ -73,6 +73,7 @@ import { loadRuntimeEnv } from "./env.ts";
 import { McpStore } from "./mcpStore.ts";
 import { McpRegistry } from "./mcpRegistry.ts";
 import { MCP_DISCOVER_CLASS, McpDiscoveryQueue } from "./mcpDiscovery.ts";
+import { mcpEgressRules } from "./mcpUrl.ts";
 import { WorkerLoop } from "./queue/workerLoop.ts";
 import { fileCredentialWriter } from "./envWriter.ts";
 import { openSecretStore } from "./secrets/open.ts";
@@ -793,9 +794,11 @@ const connectorSecrets = new ConnectorSecrets({ secrets });
  * whole policy comes back undefined and the log says which connector caused it.
  */
 async function buildRunEgress(
+  ctx: TenantContext,
   runId: string,
   provider: string | undefined,
   connectors: string[],
+  mcpRefs: string[],
 ): Promise<EgressPolicy | undefined> {
   try {
     // Resolved fresh at policy-build time and pinned. Reading something the save path recorded
@@ -803,11 +806,36 @@ async function buildRunEgress(
     const databaseUrl = connectors.includes("postgres")
       ? ((await connectorSecrets.postgresEgress(runId)) ?? undefined)
       : undefined;
+    // THE MCP SERVERS THIS AGENT WAS GRANTED, validated and pinned at policy-build time.
+    //
+    // From the AGENT's own manifest refs, never from anything a client sent — the same rule the
+    // credential resolution follows one function up. A server it was not generated with does not
+    // appear in the policy, so a generated project that somehow reached for one would find the
+    // socket closed rather than the tool missing.
+    //
+    // Re-validated HERE rather than trusted from registration, because a hostname is not a
+    // promise: `mcp.example.com` can be repointed at the metadata endpoint between the day it was
+    // added and the moment a run connects. An endpoint that no longer validates contributes no
+    // rule and is logged — see mcpUrl.mcpEgressRules on why that beats refusing the whole run.
+    const grantedServers = [
+      ...new Set(mcpRefs.map((ref) => ref.slice(0, ref.indexOf("/"))).filter(Boolean)),
+    ];
+    const endpoints: { id: string; endpoint: string }[] = [];
+    for (const id of grantedServers) {
+      const server = await mcpStore.getServer(ctx, id);
+      if (server) endpoints.push({ id: server.id, endpoint: server.endpoint });
+    }
+    const mcp = await mcpEgressRules(endpoints);
+    for (const bad of mcp.refused) {
+      console.warn(`[sandbox] run ${runId} was not granted egress to the ${bad.id} MCP server: ${bad.reason}`);
+    }
+
     return await buildEgressPolicy({
       runId,
       provider: provider ?? "fake",
       connectors,
       databaseUrl,
+      mcpRules: mcp.rules,
       controlPlaneHost: CONTROL_PLANE_URL ? new URL(CONTROL_PLANE_URL).hostname : undefined,
       controlPlanePort: CONTROL_PLANE_URL ? Number(new URL(CONTROL_PLANE_URL).port || 443) : undefined,
     });
@@ -3291,7 +3319,7 @@ async function runAgent(
     // completely different places and neither should be deciding what the rules are. Locally
     // nothing enforces it at all — a child process shares this machine's network — which is why
     // LocalSubprocessSandbox refuses to start under NODE_ENV=production.
-    runEgress = await buildRunEgress(runId, provider, agent?.connectors ?? []);
+    runEgress = await buildRunEgress(ctx, runId, provider, agent?.connectors ?? [], agent?.mcp_tools ?? []);
   } catch (err) {
     console.warn(`[manager] could not resolve credentials for ${runId}: ${(err as Error).message}`);
   }

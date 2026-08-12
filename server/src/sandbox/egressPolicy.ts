@@ -286,13 +286,27 @@ export interface EgressPolicyInput {
    * would eventually disagree.
    */
   databaseUrl?: { host: string; port: number; ips: string[] };
+  /**
+   * The MCP servers this run was granted, already validated and pinned by `mcpUrl.ts`.
+   *
+   * Taken as finished rules rather than as endpoints, for exactly the reason `databaseUrl` is:
+   * this module has no business re-deciding what counts as a safe user-supplied URL, and a second
+   * copy of that judgement is how the two would eventually disagree. An endpoint that did not
+   * validate contributes no rule and the run simply cannot reach it — see mcpUrl.ts on why that
+   * beats refusing to start a run over one repointed server.
+   */
+  mcpRules?: EgressRule[];
 }
 
 /**
- * Build the policy for one run: the declared provider, the declared connectors' fixed hosts,
- * the control plane, and the object store — nothing else. DATABASE_URL and MCP server hosts are
- * added by later commits (databaseUrl.ts, and the MCP grant respectively); this is deliberately
- * the subset that needs no user-supplied URL, so it has no SSRF surface of its own to validate.
+ * Build the policy for one run: the declared provider, the declared connectors' fixed hosts, the
+ * control plane, the object store, the workspace's own validated DATABASE_URL, and the MCP servers
+ * it was granted — nothing else, and denied by default.
+ *
+ * The two user-supplied halves arrive ALREADY VALIDATED AND PINNED, from `databaseUrl.ts` and
+ * `mcpUrl.ts`. That is not deference: those are the two SSRF vectors in this system, each has a
+ * module that decides what is safe about it, and this function taking raw URLs would be a third
+ * opinion on the same question.
  */
 export async function buildEgressPolicy(
   input: EgressPolicyInput,
@@ -331,6 +345,10 @@ export async function buildEgressPolicy(
   } else if (input.connectors.includes("postgres")) {
     throw new EgressPolicyError("the postgres connector is selected but no validated DATABASE_URL was supplied");
   }
+
+  // Already pinned. Appended rather than re-resolved: `validateMcpUrl` did the lookup, and the
+  // whole point of pinning is that nothing does it a second time.
+  for (const rule of input.mcpRules ?? []) rules.push(rule);
 
   return { runId: input.runId, rules };
 }

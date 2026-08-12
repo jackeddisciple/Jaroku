@@ -23,6 +23,8 @@
 import { discover, type DiscoveryResult } from "./mcpClient.ts";
 import { authEnvKeyFor } from "./envWriter.ts";
 import type { SecretStore } from "./secrets/secretStore.ts";
+import { McpUrlError, validateMcpUrl } from "./mcpUrl.ts";
+import { EgressPolicyError, realResolver, type Resolver } from "./sandbox/egressPolicy.ts";
 import type { TenantContext } from "./db/tenant.ts";
 import { classify } from "./mcpImpact.ts";
 import {
@@ -139,7 +141,41 @@ export class McpRegistry {
    * Still optional, and for the reason the writer was: a test can register a server without one,
    * and a server needing a credential simply reports `configured: false`.
    */
-  constructor(private store: McpStore, private secrets?: SecretStore) {}
+  constructor(
+    private store: McpStore,
+    private secrets?: SecretStore,
+    /**
+     * How an endpoint's host is resolved before anything connects to it.
+     *
+     * Injected so the suite can exercise the private-range refusal deterministically, with no
+     * live network and no flakiness from whatever a real resolver happens to answer today —
+     * the same reasoning `egressPolicy` and `databaseUrl` already document for theirs.
+     */
+    private resolver: Resolver = realResolver,
+  ) {}
+
+  /**
+   * Refuse an endpoint that must not be connected to, with a message safe to show.
+   *
+   * CALLED BEFORE EVERY HANDSHAKE, both the first and every re-discovery, and the second is the
+   * one that matters. A URL validated once at registration and trusted forever is a URL whose
+   * DNS the owner can repoint the next day — so the check is at the point of USE rather than at
+   * the point of entry, which is the same reason `connectorSecrets` re-resolves a DATABASE_URL
+   * per run instead of trusting what was saved.
+   */
+  private async refuseEndpoint(endpoint: string): Promise<string | null> {
+    try {
+      await validateMcpUrl(endpoint, this.resolver);
+      return null;
+    } catch (err) {
+      // Both carry a message written in this codebase. `validateMcpUrl` deliberately does not
+      // quote a credentialed URL back, and neither does the shared egress refusal — which
+      // matters because this text lands in `mcp_servers.last_error`, on every client's registry
+      // snapshot, and in the log.
+      if (err instanceof McpUrlError || err instanceof EgressPolicyError) return err.message;
+      return "that endpoint could not be checked";
+    }
+  }
 
   // --- reads -----------------------------------------------------------------
 
@@ -323,6 +359,21 @@ export class McpRegistry {
       }
     }
 
+    // BEFORE ANYTHING CONNECTS. A user-supplied URL fetched by the CONTROL PLANE is the SSRF
+    // vector the migration spec names, and unlike a sandbox's egress there is no second wall
+    // here — this check is the wall. See mcpUrl.ts.
+    const refusal = await this.refuseEndpoint(endpoint);
+    if (refusal) {
+      await this.store.upsertServer(ctx, {
+        id, label, endpoint, transport: "http", auth_env_key: authEnvKey,
+        server_name: null, server_version: null, protocol_version: null,
+        // `error`, not `unreachable`. Unreachable invites a retry, and this endpoint will be
+        // refused identically every time until the user changes it.
+        status: "error", last_error: refusal, discovered_at: null,
+      });
+      return { ok: false, server: await this.get(ctx, id), message: joinMessages(credentialWarning, refusal) };
+    }
+
     const result = await discover({
       endpoint,
       // Read back through the store rather than reused from `opts.token`, so the value the
@@ -382,6 +433,18 @@ export class McpRegistry {
   async rediscover(ctx: TenantContext, id: string): Promise<RegistrationResult> {
     const server = await this.store.getServer(ctx, id);
     if (!server) return { ok: false, server: null, message: `no server called "${id}"` };
+
+    // RE-CHECKED, not trusted from registration. A hostname is not a promise: the owner of
+    // `mcp.example.com` can repoint it at `169.254.169.254` the day after it was added, and a
+    // re-discovery is exactly when that would be used.
+    const refusal = await this.refuseEndpoint(server.endpoint);
+    if (refusal) {
+      // The tool list is LEFT ALONE, like every other rediscover failure — see this method's
+      // own note. A repointed server must not silently strip every agent scoped to it; it must
+      // stop being talked to and say why.
+      await this.store.setServerStatus(ctx, id, "error", refusal);
+      return { ok: false, server: await this.get(ctx, id), message: refusal };
+    }
 
     const result = await discover({ endpoint: server.endpoint, token: await this.token(ctx, server) });
 
