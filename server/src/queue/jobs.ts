@@ -28,6 +28,9 @@ export const JOB_CLASSES = [
   "edit",
   "explain",
   "mcp.discover",
+  // Session 8. A workspace asking for everything it has: not latency-critical, not retryable in
+  // the queue's sense, and the only class whose OUTPUT is an object rather than a trace.
+  "workspace.export",
 ] as const;
 
 export type JobClass = (typeof JOB_CLASSES)[number];
@@ -118,6 +121,14 @@ const DEFAULTS: Record<JobClass, Omit<JobClassConfig, "perWorkspaceConcurrency" 
   // improve. A user pressing Re-discover is the retry, and it is the one that knows whether the
   // server has been fixed.
   "mcp.discover": { label: "MCP tool discovery", globalConcurrency: null, retryable: false, queued: true },
+  // NOT RETRYABLE, for a different reason from mcp.discover's: an export reads a workspace's
+  // whole history and writes one object, so a retry is not a cheap second attempt — it is the
+  // same expensive read again, and the failure that killed the first is almost always the
+  // database being unavailable, which a retry moments later shares. The person asked for it and
+  // can ask again. GLOBALLY CAPPED at four, because this is the only class that can read
+  // millions of rows on one connection, and a platform where every workspace exports at once is
+  // a platform where nothing else gets a connection.
+  "workspace.export": { label: "a workspace export", globalConcurrency: 4, retryable: false, queued: true },
 };
 
 const PER_WORKSPACE_DEFAULT: Record<JobClass, () => number> = {
@@ -133,6 +144,9 @@ const PER_WORKSPACE_DEFAULT: Record<JobClass, () => number> = {
   edit: () => 1,
   explain: () => 4,
   "mcp.discover": () => 2,
+  // One at a time per workspace. Two exports of the same workspace produce two copies of the
+  // same bytes, and the second is always the one somebody actually waits for.
+  "workspace.export": () => 1,
 };
 
 const TIMEOUT_DEFAULT_MS: Record<JobClass, () => number | null> = {
@@ -144,6 +158,9 @@ const TIMEOUT_DEFAULT_MS: Record<JobClass, () => number | null> = {
   edit: () => 120_000,
   explain: () => 30_000,
   "mcp.discover": () => positiveFromEnv("JAROKU_MCP_DISCOVERY_MS", 30_000),
+  // Ten minutes. An export of a workspace with a year of traces is genuinely slow, and the
+  // deadline is here to catch a wedge rather than to bound the work.
+  "workspace.export": () => positiveFromEnv("JAROKU_EXPORT_TIMEOUT_MS", 600_000),
 };
 
 export function jobClassConfig(jobClass: JobClass): JobClassConfig {

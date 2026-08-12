@@ -233,6 +233,11 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   forgetDeployment: "deploy:manage",
   setRailwayToken: "deploy:manage",
   testRailwayToken: "deploy:manage",
+
+  // An export is deliberately NOT here, and its absence is the decision rather than an omission:
+  // it is an HTTP route, not a socket command — see http/lifecycle.ts. A copy of everything the
+  // workspace has is a file a browser downloads, and a download is a request with a URL, not a
+  // frame on a multiplexed socket. It checks `workspace:manage` at the door like everything else.
 };
 
 /** The capability a command needs, or undefined for one nothing has classified. */

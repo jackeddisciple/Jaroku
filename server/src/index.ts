@@ -84,6 +84,9 @@ import { loadRuntimeEnv } from "./env.ts";
 import { McpStore } from "./mcpStore.ts";
 import { McpRegistry } from "./mcpRegistry.ts";
 import { MCP_DISCOVER_CLASS, McpDiscoveryQueue } from "./mcpDiscovery.ts";
+import { WorkspaceExporter } from "./lifecycle/export.ts";
+import { lifecycleRoutes } from "./http/lifecycle.ts";
+import { buildIdempotencyKey, type JobClass, type QueueJob } from "./queue/jobs.ts";
 import { mcpEgressRules } from "./mcpUrl.ts";
 import { WorkerLoop } from "./queue/workerLoop.ts";
 import { fileCredentialWriter } from "./envWriter.ts";
@@ -590,6 +593,47 @@ const mcpDiscovery = new McpDiscoveryQueue({
     broadcastMcpServers();
   },
 });
+// AND THE OTHER CLASS THIS PROCESS DRAINS ITSELF: a workspace asking for everything it has.
+//
+// Here rather than in worker.ts for the same reason discovery is: it holds a database connection
+// and waits, rather than competing for the scarce capacity a run needs. Its own global cap of
+// four (queue/jobs.ts) is what stops six thousand workspaces exporting at once from taking every
+// connection in the pool.
+const exporter = new WorkspaceExporter({
+  db,
+  objects,
+  // The current version of every agent's source. An export listing agents without their code
+  // would be a description of somebody's work rather than their work.
+  agentFiles: async (ctx) => {
+    const out: { path: string; body: Buffer }[] = [];
+    for (const agent of await agentRepo.list(ctx)) {
+      for (const file of await agentProjectFiles(ctx, agent.slug)) {
+        out.push({ path: `${agent.slug}/${file.path}`, body: Buffer.from(file.content ?? "", "utf8") });
+      }
+    }
+    return out;
+  },
+});
+/** The class an export runs under. Named once, so the route and the loop cannot disagree. */
+const EXPORT_CLASS: JobClass = "workspace.export";
+const exportLoop = new WorkerLoop({
+  dispatcher,
+  classes: [EXPORT_CLASS],
+  handlers: {
+    [EXPORT_CLASS]: async (job: QueueJob) => {
+      // A system context scoped to the JOB's workspace, never the requester's — a job outlives
+      // the request that enqueued it, and the workspace is what authorises the work.
+      const ctx = systemContextFor(job.workspaceId, newRequestId());
+      const exportId = String((job.payload as { exportId?: string } | undefined)?.exportId ?? "");
+      const result = await exporter.export(ctx, exportId);
+      console.log(`[export] ${job.workspaceId} ${exportId} ready — ${result.bytes} byte(s)`);
+    },
+  },
+  onHandlerError: (_class, job, error) =>
+    console.error(`[export] ${job.workspaceId} failed:`, (error as Error)?.message ?? error),
+});
+void exportLoop.run();
+
 const mcpDiscoveryLoop = new WorkerLoop({
   dispatcher,
   classes: [MCP_DISCOVER_CLASS],
@@ -1532,6 +1576,41 @@ for (const route of objectRoutes({
   },
 })) {
   router.prefixRoute(route.method, route.prefix, route.handler);
+}
+
+// A WORKSPACE ASKING FOR EVERYTHING IT HAS — see http/lifecycle.ts for why this is HTTP rather
+// than a socket command, and why the status check needs no job table.
+for (const route of lifecycleRoutes({
+  objects,
+  contextFor: async (req) => {
+    const auth = await authenticate(req, tokenVerifier);
+    const requested = req.url.searchParams.get("workspace");
+    // Through the resolver, exactly like every other authenticated route: nothing below this
+    // line sees a workspace id the client chose.
+    return (await contextResolver.resolve(auth, requested, req.requestId, req.ip)).context;
+  },
+  enqueueExport: async (ctx, exportId) => {
+    await dispatcher.enqueue(
+      EXPORT_CLASS,
+      ctx.workspaceId,
+      { exportId },
+      // Keyed by the export id, so a redelivered admission is the same unit of work rather than
+      // a second archive of the same bytes.
+      { idempotencyKey: buildIdempotencyKey(EXPORT_CLASS, ctx.workspaceId, exportId) },
+    );
+  },
+  audit: async (ctx, action, detail) => {
+    await identityRepo.appendAudit(ctx, {
+      action,
+      targetType: "workspace",
+      targetId: ctx.workspaceId,
+      metadata: detail,
+    });
+  },
+})) {
+  if (route.prefix) router.prefixRoute(route.method, route.path, route.handler);
+  else if (route.method === "GET") router.get(route.path, route.handler);
+  else router.post(route.path, route.handler);
 }
 
 const relay = new WsRelay({
