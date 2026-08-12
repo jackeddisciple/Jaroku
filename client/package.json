@@ -8,15 +8,15 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test:plan-flow": "node ../server/node_modules/tsx/dist/cli.mjs src/store/planFlow.test.ts",
-    "test:deploy-store": "node ../server/node_modules/tsx/dist/cli.mjs src/store/deployStore.test.ts",
-    "test:note-kind": "node ../server/node_modules/tsx/dist/cli.mjs src/lib/noteKind.test.ts",
-    "test:inline-code": "node ../server/node_modules/tsx/dist/cli.mjs src/lib/inlineCode.test.ts",
-    "test:title": "node ../server/node_modules/tsx/dist/cli.mjs src/lib/title.test.ts",
-    "test:export": "node ../server/node_modules/tsx/dist/cli.mjs src/lib/evalExport.test.ts",
-    "test:csv": "node ../server/node_modules/tsx/dist/cli.mjs src/lib/csv.test.ts",
-    "test:auth": "node ../server/node_modules/tsx/dist/cli.mjs src/lib/auth.test.ts",
-    "test:reset": "node ../server/node_modules/tsx/dist/cli.mjs src/store/reset.test.ts"
+    "test:plan-flow": "tsx src/store/planFlow.test.ts",
+    "test:deploy-store": "tsx src/store/deployStore.test.ts",
+    "test:note-kind": "tsx src/lib/noteKind.test.ts",
+    "test:inline-code": "tsx src/lib/inlineCode.test.ts",
+    "test:title": "tsx src/lib/title.test.ts",
+    "test:export": "tsx src/lib/evalExport.test.ts",
+    "test:csv": "tsx src/lib/csv.test.ts",
+    "test:auth": "tsx src/lib/auth.test.ts",
+    "test:reset": "tsx src/store/reset.test.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
@@ -37,6 +37,7 @@
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.23.12",
     "typescript": "^5.7.2",
     "vite": "^6.0.5"
   }
