@@ -13,8 +13,8 @@
 //
 //   npm run test:metrics
 
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { METRICS, MetricsRegistry, routeLabel, statusClass, type MetricName } from "./metrics.ts";
 import { ALERTS, SLOS, renderObservabilityJson } from "./slo.ts";
@@ -171,6 +171,73 @@ console.log("\nthe committed file");
   }
   check(onDisk !== null, "deploy/observability/alerts.json exists");
   check(onDisk === renderObservabilityJson(), "...and is what the tables render to — `npm run obs:render` if this fails");
+}
+
+// --- an alert on a metric nobody emits ---------------------------------------------------------
+
+console.log("\nevery alerted metric is actually emitted");
+
+// METRICS.TS SAYS THIS IN ITS OWN HEADER and the codebase was not checking it: "an alert on a
+// metric nobody emits is an alert that never fires, which is worse than no alert because it looks
+// like cover." What was checked is that an alert names a metric that exists IN THE TABLE. Five
+// alerted metrics existed in the table and were emitted by nothing at all — including the
+// ingestion-lag and queue SLOs, both of which the spec names.
+//
+// A metric is only real where something calls `increment`, `observe` or `set` on it, so the check
+// is a read of the server's own source. Structural for the usual reason: index.ts is a script
+// that opens sockets on import, and the emission sites are spread across it, the worker and the
+// repositories.
+{
+  const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const sources: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      const p = join(dir, entry.name);
+      if (entry.isDirectory()) walk(p);
+      else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts") && p !== join(SRC, "obs", "metrics.ts")) {
+        sources.push(readFileSync(p, "utf8"));
+      }
+    }
+  };
+  walk(SRC);
+  const all = sources.join("\n");
+  const emits = (name: string): boolean =>
+    new RegExp(`\\.(?:increment|observe|set)\\(\\s*"${name}"`).test(all);
+
+  /**
+   * Declared, alerted, and NOT YET EMITTED — recorded rather than left to be discovered.
+   *
+   * Each needs a source of numbers that does not exist yet, which is why none of them is a
+   * one-line fix and why leaving them silently dead was the wrong shape. Recording them here is
+   * the same choice escapeSuite.test.ts makes about the gaps it cannot close: an explicit line
+   * somebody reads, rather than a green tick over an alert that cannot fire.
+   */
+  const NOT_YET_EMITTED: Record<string, string> = {
+    queue_oldest_pending_seconds:
+      "needs a backend that can report the age of the oldest pending job; QueueBackend only answers pendingCount per workspace",
+    sandbox_start_seconds:
+      "needs a timing hook around sandbox acquisition, which the Fly and local sandboxes would both have to carry",
+    provider_errors_total:
+      "needs the provider call sites to classify a failure by provider rather than logging it",
+  };
+
+  const alerted = new Set<string>([...ALERTS.map((a) => a.metric), ...SLOS.map((s) => s.metric)]);
+  check(alerted.size >= 8, `${alerted.size} metrics carry an alert or an SLO`);
+
+  const dead = [...alerted].filter((m) => !emits(m) && !(m in NOT_YET_EMITTED)).sort();
+  check(dead.length === 0, `every alerted metric has an emission site (${dead.join(", ") || "all do"})`);
+
+  // The recorded gaps have to stay honest in both directions: one that has since been wired is a
+  // line telling the next reader that a working alert does not work.
+  const wired = Object.keys(NOT_YET_EMITTED).filter((m) => emits(m)).sort();
+  check(wired.length === 0, `...and nothing recorded as unwired is in fact wired (${wired.join(", ") || "none is"})`);
+  const notAlerted = Object.keys(NOT_YET_EMITTED).filter((m) => !alerted.has(m)).sort();
+  check(notAlerted.length === 0, `...and each recorded gap is still an alerted metric (${notAlerted.join(", ") || "all are"})`);
+
+  // And the reader can still find one, or it would report that everything is emitted forever.
+  check(emits("http_requests_total"), "the reader finds a metric that IS emitted");
+  check(!emits("jaroku_not_a_metric_at_all"), "...and does not find one that is not");
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
