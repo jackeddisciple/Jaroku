@@ -81,6 +81,7 @@ import { introspectGraph, introspectGraphCached, type GraphResult } from "./grap
 import { streamExplain } from "./explainer.ts";
 import type { ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
+import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
 import { McpStore } from "./mcpStore.ts";
 import { McpRegistry } from "./mcpRegistry.ts";
 import { MCP_DISCOVER_CLASS, McpDiscoveryQueue } from "./mcpDiscovery.ts";
@@ -141,8 +142,21 @@ const RUNTIME_DIR = join(REPO_DIR, "runtime");
 const DB_PATH = process.env.JAROKU_DB ?? join(SERVER_DIR, "jaroku.db");
 const PORT = Number(process.env.JAROKU_PORT ?? 4317);
 
+// THE FILTER OVER EVERY LOG SINK, BEFORE ANYTHING IS LOGGED.
+//
+// Session 8. `console` is replaced here, first, so that the hundreds of existing calls in this
+// codebase — and every one written in a hurry during an incident — go through a redactor rather
+// than through review. See obs/log.ts on why owning the sink is the only version of this promise
+// that holds for code nobody has written yet.
+installLogRedaction();
+
 // Provider + generation keys live in runtime/.env. Names only are logged, never values.
 const loadedKeys = loadRuntimeEnv(join(RUNTIME_DIR, ".env"));
+// AND THE VALUES THEMSELVES, REGISTERED AS SECRETS. Names only are LOGGED, which has always been
+// true; this makes it true of the values as well, wherever they end up — a provider's error
+// message quoting the key it rejected, a stack frame carrying a connection string, a debugging
+// line somebody adds next year.
+protectEnv(process.env, loadedKeys);
 if (loadedKeys.length) {
   console.log(`[server] loaded ${loadedKeys.length} var(s) from runtime/.env: ${loadedKeys.sort().join(", ")}`);
 }
@@ -3756,6 +3770,22 @@ async function runAgent(
       connectors: agent?.connectors ?? [],
     });
     Object.assign(env, connectors.env);
+
+    // EVERY VALUE THAT JUST ENTERED THIS RUN'S ENVIRONMENT IS NOW A KNOWN SECRET.
+    //
+    // This is the moment the process is holding plaintext credentials it did not load from
+    // `runtime/.env` — a workspace's own provider key out of the vault, an hour-long access token
+    // just minted for Gmail — and it is therefore the moment they have to be registered, before
+    // anything can quote one back at us. What quotes one back: a provider's 401 body, a Python
+    // traceback carrying an argument, the sandbox's own stderr. Registered by NAME, so a redacted
+    // line still says which credential was in it. See obs/log.ts.
+    for (const [name, value] of Object.entries(env)) {
+      const upper = String(name).toUpperCase();
+      if (isSecretName(name) || upper.endsWith("_TOKEN") || upper.endsWith("_KEY") || upper.endsWith("_SECRET")) {
+        protectSecret(value, name);
+      }
+    }
+
     // Said out loud before the run rather than left for the first tool call to discover. "This
     // workspace's Gmail connection needs reconnecting" is a sentence somebody can act on; a 401
     // from Google surfacing as a red tool_call step twenty seconds into a graph is not.
