@@ -173,7 +173,7 @@ export class OAuthRepository {
          (id, workspace_id, provider, connector_id, connected_by, external_account_id,
           external_account_label, scopes, status, access_secret_name, refresh_secret_name,
           access_expires_at, last_refreshed_at, last_error, created_at, updated_at, revoked_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, NULL, ?, ?, NULL)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, NULL, NULL, ?, ?, NULL)
        ON CONFLICT (workspace_id, connector_id) DO UPDATE SET
          provider               = excluded.provider,
          connected_by           = excluded.connected_by,
@@ -184,7 +184,11 @@ export class OAuthRepository {
          access_secret_name     = excluded.access_secret_name,
          refresh_secret_name    = excluded.refresh_secret_name,
          access_expires_at      = excluded.access_expires_at,
-         last_refreshed_at      = excluded.last_refreshed_at,
+         -- NULL, not the current time. A fresh grant has never been REFRESHED: the field records
+         -- when a refresh token was last exchanged for a new access token, and stamping it at
+         -- connect time would make "last refreshed" mean "last touched" — a different and less
+         -- useful fact. A reconnect is a new grant rather than a refresh, so it clears it too.
+         last_refreshed_at      = NULL,
          last_error             = NULL,
          updated_at             = excluded.updated_at,
          revoked_at             = NULL`,
@@ -200,7 +204,6 @@ export class OAuthRepository {
         input.accessSecretName,
         input.refreshSecretName ?? null,
         input.accessExpiresAt ?? null,
-        now,
         now,
         now,
       ],

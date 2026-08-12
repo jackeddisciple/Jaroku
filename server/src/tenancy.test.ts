@@ -42,6 +42,11 @@ import { McpStore } from "./mcpStore.ts";
 import { DeployStore } from "./deployStore.ts";
 import { DbTicketStore } from "./db/repositories/tickets.ts";
 import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
+import { OAuthRepository } from "./db/repositories/oauth.ts";
+import { KmsSecretStore } from "./secrets/kmsSecretStore.ts";
+import { LocalMasterKeyProvider } from "./secrets/masterKey.ts";
+import { hashState, newPkce, newState } from "./oauth/pkce.ts";
+import { authEnvKeyFor } from "./envWriter.ts";
 import { BillingRepository } from "./db/repositories/billing.ts";
 import { attackSuite } from "./auth/attacks.test.ts";
 import { FsObjectStore } from "./storage/fsObjectStore.ts";
@@ -420,6 +425,21 @@ const SCOPED_API: Record<string, string[]> = {
     "balance", "addCredit", "setCeiling", "setLimitOverrides", "record", "spendSince",
     "eventsForRun", "recentEvents", "runSpend", "hold", "liveHolds", "expiredHolds", "liveSubscription",
     "subscriptions", "upsertSubscription", "platformSpendSince", "setOwnKeyForPlatform",
+  ],
+  // Session 7. A connection is a grant against somebody's REAL ACCOUNT, so a cross-tenant read
+  // here is not a leaked row — it is one workspace learning whose mailbox another's agents read,
+  // and a cross-tenant WRITE is one workspace ending an integration it does not own.
+  //
+  // `consumeState` and `sweepStates` are deliberately absent, and it is the same exemption
+  // `DbTicketStore.consume` and `sweep` have for the same reason: consuming a state is the
+  // operation that PRODUCES a workspace scope — the callback arrives from a third party carrying
+  // nothing else — so scoping it would be circular, and the sweep deletes expired rows across
+  // every workspace because that is maintenance rather than a scoped operation. Both are covered
+  // by `test:oauth-state`, which asserts single use, expiry, and that a forged value resolves to
+  // nothing at all.
+  OAuthRepository: [
+    "list", "forConnector", "usable", "upsert", "recordRefresh", "markReauthRequired",
+    "markRevoked", "markRevokedWithNote", "beginFlow", "openFlowCount",
   ],
 };
 
@@ -809,6 +829,164 @@ async function remainder(db: Db): Promise<void> {
   check((await billing.subscriptions(A.ctx)).length === 0, "nor does the full history");
 }
 
+/**
+ * Session 7: connections, and the credentials behind them.
+ *
+ * WHAT MAKES THIS DIFFERENT FROM EVERY SECTION ABOVE. The rows here are not this workspace's own
+ * data — they are grants against SOMEBODY ELSE'S ACCOUNT, made by a person who clicked a consent
+ * screen with their own credentials. A cross-tenant read is one workspace learning whose mailbox
+ * another workspace's agents are reading. A cross-tenant write is one workspace ending an
+ * integration it does not own, or worse, pointing another's agents at its own mailbox.
+ *
+ * And the MCP half is the one that was ACTUALLY BROKEN until this session rather than
+ * hypothetically: a server id is a slug, so two workspaces on one endpoint derived one variable
+ * name in one process environment, and the second to save a token replaced the first's. It is
+ * asserted here as well as in `test:mcp-tenancy`, because this suite is the gate.
+ */
+async function connectorIsolation(db: Db): Promise<void> {
+  console.log("  · connectors: connections, credentials and MCP");
+
+  const identity = new IdentityRepository(db);
+  const mkWorkspace = async (label: string): Promise<TenantContext> => {
+    const ws = await identity.createWorkspaceUnowned(systemContext(newRequestId()), {
+      name: `conn ${label} ${randomUUID().slice(0, 6)}`,
+    });
+    return systemContextFor(ws.id, newRequestId());
+  };
+  const A = await mkWorkspace("a");
+  const B = await mkWorkspace("b");
+
+  const oauth = new OAuthRepository(db);
+  const connRefs = new SecretRefRepository(db);
+  const vault = new KmsSecretStore({
+    db,
+    master: new LocalMasterKeyProvider("a-master-key-with-enough-entropy-behind-it-0123456789"),
+    refs: connRefs,
+    runWorkspace: async () => null,
+  });
+  const mcp = new McpStore(db);
+
+  // Both workspaces connect the SAME connector, with different accounts and different tokens.
+  // Every name below is identical between them, which is the case that has to work.
+  const accounts = [
+    [A, "ada@a.example", "tok-A"],
+    [B, "bo@b.example", "tok-B"],
+  ] as const;
+  for (const [ctx, account, token] of accounts) {
+    await vault.set(ctx, "GMAIL_ACCESS_TOKEN", token);
+    await oauth.upsert(ctx, {
+      provider: "google",
+      connectorId: "gmail",
+      scopes: ["openid"],
+      accessSecretName: "GMAIL_ACCESS_TOKEN",
+      externalAccountLabel: account,
+      accessExpiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+  }
+
+  check(
+    (await oauth.forConnector(A, "gmail"))?.external_account_label === "ada@a.example",
+    "each workspace's connection names its OWN account",
+  );
+  check(
+    (await oauth.forConnector(B, "gmail"))?.external_account_label === "bo@b.example",
+    "...and B's names B's, under the same connector id",
+  );
+  check((await oauth.list(A)).length === 1, "A's listing holds one connection");
+  check(
+    (await oauth.list(A)).every((c) => c.external_account_label !== "bo@b.example"),
+    "...and it is not B's",
+  );
+  check(
+    (await vault.getForPlatformCall(A, ["GMAIL_ACCESS_TOKEN"]))["GMAIL_ACCESS_TOKEN"] === "tok-A",
+    "the vault gives A its own token under the shared name",
+  );
+  check(
+    (await vault.getForPlatformCall(B, ["GMAIL_ACCESS_TOKEN"]))["GMAIL_ACCESS_TOKEN"] === "tok-B",
+    "...and B its own, which one process environment could not have managed",
+  );
+
+  // The mutations, each aimed at the other workspace's row by its real id.
+  const bRow = await oauth.forConnector(B, "gmail");
+  const bId = bRow?.id ?? "";
+  await oauth.markReauthRequired(A, bId, "by A");
+  check((await oauth.forConnector(B, "gmail"))?.status === "active", "A cannot break B's connection");
+  await oauth.markRevoked(A, bId);
+  check((await oauth.usable(B, "gmail")) !== null, "...nor end it");
+  await oauth.markRevokedWithNote(A, bId, "by A");
+  check((await oauth.forConnector(B, "gmail"))?.last_error === null, "...nor write a note onto it");
+  await oauth.recordRefresh(A, bId, new Date(Date.now() + 60_000).toISOString());
+  check(
+    (await oauth.forConnector(B, "gmail"))?.last_refreshed_at === null,
+    "...nor claim to have refreshed it",
+  );
+
+  // A flow opened by one workspace is counted only by that one — and the state row it writes is
+  // what a callback resolves a scope FROM, so a leak here is a callback completing in the wrong
+  // workspace entirely.
+  await oauth.beginFlow(A, hashState(newState()), {
+    provider: "google",
+    connectorId: "gmail",
+    codeVerifier: newPkce().verifier,
+    redirectUri: "https://jaroku.example.com/v1/oauth/google/callback",
+    scopes: [],
+  });
+  check((await oauth.openFlowCount(A)) === 1, "A has one flow open");
+  check((await oauth.openFlowCount(B)) === 0, "...and B has none");
+
+  // MCP: the same endpoint, the same derived variable name, two workspaces. The bug this session
+  // fixed, asserted in the suite that gates the session.
+  const key = authEnvKeyFor("linear");
+  const mcpTokens = [
+    [A, "lin-A"],
+    [B, "lin-B"],
+  ] as const;
+  for (const [ctx, token] of mcpTokens) {
+    await vault.set(ctx, key, token);
+    await mcp.upsertServer(ctx, {
+      id: "linear",
+      label: "Linear",
+      endpoint: "https://mcp.linear.app/sse",
+      transport: "http",
+      auth_env_key: key,
+      server_name: null,
+      server_version: null,
+      protocol_version: null,
+      status: "connected",
+      last_error: null,
+      discovered_at: null,
+    });
+  }
+  check(
+    (await vault.getForPlatformCall(A, [key]))[key] === "lin-A",
+    "two workspaces on one MCP endpoint hold two different credentials",
+  );
+  check((await vault.getForPlatformCall(B, [key]))[key] === "lin-B", "...under the same derived name");
+
+  await mcp.setServerAuthEnvKey(A, "linear", null);
+  check(
+    (await mcp.getServer(B, "linear"))?.auth_env_key === key,
+    "A clearing its own server's key does not clear B's",
+  );
+  await mcp.deleteServer(A, "linear");
+  check((await mcp.getServer(B, "linear")) !== null, "...and removing its server leaves B's standing");
+  check(
+    (await vault.getForPlatformCall(B, [key]))[key] === "lin-B",
+    "...with B's credential intact",
+  );
+
+  // And the names themselves. A list of what somebody integrates with is theirs.
+  await vault.set(B, "SLACK_BOT_TOKEN", "xoxb-b");
+  check(
+    !(await vault.listNames(A)).some((r) => r.name === "SLACK_BOT_TOKEN"),
+    "A never sees a credential name only B has configured",
+  );
+  check(
+    (await vault.listNames(B)).some((r) => r.name === "SLACK_BOT_TOKEN"),
+    "...while B does",
+  );
+}
+
 // --- run it -------------------------------------------------------------------------------
 
 const tmp = mkdtempSync(join(tmpdir(), "jaroku-tenancy-"));
@@ -819,6 +997,7 @@ const tmp = mkdtempSync(join(tmpdir(), "jaroku-tenancy-"));
     await suite("SqliteDb", db);
     await remainder(db);
     await storageIsolation(db);
+    await connectorIsolation(db);
   } finally {
     await db.close();
   }
@@ -829,6 +1008,7 @@ await withScratchPostgres(async (db) => {
   await suite("PostgresDb", db);
   await remainder(db);
   await storageIsolation(db);
+  await connectorIsolation(db);
 });
 
 coverage();
