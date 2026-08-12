@@ -204,7 +204,7 @@ runs in-memory and no cross-replica bridge is created at all.
 
 ---
 
-## Unreleased : Sandboxed Execution
+## v0.2.8 : Sandboxed Execution
 
 Session 4 of the hosted migration. Every place model-written code used to execute directly on
 this process — a run, the import check, graph introspection — now goes through `RunSandbox` or
