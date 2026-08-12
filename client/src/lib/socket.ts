@@ -9,6 +9,7 @@ import { useGraphStore } from "../store/graphStore.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { useMcpStore } from "../store/mcpStore.ts";
 import { useProviderStore } from "../store/providerStore.ts";
+import { useConnectionStore } from "../store/connectionStore.ts";
 import { useBillingStore } from "../store/billingStore.ts";
 import { useDeployStore } from "../store/deployStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
@@ -173,6 +174,20 @@ function dispatch(msg: ServerMessage): void {
       else if (msg.type === "testResult") p.setTestResult({ provider: msg.provider, ok: msg.ok, message: msg.message });
       else if (msg.type === "error") p.setError(msg.message);
       else if (msg.type === "notice") p.setNotice(msg.message);
+      break;
+    }
+    case "connections": {
+      // What this workspace has authorised us to reach. A full snapshot like every channel
+      // beside it, and nothing on it is a credential — see connectionStore.
+      const c = useConnectionStore.getState();
+      if (msg.type === "connections") c.setConnections(msg.connections);
+      else if (msg.type === "authorize") {
+        // THE BROWSER HAS TO GO THERE. A socket cannot redirect anything, and a consent screen is
+        // a page a person reads — so the server answers with a URL and this is the navigation.
+        // `assign` rather than `replace`, so Back returns to the app rather than skipping past it.
+        window.location.assign(msg.url);
+      } else if (msg.type === "error") c.setError(msg.message);
+      else if (msg.type === "notice") c.setNotice(msg.message);
       break;
     }
     case "billing": {
@@ -506,6 +521,27 @@ export function sendDiscardPlan(planId: string): void {
 }
 
 /** Ask for a fresh usage snapshot. Sent when the panel opens, never on a timer — see UsagePanel. */
+/** Ask for the connections snapshot. Answered on the `connections` channel. */
+export function sendListConnections(): void {
+  send({ cmd: "listConnections" });
+}
+
+/**
+ * Begin a consent flow. Answered with a URL this client then navigates to.
+ *
+ * `returnTo` is a PATH and is treated as one by the server — anything that could be absolute is
+ * discarded rather than cleaned, because a callback that redirects wherever it is told is a
+ * phishing primitive on our own domain.
+ */
+export function sendConnectConnector(connectorId: string, returnTo = "/"): void {
+  send({ cmd: "connectConnector", connectorId, returnTo });
+}
+
+/** Hand the grant back and forget the credentials. */
+export function sendDisconnectConnector(connectorId: string): void {
+  send({ cmd: "disconnectConnector", connectorId });
+}
+
 export function sendLoadUsage(): void {
   send({ cmd: "loadUsage" });
 }

@@ -199,6 +199,32 @@ export type SetMcpServerAuthCommand = {
   token: string | null;
 };
 
+// Connector connections. Three commands, and none of them carries a credential in either
+// direction — which is the difference between this set and the MCP and provider sets above,
+// where a token travels browser-to-server exactly once. Here the credential never touches this
+// process from the browser at all: it is minted by the provider and collected at the callback.
+
+/** Every connector this deployment can connect, with what this workspace has done about each. */
+export type ListConnectionsCommand = { cmd: "listConnections" };
+
+/**
+ * Begin a flow. Answered with a URL to navigate to, never with a redirect.
+ *
+ * `returnTo` is a PATH within this app and is treated as one — see oauth/provider.ts, where
+ * anything that could be absolute is discarded rather than sanitised. A callback that redirects
+ * to whatever it was handed is a phishing primitive on our own domain wearing our own certificate.
+ */
+export type ConnectConnectorCommand = { cmd: "connectConnector"; connectorId: string; returnTo?: string };
+
+/**
+ * Hand the grant back and forget the credentials.
+ *
+ * Named `disconnect` rather than `delete` because both halves happen and the second is the one
+ * people forget: the tokens are revoked AT THE PROVIDER, not merely dropped locally. A token
+ * deleted from our vault and left live in Google's is a grant the user believes they have ended.
+ */
+export type DisconnectConnectorCommand = { cmd: "disconnectConnector"; connectorId: string };
+
 // Model-provider credentials. Grouped and forwarded exactly like the MCP set above, for the
 // same reason: writing a key touches runtime/.env and — for the test — makes a network call
 // against someone else's API, so the app answers with a precise result rather than the relay
@@ -356,6 +382,19 @@ const MCP_COMMANDS = new Set([
   "setMcpServerAuth", "resolveMcpConfirm",
 ]);
 
+/** Connection-channel commands, grouped so the forwarding switch stays readable. */
+export type ConnectionCommand =
+  | ListConnectionsCommand
+  | ConnectConnectorCommand
+  | DisconnectConnectorCommand;
+
+// Forwarded rather than answered locally, INCLUDING the read. `listConnections` looks like
+// `listMcpServers` — a pure read the relay could answer from state it already has — and is not:
+// its answer depends on whether this DEPLOYMENT has an OAuth app configured, which is the app's
+// business and not the relay's, and every mutation beside it makes a network call to a third
+// party that can take seconds and fail four ways.
+const CONNECTION_COMMANDS = new Set(["listConnections", "connectConnector", "disconnectConnector"]);
+
 // Membership. Who may act in this workspace, and as what.
 //
 // Forwarded like every other mutation, and grouped so the switch stays readable. Reads are
@@ -428,6 +467,7 @@ export type ClientCommand =
   | ListMcpServersCommand
   | ProviderCommand
   | ListProvidersCommand
+  | ConnectionCommand
   | LoadUsageCommand
   | DeployChannelCommand
   | ListDeploymentsCommand
@@ -477,6 +517,7 @@ export type ForwardedCommand =
   | EvalCommand
   | McpCommand
   | ProviderCommand
+  | ConnectionCommand
   | DeployChannelCommand
   | MemberCommand
   | LoadUsageCommand;
@@ -641,6 +682,58 @@ export type ProviderEvent =
   // variable is exported in the server's shell and will win again after a restart.
   | { type: "notice"; message: string; provider?: string };
 
+// Connector connections: what this workspace has authorised Jaroku to reach on its behalf.
+//
+// Its own channel rather than a field on `providers`, and the distinction is not cosmetic. A
+// provider key is a credential the workspace HOLDS and pasted in; a connection is a grant somebody
+// else's system made to us, which can be revoked from the other end at any moment, needs a consent
+// screen to create, and has a state (`reauth_required`) that no API key has. A snapshot carrying
+// both would have to explain why half its entries have a "Reconnect" button.
+//
+// Same discipline as every channel beside it: a full snapshot on every mutation, so a client
+// replaces rather than merges. And as everywhere else, NOTHING HERE CARRIES A CREDENTIAL — a
+// connection reports a status, the scopes that were granted, and a label naming the account, which
+// is the whole of what a browser is ever told.
+
+/** One connection, as a browser sees it. Not one field of this is a token. */
+export interface ConnectionView {
+  connectorId: string;
+  label: string;
+  provider: string;
+  /** `active` | `reauth_required` | `revoked` | `disconnected` — the last meaning never connected. */
+  status: string;
+  /** What the user actually granted, in the provider's own vocabulary. */
+  scopes: string[];
+  /** What they are agreeing to, in sentences, from the connector spec. Shown before connecting. */
+  consent: string[];
+  /** Which mailbox, which Slack. Null when the provider told us nothing a person would recognise. */
+  account: string | null;
+  connectedAt: string | null;
+  /** Why it needs attention, when it does. The provider's own words, bounded and stripped. */
+  lastError: string | null;
+  /**
+   * Whether this DEPLOYMENT can run the flow at all.
+   *
+   * False locally, where there is no OAuth app — and that is not an error state. The panel renders
+   * the connector with the two environment variables somebody has to set, rather than hiding it,
+   * because an empty page looks like a missing feature rather than an unconfigured one.
+   */
+  available: boolean;
+}
+
+export type ConnectionEvent =
+  | { type: "connections"; connections: ConnectionView[] }
+  /**
+   * Where the browser must go to give consent.
+   *
+   * A URL rather than a redirect, because the request that asked came down a WebSocket and a
+   * socket cannot redirect anything. The client navigates. The URL is single-use in the sense
+   * that matters — the state behind it is — and carries the PKCE challenge, never the verifier.
+   */
+  | { type: "authorize"; connectorId: string; url: string; expiresAt: number }
+  | { type: "error"; message: string; connectorId?: string }
+  | { type: "notice"; message: string; connectorId?: string };
+
 // Deploy rides its own channel, for the same reason providers does: a deployment is not an
 // MCP server and not a provider, and the other channels are full snapshots of something else.
 // schema/events.md v1 is untouched — a deploy emits no trace events at all.
@@ -778,6 +871,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   setMcpServerAuth: "mcp", setMcpToolImpact: "mcp", resolveMcpConfirm: "mcp",
   listProviders: "providers", setProviderKey: "providers", testProviderKey: "providers",
   setOwnKeyForPlatform: "providers",
+  listConnections: "connections", connectConnector: "connections", disconnectConnector: "connections",
   loadUsage: "billing",
   listMembers: "members", inviteMember: "members", revokeInvite: "members",
   setMemberRole: "members", removeMember: "members",
@@ -1275,6 +1369,11 @@ export class WsRelay {
             // Shape-checked in the app, which owns the registry and can answer with a
             // precise error on the "mcp" channel rather than dropping the message here.
             void withContext((ctx) => this.onCommand?.(msg as McpCommand, ctx));
+          } else if (CONNECTION_COMMANDS.has(msg.cmd)) {
+            // Shape-checked in the app, which owns the OAuth service and can answer with a
+            // precise error on the "connections" channel rather than dropping the message here.
+            // The read is forwarded too — see CONNECTION_COMMANDS for why it is not local.
+            void withContext((ctx) => this.onCommand?.(msg as ConnectionCommand, ctx));
           } else if (MEMBER_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the identity repository and can answer with
             // a precise error on the "members" channel rather than dropping the message here.
@@ -1510,6 +1609,11 @@ export class WsRelay {
   // is an ordinary tool_call Step and still arrives on "trace" like any other.
   broadcastMcp(ctx: TenantContext, event: McpEvent): void {
     this.broadcastTo(ctx, { channel: "mcp", ...event });
+  }
+
+  /** Broadcast a connections event. Separate channel by design — see ConnectionEvent. */
+  broadcastConnections(ctx: TenantContext, event: ConnectionEvent): void {
+    this.broadcastTo(ctx, { channel: "connections", ...event });
   }
 
   /** Broadcast a deploy event. Separate channel by design — see DeployEvent. */

@@ -44,6 +44,8 @@ export const CAPABILITIES = [
   "eval:run",
   "mcp:read",
   "provider:read",
+  /** See what this workspace has connected, and which connection needs reconnecting. */
+  "connector:read",
   "deploy:read",
   "member:read",
   /**
@@ -62,6 +64,16 @@ export const CAPABILITIES = [
   "mcp:manage",
   /** Store or test a model-provider API key. */
   "provider:manage",
+  /**
+   * Connect or disconnect a third-party account on the workspace's behalf.
+   *
+   * Admin for the same reason `mcp:manage` is, and rather more so: connecting Gmail points every
+   * agent in the workspace at one person's mailbox, and the grant is made against THEIR account.
+   * A member who could do that could have an agent read the founder's mail by clicking a button
+   * and signing in as themselves. Disconnecting is the same capability, not a lesser one — the
+   * ability to break every agent that depends on a connection is not a read.
+   */
+  "connector:manage",
   /** Put an agent on a public URL in the workspace's own hosting account. */
   "deploy:manage",
 
@@ -86,13 +98,16 @@ const MEMBER: readonly Capability[] = [
   "eval:run",
   "mcp:read",
   "provider:read",
+  "connector:read",
   "deploy:read",
   "member:read",
   "billing:read",
 ];
 
 /** What an admin adds. Nested, so a new member capability is automatically an admin's too. */
-const ADMIN: readonly Capability[] = [...MEMBER, "mcp:manage", "provider:manage", "deploy:manage"];
+const ADMIN: readonly Capability[] = [
+  ...MEMBER, "mcp:manage", "provider:manage", "connector:manage", "deploy:manage",
+];
 
 const OWNER: readonly Capability[] = [...ADMIN, "member:manage", "workspace:manage", "billing:manage"];
 
@@ -182,6 +197,14 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // out denies. The tool was already approved in principle when an admin connected the
   // server and it was selected during planning; what is being approved here is this call.
   resolveMcpConfirm: "mcp:confirm",
+
+  // connectors
+  listConnections: "connector:read",
+  connectConnector: "connector:manage",
+  // The same capability as connecting, deliberately. Breaking every agent that depends on a
+  // connection is not a lesser act than making one, and a "disconnect is only a read" reading
+  // is how a member ends an integration the workspace depends on.
+  disconnectConnector: "connector:manage",
 
   // providers
   listProviders: "provider:read",

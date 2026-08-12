@@ -23,6 +23,7 @@ import { useChatStore } from "./chatStore.ts";
 import { useDeployStore } from "./deployStore.ts";
 import { useEvalStore } from "./evalStore.ts";
 import { useGraphStore } from "./graphStore.ts";
+import { useConnectionStore } from "./connectionStore.ts";
 import { useMcpStore } from "./mcpStore.ts";
 import { useMemberStore } from "./memberStore.ts";
 import { useProviderStore } from "./providerStore.ts";
@@ -77,6 +78,11 @@ console.log("\nfilling every store with one workspace's data");
   useEvalStore.setState({ datasets: [{ id: "d1", name: TENANT_A }] } as never);
   useGraphStore.setState({ graphs: { [TENANT_A]: { agent_id: TENANT_A } } } as never);
   useMcpStore.setState({ servers: [{ id: "s1", label: TENANT_A }] } as never);
+  // An account label is the leak here: one tenant's email address rendered under another
+  // tenant's name, beside a Disconnect button that would act in the wrong workspace.
+  useConnectionStore.setState({
+    connections: [{ connectorId: "gmail", account: TENANT_A, label: TENANT_A }],
+  } as never);
   useMemberStore.setState({ members: [{ email: TENANT_A }], invites: [{ email: TENANT_A }] } as never);
   useProviderStore.setState({ providers: [{ id: "anthropic", configured: true, note: TENANT_A }] } as never);
   useDeployStore.setState({ deployments: [{ id: "d1", agent_id: TENANT_A }] } as never);

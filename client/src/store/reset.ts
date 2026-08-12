@@ -22,6 +22,7 @@
 import { useBillingStore } from "./billingStore.ts";
 import { useBuildStore } from "./buildStore.ts";
 import { useChatStore } from "./chatStore.ts";
+import { useConnectionStore } from "./connectionStore.ts";
 import { useDeployStore } from "./deployStore.ts";
 import { useEvalStore } from "./evalStore.ts";
 import { useGraphStore } from "./graphStore.ts";
@@ -56,6 +57,10 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
   billingStore: useBillingStore as unknown as Resettable,
   buildStore: useBuildStore as unknown as Resettable,
   chatStore: useChatStore as unknown as Resettable,
+  // Which accounts a workspace has connected, and whose mailbox each points at. An account label
+  // held across a switch would show one tenant's email address under another tenant's name, and
+  // the "Reconnect" button beside it would start a flow in the wrong workspace.
+  connectionStore: useConnectionStore as unknown as Resettable,
   deployStore: useDeployStore as unknown as Resettable,
   evalStore: useEvalStore as unknown as Resettable,
   graphStore: useGraphStore as unknown as Resettable,

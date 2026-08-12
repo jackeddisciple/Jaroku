@@ -507,6 +507,44 @@ export type ProviderMessage =
   | { channel: "providers"; type: "error"; message: string; provider?: string }
   | { channel: "providers"; type: "notice"; message: string; provider?: string };
 
+// --- connections (see server/src/oauth/) ---
+//
+// What this workspace has authorised Jaroku to reach on its behalf. Its own channel rather than a
+// field on `providers`, and the difference is real: a provider key is a credential the workspace
+// HOLDS and pasted in, while a connection is a grant somebody else's system made to us — which
+// can be revoked from the other end at any moment, needs a consent screen to create, and has a
+// state (`reauth_required`) that no API key has.
+//
+// NOTHING HERE IS A CREDENTIAL. A connection reports a status, the scopes that were actually
+// granted, and a label naming the account. That is the whole of what a browser is ever told, and
+// it is the same promise `configured: true` makes on the providers channel.
+
+export type ConnectionStatus = "active" | "reauth_required" | "revoked" | "disconnected";
+
+export interface ConnectionView {
+  connectorId: string;
+  label: string;
+  provider: string;
+  status: ConnectionStatus;
+  /** What was GRANTED — never what was asked for. A partial consent must read as partial. */
+  scopes: string[];
+  /** What connecting means, in sentences, shown BEFORE the button rather than after. */
+  consent: string[];
+  /** Which mailbox, which Slack. Null when the provider named nothing a person would recognise. */
+  account: string | null;
+  connectedAt: string | null;
+  lastError: string | null;
+  /** Whether this DEPLOYMENT can run the flow. False locally, which is not an error state. */
+  available: boolean;
+}
+
+export type ConnectionMessage =
+  | { channel: "connections"; type: "connections"; connections: ConnectionView[] }
+  /** Where the browser must navigate. A socket cannot redirect, so the client does it. */
+  | { channel: "connections"; type: "authorize"; connectorId: string; url: string; expiresAt: number }
+  | { channel: "connections"; type: "error"; message: string; connectorId?: string }
+  | { channel: "connections"; type: "notice"; message: string; connectorId?: string };
+
 // --- billing (see server/src/billing/) ---
 //
 // What this workspace has spent, and against which limits. Every figure here is computed by the
@@ -671,6 +709,7 @@ export type ServerMessage =
   | EvalMessage
   | McpMessage
   | ProviderMessage
+  | ConnectionMessage
   | DeployMessage;
 
 // --- client → server commands ---
@@ -738,6 +777,14 @@ export type ClientCommand =
   | { cmd: "loadUsage" }
   | { cmd: "setProviderKey"; provider: ProviderId; key: string }
   | { cmd: "testProviderKey"; provider: ProviderId; key: string }
+  // Connections. THE ONE SET IN THIS UNION THAT CARRIES NO SECRET IN EITHER DIRECTION: a
+  // credential for a connected account is minted by the provider and collected at the callback,
+  // so the browser never holds one and never sends one. `returnTo` is a PATH — the server
+  // discards anything that could be absolute rather than cleaning it, because a callback that
+  // redirects wherever it is told is a phishing primitive on our own domain.
+  | { cmd: "listConnections" }
+  | { cmd: "connectConnector"; connectorId: string; returnTo?: string }
+  | { cmd: "disconnectConnector"; connectorId: string }
   // Deploy. `envKeys` are NAMES the user ticked — the server reads the values from its own
   // environment. `token` is the third and last field in this union carrying a secret, and it
   // takes the identical path: one way, into runtime/.env, never echoed back.

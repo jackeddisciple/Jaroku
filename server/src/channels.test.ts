@@ -89,6 +89,12 @@ const TENANT_CHANNELS = new Set([
   "deploy",     // deployment rows and scrubbed build logs
   "members",    // people, with their email addresses
   "providers",  // which keys are set — see broadcastProviders for why this is scoped anyway
+  // Which third-party accounts this workspace has authorised us to reach, and whose. It carries
+  // no token, but it carries an ACCOUNT LABEL — a person's email address, a company's Slack team
+  // name — plus the scopes they granted, which together describe what one tenant has integrated
+  // with and on whose behalf. The `authorize` event is worse: it is a live consent URL bound to
+  // one workspace's flow, and a second tenant receiving one could complete it.
+  "connections",
   "billing",    // what this workspace has spent — one tenant reading another's invoice
   "log",        // stderr lines and refusals, both of which quote the workspace's own work
 ]);
@@ -296,6 +302,7 @@ console.log("\nfired live, in A, and B receives none of it");
   relay.broadcastDeploy(ctxA, { type: "error", message: MARK });
   relay.broadcastMembers(ctxA, { type: "notice", message: MARK });
   relay.broadcastProviders(ctxA, { type: "notice", message: MARK });
+  relay.broadcastConnections(ctxA, { type: "notice", message: MARK });
   relay.broadcastBilling(ctxA, { type: "error", message: MARK });
   relay.sendMembers(ctxA, ctxA.requestId, { type: "notice", message: MARK });
   relay.broadcastAgentFiles(ctxA, "agent_a");

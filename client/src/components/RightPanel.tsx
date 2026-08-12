@@ -1,4 +1,5 @@
-// Tabbed right panel (doc §4.1): Graph · Trace · Evals · MCP — one visible at a time, never
+// Tabbed right panel (doc §4.1): Graph · Trace · Evals · MCP · Connections — one visible at a
+// time, never
 // stacked.
 // Trace is the hero and the default. Code is NOT a tab here; it opens as an on-demand overlay
 // (CodeOverlay) from a diff-card row or Cmd+P. Clicking a trace step slides in Step Details
@@ -11,6 +12,7 @@ import { TraceTimeline } from "./TraceTimeline.tsx";
 import { GraphView } from "./GraphView.tsx";
 import { EvalsPanel } from "./EvalsPanel.tsx";
 import { McpPanel } from "./McpPanel.tsx";
+import { ConnectionsPanel } from "./ConnectionsPanel.tsx";
 import { DeployPanel } from "./DeployPanel.tsx";
 import { UsagePanel } from "./UsagePanel.tsx";
 import { useDeployStore } from "../store/deployStore.ts";
@@ -22,6 +24,9 @@ const TABS: { id: RightTab; label: string }[] = [
   { id: "trace", label: "Trace" },
   { id: "evals", label: "Evals" },
   { id: "mcp", label: "MCP" },
+  // Beside MCP rather than beside Usage: both tabs answer "what does this workspace reach
+  // outside itself", and the two are the pair somebody audits together.
+  { id: "connections", label: "Connections" },
   { id: "deploy", label: "Deploy" },
   { id: "usage", label: "Usage" },
 ];
@@ -74,6 +79,7 @@ export function RightPanel() {
         {tab === "graph" ? <GraphView />
           : tab === "evals" ? <EvalsPanel />
           : tab === "mcp" ? <McpPanel />
+          : tab === "connections" ? <div className="h-full overflow-y-auto px-4 py-3"><ConnectionsPanel /></div>
           : tab === "deploy" ? <DeployPanel />
           : tab === "usage" ? <UsagePanel />
           : <TraceTimeline />}

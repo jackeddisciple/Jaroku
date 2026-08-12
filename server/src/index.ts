@@ -68,7 +68,7 @@ import {
 import { openCheckpointStore } from "./checkpoints/store.ts";
 import { introspectGraph, introspectGraphCached, type GraphResult } from "./graphIntrospect.ts";
 import { streamExplain } from "./explainer.ts";
-import type { DeployChannelCommand, ExplainCommand } from "./wsRelay.ts";
+import type { ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { McpStore } from "./mcpStore.ts";
 import { McpRegistry } from "./mcpRegistry.ts";
@@ -76,9 +76,10 @@ import { fileCredentialWriter } from "./envWriter.ts";
 import { openSecretStore } from "./secrets/open.ts";
 import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
 import { OAuthRepository } from "./db/repositories/oauth.ts";
-import { OAuthService } from "./oauth/service.ts";
+import { OAuthError, OAuthService } from "./oauth/service.ts";
 import { TokenRefresher } from "./oauth/refresh.ts";
 import { resolveClientConfig } from "./oauth/provider.ts";
+import { oauthRoutes } from "./http/oauth.ts";
 import { GOOGLE } from "./oauth/google.ts";
 import { SLACK } from "./oauth/slack.ts";
 import { connectorRunEnv } from "./oauth/injection.ts";
@@ -1178,6 +1179,36 @@ for (const route of billingRoutes({
   router.post(route.path, route.handler);
 }
 
+// THE OAUTH CALLBACK, and it is the one route here a third party drives.
+//
+// Unauthenticated by construction, exactly as the payment webhook is: a provider redirects a
+// BROWSER back to us, carrying no bearer token and no socket, and the single-use `state` we
+// handed out ten minutes ago is the whole of the authentication. See http/oauth.ts, which is
+// also where the reasoning lives for why every outcome ends in a redirect rather than in JSON.
+for (const route of oauthRoutes({
+  oauth,
+  providerIds: [GOOGLE.id, SLACK.id],
+  // A completed flow updates every socket in that workspace, not only the tab that was
+  // redirected — somebody can start a flow on a phone and finish it there while the panel is
+  // open on a laptop, and a panel that still says "not connected" is a panel people click twice.
+  onCompleted: (result) => {
+    const ctx = systemContextFor(result.workspaceId, newRequestId());
+    void broadcastConnections(ctx);
+    if (result.missingScopes.length) {
+      relay.broadcastConnections(ctx, {
+        type: "notice",
+        connectorId: result.connection.connector_id,
+        message:
+          `${result.connection.connector_id} connected, but without ${result.missingScopes.join(", ")} — ` +
+          `the tools that need those scopes will fail until it is reconnected with them granted`,
+      });
+    }
+  },
+  onFailed: (message) => console.warn(`[connections] a flow failed: ${message}`),
+})) {
+  router.get(route.path, route.handler);
+}
+
 // THE OBJECT ROUTE, which is what makes the local store's presigned URLs real.
 //
 // S3 answers its own URLs; a directory cannot, so the local store's point here. Mounted
@@ -1323,6 +1354,7 @@ const relay = new WsRelay({
     else if (MCP_COMMAND_NAMES.has(cmd.cmd)) void handleMcpCommand(ctx, cmd as McpCommand);
     else if (DEPLOY_COMMAND_NAMES.has(cmd.cmd)) void handleDeployCommand(ctx, cmd as DeployChannelCommand);
     else if (PROVIDER_COMMAND_NAMES.has(cmd.cmd)) void handleProviderCommand(ctx, cmd as ProviderCommand);
+    else if (CONNECTION_COMMAND_NAMES.has(cmd.cmd)) void handleConnectionCommand(ctx, cmd as ConnectionCommand);
     else if (MEMBER_COMMAND_NAMES.has(cmd.cmd)) void handleMemberCommand(ctx, cmd as MemberCommand);
     else if (cmd.cmd === "loadUsage") void broadcastUsage(ctx);
     else void handleEvalCommand(ctx, cmd);
@@ -1659,6 +1691,118 @@ async function handleMcpCommand(ctx: TenantContext, cmd: McpCommand): Promise<vo
   }
 }
 
+// --- connections: what this workspace has authorised us to reach -------------
+//
+// Three commands, and none of them carries a credential in either direction — which is what
+// separates this surface from the provider and MCP ones beside it, where a token travels
+// browser-to-server exactly once. Here the credential is minted by the provider and collected at
+// the callback, so the browser never holds one and this process never receives one from it.
+//
+// Every answer is a FULL SNAPSHOT of every connector this deployment offers, connected or not.
+// A panel that listed only what exists could not offer the thing a user came to do, and a
+// deployment with no OAuth app configured would show an empty page that reads as a missing
+// feature rather than an unconfigured one — so an unavailable connector is rendered with the
+// reason instead of hidden.
+
+async function connectionSnapshot(ctx: TenantContext): Promise<ConnectionView[]> {
+  const rows = new Map((await oauthRepo.list(ctx)).map((r) => [r.connector_id, r]));
+  return oauth.connectors().map(({ provider, spec }) => {
+    const row = rows.get(spec.connectorId);
+    return {
+      connectorId: spec.connectorId,
+      label: spec.label,
+      provider: provider.id,
+      // "disconnected" rather than absent, so the panel renders one row per connector in a
+      // stable order rather than a list that reshuffles as things are connected.
+      status: row?.status ?? "disconnected",
+      // What was GRANTED, from the row — never what the spec asked for. A user who ticked one
+      // box of two must not be shown the full list as though they had agreed to it.
+      scopes: row?.scopes ?? [],
+      consent: spec.consent,
+      account: row?.external_account_label ?? null,
+      connectedAt: row?.created_at ?? null,
+      lastError: row?.last_error ?? null,
+      available: oauth.configured(spec.connectorId),
+    };
+  });
+}
+
+async function broadcastConnections(ctx: TenantContext): Promise<void> {
+  relay.broadcastConnections(ctx, { type: "connections", connections: await connectionSnapshot(ctx) });
+}
+
+async function handleConnectionCommand(ctx: TenantContext, cmd: ConnectionCommand): Promise<void> {
+  try {
+    if (cmd.cmd === "listConnections") {
+      await broadcastConnections(ctx);
+      return;
+    }
+
+    // Validated against what this server actually offers, never taken verbatim — the same
+    // posture `connectors.resolveSelected` and `McpStore.resolveTools` take. A connector id is a
+    // client-supplied string that is about to be rendered and about to pick an OAuth app.
+    const connectorId = typeof cmd.connectorId === "string" ? cmd.connectorId : "";
+    if (!oauth.find(connectorId)) {
+      relay.broadcastConnections(ctx, {
+        type: "error",
+        message: `"${connectorId.slice(0, 32)}" is not a connector you connect with an account`,
+      });
+      return;
+    }
+
+    if (cmd.cmd === "connectConnector") {
+      const begun = await oauth.begin(ctx, connectorId, { returnTo: cmd.returnTo ?? "/" });
+      // A URL for the client to NAVIGATE to. A socket cannot redirect anything, and the consent
+      // screen is a page a person has to look at — see ConnectionEvent.
+      relay.broadcastConnections(ctx, {
+        type: "authorize",
+        connectorId,
+        url: begun.url,
+        expiresAt: begun.expiresAt,
+      });
+      return;
+    }
+
+    // disconnectConnector. The full revocation — handing the grant back at the provider rather
+    // than merely forgetting it here — arrives in its own commit; this drops the credentials and
+    // marks the row, which is the half that is this session's to get right first.
+    const row = await oauthRepo.forConnector(ctx, connectorId);
+    if (!row) {
+      relay.broadcastConnections(ctx, { type: "notice", message: "that connector is not connected", connectorId });
+      await broadcastConnections(ctx);
+      return;
+    }
+    await secrets.delete(ctx, row.access_secret_name);
+    if (row.refresh_secret_name) await secrets.delete(ctx, row.refresh_secret_name);
+    await oauthRepo.markRevoked(ctx, row.id);
+    await identityRepo.appendAudit(ctx, {
+      action: "connector.disconnected",
+      targetType: "connector",
+      targetId: connectorId,
+      metadata: { provider: row.provider, account: row.external_account_label },
+    });
+    relay.broadcastConnections(ctx, {
+      type: "notice",
+      message: `${connectorId} is disconnected — agents using it will report it at their next tool call`,
+      connectorId,
+    });
+    await broadcastConnections(ctx);
+  } catch (err) {
+    // The service's messages are written in this codebase and safe to render; anything else is a
+    // bug and says nothing, for the same reason the HTTP router refuses to echo a 500.
+    const message = err instanceof OAuthError ? err.message : "that could not be done";
+    if (!(err instanceof OAuthError)) console.error(`[connections] ${cmd.cmd} failed:`, err);
+    relay.broadcastConnections(ctx, {
+      type: "error",
+      message,
+      // Only the two commands that name one have one. A read that failed is not about a
+      // connector, and putting an undefined field on the event would have the panel highlight a
+      // row chosen at random.
+      connectorId: cmd.cmd === "listConnections" ? undefined : cmd.connectorId,
+    });
+  }
+}
+
 // --- providers: model credentials -------------------------------------------
 // The bring-your-own-key surface, on its own channel. Two commands, deliberately:
 // `testProviderKey` proves a key works and writes NOTHING, `setProviderKey` stores it. Folding
@@ -1670,6 +1814,7 @@ async function handleMcpCommand(ctx: TenantContext, cmd: McpCommand): Promise<vo
 // registry gives, through the same credential writer.
 
 const PROVIDER_COMMAND_NAMES = new Set(["setProviderKey", "testProviderKey"]);
+const CONNECTION_COMMAND_NAMES = new Set(["listConnections", "connectConnector", "disconnectConnector"]);
 
 async function broadcastProviders(ctx: TenantContext): Promise<void> {
   relay.broadcastProviders(ctx, {
