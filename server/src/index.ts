@@ -82,7 +82,7 @@ import { streamExplain } from "./explainer.ts";
 import type { ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
-import { formatTraceparent, openTracer, parseTraceparent } from "./obs/trace.ts";
+import { currentTraceparent, formatTraceparent, openTracer, parseTraceparent } from "./obs/trace.ts";
 import { metrics, routeLabel, statusClass } from "./obs/metrics.ts";
 import { McpStore } from "./mcpStore.ts";
 import { McpRegistry } from "./mcpRegistry.ts";
@@ -483,7 +483,11 @@ const planner = new Planner();
 // `npm run dev` keeps needing nothing installed. Either way, this gateway process still drains
 // its own admissions locally today — see evalRunner.ts's drainAvailable() — a genuinely
 // separate worker process is available (worker.ts) but is not this dev topology's default.
-const dispatcher = new Dispatcher(defaultQueueBackend());
+// The second argument is where a job's `traceparent` comes from when nothing passes one, which
+// is every enqueue in this codebase — see the dispatcher. It joins an eval fan-out, a discovery
+// job and an export to the request that asked for them, across the process boundary a worker
+// picks them up on.
+const dispatcher = new Dispatcher(defaultQueueBackend(), currentTraceparent);
 
 // THE CROSS-REPLICA EVENT BRIDGE. undefined with no JAROKU_REDIS_URL — see
 // queue/eventBridge.ts's own header for why that is the whole story for a single-replica

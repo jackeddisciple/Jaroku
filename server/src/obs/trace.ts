@@ -27,6 +27,7 @@
 // shape and a different destination, and the destination is a third party. `obs/log.ts` already
 // owns that decision; this defers to it rather than making a second one.
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
 import { redactValue } from "./log.ts";
 
@@ -201,7 +202,9 @@ export class Tracer {
   ): Promise<T> {
     const span = this.start(name, opts);
     try {
-      return await fn(span);
+      // INSIDE THE AMBIENT CONTEXT, which is what lets code that is nowhere near this call join
+      // the trace. See `currentTraceparent`.
+      return await CURRENT.run(span.context, () => fn(span));
     } catch (err) {
       span.fail(err);
       throw err;
@@ -209,6 +212,43 @@ export class Tracer {
       span.end();
     }
   }
+}
+
+// --- the ambient context ---------------------------------------------------------------------
+//
+// WHY THIS EXISTS AT ALL, given that every span here is passed explicitly and that is the better
+// arrangement wherever it is possible. It is not possible across an enqueue.
+//
+// A job is picked up by another process, so the only thing that can join it to the request that
+// asked for it is a string travelling ON the job. `QueueJob.traceparent` is that string and the
+// dispatcher has always carried it — but every caller would have had to be handed the span to
+// pass one, and the callers are three levels below the handler that owns it: an eval fan-out
+// inside a runner, a retry inside that runner's own loop, a discovery job behind a queue of its
+// own, an export enqueued from a route callback. None of them takes a span and none of them
+// should have to, so the field stayed optional and nothing ever set it. Every job started a
+// trace of its own, silently, which is exactly what the field was added to prevent.
+//
+// AsyncLocalStorage is what OpenTelemetry itself uses for this and it is the only mechanism in
+// Node that survives an `await` without a parameter. It is READ in one place — the dispatcher's
+// default — so the ambient value is a fallback for one specific question rather than a second
+// way of getting a span.
+const CURRENT = new AsyncLocalStorage<SpanContext>();
+
+/** The span this code is running inside, if any. */
+export function currentSpanContext(): SpanContext | undefined {
+  return CURRENT.getStore();
+}
+
+/**
+ * The `traceparent` for whatever span this code is running inside, or undefined outside one.
+ *
+ * Undefined rather than a fabricated root: a job enqueued outside any request — a boot-time
+ * sweep, a timer — genuinely has no parent, and inventing one would join unrelated work into a
+ * trace that describes nothing.
+ */
+export function currentTraceparent(): string | undefined {
+  const ctx = CURRENT.getStore();
+  return ctx ? formatTraceparent(ctx) : undefined;
 }
 
 // --- the exporter ------------------------------------------------------------------------------

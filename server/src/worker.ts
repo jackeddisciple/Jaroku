@@ -42,6 +42,7 @@ import { sandboxImageRef } from "./sandbox/image.ts";
 import { FlyMachinesSandbox } from "./sandbox/flySandbox.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { installLogRedaction, protectEnv } from "./obs/log.ts";
+import { currentTraceparent } from "./obs/trace.ts";
 import { REDIS_URL_ENV, openRedis, pingRedis, redisUrlFromEnv } from "./queue/redis.ts";
 import { RedisQueueBackend } from "./queue/redisBackend.ts";
 import { Dispatcher } from "./queue/dispatcher.ts";
@@ -142,7 +143,9 @@ const pool = new RunPool(WORKER_CONCURRENCY, {
       : undefined,
 });
 
-const dispatcher = new Dispatcher(new RedisQueueBackend(redisClient));
+// Same as the gateway: work a worker enqueues — a retry, a follow-up job — belongs to the span
+// it was enqueued inside rather than to a trace of its own.
+const dispatcher = new Dispatcher(new RedisQueueBackend(redisClient), currentTraceparent);
 
 const requestedClasses = (process.env.JAROKU_WORKER_CLASSES ?? "")
   .split(",")

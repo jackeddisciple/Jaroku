@@ -8,14 +8,18 @@
 //
 //   npm run test:tracing
 
+import { randomUUID } from "node:crypto";
 import {
   OtlpExporter,
   Tracer,
+  currentTraceparent,
   formatTraceparent,
   parseTraceparent,
   toOtlp,
   type FinishedSpan,
 } from "./trace.ts";
+import { Dispatcher } from "../queue/dispatcher.ts";
+import { InMemoryQueueBackend } from "../queue/inMemoryBackend.ts";
 import { protectSecret, resetProtection } from "./log.ts";
 
 let failures = 0;
@@ -201,6 +205,55 @@ console.log("\nthe exporter");
   check(bounded.stats().dropped === 3, "...and what it drops is counted, not silent");
   bounded.close();
   exporter.close();
+}
+
+// --- the join that was not happening ----------------------------------------------------------
+
+console.log("\nthe queue carries the trace, through the real dispatcher");
+
+// THE SCENARIO ABOVE PROVES THE MECHANISM AND PROVED NOTHING ABOUT THE WIRING. It formats a
+// traceparent by hand, hands it to a second Tracer, and shows that a worker given the header
+// produces a child. Every one of those steps is a line in the test rather than a line in the
+// server — and in the server, no caller ever passed one. `QueueJob.traceparent` was optional so
+// that existing enqueues kept working, so every enqueue stayed existing: each job began a trace
+// of its own and the four tiers came apart at exactly the boundary that needed them joined.
+//
+// So this goes through `Dispatcher` itself, with the wiring index.ts uses.
+{
+  const spans: FinishedSpan[] = [];
+  const tracer = new Tracer({ tier: "gateway", export: (s) => spans.push(...s), sampleRatio: 1 });
+  const dispatcher = new Dispatcher(new InMemoryQueueBackend(), currentTraceparent);
+  const ws = randomUUID();
+
+  const enqueued = await tracer.in("POST /v1/exports", { attributes: { "http.route": "/v1/exports" } }, async () =>
+    dispatcher.enqueue("run.eval", ws, { exportId: "x" }),
+  );
+  const requestSpan = spans.find((s) => s.name === "POST /v1/exports")!;
+
+  check(!!enqueued.traceparent, "a job enqueued inside a request carries a traceparent at all");
+  check(
+    parseTraceparent(enqueued.traceparent)?.traceId === requestSpan.context.traceId,
+    "...and it is the REQUEST'S trace, not one of the job's own",
+  );
+
+  // The other half, in the process that picks it up: the worker's span is the request's child.
+  const worker = new Tracer({ tier: "worker", export: (s) => spans.push(...s), sampleRatio: 0 });
+  const jobSpan = worker.start("run.eval", { parent: parseTraceparent(enqueued.traceparent) });
+  jobSpan.end();
+  check(jobSpan.context.traceId === requestSpan.context.traceId, "...so the worker's span joins the same trace");
+  check(jobSpan.context.sampled, "...and inherits the sampling decision rather than re-rolling it");
+
+  // OUTSIDE A REQUEST THERE IS NOTHING TO CARRY, and a fabricated root would be worse than none:
+  // it would join a boot-time sweep and a timer into a trace that describes neither.
+  const orphan = await dispatcher.enqueue("run.eval", ws, { exportId: "y" });
+  check(orphan.traceparent === undefined, "a job enqueued outside any span carries no traceparent");
+
+  // And an explicit one still wins, for a caller that has a span in hand.
+  const chosen = formatTraceparent({ traceId: "a".repeat(32), spanId: "b".repeat(16), sampled: true });
+  const explicit = await tracer.in("somewhere else", {}, async () =>
+    dispatcher.enqueue("run.eval", ws, { exportId: "z" }, { traceparent: chosen }),
+  );
+  check(explicit.traceparent === chosen, "an explicitly passed traceparent overrides the ambient one");
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

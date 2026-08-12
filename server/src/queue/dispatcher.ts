@@ -28,7 +28,23 @@ export interface AdmitOverrides {
 }
 
 export class Dispatcher {
-  constructor(private backendImpl: QueueBackend) {}
+  /**
+   * @param traceparent Where a job's `traceparent` comes from when the caller does not pass one.
+   *
+   * INJECTED, so this file still does not know what a span is — it knows that a job belongs to
+   * whatever asked for it and that somebody else can name that thing. index.ts supplies the
+   * tracer's ambient context; a test supplies a constant; a caller with a span in hand overrides
+   * both by passing `opts.traceparent` explicitly.
+   *
+   * It exists because the alternative did not happen. `QueueJob.traceparent` was optional so
+   * that existing enqueues kept working, and every enqueue stayed existing: no caller ever
+   * passed one, so every job began a trace of its own and the four tiers this session joined
+   * together came apart again at the queue.
+   */
+  constructor(
+    private backendImpl: QueueBackend,
+    private traceparent: () => string | undefined = () => undefined,
+  ) {}
 
   /** The underlying storage — exposed for callers that need a generic semaphore too (see
    *  queue/semaphores.ts), so they share the same backend instance rather than opening a
@@ -45,6 +61,7 @@ export class Dispatcher {
     opts: { id?: string; idempotencyKey?: string; attempt?: number; traceparent?: string } = {},
   ): Promise<QueueJob<T>> {
     const id = opts.id ?? randomUUID();
+    const traceparent = opts.traceparent ?? this.traceparent();
     const job: QueueJob<T> = {
       id,
       class: jobClass,
@@ -54,8 +71,11 @@ export class Dispatcher {
       attempt: opts.attempt ?? 1,
       payload,
       // Carried, never generated here. The dispatcher does not know what a span is; it knows
-      // that a job belongs to whatever asked for it, and this is that string.
-      ...(opts.traceparent ? { traceparent: opts.traceparent } : {}),
+      // that a job belongs to whatever asked for it, and this is that string — passed by a
+      // caller that has one, and otherwise asked for. Still absent when there is nothing to
+      // carry: a job enqueued by a boot-time sweep or a timer has no parent, and inventing one
+      // would join unrelated work into a trace that describes nothing.
+      ...(traceparent ? { traceparent } : {}),
     };
     await this.backend.enqueue(job as QueueJob);
     return job;
