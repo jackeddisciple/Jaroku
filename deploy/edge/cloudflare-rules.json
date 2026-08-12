@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "generatedFrom": "server/src/abuse/edgeRules.ts",
+  "exemptPrefixes": [
+    "/healthz",
+    "/readyz",
+    "/v1/runs/"
+  ],
+  "maxBodyBytes": 67108864,
+  "rules": [
+    {
+      "id": "skip-control-plane-and-health",
+      "description": "Never challenge or throttle the sandbox control plane or the health checks — one region's sandboxes share an egress address, and a challenged health check pulls a healthy instance.",
+      "action": "log",
+      "expression": "((starts_with(http.request.uri.path, \"/healthz\")) or (starts_with(http.request.uri.path, \"/readyz\")) or (starts_with(http.request.uri.path, \"/v1/runs/\")))",
+      "skip": true
+    },
+    {
+      "id": "block-scanner-paths",
+      "description": "Requests for paths this product has never had. A scanner announcing itself.",
+      "action": "block",
+      "expression": "(http.request.uri.path in {\"/.env\" \"/.git/config\" \"/wp-login.php\" \"/wp-admin\" \"/phpmyadmin\" \"/.aws/credentials\" \"/config.json\" \"/server-status\" \"/actuator/env\"})",
+      "skip": false
+    },
+    {
+      "id": "block-absurd-bodies",
+      "description": "A body far past anything any route accepts. The application's own limit produces a 413 with a request id; this is for the one whose only purpose is to be buffered.",
+      "action": "block",
+      "expression": "(http.request.body.size gt 67108864)",
+      "skip": false
+    },
+    {
+      "id": "challenge-signup-automation",
+      "description": "Sign-up from something that does not look like a browser. A challenge, never a block: a bot score is a vendor's opinion and is wrong about somebody every day.",
+      "action": "managed_challenge",
+      "expression": "((http.request.uri.path eq \"/v1/auth/session\") and (http.request.method in {\"POST\"}) and (cf.bot_management.score lt 30))",
+      "skip": false
+    },
+    {
+      "id": "ratelimit-signup-velocity",
+      "description": "Signup velocity from one address — the first abuse signal the hosted platform has, and the cheapest to act on. Ten an hour is a household; fifty is a farm.",
+      "action": "block",
+      "expression": "((http.request.uri.path eq \"/v1/auth/session\") and (http.request.method in {\"POST\"}))",
+      "skip": false,
+      "rateLimit": {
+        "requests": 10,
+        "periodSec": 3600,
+        "by": "ip",
+        "mitigationSec": 3600
+      }
+    },
+    {
+      "id": "ratelimit-ws-tickets",
+      "description": "A ticket per socket, and a socket per reconnect. Loose enough that a deploy's reconnect storm passes, tight enough that a loop opening sockets does not.",
+      "action": "block",
+      "expression": "(http.request.uri.path eq \"/v1/ws-ticket\")",
+      "skip": false,
+      "rateLimit": {
+        "requests": 120,
+        "periodSec": 60,
+        "by": "ip",
+        "mitigationSec": 60
+      }
+    },
+    {
+      "id": "ratelimit-oauth-callbacks",
+      "description": "The callback does a token exchange with a third party before it can decide the state is invalid, so an invalid one still costs a round trip somebody else has to serve.",
+      "action": "managed_challenge",
+      "expression": "(starts_with(http.request.uri.path, \"/v1/oauth/\"))",
+      "skip": false,
+      "rateLimit": {
+        "requests": 60,
+        "periodSec": 60,
+        "by": "ip",
+        "mitigationSec": 300
+      }
+    },
+    {
+      "id": "ratelimit-everything-else",
+      "description": "The volumetric floor: whatever this deployment is asked for, at a rate no person produces. Deliberately looser than the application's own per-IP bucket, so an ordinary overshoot is refused by the layer that can say why.",
+      "action": "block",
+      "expression": "(not ((starts_with(http.request.uri.path, \"/healthz\")) or (starts_with(http.request.uri.path, \"/readyz\")) or (starts_with(http.request.uri.path, \"/v1/runs/\"))))",
+      "skip": false,
+      "rateLimit": {
+        "requests": 600,
+        "periodSec": 60,
+        "by": "ip",
+        "mitigationSec": 60
+      }
+    },
+    {
+      "id": "log-missing-user-agent",
+      "description": "No User-Agent at all. Recorded, never refused: curl, the test suites and every deployed agent calling an API send none, and the fallback debug client is somebody's browser.",
+      "action": "log",
+      "expression": "((len(http.user_agent) eq 0) and (not (starts_with(http.request.uri.path, \"/v1/runs/\"))))",
+      "skip": false
+    }
+  ]
+}

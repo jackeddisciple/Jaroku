@@ -36,6 +36,8 @@
     "test:http": "tsx src/http/router.test.ts",
     "test:security-headers": "tsx src/http/security.test.ts",
     "test:rate-limit": "tsx src/http/rateLimit.test.ts",
+    "test:edge-rules": "tsx src/abuse/edgeRules.test.ts",
+    "edge:render": "tsx src/abuse/render.cli.ts",
     "test:jwks": "tsx src/auth/jwks.test.ts",
     "test:jwt": "tsx src/auth/jwt.test.ts",
     "test:session": "tsx src/auth/session.test.ts",
