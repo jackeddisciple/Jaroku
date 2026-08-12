@@ -76,6 +76,7 @@ import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
 import { BillingRepository } from "./db/repositories/billing.ts";
 import { assertPlanRegistry } from "./billing/plans.ts";
 import { UsageMeter, usageKey } from "./billing/usage.ts";
+import { SAMPLE_INTERVAL_MS, sampleStorage } from "./billing/storage.ts";
 import { GENERATION_MODEL } from "./claude.ts";
 import { isSecretName } from "./secrets/secretStore.ts";
 import { PROVIDER_ENV_KEY, isProviderId, providerStatus, verifyProviderKey } from "./providers.ts";
@@ -534,6 +535,28 @@ await deployStore.init();
 // and again whenever a generation, an apply or an undo changes what is on disk — those are
 // the only three things that do.
 const agentRepo = new AgentRepository(store.database());
+
+// WHAT EACH WORKSPACE IS HOLDING, SAMPLED HOURLY.
+//
+// The one billable thing here that is not an event: a stored object just sits there costing
+// money for every hour nobody deletes it, so the only honest way to put it in an event log is
+// to ask on a schedule and write down the cost of the interval. See billing/storage.ts for why
+// metering bytes as they are WRITTEN — the version publish is an event, so it looks like it
+// fits — bills the opposite of what an object store does.
+//
+// Once at boot and then hourly. The boot sample is what makes a restarting deployment still
+// bill the hour it restarted in; the row is keyed by (workspace, clock hour), so a process that
+// restarts four times in one hour records that hour once. Unref'd — a billing sampler must
+// never be the reason a process will not exit.
+const sampleStoredBytes = (): void => {
+  void sampleStorage({
+    meter,
+    workspaceIds: () => bootIdentity.listWorkspaceIds(systemContext(newRequestId())),
+    bytesHeld: (ctx) => agentRepo.storedBytes(ctx),
+  }).catch((err) => console.error("[billing] storage sampling failed:", (err as Error)?.message ?? err));
+};
+sampleStoredBytes();
+setInterval(sampleStoredBytes, SAMPLE_INTERVAL_MS).unref();
 
 // THE FILES, AS VERSIONS.
 //
@@ -2133,7 +2156,19 @@ onBothPools("spawnError", ({ runId, error }) => {
   console.error(`[manager] spawn error (run ${runId}):`, error.message);
 });
 
-onBothPools("exit", ({ runId, code, signal, timedOut }) => {
+onBothPools("exit", ({ runId, code, signal, timedOut, elapsedMs }) => {
+  // WHAT THE SANDBOX COST TO HOLD. Metered here rather than from the trace, because the trace
+  // cannot answer it: a run's first event arrives after the Python import has already run, and
+  // a killed run never emits a last one at all. The pool launches the sandbox and hears it go,
+  // so the pool is the only thing that knows how long the machine actually existed — and a
+  // micro-VM is reserved for its whole lifetime, including the seconds before the agent spoke.
+  //
+  // Read before the context is dropped below: `contextForRun` falls back to the server's own
+  // workspace once `runWorkspaces` forgets this run, which would put somebody else's sandbox
+  // seconds on the server's ledger.
+  void meter
+    .meterSandboxSeconds(contextForRun(runId), { runId, elapsedMs })
+    .catch((err) => console.error("[billing] failed to meter sandbox time:", (err as Error)?.message ?? err));
   // The subprocess is gone, so any question it was waiting on is moot. Left standing, a run
   // that crashed while blocked would leave a modal asking about a process that no longer
   // exists, and answering it would write a file nobody will ever read.

@@ -54,7 +54,9 @@ class FakePool extends EventEmitter<RunPoolEvents> {
   finish(runId: string, result: { timedOut?: boolean; spawnError?: string } = {}): void {
     this.active.delete(runId);
     if (result.spawnError) this.emit("spawnError", { runId, error: new Error(result.spawnError) });
-    else this.emit("exit", { runId, code: 0, signal: null, timedOut: result.timedOut ?? false });
+    // `elapsedMs` is what a real pool reports so sandbox time can be metered. A fake run
+    // took no wall clock, and saying 0 is truer than inventing a duration.
+    else this.emit("exit", { runId, code: 0, signal: null, timedOut: result.timedOut ?? false, elapsedMs: 0 });
   }
 }
 

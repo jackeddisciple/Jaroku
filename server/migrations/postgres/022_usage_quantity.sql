@@ -1,0 +1,24 @@
+-- 022_usage_quantity — a column for the things that are not measured in tokens.
+--
+-- `usage_events` was shaped around model calls, because those are the only thing that spent
+-- money before this. Sandbox seconds and stored bytes are the two kinds that make BYOK
+-- coherent — under BYOK a workspace's token spend is its own and its infrastructure use is
+-- ours — and neither has tokens at all. Without somewhere to put the figure, a sandbox row
+-- could record what it COST and not what it was FOR, and a dashboard could show a workspace a
+-- dollar amount with nothing to explain it.
+--
+-- WHY NOT EXPRESS TOKENS THIS WAY TOO. It was the obvious unification and it is wrong here. A
+-- model call's usage is four numbers — uncached input, output, cache read, cache write — priced
+-- at four different rates, and one `(quantity, unit)` pair cannot hold them. Expressing it as
+-- four rows would quadruple the table for the largest kind by volume, and would mean the cost
+-- of one call is a SUM over rows rather than a column, which is the exact shape that makes
+-- "unknown is not zero" hard to keep: a partial sum looks like a total. So the token columns
+-- stay, and this is for everything metered as one number of one thing.
+--
+-- `unit` IS RECORDED RATHER THAN IMPLIED BY `kind`. They are derivable from each other today
+-- and that is not a reason to leave one out: a row that says `1240 second` is readable by
+-- somebody with no map of which kind means what, and a stored unit is what makes a later kind
+-- measured in something else — requests, GiB-months, machine-hours — an insert rather than a
+-- migration plus a lookup table in code.
+ALTER TABLE usage_events ADD COLUMN quantity numeric;
+ALTER TABLE usage_events ADD COLUMN unit text;

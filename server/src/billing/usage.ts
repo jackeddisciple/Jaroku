@@ -25,8 +25,9 @@
 import { randomUUID } from "node:crypto";
 import type { BillingRepository } from "../db/repositories/billing.ts";
 import type { TenantContext } from "../db/tenant.ts";
-import { costFor } from "../pricing.ts";
+import { costFor, round8 } from "../pricing.ts";
 import type { Step } from "../types.ts";
+import { BYTES_PER_GIB, HOURS_PER_MONTH, infraRates, type InfraRates } from "./rates.ts";
 
 /** Every kind of thing a `usage_events` row can describe. */
 export const USAGE_KINDS = [
@@ -217,6 +218,79 @@ export class UsageMeter {
       outputTokens: call.outputTokens,
       cachedInputTokens: (call.cacheReadTokens ?? 0) + (call.cacheWriteTokens ?? 0),
       costUsd: cost,
+    });
+  }
+
+  /**
+   * Meter the wall clock one run's sandbox occupied.
+   *
+   * WALL CLOCK, NOT CPU. A micro-VM is reserved for the whole time it exists, so a run that
+   * spends four minutes waiting on a provider costs the same to host as one that spends four
+   * minutes computing — and billing CPU would charge an agent that does the right thing (I/O,
+   * waiting, one model call) less than one that spins, which is backwards from what the
+   * platform actually pays for.
+   *
+   * KEYED BY THE RUN ID ALONE. A run has exactly one sandbox lifetime: it is started once, it
+   * exits once, and a resumed run is a NEW subprocess under the same id — which is the one case
+   * this key deliberately swallows. A pause/resume cycle is metered as its first segment only,
+   * and that undercharges. It is the right direction to be wrong in while the alternative is a
+   * key derived from a timestamp, which would double-charge a redelivered exit; a segment
+   * counter is what fixes it properly, and it is not in this session.
+   *
+   * A run that never started is not metered at all: `spawnError` means no sandbox existed, and
+   * a zero-second row would be an event that did not happen.
+   */
+  async meterSandboxSeconds(
+    ctx: TenantContext,
+    run: { runId: string; elapsedMs: number; rates?: InfraRates },
+  ): Promise<boolean> {
+    if (!Number.isFinite(run.elapsedMs) || run.elapsedMs <= 0) return false;
+    const seconds = round8(run.elapsedMs / 1000);
+    const rates = run.rates ?? infraRates();
+    return this.billing.record(ctx, {
+      kind: "sandbox.seconds",
+      idempotencyKey: usageKey("sandbox.seconds", run.runId),
+      runId: run.runId,
+      quantity: seconds,
+      unit: "second",
+      // A deployment with no rate set does not charge for sandbox time, and says so as a
+      // priced zero rather than as an unknown — see billing/rates.ts. Rounded through the same
+      // helper every other USD figure in this codebase goes through, so a sum of sandbox rows
+      // and a sum of token rows cannot disagree at the eighth decimal.
+      costUsd: round8(seconds * rates.sandboxUsdPerSecond),
+    });
+  }
+
+  /**
+   * Meter the bytes a workspace held over one sampling interval.
+   *
+   * STORAGE IS A RATE, NOT AN EVENT, and this is the honest way to fit one into an event log:
+   * sample what is held, and record the cost of holding it for the interval since the last
+   * sample. Metering bytes at the moment they are WRITTEN — the tempting alternative, since a
+   * version publish is an event — would charge a workspace once for a file it keeps forever and
+   * nothing for keeping it, which is the opposite of what an object store bills.
+   *
+   * THE KEY IS THE WORKSPACE AND THE INTERVAL, and that is not decoration. Every gateway
+   * replica runs this sampler, so at the top of an hour N replicas each try to record the same
+   * interval for the same workspace. The unique index is what makes exactly one of them the
+   * charge and the rest no-ops — the same arbitration the trace ingest relies on, doing real
+   * work rather than defending against a hypothetical.
+   */
+  async meterStorage(
+    ctx: TenantContext,
+    sample: { bytes: number; intervalStart: string; intervalHours: number; rates?: InfraRates },
+  ): Promise<boolean> {
+    if (!Number.isFinite(sample.bytes) || sample.bytes <= 0) return false;
+    if (!Number.isFinite(sample.intervalHours) || sample.intervalHours <= 0) return false;
+    const rates = sample.rates ?? infraRates();
+    const gibHours = (sample.bytes / BYTES_PER_GIB) * sample.intervalHours;
+    return this.billing.record(ctx, {
+      kind: "storage.bytes",
+      idempotencyKey: usageKey("storage.bytes", ctx.workspaceId, sample.intervalStart),
+      quantity: sample.bytes,
+      unit: "byte",
+      costUsd: round8((gibHours / HOURS_PER_MONTH) * rates.storageUsdPerGibMonth),
+      occurredAt: sample.intervalStart,
     });
   }
 

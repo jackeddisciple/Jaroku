@@ -79,7 +79,22 @@ export interface RunPoolEvents {
   control: [{ runId: string; ctrl: Record<string, unknown> }];
   stderr: [{ runId: string; line: string }];
   parseError: [{ runId: string; line: string; error: string }];
-  exit: [{ runId: string; code: number | null; signal: NodeJS.Signals | null; timedOut: boolean }];
+  /**
+   * `elapsedMs` is how long this slot's sandbox actually existed.
+   *
+   * The pool is the only thing that knows it: it launches the sandbox and it hears the exit,
+   * and every other observer sees either the run's first trace event (which arrives after the
+   * Python import has already run) or its last (which a killed run never emits at all). Wall
+   * clock rather than anything derived from the trace, because a micro-VM is reserved for the
+   * whole time it exists — including the seconds before the agent said anything.
+   */
+  exit: [{
+    runId: string;
+    code: number | null;
+    signal: NodeJS.Signals | null;
+    timedOut: boolean;
+    elapsedMs: number;
+  }];
   spawnError: [{ runId: string; error: Error }];
 }
 
@@ -89,6 +104,9 @@ interface Slot {
   runId: string | null;
   timer: NodeJS.Timeout | null;
   timedOut: boolean;
+  /** When this slot's sandbox was launched, so the exit can say how long it existed. Null
+   *  between runs; a slot with no occupant has no clock running. */
+  startedAtMs: number | null;
   /** Set only when a run token was minted for this slot's occupant, so release() knows both
    *  whether to revoke one and, since a self-contained token cannot be un-minted, until when
    *  the revocation entry itself needs to be kept around. */
@@ -139,6 +157,7 @@ export class RunPool extends EventEmitter<RunPoolEvents> {
       runId: null,
       timer: null,
       timedOut: false,
+      startedAtMs: null,
       tokenExpiresAtMs: null,
     };
 
@@ -164,8 +183,11 @@ export class RunPool extends EventEmitter<RunPoolEvents> {
     slot.manager.on("exit", ({ code, signal }) => {
       const runId = slot.runId;
       const timedOut = slot.timedOut;
+      // Read BEFORE release(), which clears it. The lifetime is the thing being reported, so
+      // computing it after the slot has been reset would report every run as zero seconds long.
+      const elapsedMs = slot.startedAtMs === null ? 0 : Date.now() - slot.startedAtMs;
       this.release(slot);
-      if (runId) this.emit("exit", { runId, code, signal, timedOut });
+      if (runId) this.emit("exit", { runId, code, signal, timedOut, elapsedMs });
     });
 
     return slot;
@@ -183,12 +205,14 @@ export class RunPool extends EventEmitter<RunPoolEvents> {
     }
     slot.runId = null;
     slot.timedOut = false;
+    slot.startedAtMs = null;
     slot.tokenExpiresAtMs = null;
   }
 
   private launch(slot: Slot, opts: PoolRunOptions): void {
     slot.runId = opts.runId;
     slot.timedOut = false;
+    slot.startedAtMs = Date.now();
     if (opts.timeoutMs && opts.timeoutMs > 0) {
       slot.timer = setTimeout(() => {
         // Flag before killing so the `exit` handler can report WHY it died. Without this a

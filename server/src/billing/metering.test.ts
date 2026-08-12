@@ -19,6 +19,7 @@ import { BillingRepository } from "../db/repositories/billing.ts";
 import { TraceStore } from "../store.ts";
 import type { Run, Step, StepType } from "../types.ts";
 import { UsageMeter, usageKey } from "./usage.ts";
+import { intervalStart, sampleStorage } from "./storage.ts";
 
 let failures = 0;
 const check = (ok: boolean, msg: string): void => {
@@ -305,6 +306,108 @@ console.log("\nkeys: random where nothing is redelivered, deterministic where so
   );
 }
 
+console.log("\nsandbox seconds");
+
+{
+  const rates = { sandboxUsdPerSecond: 0.000_02, storageUsdPerGibMonth: 0.015 };
+  const runId = randomUUID();
+  check(
+    await meter.meterSandboxSeconds(ctx, { runId, elapsedMs: 90_000, rates }),
+    "a run's sandbox lifetime is metered",
+  );
+  const [row] = await billing.eventsForRun(ctx, runId);
+  check(row?.kind === "sandbox.seconds", "as sandbox.seconds");
+  check(row?.quantity === 90 && row?.unit === "second", "with the figure and its unit, not a token count");
+  check(Math.abs((row?.cost_usd ?? 0) - 0.0018) < 1e-9, "priced at the deployment's own rate");
+  check(row?.cost_known === true, "and known — a rate we set is not a rate we are unsure of");
+
+  check(
+    !(await meter.meterSandboxSeconds(ctx, { runId, elapsedMs: 90_000, rates })),
+    "a second exit for the same run does not charge again",
+  );
+  check(
+    !(await meter.meterSandboxSeconds(ctx, { runId: randomUUID(), elapsedMs: 0, rates })),
+    "a run that never started is not metered at all — a zero-second row is an event that did not happen",
+  );
+}
+{
+  // The default: a deployment that has not set a rate does not charge for sandbox time, and
+  // says so as a priced zero. That is the dry-run provider's claim, not the unpriced one.
+  const runId = randomUUID();
+  await meter.meterSandboxSeconds(ctx, {
+    runId,
+    elapsedMs: 5_000,
+    rates: { sandboxUsdPerSecond: 0, storageUsdPerGibMonth: 0 },
+  });
+  const [row] = await billing.eventsForRun(ctx, runId);
+  check(row?.cost_usd === 0 && row?.cost_known === true, "an unset rate is free, not unknown");
+  check(row?.quantity === 5, "and the seconds are recorded either way, because they happened");
+}
+
+console.log("\nstorage, sampled rather than evented");
+
+{
+  // 720 USD per GiB-month is exactly $1 per GiB-hour (30 days x 24), so the expected figure
+  // below is arithmetic anybody can check rather than a number copied out of a run.
+  const rates = { sandboxUsdPerSecond: 0, storageUsdPerGibMonth: 720 };
+  const hour = "2026-01-01T00:00:00.000Z";
+  const gib = 1024 ** 3;
+  check(
+    await meter.meterStorage(ctx, { bytes: 2 * gib, intervalStart: hour, intervalHours: 1, rates }),
+    "one sample per workspace per interval",
+  );
+  // Found by its interval rather than by being newest: this row is STAMPED with the hour it
+  // describes, and that hour is deliberately in the past, so "most recent" is the wrong handle.
+  const row = (await billing.recentEvents(ctx, 500)).find((r) => r.occurred_at === hour);
+  check(row?.kind === "storage.bytes" && row?.unit === "byte", "recorded as bytes held");
+  check(row?.quantity === 2 * gib, "with the figure sampled");
+  check(Math.abs((row?.cost_usd ?? 0) - 2) < 1e-8, "priced as GiB-hours out of a GiB-month");
+  check(row?.occurred_at === hour, "and stamped with the interval it is for, not the moment it ran");
+
+  // The multi-replica case the key exists for: every gateway samples, one of them charges.
+  check(
+    !(await meter.meterStorage(ctx, { bytes: 2 * gib, intervalStart: hour, intervalHours: 1, rates })),
+    "a second replica sampling the same hour records nothing",
+  );
+  check(
+    await meter.meterStorage(ctx, {
+      bytes: 2 * gib, intervalStart: "2026-01-01T01:00:00.000Z", intervalHours: 1, rates,
+    }),
+    "and the next hour is a new charge",
+  );
+  check(
+    !(await meter.meterStorage(ctx, { bytes: 0, intervalStart: "2026-01-01T02:00:00.000Z", intervalHours: 1, rates })),
+    "a workspace holding nothing writes no row",
+  );
+}
+
+console.log("\nthe sampler walks every workspace and survives one of them failing");
+
+{
+  const seen: string[] = [];
+  const recorded = await sampleStorage(
+    {
+      meter,
+      workspaceIds: async () => [ctx.workspaceId, "not-a-workspace", ctx.workspaceId],
+      bytesHeld: async (c) => {
+        seen.push(c.workspaceId);
+        if (c.workspaceId === "not-a-workspace") throw new Error("gone");
+        return 1024;
+      },
+      rates: { sandboxUsdPerSecond: 0, storageUsdPerGibMonth: 1 },
+    },
+    new Date("2026-02-02T03:04:05.678Z"),
+  );
+  check(seen.length === 3, "every workspace is asked, in turn");
+  check(seen[2] === ctx.workspaceId, "including the ones after the one that threw");
+  check(recorded === 1, "and the same workspace twice in one interval is charged once");
+}
+
+check(
+  intervalStart(new Date("2026-02-02T03:59:59.999Z")) === "2026-02-02T03:00:00.000Z",
+  "an interval is the clock hour it falls in, so every replica computes the same key",
+);
+
 console.log("\nkinds can be rolled up apart from one another");
 
 {
@@ -314,12 +417,16 @@ console.log("\nkinds can be rolled up apart from one another");
   const platform = await billing.spendSince(ctx, EPOCH, [
     "llm.generation", "llm.plan", "llm.edit", "llm.explain", "llm.judge",
   ]);
+  const infra = await billing.spendSince(ctx, EPOCH, ["sandbox.seconds", "storage.bytes"]);
   const all = await billing.spendSince(ctx, EPOCH);
-  check(provider.usd > 0 && platform.usd > 0, "both halves have spend in them");
+  check(provider.usd > 0 && platform.usd > 0 && infra.usd > 0, "all three halves have spend in them");
   check(
-    Math.abs(all.usd - (provider.usd + platform.usd)) < 1e-9,
+    Math.abs(all.usd - (provider.usd + platform.usd + infra.usd)) < 1e-9,
     "and they add up to the whole, with nothing in a kind nobody asked about",
   );
+  // The BYOK question, answerable because the kinds were kept apart at write time: what would
+  // this workspace owe if its token spend were its own?
+  check(infra.usd < all.usd, "so a BYOK bill is a query, not a schema change");
 }
 
 await db.close();

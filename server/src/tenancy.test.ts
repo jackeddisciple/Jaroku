@@ -386,6 +386,8 @@ const SCOPED_API: Record<string, string[]> = {
     "undoVersion", "editCounts",
     // Session 4.
     "getGraphCache", "setGraphCache",
+    // Session 6 — what a storage bill is computed from.
+    "storedBytes",
   ],
   // Session 2. These decide who can see a workspace AT ALL, so a cross-tenant bug in any of
   // them is worse than one in the stores above — it does not leak a row, it hands over the
@@ -675,6 +677,7 @@ async function remainder(db: Db): Promise<void> {
 
   check(!(await agents.editCounts(A.ctx)).has(theirAgent.id), "editCounts counts none of B's edits");
 
+
   // Session 4: a version's cached graph introspection result (agent_versions.graph_cache). No
   // workspace_id of its own, same as the version row it lives on — scoped by the same join.
   await agents.setGraphCache(B.ctx, theirAgent.id, 2, { agent_id: "support_bot", nodes: [], edges: [] });
@@ -729,6 +732,14 @@ async function remainder(db: Db): Promise<void> {
   // decision made against somebody else's balance — a run refused because another workspace is
   // broke, or admitted because another workspace is not. And a usage row written into the wrong
   // workspace is an invoice line the wrong person pays.
+  // The figure a storage bill is computed from. A leak here is not a leak of rows, it is one
+  // workspace paying for another's files. Asserted last, because adding a version to B's agent
+  // moves the pointer the version-history assertions above are about.
+  await agents.addVersion(B.ctx, theirAgent.id, { "big.py": { sha256: "b", bytes: 4_096 } });
+  const theirsBytes = await agents.storedBytes(B.ctx);
+  check(theirsBytes >= 4_096, "storedBytes sees B's own versions");
+  check(await agents.storedBytes(A.ctx) < theirsBytes, "and A's own figure does not include them");
+
   const billing = new BillingRepository(db);
   await billing.addCredit(B.ctx, 50);
   await billing.setCeiling(B.ctx, 25);

@@ -475,6 +475,31 @@ export class AgentRepository {
   }
 
   /**
+   * How many bytes of agent files this workspace is holding, across every version.
+   *
+   * EVERY VERSION, INCLUDING UNDONE ONES AND SOFT-DELETED AGENTS' — because the objects are
+   * still there. `undone_at` moves a pointer and `deleted_at` hides a row from a listing;
+   * neither deletes a byte from the object store, and an undo is a pointer move precisely so
+   * the bytes survive to be redone. Billing what is stored means billing what is stored, not
+   * what is currently reachable from the UI. A retention sweeper is what actually removes
+   * objects, and when it does, this number falls on the next sample by itself.
+   *
+   * Summed from `total_bytes` on the version row rather than by asking the object store. The
+   * manifest is written in the same transaction as the pointer, so the row is authoritative and
+   * free; listing a prefix on S3 to bill a workspace would be a paid API call per workspace per
+   * hour, which is a metering system that costs more than the thing it meters.
+   */
+  async storedBytes(ctx: TenantContext): Promise<number> {
+    const row = await this.q(ctx).get<{ n: unknown }>(
+      `SELECT COALESCE(SUM(v.total_bytes), 0) AS n
+         FROM agent_versions v JOIN agents a ON a.id = v.agent_id
+        WHERE a.workspace_id = ?`,
+      [ctx.workspaceId],
+    );
+    return asInt(row?.n, 0);
+  }
+
+  /**
    * Move `current_version` back one, and take the version it left behind off the line.
    *
    * The undo. Not a copy of anything: the previous version's objects were never touched, so

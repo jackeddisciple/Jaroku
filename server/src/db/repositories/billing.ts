@@ -61,6 +61,14 @@ export interface UsageEventInput {
    */
   totalTokens?: number | null;
   /**
+   * How much of `unit` this row is for — sandbox seconds, stored bytes.
+   *
+   * For the kinds that are not measured in tokens. See migration 022 for why a model call is
+   * deliberately not expressed this way.
+   */
+  quantity?: number | null;
+  unit?: string | null;
+  /**
    * USD, or null for UNKNOWN.
    *
    * Null and 0 are different claims and this interface refuses to let them blur: passing null
@@ -82,6 +90,8 @@ export interface UsageEventRow {
   output_tokens: number | null;
   cached_input_tokens: number | null;
   total_tokens: number | null;
+  quantity: number | null;
+  unit: string | null;
   cost_usd: number | null;
   cost_known: boolean;
   occurred_at: string;
@@ -145,8 +155,8 @@ function sumTokens(e: UsageEventInput): number | null {
 export const LIVE_SUBSCRIPTION_STATUSES = ["incomplete", "active", "past_due"] as const;
 
 const USAGE_COLUMNS = `id, workspace_id, run_id, kind, provider, model, input_tokens,
-                       output_tokens, cached_input_tokens, total_tokens, cost_usd, cost_known,
-                       occurred_at, idempotency_key`;
+                       output_tokens, cached_input_tokens, total_tokens, quantity, unit,
+                       cost_usd, cost_known, occurred_at, idempotency_key`;
 const HOLD_COLUMNS = `id, workspace_id, amount_usd, purpose, subject_id, created_at,
                       expires_at, released_at`;
 const SUBSCRIPTION_COLUMNS = `id, workspace_id, plan_id, status, external_customer_id,
@@ -286,9 +296,9 @@ export class BillingRepository {
     const known = e.costUsd !== null && e.costUsd !== undefined;
     const res = await this.q(ctx).run(
       `INSERT INTO usage_events (workspace_id, run_id, kind, provider, model, input_tokens,
-         output_tokens, cached_input_tokens, total_tokens, cost_usd, cost_known, occurred_at,
-         idempotency_key)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         output_tokens, cached_input_tokens, total_tokens, quantity, unit, cost_usd, cost_known,
+         occurred_at, idempotency_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (idempotency_key) DO NOTHING`,
       [
         ctx.workspaceId,
@@ -302,6 +312,8 @@ export class BillingRepository {
         // Derived rather than demanded: a caller that gave a split has already said what the
         // total is, and asking for it twice is asking for two numbers that can disagree.
         e.totalTokens ?? sumTokens(e),
+        e.quantity ?? null,
+        e.unit ?? null,
         known ? e.costUsd : null,
         known ? 1 : 0,
         e.occurredAt ?? nowIso(),
@@ -376,6 +388,8 @@ export class BillingRepository {
           ? null
           : asInt(r["cached_input_tokens"]),
       total_tokens: r["total_tokens"] === null || r["total_tokens"] === undefined ? null : asInt(r["total_tokens"]),
+      quantity: r["quantity"] === null || r["quantity"] === undefined ? null : Number(r["quantity"]),
+      unit: (r["unit"] as string | null) ?? null,
       cost_usd: r["cost_usd"] === null || r["cost_usd"] === undefined ? null : Number(r["cost_usd"]),
       cost_known: asBool(r["cost_known"]),
       occurred_at: String(r["occurred_at"]),
