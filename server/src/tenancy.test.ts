@@ -42,6 +42,7 @@ import { McpStore } from "./mcpStore.ts";
 import { DeployStore } from "./deployStore.ts";
 import { DbTicketStore } from "./db/repositories/tickets.ts";
 import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
+import { BillingRepository } from "./db/repositories/billing.ts";
 import { attackSuite } from "./auth/attacks.test.ts";
 import { FsObjectStore } from "./storage/fsObjectStore.ts";
 import { ProjectStore } from "./storage/projectStore.ts";
@@ -407,6 +408,15 @@ const SCOPED_API: Record<string, string[]> = {
   // integrates with is still theirs. `touch` takes a workspace id rather than a context,
   // because its caller resolved one from a run; it is exercised for the same scoping anyway.
   SecretRefRepository: ["list", "get", "declare", "markConfigured", "markCleared", "forget", "touch"],
+  // Session 6. `listPlans` and `setPlanPrice` are deliberately absent: `plans` is the
+  // platform's own catalogue, has no workspace_id and carries no policy — every workspace is
+  // meant to read the same rows, so asserting one cannot see another's would be asserting the
+  // opposite of what the table is for. Everything else here decides or records money.
+  BillingRepository: [
+    "balance", "addCredit", "setCeiling", "setLimitOverrides", "record", "spendSince",
+    "eventsForRun", "recentEvents", "hold", "liveHolds", "expiredHolds", "liveSubscription",
+    "subscriptions", "upsertSubscription",
+  ],
 };
 
 /**
@@ -714,6 +724,58 @@ async function remainder(db: Db): Promise<void> {
     plannedRefused = true;
   }
   check(plannedRefused, "plannedNextVersion refuses an agent uuid from B rather than answering 1");
+
+  // Session 6: money. A cross-tenant read here is not a leak of somebody's data, it is a
+  // decision made against somebody else's balance — a run refused because another workspace is
+  // broke, or admitted because another workspace is not. And a usage row written into the wrong
+  // workspace is an invoice line the wrong person pays.
+  const billing = new BillingRepository(db);
+  await billing.addCredit(B.ctx, 50);
+  await billing.setCeiling(B.ctx, 25);
+  await billing.setLimitOverrides(B.ctx, { evalConcurrency: 9 });
+  check((await billing.balance(A.ctx)).balance_usd === 0, "balance never shows B's credit");
+  check((await billing.balance(A.ctx)).ceiling_usd === null, "nor B's ceiling");
+  check(
+    Object.keys((await billing.balance(A.ctx)).limit_overrides).length === 0,
+    "nor B's negotiated limits",
+  );
+  await billing.addCredit(A.ctx, 1);
+  check((await billing.balance(B.ctx)).balance_usd === 50, "addCredit cannot top up B's balance");
+  await billing.setCeiling(A.ctx, 999);
+  check((await billing.balance(B.ctx)).ceiling_usd === 25, "setCeiling cannot lift B's ceiling");
+
+  await billing.record(B.ctx, {
+    kind: "llm.provider",
+    idempotencyKey: `tenancy-b-${randomUUID()}`,
+    runId: B.runId,
+    provider: "fake",
+    model: "fake-scripted",
+    costUsd: 0.25,
+  });
+  check((await billing.spendSince(A.ctx, "1970-01-01T00:00:00.000Z")).usd === 0, "spendSince counts none of B's usage");
+  check((await billing.eventsForRun(A.ctx, B.runId)).length === 0, "eventsForRun cannot read B's run's usage");
+  check((await billing.recentEvents(A.ctx)).length === 0, "recentEvents lists none of B's");
+
+  // The hold rows a reservation leaves behind. Inserted through the same scoped handle the
+  // reservation will use, so what is asserted here is the scoping the real path has.
+  const theirHold = randomUUID();
+  await db.forWorkspace(B.ctx.workspaceId).run(
+    `INSERT INTO billing_holds (id, workspace_id, amount_usd, purpose, subject_id, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [theirHold, B.ctx.workspaceId, 5, "run", B.runId, new Date().toISOString(), new Date(0).toISOString()],
+  );
+  check((await billing.hold(A.ctx, theirHold)) === undefined, "a hold of B's is invisible to A");
+  check((await billing.liveHolds(A.ctx)).length === 0, "and absent from A's live holds");
+  check((await billing.expiredHolds(A.ctx)).length === 0, "and from what A's sweeper would reclaim");
+
+  await billing.upsertSubscription(B.ctx, {
+    planId: "pro",
+    status: "active",
+    externalSubscriptionId: `sub_${randomUUID()}`,
+    externalCustomerId: "cus_b",
+  });
+  check((await billing.liveSubscription(A.ctx)) === undefined, "liveSubscription never returns B's");
+  check((await billing.subscriptions(A.ctx)).length === 0, "nor does the full history");
 }
 
 // --- run it -------------------------------------------------------------------------------
