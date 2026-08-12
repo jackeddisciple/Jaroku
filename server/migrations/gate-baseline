@@ -1,0 +1,10 @@
+029
+# The highest migration version reviewed under the expand/migrate/contract rule.
+#
+# Everything ABOVE this number has to pass `npm run migrate:check`. Everything at or below it
+# shipped before the gate existed and cannot be made compatible retroactively — a gate that fails
+# on history is a gate somebody disables.
+#
+# Raise this only when the migrations between the old value and the new one have actually been
+# reviewed against the rule. It is one number in its own file precisely so that raising it is
+# visible in a diff rather than buried in a config change.

@@ -1,0 +1,69 @@
+# The API / gateway tier: stateless, N replicas, terminates WebSockets.
+#
+# WHAT THIS PROCESS IS. It authenticates, resolves a TenantContext, answers reads through the
+# repositories, and enqueues mutations. It does NOT execute anything a model wrote — that is the
+# sandbox, on its own machine, and keeping the two apart is the point of Session 4.
+#
+# MIGRATIONS ARE NOT RUN FROM HERE. `release_command` runs once per deploy, before any new
+# machine takes traffic, which is exactly the ordering expand/migrate/contract needs. A server
+# that migrated at boot would have N replicas racing to apply the same migration — the advisory
+# lock makes that safe rather than correct, and "safe rather than correct" is how a deploy takes
+# four minutes for no reason.
+
+app = "jaroku-gateway"
+primary_region = "iad"
+
+[build]
+  # A digest, never a tag. A tag is a mutable pointer, and a rolling deploy that resolves it twice
+  # can put two different images in one release — see sandbox/image.ts, which makes the same rule
+  # non-negotiable for the thing that runs untrusted code.
+  image = "registry.fly.io/jaroku-gateway@sha256:REPLACE_WITH_DIGEST"
+
+[deploy]
+  # THE GATE, THEN THE MIGRATION, THEN TRAFFIC. `migrate:check` refuses a statement that would
+  # break the version currently serving; `migrate` applies what is left. Both run to completion
+  # before a single new machine is started, and a non-zero exit stops the deploy with the old
+  # version still serving — which is the failure mode worth having.
+  release_command = "npm --prefix server run migrate:check && npm --prefix server run migrate"
+  # Rolling, not immediate: replicas are replaced one at a time, so the old version is serving
+  # throughout. That window is precisely what the expand/contract rule exists to survive.
+  strategy = "rolling"
+
+[env]
+  NODE_ENV = "production"
+  JAROKU_DB_DRIVER = "postgres"
+  JAROKU_OBJECT_STORE = "s3"
+  JAROKU_SECRET_STORE = "kms"
+  JAROKU_CHECKPOINTER = "postgres"
+  JAROKU_RUN_SANDBOX = "fly"
+  JAROKU_LOG_FORMAT = "json"
+  JAROKU_PUBLIC_TLS = "1"
+  JAROKU_TRUST_PROXY = "1"
+  JAROKU_SERVICE_NAME = "jaroku-gateway"
+
+[http_service]
+  internal_port = 4317
+  force_https = true
+  auto_stop_machines = false
+  # NEVER ZERO. A gateway holds WebSockets; scaling to zero closes every one of them, and the
+  # clients reconnect in a thundering herd against a machine that is still starting.
+  min_machines_running = 2
+
+  [http_service.concurrency]
+    # Connections, not requests: this tier's load is long-lived sockets rather than short calls.
+    type = "connections"
+    soft_limit = 400
+    hard_limit = 500
+
+  [[http_service.checks]]
+    # /readyz, not /healthz. Readiness asks whether to send TRAFFIC here, which is a question
+    # about the database; liveness asks whether the process is alive, and a liveness check that
+    # touched the database would turn one database blip into every instance restarting at once.
+    path = "/readyz"
+    interval = "10s"
+    timeout = "3s"
+    grace_period = "20s"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "1gb"

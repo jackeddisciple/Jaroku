@@ -1,0 +1,69 @@
+# Deploying, in the only order that survives a rolling release.
+#
+# THE ORDER IS THE WHOLE FILE:
+#
+#   1. CI has passed. A deploy that runs the tests itself is a deploy that skips them when
+#      somebody is in a hurry.
+#   2. THE MIGRATION GATE, against what this deploy would newly apply. It refuses a statement
+#      that would break the version currently serving — see server/src/db/expandContract.ts.
+#   3. Build, and pin the digest. A tag is a mutable pointer, and two machines resolving one tag
+#      during a rolling deploy can end up running different code.
+#   4. MIGRATE, to completion, before any new machine takes traffic. Fly's release command does
+#      this, and a non-zero exit stops the deploy with the old version still serving.
+#   5. Roll the gateway one machine at a time; replace the workers all at once, because they
+#      serve no connections and their graceful shutdown already requeues what they were holding.
+#
+# WHAT IS NOT HERE IS A ROLLBACK STEP. A rollback is a deploy of the previous digest, and it is
+# safe precisely because of the expand/migrate/contract rule: the old code still runs against the
+# new schema. A deploy that broke that rule cannot be rolled back — which is why the gate at step
+# 2 is a gate rather than a warning.
+
+name: Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  # One deploy at a time. Two releases migrating the same database concurrently is the situation
+  # the advisory lock exists to survive, not something to do on purpose.
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci
+        working-directory: server
+
+      - name: the migration gate
+        working-directory: server
+        run: npm run migrate:check
+
+      - name: the generated configuration is the committed one
+        working-directory: server
+        run: |
+          npm run edge:render -- --check
+          npm run obs:render -- --check
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: gateway - migrations run in the release command, before traffic
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --config deploy/fly/gateway.fly.toml --strategy rolling --wait-timeout 10m
+
+      - name: workers
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --config deploy/fly/worker.fly.toml --strategy immediate --wait-timeout 10m

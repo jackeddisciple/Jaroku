@@ -1,0 +1,46 @@
+# The worker tier: drains the queue, owns the sandbox lifecycle, ingests traces.
+#
+# NO HTTP SERVICE AT ALL, deliberately. A worker answers nothing; it pulls. That is what makes it
+# scalable on queue depth rather than on requests, and it is why nothing here needs a load
+# balancer, a certificate or an origin allowlist.
+#
+# IT DOES NOT RUN MIGRATIONS EITHER. Exactly one place does, and it is the gateway's release
+# command — two deploys racing to migrate is the situation the advisory lock exists to survive
+# rather than a design.
+
+app = "jaroku-worker"
+primary_region = "iad"
+
+[build]
+  image = "registry.fly.io/jaroku-worker@sha256:REPLACE_WITH_DIGEST"
+
+[deploy]
+  # Immediate rather than rolling: a worker serves no connections, so replacing them all at once
+  # costs nothing a graceful shutdown does not already handle. SIGTERM stops admission, lets
+  # in-flight work finish inside the drain window, and requeues what does not — see Session 5.
+  strategy = "immediate"
+
+[processes]
+  worker = "npm --prefix server run worker"
+
+[env]
+  NODE_ENV = "production"
+  JAROKU_DB_DRIVER = "postgres"
+  JAROKU_OBJECT_STORE = "s3"
+  JAROKU_SECRET_STORE = "kms"
+  JAROKU_CHECKPOINTER = "postgres"
+  JAROKU_RUN_SANDBOX = "fly"
+  JAROKU_LOG_FORMAT = "json"
+  JAROKU_SERVICE_NAME = "jaroku-worker"
+
+[[vm]]
+  # More memory than the gateway: a worker holds a sandbox's stdout and batches it. The sandbox
+  # itself gets its own machine and its own limits — see sandbox/image.ts and the egress policy.
+  size = "shared-cpu-2x"
+  memory = "2gb"
+
+[metrics]
+  # Scraped by Fly's own Prometheus, which reaches this on the internal network — which is why
+  # the endpoint's bearer token is set even though nothing outside can route to it.
+  port = 4317
+  path = "/metrics"

@@ -46,6 +46,8 @@
     "test:log-redaction": "tsx src/obs/log.test.ts",
     "test:tracing": "tsx src/obs/trace.test.ts",
     "test:metrics": "tsx src/obs/metrics.test.ts",
+    "test:migration-gate": "tsx src/db/expandContract.test.ts",
+    "migrate:check": "tsx src/db/gate.cli.ts",
     "obs:render": "tsx src/obs/render.cli.ts",
     "edge:render": "tsx src/abuse/render.cli.ts",
     "test:jwks": "tsx src/auth/jwks.test.ts",

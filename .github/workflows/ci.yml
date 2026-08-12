@@ -1,0 +1,167 @@
+# Everything that has to be true before a change is merged.
+#
+# THE SUITES ARE PLAIN SCRIPTS, so this file is mostly a list of them rather than a test-runner
+# configuration. That is the same reason the migration runner has no dependency and the fixtures
+# are checked-in files: what runs in CI is what a developer runs locally, spelled the same way.
+#
+# THREE GATES THAT ARE NOT TESTS, and each exists because the alternative is remembering:
+#
+#   `migrate:check` refuses a migration that would break the version currently serving.
+#   `edge:render --check` refuses an edge configuration that has drifted from its source table.
+#   `obs:render --check` does the same for the alerting rules.
+#
+# Postgres and Redis run as services, so the halves of the suites that skip without
+# JAROKU_PG_URL — the RLS policies, the driver parity, half of tenancy — actually run here. Those
+# are exactly the properties that hold on SQLite and not on Postgres, which is why a green local
+# run is not enough.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: jaroku
+          POSTGRES_PASSWORD: jaroku
+          POSTGRES_DB: jaroku
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U jaroku -d jaroku"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+
+    env:
+      JAROKU_PG_URL: postgres://jaroku:jaroku@127.0.0.1:5432/jaroku
+      JAROKU_REDIS_URL: redis://127.0.0.1:6379
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci
+        working-directory: server
+
+      - name: typecheck
+        run: npm run typecheck
+        working-directory: server
+
+      - name: the gates that are not tests
+        working-directory: server
+        run: |
+          npm run migrate:check
+          npm run edge:render -- --check
+          npm run obs:render -- --check
+
+      - name: the database and tenancy
+        working-directory: server
+        run: |
+          npm run test:migrate
+          npm run test:db
+          npm run test:driver
+          npm run test:db-postgres
+          npm run test:shape-parity
+          npm run test:payloads
+          npm run test:adversarial
+          npm run test:identity
+          npm run test:rls
+          npm run test:db-boundary
+          npm run test:tenancy
+          npm run test:migration-gate
+
+      - name: storage, secrets and checkpoints
+        working-directory: server
+        run: |
+          npm run test:object-keys
+          npm run test:objects
+          npm run test:project-store
+          npm run test:secrets
+          npm run test:vault
+          npm run test:secret-refs
+          npm run test:checkpoint-threads
+          npm run test:branch
+
+      - name: auth, HTTP and the hardening pass
+        working-directory: server
+        run: |
+          npm run test:http
+          npm run test:security-headers
+          npm run test:rate-limit
+          npm run test:jwks
+          npm run test:jwt
+          npm run test:session
+          npm run test:resolve
+          npm run test:capabilities
+          npm run test:tickets
+          npm run test:members
+          npm run test:relay
+          npm run test:channels
+
+      - name: the queue and the sandbox
+        working-directory: server
+        run: |
+          npm run test:redis
+          npm run test:jobs
+          npm run test:dispatcher
+          npm run test:semaphores
+          npm run test:worker-loop
+          npm run test:chaos
+          npm run test:event-bridge
+          npm run test:egress-policy
+          npm run test:database-url
+          npm run test:run-tokens
+          npm run test:control-plane-routes
+          npm run test:backpressure
+          npm run test:escape-suite
+          npm run test:tenancy-isolation
+
+      - name: cost, abuse and the data lifecycle
+        working-directory: server
+        run: |
+          npm run test:pricing
+          npm run test:plans
+          npm run test:metering
+          npm run test:balances
+          npm run test:gate
+          npm run test:aggregate
+          npm run test:abuse-signals
+          npm run test:enforcement
+          npm run test:edge-rules
+          npm run test:partitions
+          npm run test:retention
+          npm run test:workspace-export
+          npm run test:deletion
+          npm run test:log-redaction
+          npm run test:tracing
+          npm run test:metrics
+
+  client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+        working-directory: client
+      - run: npm run typecheck
+        working-directory: client
