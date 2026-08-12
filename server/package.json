@@ -83,6 +83,7 @@
     "test:vault": "tsx src/secrets/vault.test.ts",
     "test:secret-refs": "tsx src/secrets/refs.test.ts",
     "test:oauth-state": "tsx src/oauth/state.test.ts",
+    "test:oauth-service": "tsx src/oauth/service.test.ts",
     "test:providers": "tsx src/providers.test.ts",
     "test:deploy-artifacts": "tsx src/deployArtifacts.test.ts",
     "test:deploy-secrets": "tsx src/deploySecrets.test.ts",
