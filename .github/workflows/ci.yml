@@ -116,6 +116,7 @@ jobs:
           npm run test:vault
           npm run test:secret-refs
           npm run test:secret-schema
+          npm run test:secret-passcode
           npm run test:checkpoint-threads
           npm run test:branch
 
