@@ -79,6 +79,31 @@ export function digestsMatch(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
+/**
+ * Proof that a live elevation was checked, in a form only this module can produce.
+ *
+ * WHY A BRANDED TYPE AND NOT A BOOLEAN. ADR-033's central argument is that "privilege is a runtime
+ * check, and the absence of a method is a compile-time one" — which is why the vault has no `get`.
+ * ADR-035 adds a reveal path and therefore gives that up. What replaces it has to be the strongest
+ * remaining compile-time thing, and this is it: `revealForUser` takes a receipt, the receipt's
+ * brand is a symbol this module does not export, and so the ONLY way to obtain one is to have gone
+ * through `check()` and had it say yes. A caller cannot construct a receipt, cannot cast an object
+ * into one without deliberately reaching for `as unknown`, and cannot forge one from a request
+ * body.
+ *
+ * IT CARRIES ITS OWN WORKSPACE, for exactly the reason `getForRun` takes a run id: the caller does
+ * not get to assert which tenant it is acting for. The store reads the workspace off the receipt,
+ * so a receipt for one workspace cannot open another's credential even if the name matches.
+ */
+declare const ELEVATION_BRAND: unique symbol;
+
+export interface ElevationReceipt {
+  readonly [ELEVATION_BRAND]: "elevation";
+  readonly workspaceId: string;
+  readonly userId: string;
+  readonly elevationId: string;
+}
+
 export interface GrantedElevation {
   /** Handed to the client ONCE. Never stored server-side in this form, never logged. */
   token: string;
@@ -187,6 +212,31 @@ export class SecretElevations {
       new Date(this.now()).toISOString(),
     );
     return row ?? null;
+  }
+
+  /**
+   * The same check, answering with a receipt the vault will accept.
+   *
+   * Separate from `check` rather than replacing it, because most callers want "may this request
+   * proceed" and only one wants "and here is proof, to hand to the thing that reads a value". A
+   * single method returning the receipt would put a reveal token in the hands of every route in
+   * the group, which is precisely the widening ADR-035 is trying not to do.
+   *
+   * The workspace on the receipt comes from the ROW, not from the context that was passed in —
+   * `liveByToken` already scoped the lookup, and taking it from the row means the receipt cannot
+   * describe a workspace the elevation was not actually issued for.
+   */
+  async receiptFor(
+    ctx: TenantContext,
+    input: { userId: string; sessionId: string; token: string },
+  ): Promise<ElevationReceipt | null> {
+    const row = await this.check(ctx, input);
+    if (!row) return null;
+    return {
+      workspaceId: row.workspace_id,
+      userId: row.user_id,
+      elevationId: row.id,
+    } as ElevationReceipt;
   }
 
   /**

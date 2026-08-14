@@ -155,6 +155,21 @@ export interface SecretsRouteDeps {
   test: (caller: SecretsCaller, name: string) => Promise<{ ok: boolean; message: string | null }>;
   /** Whether anything references this credential — drives the typed-name confirmation. */
   isReferenced: (ctx: TenantContext, name: string) => Promise<boolean>;
+  /**
+   * Read a stored credential back to its owner. ADR-035.
+   *
+   * OPTIONAL, and absent means the route 404s. That is not defensive coding — it is the one knob
+   * that lets a deployment keep ADR-033's original posture, and it costs one `if`. A build that
+   * never passes this has no reachable path from a request to a plaintext value, which is where
+   * this codebase stood before, and somebody should be able to stand there on purpose.
+   *
+   * It takes the raw request because it needs the elevation token to mint the receipt the vault
+   * demands — the route layer has already checked elevation, but a boolean is not a receipt and
+   * deliberately cannot be turned into one.
+   */
+  reveal?: (req: HttpRequest, caller: SecretsCaller, name: string) => Promise<string | null>;
+  /** Bound how often credentials may be read back. Fails open, like every limiter here. */
+  limitReveal?: (caller: SecretsCaller) => Promise<number | null>;
 }
 
 /**
@@ -568,6 +583,32 @@ export function secretsRoutes(deps: SecretsRouteDeps): SecretsRoute[] {
           const outcome = await deps.test(caller, name);
           await deps.audit(caller, "secrets.provider_validated", { name, ok: outcome.ok });
           return { headers: { "cache-control": "no-store" }, body: outcome };
+        }
+        if (action === "reveal") {
+          // THE ONE ROUTE THAT RETURNS A CREDENTIAL. See ADR-035 for the decision and what it
+          // cost; what follows is the set of things that make it the narrowest version of itself.
+          if (!deps.reveal) throw notFound("this deployment does not expose stored credentials");
+          // Its own rate limit, tighter than the unlock one and separate from it, so a script that
+          // has obtained one elevation cannot walk the whole vault with it inside ten minutes.
+          const retryAfter = await deps.limitReveal?.(caller);
+          if (retryAfter != null) {
+            await deps.audit(caller, "secrets.reveal_denied", { name, reason: "rate_limited" });
+            throw new HttpError(429, "rate_limited", "too many reveals — wait a moment", {
+              "retry-after": String(retryAfter),
+            });
+          }
+          const value = await deps.reveal(req, caller, name);
+          if (value === null) throw notFound("there is no value stored under that name");
+          // AUDITED BEFORE IT IS ANSWERED, and never sampled. "Who read this credential, from where,
+          // and when" is the question asked after it turns up somewhere it should not have, and an
+          // audit row written after the response is one a crash loses.
+          await deps.audit(caller, "secrets.revealed", { name });
+          // A revealed credential must not sit in a proxy, a browser cache or a back button.
+          const noCache: Record<string, string> = {
+            "cache-control": "no-store, no-cache, must-revalidate, private",
+            pragma: "no-cache",
+          };
+          return { headers: noCache, body: { name, value } };
         }
         throw notFound(`nothing to do at ${req.path}`);
       }),

@@ -67,11 +67,45 @@ export async function runSecretConformance(
     "a name with no value is absent rather than an empty string, here too",
   );
 
-  // --- the surface that does not exist -----------------------------------------------
+  // --- the surface that does not exist, and the one door that now does -----------------
+  //
+  // THIS ASSERTION CHANGED, and the change is the point rather than a detail. It used to read
+  // "there is no method that would hand a plaintext value to a request handler", which ADR-033
+  // stated absolutely and ADR-035 has now narrowed. Deleting it would have left the suite quietly
+  // asserting less than it used to; what replaces it is the narrower rule, asserted just as hard.
   check(
     !("get" in store) || typeof (store as unknown as { get?: unknown }).get !== "function",
-    "there is no get() that would hand a plaintext value to a request handler",
+    "there is still no get() — a caller cannot ask for a value by name and workspace alone",
   );
+  check(
+    typeof (store as unknown as { revealForUser?: unknown }).revealForUser === "function",
+    "and exactly one method reads one back, which takes an elevation receipt rather than a context",
+  );
+  // A receipt names its own workspace, so one issued elsewhere cannot open the hosted store's
+  // rows. The cast is what a caller would have to write to forge one, and it is deliberately ugly
+  // — there is no way to build this value from a request body.
+  //
+  // ASSERTED ONLY ON THE HOSTED STORE, AND THAT IS AN ASYMMETRY WORTH NAMING RATHER THAN HIDING.
+  // The two implementations are meant to be indistinguishable, and on this one point they are not:
+  // `DotEnvSecretStore` answers from `process.env`, which has no workspace in it, so it cannot
+  // check a receipt's workspace against anything. What both stores DO share is the part that
+  // matters — the receipt is unforgeable in the type system, so neither can be read without a live
+  // elevation. The residual difference costs what the local store's whole threat model already
+  // costs: one machine, one developer, and a leak whose worst case is showing somebody their own
+  // key. It refuses to run under NODE_ENV=production for that reason, which is what keeps this
+  // exemption from reaching a tenant.
+  const forged = { workspaceId: randomUUID(), userId: randomUUID(), elevationId: randomUUID() } as never;
+  if (store.kind === "kms") {
+    check(
+      (await store.revealForUser(forged, NAME)) === null,
+      "a receipt for another workspace reveals nothing, because the workspace comes off the receipt",
+    );
+  } else {
+    check(
+      store.kind === "dotenv",
+      "...and the local store is exempt from that one check, because a .env file has no workspace in it",
+    );
+  }
 
   const listed = await store.listNames(ctx);
   const mine = listed.find((s) => s.name === NAME);

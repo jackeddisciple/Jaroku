@@ -177,6 +177,16 @@ try {
     revoke: (c, name) => manager.revoke(c.ctx, name),
     test: (c, name) => manager.test(c.ctx, name),
     isReferenced: (ctx, name) => manager.isReferenced(ctx, name),
+    // ADR-035. The receipt is minted here exactly as index.ts mints it — from the token on the
+    // request — so the suite exercises the real path from an HTTP header to an unforgeable value.
+    reveal: async (req, c, name) => {
+      const receipt = await elevations.receiptFor(c.ctx, {
+        userId: c.userId,
+        sessionId: c.sessionId,
+        token: req.header(ELEVATION_HEADER) ?? "",
+      });
+      return receipt ? manager.reveal(receipt, name) : null;
+    },
   };
 
   // --- the structural audit ---------------------------------------------------------------
@@ -571,6 +581,50 @@ try {
       !JSON.stringify(imported.body).includes("a-vault-kv2-credential-value"),
       "and the import response carries names and reasons, never a value",
     );
+  }
+
+  // --- reveal: the one route that returns a credential (ADR-035) ---------------------------------
+  //
+  // Its responses are deliberately kept OUT of `responses`, because the serialiser audit below
+  // asserts that no route returns a value and this is the documented exception. Keeping it out is
+  // the honest arrangement: the audit would otherwise have to special-case a route, which is how
+  // an audit stops meaning anything.
+  console.log("\nreveal");
+  {
+    const elevated = await elevations.grant(ctxFor(), { userId: user.id, sessionId, method: "passcode" });
+    const itemPost = routes.find((r) => r.method === "POST" && r.prefix)!;
+    const withElevation = (path: string, token = elevated.token) =>
+      mkReq({ path, headers: { [ELEVATION_HEADER]: token } });
+
+    // WITHOUT ELEVATION IT IS NOT REACHABLE AT ALL — the guard refuses before reveal is consulted.
+    const locked = await statusOf(itemPost.handler, mkReq({ path: "/v1/secrets/ANTHROPIC_API_KEY/reveal" }));
+    check(locked.code === "elevation_required", "reveal is refused without a live elevation");
+
+    const revealed = (await itemPost.handler(withElevation("/v1/secrets/ANTHROPIC_API_KEY/reveal"))) as {
+      body: { name: string; value: string };
+      headers?: Record<string, string>;
+    };
+    check(revealed.body.value.endsWith("-rotated-4f2a"), "with one it returns the credential the owner stored");
+    check(
+      (revealed.headers?.["cache-control"] ?? "").includes("no-store"),
+      "on a response nothing may cache",
+      revealed.headers?.["cache-control"],
+    );
+    check(
+      audited.some((a) => a.action === "secrets.revealed" && a.detail["name"] === "ANTHROPIC_API_KEY"),
+      "and every reveal is audited by name",
+    );
+
+    // A NAME WITH NOTHING STORED IS A 404, not an empty string. `STRIPE_SECRET_KEY` was revoked
+    // above, so its registry row survives with `configured: false` and the vault has nothing.
+    const gone = await statusOf(itemPost.handler, withElevation("/v1/secrets/STRIPE_SECRET_KEY/reveal"));
+    check(gone.status === 404, "a name with no stored value reveals nothing rather than an empty string");
+
+    // AND THE DEPLOYMENT THAT KEPT ADR-033's POSTURE. Absent `reveal`, the route does not exist.
+    const strictRoutes = secretsRoutes({ ...deps, reveal: undefined });
+    const strictItemPost = strictRoutes.find((r) => r.method === "POST" && r.prefix)!;
+    const refused = await statusOf(strictItemPost.handler, withElevation("/v1/secrets/ANTHROPIC_API_KEY/reveal"));
+    check(refused.status === 404, "a build that wires no reveal has no path from a request to a value");
   }
 
   // --- the serialiser audit -----------------------------------------------------------------------

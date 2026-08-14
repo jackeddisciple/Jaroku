@@ -90,7 +90,7 @@ import { MCP_DISCOVER_CLASS, McpDiscoveryQueue } from "./mcpDiscovery.ts";
 import { WorkspaceExporter } from "./lifecycle/export.ts";
 import { lifecycleRoutes } from "./http/lifecycle.ts";
 import { secretsRoutes, type SecretsCaller } from "./http/secrets.ts";
-import { SecretElevations, sessionIdFor } from "./secrets/elevation.ts";
+import { ELEVATION_HEADER, SecretElevations, sessionIdFor } from "./secrets/elevation.ts";
 import { SecretPasscodes } from "./secrets/passcode.ts";
 import { SecretElevationRepository } from "./db/repositories/secretElevations.ts";
 import { SecretPasscodeRepository } from "./db/repositories/secretPasscodes.ts";
@@ -1950,6 +1950,32 @@ for (const route of secretsRoutes({
   revoke: (caller, name) => secretsManager.revoke(caller.ctx, name),
   test: (caller, name) => secretsManager.test(caller.ctx, name),
   isReferenced: (ctx, name) => secretsManager.isReferenced(ctx, name),
+  // ADR-035. The guard has already established that this request is elevated; this turns that into
+  // the RECEIPT the vault demands, which is a value no request body can produce. A token that has
+  // expired between the guard and here yields no receipt and therefore no credential.
+  reveal: async (req, caller, name) => {
+    const receipt = await secretElevations.receiptFor(caller.ctx, {
+      userId: caller.userId,
+      sessionId: caller.sessionId,
+      token: req.header(ELEVATION_HEADER) ?? "",
+    });
+    if (!receipt) return null;
+    return secretsManager.reveal(receipt, name);
+  },
+  limitReveal: async (caller) => {
+    // Fails open, like every other limiter call in this file — see rateLimit.ts. The boundary here
+    // is elevation and the capability check, not the bucket.
+    try {
+      const decision = await rateLimiter.take("secrets.reveal", caller.userId);
+      if (!decision.ok) {
+        metrics.increment("rate_limited_total", { action: "secrets.reveal" });
+        return retryAfterSeconds(decision);
+      }
+    } catch (err) {
+      console.error("[rate] limiter failed for secrets.reveal, admitting:", (err as Error)?.message ?? err);
+    }
+    return null;
+  },
   notifyLockout: async (caller, until) => {
     // NO MAILER EXISTS IN THIS SERVER, and one invented for this single notification would be a
     // transport nothing else exercises. The durable record is the `secrets.locked_out` audit row,

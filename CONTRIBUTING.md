@@ -49,7 +49,7 @@ The shortest list, with the tests that defend them:
 | `readOnlyHint` from an MCP server is ignored; impact is a ratchet | `test:mcp-impact` |
 | A failed MCP refresh never destroys a working tool list | `test:mcp-registry` |
 | A high-impact MCP call stops for confirmation; timing out denies | `test:mcp-isolation` |
-| No secret is written anywhere that outlives a run, or returned to a browser | `test:env-writer`, `test:deploy-secrets`, `test:secrets`, `test:vault` |
+| No secret is written anywhere that outlives a run, and none reaches a browser except through the one audited, elevation-gated reveal (ADR-035) | `test:env-writer`, `test:deploy-secrets`, `test:secrets`, `test:vault`, `test:secret-routes` |
 | Two implementations of every abstraction, and neither can be told apart | `test:driver`, `test:objects`, `test:secrets`, `test:vault` |
 | An agent's files are immutable per version; undo is a pointer move | `test:project-store`, `test:edit-versions` |
 | No user string becomes a path on a shared host | `test:object-keys` |

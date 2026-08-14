@@ -27,6 +27,8 @@ import type { SecretRefRepository, SecretKind, SecretRefRow } from "../db/reposi
 import type { SecretUsageRepository } from "../db/repositories/secretUsages.ts";
 import type { TenantContext } from "../db/tenant.ts";
 import { PROVIDER_ENV_KEY, isProviderId, verifyProviderKey, type ProviderId } from "../providers.ts";
+import { protectSecret } from "../obs/log.ts";
+import type { ElevationReceipt } from "./elevation.ts";
 import { maskFor } from "./mask.ts";
 import { assertSecretName, unstorableReason, type SecretStore } from "./secretStore.ts";
 
@@ -255,6 +257,22 @@ export class SecretsManager {
   /** Whether anything references this credential. Drives the typed-name revoke confirmation. */
   async isReferenced(ctx: TenantContext, name: string): Promise<boolean> {
     return this.deps.usages.isReferenced(ctx, name);
+  }
+
+  /**
+   * Read a stored credential back to the person who owns it. ADR-035.
+   *
+   * The receipt is the authorisation and carries the workspace, so this method takes no context —
+   * there is nothing for a caller to assert. What it adds on top of the vault call is the one
+   * thing the vault cannot do for itself: registering the value with the log redactor, so that
+   * from this moment on the process will scrub it out of any line anything writes. A credential
+   * that has been handed to a browser is one that can come back in a stack trace, an error report
+   * or a support paste, and `protectSecret` is the existing machinery for exactly that.
+   */
+  async reveal(receipt: ElevationReceipt, name: string): Promise<string | null> {
+    const value = await this.deps.secrets.revealForUser(receipt, name);
+    if (value !== null) protectSecret(value, name);
+    return value;
   }
 }
 

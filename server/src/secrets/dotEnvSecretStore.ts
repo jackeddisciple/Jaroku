@@ -36,6 +36,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { parseLine } from "../env.ts";
 import type { CredentialWriter } from "../envWriter.ts";
 import type { TenantContext } from "../db/tenant.ts";
+import type { ElevationReceipt } from "./elevation.ts";
 import type { SecretRefRepository } from "../db/repositories/secretRefs.ts";
 import {
   assertSecretName, type SecretRef, type SecretStore, type SetResult,
@@ -123,6 +124,22 @@ export class DotEnvSecretStore implements SecretStore {
    */
   async getForPlatformCall(_ctx: TenantContext, names: string[]): Promise<Record<string, string>> {
     return this.getForRun("", names);
+  }
+
+  /**
+   * See `SecretStore.revealForUser` and ADR-035.
+   *
+   * The receipt's workspace is not consulted here, and that is not an oversight: this store IS one
+   * machine's `runtime/.env`, with one tenant, and it refuses to run under NODE_ENV=production for
+   * exactly that reason. Reading the workspace off the receipt to compare it against nothing would
+   * be theatre. What the receipt still does on this path is the part that matters — it cannot be
+   * obtained without a live elevation, so the local store is no easier to read out of than the
+   * hosted one.
+   */
+  async revealForUser(_receipt: ElevationReceipt, name: string): Promise<string | null> {
+    assertSecretName(name);
+    const found = await this.getForRun("", [name]);
+    return found[name] ?? null;
   }
 
   /**

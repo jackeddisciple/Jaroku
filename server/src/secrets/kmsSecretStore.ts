@@ -29,6 +29,7 @@ import { randomUUID } from "node:crypto";
 import type { Db, Queryable } from "../db/db.ts";
 import { asInt } from "../db/db.ts";
 import type { TenantContext } from "../db/tenant.ts";
+import type { ElevationReceipt } from "./elevation.ts";
 import type { SecretRefRepository } from "../db/repositories/secretRefs.ts";
 import {
   newDataKey, openWithDataKey, sealWithDataKey, type MasterKeyProvider,
@@ -152,6 +153,23 @@ export class KmsSecretStore implements SecretStore {
    */
   async getForPlatformCall(ctx: TenantContext, names: string[]): Promise<Record<string, string>> {
     return this.decryptInto(ctx.workspaceId, names);
+  }
+
+  /**
+   * See `SecretStore.revealForUser` and ADR-035.
+   *
+   * The workspace comes off the RECEIPT, never from a caller's argument — which is what makes a
+   * receipt for one workspace unable to open another's credential even when the name matches. That
+   * is the same shape `getForRun` uses, and it is deliberate: the proof names the tenant.
+   *
+   * `decryptInto` is reused rather than reimplemented, so a revealed value goes through the same
+   * AAD check as every other read. A ciphertext that was moved between workspaces or relabelled
+   * fails to authenticate here exactly as it does on the run path.
+   */
+  async revealForUser(receipt: ElevationReceipt, name: string): Promise<string | null> {
+    assertSecretName(name);
+    const found = await this.decryptInto(receipt.workspaceId, [name]);
+    return found[name] ?? null;
   }
 
   async listNames(ctx: TenantContext): Promise<SecretRef[]> {

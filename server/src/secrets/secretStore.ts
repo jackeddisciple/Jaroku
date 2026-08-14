@@ -1,13 +1,21 @@
 // The secret boundary. Everything that is a credential goes through this interface, and the
 // shape of the interface is the security property — not the implementations behind it.
 //
-// THERE IS NO `get(ctx, name)`. That absence is the whole design. A request handler cannot ask
-// for a plaintext value, because there is no method that would answer, so no code path exists
-// down which a credential could reach a WebSocket frame, a log line, an error message or a
-// JSON response. Values move in exactly one direction: in through `set`, and out only into a
-// run's environment through `getForRun`. Every other question a caller has — is it configured,
-// what is it called, when was it last used — is answered by `listNames`, which returns names
-// and never a value.
+// THERE IS NO `get(ctx, name)`, and there is now exactly one way to read a value back: see
+// `revealForUser` below, and ADR-035, which supersedes the half of ADR-033 this paragraph used to
+// state absolutely. The original rule was that NO method returns a plaintext value to a request
+// handler; the rule today is narrower and worth stating precisely, because a half-remembered
+// version of it is how the next widening gets argued for:
+//
+//   No method returns a plaintext value to a caller that has not proved a live, elevated session
+//   for the workspace that owns it — and the proof is a value the type system will not let a
+//   caller invent.
+//
+// Everything else is unchanged. Values still move in through `set`; they still reach a run's
+// environment only through `getForRun` and a platform-side model call only through
+// `getForPlatformCall`; and every other question a caller has — is it configured, what is it
+// called, when was it last used — is still answered by `listNames`, which returns names and never
+// a value. `revealForUser` is a fourth door with a lock on it, not an open wall.
 //
 // That is not a new rule. It is the rule `envWriter.ts` has followed since the day it was
 // written ("callers learn that a key IS SET; they do not learn what is in it"), stated as a
@@ -25,6 +33,7 @@
 // account and no key material. `KmsSecretStore` is production. Selected by config.
 
 import type { TenantContext } from "../db/tenant.ts";
+import type { ElevationReceipt } from "./elevation.ts";
 
 export type SecretStoreKind = "dotenv" | "kms";
 
@@ -107,6 +116,38 @@ export interface SecretStore {
    * configured is simply absent rather than an empty string.
    */
   getForPlatformCall(ctx: TenantContext, names: string[]): Promise<Record<string, string>>;
+
+  /**
+   * Hand a stored value back to the person who owns it.
+   *
+   * THE THIRD PLAINTEXT EXIT, AND THE ONE THAT REVERSES THE RULE AT THE TOP OF THIS FILE. It is
+   * recorded in ADR-035, which supersedes the relevant half of ADR-033, and the honest summary is:
+   * the product decided a user must be able to read their own credential back, and that is a
+   * decision this interface now expresses instead of forbidding. Pretending otherwise by hiding it
+   * behind a differently-named method would be worse than saying so here.
+   *
+   * WHAT IS LEFT OF THE ORIGINAL GUARANTEE, because it is not nothing:
+   *
+   *   IT CANNOT BE REACHED FROM A REQUEST HANDLER THAT HAS NOT PROVED ELEVATION. The first
+   *   argument is an `ElevationReceipt`, whose brand is a symbol `secrets/elevation.ts` does not
+   *   export. There is no way to construct one, cast to one from a request body, or obtain one
+   *   except by calling `SecretElevations.receiptFor` and having it say yes. ADR-033's argument
+   *   was that a compile-time absence beats a runtime check; this is the strongest compile-time
+   *   thing still available once the method has to exist.
+   *
+   *   IT TAKES THE RECEIPT INSTEAD OF A CONTEXT, exactly as `getForRun` takes a run id. The
+   *   workspace is read OFF the receipt rather than asserted by the caller, so a caller cannot
+   *   name a workspace it was not elevated in — the same reasoning, applied to a different proof.
+   *
+   *   IT IS ONE NAME, NOT A LIST. `getForRun` takes an array because a run needs an environment.
+   *   Nothing legitimate needs to read every credential a workspace has at once, and a signature
+   *   that cannot express it is one nobody will accidentally write.
+   *
+   * A name that is not configured returns null rather than an empty string, for the same reason it
+   * is absent from `getForRun`: a missing credential is a fact, and inventing "" for one turns it
+   * into an opaque failure somewhere else.
+   */
+  revealForUser(receipt: ElevationReceipt, name: string): Promise<string | null>;
 
   /** What this workspace has configured. Names only. */
   listNames(ctx: TenantContext): Promise<SecretRef[]>;

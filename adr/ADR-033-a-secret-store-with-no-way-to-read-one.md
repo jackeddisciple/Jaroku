@@ -2,7 +2,19 @@
 
 ## Status
 
-Accepted. Introduced in Session 3, migrations `015_secret_vault` and `016_secret_refs`.
+Accepted, and **partly superseded by [ADR-035](ADR-035-a-reveal-path-gated-by-elevation.md)**.
+Introduced in Session 3, migrations `015_secret_vault` and `016_secret_refs`.
+
+The absolute form of the rule below — that NO method returns a plaintext value to a request
+handler — held for six sessions and no longer does. Session 9 added `revealForUser`, behind an
+unforgeable elevation receipt, because the product decided a user must be able to read their own
+credential back. Everything else in this ADR is unchanged and still binding: there is still no
+`get`, the run and platform paths are still the only unattended exits, `secret_refs` still has no
+column a value would fit in, and the ciphertext is still bound to `<workspace_id>:<name>`.
+
+Read ADR-035 before citing this one, and do not quote the Decision section below as current
+without the qualifier. A half-remembered version of a rule is how the next widening gets argued
+for.
 
 ## Context
 

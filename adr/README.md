@@ -109,6 +109,7 @@ and refused.
 | [ADR-032](ADR-032-versions-replace-the-atomic-swap.md) | Replace the atomic directory swap with an immutable version and a pointer |
 | [ADR-033](ADR-033-a-secret-store-with-no-way-to-read-one.md) | Give the secret store no method that returns a plaintext value |
 | [ADR-034](ADR-034-checkpoints-in-their-own-schema-keyed-by-workspace.md) | Keep LangGraph's checkpoints in their own schema, isolated by the thread id |
+| [ADR-035](ADR-035-a-reveal-path-gated-by-elevation.md) | Add one way to read a stored credential, behind an unforgeable elevation receipt |
 
 ### Interface and delivery
 
@@ -136,7 +137,7 @@ together explain the shape of everything else.
 **Working on generation or editing.** ADR-006, ADR-007, ADR-008, ADR-009, then ADR-029 for how to
 do it without spending money.
 
-**Working on storage — files, credentials or checkpoints.** ADR-031 through ADR-034, then
+**Working on storage — files, credentials or checkpoints.** ADR-031 through ADR-035, then
 ADR-018 for the scope they all rest on and ADR-026 for the credential rule ADR-033 turns into a
 type.
 
