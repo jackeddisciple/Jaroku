@@ -42,6 +42,9 @@ import { McpStore } from "./mcpStore.ts";
 import { DeployStore } from "./deployStore.ts";
 import { DbTicketStore } from "./db/repositories/tickets.ts";
 import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
+import { SecretUsageRepository } from "./db/repositories/secretUsages.ts";
+import { SecretPasscodeRepository } from "./db/repositories/secretPasscodes.ts";
+import { SecretElevationRepository } from "./db/repositories/secretElevations.ts";
 import { OAuthRepository } from "./db/repositories/oauth.ts";
 import { KmsSecretStore } from "./secrets/kmsSecretStore.ts";
 import { LocalMasterKeyProvider } from "./secrets/masterKey.ts";
@@ -416,7 +419,22 @@ const SCOPED_API: Record<string, string[]> = {
   // Session 3. The names a workspace has configured — no values, but a list of what somebody
   // integrates with is still theirs. `touch` takes a workspace id rather than a context,
   // because its caller resolved one from a run; it is exercised for the same scoping anyway.
-  SecretRefRepository: ["list", "get", "declare", "markConfigured", "markCleared", "forget", "touch"],
+  SecretRefRepository: [
+    "list", "get", "declare", "markConfigured", "markCleared", "forget", "touch",
+    // Session 9 — the Secrets tab's metadata. No values, but a complete picture of what somebody
+    // integrates with, how healthy it is, and when they last rotated it.
+    "setMetadata", "health", "recordRotation", "rotations",
+  ],
+  // Session 9. Where each credential is USED — which agent, which file, which line. A cross-tenant
+  // read here names another workspace's agents and the source inside them.
+  SecretUsageRepository: ["record", "forSecret", "isReferenced", "clearStaticFor"],
+  // Session 9. The gate on the Secrets surface. A hash read across a boundary is a hash to attack
+  // offline; a lockout state read across one says who is being attacked, and when.
+  SecretPasscodeRepository: ["get", "exists", "put", "recordFailure", "lock", "recordSuccess"],
+  // `sweep` is deliberately absent, for the reason DbTicketStore's is: it deletes EXPIRED rows
+  // across every workspace, which is maintenance rather than a scoped operation, and asserting it
+  // "cannot reach another workspace" would assert the opposite of what it is for.
+  SecretElevationRepository: ["issue", "liveByToken", "liveForSession", "revokeSession", "revokeAllForUser"],
   // Session 6. `listPlans` and `setPlanPrice` are deliberately absent: `plans` is the
   // platform's own catalogue, has no workspace_id and carries no policy — every workspace is
   // meant to read the same rows, so asserting one cannot see another's would be asserting the
@@ -723,6 +741,91 @@ async function remainder(db: Db): Promise<void> {
   check((await refs.get(B.ctx, "B_ONLY_TOKEN"))?.last_used_at === null, "nor record a use of it");
   await refs.forget(A.ctx, "B_DECLARED_TOKEN");
   check((await refs.get(B.ctx, "B_DECLARED_TOKEN")) !== undefined, "nor forget one B declared");
+
+  // Session 9: the metadata the Secrets tab renders, and the history behind it. None of this is a
+  // value — a kind, a mask, a status, a timestamp — but "what does this workspace integrate with,
+  // how healthy is it, and when did they last rotate it" is a complete picture of somebody's
+  // infrastructure, and it is theirs.
+  await refs.setMetadata(B.ctx, "B_ONLY_TOKEN", { kind: "custom", maskedHint: "••••b0b", status: "valid" });
+  await refs.setMetadata(A.ctx, "B_ONLY_TOKEN", { status: "invalid", maskedHint: "forged" });
+  check((await refs.get(B.ctx, "B_ONLY_TOKEN"))?.status === "valid", "A cannot mark B's credential invalid");
+  check((await refs.get(B.ctx, "B_ONLY_TOKEN"))?.masked_hint === "••••b0b", "nor overwrite its mask");
+  await refs.recordRotation(B.ctx, { name: "B_ONLY_TOKEN", maskedHint: "••••n3w", reason: "scheduled" });
+  // REFUSED BY THE DATABASE, not merely scoped away — and that is the stronger property, so it is
+  // what gets asserted. `secret_rotations` keys to `secret_refs` on the (workspace_id, name) PAIR,
+  // so a history entry for a credential this workspace does not have cannot be written at all.
+  // A bare `name` foreign key would have accepted this row against B's credential.
+  let forgedRotation = false;
+  try {
+    await refs.recordRotation(A.ctx, { name: "B_ONLY_TOKEN", reason: "forged" });
+  } catch {
+    forgedRotation = true;
+  }
+  check(forgedRotation, "A cannot write a rotation against a credential it does not have");
+  check((await refs.rotations(A.ctx, "B_ONLY_TOKEN")).length === 0, "and its own rotation log stays empty");
+  check((await refs.rotations(B.ctx, "B_ONLY_TOKEN")).length === 1, "while B's holds exactly its own");
+  check((await refs.rotations(B.ctx, "B_ONLY_TOKEN"))[0]?.masked_hint === "••••n3w", "with B's own mask on it");
+  const healthA = await refs.health(A.ctx);
+  const healthB = await refs.health(B.ctx);
+  check(healthA.total === 0, "health counts none of B's configured credentials");
+  check(healthB.total >= 1, "...while B's own count includes them");
+
+  // Where each credential is used. A cross-tenant read here names another workspace's agents AND
+  // the files inside them, which is worse than the name list above.
+  const usages = new SecretUsageRepository(db);
+  await usages.record(B.ctx, { name: "B_ONLY_TOKEN", source: "static_scan", location: "tools/x.py:14" });
+  await usages.record(B.ctx, { name: "B_ONLY_TOKEN", source: "runtime_read" });
+  check((await usages.forSecret(A.ctx, "B_ONLY_TOKEN")).length === 0, "A sees none of B's usage sites");
+  check((await usages.isReferenced(A.ctx, "B_ONLY_TOKEN")) === false, "and B's references do not gate A's revoke");
+  check((await usages.isReferenced(B.ctx, "B_ONLY_TOKEN")) === true, "...while B's own do gate B's");
+  check((await usages.clearStaticFor(A.ctx, theirAgent.id)) === 0, "clearStaticFor cannot wipe B's scan results");
+  check(
+    (await usages.forSecret(B.ctx, "B_ONLY_TOKEN")).length === 2,
+    "...which are both still there, static and runtime",
+  );
+
+  // The gate itself. A passcode hash read across a boundary is a hash to attack offline, and a
+  // lockout state read across one says who is being attacked and when.
+  const identity = new IdentityRepository(db);
+  const sys = systemContext(newRequestId());
+  const provisioned = await identity.provisionUser(sys, {
+    externalId: `tenancy_b_${randomUUID().slice(0, 8)}`,
+    email: `b_${randomUUID().slice(0, 8)}@example.com`,
+  });
+  const userB = provisioned.user;
+  const passcodes = new SecretPasscodeRepository(db);
+  await passcodes.put(B.ctx, userB.id, { hash: "b-hash", salt: "b-salt", algo: "scrypt", params: { N: 16384 } });
+  check((await passcodes.get(A.ctx, userB.id)) === undefined, "A cannot read B's passcode record");
+  check((await passcodes.exists(A.ctx, userB.id)) === false, "nor learn that one exists");
+  check((await passcodes.recordFailure(A.ctx, userB.id)) === 0, "nor drive B's failure counter");
+  await passcodes.lock(A.ctx, userB.id, new Date(Date.now() + 900_000).toISOString());
+  check((await passcodes.get(B.ctx, userB.id))?.locked_until === null, "nor lock B's user out");
+  await passcodes.recordSuccess(A.ctx, userB.id);
+  check((await passcodes.get(B.ctx, userB.id))?.failed_attempts === 0, "nor clear a lockout of B's");
+
+  const elevations = new SecretElevationRepository(db);
+  const granted = await elevations.issue(B.ctx, {
+    userId: userB.id,
+    sessionId: "session-b",
+    tokenHash: `hash-${randomUUID()}`,
+    method: "passcode",
+    expiresAt: new Date(Date.now() + 600_000).toISOString(),
+  });
+  check(
+    (await elevations.liveByToken(A.ctx, { userId: userB.id, sessionId: "session-b", tokenHash: "hash-guess" })) ===
+      undefined,
+    "A cannot redeem an elevation token in its own workspace",
+  );
+  check(
+    (await elevations.liveForSession(A.ctx, userB.id, "session-b")) === undefined,
+    "nor find B's live elevation",
+  );
+  check((await elevations.revokeSession(A.ctx, userB.id, "session-b", "forged")) === 0, "nor lock B's session");
+  check((await elevations.revokeAllForUser(A.ctx, userB.id, "forged")) === 0, "nor end every elevation B holds");
+  check(
+    (await elevations.liveForSession(B.ctx, userB.id, "session-b"))?.id === granted.id,
+    "...and B's elevation is still standing",
+  );
 
   // reserve/promote are the two halves of a publish. Neither may reach an agent of B's — the
   // first would write a version row against it, the second would move its live pointer.

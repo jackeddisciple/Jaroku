@@ -89,6 +89,9 @@ const SCOPED_MODULES = [
   "deployStore.ts",
   "db/repositories/agents.ts",
   "db/repositories/secretRefs.ts",
+  "db/repositories/secretUsages.ts",
+  "db/repositories/secretPasscodes.ts",
+  "db/repositories/secretElevations.ts",
 ];
 
 /**
@@ -105,6 +108,9 @@ const EXEMPT: Record<string, string> = {
   hydrateStep: "pure row-shaping",
   hydrateVersion: "pure row-shaping",
   touch: "takes a workspace id rather than a context: its caller is getForRun, which resolved one from a run",
+  sweep:
+    "deletes EXPIRED elevations across every workspace, which is maintenance rather than a scoped " +
+    "operation — it goes through asPlatform, and migration 033 grants it one DELETE-only policy",
   hydrateRubric: "pure row-shaping",
   hydrateEvalRun: "pure row-shaping",
   hydrateTool: "pure row-shaping",

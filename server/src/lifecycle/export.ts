@@ -94,6 +94,13 @@ export const EXPORTED_TABLES = [
   "subscriptions",
   "workspace_enforcements",
   "abuse_signals",
+  // WHERE EACH CREDENTIAL IS USED, and when each was rotated. Both are exported in full rather
+  // than redacted, because neither holds a value or a digest of one: `secret_usages` is a name, an
+  // agent and a `file:line`, and `secret_rotations` is a timestamp, a person and the mask of what
+  // replaced the old value. "Which of my agents breaks if this key goes away" is the workspace's
+  // own operational record, and it is exactly the sort of thing somebody leaving wants to keep.
+  "secret_usages",
+  "secret_rotations",
 ] as const;
 
 /**
@@ -116,6 +123,10 @@ export const EXCLUDED_TABLES: Record<string, string> = {
   billing_webhook_events:
     "the platform's own delivery log for a payment provider's callbacks. Not this workspace's data, and it names no user",
   deployment_logs: "build output that can contain a provider's own error text. Available in the product, not in the archive",
+  user_secret_passcodes:
+    "a passcode hash, its salt and its lockout counters. A credential digest is still a credential — and exporting the lockout state would say who is being attacked and when",
+  secret_elevations:
+    "short-lived authorisations for the secrets surface, hashed at rest and dead within ten minutes. Meaningless outside the moment, exactly as ws_tickets is",
 };
 
 /**
@@ -191,8 +202,27 @@ export class WorkspaceExporter {
     counts["secret_refs"] = refs.length;
     entries.push({
       path: "data/secret_refs.ndjson",
+      // The projection is an allowlist rather than a delete-list, so a column added to
+      // `secret_refs` later cannot arrive in an export by default. 033's metadata is named here
+      // one field at a time for that reason — including `masked_hint`, which is safe by
+      // construction: it is the stored mask, never a value, and never derived by decrypting one.
       body: refs
-        .map((r) => JSON.stringify({ name: r["name"], provider: r["provider"], configured: r["configured"], last_used_at: r["last_used_at"] }))
+        .map((r) =>
+          JSON.stringify({
+            name: r["name"],
+            provider: r["provider"],
+            configured: r["configured"],
+            last_used_at: r["last_used_at"],
+            kind: r["kind"],
+            scope: r["scope"],
+            agent_id: r["agent_id"],
+            masked_hint: r["masked_hint"],
+            status: r["status"],
+            expires_at: r["expires_at"],
+            rotated_at: r["rotated_at"],
+            connector_id: r["connector_id"],
+          }),
+        )
         .join("\n"),
       mtimeSec,
     });

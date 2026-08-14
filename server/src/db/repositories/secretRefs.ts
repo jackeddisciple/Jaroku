@@ -9,10 +9,31 @@
 // THERE IS NO METHOD HERE THAT TOUCHES A VALUE, because there is no column one would fit in.
 // See migration 016.
 
+import { randomUUID } from "node:crypto";
+
 import { asBool, type Db, type Queryable } from "../db.ts";
 import type { TenantContext } from "../tenant.ts";
 
 export type SecretScope = "workspace" | "agent";
+
+/**
+ * Where a secret came from, which decides what may be done to it.
+ *
+ * The three origins genuinely need different verbs, and that is the whole reason this column
+ * exists rather than the UI guessing from the name. A user-pasted provider key can be rotated and
+ * tested. A connector's OAuth token can only be RECONNECTED — offering "rotate" on it would be a
+ * button that cannot work, because Jaroku does not own the credential's lifecycle at the far end.
+ * A custom name can be rotated, revoked, and needs a blast-radius view before either.
+ */
+export type SecretKind = "provider_key" | "managed" | "custom";
+
+/**
+ * What is believed about a credential right now.
+ *
+ * `unknown` is the default and is not a synonym for `invalid`. A key nobody has probed yet is not
+ * known to be broken, and rendering it as broken would send people rotating working credentials.
+ */
+export type SecretStatus = "valid" | "invalid" | "expiring" | "unknown";
 
 export interface SecretRefRow {
   name: string;
@@ -23,6 +44,22 @@ export interface SecretRefRow {
   created_at: string;
   updated_at: string;
   last_used_at: string | null;
+  kind: SecretKind;
+  /**
+   * A display mask — `sk-ant-...4f2a`, or a row of dots.
+   *
+   * STORED, NEVER DERIVED. Computing it on read would mean decrypting on read, which is the one
+   * thing the vault's shape exists to make impossible. It is written at the moment the value
+   * passes through `set`, and a value whose mask could not be derived carries a generic one
+   * rather than opening a decrypt path for cosmetics.
+   */
+  masked_hint: string | null;
+  status: SecretStatus;
+  expires_at: string | null;
+  rotated_at: string | null;
+  created_by: string | null;
+  connector_id: string | null;
+  rotate_every_days: number | null;
 }
 
 export interface DeclareInput {
@@ -30,7 +67,61 @@ export interface DeclareInput {
   provider?: string | null;
   scope?: SecretScope;
   agentId?: string | null;
+  kind?: SecretKind;
+  maskedHint?: string | null;
+  status?: SecretStatus;
+  expiresAt?: string | null;
+  createdBy?: string | null;
+  connectorId?: string | null;
+  rotateEveryDays?: number | null;
 }
+
+/** A partial update of the non-sensitive metadata. Absent fields are left alone. */
+export interface MetadataPatch {
+  kind?: SecretKind;
+  maskedHint?: string | null;
+  status?: SecretStatus;
+  expiresAt?: string | null;
+  connectorId?: string | null;
+  rotateEveryDays?: number | null;
+  rotatedAt?: string | null;
+}
+
+/**
+ * The counts behind the tab's warning dot.
+ *
+ * COUNTS AND NOTHING ELSE, deliberately. Whether something is expiring is not sensitive — it is
+ * the sort of thing an ops dashboard shows — but WHICH credential is expiring names what a
+ * workspace integrates with, and this is the one secrets answer served without elevation. A
+ * shape with no room for a name cannot grow one by accident.
+ */
+export interface SecretHealth {
+  total: number;
+  expiringSoon: number;
+  invalid: number;
+  rotationDue: number;
+  unusedNinetyDays: number;
+}
+
+export interface RotationRow {
+  name: string;
+  rotated_by: string | null;
+  masked_hint: string | null;
+  reason: string | null;
+  rotated_at: string;
+}
+
+/**
+ * Every column a caller may read, named once.
+ *
+ * `SELECT *` would be shorter and is the thing to avoid here above anywhere else: this table is
+ * one migration away from somebody adding a column that should not travel, and a star would carry
+ * it to every caller on the day it landed. Naming them means a new column is invisible until
+ * somebody decides it should not be.
+ */
+const COLUMNS =
+  `name, provider, scope, agent_id, configured, created_at, updated_at, last_used_at, ` +
+  `kind, masked_hint, status, expires_at, rotated_at, created_by, connector_id, rotate_every_days`;
 
 export class SecretRefRepository {
   constructor(private db: Db) {}
@@ -49,6 +140,17 @@ export class SecretRefRepository {
       created_at: String(row["created_at"]),
       updated_at: String(row["updated_at"]),
       last_used_at: (row["last_used_at"] as string | null) ?? null,
+      kind: (row["kind"] as SecretKind) ?? "custom",
+      masked_hint: (row["masked_hint"] as string | null) ?? null,
+      status: (row["status"] as SecretStatus) ?? "unknown",
+      expires_at: (row["expires_at"] as string | null) ?? null,
+      rotated_at: (row["rotated_at"] as string | null) ?? null,
+      created_by: (row["created_by"] as string | null) ?? null,
+      connector_id: (row["connector_id"] as string | null) ?? null,
+      rotate_every_days:
+        row["rotate_every_days"] === null || row["rotate_every_days"] === undefined
+          ? null
+          : Number(row["rotate_every_days"]),
     };
   }
 
@@ -75,7 +177,7 @@ export class SecretRefRepository {
   /** Everything this workspace knows about, configured or merely declared. Sorted by name. */
   async list(ctx: TenantContext): Promise<SecretRefRow[]> {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
-      `SELECT name, provider, scope, agent_id, configured, created_at, updated_at, last_used_at
+      `SELECT ${COLUMNS}
          FROM secret_refs WHERE workspace_id = ? ORDER BY name`,
       [ctx.workspaceId],
     );
@@ -84,7 +186,7 @@ export class SecretRefRepository {
 
   async get(ctx: TenantContext, name: string): Promise<SecretRefRow | undefined> {
     const row = await this.q(ctx).get<Record<string, unknown>>(
-      `SELECT name, provider, scope, agent_id, configured, created_at, updated_at, last_used_at
+      `SELECT ${COLUMNS}
          FROM secret_refs WHERE workspace_id = ? AND name = ?`,
       [ctx.workspaceId, name],
     );
@@ -106,10 +208,17 @@ export class SecretRefRepository {
   async declare(ctx: TenantContext, input: DeclareInput): Promise<void> {
     await this.assertAgentIsOurs(ctx, input.agentId);
     const now = new Date().toISOString();
+    // THE METADATA COLUMNS ARE ABSENT FROM THIS STATEMENT ON PURPOSE, and the omission is the
+    // careful part. `kind` and `status` are NOT NULL with defaults, so an upsert naming them would
+    // have to supply a value on every call — and `COALESCE(excluded.kind, ...)` cannot rescue that,
+    // because the supplied value is never null. The result would be a re-declaration silently
+    // resetting a classified provider key back to 'custom' every time an agent's manifest
+    // mentioned its name. Creation-time defaults fill them on INSERT; `setMetadata` is how they
+    // change afterwards, and it only ever writes the fields it was actually given.
     await this.q(ctx).run(
       `INSERT INTO secret_refs (workspace_id, name, provider, scope, agent_id, configured,
-         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         created_at, updated_at, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (workspace_id, name) DO UPDATE SET
          provider   = COALESCE(excluded.provider, secret_refs.provider),
          scope      = excluded.scope,
@@ -124,8 +233,10 @@ export class SecretRefRepository {
         0,
         now,
         now,
+        input.createdBy ?? null,
       ],
     );
+    await this.setMetadata(ctx, input.name, input);
   }
 
   /** Record that a value is now set under this name. Called by every store's `set`. */
@@ -134,8 +245,8 @@ export class SecretRefRepository {
     const now = new Date().toISOString();
     await this.q(ctx).run(
       `INSERT INTO secret_refs (workspace_id, name, provider, scope, agent_id, configured,
-         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         created_at, updated_at, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (workspace_id, name) DO UPDATE SET
          provider   = COALESCE(excluded.provider, secret_refs.provider),
          configured = ?,
@@ -149,9 +260,136 @@ export class SecretRefRepository {
         1,
         now,
         now,
+        input.createdBy ?? null,
         1,
       ],
     );
+    // Same reasoning as `declare`: the metadata is a separate write that touches only what it was
+    // told about, so the two stores can keep calling this with the four fields they always have.
+    await this.setMetadata(ctx, input.name, input);
+  }
+
+  /**
+   * Update the non-sensitive metadata, writing only the fields actually supplied.
+   *
+   * A partial update rather than a whole-row write, because the callers know different halves: the
+   * store's `set` knows the mask and the kind, a provider probe knows only the status, and a
+   * rotation knows only that it happened. A method taking a full row would make each of them
+   * read-modify-write, and two of those racing is how a status overwrites a mask.
+   *
+   * NOTHING HERE CAN WRITE A VALUE. Every field is a classification, a timestamp or a mask, and
+   * the table has no column a credential would fit in — see migration 016.
+   */
+  async setMetadata(ctx: TenantContext, name: string, patch: MetadataPatch): Promise<void> {
+    const sets: string[] = [];
+    const args: unknown[] = [];
+    const put = (column: string, value: unknown): void => {
+      sets.push(`${column} = ?`);
+      args.push(value);
+    };
+    // `in` rather than a truthiness check, so an explicit null — "this no longer expires", "this
+    // has no mask" — is a value somebody meant rather than a field that gets skipped.
+    if (patch.kind !== undefined) put("kind", patch.kind);
+    if (patch.maskedHint !== undefined) put("masked_hint", patch.maskedHint);
+    if (patch.status !== undefined) put("status", patch.status);
+    if (patch.expiresAt !== undefined) put("expires_at", patch.expiresAt);
+    if (patch.connectorId !== undefined) put("connector_id", patch.connectorId);
+    if (patch.rotateEveryDays !== undefined) put("rotate_every_days", patch.rotateEveryDays);
+    if (patch.rotatedAt !== undefined) put("rotated_at", patch.rotatedAt);
+    if (!sets.length) return;
+    put("updated_at", new Date().toISOString());
+    await this.q(ctx).run(
+      `UPDATE secret_refs SET ${sets.join(", ")} WHERE workspace_id = ? AND name = ?`,
+      [...args, ctx.workspaceId, name],
+    );
+  }
+
+  /**
+   * The counts behind the tab's warning dot.
+   *
+   * SERVED WITHOUT ELEVATION, which is why it counts rather than lists. "Something needs attention"
+   * is not a secret; "your STRIPE_SECRET_KEY expires on Thursday" names what a workspace
+   * integrates with, and the gate exists to hold that back. One query, five numbers, no room for
+   * a name in the shape it returns.
+   *
+   * Computed in SQL rather than by reading every row and counting in Node, because this runs on
+   * every tab render for every open client and the alternative is the whole table each time.
+   */
+  async health(ctx: TenantContext, now: Date = new Date()): Promise<SecretHealth> {
+    const soon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString();
+    const nowIso = now.toISOString();
+    const row = await this.q(ctx).get<Record<string, unknown>>(
+      `SELECT
+         COUNT(*)                                                                   AS total,
+         SUM(CASE WHEN expires_at IS NOT NULL AND expires_at <= ? THEN 1 ELSE 0 END) AS expiring,
+         SUM(CASE WHEN status = 'invalid' THEN 1 ELSE 0 END)                        AS invalid,
+         SUM(CASE WHEN rotate_every_days IS NOT NULL
+                   AND COALESCE(rotated_at, created_at) <= ? THEN 1 ELSE 0 END)     AS rotation_due,
+         SUM(CASE WHEN last_used_at IS NOT NULL AND last_used_at <= ? THEN 1 ELSE 0 END)
+                                                                                     AS unused
+       FROM secret_refs
+       WHERE workspace_id = ? AND configured = ?`,
+      // The rotation-due comparison is deliberately coarse: a row is due when the last rotation is
+      // older than the WINDOW ITSELF measured back from now, which over-reports for a schedule
+      // longer than the elapsed lifetime and never under-reports. Computing the exact due date per
+      // row needs date arithmetic that the two dialects spell differently, and a badge that
+      // occasionally says "look at this" a few days early is the harmless direction to be wrong in.
+      [soon, ninetyDaysAgo, ninetyDaysAgo, ctx.workspaceId, 1],
+    );
+    const n = (key: string): number => Number(row?.[key] ?? 0);
+    return {
+      total: n("total"),
+      expiringSoon: n("expiring"),
+      invalid: n("invalid"),
+      rotationDue: n("rotation_due"),
+      unusedNinetyDays: n("unused"),
+    };
+  }
+
+  /**
+   * Write down that a credential was replaced.
+   *
+   * METADATA ONLY — when, who, why, and the mask of what replaced it. There is no column the old
+   * value would fit in, because rotation REPLACES rather than versions: keeping the superseded
+   * credential readable is the opposite of what rotating one is for.
+   */
+  async recordRotation(
+    ctx: TenantContext,
+    entry: { name: string; rotatedBy?: string | null; maskedHint?: string | null; reason?: string | null },
+  ): Promise<void> {
+    const at = new Date().toISOString();
+    await this.q(ctx).run(
+      `INSERT INTO secret_rotations (id, workspace_id, name, rotated_by, masked_hint, reason, rotated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        randomUUID(),
+        ctx.workspaceId,
+        entry.name,
+        entry.rotatedBy ?? null,
+        entry.maskedHint ?? null,
+        entry.reason ?? null,
+        at,
+      ],
+    );
+    await this.setMetadata(ctx, entry.name, { rotatedAt: at });
+  }
+
+  /** A credential's rotation history, newest first. */
+  async rotations(ctx: TenantContext, name: string, limit = 50): Promise<RotationRow[]> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT name, rotated_by, masked_hint, reason, rotated_at
+         FROM secret_rotations WHERE workspace_id = ? AND name = ?
+        ORDER BY rotated_at DESC LIMIT ?`,
+      [ctx.workspaceId, name, limit],
+    );
+    return rows.map((r) => ({
+      name: String(r["name"]),
+      rotated_by: (r["rotated_by"] as string | null) ?? null,
+      masked_hint: (r["masked_hint"] as string | null) ?? null,
+      reason: (r["reason"] as string | null) ?? null,
+      rotated_at: String(r["rotated_at"]),
+    }));
   }
 
   /**

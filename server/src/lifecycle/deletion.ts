@@ -107,9 +107,18 @@ const DELETION_ORDER = [
   "billing_holds",
   "workspace_balances",
   "subscriptions",
+  // Before `secret_refs`, which both of them reference on the (workspace_id, name) pair. The
+  // cascade would take them anyway; naming them here puts their counts in the receipt, and a
+  // deletion nobody can read the extent of is a deletion nobody can defend.
+  "secret_usages",
+  "secret_rotations",
   "secret_refs",
   "workspace_secrets",
   "workspace_data_keys",
+  // The secrets gate's own state. `secret_elevations` first: an authorisation outliving the
+  // workspace it authorises is a small window, and it costs one line to not have it.
+  "secret_elevations",
+  "user_secret_passcodes",
   "oauth_states",
   "oauth_connections",
   "ws_tickets",
