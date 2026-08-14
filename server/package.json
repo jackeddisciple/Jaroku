@@ -138,7 +138,9 @@
     "worker": "tsx src/worker.ts",
     "test:secret-passcode": "tsx src/secrets/passcode.test.ts",
     "test:secret-routes": "tsx src/http/secrets.test.ts",
-    "test:secret-import": "tsx src/secrets/bundle.test.ts"
+    "test:secret-import": "tsx src/secrets/bundle.test.ts",
+    "secrets:migrate-provider-keys": "tsx src/secrets/migrateProviderKeys.cli.ts",
+    "test:provider-key-migration": "tsx src/secrets/migrateProviderKeys.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",

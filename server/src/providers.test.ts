@@ -53,7 +53,11 @@ SLACK_BOT_TOKEN=xoxb-123
     PROVIDER_ENV_KEY.anthropic === "ANTHROPIC_API_KEY");
   check("openai maps to the name the runtime reads",
     PROVIDER_ENV_KEY.openai === "OPENAI_API_KEY");
-  check("only real providers are connectable", PROVIDER_IDS.join(",") === "anthropic,openai");
+  // GOOGLE_API_KEY, not GEMINI_API_KEY: the first is what `langchain_google_genai` reads, and the
+  // Python runtime finding the key is the only thing that decides which name is correct.
+  check("google maps to the name the runtime reads",
+    PROVIDER_ENV_KEY.google === "GOOGLE_API_KEY");
+  check("only real providers are connectable", PROVIDER_IDS.join(",") === "anthropic,openai,google");
   // `fake` is the free dry-run path, not a credential — offering it as something to connect
   // would ask a user for a key that does not exist.
   check("fake is not a provider you connect", !isProviderId("fake"));

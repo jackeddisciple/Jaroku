@@ -96,7 +96,7 @@ export function WelcomeStep() {
 
         <Reveal delay={200}>
           <div className="mt-9">
-            <PrimaryCta onClick={() => setStep("provider")} autoFocus kbd="↵">
+            <PrimaryCta onClick={() => setStep("prompt")} autoFocus kbd="↵">
               Get started
             </PrimaryCta>
           </div>

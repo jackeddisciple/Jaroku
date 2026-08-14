@@ -58,7 +58,9 @@ export const INPUT_KEY_PREFIX = "jaroku.input.";
 //
 // Both fields share ONE key rather than two, so a half-written state is not representable.
 
-export type OnboardingStep = "welcome" | "provider" | "prompt" | "run";
+// `provider` is gone: pasting an API key is no longer a wall in front of the product. Credentials
+// live in one place now — the Secrets tab — and onboarding goes welcome → prompt → run.
+export type OnboardingStep = "welcome" | "prompt" | "run";
 
 /** The one-time hints shown so far, by id. A list rather than a boolean per hint, so adding a
  *  second hint later is data rather than another field. */
@@ -85,9 +87,17 @@ function readProgress(userId: string | null): OnboardingProgress {
       // Field by field, because this is user-editable storage that survives across versions:
       // a blob written by an older build (or by hand) must degrade to the default rather than
       // put `undefined` where the app expects a step name.
-      step: parsed.step === "provider" || parsed.step === "prompt" || parsed.step === "run"
-        ? parsed.step
-        : "welcome",
+      // A BROWSER STOPPED ON THE REMOVED STEP LANDS ON `prompt`, NOT `welcome`. This is
+      // user-editable storage that survives across versions, and somebody who was midway through
+      // the old flow has already seen the welcome screen — sending them back to it would be the
+      // one thing `users.onboarded_at` exists to stop. `prompt` is where the provider step used
+      // to hand off to, so they resume exactly where they would have.
+      step:
+        parsed.step === "prompt" || parsed.step === "run"
+          ? parsed.step
+          : (parsed.step as string) === "provider"
+            ? "prompt"
+            : "welcome",
       hintsShown: Array.isArray(parsed.hintsShown) ? parsed.hintsShown.filter((h) => typeof h === "string") : [],
     };
   } catch {
@@ -112,6 +122,7 @@ export const RUN_PROVIDERS = [
   { id: "fake", label: "Dry run (free)", models: ["fake-dry-run"] },
   { id: "anthropic", label: "Claude", models: ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8"] },
   { id: "openai", label: "OpenAI", models: ["gpt-4o-mini", "gpt-4o"] },
+  { id: "google", label: "Gemini", models: ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro"] },
 ] as const;
 
 interface UiState {

@@ -119,6 +119,7 @@ jobs:
           npm run test:secret-passcode
           npm run test:secret-routes
           npm run test:secret-import
+          npm run test:provider-key-migration
           npm run test:checkpoint-threads
           npm run test:branch
 

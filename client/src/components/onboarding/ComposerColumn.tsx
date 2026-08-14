@@ -255,7 +255,7 @@ export function ComposerColumn({ phase }: { phase: OnboardingPhase }) {
         <p className="mt-4 text-center text-[11px] leading-[1.6] text-faint">
           {canBuild(providers)
             ? "Describing an agent of your own goes through Anthropic, which is already connected — build one whenever you are ready."
-            : "Describing an agent of your own goes through Anthropic — connect a key from Settings whenever you want to build one."}
+            : "Describing an agent of your own goes through Anthropic — add a key in the Secrets tab whenever you want to build one."}
         </p>
       </>
     );

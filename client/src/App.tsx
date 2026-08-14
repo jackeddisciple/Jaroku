@@ -9,7 +9,6 @@ import { CodeOverlay } from "./components/CodeOverlay.tsx";
 import { SignIn } from "./components/SignIn.tsx";
 import { McpConfirmModal } from "./components/McpConfirmModal.tsx";
 import { ComposerColumn } from "./components/onboarding/ComposerColumn.tsx";
-import { ConnectProviderStep } from "./components/onboarding/ConnectProviderStep.tsx";
 import { WelcomeStep } from "./components/onboarding/WelcomeStep.tsx";
 import { useOnboarding } from "./components/onboarding/useOnboarding.ts";
 import { sendLoadAgentFiles, startSocket } from "./lib/socket.ts";
@@ -46,11 +45,10 @@ export function App() {
   // distinction lib/socket.ts exists to keep straight.
   if (sessionStatus === "signed_out") return <SignIn />;
 
-  // Steps 1 and 2 replace the layout entirely rather than covering it. Neither has anything to
-  // say about an agent, a run or a trace, so mounting three empty columns underneath them
-  // would be paying to render what nobody can see. They own the whole surface.
+  // The welcome step replaces the layout entirely rather than covering it. It has nothing to say
+  // about an agent, a run or a trace, so mounting three empty columns underneath it would be
+  // paying to render what nobody can see. It owns the whole surface.
   if (phase === "welcome") return <WelcomeStep />;
-  if (phase === "provider") return <ConnectProviderStep />;
 
   return (
     // The app is a panel on a surface, not the surface. A few pixels of inset and one outer

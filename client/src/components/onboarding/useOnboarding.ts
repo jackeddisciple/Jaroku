@@ -15,8 +15,11 @@ import { useSessionStore } from "../../store/sessionStore.ts";
 import { useTraceStore } from "../../store/traceStore.ts";
 import { useUiStore } from "../../store/uiStore.ts";
 
-/** The four onboarding views, plus the one that means "the normal app". */
-export type OnboardingPhase = "welcome" | "provider" | "prompt" | "run" | "complete";
+/** The three onboarding views, plus the one that means "the normal app". */
+//
+// `provider` is gone. Onboarding no longer asks for an API key before anybody has seen the
+// product — credentials live in the Secrets tab, and generation fails gracefully into it.
+export type OnboardingPhase = "welcome" | "prompt" | "run" | "complete";
 
 /**
  * The reference agent that ships in the repo, and the only one a fresh clone has.

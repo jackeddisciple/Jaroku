@@ -21,6 +21,7 @@ from .fake import build_dry_run_model
 DEFAULT_MODELS = {
     "anthropic": "claude-haiku-4-5",
     "openai": "gpt-4o-mini",
+    "google": "gemini-2.0-flash",
     "fake": "fake-dry-run",
 }
 
@@ -47,5 +48,16 @@ def build_model(provider: str, model_name: str, tools: Sequence[Any]) -> tuple[A
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(model=model_name), provider, model_name
+
+    if provider == "google":
+        # Imported inside the branch, like the other two: a workspace on Claude should not pay the
+        # import cost — or the failure — of a package it never uses.
+        #
+        # The key is read from ``GOOGLE_API_KEY`` by the client itself, which is why that name is
+        # the one the server writes. No ``temperature`` here either, for consistency with the note
+        # at the top of this module rather than because Gemini refuses one.
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        return ChatGoogleGenerativeAI(model=model_name), provider, model_name
 
     return build_dry_run_model(tools), "fake", DEFAULT_MODELS["fake"]

@@ -1,17 +1,17 @@
 {
   "$comment": [
     "SINGLE SOURCE OF TRUTH for model pricing. Read by BOTH sides:",
-    "  runtime/jaroku_interceptor/callback.py  — per-step cost as a run executes",
-    "  server/src/pricing.ts                   — pre-run estimates + eval aggregation",
+    "  runtime/jaroku_interceptor/callback.py  \u2014 per-step cost as a run executes",
+    "  server/src/pricing.ts                   \u2014 pre-run estimates + eval aggregation",
     "Two copies of a pricing table drift, and a drifted table means the comparison",
     "dashboard and the pre-run estimate disagree about the same run. One file, two readers.",
     "",
     "Prices are USD per MILLION tokens (readable + auditable against a published price",
     "sheet). Both readers divide by 1e6 themselves; nothing stores per-token floats.",
     "",
-    "Matching is EXACT first, then LONGEST PREFIX — never unordered substring. A model",
-    "with no entry is priced as UNKNOWN (null cost), never as zero. Doc §8: 'wrong cost",
-    "numbers destroy trust instantly' — a silent $0.00 is the worst kind of wrong."
+    "Matching is EXACT first, then LONGEST PREFIX \u2014 never unordered substring. A model",
+    "with no entry is priced as UNKNOWN (null cost), never as zero. Doc \u00a78: 'wrong cost",
+    "numbers destroy trust instantly' \u2014 a silent $0.00 is the worst kind of wrong."
   ],
   "version": 1,
   "currency": "USD",
@@ -87,6 +87,30 @@
       "input": 0.15,
       "output": 0.6,
       "cache_read_mult": 0.5,
+      "cache_write_mult": 1.0
+    },
+    {
+      "id": "gemini-2.0-flash",
+      "provider": "google",
+      "input": 0.1,
+      "output": 0.4,
+      "cache_read_mult": 0.25,
+      "cache_write_mult": 1.0
+    },
+    {
+      "id": "gemini-2.5-flash",
+      "provider": "google",
+      "input": 0.3,
+      "output": 2.5,
+      "cache_read_mult": 0.25,
+      "cache_write_mult": 1.0
+    },
+    {
+      "id": "gemini-2.5-pro",
+      "provider": "google",
+      "input": 1.25,
+      "output": 10.0,
+      "cache_read_mult": 0.25,
       "cache_write_mult": 1.0
     },
     {

@@ -33,6 +33,10 @@ import { verifyAnthropicKey } from "./claude.ts";
 export const PROVIDER_ENV_KEY = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
+  // `GOOGLE_API_KEY` rather than `GEMINI_API_KEY`, because that is the name
+  // `langchain_google_genai` reads and the Python runtime is what has to find it. Picking the
+  // prettier name would produce a `.env` that looks right and works for nothing.
+  google: "GOOGLE_API_KEY",
 } as const;
 
 export type ProviderId = keyof typeof PROVIDER_ENV_KEY;
@@ -135,6 +139,43 @@ async function verifyOpenAiKey(key: string): Promise<{ ok: boolean; message: str
 }
 
 /**
+ * Ask Google whether this key authenticates.
+ *
+ * Same shape as the OpenAI probe and for the same reasons: a bare fetch rather than a dependency,
+ * and a models-list rather than a completion, so testing a key costs nothing.
+ *
+ * THE KEY GOES IN A QUERY STRING, which is where this API takes it and is a thing worth naming
+ * rather than doing quietly. It is Google's URL, so it does not reach any log of ours — but this
+ * is the one provider probe where the credential is in a URL rather than a header, and anything
+ * that ever logs the request line here would be logging a key.
+ */
+async function verifyGoogleKey(key: string): Promise<{ ok: boolean; message: string | null }> {
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?pageSize=1&key=${encodeURIComponent(key)}`,
+      { signal: AbortSignal.timeout(VERIFY_TIMEOUT_MS) },
+    );
+    if (res.ok) return { ok: true, message: null };
+    // Google answers a bad key with 400 rather than 401, which reads as "you sent nonsense" when
+    // it means "that key is not accepted". Said plainly, because the status alone sends somebody
+    // looking at their request instead of at their key.
+    return {
+      ok: false,
+      message:
+        res.status === 400 || res.status === 401 || res.status === 403
+          ? `Google rejected that key (${res.status}). Check it was copied whole and that the Generative Language API is enabled.`
+          : `Google answered ${res.status} ${res.statusText}`,
+    };
+  } catch (err) {
+    const message =
+      (err as Error)?.name === "TimeoutError"
+        ? `Google did not answer within ${Math.round(VERIFY_TIMEOUT_MS / 1000)}s`
+        : ((err as Error)?.message ?? String(err));
+    return { ok: false, message };
+  }
+}
+
+/**
  * Prove a key works, WITHOUT writing it.
  *
  * Separate from storing it on purpose: "Test connection" must not put a credential on disk
@@ -147,5 +188,7 @@ export async function verifyProviderKey(
   key: string,
 ): Promise<{ ok: boolean; message: string | null }> {
   if (!key.trim()) return { ok: false, message: "no key was entered" };
-  return provider === "anthropic" ? verifyAnthropicKey(key) : verifyOpenAiKey(key);
+  if (provider === "anthropic") return verifyAnthropicKey(key);
+  if (provider === "google") return verifyGoogleKey(key);
+  return verifyOpenAiKey(key);
 }

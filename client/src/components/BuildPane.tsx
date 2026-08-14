@@ -16,6 +16,7 @@ import {
 } from "../store/chatStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { inputKey, RUN_PROVIDERS, useUiStore } from "../store/uiStore.ts";
+import { useProviderStore } from "../store/providerStore.ts";
 import {
   sendApplyEdit, sendBranchRun, sendDiscardEdit, sendDiscardPlan, sendEdit, sendExplain,
   sendGenerate, sendPlanAgent, sendPromoteTestInput, sendRun,
@@ -257,6 +258,15 @@ function ModelSelector({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const label = provider === "fake" ? "Dry run (free)" : model;
+  const setRightTab = useUiStore((s) => s.setRightTab);
+  // WHICH PROVIDERS CAN ACTUALLY RUN. `fake` always can — it is the free dry-run path and needs no
+  // key, which is the thing this product is rightly proud of. The rest need one in THIS workspace,
+  // which `providerStore` already knows from the providers channel.
+  const providers = useProviderStore((s) => s.providers);
+  const usableProviders = new Set<string>([
+    "fake",
+    ...providers.filter((p) => p.configured).map((p) => p.id),
+  ]);
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
@@ -297,31 +307,92 @@ function ModelSelector({
               </div>
               {p.models.map((m) => {
                 const active = provider === p.id && model === m;
+                // DISABLED WITH A STATED REASON, NEVER HIDDEN. A model that vanishes because a key
+                // is missing reads as "Jaroku does not support this", which is both false and
+                // unfixable from the user's side. Shown, greyed, and told why.
+                const usable = usableProviders.has(p.id);
                 return (
                   <button
                     key={m}
                     type="button"
+                    disabled={!usable}
+                    title={usable ? undefined : `No ${p.label} API key in this workspace`}
                     onClick={() => {
                       setProvider(p.id); // resets model to the provider's default…
                       setModel(m); // …then pin the chosen one
                       setOpen(false);
                     }}
                     className={`flex w-full items-center gap-1.5 rounded-control px-2 py-1 text-left font-mono text-[12px] transition-colors duration-fast ${
-                      active ? "bg-active text-ink" : "text-muted hover:bg-active/40 hover:text-ink"
+                      !usable
+                        ? "cursor-not-allowed text-faint opacity-60"
+                        : active
+                          ? "bg-active text-ink"
+                          : "text-muted hover:bg-active/40 hover:text-ink"
                     }`}
                   >
                     {/* A fixed slot, so choosing a model does not shift the list. */}
                     <span className="inline-flex w-[11px] shrink-0 items-center justify-center" aria-hidden>
                       {active && <CheckIcon size={ICON.xs} />}
                     </span>
-                    {m}
+                    <span className="min-w-0 flex-1 truncate">{m}</span>
+                    {!usable ? <span className="shrink-0 text-[10px]">no API key</span> : null}
                   </button>
                 );
               })}
             </div>
           ))}
+          {/* THE WAY OUT OF THE DEAD END. Opens the Secrets tab at the provider group with the add
+              form already showing — and does NOT unmount the composer, so the draft, the selected
+              connectors and the attachments are all still there when they come back. That is the
+              whole reason this is a tab rather than a full-screen step. */}
+          <button
+            type="button"
+            onClick={() => {
+              setRightTab("secrets");
+              setOpen(false);
+            }}
+            className="mt-1 flex w-full items-center gap-1.5 rounded-control border-t border-hair px-2 pt-2 pb-1 text-left text-[12px] text-muted transition-colors duration-fast hover:text-ink"
+          >
+            <span className="inline-flex w-[11px] shrink-0 items-center justify-center" aria-hidden>
+              +
+            </span>
+            Add a provider key…
+          </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The one banner a workspace with no provider keys sees.
+ *
+ * A BANNER, NOT A MODAL, and the brief is specific about why: a modal on first run gets dismissed
+ * reflexively, before it has been read, by somebody trying to get to the thing they came for. This
+ * sits above the composer, says what is missing, and offers the one click that fixes it.
+ *
+ * Only when `loaded`. Before the first providers snapshot arrives, "no keys" and "we have not been
+ * told yet" are indistinguishable, and rendering the first would flash a warning at somebody who
+ * has three.
+ */
+function NoProviderKeyBanner() {
+  const providers = useProviderStore((s) => s.providers);
+  const loaded = useProviderStore((s) => s.loaded);
+  const setRightTab = useUiStore((s) => s.setRightTab);
+  if (!loaded || providers.some((p) => p.configured)) return null;
+  return (
+    <div className="mb-2 flex items-center gap-2 rounded-control border border-hair px-2.5 py-1.5 text-[11px] text-muted">
+      <PlugIcon size={ICON.xs} />
+      <span className="min-w-0 flex-1">
+        No provider key in this workspace yet — runs use the free dry-run model until you add one.
+      </span>
+      <button
+        type="button"
+        className="shrink-0 text-ink underline-offset-2 hover:underline"
+        onClick={() => setRightTab("secrets")}
+      >
+        Add a key
+      </button>
     </div>
   );
 }
@@ -861,6 +932,7 @@ export function BuildPane({
 
       {/* composer — ONE input; the Chat/Test toggle folds in what used to be the run-bar */}
       <div className="px-6 pb-4 pt-2 shrink-0">
+        <NoProviderKeyBanner />
         {/* connectors + name — new-agent generation only (Chat mode, no agent selected) */}
         {composerMode === "chat" && mode === "generate" && (
           // On first run this row is one of three stacked groups — examples, connectors,
