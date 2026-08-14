@@ -70,6 +70,15 @@ export interface DeployManagerDeps {
   context: () => TenantContext;
   /** The agent's Railway token, read at the moment of use. Never held by this class. */
   token: () => string | undefined;
+  /**
+   * The credential NAMES this workspace has configured. Never a value — see ADR-026.
+   *
+   * Absent means fall back to this process's environment, which is right for the local path and
+   * is what this did everywhere before. Hosted, the two are different questions: reading the
+   * environment asks whether the SERVER has a variable, when what decides a deploy is whether this
+   * WORKSPACE has the credential.
+   */
+  configuredNames?: () => Promise<ReadonlySet<string>>;
   /** True while a run or an eval job is reading this agent's files. Blocks packaging. */
   agentBusy: (agentId: string) => boolean;
   onStage: (e: { deploymentId: string; stage: DeployStage; status: DeployStatus }) => void;
@@ -157,6 +166,7 @@ export async function planDeploy(
     requiredEnv: meta.required_env ?? [],
     mcpServers: meta.mcp_servers ?? [],
     provider: req.provider,
+    configuredNames: await deps.configuredNames?.(),
   });
 
   const missing = secrets.filter((s) => s.required && !s.configured).map((s) => s.name);

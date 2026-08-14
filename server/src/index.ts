@@ -94,6 +94,8 @@ import { SecretElevations, sessionIdFor } from "./secrets/elevation.ts";
 import { SecretPasscodes } from "./secrets/passcode.ts";
 import { SecretElevationRepository } from "./db/repositories/secretElevations.ts";
 import { SecretPasscodeRepository } from "./db/repositories/secretPasscodes.ts";
+import { SecretUsageRepository } from "./db/repositories/secretUsages.ts";
+import { SecretsManager } from "./secrets/manager.ts";
 import { WorkspaceDeleter } from "./lifecycle/deletion.ts";
 import { endAllGrants } from "./oauth/revoke.ts";
 import { buildIdempotencyKey, type JobClass, type QueueJob } from "./queue/jobs.ts";
@@ -1193,6 +1195,13 @@ const deployDeps: DeployManagerDeps = {
   projects,
   context: contextForDeploy,
   token: () => process.env[RAILWAY_ENV_KEY],
+  // NAMES, from the vault, for THIS workspace — not `process.env`, which asks whether the server
+  // has a variable when the question is whether this tenant has the credential. The Secrets tab
+  // makes the two visible side by side, which is what turned a latent divergence into one somebody
+  // would report: a workspace whose key is plainly listed as configured, and a deploy refusing to
+  // start because it could not see it.
+  configuredNames: async () =>
+    new Set((await secrets.listNames(contextForDeploy())).map((s) => s.name)),
   // The same pool-aware check the editor uses, and for a sharper version of the reason:
   // deploying WRITES into the project, so doing it while a subprocess is importing those
   // files would change code out from under a run in flight.
@@ -1856,6 +1865,8 @@ for (const route of lifecycleRoutes({
 // socket would mean inventing a per-frame authorisation, which is a header with extra steps.
 const secretPasscodes = new SecretPasscodes({ passcodes: new SecretPasscodeRepository(db) });
 const secretElevations = new SecretElevations({ elevations: new SecretElevationRepository(db) });
+const secretUsages = new SecretUsageRepository(db);
+const secretsManager = new SecretsManager({ secrets, refs: secretRefs, usages: secretUsages });
 
 /**
  * How recently somebody must have authenticated for a step-up route to accept them.
@@ -1932,6 +1943,13 @@ for (const route of secretsRoutes({
     }
     return null;
   },
+  list: (ctx) => secretsManager.list(ctx),
+  // `actorUserId` is ATTRIBUTION, never authorisation — the capability check upstream is what
+  // decided this may happen. See ADR-018.
+  store: (caller, input) => secretsManager.store(caller.ctx, { ...input, actorUserId: caller.userId }),
+  revoke: (caller, name) => secretsManager.revoke(caller.ctx, name),
+  test: (caller, name) => secretsManager.test(caller.ctx, name),
+  isReferenced: (ctx, name) => secretsManager.isReferenced(ctx, name),
   notifyLockout: async (caller, until) => {
     // NO MAILER EXISTS IN THIS SERVER, and one invented for this single notification would be a
     // transport nothing else exercises. The durable record is the `secrets.locked_out` audit row,

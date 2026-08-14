@@ -50,6 +50,21 @@ export interface RequiredSecretsInput {
   mcpServers?: string[];
   /** What the deployed instance will run on. */
   provider: string;
+  /**
+   * The names this WORKSPACE has configured, from `SecretStore.listNames`.
+   *
+   * TAKES THE NAMES RATHER THAN READING process.env, and this is the same move `providerStatus`
+   * made for the same reason — it just had not reached here. Locally the two are identical: the
+   * local store IS the process environment, loaded from `runtime/.env` at boot. Hosted they are
+   * not remotely the same thing, and reading the environment asks "does the SERVER have this
+   * variable" when the question is "does this WORKSPACE have this credential". The answers differ
+   * in both directions: a workspace's vault secret read as unconfigured, and the platform's own
+   * key read as every workspace's.
+   *
+   * Optional, and absent means fall back to the environment — which is right for the local path
+   * and for the two callers that have no workspace in hand.
+   */
+  configuredNames?: ReadonlySet<string>;
 }
 
 /**
@@ -63,10 +78,13 @@ export function requiredSecrets(input: RequiredSecretsInput): DeploySecretStatus
   const out: DeploySecretStatus[] = [];
   const seen = new Set<string>();
 
+  const configured = (name: string): boolean =>
+    input.configuredNames ? input.configuredNames.has(name) : Boolean(process.env[name]);
+
   const add = (name: string, reason: string, required: boolean): void => {
     if (!name || seen.has(name)) return;
     seen.add(name);
-    out.push({ name, configured: Boolean(process.env[name]), reason, required });
+    out.push({ name, configured: configured(name), reason, required });
   };
 
   if (isProviderId(input.provider)) {

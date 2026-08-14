@@ -36,10 +36,14 @@
 // A caller who is elevated in their own workspace is not thereby anything in somebody else's.
 
 import { requireCapability, type Capability } from "../auth/capabilities.ts";
+import type { SecretKind } from "../db/repositories/secretRefs.ts";
 import type { TenantContext } from "../db/tenant.ts";
 import { ELEVATION_HEADER, type SecretElevations } from "../secrets/elevation.ts";
 import type { SecretPasscodes } from "../secrets/passcode.ts";
-import { HttpError, badRequest, type Handler, type HttpRequest, type HttpResponse } from "./router.ts";
+import { isSecretName } from "../secrets/secretStore.ts";
+import { parseSecretBundle, validateBundle } from "../secrets/bundle.ts";
+import type { SecretSummary } from "../secrets/manager.ts";
+import { HttpError, badRequest, notFound, type Handler, type HttpRequest, type HttpResponse } from "./router.ts";
 
 /** Which policy a workspace is on. Both implemented; `tab` is the default and what ships. */
 export type SecretsGate = "tab" | "mutations";
@@ -132,7 +136,36 @@ export interface SecretsRouteDeps {
    * wired to anything. Deployments that have a mailer pass one in.
    */
   notifyLockout?: (caller: SecretsCaller, until: string | null) => Promise<void>;
+  /** Everything the workspace has, as metadata. Never a value; there is no method that returns one. */
+  list: (ctx: TenantContext) => Promise<SecretSummary[]>;
+  /**
+   * Store a credential, having proved it works when that is possible.
+   *
+   * Returns what is safe to say about it. The VALUE is the caller's argument and never the
+   * result — the once-only display the brief asks for is the client echoing back what the user
+   * just typed, not the server handing it back.
+   */
+  store: (
+    caller: SecretsCaller,
+    input: { name: string; value: string; kind: SecretKind; provider?: string | null; agentId?: string | null; expiresAt?: string | null; rotateEveryDays?: number | null },
+  ) => Promise<{ ok: boolean; message: string | null; summary?: SecretSummary }>;
+  /** Forget one. The caller has already dealt with the blast-radius confirmation. */
+  revoke: (caller: SecretsCaller, name: string) => Promise<void>;
+  /** Re-run a provider probe against what is already stored. Answers ok/message, never a key. */
+  test: (caller: SecretsCaller, name: string) => Promise<{ ok: boolean; message: string | null }>;
+  /** Whether anything references this credential — drives the typed-name confirmation. */
+  isReferenced: (ctx: TenantContext, name: string) => Promise<boolean>;
 }
+
+/**
+ * What a client learns about one credential.
+ *
+ * DECLARED IN ONE PLACE — `secrets/manager.ts` — so that "does any route return a value" is
+ * answerable by reading one interface rather than by auditing every handler. There is no field on
+ * it a credential fits in, and the serialiser audit asserts that against every route's real output
+ * rather than against the type.
+ */
+export type { SecretSummary };
 
 /**
  * Wrap a handler in the group's guarantees.
@@ -407,6 +440,175 @@ export function secretsRoutes(deps: SecretsRouteDeps): SecretsRoute[] {
       }),
     },
 
+    // --- the list ------------------------------------------------------------------------------
+    //
+    // `read`, so it is the route the workspace policy actually decides about: under `tab` it needs
+    // elevation, under `mutations` it does not. Metadata only — see `SecretSummary`, which has no
+    // field a credential would fit in.
+    {
+      method: "GET",
+      path: "/v1/secrets",
+      handler: guarded(deps, { elevation: "read", capability: "secret:read" }, async (_req, caller) => {
+        const secrets = await deps.list(caller.ctx);
+        await deps.audit(caller, "secrets.listed", { count: secrets.length });
+        return { headers: { "cache-control": "no-store" }, body: { secrets } };
+      }),
+    },
+
+    // --- adding one ------------------------------------------------------------------------------
+    {
+      method: "POST",
+      path: "/v1/secrets",
+      handler: guarded(deps, {}, async (req, caller) => {
+        const body = await req.json<Record<string, unknown>>();
+        const name = body["name"];
+        const value = body["value"];
+        if (!isSecretName(name)) {
+          throw badRequest(
+            "a credential name must be UPPER_SNAKE_CASE, start with a letter, and be at most 128 characters",
+          );
+        }
+        if (typeof value !== "string" || !value) throw badRequest("a value is required");
+        const kind = readKind(body["kind"]);
+        const result = await deps.store(caller, {
+          name,
+          value,
+          kind,
+          provider: typeof body["provider"] === "string" ? body["provider"] : null,
+          agentId: typeof body["agentId"] === "string" ? body["agentId"] : null,
+          expiresAt: typeof body["expiresAt"] === "string" ? body["expiresAt"] : null,
+          rotateEveryDays: typeof body["rotateEveryDays"] === "number" ? body["rotateEveryDays"] : null,
+        });
+        if (!result.ok) {
+          // NOT STORED. A provider key that the provider itself rejected is a typo caught here
+          // rather than a confusing failure three screens later, and storing it anyway would mean
+          // the row says `invalid` while the vault holds something nobody can use.
+          throw new HttpError(422, "credential_rejected", result.message ?? "that credential was not accepted");
+        }
+        await deps.audit(caller, "secrets.created", { name, kind });
+        return { headers: { "cache-control": "no-store" }, body: { secret: result.summary ?? null } };
+      }),
+    },
+
+    // --- importing a bundle from somewhere else ---------------------------------------------------
+    {
+      method: "POST",
+      path: "/v1/secrets/import",
+      handler: guarded(deps, {}, async (req, caller) => {
+        const body = await req.json<{ text?: unknown }>();
+        if (typeof body.text !== "string") throw badRequest("paste an export to import");
+        const bundle = validateBundle(parseSecretBundle(body.text));
+        const stored: string[] = [];
+        const failed: { name: string; reason: string }[] = [...bundle.rejected];
+        for (const entry of bundle.accepted) {
+          // Each through the SAME store path a single credential takes, so nothing about a bulk
+          // import is a way around the rules the single path enforces.
+          const result = await deps.store(caller, { name: entry.name, value: entry.value, kind: "custom" });
+          if (result.ok) stored.push(entry.name);
+          else failed.push({ name: entry.name, reason: result.message ?? "it was not accepted" });
+        }
+        await deps.audit(caller, "secrets.imported", {
+          format: bundle.format,
+          imported: stored.length,
+          rejected: failed.length,
+        });
+        // NAMES AND REASONS, never a value — the same shape `describe` produces, which is why that
+        // function exists rather than the route reaching into the bundle itself.
+        return {
+          headers: { "cache-control": "no-store" },
+          body: { format: bundle.format, imported: stored, rejected: failed },
+        };
+      }),
+    },
+
+    // --- one credential: rotate, test, revoke -------------------------------------------------------
+    //
+    // ADDRESSED BY NAME, not by a uuid. The brief writes `/secrets/:id`, and an id would be a
+    // second way to name a row whose identity already IS `(workspace_id, name)` — the pointer the
+    // whole store is built on. A second identifier is a second thing to keep in step.
+    //
+    // Reached by prefix, and the exact routes above are matched first, so `/v1/secrets/health` is
+    // never read as a credential called `health`. A name that is not a legal credential name is
+    // refused before anything looks it up.
+    {
+      method: "POST",
+      path: "/v1/secrets/",
+      prefix: true,
+      handler: guarded(deps, {}, async (req, caller) => {
+        const { name, action } = readTail(req.path);
+        if (action === "rotate") {
+          const body = await req.json<{ value?: unknown }>();
+          if (typeof body.value !== "string" || !body.value) throw badRequest("a new value is required");
+          const existing = (await deps.list(caller.ctx)).find((s) => s.name === name);
+          if (!existing) throw notFound("no such credential in this workspace");
+          if (existing.kind === "managed") {
+            // A BUTTON THAT CANNOT WORK IS WORSE THAN NO BUTTON. Jaroku does not own a connector
+            // token's lifecycle; the fix for a broken one is re-running consent, not writing a new
+            // value over it.
+            throw new HttpError(
+              409,
+              "managed_credential",
+              "this credential is managed by a connector — reconnect it instead of rotating it",
+            );
+          }
+          const result = await deps.store(caller, {
+            name,
+            value: body.value,
+            kind: existing.kind,
+            provider: existing.provider,
+            agentId: existing.agentId,
+          });
+          if (!result.ok) {
+            throw new HttpError(422, "credential_rejected", result.message ?? "that credential was not accepted");
+          }
+          await deps.audit(caller, "secrets.rotated", { name });
+          return { headers: { "cache-control": "no-store" }, body: { secret: result.summary ?? null } };
+        }
+        if (action === "test") {
+          const outcome = await deps.test(caller, name);
+          await deps.audit(caller, "secrets.provider_validated", { name, ok: outcome.ok });
+          return { headers: { "cache-control": "no-store" }, body: outcome };
+        }
+        throw notFound(`nothing to do at ${req.path}`);
+      }),
+    },
+
+    {
+      method: "DELETE",
+      path: "/v1/secrets/",
+      prefix: true,
+      handler: guarded(deps, {}, async (req, caller) => {
+        const { name, action } = readTail(req.path);
+        if (action) throw notFound(`nothing to delete at ${req.path}`);
+        const existing = (await deps.list(caller.ctx)).find((s) => s.name === name);
+        if (!existing) throw notFound("no such credential in this workspace");
+        if (existing.kind === "managed") {
+          throw new HttpError(
+            409,
+            "managed_credential",
+            "this credential is managed by a connector — disconnect the connector instead",
+          );
+        }
+        // CONFIRMATION GATED BY BLAST RADIUS. A credential nothing points at goes with an ordinary
+        // confirm; one with a live reference makes somebody type its name, the same discipline the
+        // audited GitHub force-override uses. The quiet revoke that breaks a deployed agent at
+        // three in the morning is the failure being designed against.
+        if (await deps.isReferenced(caller.ctx, name)) {
+          const body = await req.json<{ confirm?: unknown }>();
+          if (body.confirm !== name) {
+            throw new HttpError(
+              409,
+              "confirmation_required",
+              `${name} is referenced by this workspace — type its name to confirm`,
+            );
+          }
+        }
+        await deps.revoke(caller, name);
+        await deps.audit(caller, "secrets.revoked", { name });
+        return { headers: { "cache-control": "no-store" }, body: { revoked: name } };
+      }),
+    },
+
     // --- lock now ----------------------------------------------------------------------------
     //
     // `none` rather than `mutate`, and that is deliberate. Requiring elevation to END elevation
@@ -425,6 +627,32 @@ export function secretsRoutes(deps: SecretsRouteDeps): SecretsRoute[] {
       }),
     },
   ];
+}
+
+/** The three origins, read from a request body without trusting it. */
+function readKind(raw: unknown): SecretKind {
+  if (raw === "provider_key" || raw === "custom") return raw;
+  // `managed` is deliberately not reachable from here. A connector's credential is created by the
+  // connector's own flow; letting a client declare one would produce a row claiming a lifecycle
+  // Jaroku does not actually own, with a Reconnect button pointing at nothing.
+  if (raw === undefined || raw === null) return "custom";
+  throw badRequest(`unknown kind: ${String(raw).slice(0, 32)}`);
+}
+
+/**
+ * Split `/v1/secrets/NAME` or `/v1/secrets/NAME/rotate` into its two halves.
+ *
+ * The name is validated HERE, before anything looks it up, so a path segment that could never be a
+ * credential name is a 400 rather than a lookup miss — and so nothing downstream receives a string
+ * that has not been through the same gate `set` uses.
+ */
+function readTail(path: string): { name: string; action: string | null } {
+  const tail = path.slice("/v1/secrets/".length);
+  const [rawName, action, ...rest] = tail.split("/");
+  if (rest.length) throw notFound(`nothing at ${path}`);
+  const name = decodeURIComponent(rawName ?? "");
+  if (!isSecretName(name)) throw badRequest("that is not a credential name");
+  return { name, action: action || null };
 }
 
 /** Whole seconds until an ISO instant, floored at one. A `Retry-After: 0` invites an instant retry. */

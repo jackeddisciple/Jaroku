@@ -83,6 +83,37 @@ const withEnv = <T>(vars: Record<string, string | undefined>, fn: () => T): T =>
   );
 }
 
+// --- 1b. a workspace's credentials, not this process's --------------------------------
+//
+// THE DIVERGENCE THE SECRETS TAB MADE VISIBLE. `configured` was `Boolean(process.env[name])`,
+// which on the local path is exactly right — the local store IS the process environment — and
+// hosted asks a different question from the one that decides a deploy: whether the SERVER holds a
+// variable, rather than whether this WORKSPACE holds the credential. It is wrong in both
+// directions, and the second is the worse one.
+{
+  withEnv({ ANTHROPIC_API_KEY: ANTHROPIC, DATABASE_URL: undefined }, () => {
+    const vaultNames = new Set(["DATABASE_URL"]);
+    const status = requiredSecrets({
+      requiredEnv: ["DATABASE_URL"],
+      provider: "anthropic",
+      configuredNames: vaultNames,
+    });
+
+    check("a credential in the workspace's vault reads as configured, though this process has no such variable",
+      status.find((s) => s.name === "DATABASE_URL")?.configured === true);
+
+    // The direction that actually leaks a decision across a tenant boundary: the PLATFORM's own
+    // Anthropic key is in this process's environment, and reading it would tell every workspace on
+    // the box that it has a provider key configured when it has not.
+    check("and the platform's own key in the environment does NOT read as this workspace's",
+      status.find((s) => s.name === "ANTHROPIC_API_KEY")?.configured === false);
+
+    check("while with no names supplied it still falls back to the environment, for the local path",
+      requiredSecrets({ requiredEnv: [], provider: "anthropic" })
+        .find((s) => s.name === "ANTHROPIC_API_KEY")?.configured === true);
+  });
+}
+
 // --- 2. the name list is right --------------------------------------------------------
 {
   withEnv({ OPENAI_API_KEY: "sk-openai", ANTHROPIC_API_KEY: undefined }, () => {

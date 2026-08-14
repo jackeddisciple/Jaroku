@@ -137,7 +137,8 @@
     "loadtest:queue": "tsx src/queue/loadTest.ts",
     "worker": "tsx src/worker.ts",
     "test:secret-passcode": "tsx src/secrets/passcode.test.ts",
-    "test:secret-routes": "tsx src/http/secrets.test.ts"
+    "test:secret-routes": "tsx src/http/secrets.test.ts",
+    "test:secret-import": "tsx src/secrets/bundle.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",

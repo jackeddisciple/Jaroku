@@ -33,6 +33,11 @@ import { newRequestId, systemContext, systemContextFor, type Role, type TenantCo
 import { IdentityRepository } from "../db/repositories/identity.ts";
 import { SecretElevationRepository } from "../db/repositories/secretElevations.ts";
 import { SecretPasscodeRepository } from "../db/repositories/secretPasscodes.ts";
+import { SecretRefRepository } from "../db/repositories/secretRefs.ts";
+import { SecretUsageRepository } from "../db/repositories/secretUsages.ts";
+import { KmsSecretStore } from "../secrets/kmsSecretStore.ts";
+import { LocalMasterKeyProvider } from "../secrets/masterKey.ts";
+import { SecretsManager } from "../secrets/manager.ts";
 import { SecretElevations, ELEVATION_HEADER, ELEVATION_TTL_MS, sessionIdFor } from "../secrets/elevation.ts";
 import { SecretPasscodes } from "../secrets/passcode.ts";
 import {
@@ -112,6 +117,28 @@ try {
 
   const elevationRepo = new SecretElevationRepository(db);
   const passcodeRepo = new SecretPasscodeRepository(db);
+  const refs = new SecretRefRepository(db);
+  const usages = new SecretUsageRepository(db);
+  // The hosted store rather than the dotenv one: it holds real ciphertext and writes no files, so
+  // the suite proves the no-value property against something that genuinely has a value to leak.
+  const vault = new KmsSecretStore({
+    db,
+    master: new LocalMasterKeyProvider("a-master-key-with-enough-entropy-behind-it-0123456789"),
+    refs,
+    runWorkspace: async () => null,
+    providerFor: (name) => (name.startsWith("ANTHROPIC") ? "anthropic" : null),
+  });
+  // Provider probes are stubbed by outcome, not by network: the point being asserted is that a
+  // rejected key is not stored, and reaching Anthropic to find that out would make the suite
+  // depend on somebody else's uptime.
+  let providerSaysYes = true;
+  const manager = new SecretsManager({
+    secrets: vault,
+    refs,
+    usages,
+    verify: async () =>
+      providerSaysYes ? { ok: true, message: null } : { ok: false, message: "the provider rejected that key (401)" },
+  });
   const elevations = new SecretElevations({ elevations: elevationRepo });
   const passcodes = new SecretPasscodes({ passcodes: passcodeRepo });
 
@@ -143,6 +170,13 @@ try {
       audited.push({ action, detail: detail ?? {} });
     },
     health: async () => ({ total: 2, expiringSoon: 1, invalid: 0, rotationDue: 0, unusedNinetyDays: 0 }),
+    // THE REAL MANAGER OVER A REAL VAULT, not a stub. The point of the CRUD half of this suite is
+    // that no route returns a value, and a stub that never held one would prove nothing.
+    list: (ctx) => manager.list(ctx),
+    store: (c, input) => manager.store(c.ctx, { ...input, actorUserId: c.userId }),
+    revoke: (c, name) => manager.revoke(c.ctx, name),
+    test: (c, name) => manager.test(c.ctx, name),
+    isReferenced: (ctx, name) => manager.isReferenced(ctx, name),
   };
 
   // --- the structural audit ---------------------------------------------------------------
@@ -292,7 +326,9 @@ try {
     const a = await elevations.grant(ctxFor(), { userId: user.id, sessionId: "two-tabs", method: "passcode" });
     const b = await elevations.joinExisting(ctxFor(), { userId: user.id, sessionId: "two-tabs" });
     check(b !== null, "two tabs of one session each hold a token");
-    const lockRoute = routes.find((r) => r.method === "DELETE")!;
+    // Matched on path as well as method: the group now has two DELETEs, and the other one is the
+    // prefix route that revokes a credential.
+    const lockRoute = routes.find((r) => r.method === "DELETE" && r.path === "/v1/secrets/elevation")!;
     // The lock route acts on the caller's own session, which the fixture pins to `sessionId`, so
     // this is asserted through the service for the tab pair above.
     await elevations.lock(ctxFor(), user.id, "two-tabs");
@@ -380,6 +416,176 @@ try {
     check(wrongCurrent.code === "elevation_denied", "changing it with the wrong current passcode is refused");
     check((await passcodes.verify(ctxFor(), user.id, "resetpc9")).ok, "and the old one still works");
     freshLogin = false;
+  }
+
+  // --- storing, rotating, revoking ---------------------------------------------------------------
+  //
+  // Every response in this section is also collected for the serialiser audit at the end, which is
+  // the assertion the brief asks for by name: no secrets route returns a plaintext value, checked
+  // across every route rather than argued about per handler.
+  console.log("\nstoring a credential");
+  const responses: unknown[] = [];
+  const SECRET_VALUE = "sk-ant-api03-THIS-IS-THE-PLAINTEXT-NOBODY-MAY-SEE-9c11";
+  {
+    const elevated = await elevations.grant(ctxFor(), { userId: user.id, sessionId, method: "passcode" });
+    const withElevation = (init: Parameters<typeof mkReq>[0]) =>
+      mkReq({ ...init, headers: { ...(init.headers ?? {}), [ELEVATION_HEADER]: elevated.token } });
+
+    const createRoute = routes.find((r) => r.method === "POST" && r.path === "/v1/secrets")!;
+    const listRoute = routes.find((r) => r.method === "GET" && r.path === "/v1/secrets")!;
+    const itemPost = routes.find((r) => r.method === "POST" && r.prefix)!;
+    const itemDelete = routes.find((r) => r.method === "DELETE" && r.prefix)!;
+
+    // A REJECTED PROVIDER KEY IS NOT STORED. This is acceptance criterion 20.
+    providerSaysYes = false;
+    const rejected = await statusOf(
+      createRoute.handler,
+      withElevation({ body: { name: "ANTHROPIC_API_KEY", value: SECRET_VALUE, kind: "provider_key" } }),
+    );
+    check(rejected.status === 422, "a key the provider rejects is refused");
+    const afterReject = (await listRoute.handler(withElevation({ method: "GET", path: "/v1/secrets" }))) as {
+      body: { secrets: { name: string }[] };
+    };
+    check(
+      !afterReject.body.secrets.some((s) => s.name === "ANTHROPIC_API_KEY"),
+      "...and is not stored, so the row and the vault cannot disagree",
+    );
+
+    providerSaysYes = true;
+    const created = (await createRoute.handler(
+      withElevation({ body: { name: "ANTHROPIC_API_KEY", value: SECRET_VALUE, kind: "provider_key" } }),
+    )) as { body: { secret: { maskedHint: string; status: string; kind: string } } };
+    responses.push(created.body);
+    check(created.body.secret.status === "valid", "a key that passes its probe is stored as valid");
+    check(created.body.secret.kind === "provider_key", "classified by kind");
+    check(
+      created.body.secret.maskedHint === "sk-ant-api03-...9c11",
+      "with a mask showing a published prefix and four characters",
+      created.body.secret.maskedHint,
+    );
+    check(!created.body.secret.maskedHint.includes("PLAINTEXT"), "and nothing from the middle of the key");
+
+    // Rotation is the same call against a name that already exists.
+    const rotated = (await itemPost.handler(
+      withElevation({ path: "/v1/secrets/ANTHROPIC_API_KEY/rotate", body: { value: `${SECRET_VALUE}-rotated-4f2a` } }),
+    )) as { body: { secret: { maskedHint: string; rotatedAt: string | null } } };
+    responses.push(rotated.body);
+    check(rotated.body.secret.rotatedAt !== null, "rotating records when it happened");
+    check(rotated.body.secret.maskedHint.endsWith("4f2a"), "and the mask follows the new value");
+    const history = await refs.rotations(ctxFor(), "ANTHROPIC_API_KEY");
+    check(history.length === 1, "with one history row, holding a mask and no value");
+    check(!JSON.stringify(history).includes("PLAINTEXT"), "...and definitely not the old value");
+
+    // Testing a stored key answers ok/message and never the key.
+    const tested = (await itemPost.handler(
+      withElevation({ path: "/v1/secrets/ANTHROPIC_API_KEY/test" }),
+    )) as { body: { ok: boolean; message: string | null } };
+    responses.push(tested.body);
+    check(tested.body.ok === true, "a stored key can be re-tested on demand");
+    providerSaysYes = false;
+    const retested = (await itemPost.handler(
+      withElevation({ path: "/v1/secrets/ANTHROPIC_API_KEY/test" }),
+    )) as { body: { ok: boolean; message: string | null } };
+    responses.push(retested.body);
+    check(retested.body.ok === false, "and flips to invalid when the provider stops accepting it");
+    check(
+      (await manager.get(ctxFor(), "ANTHROPIC_API_KEY"))?.status === "invalid",
+      "...with the row updated rather than silently retried forever",
+    );
+    providerSaysYes = true;
+
+    // The list, and the once-only rule: nothing here is the value.
+    const listed = (await listRoute.handler(withElevation({ method: "GET", path: "/v1/secrets" }))) as {
+      body: { secrets: unknown[] };
+    };
+    responses.push(listed.body);
+    check(listed.body.secrets.length >= 1, "the list answers with what the workspace has");
+
+    // --- revoking, and the blast-radius confirmation --------------------------------------------
+    console.log("\nrevoking");
+    await manager.store(ctxFor(), { name: "OPENWEATHER_API_KEY", value: "a-plain-custom-credential-value", kind: "custom" });
+    const unreferenced = (await itemDelete.handler(
+      withElevation({ method: "DELETE", path: "/v1/secrets/OPENWEATHER_API_KEY" }),
+    )) as { body: { revoked: string } };
+    responses.push(unreferenced.body);
+    check(unreferenced.body.revoked === "OPENWEATHER_API_KEY", "a credential nothing points at revokes directly");
+
+    await manager.store(ctxFor(), { name: "STRIPE_SECRET_KEY", value: "another-plain-custom-value-here", kind: "custom" });
+    await usages.record(ctxFor(), { name: "STRIPE_SECRET_KEY", source: "static_scan", location: "tools/pay.py:9" });
+    const needsTyping = await statusOf(
+      itemDelete.handler,
+      withElevation({ method: "DELETE", path: "/v1/secrets/STRIPE_SECRET_KEY" }),
+    );
+    check(needsTyping.status === 409, "a REFERENCED credential refuses a bare revoke");
+    check(needsTyping.code === "confirmation_required", "asking for its name to be typed");
+    const wrongName = await statusOf(
+      itemDelete.handler,
+      withElevation({ method: "DELETE", path: "/v1/secrets/STRIPE_SECRET_KEY", body: { confirm: "NOT_THE_NAME" } }),
+    );
+    check(wrongName.status === 409, "and the wrong name does not satisfy it");
+    const confirmed = (await itemDelete.handler(
+      withElevation({ method: "DELETE", path: "/v1/secrets/STRIPE_SECRET_KEY", body: { confirm: "STRIPE_SECRET_KEY" } }),
+    )) as { body: { revoked: string } };
+    check(confirmed.body.revoked === "STRIPE_SECRET_KEY", "typing it exactly goes through");
+
+    // --- managed credentials get neither verb ----------------------------------------------------
+    console.log("\nmanaged credentials");
+    await manager.store(ctxFor(), { name: "GITHUB_TOKEN", value: "ghp_a-connector-owned-token-value", kind: "custom" });
+    await refs.setMetadata(ctxFor(), "GITHUB_TOKEN", { kind: "managed", connectorId: "github" });
+    const cannotRotate = await statusOf(
+      itemPost.handler,
+      withElevation({ path: "/v1/secrets/GITHUB_TOKEN/rotate", body: { value: "ghp_something-else-entirely" } }),
+    );
+    check(cannotRotate.status === 409 && cannotRotate.code === "managed_credential", "a managed credential cannot be rotated");
+    const cannotRevoke = await statusOf(
+      itemDelete.handler,
+      withElevation({ method: "DELETE", path: "/v1/secrets/GITHUB_TOKEN" }),
+    );
+    check(cannotRevoke.status === 409, "nor revoked — the fix is reconnecting the connector");
+
+    // --- importing a bundle ------------------------------------------------------------------------
+    console.log("\nimporting an export from somewhere else");
+    const importRoute = routes.find((r) => r.path === "/v1/secrets/import")!;
+    const imported = (await importRoute.handler(
+      withElevation({
+        path: "/v1/secrets/import",
+        body: {
+          text: JSON.stringify({
+            data: { data: { VAULT_ONE: "a-vault-kv2-credential-value", lower_case: "refused", VAULT_TWO: "" } },
+          }),
+        },
+      }),
+    )) as { body: { format: string; imported: string[]; rejected: { name: string; reason: string }[] } };
+    responses.push(imported.body);
+    check(imported.body.format === "vault", "a Vault KV-v2 document is recognised as one");
+    check(imported.body.imported.includes("VAULT_ONE"), "and its credentials are stored");
+    check(
+      imported.body.rejected.some((r) => r.name === "lower_case"),
+      "a name that is not a legal credential name is rejected with a reason",
+    );
+    check(
+      imported.body.rejected.some((r) => r.name === "VAULT_TWO"),
+      "and so is an empty value, which is a template placeholder rather than a credential",
+    );
+    check(
+      !JSON.stringify(imported.body).includes("a-vault-kv2-credential-value"),
+      "and the import response carries names and reasons, never a value",
+    );
+  }
+
+  // --- the serialiser audit -----------------------------------------------------------------------
+  //
+  // Acceptance criterion 11, asserted across every response this suite collected rather than
+  // argued handler by handler. The needle is a value that was genuinely stored in a real vault.
+  console.log("\nno route returns a plaintext value");
+  {
+    const haystack = JSON.stringify(responses);
+    check(responses.length >= 6, `collected ${responses.length} route responses to check`);
+    for (const needle of ["PLAINTEXT", SECRET_VALUE, "a-plain-custom-credential-value", "a-vault-kv2-credential-value"]) {
+      check(!haystack.includes(needle), `no response contains ${needle.slice(0, 24)}…`);
+    }
+    // And the mask is present, so the check above is not passing because the responses were empty.
+    check(haystack.includes("sk-ant-api03-...9c11"), "...while the MASK is present, so this is checking real output");
   }
 
   // --- step-up ----------------------------------------------------------------------------------
