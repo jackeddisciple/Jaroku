@@ -64,6 +64,15 @@ export interface JwtClaims {
   exp: number;
   iat?: number;
   nbf?: number;
+  /**
+   * When the person actually authenticated, per OIDC — as distinct from when this token was minted.
+   *
+   * The two differ exactly where it matters: a token silently refreshed in the background has a
+   * fresh `iat` and an `auth_time` from whenever somebody last typed a password. A step-up check
+   * that read `iat` would treat a background refresh as a re-authentication, which is the whole
+   * thing it exists to distinguish. Optional, because not every issuer emits it.
+   */
+  auth_time?: number;
   email?: string;
   email_verified?: boolean;
   name?: string;
@@ -206,6 +215,7 @@ function checkClaims(payload: Record<string, unknown>, opts: VerifyOptions): Jwt
     exp,
     iat: typeof iat === "number" ? iat : undefined,
     nbf: typeof nbf === "number" ? nbf : undefined,
+    auth_time: typeof payload["auth_time"] === "number" ? (payload["auth_time"] as number) : undefined,
     email: typeof payload["email"] === "string" ? payload["email"] : undefined,
     email_verified: payload["email_verified"] === true,
     name: typeof payload["name"] === "string" ? payload["name"] : undefined,

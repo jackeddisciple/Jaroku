@@ -115,6 +115,23 @@ export interface SecretsRouteDeps {
    * seconds to wait, or null to admit.
    */
   limitElevation?: (caller: SecretsCaller) => Promise<number | null>;
+  /**
+   * The counts behind the tab's warning dot. Served WITHOUT elevation, so it answers in numbers.
+   *
+   * Whether something needs attention is not sensitive; which credential needs it names what a
+   * workspace integrates with. The return type has no room for a name, which is the enforcement.
+   */
+  health: (ctx: TenantContext) => Promise<Record<string, number>>;
+  /**
+   * Tell somebody their account was locked out.
+   *
+   * A SEAM RATHER THAN A MAILER, and that is a decision worth stating. The brief asks for an email
+   * on lockout; this server has no mail transport, and inventing an untested SMTP client for one
+   * notification would be a worse answer than a named hook. The durable record — which the brief
+   * also asks for — is the `secrets.locked_out` audit row, which is written whether or not this is
+   * wired to anything. Deployments that have a mailer pass one in.
+   */
+  notifyLockout?: (caller: SecretsCaller, until: string | null) => Promise<void>;
 }
 
 /**
@@ -189,6 +206,95 @@ export function guarded(deps: SecretsRouteDeps, options: GuardOptions, handler: 
  */
 export function secretsRoutes(deps: SecretsRouteDeps): SecretsRoute[] {
   return [
+    // --- the badge, which must work while the tab is locked -----------------------------------
+    //
+    // `none`, and it is the only READ in the group that is. The brief is explicit: the tab shows a
+    // warning dot when something is expiring or broken, and that dot has to be computable without
+    // elevation — otherwise every user is prompted for a passcode to be told whether they need to
+    // care. Expiry status is not sensitive. WHICH credential is expiring names what a workspace
+    // integrates with, so this answers in counts and the shape it returns has nowhere to put a
+    // name.
+    {
+      method: "GET",
+      path: "/v1/secrets/health",
+      handler: guarded(deps, { elevation: "none", capability: "secret:read" }, async (_req, caller) => {
+        const counts = await deps.health(caller.ctx);
+        return { body: counts };
+      }),
+    },
+
+    // --- setting the first passcode -----------------------------------------------------------
+    //
+    // STEP-UP, NOT ELEVATION, and the ordering is the point: a user who has never set a passcode
+    // cannot be asked for one, so something else has to authorise this. If a session alone were
+    // enough, a hijacked session could set a passcode and thereby GRANT ITSELF access to every
+    // credential in the workspace — the gate would be a door the attacker installs and holds the
+    // only key to.
+    {
+      method: "POST",
+      path: "/v1/secrets/passcode",
+      handler: guarded(deps, { elevation: "step-up", capability: "secret:read" }, async (req, caller) => {
+        const body = await req.json<{ passcode?: unknown }>();
+        if (typeof body.passcode !== "string") throw badRequest("a passcode is required");
+        // Refused rather than silently replaced. Somebody who already has one and reaches here has
+        // either lost it — which is what /reset is for — or is not who they say they are.
+        if (await deps.passcodes.isSet(caller.ctx, caller.userId)) {
+          throw new HttpError(409, "passcode_already_set", "this account already has a secrets passcode");
+        }
+        await setPasscodeOrRefuse(deps, caller, body.passcode);
+        await deps.audit(caller, "secrets.passcode_set", {});
+        return { headers: { "cache-control": "no-store" }, body: { passcodeSet: true } };
+      }),
+    },
+
+    // --- changing one you know ------------------------------------------------------------------
+    //
+    // Elevation AND the current passcode. Elevation alone would mean an unlocked tab left open is
+    // a tab that can change the passcode, which is how somebody loses access to their own
+    // credentials to whoever walked past their desk.
+    {
+      method: "PATCH",
+      path: "/v1/secrets/passcode",
+      handler: guarded(deps, { elevation: "mutate", capability: "secret:read" }, async (req, caller) => {
+        const body = await req.json<{ current?: unknown; passcode?: unknown }>();
+        if (typeof body.current !== "string" || typeof body.passcode !== "string") {
+          throw badRequest("the current passcode and a new one are both required");
+        }
+        const proven = await deps.passcodes.verify(caller.ctx, caller.userId, body.current);
+        if (!proven.ok) {
+          await deps.audit(caller, "secrets.elevation_denied", { reason: "passcode_change" });
+          throw new HttpError(403, "elevation_denied", proven.message ?? "Incorrect passcode");
+        }
+        await setPasscodeOrRefuse(deps, caller, body.passcode);
+        // EVERY ELEVATION THE USER HOLDS ENDS, on every device. The proof they were granted under
+        // is the passcode that no longer exists, and a session elevated under the old one
+        // outliving the change is the case somebody changes their passcode to prevent.
+        await deps.elevations.lockEverywhere(caller.ctx, caller.userId, "passcode changed");
+        await deps.audit(caller, "secrets.passcode_changed", {});
+        return { headers: { "cache-control": "no-store" }, body: { passcodeSet: true, reElevate: true } };
+      }),
+    },
+
+    // --- recovering one you have forgotten --------------------------------------------------------
+    //
+    // A FULL STEP-UP, and deliberately NOT an email magic link. The whole point of elevation is
+    // proving the person is still there; a link in a mailbox proves someone had the mailbox, which
+    // is exactly the thing an attacker who took the session may also have.
+    {
+      method: "POST",
+      path: "/v1/secrets/passcode/reset",
+      handler: guarded(deps, { elevation: "step-up", capability: "secret:read" }, async (req, caller) => {
+        const body = await req.json<{ passcode?: unknown }>();
+        if (typeof body.passcode !== "string") throw badRequest("a new passcode is required");
+        // `put` clears the lockout as part of setting one — see the repository. Somebody who has
+        // just re-proved their identity to the IdP must not still be held out by the ladder.
+        await setPasscodeOrRefuse(deps, caller, body.passcode);
+        await deps.elevations.lockEverywhere(caller.ctx, caller.userId, "passcode reset");
+        await deps.audit(caller, "secrets.passcode_reset", {});
+        return { headers: { "cache-control": "no-store" }, body: { passcodeSet: true, reElevate: true } };
+      }),
+    },
+
     // --- becoming elevated ------------------------------------------------------------------
     //
     // `none`, necessarily: this is the route somebody calls precisely because they are not
@@ -226,6 +332,13 @@ export function secretsRoutes(deps: SecretsRouteDeps): SecretsRoute[] {
           });
           if (outcome.justLockedOut) {
             await deps.audit(caller, "secrets.locked_out", { method, until: outcome.lockedUntil });
+            // Told once, on the step that crosses into the lockout — not on every subsequent
+            // refusal, which would turn one attack into a mailbox full of identical warnings.
+            // Never awaited into the refusal: a notification that fails must not turn a 403 into
+            // a 500 and tell the attacker they found something.
+            void deps.notifyLockout?.(caller, outcome.lockedUntil).catch((err) => {
+              console.error("[secrets] could not report a lockout:", (err as Error)?.message ?? err);
+            });
           }
           // 403 with the same body whether the passcode was wrong, whether none is set, and
           // whether they are held out — plus `lockedUntil` when there is a wait to render, which
@@ -280,6 +393,14 @@ export function secretsRoutes(deps: SecretsRouteDeps): SecretsRoute[] {
             elevated: state.elevated,
             expiresAt: state.expiresAt,
             remainingMs: state.remainingMs,
+            // WHICH SCREEN TO RENDER: setup or unlock. This is not the oracle §3.5 forbids — that
+            // rule is about a FAILED verify not distinguishing "wrong" from "none set", so an
+            // attacker cannot enumerate. This tells an authenticated caller a fact about their own
+            // account, which they are entitled to and which the first-run flow cannot work without.
+            passcodeSet: await deps.passcodes.isSet(caller.ctx, caller.userId),
+            // What the gate is set to, so the client knows whether a locked tab should still
+            // render the list. Not sensitive: it is the shape of the policy, not its contents.
+            gate: await deps.gateFor(caller.ctx),
             ...(joined ? { token: joined.token } : {}),
           },
         };
@@ -309,4 +430,25 @@ export function secretsRoutes(deps: SecretsRouteDeps): SecretsRoute[] {
 /** Whole seconds until an ISO instant, floored at one. A `Retry-After: 0` invites an instant retry. */
 function retryAfterSecondsUntil(iso: string): number {
   return Math.max(1, Math.ceil((Date.parse(iso) - Date.now()) / 1000));
+}
+
+/**
+ * Store a passcode, turning a policy refusal into a 400 rather than a 500.
+ *
+ * `SecretPasscodes.set` throws a plain Error for a passcode that is too short or all spaces, which
+ * is right for a library — but an uncaught one here becomes "the server failed to handle that",
+ * with the actual reason visible only in a log the user cannot read. The message is safe to render:
+ * it says nothing about the passcode beyond the rule it broke.
+ */
+async function setPasscodeOrRefuse(
+  deps: SecretsRouteDeps,
+  caller: SecretsCaller,
+  passcode: string,
+): Promise<void> {
+  try {
+    await deps.passcodes.set(caller.ctx, caller.userId, passcode);
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    throw badRequest((err as Error)?.message ?? "that passcode cannot be used");
+  }
 }

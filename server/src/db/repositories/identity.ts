@@ -375,6 +375,57 @@ export class IdentityRepository {
   }
 
   /**
+   * How hard this workspace gates its Secrets surface.
+   *
+   * `tab` — nothing renders without elevation. `mutations` — the metadata list is readable with
+   * ordinary auth, and adding, rotating, revoking or revealing needs elevation.
+   *
+   * READ PER REQUEST rather than cached, because it is the kind of setting somebody changes
+   * BECAUSE something is happening, and one that took effect at the next restart would be one
+   * nobody could rely on during the incident that made them change it.
+   *
+   * A missing or deleted workspace answers `tab`, which is the stricter of the two. Failing open
+   * on a lookup that returned nothing is how a gate becomes optional.
+   */
+  async secretsGate(ctx: TenantContext): Promise<"tab" | "mutations"> {
+    const row = await this.db
+      .forWorkspace(ctx.workspaceId)
+      .get<{ secrets_gate: string }>(
+        `SELECT secrets_gate FROM workspaces WHERE id = ? AND deleted_at IS NULL`,
+        [ctx.workspaceId],
+      );
+    return row?.secrets_gate === "mutations" ? "mutations" : "tab";
+  }
+
+  /**
+   * Change it. Owner-gated at the route, audited here.
+   *
+   * Audited for the same reason a plan change is: "why could a member read our credential list
+   * without unlocking" is a question asked long after the change, and the answer has to survive in
+   * something other than a log that rotated.
+   */
+  async setSecretsGate(ctx: TenantContext, gate: "tab" | "mutations"): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const before = await tx.get<{ secrets_gate: string }>(
+        `SELECT secrets_gate FROM workspaces WHERE id = ? AND deleted_at IS NULL`,
+        [ctx.workspaceId],
+      );
+      if (!before || before.secrets_gate === gate) return;
+      await tx.run(`UPDATE workspaces SET secrets_gate = ? WHERE id = ? AND deleted_at IS NULL`, [
+        gate,
+        ctx.workspaceId,
+      ]);
+      await this.appendAuditIn(tx, ctx, {
+        workspaceId: ctx.workspaceId,
+        action: "secrets.policy_changed",
+        targetType: "workspace",
+        targetId: ctx.workspaceId,
+        metadata: { from: before.secrets_gate, to: gate },
+      });
+    });
+  }
+
+  /**
    * Move a workspace onto a plan.
    *
    * THE ONLY WRITER OF `workspaces.plan`, and it takes a TenantContext even though `workspaces`

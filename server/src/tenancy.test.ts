@@ -411,6 +411,9 @@ const SCOPED_API: Record<string, string[]> = {
     "createInvite", "listInvites", "revokeInvite", "acceptInvite", "listAudit",
     // Session 6 — the one writer of `workspaces.plan`, and therefore of every limit read from it.
     "setWorkspacePlan",
+    // Session 9 — how hard this workspace gates its credentials. Reading another tenant's would
+    // say how well defended they are; writing one would lower a defence somebody else chose.
+    "secretsGate", "setSecretsGate",
   ],
   // `sweep` is deliberately absent: it deletes EXPIRED rows across every workspace, which is
   // maintenance rather than a scoped operation, and asserting it "cannot reach another
@@ -802,6 +805,13 @@ async function remainder(db: Db): Promise<void> {
   check((await passcodes.get(B.ctx, userB.id))?.locked_until === null, "nor lock B's user out");
   await passcodes.recordSuccess(A.ctx, userB.id);
   check((await passcodes.get(B.ctx, userB.id))?.failed_attempts === 0, "nor clear a lockout of B's");
+
+  // How hard a workspace gates its credentials. Reading another tenant's says how well defended
+  // they are; writing one lowers a defence somebody else chose.
+  await identity.setSecretsGate(B.ctx, "mutations");
+  check((await identity.secretsGate(A.ctx)) === "tab", "A's gate is its own, and defaults to the strict one");
+  await identity.setSecretsGate(A.ctx, "tab");
+  check((await identity.secretsGate(B.ctx)) === "mutations", "and A cannot force B's back to strict either");
 
   const elevations = new SecretElevationRepository(db);
   const granted = await elevations.issue(B.ctx, {

@@ -89,6 +89,11 @@ import { McpRegistry } from "./mcpRegistry.ts";
 import { MCP_DISCOVER_CLASS, McpDiscoveryQueue } from "./mcpDiscovery.ts";
 import { WorkspaceExporter } from "./lifecycle/export.ts";
 import { lifecycleRoutes } from "./http/lifecycle.ts";
+import { secretsRoutes, type SecretsCaller } from "./http/secrets.ts";
+import { SecretElevations, sessionIdFor } from "./secrets/elevation.ts";
+import { SecretPasscodes } from "./secrets/passcode.ts";
+import { SecretElevationRepository } from "./db/repositories/secretElevations.ts";
+import { SecretPasscodeRepository } from "./db/repositories/secretPasscodes.ts";
 import { WorkspaceDeleter } from "./lifecycle/deletion.ts";
 import { endAllGrants } from "./oauth/revoke.ts";
 import { buildIdempotencyKey, type JobClass, type QueueJob } from "./queue/jobs.ts";
@@ -1840,6 +1845,106 @@ for (const route of lifecycleRoutes({
 })) {
   if (route.prefix) router.prefixRoute(route.method, route.path, route.handler);
   else if (route.method === "GET") router.get(route.path, route.handler);
+  else router.post(route.path, route.handler);
+}
+
+// THE SECRETS GROUP, and it is HTTP rather than socket commands for a reason worth stating.
+//
+// Everything else the product does goes down the WebSocket. This does not, because the elevation
+// token has to ride on a request header — a browser cannot set one on a WebSocket, which is the
+// same constraint that put the auth exchange on HTTP in the first place. Putting the gate on the
+// socket would mean inventing a per-frame authorisation, which is a header with extra steps.
+const secretPasscodes = new SecretPasscodes({ passcodes: new SecretPasscodeRepository(db) });
+const secretElevations = new SecretElevations({ elevations: new SecretElevationRepository(db) });
+
+/**
+ * How recently somebody must have authenticated for a step-up route to accept them.
+ *
+ * Five minutes. Long enough that "sign in, then set your passcode" is one flow rather than a race,
+ * short enough that a token minted this morning is not a fresh sign-in this afternoon.
+ */
+const STEP_UP_MAX_AGE_S = 5 * 60;
+
+for (const route of secretsRoutes({
+  callerFor: async (req): Promise<SecretsCaller> => {
+    const bearer = TokenVerifier.bearer(req.header("authorization")) ?? "";
+    const auth = await authenticate(req, tokenVerifier);
+    const requested = req.url.searchParams.get("workspace");
+    // Through the resolver, exactly like every other authenticated route: nothing below this line
+    // sees a workspace id the client chose. Elevation is an ADDITIONAL gate and never a
+    // replacement for this one.
+    const session = await contextResolver.resolve(auth, requested, req.requestId, req.ip);
+    const nowS = Math.floor(Date.now() / 1000);
+    return {
+      ctx: session.context,
+      userId: session.userId,
+      // Derived from the token the request already carries, so signing out ends every elevation
+      // it held without anything having to watch for a sign-out. See secrets/elevation.ts.
+      sessionId: sessionIdFor(bearer),
+      // NULL IS NOT FRESH. An issuer that will not say when somebody last authenticated cannot
+      // satisfy a step-up, because treating silence as "recently" makes the gate a formality
+      // against exactly the providers it cannot verify.
+      reauthenticatedRecently:
+        auth.authenticatedAt !== null && nowS - auth.authenticatedAt <= STEP_UP_MAX_AGE_S,
+      ip: req.ip,
+      userAgent: req.header("user-agent") ?? null,
+    };
+  },
+  elevations: secretElevations,
+  passcodes: secretPasscodes,
+  gateFor: (ctx) => identityRepo.secretsGate(ctx),
+  audit: async (caller, action, detail) => {
+    await identityRepo.appendAudit(caller.ctx, {
+      action,
+      targetType: "workspace",
+      targetId: caller.ctx.workspaceId,
+      // USER-AGENT IN THE METADATA, because there is no column for it and `audit_log` is
+      // append-only and shared. "Which browser was the credential-stuffing coming from" is asked
+      // while an incident is open, and `ip` alone does not answer it.
+      metadata: { ...detail, userAgent: caller.userAgent },
+      ip: caller.ip,
+    });
+  },
+  health: async (ctx) => {
+    const counts = await secretRefs.health(ctx);
+    return { ...counts };
+  },
+  limitElevation: async (caller) => {
+    // TWO BUCKETS, and both FAIL OPEN — the limiter is a protection against volume, not the
+    // boundary against a person. That boundary is the passcode ladder, which is unaffected by
+    // whether Redis is answering. See rateLimit.ts for why a bare `await take()` here would turn
+    // an unreachable Redis into an outage on this route.
+    for (const [action, subject] of [
+      ["secrets.elevation.user", caller.userId],
+      ["secrets.elevation.ip", caller.ip ?? "unknown"],
+    ] as const) {
+      let decision;
+      try {
+        decision = await rateLimiter.take(action, subject);
+      } catch (err) {
+        console.error(`[rate] limiter failed for ${action}, admitting:`, (err as Error)?.message ?? err);
+        continue;
+      }
+      if (!decision.ok) {
+        metrics.increment("rate_limited_total", { action });
+        return retryAfterSeconds(decision);
+      }
+    }
+    return null;
+  },
+  notifyLockout: async (caller, until) => {
+    // NO MAILER EXISTS IN THIS SERVER, and one invented for this single notification would be a
+    // transport nothing else exercises. The durable record is the `secrets.locked_out` audit row,
+    // already written by the caller. This is the seam a deployment with mail plugs into, and until
+    // then it is a warning on the operator's own log.
+    console.warn(
+      `[secrets] ${caller.userId} in ${caller.ctx.workspaceId} is locked out of secrets until ${until ?? "unknown"}`,
+    );
+  },
+})) {
+  if (route.method === "GET") router.get(route.path, route.handler);
+  else if (route.method === "PATCH") router.patch(route.path, route.handler);
+  else if (route.method === "DELETE") router.del(route.path, route.handler);
   else router.post(route.path, route.handler);
 }
 

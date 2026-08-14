@@ -40,6 +40,7 @@ const authFor = (sub: string): AuthContext => ({
   displayName: null,
   expiresAt: Math.floor(Date.now() / 1000) + 3600,
   issuer: "urn:jaroku:local",
+  authenticatedAt: Math.floor(Date.now() / 1000),
 });
 
 const refused = async (p: Promise<unknown>): Promise<{ status?: number; message: string } | null> =>

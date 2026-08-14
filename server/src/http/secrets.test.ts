@@ -142,6 +142,7 @@ try {
     audit: async (_caller, action, detail) => {
       audited.push({ action, detail: detail ?? {} });
     },
+    health: async () => ({ total: 2, expiringSoon: 1, invalid: 0, rotationDue: 0, unusedNinetyDays: 0 }),
   };
 
   // --- the structural audit ---------------------------------------------------------------
@@ -304,6 +305,81 @@ try {
       "...and the other one, which is what makes it a session property",
     );
     check(guardLevelOf(lockRoute.handler) === "none", "and lock-now needs no elevation, so it works while expiring");
+  }
+
+  // --- the badge works while the tab is locked ---------------------------------------------------
+  console.log("\nhealth answers without elevation, in counts");
+  {
+    const healthRoute = routes.find((r) => r.path === "/v1/secrets/health")!;
+    check(guardLevelOf(healthRoute.handler) === "none", "health needs no elevation");
+    const answer = (await healthRoute.handler(mkReq({ method: "GET", path: "/v1/secrets/health" }))) as {
+      body: Record<string, number>;
+    };
+    check(typeof answer.body["expiringSoon"] === "number", "and answers with counts");
+    check(
+      Object.values(answer.body).every((v) => typeof v === "number"),
+      "every field of which is a number, so there is nowhere for a name to travel",
+      JSON.stringify(answer.body),
+    );
+  }
+
+  // --- setting, changing and resetting a passcode ------------------------------------------------
+  console.log("\nthe passcode routes");
+  {
+    const setRoute = routes.find((r) => r.method === "POST" && r.path === "/v1/secrets/passcode")!;
+    const patchRoute = routes.find((r) => r.method === "PATCH" && r.path === "/v1/secrets/passcode")!;
+    const resetRoute = routes.find((r) => r.method === "POST" && r.path === "/v1/secrets/passcode/reset")!;
+    check(guardLevelOf(setRoute.handler) === "step-up", "setting the first passcode is a step-up route");
+    check(guardLevelOf(resetRoute.handler) === "step-up", "and so is resetting a forgotten one");
+    check(guardLevelOf(patchRoute.handler) === "mutate", "while changing a known one needs elevation");
+
+    // A SESSION ALONE CANNOT SET ONE. This is acceptance criterion 9, and the reason is that
+    // otherwise a hijacked session installs the gate and holds the only key.
+    freshLogin = false;
+    check(
+      (await statusOf(setRoute.handler, mkReq({ body: { passcode: "newpass1" } }))).code === "step_up_required",
+      "a valid session alone cannot set a first passcode",
+    );
+
+    // The fixture user already has one from the elevation section, so setting is refused as a
+    // conflict rather than silently replacing it.
+    freshLogin = true;
+    const conflict = await statusOf(setRoute.handler, mkReq({ body: { passcode: "newpass1" } }));
+    check(conflict.status === 409, "setting one over an existing passcode is refused, not silently replaced");
+
+    // A short passcode is a 400 from the policy, not a 500 from an uncaught throw.
+    const tooShort = await statusOf(resetRoute.handler, mkReq({ body: { passcode: "ab" } }));
+    check(tooShort.status === 400, "a too-short passcode is a bad request");
+    check(tooShort.status !== 500, "...rather than an uncaught error the user cannot read");
+
+    // Reset works on a step-up and ends every elevation, everywhere.
+    const stillLive = await elevations.grant(ctxFor(), {
+      userId: user.id,
+      sessionId: "reset-victim",
+      method: "passcode",
+    });
+    await resetRoute.handler(mkReq({ body: { passcode: "resetpc9" } }));
+    check(
+      (await elevations.check(ctxFor(), { userId: user.id, sessionId: "reset-victim", token: stillLive.token })) ===
+        null,
+      "a reset ends every elevation the user holds, on every device",
+    );
+    check(
+      audited.some((a) => a.action === "secrets.passcode_reset"),
+      "and is audited",
+    );
+    check((await passcodes.verify(ctxFor(), user.id, "resetpc9")).ok, "and the new passcode works");
+
+    // Changing needs BOTH elevation and the current passcode — an unlocked tab left open must not
+    // be enough to lock its owner out.
+    const fresh = await elevations.grant(ctxFor(), { userId: user.id, sessionId, method: "passcode" });
+    const wrongCurrent = await statusOf(
+      patchRoute.handler,
+      mkReq({ method: "PATCH", headers: { [ELEVATION_HEADER]: fresh.token }, body: { current: "nope1234", passcode: "brandnew1" } }),
+    );
+    check(wrongCurrent.code === "elevation_denied", "changing it with the wrong current passcode is refused");
+    check((await passcodes.verify(ctxFor(), user.id, "resetpc9")).ok, "and the old one still works");
+    freshLogin = false;
   }
 
   // --- step-up ----------------------------------------------------------------------------------

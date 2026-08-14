@@ -26,6 +26,21 @@ export interface AuthContext {
   /** Unix seconds. What the session revalidation timer watches. */
   expiresAt: number;
   issuer: string;
+  /**
+   * Unix seconds: when this person last actually authenticated, or null when the issuer will not
+   * say.
+   *
+   * `auth_time` when the issuer emits it, falling back to `iat`. The step-up gate on the secrets
+   * passcode routes is the only reader, and the distinction is the point of it: a token refreshed
+   * in the background carries a fresh `iat` and an `auth_time` from whenever somebody last proved
+   * who they were. Reading `iat` alone would let a silent refresh satisfy a check that exists to
+   * demand a deliberate one.
+   *
+   * NULL IS NOT FRESH. An issuer that says nothing cannot satisfy a step-up, because the
+   * alternative — treating silence as "recently" — makes the gate a formality against exactly the
+   * providers it cannot verify.
+   */
+  authenticatedAt: number | null;
 }
 
 export class AuthError extends Error {
@@ -79,6 +94,7 @@ export class TokenVerifier {
       displayName: claims.name?.trim() || null,
       expiresAt: claims.exp,
       issuer: claims.iss,
+      authenticatedAt: claims.auth_time ?? claims.iat ?? null,
     };
   }
 
