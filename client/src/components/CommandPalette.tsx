@@ -143,6 +143,10 @@ export function CommandPalette() {
                 <Item onSelect={run(() => setRightTab("graph"))}>Open Graph</Item>
                 <Item onSelect={run(() => setRightTab("trace"))}>Open Trace</Item>
                 <Item onSelect={run(() => setRightTab("deploy"))}>Open Deploy</Item>
+                {/* Tabs are reached from here rather than by a dedicated chord — the palette is
+                    where this app puts view navigation, and a secrets shortcut would be one more
+                    key to collide with while the composer has focus. */}
+                <Item onSelect={run(() => setRightTab("secrets"))}>Open Secrets</Item>
                 <Item onSelect={run(() => { setMode("files"); })} kbd="⌘P">Jump to file…</Item>
                 <Item onSelect={run(focusChat)} kbd="⌘/">Focus chat</Item>
               </Command.Group>

@@ -15,7 +15,9 @@ import { McpPanel } from "./McpPanel.tsx";
 import { ConnectionsPanel } from "./ConnectionsPanel.tsx";
 import { DeployPanel } from "./DeployPanel.tsx";
 import { UsagePanel } from "./UsagePanel.tsx";
+import { SecretsPanel } from "./SecretsPanel.tsx";
 import { useDeployStore } from "../store/deployStore.ts";
+import { needsAttention, useSecretsStore } from "../store/secretsStore.ts";
 import { isDeployInFlight } from "../types.ts";
 import { StepDetailPanel } from "./StepDetailPanel.tsx";
 
@@ -28,6 +30,10 @@ const TABS: { id: RightTab; label: string }[] = [
   // outside itself", and the two are the pair somebody audits together.
   { id: "connections", label: "Connections" },
   { id: "deploy", label: "Deploy" },
+  // Beside Connections, for the reason Connections sits beside MCP: the three answer "what does
+  // this workspace reach outside itself, and with whose credentials", and they are audited
+  // together.
+  { id: "secrets", label: "Secrets" },
   { id: "usage", label: "Usage" },
 ];
 
@@ -54,6 +60,8 @@ export function RightPanel() {
     prevDeployId.current = deployId;
   }, [deployId, deployRunning, setTab]);
 
+  const secretsNeedAttention = useSecretsStore((s) => needsAttention(s.health));
+
   const tabClass = (t: RightTab) =>
     `px-3 py-1.5 text-[12px] rounded-control transition-colors ${
       tab === t ? "bg-active text-ink" : "text-muted hover:text-ink"
@@ -72,6 +80,18 @@ export function RightPanel() {
         {TABS.map((t) => (
           <button key={t.id} className={tabClass(t.id)} onClick={() => setTab(t.id)}>
             {t.label}
+            {/* THE ONE BADGE IN THIS BAR, and it is computable while the tab is locked — the
+                health route answers in counts, without elevation, so somebody is not asked for a
+                passcode to be told whether they need to care. Carries a title as well as a colour,
+                because a coloured dot alone says nothing to a screen reader. */}
+            {t.id === "secrets" && secretsNeedAttention ? (
+              <span
+                title="A credential needs attention"
+                aria-label="A credential needs attention"
+                role="img"
+                className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-run align-middle"
+              />
+            ) : null}
           </button>
         ))}
       </div>
@@ -81,6 +101,7 @@ export function RightPanel() {
           : tab === "mcp" ? <McpPanel />
           : tab === "connections" ? <div className="h-full overflow-y-auto px-4 py-3"><ConnectionsPanel /></div>
           : tab === "deploy" ? <DeployPanel />
+          : tab === "secrets" ? <SecretsPanel />
           : tab === "usage" ? <UsagePanel />
           : <TraceTimeline />}
       </div>
