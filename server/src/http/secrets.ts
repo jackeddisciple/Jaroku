@@ -43,6 +43,7 @@ import type { SecretPasscodes } from "../secrets/passcode.ts";
 import { isSecretName } from "../secrets/secretStore.ts";
 import { parseSecretBundle, validateBundle } from "../secrets/bundle.ts";
 import type { SecretSummary } from "../secrets/manager.ts";
+import type { UsageRow as UsageSite } from "../db/repositories/secretUsages.ts";
 import { HttpError, badRequest, notFound, type Handler, type HttpRequest, type HttpResponse } from "./router.ts";
 
 /** Which policy a workspace is on. Both implemented; `tab` is the default and what ships. */
@@ -170,6 +171,14 @@ export interface SecretsRouteDeps {
   reveal?: (req: HttpRequest, caller: SecretsCaller, name: string) => Promise<string | null>;
   /** Bound how often credentials may be read back. Fails open, like every limiter here. */
   limitReveal?: (caller: SecretsCaller) => Promise<number | null>;
+  /**
+   * Where one credential is used, from both sources, each labelled.
+   *
+   * Refreshes the static half before answering — a scan is a substring walk over one version's
+   * files, cheap enough to do on demand, and a Usage view showing yesterday's scan is a Usage view
+   * somebody makes a revoke decision from.
+   */
+  usage?: (caller: SecretsCaller, name: string) => Promise<UsageSite[]>;
 }
 
 /**
@@ -180,7 +189,7 @@ export interface SecretsRouteDeps {
  * it a credential fits in, and the serialiser audit asserts that against every route's real output
  * rather than against the type.
  */
-export type { SecretSummary };
+export type { SecretSummary, UsageSite };
 
 /**
  * Wrap a handler in the group's guarantees.
@@ -611,6 +620,25 @@ export function secretsRoutes(deps: SecretsRouteDeps): SecretsRoute[] {
           return { headers: noCache, body: { name, value } };
         }
         throw notFound(`nothing to do at ${req.path}`);
+      }),
+    },
+
+    // --- what breaks if I revoke this --------------------------------------------------------
+    //
+    // `read`, not `mutate`: it is a question, and under the `mutations` policy somebody looking at
+    // the list should be able to see what depends on a credential without unlocking. The answer
+    // labels each site with its source, because a static hit is a guess about code that may never
+    // run and a runtime read is a fact about code that did.
+    {
+      method: "GET",
+      path: "/v1/secrets/",
+      prefix: true,
+      handler: guarded(deps, { elevation: "read", capability: "secret:read" }, async (req, caller) => {
+        const { name, action } = readTail(req.path);
+        if (action !== "usage") throw notFound(`nothing at ${req.path}`);
+        if (!deps.usage) throw notFound("this deployment does not record credential usage");
+        const sites = await deps.usage(caller, name);
+        return { headers: { "cache-control": "no-store" }, body: { name, usage: sites } };
       }),
     },
 

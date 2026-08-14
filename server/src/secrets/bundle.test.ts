@@ -1,5 +1,8 @@
-// Reading an export from 1Password, Vault or Doppler, and refusing what should not become a
-// credential.
+// The pure helpers behind the Secrets tab: reading an export from 1Password, Vault or Doppler,
+// masking a stored value, and scanning an agent's source for the credentials it names.
+//
+// Grouped in one suite because none of them touches a database or a network, and three npm
+// scripts for three pure modules is three things to forget to run.
 //
 // THE ASSERTION WORTH HAVING is the detection-order one. A HashiCorp KV-v2 document is ALSO a
 // perfectly valid flat `{"NAME": "value"}` object whose single key happens to be `data`. Read as
@@ -15,6 +18,7 @@
 
 import { describe, parseSecretBundle, validateBundle } from "./bundle.ts";
 import { maskFor, GENERIC_MASK } from "./mask.ts";
+import { scanForSecretNames } from "./scan.ts";
 
 let failures = 0;
 const check = (ok: boolean, msg: string, detail = ""): void => {
@@ -120,6 +124,63 @@ console.log("\nmasks");
   const masked = maskFor("sk-ant-api03-MIDDLE-ENTROPY-HERE-9c11");
   check(!masked.includes("MIDDLE"), "nothing from the middle of a key ever appears in a mask");
   check(!masked.includes("ENTROPY"), "...which is where the entropy is");
+}
+
+// --- the static scan ----------------------------------------------------------------------------
+//
+// THE ASSERTION WORTH HAVING here is the whole-word one. `OPENWEATHER_API_KEY` must not match
+// inside `OPENWEATHER_API_KEY_BACKUP`, or revoking the first warns about a file that uses the
+// second — and the warning would name a real file and a real line, which is what makes it
+// convincing and wrong. A `\b` would not do it: `\b` treats `_` as a word character, so it happily
+// matches a prefix that ends at an underscore.
+console.log("\nthe static scan");
+{
+  const files = [
+    {
+      path: "tools/weather.py",
+      content: [
+        "import os",
+        "",
+        'KEY = os.environ["OPENWEATHER_API_KEY"]',
+        'BACKUP = os.environ["OPENWEATHER_API_KEY_BACKUP"]',
+        'OLD = os.environ["LEGACY_OPENWEATHER_API_KEY"]',
+      ].join("\n"),
+    },
+    { path: "agent.py", content: 'token = os.environ.get("SLACK_BOT_TOKEN")\n' },
+  ];
+  const hits = scanForSecretNames(files, ["OPENWEATHER_API_KEY", "SLACK_BOT_TOKEN", "NEVER_MENTIONED"]);
+
+  const weather = hits.filter((h) => h.name === "OPENWEATHER_API_KEY");
+  check(weather.length === 1, `the name is found once, not three times (${weather.length})`);
+  check(weather[0]?.location === "tools/weather.py:3", "at the right file and line", weather[0]?.location);
+  check(
+    !hits.some((h) => h.location === "tools/weather.py:4"),
+    "a longer name that STARTS with it is not a hit",
+  );
+  check(
+    !hits.some((h) => h.location === "tools/weather.py:5"),
+    "and neither is one that ENDS with it",
+  );
+  check(hits.some((h) => h.name === "SLACK_BOT_TOKEN" && h.location === "agent.py:1"), "other files are scanned too");
+  check(!hits.some((h) => h.name === "NEVER_MENTIONED"), "a name nothing mentions produces no hit");
+
+  // One line, two occurrences, one hit: a line is the unit somebody opens.
+  const twice = scanForSecretNames(
+    [{ path: "x.py", content: 'a = ENV["MY_KEY"] or ENV["MY_KEY"]\n' }],
+    ["MY_KEY"],
+  );
+  check(twice.length === 1, "a name twice on one line is one hit");
+
+  check(scanForSecretNames(files, []).length === 0, "scanning for no names finds nothing");
+  check(
+    scanForSecretNames([{ path: "b.bin", content: "MY_KEY binary" }], ["MY_KEY"]).length === 0,
+    "and a binary file is skipped rather than scanned",
+  );
+
+  // Stable order, so a rescan of an unchanged tree writes the same rows rather than churning.
+  const a = JSON.stringify(scanForSecretNames(files, ["OPENWEATHER_API_KEY", "SLACK_BOT_TOKEN"]));
+  const b = JSON.stringify(scanForSecretNames(files, ["SLACK_BOT_TOKEN", "OPENWEATHER_API_KEY"]));
+  check(a === b, "the result does not depend on the order the names were given in");
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

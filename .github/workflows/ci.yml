@@ -120,6 +120,7 @@ jobs:
           npm run test:secret-routes
           npm run test:secret-import
           npm run test:provider-key-migration
+          npm run test:secrets-e2e
           npm run test:checkpoint-threads
           npm run test:branch
 

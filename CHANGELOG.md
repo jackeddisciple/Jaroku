@@ -8,6 +8,86 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.2.14 : The Secrets Tab
+
+A credential surface, and the gate in front of it. Session 9 is not a new store — the vault, its
+envelope encryption and its no-read rule have been there since Session 3. What it adds is the
+metadata a person needs to manage credentials, an elevated-session gate that is enforced in
+middleware rather than in a React component, and one deliberate reversal of a rule this codebase
+had held for six sessions.
+
+### Added
+
+- **A Secrets tab**, beside Connections and Deploy, with three groups because credentials arrive
+  three ways and each needs different verbs: user-pasted provider keys (rotate, test, reveal),
+  connector-managed tokens (reconnect only — Jaroku does not own their lifecycle, so "rotate" would
+  be a button that writes a value the far end has never heard of), and custom names an agent reads.
+- **An elevated session**, ten minutes, absolute and never sliding — a sliding window means an idle
+  open tab stays elevated all day. Keyed on a digest of the bearer token, which gets sign-out right
+  for nothing: a new token is a new session, so the old elevation is unreachable without anything
+  watching for it. Two tabs of one session share it and lock together; a second tab inherits the
+  first's expiry rather than starting a new ten minutes.
+- **A passcode**, per user and never per workspace, because `audit_log` has to be able to name a
+  person. scrypt from `node:crypto` with `algo` and `params` stored beside each hash, so the cost
+  can be raised later and every passcode migrates itself on its owner's next correct answer. Wrong
+  and never-set are indistinguishable in the response **and in timing** — the no-record path hashes
+  against a dummy salt at full cost, and `test:secret-passcode` measures that it does.
+- **A backoff ladder** enforced server-side at every step, including the small ones: three free
+  attempts, then 2s, 8s and 30s, then fifteen minutes and an audit row. A backoff the client is
+  asked to observe is not a control.
+- **A guarded route group.** This router has one global `beforeHandle` and its own comment refuses a
+  middleware chain, so the group is a route table whose every handler comes from `guarded()` —
+  defaulting to the strictest level, with opting out spelled out loud. `guardLevelOf()` lets
+  `test:secret-routes` assert that mechanically, and the suite builds an unguarded route to prove
+  the assertion can still fail.
+- **A workspace policy**, `tab` or `mutations`, both implemented and shipping as `tab`. One line in
+  the guard because it was designed in rather than bolted on.
+- **Blast radius** (`secret_usages`): a static scan of the agent's current version tree and a record
+  of runtime reads, shown separately and labelled. Neither is sufficient — a scan misses a name
+  built at runtime, and a read record misses code that has never run — so merging them into one
+  count would produce a number nobody could act on. Revoking a referenced credential requires typing
+  its name.
+- **Import** from a `.env`, a flat JSON object, Doppler's richer JSON or a HashiCorp KV-v2 document.
+  The nested shapes are detected before the flat one, because a KV-v2 document IS a valid flat
+  object whose one key is `data` — read as flat it would import one credential called `data` and
+  silently drop every real one.
+- **Google as a third provider**, end to end: `GOOGLE_API_KEY` (the name `langchain_google_genai`
+  actually reads), a models-list probe, three Gemini entries in `pricing.json`, and a branch in the
+  Python runtime's model resolution.
+- Suites: `test:secret-schema`, `test:secret-passcode`, `test:secret-routes`, `test:secret-import`,
+  `test:provider-key-migration`, `test:secrets-e2e`, and `test:secrets-store` on the client.
+
+### Changed
+
+- **Provider keys left onboarding.** A key-paste wall before anybody has seen the product is a bad
+  first screen. Onboarding is welcome → prompt → run; a browser stopped on the removed step resumes
+  at `prompt` rather than being sent back to a welcome screen it has already seen. Models whose
+  provider has no key render **disabled with a stated reason**, never hidden — a hidden model reads
+  as one Jaroku does not support, which is both false and unfixable from the user's side.
+- **`AuthContext` gained `authenticatedAt`**, from `auth_time` and falling back to `iat`, for the
+  step-up gate on the passcode routes. A token refreshed in the background carries a fresh `iat` and
+  proves nobody was there; null is deliberately not fresh.
+- **The deploy panel asks the vault what is configured**, not `process.env`. On the hosted driver
+  those are different questions — whether the SERVER holds a variable, rather than whether this
+  WORKSPACE holds the credential — and it was wrong in both directions, including reading the
+  platform's own key as every workspace's.
+
+### Fixed
+
+- **`RateRule.scope` gained `user`.** A per-workspace limit on unlock attempts would let one member
+  lock out their colleagues; a per-IP one would let a team behind one office NAT do it to each
+  other. What is being bounded is one person's guessing.
+
+### Migrations
+
+- `033_secrets_tab` — eight columns on `secret_refs` rather than a second `secrets` table beside it,
+  which is 016's own argument ("two copies of one fact is how they disagree"). Four new tables:
+  `user_secret_passcodes`, `secret_elevations`, `secret_usages` and `secret_rotations`, all
+  workspace-scoped with RLS. Plus one DELETE-only `platform_sweep` policy on `secret_elevations`,
+  because an unscoped delete under RLS removes nothing and reports that to nobody.
+
+---
+
 ## v0.2.13 : Hardening, Abuse, Data Lifecycle, Observability, Deploy
 
 Session 8 of the hosted migration, and the last one. Nothing here is a feature: it is the layers

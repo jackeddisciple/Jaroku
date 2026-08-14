@@ -48,6 +48,14 @@ export interface KmsSecretStoreOptions {
   runWorkspace: RunWorkspaceResolver;
   /** What each name is for, when the caller knows. Display only. */
   providerFor?: (name: string) => string | null;
+  /**
+   * Told when a run actually received credentials, for the blast-radius view.
+   *
+   * Takes a workspace id rather than a context for the same reason `refs.touch` does: its caller
+   * is the read path, which resolved one from a run and has no requesting context by then.
+   * Optional, so the two suites that construct this store with nothing but a database still work.
+   */
+  onRuntimeRead?: (workspaceId: string, names: string[]) => Promise<void>;
 }
 
 interface DataKeyRow {
@@ -138,7 +146,20 @@ export class KmsSecretStore implements SecretStore {
 
     // Usage is recorded in the registry rather than beside the ciphertext, so "when did a run
     // last receive this" is one fact in one place whichever store answered.
-    await this.opts.refs.touch(workspaceId, Object.keys(out));
+    const received = Object.keys(out);
+    await this.opts.refs.touch(workspaceId, received);
+    // AND WHERE, for the blast-radius view. Hooked HERE rather than at the request path because
+    // eval runs and the queue worker never go through `index.ts` — recording at the caller would
+    // have captured interactive runs only, which is the half least likely to be the one somebody
+    // is trying to explain at three in the morning.
+    //
+    // Best-effort and never awaited into the read's failure: a run must not fail because a usage
+    // row could not be written.
+    if (this.opts.onRuntimeRead && received.length) {
+      void this.opts.onRuntimeRead(workspaceId, received).catch((err) => {
+        console.error("[secrets] could not record a runtime read:", (err as Error)?.message ?? err);
+      });
+    }
     return out;
   }
 

@@ -269,6 +269,23 @@ export async function revokeSecret(name: string, confirm?: string): Promise<void
   await request("DELETE", `/v1/secrets/${encodeURIComponent(name)}`, confirm ? { confirm } : {});
 }
 
+export interface UsageSite {
+  name: string;
+  agent_id: string | null;
+  /** `static_scan` is a guess about code that may never run; `runtime_read` is a fact about code
+   *  that did. The UI labels them separately rather than merging them into one count. */
+  source: "static_scan" | "runtime_read";
+  location: string | null;
+  hits: number;
+  first_seen_at: string;
+  detected_at: string;
+}
+
+/** What breaks if I revoke this. Refreshes the static half server-side before answering. */
+export async function fetchUsage(name: string): Promise<UsageSite[]> {
+  return (await request<{ usage: UsageSite[] }>("GET", `/v1/secrets/${encodeURIComponent(name)}/usage`)).usage;
+}
+
 export interface ImportResult {
   format: string;
   imported: string[];

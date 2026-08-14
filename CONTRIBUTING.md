@@ -50,6 +50,10 @@ The shortest list, with the tests that defend them:
 | A failed MCP refresh never destroys a working tool list | `test:mcp-registry` |
 | A high-impact MCP call stops for confirmation; timing out denies | `test:mcp-isolation` |
 | No secret is written anywhere that outlives a run, and none reaches a browser except through the one audited, elevation-gated reveal (ADR-035) | `test:env-writer`, `test:deploy-secrets`, `test:secrets`, `test:vault`, `test:secret-routes` |
+| Every route in the secrets group is guarded, and a new one is guarded by default | `test:secret-routes` |
+| Wrong passcode and no-passcode-set are indistinguishable in body and in timing | `test:secret-passcode` |
+| Moving provider keys to the new shape decrypts nothing | `test:provider-key-migration` |
+| One tenant's credentials do not answer another tenant's requests, over real HTTP | `test:secrets-e2e` |
 | Two implementations of every abstraction, and neither can be told apart | `test:driver`, `test:objects`, `test:secrets`, `test:vault` |
 | An agent's files are immutable per version; undo is a pointer move | `test:project-store`, `test:edit-versions` |
 | No user string becomes a path on a shared host | `test:object-keys` |
@@ -89,6 +93,23 @@ The shortest list, with the tests that defend them:
 
 Every commit leaves `npm run typecheck` green on both `server/` and `client/`, and leaves the
 existing suites passing. A commit that breaks a test is not a working commit.
+
+## A new route in the secrets group needs nothing
+
+That is the property, not an omission. `server/src/http/secrets.ts` builds every handler through
+`guarded()`, whose default is the strictest level — capability, tenancy and a live elevation — so a
+route added without a thought is protected. Opting OUT is explicit (`elevation: "none"`) and visible
+in review, and there are four such routes: the badge's counts, and the three that exist to make
+elevation possible in the first place.
+
+`npm run test:secret-routes` asserts it mechanically rather than trusting it: every entry in the
+exported table must carry the marker `guarded()` leaves behind, and the suite builds an unguarded
+route of its own to prove the check can still fail.
+
+The one thing to decide is which level, and the answer is usually nothing — `mutate` is the default
+because it is the safe one. `read` exists for the questions the `mutations` policy makes answerable
+while locked, and `step-up` for the two operations a passcode cannot authorise, because a hijacked
+session could otherwise set one and let itself in.
 
 ## A new command needs a capability and a channel
 

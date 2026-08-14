@@ -557,6 +557,8 @@ function contextForRun(runId: string): TenantContext {
 // The MCP registry and the provider panel keep talking to the writer directly for now; they are
 // moved onto this in the commit that gives names a table of their own.
 const secretRefs = new SecretRefRepository(db);
+/** Filled in once the secrets manager exists — see `onRuntimeRead` on the store below. */
+let recordRuntimeRead: ((workspaceId: string, names: string[]) => Promise<void>) | null = null;
 const secrets = openSecretStore({
   db,
   refs: secretRefs,
@@ -570,8 +572,15 @@ const secrets = openSecretStore({
     name.startsWith("JAROKU_MCP_") ? "mcp"
       : name.startsWith("ANTHROPIC") ? "anthropic"
         : name.startsWith("OPENAI") ? "openai"
-          : name === RAILWAY_ENV_KEY ? "railway"
-            : null,
+          : name.startsWith("GOOGLE") ? "google"
+            : name === RAILWAY_ENV_KEY ? "railway"
+              : null,
+  // LATE-BOUND ON PURPOSE. The store is built here, near the top, because half the server needs
+  // it; the manager that records usage is built much later, because it needs the repositories that
+  // need the router. Rather than move one of them and disturb an ordering that works, the hook is
+  // a hole this fills in once both exist. Before then it is a no-op, which is correct: nothing has
+  // read a credential yet.
+  onRuntimeRead: (workspaceId, names) => recordRuntimeRead?.(workspaceId, names) ?? Promise.resolve(),
 });
 console.log(`[server] secret store: ${secrets.kind}${secrets.kind === "dotenv" ? " (runtime/.env)" : ""}`);
 
@@ -1867,6 +1876,11 @@ const secretPasscodes = new SecretPasscodes({ passcodes: new SecretPasscodeRepos
 const secretElevations = new SecretElevations({ elevations: new SecretElevationRepository(db) });
 const secretUsages = new SecretUsageRepository(db);
 const secretsManager = new SecretsManager({ secrets, refs: secretRefs, usages: secretUsages });
+// The hole punched at the store's construction, filled now that there is something to fill it
+// with. A run that reads a credential records WHERE, not just when.
+recordRuntimeRead = async (workspaceId, names) => {
+  await secretsManager.recordRuntimeReads(systemContextFor(workspaceId, newRequestId()), names);
+};
 
 /**
  * How recently somebody must have authenticated for a step-up route to accept them.
@@ -1950,6 +1964,25 @@ for (const route of secretsRoutes({
   revoke: (caller, name) => secretsManager.revoke(caller.ctx, name),
   test: (caller, name) => secretsManager.test(caller.ctx, name),
   isReferenced: (ctx, name) => secretsManager.isReferenced(ctx, name),
+  // THE STATIC HALF IS REFRESHED BEFORE THE ANSWER, so a revoke decision is made against the
+  // agent's source as it is now rather than as it was when somebody last opened this. Scanning is
+  // a substring walk over one version's files — cheap enough to do on demand, which is why there
+  // is no background job here to schedule, monitor and forget.
+  usage: async (caller, name) => {
+    for (const agent of await agentRepo.list(caller.ctx)) {
+      if (!agent.current_version) continue;
+      try {
+        const files = await projects.readCurrent(caller.ctx, agent.id, agent.current_version);
+        await secretsManager.rescanAgent(caller.ctx, agent.id, files);
+      } catch (err) {
+        // One unreadable agent must not make the whole Usage view fail. What it costs is that
+        // agent's static hits, and the runtime reads — the half that records what actually
+        // happened — are unaffected.
+        console.warn(`[secrets] could not scan ${agent.id}:`, (err as Error)?.message ?? err);
+      }
+    }
+    return secretsManager.usage(caller.ctx, name);
+  },
   // ADR-035. The guard has already established that this request is elevated; this turns that into
   // the RECEIPT the vault demands, which is a value no request body can produce. A token that has
   // expired between the guard and here yields no receipt and therefore no credential.

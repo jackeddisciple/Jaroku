@@ -27,11 +27,13 @@ import { KeyIcon, EyeIcon, RefreshIcon, XIcon, PlugIcon, CheckIcon } from "./pan
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { ICON, STATUS } from "../lib/tokens.ts";
 import {
+  fetchUsage,
   revealSecret,
   revokeSecret,
   rotateSecret,
   testSecret,
   type SecretSummary,
+  type UsageSite,
 } from "../lib/secrets.ts";
 import { groupSecrets, useSecretsStore } from "../store/secretsStore.ts";
 
@@ -210,12 +212,65 @@ function RevokeForm({
   );
 }
 
-type RowMode = "idle" | "rotate" | "revoke" | "revealed";
+/**
+ * What breaks if I revoke this.
+ *
+ * TWO SOURCES, SHOWN SEPARATELY AND LABELLED, because merging them would produce a number nobody
+ * can act on: a static hit is a guess about code that may never run, and a runtime read is a fact
+ * about code that did. "Three references" means something different when two of them are guesses.
+ */
+function UsageView({ sites }: { sites: UsageSite[] }) {
+  const staticHits = sites.filter((s) => s.source === "static_scan");
+  const runtime = sites.filter((s) => s.source === "runtime_read");
+  if (!sites.length) {
+    return (
+      <p className="pt-1 text-[11px] text-faint">
+        Nothing references this — no mention in any agent&rsquo;s current source, and no run has
+        received it.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-2 pt-1 text-[11px]">
+      <div>
+        <div className="text-faint">Referenced in source</div>
+        {staticHits.length === 0 ? (
+          <div className="text-faint">
+            — none. A name built at runtime would not appear here even if it is used.
+          </div>
+        ) : (
+          staticHits.map((s) => (
+            <div key={`${s.agent_id}:${s.location}`} className="font-mono text-muted">
+              · {s.location}
+            </div>
+          ))
+        )}
+      </div>
+      <div>
+        <div className="text-faint">Received by a run</div>
+        {runtime.length === 0 ? (
+          <div className="text-faint">
+            — never. Code that has not run yet would not appear here either.
+          </div>
+        ) : (
+          runtime.map((s) => (
+            <div key={`rt:${s.agent_id}`} className="text-muted">
+              · {s.hits} read{s.hits === 1 ? "" : "s"}, last {new Date(s.detected_at).toLocaleString()}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+type RowMode = "idle" | "rotate" | "revoke" | "revealed" | "usage";
 
 function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: () => void }) {
   const [mode, setMode] = useState<RowMode>("idle");
   const [busy, setBusy] = useState(false);
   const [revealed, setRevealed] = useState<string | null>(null);
+  const [usage, setUsage] = useState<UsageSite[] | null>(null);
   const [needsTyping, setNeedsTyping] = useState(false);
   const setError = useSecretsStore((s) => s.setError);
   const setNotice = useSecretsStore((s) => s.setNotice);
@@ -280,6 +335,25 @@ function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: ()
       <button className={quietBtn} disabled={busy} onClick={() => setMode(mode === "rotate" ? "idle" : "rotate")}>
         <RefreshIcon size={ICON.xs} /> {secret.configured ? "Rotate" : "Add"}
       </button>
+      {secret.kind === "custom" ? (
+        <button
+          className={quietBtn}
+          disabled={busy}
+          title="What breaks if I revoke this"
+          onClick={() => {
+            if (mode === "usage") {
+              setMode("idle");
+              return;
+            }
+            void run(async () => {
+              setUsage(await fetchUsage(secret.name));
+              setMode("usage");
+            });
+          }}
+        >
+          Usage
+        </button>
+      ) : null}
       {secret.configured ? (
         <button
           className={quietBtn}
@@ -371,6 +445,7 @@ function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: ()
           }
         />
       ) : null}
+      {mode === "usage" && usage !== null ? <UsageView sites={usage} /> : null}
       {mode === "revealed" && revealed !== null ? (
         <ValueOnce
           value={revealed}

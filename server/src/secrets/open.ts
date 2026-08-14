@@ -24,6 +24,13 @@ export interface OpenSecretStoreOptions {
   envPath: string;
   runWorkspace: RunWorkspaceResolver;
   providerFor?: (name: string) => string | null;
+  /**
+   * Told when a run received credentials, for the blast-radius view.
+   *
+   * Hosted store only. The local one answers from `process.env` and has no workspace to record
+   * against — the same asymmetry that keeps `last_used_at` in memory there. See ADR-033.
+   */
+  onRuntimeRead?: (workspaceId: string, names: string[]) => Promise<void>;
   /** Overrides `JAROKU_SECRET_STORE`. Tests pass this rather than mutating the environment. */
   kind?: string;
   env?: NodeJS.ProcessEnv;
@@ -77,5 +84,6 @@ export function openSecretStore(opts: OpenSecretStoreOptions): SecretStore {
     refs: opts.refs,
     runWorkspace: opts.runWorkspace,
     providerFor: opts.providerFor,
+    onRuntimeRead: opts.onRuntimeRead,
   });
 }

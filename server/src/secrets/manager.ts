@@ -24,12 +24,13 @@
 // goes out to the provider over HTTPS and never comes back into a response.
 
 import type { SecretRefRepository, SecretKind, SecretRefRow } from "../db/repositories/secretRefs.ts";
-import type { SecretUsageRepository } from "../db/repositories/secretUsages.ts";
+import type { SecretUsageRepository, UsageRow } from "../db/repositories/secretUsages.ts";
 import type { TenantContext } from "../db/tenant.ts";
 import { PROVIDER_ENV_KEY, isProviderId, verifyProviderKey, type ProviderId } from "../providers.ts";
 import { protectSecret } from "../obs/log.ts";
 import type { ElevationReceipt } from "./elevation.ts";
 import { maskFor } from "./mask.ts";
+import { scanForSecretNames, type ScannedFile } from "./scan.ts";
 import { assertSecretName, unstorableReason, type SecretStore } from "./secretStore.ts";
 
 /** What a client learns about one credential. No field here fits a credential. */
@@ -257,6 +258,55 @@ export class SecretsManager {
   /** Whether anything references this credential. Drives the typed-name revoke confirmation. */
   async isReferenced(ctx: TenantContext, name: string): Promise<boolean> {
     return this.deps.usages.isReferenced(ctx, name);
+  }
+
+  /** Every recorded site for one credential, static and runtime, each labelled with its source. */
+  async usage(ctx: TenantContext, name: string): Promise<UsageRow[]> {
+    return this.deps.usages.forSecret(ctx, name);
+  }
+
+  /**
+   * Re-scan one agent's current source for every credential name this workspace has.
+   *
+   * REPLACES that agent's static hits rather than adding to them, so a credential an agent stopped
+   * mentioning stops being listed. Its runtime reads survive: a scan of the current source has no
+   * standing to say a run did not happen, and an agent that is still deployed is still using what
+   * it used yesterday.
+   *
+   * Cheap enough to run on demand — it reads one version's files and does a substring walk — which
+   * is why the Usage view triggers it rather than depending on a background job somebody has to
+   * remember to schedule.
+   */
+  async rescanAgent(
+    ctx: TenantContext,
+    agentId: string,
+    files: readonly ScannedFile[],
+  ): Promise<number> {
+    const names = (await this.deps.refs.list(ctx)).map((r) => r.name);
+    const hits = scanForSecretNames(files, names);
+    await this.deps.usages.clearStaticFor(ctx, agentId);
+    for (const hit of hits) {
+      await this.deps.usages.record(ctx, {
+        name: hit.name,
+        source: "static_scan",
+        agentId,
+        location: hit.location,
+      });
+    }
+    return hits.length;
+  }
+
+  /**
+   * Record that a run received these credentials.
+   *
+   * Called from the store layer rather than from the request path, because eval runs and the queue
+   * worker never touch `index.ts` — hooking the caller would have recorded interactive runs only,
+   * which is the half of the traffic least likely to matter at three in the morning.
+   */
+  async recordRuntimeReads(ctx: TenantContext, names: readonly string[], agentId?: string | null): Promise<void> {
+    for (const name of names) {
+      await this.deps.usages.record(ctx, { name, source: "runtime_read", agentId: agentId ?? null });
+    }
   }
 
   /**
