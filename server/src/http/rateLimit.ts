@@ -62,6 +62,9 @@ export type RateAction =
   | "mcp.discover"
   | "member.invite"
   | "connector.connect"
+  | "secrets.elevation.user"
+  | "secrets.elevation.ip"
+  | "secrets.reveal"
   | "billing.checkout";
 
 export interface RateRule {
@@ -69,8 +72,15 @@ export interface RateRule {
   capacity: number;
   /** How fast the bucket refills. Bounds a SUSTAINED rate. */
   perMinute: number;
-  /** What the key is built from. `ip` for a stranger, `workspace` for a tenant. */
-  scope: "ip" | "workspace";
+  /**
+   * What the key is built from. `ip` for a stranger, `workspace` for a tenant, `user` for a person.
+   *
+   * `user` exists for the secrets gate and is a genuinely third thing. A per-workspace limit on
+   * unlock attempts would let one member's guessing lock out their colleagues, and a per-IP one
+   * would let a team behind one office NAT do the same to each other. What is being bounded here
+   * is one person's guessing, so the key is one person.
+   */
+  scope: "ip" | "workspace" | "user";
 }
 
 /**
@@ -123,6 +133,19 @@ export const RATE_RULES: Record<RateAction, RateRule> = {
   // Starting an OAuth flow costs a state row and a redirect; finishing one costs a token
   // exchange. Ten an hour is more reconnecting than anybody does.
   "connector.connect": { capacity: 10, perMinute: 10 / 60, scope: "workspace" },
+  // UNLOCK ATTEMPTS, LIMITED TWICE, because the two limits stop different attacks and neither
+  // substitutes for the other. The per-user bucket bounds one person's guessing and sits in front
+  // of a 64 MiB scrypt hash, so it is also what stops a guess flood being a memory attack. The
+  // per-IP bucket bounds one machine working through many accounts, which the per-user limit
+  // cannot see at all.
+  //
+  // Both are deliberately looser than the passcode ladder, which locks an account outright after
+  // seven wrong answers. The ladder is the control; these bound the cost of reaching it.
+  "secrets.elevation.user": { capacity: 10, perMinute: 10 / 60, scope: "user" },
+  "secrets.elevation.ip": { capacity: 30, perMinute: 30 / 60, scope: "ip" },
+  // Reading a stored credential back. Rarer than unlocking by design — the answer to "I need it
+  // again" is usually rotation — and every one of these writes an audit row.
+  "secrets.reveal": { capacity: 20, perMinute: 20 / 60, scope: "user" },
   // A checkout session is a row in somebody else's system that we cannot delete.
   "billing.checkout": { capacity: 10, perMinute: 10 / 60, scope: "workspace" },
 };

@@ -44,6 +44,18 @@ export const CAPABILITIES = [
   "eval:run",
   "mcp:read",
   "provider:read",
+  /**
+   * List the workspace's credentials as METADATA: names, kinds, masks, health, where each is used.
+   *
+   * A member capability, and the elevation gate is what actually holds this back — the two answer
+   * different questions. A capability asks "is this person entitled to this class of thing at
+   * all"; elevation asks "is it still them, right now". Making this admin-only would not remove
+   * the need for elevation, and would stop a member seeing that the credential their own agent
+   * depends on is the one that expired.
+   *
+   * It carries no value and cannot: nothing under this capability reaches a plaintext credential.
+   */
+  "secret:read",
   /** See what this workspace has connected, and which connection needs reconnecting. */
   "connector:read",
   "deploy:read",
@@ -64,6 +76,15 @@ export const CAPABILITIES = [
   "mcp:manage",
   /** Store or test a model-provider API key. */
   "provider:manage",
+  /**
+   * Add, rotate, revoke or reveal a credential.
+   *
+   * ADMIN, by the rule the header states: does this change what the workspace IS, or what is in
+   * it? Storing a credential commits the whole workspace to something, exactly as
+   * `provider:manage` and `connector:manage` do — and revoking one can break every deployed agent
+   * that reads it, which is not a lesser act than adding it.
+   */
+  "secret:manage",
   /**
    * Connect or disconnect a third-party account on the workspace's behalf.
    *
@@ -98,6 +119,7 @@ const MEMBER: readonly Capability[] = [
   "eval:run",
   "mcp:read",
   "provider:read",
+  "secret:read",
   "connector:read",
   "deploy:read",
   "member:read",
@@ -106,7 +128,7 @@ const MEMBER: readonly Capability[] = [
 
 /** What an admin adds. Nested, so a new member capability is automatically an admin's too. */
 const ADMIN: readonly Capability[] = [
-  ...MEMBER, "mcp:manage", "provider:manage", "connector:manage", "deploy:manage",
+  ...MEMBER, "mcp:manage", "provider:manage", "secret:manage", "connector:manage", "deploy:manage",
 ];
 
 const OWNER: readonly Capability[] = [...ADMIN, "member:manage", "workspace:manage", "billing:manage"];

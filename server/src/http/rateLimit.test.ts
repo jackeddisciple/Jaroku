@@ -52,8 +52,11 @@ console.log("\nthe rules");
     actions.every((a) => RATE_RULES[a].capacity >= 1 && RATE_RULES[a].perMinute > 0),
     "every rule admits at least one request and refills at all — a capacity of zero refuses forever",
   );
+  // Three scopes since the secrets gate: `user` is a genuinely third thing, not a synonym for
+  // either. A per-workspace limit on unlock attempts would let one member lock out their
+  // colleagues; a per-IP one would let a team behind one office NAT do the same to each other.
   check(
-    actions.every((a) => RATE_RULES[a].scope === "ip" || RATE_RULES[a].scope === "workspace"),
+    actions.every((a) => ["ip", "workspace", "user"].includes(RATE_RULES[a].scope)),
     "every rule says what it is keyed by",
   );
   check(

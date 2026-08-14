@@ -63,8 +63,16 @@ export interface CorsPolicy {
   allows(origin: string | undefined): boolean;
 }
 
-/** The request headers a browser is allowed to send here. `authorization` is the whole point. */
-const ALLOWED_REQUEST_HEADERS = "authorization, content-type";
+/**
+ * The request headers a browser is allowed to send here. `authorization` is the whole point.
+ *
+ * `x-jaroku-elevation` joins it for the secrets group. A custom header makes every request to that
+ * group non-simple and therefore preflighted, and a header missing from this list is one the
+ * browser strips before the real request — which arrives looking exactly like a request from
+ * somebody who is not elevated. That failure is invisible from the server and baffling from the
+ * client, which is the combination worth naming here rather than debugging later.
+ */
+const ALLOWED_REQUEST_HEADERS = "authorization, content-type, x-jaroku-elevation";
 
 /**
  * How long a browser may cache a preflight. Ten minutes: long enough that a session/ticket
@@ -265,8 +273,33 @@ export class Router {
     return this.add("PUT", path, handler, opts);
   }
 
+  /**
+   * PATCH and DELETE, added for the secrets group.
+   *
+   * Not present for the first eight sessions because nothing needed them: every mutation in this
+   * codebase was a POST or went down the socket. A credential surface is the first place where
+   * "change this one field" and "remove this one thing" are distinct operations on an addressable
+   * resource, and spelling both as POST would mean the method no longer says what the request
+   * does — which matters most on the routes where an audit log is reading it back.
+   *
+   * `del` rather than `delete`, which is a reserved word as a bare method name in enough contexts
+   * to be worth not fighting.
+   */
+  patch(path: string, handler: Handler, opts?: RouteOptions): this {
+    return this.add("PATCH", path, handler, opts);
+  }
+
+  del(path: string, handler: Handler, opts?: RouteOptions): this {
+    return this.add("DELETE", path, handler, opts);
+  }
+
   /** Everything under `prefix`, for a route whose tail is data rather than a path. */
-  prefixRoute(method: "GET" | "PUT" | "POST", prefix: string, handler: Handler, opts?: RouteOptions): this {
+  prefixRoute(
+    method: "GET" | "PUT" | "POST" | "PATCH" | "DELETE",
+    prefix: string,
+    handler: Handler,
+    opts?: RouteOptions,
+  ): this {
     this.routes.push({ method, path: prefix, prefix: true, handler, timeoutMs: opts?.timeoutMs });
     return this;
   }
