@@ -209,6 +209,7 @@ jobs:
         working-directory: client
         run: |
           npm run test:reset
+          npm run test:secrets-store
           npm run test:auth
           npm run test:plan-flow
           npm run test:deploy-store

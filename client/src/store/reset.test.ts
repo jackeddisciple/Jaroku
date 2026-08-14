@@ -27,6 +27,7 @@ import { useConnectionStore } from "./connectionStore.ts";
 import { useMcpStore } from "./mcpStore.ts";
 import { useMemberStore } from "./memberStore.ts";
 import { useProviderStore } from "./providerStore.ts";
+import { useSecretsStore } from "./secretsStore.ts";
 import { useTraceStore } from "./traceStore.ts";
 import { useSessionStore } from "./sessionStore.ts";
 import { inputKey, INPUT_KEY_PREFIX, useUiStore } from "./uiStore.ts";
@@ -85,6 +86,15 @@ console.log("\nfilling every store with one workspace's data");
   } as never);
   useMemberStore.setState({ members: [{ email: TENANT_A }], invites: [{ email: TENANT_A }] } as never);
   useProviderStore.setState({ providers: [{ id: "anthropic", configured: true, note: TENANT_A }] } as never);
+  // A credential NAME and the fact this session is unlocked. The names are what a workspace
+  // integrates with, and `elevated` is worse than a stale row: carried across a switch it would
+  // leave the second workspace's gate standing open because somebody unlocked the first.
+  useSecretsStore.setState({
+    secrets: [{ name: TENANT_A, kind: "custom", maskedHint: TENANT_A }],
+    elevated: true,
+    expiresAt: TENANT_A,
+    passcodeSet: true,
+  } as never);
   useDeployStore.setState({ deployments: [{ id: "d1", agent_id: TENANT_A }] } as never);
   // Session 6. A spend figure held across a switch is one workspace's invoice shown under
   // another's name — the same class of leak as a trace row, and harder to explain afterwards.

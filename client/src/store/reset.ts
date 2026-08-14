@@ -29,6 +29,7 @@ import { useGraphStore } from "./graphStore.ts";
 import { useMcpStore } from "./mcpStore.ts";
 import { useMemberStore } from "./memberStore.ts";
 import { useProviderStore } from "./providerStore.ts";
+import { useSecretsStore } from "./secretsStore.ts";
 import { useTraceStore } from "./traceStore.ts";
 
 /** Enough of a zustand store for this file. Avoids importing its generics for one call. */
@@ -67,6 +68,11 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
   mcpStore: useMcpStore as unknown as Resettable,
   memberStore: useMemberStore as unknown as Resettable,
   providerStore: useProviderStore as unknown as Resettable,
+  // The credential list, the health counts and — most of all — whether this session is elevated.
+  // Carrying elevation across a workspace switch would be the worst version of this leak: not one
+  // tenant's rows shown under another's name, but the gate on the second workspace standing open
+  // because somebody unlocked the first.
+  secretsStore: useSecretsStore as unknown as Resettable,
   traceStore: useTraceStore as unknown as Resettable,
 };
 

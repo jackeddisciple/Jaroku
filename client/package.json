@@ -16,7 +16,8 @@
     "test:export": "tsx src/lib/evalExport.test.ts",
     "test:csv": "tsx src/lib/csv.test.ts",
     "test:auth": "tsx src/lib/auth.test.ts",
-    "test:reset": "tsx src/store/reset.test.ts"
+    "test:reset": "tsx src/store/reset.test.ts",
+    "test:secrets-store": "tsx src/store/secretsStore.test.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
