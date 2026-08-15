@@ -368,6 +368,106 @@ const DEPLOY_COMMANDS = new Set([
   "setRailwayToken", "testRailwayToken",
 ]);
 
+// GitHub. Full git control from inside Jaroku, on its own channel.
+//
+// NOT ONE COMMAND HERE CARRIES A CREDENTIAL, and that is the constraint the whole command set is
+// shaped around rather than an accident of what happened to be needed. Elevation rides on a
+// request header and a browser cannot set one on a WebSocket — which is exactly why
+// `setProviderKey` was removed from this file — so linking a GitHub account is an HTTP route in
+// the secrets group and everything below it is a socket command about REPOSITORIES, not about
+// tokens. `githubConnected` is a boolean and an account login; the token behind it is a name in
+// the vault that never leaves the server.
+//
+// The read/manage split follows `deploy:read` / `deploy:manage`. Looking at where an agent's code
+// went is a read every member does; pointing an agent at a different repository commits the
+// workspace to something outside itself, and pushing writes source code into somebody's account.
+export type ListGithubCommand = { cmd: "listGithub"; agentId?: string };
+/** The repositories this workspace's token can write to. Answers names, never a credential. */
+export type ListGithubReposCommand = { cmd: "listGithubRepos"; query?: string };
+/** §2.2's live availability check, one keystroke at a time. Creates nothing. */
+export type CheckGithubRepoCommand = { cmd: "checkGithubRepo"; name: string };
+export type LinkGithubCommand = {
+  cmd: "linkGithub";
+  agentId: string;
+  /** An existing `owner/repo`, or the bare name of one to create under the linked account. */
+  repoFullName?: string;
+  createName?: string;
+  createPrivate?: boolean;
+  branch?: string;
+  subdirectory?: string | null;
+  includeArtifacts?: boolean;
+};
+export type UnlinkGithubCommand = { cmd: "unlinkGithub"; agentId: string };
+/**
+ * Re-read the remote and recompute the verdict. Read-only, and the cheap one.
+ *
+ * It updates `last_known_remote_sha` and touches neither the working state nor the divergence
+ * flow, so it carries none of the confirmation weight push and pull do — which is what makes it
+ * safe to run on opening the panel rather than only on a click.
+ */
+export type RefreshGithubCommand = { cmd: "refreshGithub"; agentId: string };
+export type PushGithubCommand = {
+  cmd: "pushGithub";
+  agentId: string;
+  /** §2.3's opt-in. Per push, never a stored preference. */
+  squash?: boolean;
+  /**
+   * Overwrite the branch.
+   *
+   * Carried as a field rather than as its own command so that the ordinary path and the escape
+   * hatch go through one handler and one audit row — a separate `forcePushGithub` would be a
+   * second code path that could drift out of writing the event.
+   */
+  force?: boolean;
+  /** The agent slug, typed by the user, when `force` is set. Refused without it. */
+  confirmSlug?: string;
+};
+export type PullGithubCommand = {
+  cmd: "pullGithub";
+  agentId: string;
+  /** Publish a candidate the validator refused. Same typed-slug bar as a force push. */
+  force?: boolean;
+  confirmSlug?: string;
+};
+export type SwitchGithubBranchCommand = {
+  cmd: "switchGithubBranch";
+  agentId: string;
+  branch: string;
+  /** §3.2 offers three answers when there is unpushed work, and never a silent overwrite. */
+  onUnpushed?: "push" | "stash" | "cancel";
+};
+export type CreateGithubBranchCommand = { cmd: "createGithubBranch"; agentId: string; branch: string };
+export type OpenGithubPrCommand = { cmd: "openGithubPr"; agentId: string };
+/** §3.4's commit box: a hand-staged subset of the changed files, with a message. */
+export type CommitGithubCommand = {
+  cmd: "commitGithub";
+  agentId: string;
+  paths: string[];
+  message: string;
+  /** §A.8's second half — commit, then push, in one step. */
+  push?: boolean;
+};
+
+export type GithubCommand =
+  | ListGithubCommand
+  | ListGithubReposCommand
+  | CheckGithubRepoCommand
+  | LinkGithubCommand
+  | UnlinkGithubCommand
+  | RefreshGithubCommand
+  | PushGithubCommand
+  | PullGithubCommand
+  | SwitchGithubBranchCommand
+  | CreateGithubBranchCommand
+  | OpenGithubPrCommand
+  | CommitGithubCommand;
+
+const GITHUB_COMMANDS = new Set([
+  "listGithub", "listGithubRepos", "checkGithubRepo", "linkGithub", "unlinkGithub",
+  "refreshGithub", "pushGithub", "pullGithub", "switchGithubBranch", "createGithubBranch",
+  "openGithubPr", "commitGithub",
+]);
+
 /** MCP-channel commands, grouped so the forwarding switch stays readable. */
 export type McpCommand =
   | AddMcpServerCommand
@@ -471,6 +571,7 @@ export type ClientCommand =
   | LoadUsageCommand
   | DeployChannelCommand
   | ListDeploymentsCommand
+  | GithubCommand
   | MemberCommand;
 
 /** Eval-channel commands, grouped so the forwarding switch stays readable. */
@@ -519,6 +620,7 @@ export type ForwardedCommand =
   | ProviderCommand
   | ConnectionCommand
   | DeployChannelCommand
+  | GithubCommand
   | MemberCommand
   | LoadUsageCommand;
 
@@ -782,6 +884,61 @@ export type DeployEvent =
   | { type: "error"; message: string; deploymentId?: string }
   | { type: "notice"; message: string; deploymentId?: string };
 
+// GitHub rides its own channel, for the same reason deploy does: a repository link is not a
+// deployment and not a connector, and the other channels are full snapshots of something else.
+//
+// ONE `state` EVENT CARRIES THE WHOLE PANEL, and that is a deliberate departure from the
+// finer-grained shapes elsewhere. Every region in §1 answers a question about the same underlying
+// pair of lineages, and a client that received "here is the link" and "here are the versions"
+// separately would render, for a frame, a verdict computed from a link that had already moved.
+// The panel's whole promise is that it is legible at every moment; a half-applied snapshot breaks
+// exactly that.
+//
+// Nothing here carries a credential. `connected` is a boolean, `accountLogin` is a name GitHub
+// prints on a profile page, and the token behind both is a name in the vault.
+export type GithubEvent =
+  /** The whole picture for one agent, plus the workspace-wide facts the sidebar needs. */
+  | {
+      type: "state";
+      agentId: string | null;
+      connected: boolean;
+      accountLogin: string | null;
+      /** Every live link in the workspace, for the sidebar's Synced filter. */
+      links: unknown[];
+      /** The active agent's link, verdict, versions and remote commits. Null when unlinked. */
+      view: unknown | null;
+    }
+  /** §2.2's existing-repo search. Names and default branches, filtered to what the token can write. */
+  | { type: "repos"; repos: unknown[] }
+  /** §2.2's live availability check, one answer per keystroke. */
+  | { type: "nameCheck"; name: string; available: boolean }
+  /**
+   * One phase transition of a push or a pull.
+   *
+   * `op` rather than two event types, so §2.4's rail and §3.6's rail are one component. They are
+   * the same shape — named stages in three tenses — and the only difference is the list.
+   */
+  | { type: "stage"; agentId: string; op: "push" | "pull"; stage: string; status: "active" | "done" | "error" }
+  /**
+   * A pull the validator turned away.
+   *
+   * ITS OWN EVENT RATHER THAN AN `error`, because §3.6 is explicit that this is a refusal and not a
+   * warning: it names the file and the missing symbol, it says the agent is unchanged, and it
+   * offers three specific actions. An error strip carrying a sentence could do none of that.
+   */
+  | {
+      type: "refused";
+      agentId: string;
+      /** `parse`, `import`, `contract`, `protected`, `size` — which bar it failed. */
+      check: string;
+      path: string | null;
+      message: string;
+      /** The candidate version that was staged and discarded, for the "View diff" link. */
+      candidate: number | null;
+    }
+  | { type: "error"; message: string; agentId?: string }
+  | { type: "notice"; message: string; agentId?: string };
+
 // The session channel: the only one that is about the CONNECTION rather than about the work.
 //
 // It exists because a WebSocket is the one thing in this system with no natural expiry. An
@@ -890,6 +1047,15 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   listDeployments: "deploy", planDeploy: "deploy", deploy: "deploy", cancelDeploy: "deploy",
   forgetDeployment: "deploy", loadDeployLogs: "deploy", setRailwayToken: "deploy",
   testRailwayToken: "deploy",
+
+  // Every GitHub command answers on `github`, including the reads. The channel HAS an error shape
+  // — `{ type: "error", agentId }` — so unlike `loadAgentFiles` there is nowhere better for a
+  // refusal to go, and a rate-limit refusal about a push that landed in the status bar instead of
+  // the panel would leave the panel waiting on an answer that already came.
+  listGithub: "github", listGithubRepos: "github", checkGithubRepo: "github",
+  linkGithub: "github", unlinkGithub: "github", refreshGithub: "github",
+  pushGithub: "github", pullGithub: "github", switchGithubBranch: "github",
+  createGithubBranch: "github", openGithubPr: "github", commitGithub: "github",
 };
 
 export function channelFor(cmd: string): string {
@@ -1413,6 +1579,13 @@ export class WsRelay {
             // precise error on the "connections" channel rather than dropping the message here.
             // The read is forwarded too — see CONNECTION_COMMANDS for why it is not local.
             void withContext((ctx) => this.onCommand?.(msg as ConnectionCommand, ctx));
+          } else if (GITHUB_COMMANDS.has(msg.cmd)) {
+            // Shape-checked in the app, which owns the GitHub client and the object store and can
+            // answer with a precise error on the "github" channel rather than dropping the
+            // message here. The reads are forwarded too, for the reason CONNECTION_COMMANDS gives:
+            // every one of them makes a network call to a third party that can take seconds and
+            // fail five ways, and the relay holds no token to make it with.
+            void withContext((ctx) => this.onCommand?.(msg as GithubCommand, ctx));
           } else if (MEMBER_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the identity repository and can answer with
             // a precise error on the "members" channel rather than dropping the message here.
@@ -1664,6 +1837,11 @@ export class WsRelay {
   /** Broadcast a deploy event. Separate channel by design — see DeployEvent. */
   broadcastDeploy(ctx: TenantContext, event: DeployEvent): void {
     this.broadcastTo(ctx, { channel: "deploy", ...event });
+  }
+
+  /** Broadcast a GitHub event. Separate channel by design — see GithubEvent. */
+  broadcastGithub(ctx: TenantContext, event: GithubEvent): void {
+    this.broadcastTo(ctx, { channel: "github", ...event });
   }
 
   /** Broadcast a membership event to the workspace it concerns. See MemberEvent. */

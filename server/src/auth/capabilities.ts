@@ -59,6 +59,8 @@ export const CAPABILITIES = [
   /** See what this workspace has connected, and which connection needs reconnecting. */
   "connector:read",
   "deploy:read",
+  /** See where an agent's code is pushed, and how far the two lineages have drifted. */
+  "github:read",
   "member:read",
   /**
    * See what this workspace has spent, and against which ceiling.
@@ -97,6 +99,16 @@ export const CAPABILITIES = [
   "connector:manage",
   /** Put an agent on a public URL in the workspace's own hosting account. */
   "deploy:manage",
+  /**
+   * Link an agent to a repository, push to it, pull from it, or override a refusal.
+   *
+   * ADMIN, by the rule the header states, and it is the clearest case of it in the table: a push
+   * writes this workspace's source code into an account outside the workspace, and a LINK decides
+   * which account that is. The read is a member's — somebody debugging an agent has to be able to
+   * see where its code went — but choosing the destination is committing the workspace to
+   * something, in the same sense `connector:manage` and `deploy:manage` are.
+   */
+  "github:manage",
 
   // --- what the workspace IS: owner --------------------------------------------------------
   /** Invite, remove, and change roles. */
@@ -122,6 +134,7 @@ const MEMBER: readonly Capability[] = [
   "secret:read",
   "connector:read",
   "deploy:read",
+  "github:read",
   "member:read",
   "billing:read",
 ];
@@ -129,6 +142,7 @@ const MEMBER: readonly Capability[] = [
 /** What an admin adds. Nested, so a new member capability is automatically an admin's too. */
 const ADMIN: readonly Capability[] = [
   ...MEMBER, "mcp:manage", "provider:manage", "secret:manage", "connector:manage", "deploy:manage",
+  "github:manage",
 ];
 
 const OWNER: readonly Capability[] = [...ADMIN, "member:manage", "workspace:manage", "billing:manage"];
@@ -257,6 +271,29 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   forgetDeployment: "deploy:manage",
   setRailwayToken: "deploy:manage",
   testRailwayToken: "deploy:manage",
+
+  // github
+  //
+  // The three reads are a member's: where an agent's code lives, which repositories are on offer,
+  // and whether a name is taken are all questions somebody debugging an agent legitimately asks.
+  // Everything below them writes — to a repository outside this workspace, or to the pointer that
+  // decides which repository that is — and is an admin's.
+  //
+  // `refreshGithub` IS A READ despite moving a stored column. All it moves is the watermark: it
+  // updates what we last SAW, never what we last DID, and a member who could not refresh would be
+  // reading a verdict computed from whenever an admin last looked.
+  listGithub: "github:read",
+  listGithubRepos: "github:read",
+  checkGithubRepo: "github:read",
+  refreshGithub: "github:read",
+  linkGithub: "github:manage",
+  unlinkGithub: "github:manage",
+  pushGithub: "github:manage",
+  pullGithub: "github:manage",
+  switchGithubBranch: "github:manage",
+  createGithubBranch: "github:manage",
+  openGithubPr: "github:manage",
+  commitGithub: "github:manage",
 
   // An export is deliberately NOT here, and its absence is the decision rather than an omission:
   // it is an HTTP route, not a socket command — see http/lifecycle.ts. A copy of everything the

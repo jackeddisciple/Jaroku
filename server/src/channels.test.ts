@@ -96,6 +96,12 @@ const TENANT_CHANNELS = new Set([
   // one workspace's flow, and a second tenant receiving one could complete it.
   "connections",
   "billing",    // what this workspace has spent — one tenant reading another's invoice
+  // Where each agent's source is pushed, under whose GitHub account, and every commit message on
+  // the way. It carries no token — but a repository name is often private, an account login names
+  // a person, and the version list inside a `state` event is this workspace's whole build history.
+  // The `repos` event is the sharpest case: it is a listing of every repository one token can
+  // write to, which is a map of somebody's private work.
+  "github",
   "log",        // stderr lines and refusals, both of which quote the workspace's own work
 ]);
 
@@ -304,6 +310,7 @@ console.log("\nfired live, in A, and B receives none of it");
   relay.broadcastProviders(ctxA, { type: "notice", message: MARK });
   relay.broadcastConnections(ctxA, { type: "notice", message: MARK });
   relay.broadcastBilling(ctxA, { type: "error", message: MARK });
+  relay.broadcastGithub(ctxA, { type: "error", message: MARK });
   relay.sendMembers(ctxA, ctxA.requestId, { type: "notice", message: MARK });
   relay.broadcastAgentFiles(ctxA, "agent_a");
   await relay.broadcastAgentGraph(ctxA, "agent_a");
