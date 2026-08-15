@@ -158,6 +158,23 @@ jobs:
           npm run test:escape-suite
           npm run test:tenancy-isolation
 
+      # THESE TWO SUITES SHIPPED WITH v0.2.15 AND CI HAS NEVER RUN EITHER OF THEM. They were
+      # written, they passed, and nothing but the person who wrote them ever executed them — the
+      # same gap the client job's comment below describes, in the job that was supposed to have
+      # learned from it.
+      #
+      # They are the whole of what is testable about the GitHub feature without a network: six
+      # sync states including the three that are almost impossible to produce by hand against a
+      # real repository, and the version-to-commit mapping, where getting a deletion wrong leaves
+      # a tool the user removed in their repository forever. Their own step rather than an
+      # addition to one above, because neither needs Postgres or Redis and a reader looking for
+      # "what covers GitHub" should find it in one place.
+      - name: the two lineages
+        working-directory: server
+        run: |
+          npm run test:github-sync
+          npm run test:github-push
+
       - name: cost, abuse and the data lifecycle
         working-directory: server
         run: |
@@ -220,3 +237,12 @@ jobs:
           npm run test:title
           npm run test:export
           npm run test:csv
+          # Both arrived with v0.2.15 and neither was added here, which is the exact omission the
+          # comment above is about. `test:truncate-path` guards the rule that a filename survives
+          # the width and the middle of the path is what gives way — a right-edge fade makes
+          # tools/we and tools/tr the same string to anybody scanning a list. `test:composer-
+          # triggers` guards #, @ and ! firing only where they are a trigger, and the case that
+          # matters is the one that is not: a picker opening halfway through somebody's email
+          # address is worse than having no shortcut at all.
+          npm run test:truncate-path
+          npm run test:composer-triggers
