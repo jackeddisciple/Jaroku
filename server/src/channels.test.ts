@@ -225,6 +225,71 @@ console.log("\nan in-flight operation's channel scope belongs to it alone");
 }
 
 // ---------------------------------------------------------------------------------------------
+// 3b. A command that answers on a feature's channel reaches that feature's handler.
+// ---------------------------------------------------------------------------------------------
+//
+// TWO LISTS OF THE SAME THING, IN TWO FILES, AND NOTHING TYPED CONNECTS THEM. `COMMAND_CHANNEL`
+// decides where a command's answer lands; the `*_COMMAND_NAMES` sets in index.ts decide which
+// handler it reaches. A name in the first and not the second is not a compile error and not a
+// runtime error either — the command arrives, passes its capability check, falls off the end of
+// the dispatch chain into `handleEvalCommand`, and the panel that sent it waits forever for an
+// answer nobody is going to write. That is exactly how `generateGithubMessage` shipped: ✨
+// generate sent, the button spun, and the eval handler quietly ignored a command it had never
+// heard of.
+//
+// The exceptions are named rather than pattern-matched, because "the relay answers this one
+// itself" is a decision worth stating once per command rather than a shape to be inferred.
+
+console.log("\nevery command reaches the handler its channel implies");
+{
+  /** channel -> the set literal in index.ts that dispatches it. */
+  const DISPATCH_SETS: Record<string, string> = {
+    mcp: "MCP_COMMAND_NAMES",
+    deploy: "DEPLOY_COMMAND_NAMES",
+    github: "GITHUB_COMMAND_NAMES",
+    providers: "PROVIDER_COMMAND_NAMES",
+    connections: "CONNECTION_COMMAND_NAMES",
+    members: "MEMBER_COMMAND_NAMES",
+  };
+
+  /**
+   * Reads the relay answers from its own handler table, never through `dispatchCommand`.
+   *
+   * Each is a pure snapshot with no side effect and no refusal of its own, so routing it through
+   * a feature handler would buy nothing. Listed by name so that adding a seventh is a decision
+   * somebody makes here, rather than a command that silently stops arriving.
+   */
+  const ANSWERED_BY_THE_RELAY = new Set(["listMcpServers", "listProviders", "listDeployments"]);
+
+  for (const [channel, setName] of Object.entries(DISPATCH_SETS)) {
+    const literal = new RegExp(`const ${setName} = new Set\\(\\[([\\s\\S]*?)\\]\\)`).exec(indexSource);
+    check(Boolean(literal), `${setName} is where index.ts dispatches the ${channel} channel`);
+    if (!literal) continue;
+    const dispatched = new Set([...literal[1]!.matchAll(/"([A-Za-z]+)"/g)].map((m) => m[1]!));
+
+    const expected = Object.entries(COMMAND_CHANNEL)
+      .filter(([cmd, ch]) => ch === channel && !ANSWERED_BY_THE_RELAY.has(cmd))
+      .map(([cmd]) => cmd);
+    const missing = expected.filter((cmd) => !dispatched.has(cmd));
+    check(
+      missing.length === 0,
+      `every command answering on "${channel}" is in ${setName} (${expected.length} checked)`,
+      missing.length ? `UNROUTED: ${missing.join(", ")} — they would fall through to handleEvalCommand` : "",
+    );
+
+    // And the other direction: a name dispatched to a handler but absent from COMMAND_CHANNEL
+    // answers on `log` by default, so its refusals land in the status bar instead of the panel
+    // that asked — the exact failure COMMAND_CHANNEL's own comment exists to prevent.
+    const unmapped = [...dispatched].filter((cmd) => COMMAND_CHANNEL[cmd] !== channel);
+    check(
+      unmapped.length === 0,
+      `...and nothing in ${setName} answers somewhere else`,
+      unmapped.length ? `UNMAPPED: ${unmapped.join(", ")}` : "",
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // 4. Live: two sockets, two workspaces, every tenant channel fired.
 // ---------------------------------------------------------------------------------------------
 

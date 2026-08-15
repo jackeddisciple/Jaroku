@@ -3035,10 +3035,16 @@ async function handleMemberCommand(ctx: TenantContext, cmd: MemberCommand): Prom
 // NOT ONE COMMAND HERE TOUCHES A TOKEN. Connecting is `POST /v1/github/connect`, in the secrets
 // group, behind `guarded()` — see wsRelay.ts and http/secrets.ts for why that has to be HTTP.
 
+// THE SAME TWELVE NAMES `wsRelay.GITHUB_COMMANDS` FORWARDS, PLUS THE ONE THIS LIST HAD DROPPED.
+// The relay decides which commands reach the server and this decides which handler they reach, so
+// a name in one and not the other is not a type error anywhere — it is a command that arrives,
+// passes its capability check, and falls through the dispatch chain into `handleEvalCommand`,
+// which has never heard of it. That is what happened to `generateGithubMessage`: ✨ generate sent,
+// the button span, and no answer was ever coming.
 const GITHUB_COMMAND_NAMES = new Set([
   "listGithub", "listGithubRepos", "checkGithubRepo", "linkGithub", "unlinkGithub",
   "refreshGithub", "pushGithub", "pullGithub", "switchGithubBranch", "createGithubBranch",
-  "openGithubPr", "commitGithub",
+  "openGithubPr", "commitGithub", "generateGithubMessage",
 ]);
 
 const githubService = new GithubService({
