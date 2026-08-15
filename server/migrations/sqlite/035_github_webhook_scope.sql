@@ -1,0 +1,14 @@
+-- 035_github_webhook_scope — nothing to do on this driver.
+--
+-- The postgres half adds one SELECT policy on `github_links` that the marker set by
+-- `Db.asPlatform` unlocks, so the GitHub webhook can answer the question no tenant can ask:
+-- which workspaces have linked the repository this delivery is about?
+--
+-- There are no policies here and no marker — `asPlatform` is an ordinary transaction on SQLite,
+-- exactly as `scoped` is, because there is no second wall to open a door in. The distinction is
+-- still real on this driver and is carried by the repository method's signature: `linksForRepo`
+-- takes no `TenantContext` and says in its own comment that it is the exception, while every
+-- other read of that table takes one and carries `workspace_id` in its WHERE.
+--
+-- Present as a file because the runner requires both dialects to hold the same versions under the
+-- same names. See `compareDialects`.

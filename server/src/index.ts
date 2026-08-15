@@ -71,6 +71,7 @@ import { resolveSigningKey } from "./storage/presign.ts";
 import { filesFromDirectory, ProjectStore } from "./storage/projectStore.ts";
 import { objectRoutes } from "./http/objects.ts";
 import { billingRoutes } from "./http/billing.ts";
+import { githubWebhookRoutes } from "./http/githubWebhook.ts";
 import { stripeConfigFromEnv } from "./billing/stripe.ts";
 import { readAgentFiles, slugsOwnedElsewhere, type AgentFilesDeps } from "./agentFiles.ts";
 import {
@@ -3095,6 +3096,37 @@ async function broadcastGithub(ctx: TenantContext, agentId?: string | null): Pro
     links: await githubRepo.links(ctx),
     view: agentId ? await githubService.view(ctx, agentId) : null,
   });
+}
+
+// THE GITHUB WEBHOOK, for the same reason and with the same shape as the payment one above.
+//
+// Unauthenticated by construction — GitHub presents no bearer token and holds no socket — so its
+// HMAC over the raw bytes is the whole authentication. It is registered here rather than in the
+// secrets group because that group's every handler comes from `guarded()`, which is exactly what
+// this endpoint cannot be: `POST /v1/github/connect` writes a credential and must be elevated,
+// while this one is a third party telling us a branch moved.
+//
+// WITHOUT `JAROKU_GITHUB_WEBHOOK_SECRET` SET, EVERY DELIVERY IS REFUSED. The route stays mounted
+// so a misconfiguration reads as 401s in GitHub's own delivery log — somewhere somebody will look
+// — rather than as 404s that look like a wrong URL.
+for (const route of githubWebhookRoutes({
+  repo: githubRepo,
+  secret: () => process.env["JAROKU_GITHUB_WEBHOOK_SECRET"] || undefined,
+  // The panel updates itself with no click and no poll, which is the entire point of the hook:
+  // a teammate's push reaches a tab nobody has touched. Through the same `broadcastGithub` a
+  // command uses, so a webhook-driven refresh and a user-driven one are one code path.
+  //
+  // THE UUID IS RESOLVED TO A SLUG HERE. A link stores `agent_id` as the uuid, which is the right
+  // key for a foreign key and the wrong one for `broadcastGithub` — that takes what the panel
+  // calls an agent, and `githubService.view` looks it up with `bySlug`. Handing it a uuid finds no
+  // agent, returns a null view, and broadcasts a snapshot that would UNLINK the agent in every
+  // open tab: `applyState` deletes the entry when a message names an agent with no view.
+  notify: (ctx, agentUuid) =>
+    void agentRepo.byId(ctx, agentUuid).then((agent) => {
+      if (agent) void broadcastGithub(ctx, agent.slug);
+    }),
+})) {
+  router.post(route.path, route.handler);
 }
 
 /**

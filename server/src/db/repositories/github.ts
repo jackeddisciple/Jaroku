@@ -90,6 +90,18 @@ export interface LinkInput {
   includeArtifacts?: boolean;
 }
 
+/**
+ * A link and the workspace that owns it — what a cross-workspace lookup has to return.
+ *
+ * Only `linksForRepo` produces this, and only the webhook consumes it. Everywhere else the
+ * workspace is already known before a link is fetched, which is the ordinary case and the one
+ * `GithubLink` is shaped for.
+ */
+export interface LinkOwner {
+  workspaceId: string;
+  link: GithubLink;
+}
+
 /** The fields a sync updates. All optional: a fetch moves one of them and a push moves three. */
 export interface LinkPatch {
   branch?: string;
@@ -328,6 +340,44 @@ export class GithubRepository {
       [ctx.workspaceId],
     );
     return rows.map((r) => this.hydrateLink(r));
+  }
+
+  /**
+   * Every live link pointing at one repository and branch, ACROSS WORKSPACES.
+   *
+   * THE ONE METHOD IN THIS FILE THAT TAKES NO `TenantContext`, and the signature is the warning
+   * label. The header above says every method takes a context first because on SQLite the WHERE
+   * clause IS the tenancy boundary — this is the documented exception, and it exists because the
+   * GitHub webhook genuinely has no tenant to be scoped to. GitHub POSTs a repository name to a
+   * public URL with no session and no socket; "which workspaces care about this repository?" is
+   * the question, and no workspace can ask it.
+   *
+   * THE PAYLOAD NAMES A REPOSITORY AND NEVER A WORKSPACE. That is the whole tenancy argument. The
+   * caller matches on the repo name and gets back rows that each carry the workspace they belong
+   * to, then does its work per workspace through `forWorkspace` like everything else. A handler
+   * that read a workspace id OFF the delivery would be letting a stranger choose a tenant.
+   *
+   * `asPlatform` RATHER THAN A BARE READ, because on Postgres an unscoped statement sees nothing:
+   * with no `app.workspace_id` set, `tenant_isolation` is false for every row, so this would
+   * return empty and the webhook would silently do nothing on the one driver that matters.
+   * Migration 035 grants the SELECT this unlocks, and grants only that.
+   *
+   * TWO WORKSPACES MAY LINK THE SAME REPOSITORY and both are returned. That is not a leak: each
+   * of them independently told Jaroku to watch that repo, and telling one of them their branch
+   * moved reveals nothing they did not already have a link to.
+   */
+  async linksForRepo(repoFullName: string, branch: string): Promise<LinkOwner[]> {
+    const rows = await this.db.asPlatform((tx) =>
+      tx.all<Record<string, unknown>>(
+        `SELECT ${LINK_COLUMNS}, workspace_id FROM github_links
+          WHERE repo_full_name = ? AND branch = ? AND deleted_at IS NULL`,
+        [repoFullName, branch],
+      ),
+    );
+    // The workspace rides ALONGSIDE the link rather than on it. `GithubLink` is read by the
+    // service, the runners and the panel, none of which should start seeing a workspace id on a
+    // shape whose whole point is that it was already scoped to one before they got it.
+    return rows.map((r) => ({ workspaceId: String(r["workspace_id"]), link: this.hydrateLink(r) }));
   }
 
   /**
