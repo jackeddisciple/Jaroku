@@ -105,7 +105,7 @@ export interface GithubView {
   remoteOnly: CommitRow[];
   branches: BranchRow[];
   /**
-   * Paths the edit loop and the staging area may not touch, repository-relative.
+   * Paths the edit loop and the staging area may not touch, project-relative — as `changes` is.
    *
    * §3.3's PROTECTED group, and the part a generic git client gets wrong. Sent from the server
    * rather than derived in the browser because the block list is the same one `projectFs` enforces
@@ -303,18 +303,24 @@ export class GithubService {
   }
 
   /**
-   * The read-only set, in repository terms.
+   * The read-only set, in the SAME path space as `changes` — project-relative, POSIX.
    *
-   * NORMALISED THROUGH `repoPath`, and that is not cosmetic — it is the Windows-separator bug from
-   * the Unreleased release, one layer up and in a new place. `readOnlyPaths` returns POSIX object
-   * keys; the panel compares them against paths that carry the link's subdirectory prefix. Build
-   * that prefix with anything platform-dependent and the block list matches nothing on one
-   * operating system, which is not a rendering glitch: it is the PROTECTED group going quietly
-   * empty, and a hand-staged edit to `mcp_bridge.py` becoming available on exactly one platform.
+   * IT USED TO CARRY THE LINK'S SUBDIRECTORY PREFIX, and the panel is the reason that was wrong.
+   * §3.3's PROTECTED group renders these beside `changes` rows and subtracts one list from the
+   * other to find the protected files nothing touched — and `file_stats` paths are project-
+   * relative, so under a subdirectory link `agents/weather/tools/__init__.py` never equalled
+   * `tools/__init__.py`. Nothing errored: a protected file that HAD been touched was rendered
+   * twice, once from each list, in two different spellings of its own name, and the composer's
+   * @-picker offered both as though they were two files.
+   *
+   * Still normalised rather than passed through, because `readOnlyPaths` is fed by
+   * `connectorFilesFor` and a backslash arriving from a catalogue entry would make the block list
+   * match nothing on one operating system — which is not a rendering glitch but a hand-staged edit
+   * to `mcp_bridge.py` becoming possible on exactly one platform.
    */
-  private protectedFor(agent: Agent, link: GithubLink): string[] {
+  private protectedFor(agent: Agent, _link: GithubLink): string[] {
     const files = this.deps.connectorFilesFor(agent, agent.slug);
-    return [...readOnlyPaths(files)].map((p) => repoPath(p, link.subdirectory)).sort();
+    return [...readOnlyPaths(files)].map((p) => p.replace(/\\/g, "/").replace(/^\/+/, "")).sort();
   }
 
   /**
