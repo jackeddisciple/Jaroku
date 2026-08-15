@@ -29,6 +29,7 @@ import { AlertTriangleIcon, ClockIcon, LockIcon, PlusIcon, XIcon } from "./panel
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { ICON } from "../lib/tokens.ts";
 import {
+  changePasscode,
   createSecret,
   fetchElevation,
   fetchHealth,
@@ -104,6 +105,7 @@ export function SecretsPanel() {
   const pending = useSecretsStore((s) => s.pending);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [changingPasscode, setChangingPasscode] = useState(false);
   const hiddenSince = useRef<number | null>(null);
 
   // Under `mutations` the metadata list is readable without elevation, so the content renders
@@ -262,10 +264,19 @@ export function SecretsPanel() {
               <button className={quietBtn} onClick={() => setImporting((v) => !v)}>
                 Import
               </button>
+              {/* The only way to reach PATCH /secrets/passcode. The route and the client function
+                  both existed; nothing rendered a control for either, so somebody who wanted to
+                  change a passcode they still knew had to forget it first and recover. */}
+              <button className={quietBtn} onClick={() => setChangingPasscode((v) => !v)}>
+                Change passcode
+              </button>
             </div>
 
             {adding ? <AddForm onDone={() => { setAdding(false); void refresh(); }} /> : null}
             {importing ? <ImportForm onDone={() => { setImporting(false); void refresh(); }} /> : null}
+            {changingPasscode ? (
+              <PasscodeForm onDone={() => { setChangingPasscode(false); void refresh(); }} />
+            ) : null}
 
             <SecretsList onChanged={() => void refresh()} />
           </div>
@@ -323,6 +334,95 @@ function AddForm({ onDone }: { onDone: () => void }) {
       </div>
       <p className="text-[11px] text-faint">
         UPPER_SNAKE_CASE. A provider key is validated with the provider before it is stored.
+      </p>
+    </form>
+  );
+}
+
+/**
+ * Changing a passcode somebody still knows.
+ *
+ * THE CURRENT ONE IS ASKED FOR AS WELL AS ELEVATION, and that is the server's rule rather than this
+ * form's politeness: an unlocked tab left open would otherwise be a tab that can change the
+ * passcode, which is how somebody loses their credentials to whoever walked past the desk.
+ *
+ * A SUCCESSFUL CHANGE ENDS EVERY ELEVATION, on every device — the proof they were all granted under
+ * is the passcode that no longer exists. So this closes onto the lock screen, which is correct and
+ * worth saying out loud rather than looking like a failure.
+ */
+function PasscodeForm({ onDone }: { onDone: () => void }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const setError = useSecretsStore((s) => s.setError);
+  const setNotice = useSecretsStore((s) => s.setNotice);
+  const field =
+    "min-w-0 flex-1 rounded-control bg-bg px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-faint focus:shadow-focusring";
+  return (
+    <form
+      className="space-y-2 rounded-control border border-hair px-3 py-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (next !== confirm) {
+          setError("Those do not match");
+          return;
+        }
+        setBusy(true);
+        setError(null);
+        void changePasscode(current, next)
+          .then(() => {
+            setCurrent("");
+            setNext("");
+            setConfirm("");
+            setNotice("Passcode changed. Every unlocked tab was locked, including this one.");
+            onDone();
+          })
+          .catch((err: Error) => setError(err.message))
+          .finally(() => setBusy(false));
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <label className="sr-only" htmlFor="secrets-passcode-current">Current passcode</label>
+        <input
+          id="secrets-passcode-current"
+          type="password"
+          autoComplete="current-password"
+          spellCheck={false}
+          autoFocus
+          placeholder="current"
+          value={current}
+          onChange={(e) => setCurrent(e.target.value)}
+          className={field}
+        />
+        <label className="sr-only" htmlFor="secrets-passcode-next">New passcode</label>
+        <input
+          id="secrets-passcode-next"
+          type="password"
+          autoComplete="new-password"
+          spellCheck={false}
+          placeholder="new"
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+          className={field}
+        />
+        <label className="sr-only" htmlFor="secrets-passcode-again">Confirm new passcode</label>
+        <input
+          id="secrets-passcode-again"
+          type="password"
+          autoComplete="new-password"
+          spellCheck={false}
+          placeholder="confirm"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          className={field}
+        />
+        <button type="submit" className={primaryBtn} disabled={busy || !current || !next}>
+          {busy ? "Saving…" : "Change"}
+        </button>
+      </div>
+      <p className="text-[11px] text-faint">
+        Six to twelve characters. Changing it locks Secrets everywhere you are signed in.
       </p>
     </form>
   );
