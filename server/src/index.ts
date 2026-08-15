@@ -92,6 +92,10 @@ import { lifecycleRoutes } from "./http/lifecycle.ts";
 import { mountSecretsRoutes, type SecretsCaller } from "./http/secrets.ts";
 import { GithubRepository } from "./db/repositories/github.ts";
 import { GithubIdentity } from "./githubIdentity.ts";
+import { GithubService } from "./githubService.ts";
+import { GithubPusher, type StageReport } from "./githubPushRunner.ts";
+import { GithubPuller } from "./githubPullRunner.ts";
+import type { GithubCommand } from "./wsRelay.ts";
 import { ELEVATION_HEADER, SecretElevations, sessionIdFor } from "./secrets/elevation.ts";
 import { SecretPasscodes } from "./secrets/passcode.ts";
 import { SecretElevationRepository } from "./db/repositories/secretElevations.ts";
@@ -2205,6 +2209,7 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (cmd.cmd === "explain") explainAgent(ctx, cmd);
     else if (MCP_COMMAND_NAMES.has(cmd.cmd)) void handleMcpCommand(ctx, cmd as McpCommand);
     else if (DEPLOY_COMMAND_NAMES.has(cmd.cmd)) void handleDeployCommand(ctx, cmd as DeployChannelCommand);
+    else if (GITHUB_COMMAND_NAMES.has(cmd.cmd)) void handleGithubCommand(ctx, cmd as GithubCommand);
     else if (PROVIDER_COMMAND_NAMES.has(cmd.cmd)) void handleProviderCommand(ctx, cmd as ProviderCommand);
     else if (CONNECTION_COMMAND_NAMES.has(cmd.cmd)) void handleConnectionCommand(ctx, cmd as ConnectionCommand);
     else if (MEMBER_COMMAND_NAMES.has(cmd.cmd)) void handleMemberCommand(ctx, cmd as MemberCommand);
@@ -3017,6 +3022,308 @@ async function handleMemberCommand(ctx: TenantContext, cmd: MemberCommand): Prom
     const message = (err as Error)?.message ?? String(err);
     console.error(`[members] ${cmd.cmd} failed: ${message}`);
     relay.broadcastMembers(ctx, { type: "error", message: `${cmd.cmd} failed: ${message}` });
+  }
+}
+
+// --- github: commands -------------------------------------------------------
+//
+// Every mutation answers by re-broadcasting the whole snapshot on the "github" channel, the same
+// shape a fresh `listGithub` would return — so a client never reconciles a partial update against
+// local state. §1's four regions are views of ONE reconciliation, and a client that merged would
+// eventually render a verdict computed from a link that had already moved.
+//
+// NOT ONE COMMAND HERE TOUCHES A TOKEN. Connecting is `POST /v1/github/connect`, in the secrets
+// group, behind `guarded()` — see wsRelay.ts and http/secrets.ts for why that has to be HTTP.
+
+const GITHUB_COMMAND_NAMES = new Set([
+  "listGithub", "listGithubRepos", "checkGithubRepo", "linkGithub", "unlinkGithub",
+  "refreshGithub", "pushGithub", "pullGithub", "switchGithubBranch", "createGithubBranch",
+  "openGithubPr", "commitGithub",
+]);
+
+const githubService = new GithubService({
+  repo: githubRepo,
+  identity: githubIdentity,
+  agents: agentRepo,
+  projects,
+  // The same resolver `agentFilesDeps` uses, so the PROTECTED group in the panel and the read-only
+  // set the edit loop enforces are one answer rather than two that agree today.
+  connectorFilesFor: agentFilesDeps.connectorFilesFor,
+});
+
+const githubPusher = new GithubPusher({
+  repo: githubRepo,
+  identity: githubIdentity,
+  agents: agentRepo,
+  projects,
+});
+
+const githubPuller = new GithubPuller({
+  repo: githubRepo,
+  identity: githubIdentity,
+  agents: agentRepo,
+  projects,
+  runtimeDir: RUNTIME_DIR,
+  connectorFilesFor: agentFilesDeps.connectorFilesFor,
+});
+
+/**
+ * The whole panel, for whichever agent the client is looking at.
+ *
+ * `agentId` IS OPTIONAL AND `null` IS A REAL ANSWER. A client with no agent selected still needs
+ * the workspace-wide half — whether GitHub is connected at all, and the link list the sidebar's
+ * Synced filter counts — so the snapshot always carries those and carries `view` only when there
+ * is an agent to have one.
+ */
+async function broadcastGithub(ctx: TenantContext, agentId?: string | null): Promise<void> {
+  const installation = await githubIdentity.current(ctx);
+  relay.broadcastGithub(ctx, {
+    type: "state",
+    agentId: agentId ?? null,
+    connected: Boolean(installation),
+    accountLogin: installation?.account_login ?? null,
+    links: await githubRepo.links(ctx),
+    view: agentId ? await githubService.view(ctx, agentId) : null,
+  });
+}
+
+/**
+ * Report a stage of a push or a pull as it happens.
+ *
+ * A CLOSURE PER OPERATION rather than a shared emitter, so a stage event can never be attributed
+ * to the wrong agent — the id is captured once, at the call that started the work, instead of read
+ * from a mutable field a second concurrent operation would have overwritten. That is the shape of
+ * bug the deploy panel's `deployContext` was fixed for.
+ */
+function githubStage(ctx: TenantContext, agentId: string, op: "push" | "pull"): StageReport {
+  return (stage, status) => relay.broadcastGithub(ctx, { type: "stage", agentId, op, stage, status });
+}
+
+async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Promise<void> {
+  const fail = (message: string, agentId?: string): void => {
+    relay.broadcastGithub(ctx, { type: "error", message, ...(agentId ? { agentId } : {}) });
+  };
+  try {
+    switch (cmd.cmd) {
+      case "listGithub":
+        await broadcastGithub(ctx, cmd.agentId ?? null);
+        return;
+
+      case "listGithubRepos":
+        relay.broadcastGithub(ctx, {
+          type: "repos",
+          repos: await githubService.repos(ctx, typeof cmd.query === "string" ? cmd.query : undefined),
+        });
+        return;
+
+      case "checkGithubRepo": {
+        // Answered even for a name that is not a legal repository name — see `checkName`. This
+        // runs on every keystroke, and a red strip mid-typing is worse than a quiet "taken".
+        const answer = await githubService.checkName(ctx, String(cmd.name ?? ""));
+        relay.broadcastGithub(ctx, { type: "nameCheck", ...answer });
+        return;
+      }
+
+      case "linkGithub": {
+        const result = await githubService.link(ctx, {
+          agentId: String(cmd.agentId ?? ""),
+          repoFullName: typeof cmd.repoFullName === "string" ? cmd.repoFullName : undefined,
+          createName: typeof cmd.createName === "string" ? cmd.createName : undefined,
+          createPrivate: cmd.createPrivate !== false,
+          branch: typeof cmd.branch === "string" ? cmd.branch : undefined,
+          subdirectory: typeof cmd.subdirectory === "string" ? cmd.subdirectory : null,
+          includeArtifacts: cmd.includeArtifacts !== false,
+        });
+        if (!result.ok) return fail(result.message ?? "could not link that repository", cmd.agentId);
+        await broadcastGithub(ctx, cmd.agentId);
+        return;
+      }
+
+      case "unlinkGithub": {
+        const result = await githubService.unlink(ctx, String(cmd.agentId ?? ""));
+        if (!result.ok) return fail(result.message ?? "could not unlink", cmd.agentId);
+        relay.broadcastGithub(ctx, {
+          type: "notice",
+          agentId: cmd.agentId,
+          // Said rather than assumed. §6's rule is that Jaroku never deletes a user's repo, and a
+          // notice that did not say so leaves somebody wondering what just happened to it.
+          message: "Unlinked. The repository and everything in it is untouched.",
+        });
+        await broadcastGithub(ctx, cmd.agentId);
+        return;
+      }
+
+      case "refreshGithub":
+        await githubService.refresh(ctx, String(cmd.agentId ?? ""));
+        await broadcastGithub(ctx, cmd.agentId);
+        return;
+
+      case "pushGithub": {
+        const agentId = String(cmd.agentId ?? "");
+        const result = await githubPusher.push(
+          ctx,
+          {
+            agentId,
+            squash: cmd.squash === true,
+            force: cmd.force === true,
+            confirmSlug: typeof cmd.confirmSlug === "string" ? cmd.confirmSlug : undefined,
+          },
+          githubStage(ctx, agentId, "push"),
+        );
+        if (!result.ok) fail(result.message ?? "the push did not complete", agentId);
+        else if (result.shas.length) {
+          relay.broadcastGithub(ctx, {
+            type: "notice",
+            agentId,
+            message: `Pushed ${result.shas.length} commit${result.shas.length === 1 ? "" : "s"}.`,
+          });
+        }
+        // BROADCAST EITHER WAY. A failed push still changed what the panel should say — the branch
+        // moved under us, or the token died — and leaving the old snapshot up would show the user
+        // the state that produced the failure as though it were the state after it.
+        await broadcastGithub(ctx, agentId);
+        return;
+      }
+
+      case "pullGithub": {
+        const agentId = String(cmd.agentId ?? "");
+        const result = await githubPuller.pull(
+          ctx,
+          {
+            agentId,
+            force: cmd.force === true,
+            confirmSlug: typeof cmd.confirmSlug === "string" ? cmd.confirmSlug : undefined,
+          },
+          githubStage(ctx, agentId, "pull"),
+        );
+        if (result.refusal) {
+          // ITS OWN EVENT, never an error strip. §3.6's card names the file, the check and the fact
+          // that the agent is unchanged, and offers three actions — none of which a one-line error
+          // could carry.
+          relay.broadcastGithub(ctx, { type: "refused", agentId, ...result.refusal });
+        } else if (!result.ok) {
+          fail(result.message ?? "the pull did not complete", agentId);
+        } else {
+          relay.broadcastGithub(ctx, {
+            type: "notice",
+            agentId,
+            message: `Pulled and published as v${result.version}.`,
+          });
+          // The files changed under everything else that renders them.
+          relay.broadcastAgentFiles(ctx, agentId);
+          void relay.broadcastAgents();
+        }
+        await broadcastGithub(ctx, agentId);
+        return;
+      }
+
+      case "createGithubBranch":
+      case "switchGithubBranch": {
+        const agentId = String(cmd.agentId ?? "");
+        const branch = String(cmd.branch ?? "").trim();
+        if (!branch) return fail("name a branch", agentId);
+        const agent = await agentRepo.bySlug(ctx, agentId);
+        if (!agent) return fail("no such agent in this workspace", agentId);
+        const link = await githubRepo.linkFor(ctx, agent.id);
+        if (!link) return fail("link a repository first", agentId);
+
+        // §3.2: switching a linked branch re-materialises the agent from a different tree, so it
+        // is a heavier action than switching in an editor. With unpushed work the switcher offers
+        // three answers and this refuses anything else — never a silent overwrite.
+        const view = await githubService.view(ctx, agentId);
+        if (cmd.cmd === "switchGithubBranch" && (view?.ahead ?? 0) > 0 && cmd.onUnpushed !== "stash") {
+          if (cmd.onUnpushed === "push") {
+            const pushed = await githubPusher.push(ctx, { agentId }, githubStage(ctx, agentId, "push"));
+            if (!pushed.ok) {
+              await broadcastGithub(ctx, agentId);
+              return fail(pushed.message ?? "could not push before switching", agentId);
+            }
+          } else {
+            const ahead = view?.ahead ?? 0;
+            await broadcastGithub(ctx, agentId);
+            return fail(
+              `${ahead} unpushed version${ahead === 1 ? "" : "s"} — push them, keep them as a draft, or cancel.`,
+              agentId,
+            );
+          }
+        }
+
+        if (cmd.cmd === "createGithubBranch") {
+          const connection = await githubIdentity.apiFor(ctx);
+          if (!connection) return fail("connect GitHub first", agentId);
+          const from = link.last_pushed_sha ?? (await connection.api.refSha(link.repo_full_name, link.branch));
+          if (!from) return fail("there is nothing on the current branch to branch from", agentId);
+          await connection.api.createRef(link.repo_full_name, branch, from);
+        }
+
+        // THE WATERMARKS ARE CLEARED, not carried across. `last_pushed_sha` describes a commit on
+        // the OLD branch, and leaving it in place would have the verdict compare the new branch's
+        // head against a sha that is not in its history — which reads as diverged forever.
+        await githubRepo.patchLink(ctx, link.id, {
+          branch,
+          lastKnownRemoteSha: null,
+          ...(cmd.cmd === "switchGithubBranch" ? { lastPushedSha: null, lastPushedVersionId: null } : {}),
+        });
+        await githubRepo.record(ctx, {
+          agentId: agent.id,
+          linkId: link.id,
+          kind: "branch_switch",
+          detail: `${link.branch} -> ${branch}`,
+        });
+        await githubService.refresh(ctx, agentId);
+        await broadcastGithub(ctx, agentId);
+        return;
+      }
+
+      case "openGithubPr": {
+        const agentId = String(cmd.agentId ?? "");
+        const agent = await agentRepo.bySlug(ctx, agentId);
+        if (!agent) return fail("no such agent in this workspace", agentId);
+        const link = await githubRepo.linkFor(ctx, agent.id);
+        if (!link) return fail("link a repository first", agentId);
+        const connection = await githubIdentity.apiFor(ctx);
+        if (!connection) return fail("connect GitHub first", agentId);
+        const base = (await connection.api.repo(link.repo_full_name)).defaultBranch;
+        if (base === link.branch) {
+          // §3.1: Jaroku owns `jaroku/<slug>` and reconciliation is through a PR. A PR from a
+          // branch into itself is not a thing GitHub can make, and the honest answer is to say why
+          // rather than to forward its error.
+          return fail("this agent is linked to the default branch, so there is nothing to open a PR against.", agentId);
+        }
+        const pr = await connection.api.createPullRequest(link.repo_full_name, {
+          title: `Agent updates: ${agent.display_name ?? agent.slug}`,
+          head: link.branch,
+          base,
+          body: "Pushed from Jaroku. Every commit on this branch was published as an agent version, and validated before it was.",
+        });
+        await githubRepo.record(ctx, {
+          agentId: agent.id, linkId: link.id, kind: "pr_open", detail: `#${pr.number} -> ${base}`,
+        });
+        relay.broadcastGithub(ctx, { type: "notice", agentId, message: `Opened #${pr.number}.` });
+        await broadcastGithub(ctx, agentId);
+        return;
+      }
+
+      case "commitGithub": {
+        // §3.4's commit box. A "commit" in Jaroku's model is a push of the staged subset — there is
+        // no local git repository here, so there is nothing a commit could land in that a push does
+        // not. Keeping the two buttons distinct in the UI while resolving both to a push is
+        // deliberate: §A.8 splits them because one reaches GitHub and one does not, and the day a
+        // local staging area exists this is the one place that changes.
+        const agentId = String(cmd.agentId ?? "");
+        if (cmd.push === false) {
+          return fail("Jaroku has no local repository to commit into — use push.", agentId);
+        }
+        const result = await githubPusher.push(ctx, { agentId, squash: true }, githubStage(ctx, agentId, "push"));
+        if (!result.ok) fail(result.message ?? "the commit did not complete", agentId);
+        await broadcastGithub(ctx, agentId);
+        return;
+      }
+    }
+  } catch (err) {
+    const message = (err as Error)?.message ?? String(err);
+    console.error(`[github] ${cmd.cmd} failed: ${message}`);
+    relay.broadcastGithub(ctx, { type: "error", message: `${cmd.cmd} failed: ${message}` });
   }
 }
 
