@@ -78,6 +78,17 @@ export function GitHubPanel() {
     // every snapshot — including the one this fires.
   }, [agentId, Boolean(view)]);
 
+  // A NOTICE EXPIRES; AN ERROR DOES NOT. "Pushed 1 commit." reports something that already
+  // finished — it has a natural end, and now that it floats over the panel rather than sitting in
+  // the flow, one nobody dismissed would cover the repository header indefinitely. An error is the
+  // opposite: it names something still wrong, and a message about a failed push that vanished on
+  // its own is the silent failure this product avoids by name. So only the notice is on a timer.
+  useEffect(() => {
+    if (!notice) return;
+    const id = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(id);
+  }, [notice, setNotice]);
+
   if (!loaded) {
     // Not a spinner: "we have not been told yet" is a real state, and showing the connect screen
     // before the first snapshot would invite somebody to link an agent that is already linked.
@@ -85,17 +96,25 @@ export function GitHubPanel() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="relative flex h-full flex-col overflow-hidden">
+      {/* LAYERED OVER THE PANEL RATHER THAN INSERTED ABOVE IT.
+          In the flow this was `shrink-0`, so every push, pull, fetch and unlink shortened the
+          scroll area and moved all four regions down — and dismissing it moved them back. The
+          thing somebody is reading when a notice arrives is the region the notice is about, and
+          it used to jump out from under them at the moment it changed. A transient message is a
+          layer, not a row. */}
       {(error || notice) && (
-        <div className="shrink-0 px-4 pt-2">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 px-4 pt-2">
           <div
-            className={`flex items-start gap-2 rounded-control border px-2 py-1.5 text-[11px] leading-[1.5] ${
+            role="status"
+            className={`pointer-events-auto flex items-start gap-2 rounded-control border bg-panel px-2 py-1.5 text-[11px] leading-[1.5] shadow-floating ${
               error ? "border-err/30 text-err" : "border-hair text-muted"
             }`}
           >
             <span className="min-w-0 flex-1 break-words">{error ?? notice}</span>
             <button
               className="shrink-0 text-faint hover:text-ink"
+              aria-label="dismiss"
               onClick={() => (error ? setError(null) : setNotice(null))}
             >
               <XIcon size={ICON.xs} />
