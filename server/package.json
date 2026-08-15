@@ -113,6 +113,7 @@
     "test:deploy-artifacts": "tsx src/deployArtifacts.test.ts",
     "test:deploy-secrets": "tsx src/deploySecrets.test.ts",
     "test:deploy-store": "tsx src/deployStore.test.ts",
+    "test:github-sync": "tsx src/githubSync.test.ts",
     "test:mcp-impact": "tsx src/mcpImpact.test.ts",
     "test:mcp-client": "tsx src/mcpClient.test.ts",
     "test:mcp-isolation": "tsx src/mcpIsolation.test.ts",
