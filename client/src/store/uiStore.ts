@@ -152,6 +152,22 @@ interface UiState {
   openSecretsForProvider: (providerId: string | null) => void;
   clearSecretsAddProvider: () => void;
 
+  /**
+   * Open the GitHub tab WITH ITS BRANCH SWITCHER SHOWING — §A.7.
+   *
+   * A nonce rather than a boolean, and a one-shot intent rather than persistent state, for exactly
+   * the reasons `secretsAddProvider` is both: it describes a navigation that has happened, not a
+   * preference, and left set it would re-open the switcher every time somebody came back to the
+   * tab. A nonce because clicking the chip twice is two requests and a boolean would fire an
+   * effect only for the first.
+   *
+   * It exists at all because the chip's click implies a specific action. Switching the tab was the
+   * whole of what a naive version would do, and somebody who clicked the thing naming their branch
+   * would arrive at a panel and have to find the branch control themselves.
+   */
+  githubBranchNonce: number;
+  openGithubBranches: () => void;
+
   // Bumped to ask the chat composer to take focus (Cmd+/). A nonce, not a boolean, so repeated
   // requests always fire an effect.
   focusChatNonce: number;
@@ -219,6 +235,10 @@ export const useUiStore = create<UiState>((set) => ({
   // Both fields in one call, so the tab and the reason for being there can never be set apart.
   openSecretsForProvider: (secretsAddProvider) => set({ rightTab: "secrets", secretsAddProvider }),
   clearSecretsAddProvider: () => set({ secretsAddProvider: null }),
+
+  githubBranchNonce: 0,
+  // Both fields in one call, so the tab and the reason for being there can never be set apart.
+  openGithubBranches: () => set((s) => ({ rightTab: "github", githubBranchNonce: s.githubBranchNonce + 1 })),
 
   focusChatNonce: 0,
   focusChat: () => set((s) => ({ focusChatNonce: s.focusChatNonce + 1 })),

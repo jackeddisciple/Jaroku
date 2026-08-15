@@ -24,7 +24,8 @@ import { SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
 
 import { Truncate } from "./Truncate.tsx";
 import { Chip } from "./Chip.tsx";
-import { KeyIcon } from "./panelIcons.tsx";
+import { GithubIcon, KeyIcon } from "./panelIcons.tsx";
+import { useGithubStore } from "../store/githubStore.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
 
 function StatusDot({ status }: { status: string }) {
@@ -173,6 +174,49 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
   );
 }
 
+/**
+ * What this agent is linked to — §A.7.
+ *
+ * THE TAB BADGE AND THIS CHIP ANSWER DIFFERENT QUESTIONS, and that is why they are two elements
+ * rather than one. The badge (↑2 / ↓1 / ↕ / ⚠) says HOW OUT OF SYNC an agent is right now; it is
+ * the live half, changing constantly. This says WHAT it is linked to; it is close to static,
+ * changing only on a relink or a branch switch. Collapsing them would mean either the identity
+ * gets buried under a number that changes every minute, or the number gets buried in a string that
+ * mostly does not — and each stays legible only on its own update cadence.
+ *
+ * AN UNLINKED AGENT SHOWS NO CHIP AT ALL, not an empty placeholder. §2.1's principle: describe what
+ * is true rather than what is missing.
+ *
+ * The click is a shortcut into the specific action it implies — the branch switcher — rather than
+ * merely the tab, because somebody who clicked the element naming their branch was reaching for
+ * the branch.
+ */
+function GithubChip({ agentId }: { agentId: string }) {
+  const view = useGithubStore((s) => s.views[agentId]);
+  const openGithubBranches = useUiStore((s) => s.openGithubBranches);
+  if (!view) return null;
+  return (
+    <Chip
+      size="sm"
+      tone="faint"
+      mono
+      variant="bare"
+      icon={<GithubIcon size={10} />}
+      onClick={openGithubBranches}
+      title={`${view.link.repo_full_name} · ${view.link.branch} — open the branch switcher`}
+      className="max-w-[320px]"
+    >
+      {/* owner/repo SHRINKS BEFORE branch does, because the branch is the more decision-relevant
+          half day to day — you switch branches far more often than you switch repositories. Two
+          Truncates rather than one over the joined string, so the shrinking is allocated rather
+          than left to whichever half happens to be on the right. */}
+      <Truncate variant="path" className="min-w-0 max-w-[160px]">{view.link.repo_full_name}</Truncate>
+      <span className="shrink-0 text-faint">·</span>
+      <Truncate className="min-w-0 shrink-0">{view.link.branch}</Truncate>
+    </Chip>
+  );
+}
+
 export function TopBar() {
   const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === s.activeAgentId));
   const runs = useTraceStore((s) => s.runs);
@@ -199,6 +243,7 @@ export function TopBar() {
           <span className="text-faint">·</span>
           <Truncate className="max-w-[280px] text-[13px] text-ink" title={agent.name}>{agent.name}</Truncate>
           <StatusDot status={status} />
+          <GithubChip agentId={agent.agent_id} />
         </>
       )}
 

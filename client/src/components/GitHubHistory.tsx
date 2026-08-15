@@ -20,6 +20,7 @@ import {
   sendCreateGithubBranch, sendOpenGithubPr, sendSwitchGithubBranch,
 } from "../lib/socket.ts";
 import { relTime } from "../lib/format.ts";
+import { useUiStore } from "../store/uiStore.ts";
 import { ICON, STATUS } from "../lib/tokens.ts";
 import type { GithubView } from "../types.ts";
 import { fileStatusFor, type FileStatus } from "../lib/actionIcons.tsx";
@@ -46,6 +47,14 @@ import {
  */
 export function BranchSwitcher({ view }: { view: GithubView }) {
   const [open, setOpen] = useState(false);
+  // §A.7's chip opens the tab AT this control rather than merely at the panel. A nonce rather than
+  // a boolean, so clicking the chip twice re-opens the switcher rather than firing once and then
+  // being permanently satisfied.
+  const branchNonce = useUiStore((s) => s.githubBranchNonce);
+  const firstNonce = useRef(branchNonce);
+  useEffect(() => {
+    if (branchNonce !== firstNonce.current) setOpen(true);
+  }, [branchNonce]);
   const [filter, setFilter] = useState("");
   const [creating, setCreating] = useState("");
   const [pending, setPending] = useState<string | null>(null);
