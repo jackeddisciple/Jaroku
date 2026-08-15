@@ -155,6 +155,28 @@ export function needsAttention(health: SecretsHealth | null): boolean {
   return health.expiringSoon > 0 || health.invalid > 0 || health.rotationDue > 0;
 }
 
+/**
+ * The rows this agent's tab may show.
+ *
+ * WORKSPACE-SCOPED EVERYWHERE, AGENT-SCOPED IN ONE PLACE. §4.4 draws that line and nothing enforced
+ * it: `GET /secrets` answers with everything the workspace has, so a credential somebody deliberately
+ * pinned to one agent turned up in every other agent's tab too — beside a chip reading `agent:` and
+ * eight characters of a uuid, which names nothing to the person reading it. With a few agents the
+ * list stops being a list of what THIS agent can reach, which is the question the tab answers.
+ *
+ * FILTERED HERE RATHER THAN ON THE SERVER, deliberately. The rows are the workspace's and the user
+ * is entitled to all of them — this is about which of them belong on the screen in front of them,
+ * which is a view decision. Answering it in the route would also mean the tab could not show the
+ * workspace's credentials at all before an agent is selected.
+ *
+ * A null `agentId` means no agent is selected yet, and then only the workspace's own are shown:
+ * claiming an agent-scoped credential is in scope when there is no agent would be the wrong half to
+ * guess at.
+ */
+export function visibleTo(secrets: SecretSummary[], agentId: string | null): SecretSummary[] {
+  return secrets.filter((s) => s.scope === "workspace" || (s.agentId !== null && s.agentId === agentId));
+}
+
 /** The three groups the brief specifies, in its order. Each origin needs different verbs. */
 export function groupSecrets(secrets: SecretSummary[]): {
   providers: SecretSummary[];

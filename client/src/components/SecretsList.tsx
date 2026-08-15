@@ -35,7 +35,8 @@ import {
   type SecretSummary,
   type UsageSite,
 } from "../lib/secrets.ts";
-import { groupSecrets, holdForElevation, useSecretsStore } from "../store/secretsStore.ts";
+import { groupSecrets, holdForElevation, useSecretsStore, visibleTo } from "../store/secretsStore.ts";
+import { useBuildStore } from "../store/buildStore.ts";
 
 /** Status as a chip, with a word in it — never colour alone. */
 function StatusChip({ secret }: { secret: SecretSummary }) {
@@ -274,6 +275,9 @@ function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: ()
   const [needsTyping, setNeedsTyping] = useState(false);
   const setError = useSecretsStore((s) => s.setError);
   const setNotice = useSecretsStore((s) => s.setNotice);
+  const agentLabel = useBuildStore((s) =>
+    secret.agentId ? (s.agents.find((a) => a.agent_id === secret.agentId)?.name ?? null) : null,
+  );
 
   const run = async (fn: () => Promise<void>): Promise<void> => {
     setBusy(true);
@@ -388,9 +392,11 @@ function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: ()
               {secret.maskedHint}
             </Chip>
           ) : null}
-          {/* Scope, so somebody knows an edit here is global rather than local to one agent. */}
+          {/* Scope, so somebody knows an edit here is global rather than local to one agent. The
+              agent's NAME when the client knows it — eight characters of a uuid identifies nothing
+              to the person deciding whether a rotation is safe. */}
           <Chip size="sm" tone="faint" variant="bare">
-            {secret.scope === "agent" ? `agent: ${secret.agentId?.slice(0, 8) ?? "?"}` : "workspace"}
+            {secret.scope === "agent" ? `agent: ${agentLabel ?? secret.agentId?.slice(0, 8) ?? "?"}` : "workspace"}
           </Chip>
         </div>
       }
@@ -488,8 +494,11 @@ function Group({
 }
 
 export function SecretsList({ onChanged }: { onChanged: () => void }) {
-  const secrets = useSecretsStore((s) => s.secrets);
+  const all = useSecretsStore((s) => s.secrets);
   const loaded = useSecretsStore((s) => s.loaded);
+  // §4.4: agent-scoped credentials belong to one agent's tab, workspace-scoped to all of them.
+  const activeAgentId = useBuildStore((s) => s.activeAgentId);
+  const secrets = visibleTo(all, activeAgentId);
   const groups = groupSecrets(secrets);
 
   // `loaded`, not `secrets.length` — before the first response lands, "nothing configured" and

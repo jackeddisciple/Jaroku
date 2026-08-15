@@ -28,6 +28,7 @@ import {
   holdForElevation,
   needsAttention,
   useSecretsStore,
+  visibleTo,
 } from "./secretsStore.ts";
 import type { SecretSummary } from "../lib/secrets.ts";
 
@@ -132,6 +133,24 @@ console.log("\nand something actually puts one there");
   }
   check(threw, "a rejected credential still throws — that is a message the user needs now");
   check(s().pending === null, "and is not parked, because unlocking would not make it any more valid");
+}
+
+console.log("\nwhose tab a credential belongs in");
+{
+  // §4.4: an agent-scoped credential belongs to that agent's tab, a workspace-scoped one to all of
+  // them. Nothing enforced it — the route answers with everything the workspace has — so a
+  // credential pinned to one agent appeared in every other agent's tab beside a chip naming eight
+  // characters of a uuid.
+  const rows = [
+    secret({ name: "SHARED_KEY" }),
+    secret({ name: "ONLY_WEATHER", scope: "agent", agentId: "agent_weather" }),
+    secret({ name: "ONLY_INVOICES", scope: "agent", agentId: "agent_invoices" }),
+  ];
+  const names = (list: SecretSummary[]): string => list.map((s) => s.name).sort().join(",");
+  check(names(visibleTo(rows, "agent_weather")) === "ONLY_WEATHER,SHARED_KEY", "an agent sees its own and the workspace's");
+  check(names(visibleTo(rows, "agent_invoices")) === "ONLY_INVOICES,SHARED_KEY", "...and not another agent's");
+  check(names(visibleTo(rows, null)) === "SHARED_KEY", "with no agent selected, only the workspace's — guessing the other half would be worse");
+  check(visibleTo([], "agent_weather").length === 0, "and an empty list stays empty");
 }
 
 console.log("\nthe countdown");
