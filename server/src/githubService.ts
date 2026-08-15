@@ -22,7 +22,7 @@ import { GithubError, type GithubApi, type GithubCommit } from "./githubApi.ts";
 import type { GithubEvent, GithubLink, GithubRepository } from "./db/repositories/github.ts";
 import type { GithubIdentity } from "./githubIdentity.ts";
 import { badgeFor, syncVerdict, unpushedVersions, verdictLine, type SyncVerdict } from "./githubSync.ts";
-import { repoPath } from "./githubPush.ts";
+import { inSubdirectory, repoPath } from "./githubPush.ts";
 import type { Agent, AgentRepository, AgentVersion } from "./db/repositories/agents.ts";
 import type { ProjectStore } from "./storage/projectStore.ts";
 import type { TenantContext } from "./db/tenant.ts";
@@ -376,9 +376,11 @@ export class GithubService {
         const comparison = await api.compare(link.repo_full_name, watermark, headSha);
         behindBy = comparison.aheadBy;
         // Scoped to our subdirectory, for the same reason a push's deletions are: in a monorepo
-        // the other agents' files are not this agent's pending changes.
-        const prefix = repoPath("", link.subdirectory);
-        remoteChanges = comparison.files.filter((f) => (prefix ? f.startsWith(`${prefix}/`) : true));
+        // the other agents' files are not this agent's pending changes. Through `inSubdirectory`
+        // rather than a prefix built here — the local version tested against `agents/weather//`
+        // and therefore filtered the list down to nothing on exactly the links the FROM REMOTE
+        // group exists for, while reading as a repository where nothing had changed.
+        remoteChanges = comparison.files.filter((f) => inSubdirectory(f, link.subdirectory));
       } catch {
         behindBy = null;
       }
