@@ -14,6 +14,7 @@
     "test:inline-code": "tsx src/lib/inlineCode.test.ts",
     "test:title": "tsx src/lib/title.test.ts",
     "test:truncate-path": "tsx src/lib/truncatePath.test.ts",
+    "test:composer-triggers": "tsx src/lib/composerTriggers.test.ts",
     "test:export": "tsx src/lib/evalExport.test.ts",
     "test:csv": "tsx src/lib/csv.test.ts",
     "test:auth": "tsx src/lib/auth.test.ts",

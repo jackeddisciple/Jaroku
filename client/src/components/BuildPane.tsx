@@ -32,7 +32,10 @@ import { Prose } from "./InlineCode.tsx";
 import { StreamingFileRow } from "./FileList.tsx";
 import { PlanCard } from "./PlanCard.tsx";
 import { ArrowUpIcon, ChevronDownIcon, MicIcon, SaveToDatasetIcon } from "./composerIcons.tsx";
-import { GitHubAttachChips, GitHubAttachMenu, useGithubAttachments } from "./GitHubAttach.tsx";
+import {
+  GitHubAttachChips, GitHubAttachMenu, GitHubTriggerPicker, useGithubAttachments,
+} from "./GitHubAttach.tsx";
+import { activeTrigger, removeTrigger, type ActiveTrigger } from "../lib/composerTriggers.ts";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { StatRow, STAT_ICON, type Stat } from "./StatRow.tsx";
@@ -502,6 +505,10 @@ export function BuildPane({
   // being written, is cleared when that message is sent, and nothing outside this composer has a
   // reason to read it.
   const github = useGithubAttachments(activeAgentId);
+  // §A.6. The trigger the caret is currently inside, recomputed from the draft and the caret on
+  // every keystroke — a pure function of both, so there is no popover state to fall out of step
+  // with what is actually typed. Null is the ordinary case and renders nothing.
+  const [githubTrigger, setGithubTrigger] = useState<ActiveTrigger | null>(null);
   const threads = useChatStore((s) => s.threads);
   const pendingThread = useChatStore((s) => s.pending);
   const streamingAgentId = useChatStore((s) => s.streamingAgentId);
@@ -715,6 +722,7 @@ export function BuildPane({
           github.attachments,
         );
         github.clear();
+        setGithubTrigger(null);
         break;
       }
     }
@@ -1160,6 +1168,24 @@ export function BuildPane({
           {/* Attached GitHub context, above the input. Above rather than below because it is
               part of the message being composed, and a chip under the send button would read as
               something that happened rather than something about to be sent. */}
+          {/* §A.6's picker, above the chips and above the input: it is about the token being
+              typed, so it sits between the sentence and the things already attached to it. */}
+          {githubTrigger && github.view && (
+            <GitHubTriggerPicker
+              view={github.view}
+              trigger={githubTrigger}
+              onDismiss={() => setGithubTrigger(null)}
+              onPick={(attachment) => {
+                github.attach(attachment);
+                // The token comes OUT of the sentence — the attachment is a chip now, and leaving
+                // `#a1b2c3d` in the prose would send the same reference twice.
+                const { text: next } = removeTrigger(text, githubTrigger);
+                setText(next);
+                setGithubTrigger(null);
+              }}
+            />
+          )}
+
           <GitHubAttachChips attachments={github.attachments} onRemove={github.remove} />
 
           {/* input slot: the textarea and the live waveform crossfade in place (~200ms) so the
@@ -1173,7 +1199,21 @@ export function BuildPane({
               // from wherever the user actually is.
               autoFocus={standalone}
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => {
+                setText(e.target.value);
+                // Recomputed here rather than in an effect, so the picker opens on the keystroke
+                // that typed the trigger rather than a frame later.
+                setGithubTrigger(
+                  activeTrigger(e.target.value, e.target.selectionStart ?? e.target.value.length, github.triggers),
+                );
+              }}
+              // A caret moved by click or arrow key closes a picker whose trigger it has left, and
+              // opens one it has entered. Without this, clicking away from `#a1b2` leaves a picker
+              // floating over a word nobody is editing.
+              onSelect={(e) => {
+                const el = e.currentTarget;
+                setGithubTrigger(activeTrigger(el.value, el.selectionStart ?? el.value.length, github.triggers));
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();

@@ -27,6 +27,7 @@ import { useEffect, useRef, useState } from "react";
 import { ICON } from "../lib/tokens.ts";
 import { useGithubStore } from "../store/githubStore.ts";
 import type { GithubAttachment, GithubView } from "../types.ts";
+import type { ActiveTrigger, TriggerKind } from "../lib/composerTriggers.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { ChevronRightIcon, GithubIcon, PlusIcon, XIcon } from "./panelIcons.tsx";
@@ -302,10 +303,142 @@ export function GitHubAttachChips({
   );
 }
 
+
+/**
+ * The picker a trigger character opens — §A.6.
+ *
+ * THE SAME ATTACH ACTION THE ⊕ MENU PERFORMS, reached faster. Not a second surface with its own
+ * rules: it produces the same `GithubAttachment` values, the resulting chips are the ⊕ menu's
+ * chips, and there is no entry here that the menu does not also offer. The trigger characters are
+ * a shortcut to an existing action, never a new one.
+ *
+ * ANCHORED ABOVE THE COMPOSER rather than at the caret. A caret-tracking popover needs a mirror of
+ * the textarea's layout to position against, which is a measurement that goes wrong at every font
+ * and wrap boundary — and the composer is one control at the bottom of a column, so "above it" is
+ * unambiguous and always on screen.
+ */
+export function GitHubTriggerPicker({
+  view,
+  trigger,
+  onPick,
+  onDismiss,
+}: {
+  view: GithubView;
+  trigger: ActiveTrigger;
+  onPick: (attachment: GithubAttachment) => void;
+  onDismiss: () => void;
+}) {
+  const rows = triggerRows(view, trigger);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onDismiss();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onDismiss]);
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="mb-2 max-h-44 overflow-auto rounded-card border border-edge bg-panel p-1 shadow-floating">
+      {rows.map((row) => (
+        <button
+          key={row.id}
+          type="button"
+          // `onMouseDown` rather than `onClick`: a click blurs the textarea first, and a picker
+          // that steals focus from the sentence somebody is mid-way through typing is a picker
+          // they have to click back out of.
+          onMouseDown={(e) => {
+            e.preventDefault();
+            onPick(row.attachment);
+          }}
+          className="flex w-full items-baseline gap-2 rounded-control px-2 py-1 text-left transition-colors duration-fast hover:bg-active/40"
+        >
+          <span className="shrink-0 font-mono text-[11px] text-faint">{row.lead}</span>
+          <Truncate className="min-w-0 flex-1 text-[11px] text-muted">{row.label}</Truncate>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * What a trigger offers, filtered by what has been typed after it.
+ *
+ * `#` MATCHES A SHA PREFIX OR MESSAGE TEXT, because people remember one or the other and rarely
+ * both — "the retry one" and "a1b2" should find the same commit.
+ */
+function triggerRows(
+  view: GithubView,
+  trigger: ActiveTrigger,
+): { id: string; lead: string; label: string; attachment: GithubAttachment }[] {
+  const q = trigger.query.trim().toLowerCase();
+
+  if (trigger.kind === "commit") {
+    const commits = [
+      ...view.pushed.filter((v) => v.sha).map((v) => ({ sha: v.sha!, message: v.summary })),
+      ...view.remoteOnly.map((c) => ({ sha: c.sha, message: c.message })),
+    ];
+    return commits
+      .filter((c) => !q || c.sha.toLowerCase().startsWith(q) || c.message.toLowerCase().includes(q))
+      .slice(0, 8)
+      .map((c) => ({
+        id: c.sha,
+        lead: `#${c.sha.slice(0, 7)}`,
+        label: c.message,
+        attachment: { kind: "commit", sha: c.sha },
+      }));
+  }
+
+  if (trigger.kind === "file") {
+    // Every path the panel knows about, on every branch it knows about. A cross product is the
+    // honest offer — §7's entry is "a specific file at a ref" — and it is bounded because both
+    // lists are small and the query narrows it immediately.
+    const paths = [...new Set([...view.changes.map((c) => c.path), ...view.protectedPaths, ...view.remoteChanges])];
+    const refs = view.branches.length > 0 ? view.branches.map((b) => b.name) : [view.link.branch];
+    const rows: { id: string; lead: string; label: string; attachment: GithubAttachment }[] = [];
+    for (const path of paths) {
+      if (q && !path.toLowerCase().includes(q)) continue;
+      for (const ref of refs) {
+        rows.push({
+          id: `${ref}:${path}`,
+          lead: "@",
+          label: `${path} @ ${ref}`,
+          attachment: { kind: "file", path, ref },
+        });
+        if (rows.length >= 8) return rows;
+      }
+    }
+    return rows;
+  }
+
+  // `!` has no picker at all — one entry, inserted on the keystroke. It is rendered as a single
+  // confirmable row rather than attaching silently, so a mistyped `!` is one Escape away rather
+  // than an attachment somebody has to notice and remove.
+  return [
+    {
+      id: "sinceSync",
+      lead: "!",
+      label: `diff since last sync — ${view.verdict.toLowerCase()}`,
+      attachment: { kind: "sinceSync" },
+    },
+  ];
+}
+
 /** The attachments the composer is holding, and the two ways they change. */
 export function useGithubAttachments(agentId: string | null): {
   view: GithubView | null;
   attachments: GithubAttachment[];
+  /**
+   * Which trigger characters are live right now — §A.6.
+   *
+   * ABSENT RATHER THAN DISABLED. `#` needs only push history, so it works as soon as anything has
+   * been pushed. `@` and `!` need real sync-state machinery behind them, and before that they are
+   * simply not triggers: typing one types a character, the same way §7 hides its Phase-2 menu
+   * entries rather than greying them out.
+   */
+  triggers: TriggerKind[];
   attach: (a: GithubAttachment) => void;
   remove: (id: string) => void;
   clear: () => void;
@@ -319,9 +452,14 @@ export function useGithubAttachments(agentId: string | null): {
     setAttachments([]);
   }, [agentId]);
 
+  const triggers: TriggerKind[] = [];
+  if (view && (view.pushed.some((v) => v.sha) || view.remoteOnly.length > 0)) triggers.push("commit");
+  if (view && view.link.last_known_remote_sha) triggers.push("file", "sync");
+
   return {
     view,
     attachments,
+    triggers,
     attach: (a) =>
       setAttachments((prev) =>
         // Idempotent by identity: attaching the same commit twice is one attachment, not a
