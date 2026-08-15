@@ -186,14 +186,16 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
             </button>
             <button
               className={secondaryBtn}
-              title="Keeps them as versions here and switches anyway."
+              title="They stay as versions on this agent and the branch switches. Nothing is stashed — a version belongs to the agent rather than to a branch, so there is nowhere to stash it and nothing to pop later."
               onClick={() => {
-                sendSwitchGithubBranch(view.agentId, pending, "stash");
+                sendSwitchGithubBranch(view.agentId, pending, "keep");
                 setPending(null);
                 setOpen(false);
               }}
             >
-              Keep as a draft
+              {/* "Keep as a draft" implied a saved-elsewhere state that does not exist. The
+                  versions do not move; only which branch they count as unpushed against does. */}
+              Keep them here
             </button>
             <button className={`${quietBtn} ml-auto`} onClick={() => setPending(null)}>Cancel</button>
           </div>

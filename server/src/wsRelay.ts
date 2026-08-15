@@ -452,7 +452,7 @@ export type SwitchGithubBranchCommand = {
   agentId: string;
   branch: string;
   /** §3.2 offers three answers when there is unpushed work, and never a silent overwrite. */
-  onUnpushed?: "push" | "stash" | "cancel";
+  onUnpushed?: "push" | "keep" | "cancel";
 };
 export type CreateGithubBranchCommand = { cmd: "createGithubBranch"; agentId: string; branch: string };
 export type OpenGithubPrCommand = { cmd: "openGithubPr"; agentId: string };

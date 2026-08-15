@@ -3302,7 +3302,13 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
         // is a heavier action than switching in an editor. With unpushed work the switcher offers
         // three answers and this refuses anything else — never a silent overwrite.
         const view = await githubService.view(ctx, agentId);
-        if (cmd.cmd === "switchGithubBranch" && (view?.ahead ?? 0) > 0 && cmd.onUnpushed !== "stash") {
+        // `keep` RATHER THAN `stash`, because nothing stashes and the old name said otherwise.
+        // A Jaroku version belongs to the agent, not to a branch, so switching cannot strand it
+        // and there is nothing to put on a stack or pop later — the versions stay exactly where
+        // they are and become unpushed relative to the new branch. That is the honest behaviour
+        // and it was already the behaviour; the word on the wire was borrowed from a git command
+        // that means "put this somewhere else for now", which is the one thing it does not do.
+        if (cmd.cmd === "switchGithubBranch" && (view?.ahead ?? 0) > 0 && cmd.onUnpushed !== "keep") {
           if (cmd.onUnpushed === "push") {
             const pushed = await githubPusher.push(ctx, { agentId }, githubStage(ctx, agentId, "push"));
             if (!pushed.ok) {
@@ -3313,7 +3319,7 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
             const ahead = view?.ahead ?? 0;
             await broadcastGithub(ctx, agentId);
             return fail(
-              `${ahead} unpushed version${ahead === 1 ? "" : "s"} — push them, keep them as a draft, or cancel.`,
+              `${ahead} unpushed version${ahead === 1 ? "" : "s"} — push them, keep them here, or cancel.`,
               agentId,
             );
           }

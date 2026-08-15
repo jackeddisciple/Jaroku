@@ -1012,7 +1012,7 @@ export type ClientCommand =
   | { cmd: "refreshGithub"; agentId: string; explicit?: boolean }
   | { cmd: "pushGithub"; agentId: string; squash?: boolean; force?: boolean; confirmSlug?: string }
   | { cmd: "pullGithub"; agentId: string; force?: boolean; confirmSlug?: string }
-  | { cmd: "switchGithubBranch"; agentId: string; branch: string; onUnpushed?: "push" | "stash" | "cancel" }
+  | { cmd: "switchGithubBranch"; agentId: string; branch: string; onUnpushed?: "push" | "keep" | "cancel" }
   | { cmd: "createGithubBranch"; agentId: string; branch: string }
   | { cmd: "openGithubPr"; agentId: string }
   | { cmd: "commitGithub"; agentId: string; message: string; push?: boolean }

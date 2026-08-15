@@ -948,7 +948,7 @@ export function sendPullGithub(
 export function sendSwitchGithubBranch(
   agentId: string,
   branch: string,
-  onUnpushed?: "push" | "stash" | "cancel",
+  onUnpushed?: "push" | "keep" | "cancel",
 ): void {
   send({ cmd: "switchGithubBranch", agentId, branch, onUnpushed });
 }
