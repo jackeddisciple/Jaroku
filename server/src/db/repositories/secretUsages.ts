@@ -79,11 +79,26 @@ export class SecretUsageRepository {
    */
   async record(ctx: TenantContext, input: RecordUsageInput): Promise<void> {
     const now = new Date().toISOString();
+    // THE CAST IS NOT DECORATION, AND IT IS THE ONE THING THAT DIFFERS BETWEEN THE DRIVERS HERE.
+    //
+    // `ON CONFLICT (<expr>)` infers the index by matching the expression, so this has to be spelled
+    // exactly as the unique index is — and the two migrations spell it differently ON PURPOSE.
+    // SQLite is dynamically typed and takes `COALESCE(agent_id, '')`; on Postgres `agent_id` is a
+    // `uuid`, so the same text asks the server to read '' as one and it answers
+    // `invalid input syntax for type uuid: ""`. Migration 033 therefore indexes
+    // `COALESCE(agent_id::text, '')` there, and this statement did not.
+    //
+    // The result was not a subtly wrong answer: `record` threw on every call against Postgres, so
+    // the whole blast-radius half of the tab — every runtime read, every static scan hit — worked
+    // on the local driver and on nothing else. It is invisible without a Postgres to run against,
+    // which is why every secrets suite reports "skipping Postgres" on a developer machine and CI
+    // is where it surfaced.
+    const agentKey = this.db.dialect === "postgres" ? "COALESCE(agent_id::text, '')" : "COALESCE(agent_id, '')";
     await this.q(ctx).run(
       `INSERT INTO secret_usages
          (id, workspace_id, name, agent_id, source, location, hits, first_seen_at, detected_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (workspace_id, name, source, COALESCE(agent_id, ''), COALESCE(location, ''))
+       ON CONFLICT (workspace_id, name, source, ${agentKey}, COALESCE(location, ''))
        DO UPDATE SET hits = secret_usages.hits + 1, detected_at = excluded.detected_at`,
       [randomUUID(), ctx.workspaceId, input.name, input.agentId ?? null, input.source, input.location ?? null, 1, now, now],
     );
