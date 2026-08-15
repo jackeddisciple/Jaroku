@@ -17,6 +17,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { NOT_WORKSPACE_SCOPED, WORKSPACE_STORES, resetWorkspaceStores } from "./reset.ts";
+import { hasElevationToken, setElevationToken } from "../lib/secrets.ts";
 import { useBillingStore } from "./billingStore.ts";
 import { useBuildStore } from "./buildStore.ts";
 import { useChatStore } from "./chatStore.ts";
@@ -115,7 +116,16 @@ console.log("\nfilling every store with one workspace's data");
 
 console.log("\nswitching workspace");
 {
+  // THE ONE PIECE OF WORKSPACE STATE THE LOOP CANNOT REACH. The elevation token is a module
+  // variable in lib/secrets.ts rather than a store field, on purpose, so `getInitialState()` walks
+  // past it — and a tab that still believes it holds an elevation skips the rejoin and 403s on
+  // every request until the next poll.
+  setElevationToken("a-token-issued-for-the-workspace-being-left");
+  check(hasElevationToken(), "a token from the workspace being left is in hand");
+
   resetWorkspaceStores();
+
+  check(!hasElevationToken(), "...and the switch forgets it, along with every store");
 
   const leaked = Object.entries(WORKSPACE_STORES)
     .filter(([, s]) => JSON.stringify((s as unknown as { getState(): unknown }).getState()).includes(TENANT_A))

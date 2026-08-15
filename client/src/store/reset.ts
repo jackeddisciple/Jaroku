@@ -31,6 +31,7 @@ import { useMemberStore } from "./memberStore.ts";
 import { useProviderStore } from "./providerStore.ts";
 import { useSecretsStore } from "./secretsStore.ts";
 import { useTraceStore } from "./traceStore.ts";
+import { forgetElevation } from "../lib/secrets.ts";
 
 /** Enough of a zustand store for this file. Avoids importing its generics for one call. */
 interface Resettable {
@@ -79,9 +80,23 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
 /** Stores that hold nothing a workspace owns. Named, so the omission is a decision. */
 export const NOT_WORKSPACE_SCOPED = ["sessionStore", "uiStore"] as const;
 
-/** Empty every store that holds a workspace's data. */
+/**
+ * Empty every store that holds a workspace's data.
+ *
+ * AND THE ONE PIECE OF WORKSPACE STATE THAT IS NOT IN A STORE. The elevation token lives in a
+ * module variable in `lib/secrets.ts` rather than in `secretsStore`, deliberately — a store is what
+ * devtools serialise and error reporters attach — which means `getInitialState()` cannot reach it
+ * and the loop above walks straight past it.
+ *
+ * The server refuses it either way: an elevation is scoped to the workspace it was issued for, so
+ * the old workspace's token matches nothing in the new one. What it costs to leave behind is a tab
+ * that believes it holds an elevation it cannot use — `hasElevationToken()` is what decides whether
+ * to rejoin the session's existing elevation, so a session already unlocked in the workspace being
+ * switched TO would render its content and 403 on every request until the next poll noticed.
+ */
 export function resetWorkspaceStores(): void {
   for (const store of Object.values(WORKSPACE_STORES)) {
     store.setState(store.getInitialState() as never, true);
   }
+  forgetElevation();
 }
