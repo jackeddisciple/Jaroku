@@ -469,10 +469,26 @@ export function HistoryRegion({ view }: { view: GithubView }) {
 
   return (
     <section>
-      <div className="flex items-center justify-end gap-1">
+      {/* LABELLED, because "Versions | Both" is only legible to somebody who already knows what
+          the second thing is. Both WHAT — both branches, both agents, both halves of a diff? The
+          answer is the whole idea of this panel: there are two lineages here, and this chooses
+          whether to draw one of them or the pair interleaved. The word "show" is what makes the
+          pair read as options rather than as two more buttons to press. */}
+      <div className="flex items-center justify-end gap-1.5">
+        <span className="text-[10px] uppercase tracking-wider text-faint">Show</span>
         {(["versions", "both"] as const).map((m) => (
-          <Chip key={m} size="sm" selected={mode === m} onClick={() => setMode(m)}>
-            {m === "versions" ? "Versions" : "Both"}
+          <Chip
+            key={m}
+            size="sm"
+            selected={mode === m}
+            onClick={() => setMode(m)}
+            title={
+              m === "versions"
+                ? "Only Jaroku's versions."
+                : "Jaroku's versions interleaved with the commits on this branch that no version accounts for."
+            }
+          >
+            {m === "versions" ? "Versions" : "+ GitHub commits"}
           </Chip>
         ))}
       </div>
