@@ -18,6 +18,7 @@ import { UsagePanel } from "./UsagePanel.tsx";
 import { SecretsPanel } from "./SecretsPanel.tsx";
 import { useDeployStore } from "../store/deployStore.ts";
 import { needsAttention, useSecretsStore } from "../store/secretsStore.ts";
+import { fetchHealth } from "../lib/secrets.ts";
 import { isDeployInFlight } from "../types.ts";
 import { StepDetailPanel } from "./StepDetailPanel.tsx";
 
@@ -61,6 +62,33 @@ export function RightPanel() {
   }, [deployId, deployRunning, setTab]);
 
   const secretsNeedAttention = useSecretsStore((s) => needsAttention(s.health));
+
+  // THE BADGE HAS TO BE COMPUTED BY SOMETHING THAT IS ALWAYS MOUNTED, and until now the only
+  // caller of `/secrets/health` was SecretsPanel — which exists only while the Secrets tab is the
+  // one on screen. So the dot appeared exactly when somebody was already reading the health strip
+  // that says the same thing at more length, and never when they were somewhere else, which is the
+  // entire moment it exists for.
+  //
+  // IT IS THE ONE SECRETS ANSWER SERVED WITHOUT ELEVATION, and that is what makes this possible:
+  // counts, no names, so polling it from the tab bar asks nobody for a passcode to be told whether
+  // they need to care. A minute, because expiry moves in days and this runs for every open client.
+  useEffect(() => {
+    let cancelled = false;
+    const read = async (): Promise<void> => {
+      try {
+        const health = await fetchHealth();
+        if (!cancelled) useSecretsStore.getState().setHealth(health);
+      } catch {
+        /* a badge is not worth an error strip — and before sign-in there is nothing to ask */
+      }
+    };
+    void read();
+    const poll = setInterval(() => void read(), 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(poll);
+    };
+  }, []);
 
   const tabClass = (t: RightTab) =>
     `px-3 py-1.5 text-[12px] rounded-control transition-colors ${
