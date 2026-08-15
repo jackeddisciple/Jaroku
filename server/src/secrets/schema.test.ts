@@ -201,7 +201,14 @@ async function suite(label: string, db: Db): Promise<void> {
 
   // A rescan replaces static hits and leaves the record of what actually ran alone.
   await usages.record(ws, { name: "BROKEN_KEY", source: "static_scan", location: "x.py:1" });
-  const cleared = await usages.clearStaticFor(ws, "no-such-agent");
+  // A REAL UUID THAT NOTHING USES, not the string "no-such-agent". `agent_id` is `text` on SQLite
+  // and `uuid` on Postgres, so the readable placeholder passed here asserted the property on one
+  // driver and raised `invalid input syntax for type uuid` on the other — which is not this check
+  // failing, it is the suite dying mid-file with everything after it unreported.
+  //
+  // The property being asserted is "an agent that HAS no scan results clears nothing", and a valid
+  // id nothing was recorded against says exactly that on both.
+  const cleared = await usages.clearStaticFor(ws, randomUUID());
   check(cleared === 0, "clearing an agent with no scan results removes nothing");
   check(
     (await usages.forSecret(ws, "BROKEN_KEY")).some((s) => s.source === "runtime_read"),
