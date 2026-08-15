@@ -552,6 +552,32 @@ try {
       withElevation({ method: "DELETE", path: "/v1/secrets/GITHUB_TOKEN" }),
     );
     check(cannotRevoke.status === 409, "nor revoked — the fix is reconnecting the connector");
+    // THE THIRD VERB, WHICH IS THE SAME WRITE. A create against a name that already exists is a
+    // rotation, and this route had no guard: the value went in and the row came back `custom`,
+    // which then made both refusals above stop applying to it.
+    const cannotCreateOver = await statusOf(
+      createRoute.handler,
+      withElevation({
+        path: "/v1/secrets",
+        body: { name: "GITHUB_TOKEN", value: "ghp_something-the-far-end-never-issued", kind: "custom" },
+      }),
+    );
+    check(
+      cannotCreateOver.status === 409 && cannotCreateOver.code === "managed_credential",
+      "nor written over by a create, which is the same write with a different verb",
+      String(cannotCreateOver.status),
+    );
+    check(
+      (await refs.get(ctxFor(), "GITHUB_TOKEN"))?.kind === "managed",
+      "...so its origin survives the attempt",
+    );
+    // And the bulk import, which reaches `store` without passing a route that guards it.
+    const importedOver = await manager.store(ctxFor(), {
+      name: "GITHUB_TOKEN",
+      value: "ghp_from-a-pasted-env-file-instead",
+      kind: "custom",
+    });
+    check(!importedOver.ok, "and a pasted bundle cannot reach around the routes to do it");
 
     // --- importing a bundle ------------------------------------------------------------------------
     console.log("\nimporting an export from somewhere else");

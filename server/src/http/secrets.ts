@@ -494,6 +494,12 @@ export function secretsRoutes(deps: SecretsRouteDeps): SecretsRoute[] {
         }
         if (typeof value !== "string" || !value) throw badRequest("a value is required");
         const kind = readKind(body["kind"]);
+        // THE SAME REFUSAL ROTATE MAKES, because this is the same write with a different verb.
+        // Rotate and revoke both refuse a connector-managed credential; create did not, and a
+        // create against a name that already exists IS a rotation — so POSTing over `GITHUB_TOKEN`
+        // wrote a value the far end never issued AND reclassified the row as `custom`, which then
+        // made rotate and revoke available on it. The narrower guard was the way past the wider one.
+        await refuseIfManaged(deps, caller, name);
         const result = await deps.store(caller, {
           name,
           value,
@@ -565,16 +571,10 @@ export function secretsRoutes(deps: SecretsRouteDeps): SecretsRoute[] {
           if (typeof body.value !== "string" || !body.value) throw badRequest("a new value is required");
           const existing = (await deps.list(caller.ctx)).find((s) => s.name === name);
           if (!existing) throw notFound("no such credential in this workspace");
-          if (existing.kind === "managed") {
-            // A BUTTON THAT CANNOT WORK IS WORSE THAN NO BUTTON. Jaroku does not own a connector
-            // token's lifecycle; the fix for a broken one is re-running consent, not writing a new
-            // value over it.
-            throw new HttpError(
-              409,
-              "managed_credential",
-              "this credential is managed by a connector — reconnect it instead of rotating it",
-            );
-          }
+          // A BUTTON THAT CANNOT WORK IS WORSE THAN NO BUTTON. Jaroku does not own a connector
+          // token's lifecycle; the fix for a broken one is re-running consent, not writing a new
+          // value over it.
+          await refuseIfManaged(deps, caller, name);
           const result = await deps.store(caller, {
             name,
             value: body.value,
@@ -651,13 +651,7 @@ export function secretsRoutes(deps: SecretsRouteDeps): SecretsRoute[] {
         if (action) throw notFound(`nothing to delete at ${req.path}`);
         const existing = (await deps.list(caller.ctx)).find((s) => s.name === name);
         if (!existing) throw notFound("no such credential in this workspace");
-        if (existing.kind === "managed") {
-          throw new HttpError(
-            409,
-            "managed_credential",
-            "this credential is managed by a connector — disconnect the connector instead",
-          );
-        }
+        await refuseIfManaged(deps, caller, name, "disconnect the connector instead");
         // CONFIRMATION GATED BY BLAST RADIUS. A credential nothing points at goes with an ordinary
         // confirm; one with a live reference makes somebody type its name, the same discipline the
         // audited GitHub force-override uses. The quiet revoke that breaks a deployed agent at
@@ -723,6 +717,29 @@ export function mountSecretsRoutes(router: Router, deps: SecretsRouteDeps): Secr
     else router.post(route.path, route.handler);
   }
   return routes;
+}
+
+/**
+ * Refuse anything that would write over a connector's credential.
+ *
+ * ONE FUNCTION FOR ALL THREE VERBS, because the rule is about the credential's ORIGIN and not about
+ * which verb was aimed at it. Rotate and revoke each carried their own copy of this check; create
+ * carried none, and the three of them are the same write. A workspace whose GitHub connector had
+ * issued a token could POST a value over that name and get back a row reclassified `custom` — after
+ * which rotate and revoke, both of which had refused a moment earlier, were available on it.
+ *
+ * Jaroku does not own the lifecycle at the far end. There is no value it can write that the
+ * provider has heard of, so every one of these ends the same way: reconnect.
+ */
+async function refuseIfManaged(
+  deps: SecretsRouteDeps,
+  caller: SecretsCaller,
+  name: string,
+  remedy = "reconnect it instead",
+): Promise<void> {
+  const existing = (await deps.list(caller.ctx)).find((s) => s.name === name);
+  if (existing?.kind !== "managed") return;
+  throw new HttpError(409, "managed_credential", `this credential is managed by a connector — ${remedy}`);
 }
 
 /** The three origins, read from a request body without trusting it. */

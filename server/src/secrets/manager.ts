@@ -146,6 +146,18 @@ export class SecretsManager {
     const before = await this.deps.refs.get(ctx, name);
     const rotated = Boolean(before?.configured);
 
+    // A CONNECTOR'S CREDENTIAL IS NOT WRITABLE FROM HERE, and this backstop is not the route's
+    // check repeated. The route guards the three verbs a person presses; this guards `store`
+    // itself, which the bulk import also calls — a pasted .env containing `GITHUB_TOKEN=` would
+    // otherwise walk straight past the guard by never touching a route that has one. Only a caller
+    // that says `managed` outright, which no request body can (see `readKind`), may write one.
+    if (before?.kind === "managed" && input.kind !== "managed") {
+      return {
+        ok: false,
+        message: `${name} is managed by a connector — reconnect it instead of writing a value over it`,
+      };
+    }
+
     // The provider a key belongs to comes from its NAME, not from what the client claimed. A body
     // saying `provider: "anthropic"` against `OPENWEATHER_API_KEY` would otherwise send somebody's
     // weather key to Anthropic to be validated.
