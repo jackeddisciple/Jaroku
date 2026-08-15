@@ -57,9 +57,14 @@ export function GitHubCommitBox({ view }: { view: GithubView }) {
     clearGenerated(view.agentId);
   }, [generated, view.agentId, clearGenerated]);
 
-  const staged = view.changes.filter((c) => !c.locked).length;
+  // NOT "STAGED", because nothing here stages. There is no index and no checkbox — this is the
+  // set of files the unpushed versions touched, which is the whole of what the push will carry.
+  // "Stage a file to enable commit" told somebody to operate a control this surface does not have
+  // and, by §A.2's own rule, a reason that names an action the user cannot take is worse than no
+  // reason at all.
+  const included = view.changes.filter((c) => !c.locked).length;
   const nothingStaged: DisabledState =
-    staged === 0 ? { reason: "Stage a file to enable commit." } : ENABLED;
+    included === 0 ? { reason: "Nothing has changed since the last push." } : ENABLED;
   const runBlocking: DisabledState = runInFlight
     ? {
         reason: "Commit blocked — a run is using this agent's files.",
@@ -78,12 +83,7 @@ export function GitHubCommitBox({ view }: { view: GithubView }) {
 
   const commit = (push: boolean): void => {
     if ((push ? pushState : commitState).reason) return;
-    sendCommitGithub(
-      view.agentId,
-      view.changes.filter((c) => !c.locked).map((c) => c.path),
-      message.trim(),
-      push,
-    );
+    sendCommitGithub(view.agentId, message.trim(), push);
   };
 
   return (
@@ -111,9 +111,9 @@ export function GitHubCommitBox({ view }: { view: GithubView }) {
         <button
           type="button"
           className={`${quietBtn} !px-0`}
-          disabled={generating || staged === 0}
+          disabled={generating || included === 0}
           onClick={() => sendGenerateGithubMessage(view.agentId)}
-          title="For when the staged files do not map onto one version — a hand-staged subset, or a post-pull merge."
+          title="For when a run of versions does not map onto one message — several small edits, or a post-pull merge."
         >
           <span className="inline-flex items-center gap-1.5">
             <SparklesIcon size={ICON.xs} />
@@ -123,7 +123,7 @@ export function GitHubCommitBox({ view }: { view: GithubView }) {
         {/* The count, in the same numeric weight the region headers use. Zero is a real answer
             here and is shown as one — it is what the disabled reasons below are about. */}
         <span className="text-[11px] tabular-nums text-faint">
-          {staged} staged file{staged === 1 ? "" : "s"}
+          {included} file{included === 1 ? "" : "s"} in this push
         </span>
       </div>
 
@@ -159,7 +159,7 @@ export function GitHubCommitBox({ view }: { view: GithubView }) {
           </span>
         </DisabledReason>
         {/* THE ONE PLACE THE TWO DISABLED STATES LEGITIMATELY DIVERGE, and making that visible is
-            part of why they are split rather than merged into one two-state button: staged but
+            part of why they are split rather than merged into one two-state button: changed but
             unlinked leaves Commit enabled — a local commit needs no repository — while the push
             half says "Link a repository first." */}
         {pushState.reason && pushState.reason !== commitState.reason && (

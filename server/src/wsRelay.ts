@@ -460,7 +460,16 @@ export type OpenGithubPrCommand = { cmd: "openGithubPr"; agentId: string };
 export type CommitGithubCommand = {
   cmd: "commitGithub";
   agentId: string;
-  paths: string[];
+  /**
+   * NO `paths` FIELD, and its removal is the design being stated rather than a capability lost.
+   *
+   * It carried the unlocked changed files and the handler ignored every one of them, which was
+   * survivable only because the client could not compute anything else to send: the Changes region
+   * has no stage/unstage control, because Jaroku has no working tree and there is no half-committed
+   * state a checkbox could describe. A field that always holds a derivable value and is never read
+   * is a promise of partial staging that this surface cannot keep — see ChangesRegion's own note.
+   * Partial staging arrives with a real index behind it or not at all.
+   */
   message: string;
   /** §A.8's second half — commit, then push, in one step. */
   push?: boolean;

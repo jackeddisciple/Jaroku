@@ -1015,7 +1015,7 @@ export type ClientCommand =
   | { cmd: "switchGithubBranch"; agentId: string; branch: string; onUnpushed?: "push" | "stash" | "cancel" }
   | { cmd: "createGithubBranch"; agentId: string; branch: string }
   | { cmd: "openGithubPr"; agentId: string }
-  | { cmd: "commitGithub"; agentId: string; paths: string[]; message: string; push?: boolean }
+  | { cmd: "commitGithub"; agentId: string; message: string; push?: boolean }
   // §3.4's ✨ generate. Its own command because it is the one thing in this family that costs
   // money — the default message needs no model call at all.
   | { cmd: "generateGithubMessage"; agentId: string };

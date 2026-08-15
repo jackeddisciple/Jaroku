@@ -975,6 +975,6 @@ export function sendGenerateGithubMessage(agentId: string): void {
 }
 
 /** §3.4's commit box. `push` false is refused server-side — there is no local repository here. */
-export function sendCommitGithub(agentId: string, paths: string[], message: string, push = true): void {
-  send({ cmd: "commitGithub", agentId, paths, message, push });
+export function sendCommitGithub(agentId: string, message: string, push = true): void {
+  send({ cmd: "commitGithub", agentId, message, push });
 }
