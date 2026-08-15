@@ -38,7 +38,7 @@ import { join } from "node:path";
 import { GithubError, MAX_BLOB_BYTES } from "./githubApi.ts";
 import type { GithubLink, GithubRepository } from "./db/repositories/github.ts";
 import type { GithubIdentity } from "./githubIdentity.ts";
-import { repoPath } from "./githubPush.ts";
+import { inSubdirectory, repoPrefix } from "./githubPush.ts";
 import type { Agent, AgentRepository } from "./db/repositories/agents.ts";
 import type { ProjectStore } from "./storage/projectStore.ts";
 import { newStagingId } from "./storage/keys.ts";
@@ -166,8 +166,8 @@ export class GithubPuller {
       report(stage, "active");
       const head = await api.refSha(repo, link.branch);
       if (!head) return { ok: false, message: `${link.branch} does not exist on GitHub` };
-      const prefix = repoPath("", link.subdirectory);
-      const entries = (await api.tree(repo, head)).filter((e) => (prefix ? e.path.startsWith(`${prefix}/`) : true));
+      const prefix = repoPrefix(link.subdirectory);
+      const entries = (await api.tree(repo, head)).filter((e) => inSubdirectory(e.path, link.subdirectory));
 
       // §6's row, refused with the path named — before the download rather than after it.
       const oversized = entries.find((e) => (e.size ?? 0) > MAX_BLOB_BYTES);
@@ -182,6 +182,10 @@ export class GithubPuller {
 
       const files: { path: string; content: string }[] = [];
       for (const entry of entries) {
+        // `+ 1` for the separator `repoPrefix` deliberately does not carry. With the old prefix —
+        // which ended in one already — this ate the first character of every filename, so a pull
+        // that somehow got this far would have staged `gent.py` and failed the contract check on
+        // a file the repository does not contain.
         const projectPath = prefix ? entry.path.slice(prefix.length + 1) : entry.path;
         files.push({ path: projectPath, content: await api.blob(repo, entry.sha, entry.path) });
       }

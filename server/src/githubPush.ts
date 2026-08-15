@@ -84,14 +84,36 @@ export interface PlanOptions {
  * one layer up.
  */
 export function repoPath(projectPath: string, subdirectory?: string | null): string {
-  const prefix = (subdirectory ?? "")
+  const prefix = repoPrefix(subdirectory);
+  const file = projectPath.replace(/\\/g, "/").replace(/^\/+/, "");
+  return prefix ? `${prefix}/${file}` : file;
+}
+
+/**
+ * The link's subdirectory, normalised, with NO trailing slash — and `""` for the repository root.
+ *
+ * EXTRACTED BECAUSE `repoPath("", sub)` WAS BEING USED FOR THIS AND IS NOT THE SAME FUNCTION. It
+ * returns `agents/weather/` — a path with an empty filename on the end — and every caller that
+ * then wrote ``path.startsWith(`${prefix}/`)`` was testing for `agents/weather//`, which nothing
+ * in a git tree matches. That is not a cosmetic slip: it silently emptied a set. A pull under a
+ * subdirectory link found zero files and refused with "there is nothing on that branch to pull",
+ * and the FROM REMOTE group never listed a file, on repositories where both were working
+ * correctly. The one-character difference between "prefix" and "prefix plus a separator" is worth
+ * a named function precisely because it typechecks either way.
+ */
+export function repoPrefix(subdirectory?: string | null): string {
+  return (subdirectory ?? "")
     .replace(/\\/g, "/")
     .split("/")
     .map((s) => s.trim())
     .filter((s) => s.length > 0 && s !== ".")
     .join("/");
-  const file = projectPath.replace(/\\/g, "/").replace(/^\/+/, "");
-  return prefix ? `${prefix}/${file}` : file;
+}
+
+/** Whether a repository-relative path is inside the link's subdirectory. `""` means everything. */
+export function inSubdirectory(path: string, subdirectory?: string | null): boolean {
+  const prefix = repoPrefix(subdirectory);
+  return prefix === "" || path.startsWith(`${prefix}/`);
 }
 
 /**

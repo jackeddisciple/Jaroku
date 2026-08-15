@@ -19,7 +19,8 @@
 import type { AgentVersion } from "./db/repositories/agents.ts";
 import type { StoredFile } from "./storage/projectStore.ts";
 import {
-  messageFor, planPush, pushableFiles, repoPath, squashMessageFor, withVersionTrailer,
+  inSubdirectory, messageFor, planPush, pushableFiles, repoPath, repoPrefix, squashMessageFor,
+  withVersionTrailer,
   type VersionSnapshot,
 } from "./githubPush.ts";
 
@@ -157,6 +158,28 @@ console.log("\nsquash");
     squashMessageFor([version(11, { instruction: "Only one" })]).startsWith("Only one"),
     "a squash of one is just that version's message, not a range of one",
   );
+}
+
+console.log("\nwhat is inside the linked subdirectory");
+{
+  // `repoPath("", sub)` was standing in for this and returns a TRAILING SLASH, so every caller
+  // that appended its own separator was matching `agents/weather//` and finding nothing. A pull
+  // under a subdirectory link refused as empty and the FROM REMOTE list was always blank.
+  check(repoPrefix("agents/weather") === "agents/weather", "the prefix carries no trailing slash");
+  check(repoPrefix("/agents/weather/") === "agents/weather", "...whatever the user typed around it");
+  check(repoPrefix(null) === "" && repoPrefix("") === "", "and the repository root is the empty string");
+  check(
+    repoPath("", "agents/weather") !== repoPrefix("agents/weather"),
+    "which is exactly what repoPath does NOT return — the two are different functions",
+  );
+
+  check(inSubdirectory("agents/weather/agent.py", "agents/weather"), "a file under it is inside");
+  check(inSubdirectory("agents/weather/tools/x.py", "agents/weather"), "...at any depth");
+  check(!inSubdirectory("agents/slack/agent.py", "agents/weather"), "a sibling agent is not");
+  // The boundary the separator exists for: a prefix match without it would swallow the neighbour.
+  check(!inSubdirectory("agents/weather-v2/agent.py", "agents/weather"), "and neither is a longer name that starts the same");
+  check(!inSubdirectory("agents/weather", "agents/weather"), "the directory itself is not a file in it");
+  check(inSubdirectory("agent.py", null), "with no subdirectory, everything is inside");
 }
 
 console.log("\na message somebody typed");
