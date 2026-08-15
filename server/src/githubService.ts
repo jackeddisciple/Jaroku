@@ -114,6 +114,15 @@ export interface GithubView {
    */
   protectedPaths: string[];
   changes: ChangeRow[];
+  /**
+   * Paths the remote changed since our watermark — §A.4's FROM REMOTE group.
+   *
+   * A LIST OF PATHS AND NOT A DIFF. The panel's job here is to say WHICH files a pull would bring
+   * in, so the user can see before pressing anything whether it touches something they care about;
+   * the diff itself lives on GitHub, where review already works. Empty whenever nothing is behind,
+   * which is most of the time, so the group simply does not render.
+   */
+  remoteChanges: string[];
   pr: PullRequestRow | null;
   events: GithubEvent[];
 }
@@ -201,6 +210,7 @@ export class GithubService {
       branches: remote.branches.map((b) => ({ ...b, current: b.name === link.branch })),
       protectedPaths: this.protectedFor(agent, link),
       changes: this.changesFor(agent, versions, unpushedIds),
+      remoteChanges: remote.remoteChanges,
       pr: remote.pr,
       events,
     };
@@ -280,10 +290,11 @@ export class GithubService {
   ): Promise<{
     state: { headSha: string | null; repoReachable: boolean; tokenRevoked?: boolean; behindBy?: number | null };
     remoteOnly: CommitRow[];
+    remoteChanges: string[];
     branches: { name: string; sha: string; isDefault: boolean }[];
     pr: PullRequestRow | null;
   }> {
-    const empty = { remoteOnly: [], branches: [], pr: null };
+    const empty = { remoteOnly: [], remoteChanges: [], branches: [], pr: null };
     const connection = await this.deps.identity.apiFor(ctx);
     if (!connection) {
       return { state: { headSha: null, repoReachable: false, tokenRevoked: true }, ...empty };
@@ -314,10 +325,19 @@ export class GithubService {
     // Only asked when the cheap answer says something changed. A `compare` per agent per poll
     // would spend the token's rate limit on a number the badge does not need.
     let behindBy: number | null = null;
+    let remoteChanges: string[] = [];
     const watermark = link.last_known_remote_sha ?? link.last_pushed_sha;
     if (headSha && watermark && headSha !== watermark) {
       try {
-        behindBy = (await api.compare(link.repo_full_name, watermark, headSha)).aheadBy;
+        // ONE CALL ANSWERS BOTH. `compare` returns the count and the file list together, so
+        // "how far behind" and "which files" cost the same single request — which is the whole
+        // reason the FROM REMOTE group can exist without a second round trip per panel open.
+        const comparison = await api.compare(link.repo_full_name, watermark, headSha);
+        behindBy = comparison.aheadBy;
+        // Scoped to our subdirectory, for the same reason a push's deletions are: in a monorepo
+        // the other agents' files are not this agent's pending changes.
+        const prefix = repoPath("", link.subdirectory);
+        remoteChanges = comparison.files.filter((f) => (prefix ? f.startsWith(`${prefix}/`) : true));
       } catch {
         behindBy = null;
       }
@@ -326,6 +346,7 @@ export class GithubService {
     return {
       state: { headSha, repoReachable: true, behindBy },
       remoteOnly: await this.remoteOnlyCommits(api, link, headSha),
+      remoteChanges,
       branches: await this.branchList(api, link, defaultBranch),
       pr: await this.pullRequest(api, link, defaultBranch),
     };

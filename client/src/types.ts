@@ -813,6 +813,8 @@ export interface GithubView {
   /** §3.3's PROTECTED group, repository-relative. From the server, never derived here. */
   protectedPaths: string[];
   changes: GithubChangeRow[];
+  /** Paths the remote changed since our watermark — §A.4's FROM REMOTE group. Paths, not a diff. */
+  remoteChanges: string[];
   pr: GithubPrRow | null;
   events: GithubEventRow[];
 }

@@ -22,14 +22,15 @@ import {
 import { relTime } from "../lib/format.ts";
 import { ICON, STATUS } from "../lib/tokens.ts";
 import type { GithubView } from "../types.ts";
+import { fileStatusFor, type FileStatus } from "../lib/actionIcons.tsx";
+import { iconForPath } from "./fileIcons.tsx";
 import { RegionLabel } from "./GitHubSync.tsx";
 import { DiffStat } from "./DiffStat.tsx";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import {
-  CheckIcon, ChevronDownIcon, ExternalLinkIcon, GitPullRequestIcon, LockIcon, SearchIcon,
-  XIcon,
+  CheckIcon, ChevronDownIcon, ExternalLinkIcon, GitPullRequestIcon, SearchIcon, XIcon,
 } from "./panelIcons.tsx";
 
 // --- §3.2 the branch switcher -----------------------------------------------
@@ -209,8 +210,11 @@ export function ChangesRegion({ view }: { view: GithubView }) {
   // Protected files that were NOT touched are still worth listing — the group's job is to say what
   // this surface cannot do, and it can only do that when the files are visible.
   const untouched = view.protectedPaths.filter((p) => !view.changes.some((c) => c.path === p));
+  const remote = view.remoteChanges;
 
-  if (changed.length === 0 && locked.length === 0 && untouched.length === 0) return null;
+  if (changed.length === 0 && locked.length === 0 && untouched.length === 0 && remote.length === 0) {
+    return null;
+  }
 
   return (
     <section>
@@ -223,42 +227,87 @@ export function ChangesRegion({ view }: { view: GithubView }) {
 
       <div className="mt-1.5 space-y-0.5">
         {changed.map((c) => (
-          <div key={c.path} className="flex items-center gap-2 text-[11px]">
-            <span
-              className={`w-3 shrink-0 text-center font-mono ${c.status === "added" ? "text-ok" : "text-muted"}`}
-              title={c.status}
-              aria-hidden
-            >
-              {c.status === "added" ? "+" : "✎"}
-            </span>
-            {/* §A.3: a path is not prose. The filename and its extension are what identify the
-                row, and a right-edge fade throws away exactly those. */}
-            <Truncate variant="path" className="min-w-0 flex-1 font-mono text-ink">{c.path}</Truncate>
-            <DiffStat additions={c.additions} deletions={c.deletions} className="shrink-0" />
-          </div>
+          <FileRow
+            key={c.path}
+            path={c.path}
+            status={c.status === "added" ? "added" : "modified"}
+            trailing={<DiffStat additions={c.additions} deletions={c.deletions} className="shrink-0" />}
+          />
         ))}
         {changed.length === 0 && <p className="text-[11px] text-muted">nothing since the last push</p>}
       </div>
 
+      {/* §A.4's FROM REMOTE group. Its own heading rather than mixed into the list above, because
+          these files have NOT been through Jaroku's validator — that is what a pull is for — and a
+          row that read the same as a local change would be claiming otherwise. */}
+      {remote.length > 0 && (
+        <FileGroup label={`From remote (${remote.length}) — pending pull`}>
+          {remote.map((path) => <FileRow key={path} path={path} status="remote" />)}
+        </FileGroup>
+      )}
+
       {(locked.length > 0 || untouched.length > 0) && (
-        <div className="mt-2">
-          <div className="text-[10px] uppercase tracking-wider text-faint">Protected (not editable here)</div>
-          <div className="mt-1 space-y-0.5">
-            {[...locked.map((l) => l.path), ...untouched].map((path) => (
-              <div
-                key={path}
-                className="flex items-center gap-2 text-[11px] text-faint"
-                // The reason, on hover, rather than only in a doc nobody opens.
-                title="Reviewed code Jaroku keeps read-only. The edit loop cannot change it, the object store's block list covers it, and a change arriving from GitHub that touches it is refused during a pull rather than applied silently."
-              >
-                <span className="w-3 shrink-0 text-center" aria-hidden><LockIcon size={10} /></span>
-                <Truncate variant="path" className="min-w-0 flex-1 font-mono">{path}</Truncate>
-              </div>
-            ))}
-          </div>
-        </div>
+        <FileGroup label="Protected (not editable here)">
+          {[...locked.map((l) => l.path), ...untouched].map((path) => (
+            <FileRow key={path} path={path} status="protected" muted />
+          ))}
+        </FileGroup>
       )}
     </section>
+  );
+}
+
+function FileGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="mt-2">
+      <div className="text-[10px] uppercase tracking-wider text-faint">{label}</div>
+      <div className="mt-1 space-y-0.5">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * One file: what happened to it, what it is, and what it cost.
+ *
+ * TWO ICON COLUMNS, and §A.4 is the argument for the split. The leading glyph is the STATUS — what
+ * happened — and the trailing one is the FILE TYPE — what it is. One slot doing both meant a fresh
+ * file and a modified one read identically unless you had already looked up at the section header,
+ * which is an extra lookup that gets more expensive the longer the list gets.
+ *
+ * They share a stroke weight and a size deliberately: this is one icon system on two semantic axes,
+ * not two icon systems sitting next to each other.
+ */
+function FileRow({
+  path, status, trailing, muted = false,
+}: {
+  path: string;
+  status: FileStatus;
+  trailing?: React.ReactNode;
+  muted?: boolean;
+}) {
+  const descriptor = fileStatusFor(status);
+  const TypeIcon = iconForPath(path);
+  return (
+    <div className="flex items-center gap-2 text-[11px]" title={descriptor.label}>
+      {/* Fixed width, so the filenames line up as a column whatever glyph precedes them. A status
+          column whose width changed per row would be worse than no column at all. */}
+      <span
+        className="inline-flex w-3 shrink-0 items-center justify-center"
+        style={{ color: descriptor.accent }}
+        role="img"
+        aria-label={descriptor.label}
+      >
+        <descriptor.Icon size={ICON.xs} />
+      </span>
+      <span className="inline-flex w-3 shrink-0 items-center justify-center text-faint" aria-hidden>
+        <TypeIcon size={ICON.xs} />
+      </span>
+      {/* §A.3: the filename and its extension are what identify the row, so the middle gives way. */}
+      <Truncate variant="path" className={`min-w-0 flex-1 font-mono ${muted ? "text-faint" : "text-ink"}`}>
+        {path}
+      </Truncate>
+      {trailing}
+    </div>
   );
 }
 
