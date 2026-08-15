@@ -242,6 +242,7 @@ try {
 
   // --- 4. unlocking, and what it opens ----------------------------------------------------------
   console.log("\nunlocking");
+  // Reassigned by the recovery section below, which mints a new one after resetting the passcode.
   let elevation = "";
   {
     const granted = await call(A, "POST", "/v1/secrets/elevation", {
@@ -371,6 +372,44 @@ try {
     const afterSecond = await call(A, "GET", "/v1/secrets", { elevation: second });
     check(afterFirst.status === 403, "the first tab is locked");
     check(afterSecond.status === 403, "and so is the second — which is criterion 7");
+  }
+
+  // --- 8b. forgetting the passcode is recoverable ------------------------------------------------
+  //
+  // THE PATH A LOCKED-OUT USER HAS TO HAVE. Everything else in this suite assumes somebody knows
+  // their passcode; this is the case where they do not, and it is the one where getting it wrong
+  // means a person is permanently shut out of their own credentials. Driven through the routes the
+  // lock screen calls, in the order it calls them.
+  console.log("\nforgetting it");
+  {
+    // Held out by the ladder first, because a reset that respected the lockout would recover
+    // nothing — the point of proving your identity to the IdP is that it outranks the passcode.
+    for (let i = 0; i < 7; i++) {
+      await call(A, "POST", "/v1/secrets/elevation", { body: { method: "passcode", credential: `wrong-${i}` } });
+    }
+    const heldOut = await call(A, "POST", "/v1/secrets/elevation", {
+      body: { method: "passcode", credential: "hunter2!" },
+    });
+    check(heldOut.status === 403, `the right passcode is refused while the lockout stands (${heldOut.status})`);
+
+    const withoutStepUp = await call(A, "POST", "/v1/secrets/passcode/reset", { body: { passcode: "recovered1" } });
+    check(withoutStepUp.code === "step_up_required", "a reset from an ordinary session is refused");
+
+    freshLogin = true;
+    const reset = await call(A, "POST", "/v1/secrets/passcode/reset", { body: { passcode: "recovered1" } });
+    freshLogin = false;
+    check(reset.status === 200, `a fresh sign-in resets it (${reset.status})`, reset.text.slice(0, 120));
+
+    const withNew = await call(A, "POST", "/v1/secrets/elevation", {
+      body: { method: "passcode", credential: "recovered1" },
+    });
+    check(withNew.status === 200, `and the new passcode works at once, lockout cleared (${withNew.status})`);
+    elevation = String(withNew.body["token"]);
+
+    const withOld = await call(A, "POST", "/v1/secrets/elevation", {
+      body: { method: "passcode", credential: "hunter2!" },
+    });
+    check(withOld.status === 403, "while the forgotten one no longer does");
   }
 
   // --- 9. a new route in the group is protected without anybody remembering -------------------------

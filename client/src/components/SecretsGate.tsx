@@ -20,7 +20,7 @@ import { EmptyState } from "./EmptyState.tsx";
 import { LockIcon, ShieldCheckIcon } from "./panelIcons.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
 import { ICON } from "../lib/tokens.ts";
-import { failureCode, setPasscode, unlock } from "../lib/secrets.ts";
+import { failureCode, resetPasscode, setPasscode, unlock } from "../lib/secrets.ts";
 import { useSecretsStore } from "../store/secretsStore.ts";
 
 /** Shared field, so the unlock and setup forms cannot drift on the rules that matter. */
@@ -70,7 +70,18 @@ export function SecretsGate({ onUnlocked }: { onUnlocked: () => void }) {
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // RECOVERY IS A THIRD MODE, not a sentence. "Forgot passcode?" used to set an error string
+  // telling somebody to sign out and back in — which does nothing on its own: the passcode they
+  // have forgotten is still the passcode, `POST /secrets/passcode` refuses a second one with a
+  // 409, and there was no form anywhere that called the reset route the server has always had. A
+  // forgotten passcode locked somebody out of their own credentials permanently.
+  const [resetting, setResetting] = useState(false);
   const errorRef = useRef<HTMLParagraphElement>(null);
+
+  // Two fields, whenever a NEW passcode is being chosen — first-run setup and recovery are the
+  // same form and the same rules, which is why they are one branch rather than two components
+  // that could disagree about the confirm field.
+  const choosingNew = !passcodeSet || resetting;
 
   // Clearing the field when the mode flips, so a passcode typed into the setup form is not still
   // sitting there when it becomes an unlock form.
@@ -78,7 +89,7 @@ export function SecretsGate({ onUnlocked }: { onUnlocked: () => void }) {
     setValue("");
     setConfirm("");
     setError(null);
-  }, [passcodeSet]);
+  }, [passcodeSet, resetting]);
 
   const submit = async (e?: React.FormEvent): Promise<void> => {
     e?.preventDefault();
@@ -86,18 +97,23 @@ export function SecretsGate({ onUnlocked }: { onUnlocked: () => void }) {
     setError(null);
     setBusy(true);
     try {
-      if (passcodeSet) {
+      if (!choosingNew) {
         await unlock(passcode);
       } else {
         if (passcode !== confirm) {
           setError("Those do not match");
           return;
         }
-        await setPasscode(passcode);
+        // Reset and first-run are different routes for the same reason they look alike: one
+        // refuses when a passcode already exists and the other exists precisely because one does.
+        // Both need a fresh sign-in, which is what stops a stolen session installing its own gate.
+        if (resetting) await resetPasscode(passcode);
+        else await setPasscode(passcode);
         await unlock(passcode);
       }
       setValue("");
       setConfirm("");
+      setResetting(false);
       onUnlocked();
     } catch (err) {
       const message = (err as Error).message;
@@ -105,7 +121,9 @@ export function SecretsGate({ onUnlocked }: { onUnlocked: () => void }) {
       // step-up is needed and the user has no idea what that means.
       setError(
         failureCode(err) === "step_up_required"
-          ? "Sign in again to set a secrets passcode — this cannot be done from an existing session."
+          ? resetting
+            ? "Sign out and back in first, then choose a new passcode here — a reset needs a fresh sign-in, not the old passcode."
+            : "Sign in again to set a secrets passcode — this cannot be done from an existing session."
           : message,
       );
     } finally {
@@ -117,9 +135,11 @@ export function SecretsGate({ onUnlocked }: { onUnlocked: () => void }) {
     <div className="flex h-full items-center justify-center px-4">
       <form onSubmit={submit} className="w-full max-w-[320px] space-y-3">
         <EmptyState
-          title={passcodeSet ? "Secrets are locked" : "Set a secrets passcode"}
+          title={resetting ? "Choose a new passcode" : passcodeSet ? "Secrets are locked" : "Set a secrets passcode"}
           hint={
-            passcodeSet ? (
+            resetting ? (
+              <>Sign out and back in first — a reset proves who you are to your identity provider, not with the passcode you have lost.</>
+            ) : passcodeSet ? (
               pending ? (
                 // WHY THEY ARE LOOKING AT THIS. An expiry mid-form is confusing enough without
                 // the screen refusing to say what it interrupted.
@@ -133,20 +153,20 @@ export function SecretsGate({ onUnlocked }: { onUnlocked: () => void }) {
               <>Asked for whenever you open Secrets. It protects this view — it does not encrypt your secrets.</>
             )
           }
-          icon={passcodeSet ? LockIcon : ShieldCheckIcon}
+          icon={choosingNew ? ShieldCheckIcon : LockIcon}
           size="inline"
         />
 
         <PasscodeField
           id="secrets-passcode"
-          label={passcodeSet ? "Passcode" : "New passcode"}
+          label={choosingNew ? "New passcode" : "Passcode"}
           value={passcode}
           onChange={setValue}
-          autoComplete={passcodeSet ? "current-password" : "new-password"}
+          autoComplete={choosingNew ? "new-password" : "current-password"}
           autoFocus
           disabled={busy}
         />
-        {!passcodeSet ? (
+        {choosingNew ? (
           <PasscodeField
             id="secrets-passcode-confirm"
             label="Confirm"
@@ -171,30 +191,24 @@ export function SecretsGate({ onUnlocked }: { onUnlocked: () => void }) {
 
         <div className="flex items-center gap-2">
           <button type="submit" className={primaryBtn} disabled={busy || !passcode}>
-            {busy ? "Working…" : passcodeSet ? "Unlock" : "Verify identity & save"}
+            {busy ? "Working…" : choosingNew ? "Verify identity & save" : "Unlock"}
           </button>
           {passcodeSet ? (
-            <a
-              className={quietBtn}
-              href="/v1/auth/session"
-              onClick={(e) => {
-                e.preventDefault();
-                // Recovery is a full re-authentication, never an email link — the whole point of
-                // elevation is proving the person is still there, and a link in a mailbox proves
-                // somebody had the mailbox. Sending them through sign-in is the honest route.
-                setError("Sign out and back in to reset a forgotten passcode.");
-              }}
-            >
-              Forgot passcode?
-            </a>
+            // Recovery is a full re-authentication, never an email link — the whole point of
+            // elevation is proving the person is still there, and a link in a mailbox proves
+            // somebody had the mailbox. So this opens the form rather than describing one: the
+            // reset route needs a fresh sign-in, and the refusal it gives says so in words.
+            <button type="button" className={quietBtn} onClick={() => setResetting(!resetting)}>
+              {resetting ? "Back to unlock" : "Forgot passcode?"}
+            </button>
           ) : null}
         </div>
 
         <p className="text-[11px] text-faint">
           <LockIcon size={ICON.xs} />{" "}
-          {passcodeSet
-            ? "Six to twelve characters. Paste is fine — use a password manager."
-            : "Six to twelve characters, and it is per person, not per workspace."}
+          {choosingNew
+            ? "Six to twelve characters, and it is per person, not per workspace."
+            : "Six to twelve characters. Paste is fine — use a password manager."}
         </p>
       </form>
     </div>
