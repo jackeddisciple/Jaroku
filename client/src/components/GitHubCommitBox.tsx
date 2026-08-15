@@ -24,8 +24,8 @@ import { useUiStore } from "../store/uiStore.ts";
 import { ICON } from "../lib/tokens.ts";
 import type { GithubView } from "../types.ts";
 import { DisabledReason, ENABLED, firstReason, type DisabledState } from "./DisabledReason.tsx";
-import { primaryBtn, quietBtn } from "./buttons.ts";
-import { SparklesIcon } from "./panelIcons.tsx";
+import { quietBtn } from "./buttons.ts";
+import { ArrowUpIcon, SparklesIcon } from "./panelIcons.tsx";
 
 export function GitHubCommitBox({ view }: { view: GithubView }) {
   const generated = useGithubStore((s) => s.generated[view.agentId]);
@@ -127,17 +127,46 @@ export function GitHubCommitBox({ view }: { view: GithubView }) {
         </span>
       </div>
 
+      {/* §A.8. `[ Commit ] [ Commit & push ]` repeated the word "commit" in both labels, which
+          takes a beat longer to scan than it should — and worse, it phrased two meaningfully
+          different weights of action (one local, one that reaches GitHub) as variations on the
+          same verb rather than as a base action plus an escalation. */}
       <div className="mt-2 flex items-start gap-3">
         <DisabledReason state={commitState}>
-          <button className={primaryBtn} disabled={Boolean(commitState.reason)} onClick={() => commit(false)}>
-            Commit
-          </button>
+          {/* CONNECTED AS A PAIR: one rounded box, a hairline between the halves rather than a
+              gap, so they read as "commit, optionally also →" and not as two unrelated buttons
+              competing for attention. */}
+          <span className="inline-flex overflow-hidden rounded-control bg-panel">
+            <button
+              className="px-3 py-1.5 text-[12px] text-ink transition-colors hover:bg-active disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={Boolean(commitState.reason)}
+              onClick={() => commit(false)}
+            >
+              Commit
+            </button>
+            <span className="w-px shrink-0 bg-hair" aria-hidden />
+            {/* ICON-ONLY, and the same ↑ the tab badge already uses for "ahead". The glyph carries
+                the meaning once learned; the tooltip carries it for the first few uses. */}
+            <button
+              className="px-2.5 py-1.5 text-ink transition-colors hover:bg-active disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={Boolean(pushState.reason)}
+              onClick={() => commit(true)}
+              title="push after commit — ⌘⇧↵"
+              aria-label="push after commit"
+            >
+              <ArrowUpIcon size={ICON.xs} />
+            </button>
+          </span>
         </DisabledReason>
-        <DisabledReason state={pushState}>
-          <button className={primaryBtn} disabled={Boolean(pushState.reason)} onClick={() => commit(true)}>
-            Commit &amp; push
-          </button>
-        </DisabledReason>
+        {/* THE ONE PLACE THE TWO DISABLED STATES LEGITIMATELY DIVERGE, and making that visible is
+            part of why they are split rather than merged into one two-state button: staged but
+            unlinked leaves Commit enabled — a local commit needs no repository — while the push
+            half says "Link a repository first." */}
+        {pushState.reason && pushState.reason !== commitState.reason && (
+          <DisabledReason state={pushState}>
+            <span className="sr-only">push after commit</span>
+          </DisabledReason>
+        )}
       </div>
     </div>
   );
