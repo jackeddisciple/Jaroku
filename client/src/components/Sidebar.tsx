@@ -14,16 +14,17 @@ import { selectAgent, selectRun } from "../lib/selection.ts";
 import { sendLoadRun } from "../lib/socket.ts";
 import { ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { useUiStore } from "../store/uiStore.ts";
+import { useGithubStore } from "../store/githubStore.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import {
-  ActivityIcon, ChevronRightIcon, GitForkIcon, GlobeIcon, LoaderIcon, PauseIcon, PlusIcon,
-  SearchIcon, SettingsIcon, SparklesIcon, XIcon,
+  ActivityIcon, ChevronRightIcon, GitForkIcon, GithubIcon, GlobeIcon, LoaderIcon, PauseIcon,
+  PlusIcon, SearchIcon, SettingsIcon, SparklesIcon, XIcon,
 } from "./panelIcons.tsx";
 
-type Filter = "all" | "running" | "deployed" | "drafts";
+type Filter = "all" | "running" | "deployed" | "synced" | "drafts";
 
 // A run's outcome, in the same marks the rest of the app uses for the same facts.
 // It was font characters — a pulsing ●, a ✗ and a ✓ — which sat on the text baseline at
@@ -105,6 +106,9 @@ function RunRow({ run }: { run: RunSummary }) {
 function AgentRow({ agent }: { agent: AgentSummary }) {
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const runs = useTraceStore((s) => s.runs);
+  // §4: the same delta the tab badge carries, on the row. An agent list that says "synced" without
+  // saying HOW synced makes you open each one to find out which is the one with work on it.
+  const github = useGithubStore((s) => s.views[agent.agent_id]);
   const active = agent.agent_id === activeAgentId;
   const status = agentStatus(agent.agent_id, runs, agent.deployment);
 
@@ -127,7 +131,17 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
           <StatusDot state="error" icon={XIcon} title="missing agent.py" />
         )}
         <Truncate className="text-ink" title={agent.name}>{agent.name}</Truncate>
-        {last && <span className="ml-auto text-faint text-[11px] shrink-0">{relTime(last.started_at)}</span>}
+        {github?.badge && (
+          <span
+            className={`ml-auto shrink-0 font-mono text-[10px] tabular-nums ${
+              github.badge === "↕" || github.badge === "⚠" ? "text-err" : "text-faint"
+            }`}
+            title={github.verdict}
+          >
+            {github.badge}
+          </span>
+        )}
+        {last && <span className={`text-faint text-[11px] shrink-0 ${github?.badge ? "" : "ml-auto"}`}>{relTime(last.started_at)}</span>}
       </div>
       {/* A provider and a connector are both names of things this agent is wired to — the same
           kind of label the plan card puts on a reviewed tool. Bare rather than filled: a row of
@@ -147,6 +161,13 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
             {c}
           </Chip>
         ))}
+        {/* Where its code lives, for the same reason the URL below is here: a list that says
+            "synced" without saying where makes you open the tab to find out. */}
+        {github && (
+          <Chip size="sm" tone="faint" mono variant="bare" icon={<GithubIcon size={10} />} title={github.verdict}>
+            {github.link.repo_full_name}
+          </Chip>
+        )}
         {/* Where it is serving, not just that it is. A URL is the whole point of a deploy, and
             an agent list that says "deployed" without saying where makes you go and look. */}
         {agent.deployment?.status === "live" && agent.deployment.url && (
@@ -171,8 +192,12 @@ export function Sidebar() {
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
+  // Per AGENT rather than per workspace — §4. Different agents legitimately belong in different
+  // repositories, and one repo per workspace would break the monorepo case the subdirectory field
+  // exists for.
+  const githubViews = useGithubStore((s) => s.views);
 
-  const counts = { running: 0, deployed: 0, drafts: 0 };
+  const counts = { running: 0, deployed: 0, synced: 0, drafts: 0 };
   for (const a of agents) {
     const st = agentStatus(a.agent_id, runs, a.deployment);
     if (st === "running") counts.running++;
@@ -181,6 +206,10 @@ export function Sidebar() {
     // running locally is both, and a Deployed tab that hid it while a test run was in flight
     // would flicker its own count.
     if (st === "deployed" || st === "deploying") counts.deployed++;
+    // Counted outside the status chain for the reason Deployed is: linked and running are
+    // orthogonal facts, and a Synced count that flickered while a test run was in flight would be
+    // counting the wrong thing.
+    if (githubViews[a.agent_id]) counts.synced++;
   }
 
   const q = query.trim().toLowerCase();
@@ -189,6 +218,7 @@ export function Sidebar() {
     if (filter === "all") return true;
     const st = agentStatus(a.agent_id, runs, a.deployment);
     if (filter === "running") return st === "running";
+    if (filter === "synced") return Boolean(githubViews[a.agent_id]);
     if (filter === "drafts") return st === "draft";
     // Deployed shows what is live AND what is on its way there — the tab is about where an
     // agent is, and a deploy in flight is the most interesting answer that question has.
@@ -238,6 +268,7 @@ export function Sidebar() {
         {tab("all", "All")}
         {tab("running", "Running", counts.running)}
         {tab("deployed", "Deployed", counts.deployed)}
+        {tab("synced", "Synced", counts.synced)}
         {tab("drafts", "Drafts", counts.drafts)}
       </div>
 

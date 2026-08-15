@@ -51,6 +51,24 @@ export interface CommitRow {
   url: string;
 }
 
+/**
+ * One file the unpushed versions touched — §3.3's Changes region.
+ *
+ * DERIVED FROM `file_stats` ACROSS THE UNPUSHED RUN rather than from a working tree, because
+ * Jaroku has no working tree: an agent's files are immutable per version and the "uncommitted
+ * change" a git client would show is, here, the set of paths the versions since the last push
+ * touched. Merged newest-wins on status and summed on the figures, so a file edited in three
+ * versions is one row saying what happened to it overall.
+ */
+export interface ChangeRow {
+  path: string;
+  status: "added" | "modified";
+  additions: number;
+  deletions: number;
+  /** §3.3's PROTECTED group. Listed, visible, and never stageable. */
+  locked: boolean;
+}
+
 export interface PullRequestRow {
   number: number;
   title: string;
@@ -95,6 +113,7 @@ export interface GithubView {
    * be the one an attacker can edit.
    */
   protectedPaths: string[];
+  changes: ChangeRow[];
   pr: PullRequestRow | null;
   events: GithubEvent[];
 }
@@ -181,9 +200,37 @@ export class GithubService {
       remoteOnly: remote.remoteOnly,
       branches: remote.branches.map((b) => ({ ...b, current: b.name === link.branch })),
       protectedPaths: this.protectedFor(agent, link),
+      changes: this.changesFor(agent, versions, unpushedIds),
       pr: remote.pr,
       events,
     };
+  }
+
+  /**
+   * What the unpushed run changed, as one row per path.
+   *
+   * ADDED BEATS MODIFIED when a file appears in both. A file created two versions ago and edited
+   * since is, from GitHub's point of view, a new file — and labelling it "modified" would point the
+   * glyph at a state the remote has never seen.
+   */
+  private changesFor(agent: Agent, versions: AgentVersion[], unpushedIds: Set<string>): ChangeRow[] {
+    const readOnly = readOnlyPaths(this.deps.connectorFilesFor(agent, agent.slug));
+    const merged = new Map<string, ChangeRow>();
+    // Oldest first, so a later "modified" cannot overwrite an earlier "added" — see above.
+    for (const version of [...versions].reverse()) {
+      if (!unpushedIds.has(version.id)) continue;
+      for (const stat of version.file_stats ?? []) {
+        const existing = merged.get(stat.path);
+        merged.set(stat.path, {
+          path: stat.path,
+          status: existing?.status === "added" ? "added" : stat.status,
+          additions: (existing?.additions ?? 0) + stat.additions,
+          deletions: (existing?.deletions ?? 0) + stat.deletions,
+          locked: readOnly.has(stat.path),
+        });
+      }
+    }
+    return [...merged.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   }
 
   private versionRow(version: AgentVersion, link: GithubLink, sha: string | null): VersionRow {

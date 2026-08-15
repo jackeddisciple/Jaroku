@@ -746,6 +746,22 @@ export interface GithubBranchRow {
   current: boolean;
 }
 
+/**
+ * One file the unpushed versions touched — §3.3's Changes region.
+ *
+ * Derived server-side from `file_stats` across the unpushed run rather than from a working tree,
+ * because Jaroku has none: an agent's files are immutable per version, so the "uncommitted change"
+ * a git client would show is the set of paths the versions since the last push touched.
+ */
+export interface GithubChangeRow {
+  path: string;
+  status: "added" | "modified";
+  additions: number;
+  deletions: number;
+  /** §3.3's PROTECTED group. Listed, visible, and never stageable. */
+  locked: boolean;
+}
+
 export interface GithubPrRow {
   number: number;
   title: string;
@@ -796,6 +812,7 @@ export interface GithubView {
   branches: GithubBranchRow[];
   /** §3.3's PROTECTED group, repository-relative. From the server, never derived here. */
   protectedPaths: string[];
+  changes: GithubChangeRow[];
   pr: GithubPrRow | null;
   events: GithubEventRow[];
 }

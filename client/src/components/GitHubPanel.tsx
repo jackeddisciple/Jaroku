@@ -36,6 +36,7 @@ import type { GithubVersionRow, GithubView } from "../types.ts";
 import { ActionRow } from "./ActionRow.tsx";
 import { DiffStat } from "./DiffStat.tsx";
 import { GitHubSyncRegion, RegionLabel } from "./GitHubSync.tsx";
+import { BranchSwitcher, ChangesRegion, HistoryRegion, PullRequestCard } from "./GitHubHistory.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
 import { EmptyState } from "./EmptyState.tsx";
@@ -462,7 +463,10 @@ function Linked({ view }: { view: GithubView }) {
     <div className="space-y-4 p-4">
       <RepoHeader view={view} />
       <GitHubSyncRegion view={view} />
+      <ChangesRegion view={view} />
       <VersionLists view={view} />
+      <PullRequestCard view={view} />
+      <HistoryRegion view={view} />
     </div>
   );
 }
@@ -487,7 +491,7 @@ function RepoHeader({ view }: { view: GithubView }) {
         </button>
       </div>
       <div className="mt-0.5 flex items-center gap-2 pl-6 font-mono text-[11px] text-muted">
-        <Truncate title={view.link.branch}>{view.link.branch}</Truncate>
+        <BranchSwitcher view={view} />
         {view.link.subdirectory && (
           <Chip size="sm" tone="faint" mono variant="bare" title="Only this directory is pushed and pulled">
             {view.link.subdirectory}/
