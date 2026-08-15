@@ -92,6 +92,27 @@ export interface OAuthServiceOptions {
   now?: () => number;
   /** For the audit row a completed or refused flow writes. Optional; absent means no audit. */
   audit?: (ctx: TenantContext, action: string, detail: Record<string, unknown>) => Promise<void>;
+  /**
+   * Say who owns the credentials this flow just stored.
+   *
+   * A CONNECTOR'S TOKEN IS NOT A CREDENTIAL THE USER MAY EDIT, and without this hook nothing said
+   * so. `SecretStore.set` records a name and classifies it `custom` — the default, and the right
+   * one for a value somebody typed — so `GMAIL_ACCESS_TOKEN` and `SLACK_BOT_TOKEN` appeared in the
+   * Secrets tab's Custom group with Rotate, Revoke and Reveal beside them. Every one of those is
+   * either a button that cannot work or one that quietly breaks the connection: rotating writes a
+   * value Google never issued, revoking leaves `oauth_connections` reporting a live connection that
+   * hands a run nothing — the exact failure `store`'s own comment below is written against — and
+   * revealing hands a browser a live access token.
+   *
+   * A HOOK RATHER THAN THE REPOSITORY, so this module keeps depending on `SecretStore` and nothing
+   * else. Optional, because a deployment that wires no classifier gets what it had before rather
+   * than a crash.
+   */
+  classify?: (
+    ctx: TenantContext,
+    name: string,
+    detail: { connectorId: string; expiresAt: string | null },
+  ) => Promise<void>;
 }
 
 export interface BeginResult {
@@ -302,6 +323,19 @@ export class OAuthService {
         throw new OAuthError("error", refresh.warning ?? "that refresh token could not be stored");
       }
     }
+    const accessExpiresAt = expiryFrom(grant.expiresInS, this.now());
+
+    // CLASSIFIED BEFORE THE CONNECTION ROW EXISTS, so there is no window in which the tab offers
+    // Rotate on a token the far end owns. The access token carries the grant's expiry, which is
+    // what makes a connector show up in the health strip as expiring rather than as broken after
+    // it already has; the refresh token has none of its own.
+    if (this.opts.classify) {
+      await this.opts.classify(ctx, spec.accessSecretName, { connectorId: spec.connectorId, expiresAt: accessExpiresAt });
+      if (spec.refreshSecretName && grant.refreshToken) {
+        await this.opts.classify(ctx, spec.refreshSecretName, { connectorId: spec.connectorId, expiresAt: null });
+      }
+    }
+
     return this.opts.repo.upsert(ctx, {
       provider: provider.id,
       connectorId: spec.connectorId,
@@ -311,7 +345,7 @@ export class OAuthService {
       scopes: grant.scopes,
       accessSecretName: spec.accessSecretName,
       refreshSecretName: spec.refreshSecretName ?? null,
-      accessExpiresAt: expiryFrom(grant.expiresInS, this.now()),
+      accessExpiresAt,
     });
   }
 

@@ -31,6 +31,7 @@ import { SecretRefRepository } from "../db/repositories/secretRefs.ts";
 import { OAuthRepository } from "../db/repositories/oauth.ts";
 import { KmsSecretStore } from "../secrets/kmsSecretStore.ts";
 import { LocalMasterKeyProvider } from "../secrets/masterKey.ts";
+import { GENERIC_MASK } from "../secrets/mask.ts";
 import { OAuthError, OAuthService, stripControl, type TokenTransport } from "./service.ts";
 import type { OAuthClientConfig, OAuthProvider } from "./provider.ts";
 import { returnUrl } from "./provider.ts";
@@ -138,6 +139,17 @@ function service(transport: TokenTransport, config: OAuthClientConfig | null = C
     config: () => config,
     transport,
     env: { JAROKU_APP_URL: "https://app.jaroku.example" },
+    // The same wiring `index.ts` uses. Without it the flow's tokens are classified `custom`, which
+    // is what put a connector's OAuth token in the Secrets tab's Custom group with Rotate, Revoke
+    // and Reveal beside it.
+    classify: async (ctx, name, detail) =>
+      refs.setMetadata(ctx, name, {
+        kind: "managed",
+        connectorId: detail.connectorId,
+        maskedHint: GENERIC_MASK,
+        status: "valid",
+        expiresAt: detail.expiresAt,
+      }),
   });
 }
 
@@ -243,6 +255,20 @@ console.log("\na completed flow: the tokens go to the vault and nowhere else");
     (await secrets.getForPlatformCall(A, ["GMAIL_REFRESH_TOKEN"]))["GMAIL_REFRESH_TOKEN"] === REFRESH,
     "...both halves of it",
   );
+
+  // WHOSE CREDENTIAL THE SECRETS TAB THINKS THIS IS. `SecretStore.set` classifies what it stores
+  // `custom`, which is right for a value somebody typed and wrong for one a provider issued — and
+  // the Custom group is the one that offers Rotate, Revoke, Usage and Reveal. Rotating writes a
+  // token the far end never heard of; revoking leaves this connection reporting itself active
+  // while handing a run nothing; revealing puts a live access token in a browser.
+  const access = await refs.get(A, "GMAIL_ACCESS_TOKEN");
+  const refresh = await refs.get(A, "GMAIL_REFRESH_TOKEN");
+  check(access?.kind === "managed", `the access token is a MANAGED credential (${access?.kind})`);
+  check(access?.connector_id === "gmail", `...naming the connector that owns it (${access?.connector_id})`);
+  check(refresh?.kind === "managed", "and so is the refresh token");
+  check(access?.expires_at !== null, "the access token carries the grant's expiry, so it can warn before it breaks");
+  check(access?.masked_hint === GENERIC_MASK, "with a generic mask — deriving a real one would need the plaintext");
+  check(!JSON.stringify({ access, refresh }).includes(ACCESS), "and the classification carries no token");
 }
 
 // --- a partial grant ---------------------------------------------------------------------

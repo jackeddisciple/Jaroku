@@ -103,6 +103,7 @@ import { mcpEgressRules } from "./mcpUrl.ts";
 import { WorkerLoop } from "./queue/workerLoop.ts";
 import { fileCredentialWriter } from "./envWriter.ts";
 import { openSecretStore } from "./secrets/open.ts";
+import { GENERIC_MASK } from "./secrets/mask.ts";
 import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
 import { OAuthRepository } from "./db/repositories/oauth.ts";
 import { OAuthError, OAuthService } from "./oauth/service.ts";
@@ -930,6 +931,22 @@ const oauth = new OAuthService({
       targetType: "connector",
       targetId: typeof detail["connector"] === "string" ? detail["connector"] : null,
       metadata: detail,
+    });
+  },
+  // A CONNECTOR'S TOKEN BELONGS TO THE CONNECTOR, and the Secrets tab has to be told: without
+  // this, `GMAIL_ACCESS_TOKEN` and `SLACK_BOT_TOKEN` were classified `custom` — the default that
+  // is correct for a value somebody typed — and rendered in the Custom group with Rotate, Revoke
+  // and Reveal, none of which can end well on a credential Google issued.
+  //
+  // A GENERIC MASK, NEVER A DERIVED ONE. The real hint would need the plaintext, and there is no
+  // reason to reach for a token's value to decorate a row nobody may act on anyway.
+  classify: async (ctx, name, detail) => {
+    await secretRefs.setMetadata(ctx, name, {
+      kind: "managed",
+      connectorId: detail.connectorId,
+      maskedHint: GENERIC_MASK,
+      status: "valid",
+      expiresAt: detail.expiresAt,
     });
   },
 });

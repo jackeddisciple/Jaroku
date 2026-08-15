@@ -324,7 +324,8 @@ export class SecretRefRepository {
          COUNT(*)                                                                   AS total,
          SUM(CASE WHEN expires_at IS NOT NULL AND expires_at <= ? THEN 1 ELSE 0 END) AS expiring,
          SUM(CASE WHEN status = 'invalid' THEN 1 ELSE 0 END)                        AS invalid,
-         SUM(CASE WHEN COALESCE(last_used_at, updated_at) <= ? THEN 1 ELSE 0 END)   AS unused
+         SUM(CASE WHEN kind <> 'managed'
+                   AND COALESCE(last_used_at, updated_at) <= ? THEN 1 ELSE 0 END)  AS unused
        FROM secret_refs
        WHERE workspace_id = ? AND configured = ?`,
       // A CREDENTIAL NOBODY HAS EVER READ IS THE MOST UNUSED ONE THERE IS, and `last_used_at IS NOT
@@ -333,6 +334,12 @@ export class SecretRefRepository {
       // been read the clock starts at `updated_at`, not `created_at`: a name an agent's manifest
       // declared a year ago and somebody filled in yesterday is a day old as a credential, and
       // warning about it would be a false alarm on the day it was added.
+      //
+      // MANAGED CREDENTIALS ARE EXCLUDED because nothing records their reads here — a connector's
+      // token is resolved through `oauth_connections`, so `last_used_at` on its row stays null
+      // however busy the connector is. Counting it would be asserting a fact nobody measured, and
+      // it would light the badge permanently for every workspace with a connector older than
+      // ninety days.
       [soon, ninetyDaysAgo, ctx.workspaceId, 1],
     );
     const n = (key: string): number => Number(row?.[key] ?? 0);

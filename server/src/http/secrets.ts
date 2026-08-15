@@ -597,6 +597,13 @@ export function secretsRoutes(deps: SecretsRouteDeps): SecretsRoute[] {
           // THE ONE ROUTE THAT RETURNS A CREDENTIAL. See ADR-035 for the decision and what it
           // cost; what follows is the set of things that make it the narrowest version of itself.
           if (!deps.reveal) throw notFound("this deployment does not expose stored credentials");
+          // AND NOT A CONNECTOR'S. ADR-035 lets somebody read back a credential THEY provided; a
+          // connector token is one Jaroku obtained under a grant the user gave to Jaroku, and
+          // handing it to a browser turns "this app may read my mail" into "this tab now holds a
+          // token that can". The row offers no other verb either — reconnect is the whole of what
+          // may be done to it — and the UI already renders it that way, which is exactly why the
+          // route has to say so independently.
+          await refuseIfManaged(deps, caller, name, "it cannot be read back — reconnect it instead");
           // Its own rate limit, tighter than the unlock one and separate from it, so a script that
           // has obtained one elevation cannot walk the whole vault with it inside ten minutes.
           const retryAfter = await deps.limitReveal?.(caller);

@@ -578,6 +578,19 @@ try {
       kind: "custom",
     });
     check(!importedOver.ok, "and a pasted bundle cannot reach around the routes to do it");
+    // NOR READ BACK. ADR-035 lets somebody recover a credential THEY provided; a connector token is
+    // one Jaroku holds under a grant the user gave to Jaroku, and the value really is in the vault
+    // — so without this the route hands a browser a live OAuth access token for a row whose only
+    // offered verb is Reconnect.
+    const cannotReveal = await statusOf(
+      itemPost.handler,
+      withElevation({ path: "/v1/secrets/GITHUB_TOKEN/reveal" }),
+    );
+    check(
+      cannotReveal.status === 409 && cannotReveal.code === "managed_credential",
+      "and cannot be revealed, whatever the UI does or does not render",
+      String(cannotReveal.status),
+    );
 
     // --- importing a bundle ------------------------------------------------------------------------
     console.log("\nimporting an export from somewhere else");
