@@ -324,27 +324,61 @@ export class SecretRefRepository {
          COUNT(*)                                                                   AS total,
          SUM(CASE WHEN expires_at IS NOT NULL AND expires_at <= ? THEN 1 ELSE 0 END) AS expiring,
          SUM(CASE WHEN status = 'invalid' THEN 1 ELSE 0 END)                        AS invalid,
-         SUM(CASE WHEN rotate_every_days IS NOT NULL
-                   AND COALESCE(rotated_at, created_at) <= ? THEN 1 ELSE 0 END)     AS rotation_due,
-         SUM(CASE WHEN last_used_at IS NOT NULL AND last_used_at <= ? THEN 1 ELSE 0 END)
-                                                                                     AS unused
+         SUM(CASE WHEN COALESCE(last_used_at, updated_at) <= ? THEN 1 ELSE 0 END)   AS unused
        FROM secret_refs
        WHERE workspace_id = ? AND configured = ?`,
-      // The rotation-due comparison is deliberately coarse: a row is due when the last rotation is
-      // older than the WINDOW ITSELF measured back from now, which over-reports for a schedule
-      // longer than the elapsed lifetime and never under-reports. Computing the exact due date per
-      // row needs date arithmetic that the two dialects spell differently, and a badge that
-      // occasionally says "look at this" a few days early is the harmless direction to be wrong in.
-      [soon, ninetyDaysAgo, ninetyDaysAgo, ctx.workspaceId, 1],
+      // A CREDENTIAL NOBODY HAS EVER READ IS THE MOST UNUSED ONE THERE IS, and `last_used_at IS NOT
+      // NULL` used to exclude exactly those — the count answered only for credentials that had been
+      // used and then stopped, which is the smaller half of the question. For a row that has never
+      // been read the clock starts at `updated_at`, not `created_at`: a name an agent's manifest
+      // declared a year ago and somebody filled in yesterday is a day old as a credential, and
+      // warning about it would be a false alarm on the day it was added.
+      [soon, ninetyDaysAgo, ctx.workspaceId, 1],
     );
     const n = (key: string): number => Number(row?.[key] ?? 0);
     return {
       total: n("total"),
       expiringSoon: n("expiring"),
       invalid: n("invalid"),
-      rotationDue: n("rotation_due"),
+      rotationDue: await this.rotationDue(ctx, now),
       unusedNinetyDays: n("unused"),
     };
+  }
+
+  /**
+   * How many credentials are past their own rotation schedule.
+   *
+   * ITS OWN QUERY, AND COUNTED IN NODE, because the comparison is per-row: a credential is due when
+   * the last rotation is older than ITS `rotate_every_days`, and that is date arithmetic the two
+   * dialects spell differently. The version this replaces sidestepped that by comparing every row
+   * against a flat ninety days, which under-reported every schedule shorter than ninety — a
+   * thirty-day key rotated forty-five days ago counted as fine, and thirty, sixty and ninety are
+   * the schedules people actually pick. A badge that stays dark when something is overdue is the
+   * one direction this must not be wrong in.
+   *
+   * Reading rows rather than aggregating is affordable here in a way it would not be for the four
+   * counts above: the filter is `rotate_every_days IS NOT NULL`, which is the handful of credentials
+   * somebody has deliberately put on a schedule, not the table.
+   */
+  private async rotationDue(ctx: TenantContext, now: Date): Promise<number> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT rotate_every_days, COALESCE(rotated_at, created_at) AS since
+         FROM secret_refs
+        WHERE workspace_id = ? AND configured = ? AND rotate_every_days IS NOT NULL`,
+      [ctx.workspaceId, 1],
+    );
+    let due = 0;
+    for (const r of rows) {
+      const days = Number(r["rotate_every_days"]);
+      // A schedule that is not a positive number is not a schedule. Skipped rather than treated as
+      // "due immediately", which would light the badge permanently for a bad row nobody can fix
+      // from the UI.
+      if (!Number.isFinite(days) || days <= 0) continue;
+      const since = Date.parse(String(r["since"]));
+      if (!Number.isFinite(since)) continue;
+      if (now.getTime() - since >= days * 24 * 60 * 60 * 1000) due++;
+    }
+    return due;
   }
 
   /**

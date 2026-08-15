@@ -136,6 +136,33 @@ async function suite(label: string, db: Db): Promise<void> {
   await refs.setMetadata(ws, "EXPIRING_SOON_KEY", { expiresAt: iso(30 * 86_400_000) });
   check((await refs.health(ws)).expiringSoon === 0, "and one expiring next month is not counted");
 
+  // ROTATION IS DUE AGAINST THE ROW'S OWN SCHEDULE, not against a flat window. Thirty, sixty and
+  // ninety days are the schedules people pick, and a count that compared every row against ninety
+  // said "fine" to all of the first two — a badge that stays dark while something is overdue.
+  await refs.markConfigured(ws, { name: "ROTATE_EVERY_MONTH" });
+  await refs.setMetadata(ws, "ROTATE_EVERY_MONTH", { rotateEveryDays: 30, rotatedAt: iso(-45 * 86_400_000) });
+  check((await refs.health(ws)).rotationDue === 1, `a 30-day credential rotated 45 days ago is due (got ${(await refs.health(ws)).rotationDue})`);
+  await refs.setMetadata(ws, "ROTATE_EVERY_MONTH", { rotatedAt: iso(-10 * 86_400_000) });
+  check((await refs.health(ws)).rotationDue === 0, "and one rotated ten days ago is not");
+  await refs.setMetadata(ws, "ROTATE_EVERY_MONTH", { rotateEveryDays: null });
+  check((await refs.health(ws)).rotationDue === 0, "a credential on no schedule is never due");
+
+  // A CREDENTIAL NOBODY HAS EVER READ is the most unused one there is, and the count used to skip
+  // exactly those by requiring `last_used_at IS NOT NULL`.
+  await refs.markConfigured(ws, { name: "NEVER_READ_KEY" });
+  check((await refs.health(ws)).unusedNinetyDays === 0, "a credential added today is not unused");
+  await db
+    .forWorkspace(ws.workspaceId)
+    .run(`UPDATE secret_refs SET updated_at = ? WHERE workspace_id = ? AND name = ?`, [
+      iso(-200 * 86_400_000),
+      ws.workspaceId,
+      "NEVER_READ_KEY",
+    ]);
+  check(
+    (await refs.health(ws)).unusedNinetyDays === 1,
+    `one configured 200 days ago and never read is (got ${(await refs.health(ws)).unusedNinetyDays})`,
+  );
+
   // --- rotation history ------------------------------------------------------------------
   console.log("\n  rotation history");
   await refs.recordRotation(ws, { name: "BROKEN_KEY", maskedHint: "••••aaaa", reason: "first" });
