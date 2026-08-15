@@ -23,6 +23,7 @@ import { useBuildStore } from "./buildStore.ts";
 import { useChatStore } from "./chatStore.ts";
 import { useDeployStore } from "./deployStore.ts";
 import { useEvalStore } from "./evalStore.ts";
+import { useGithubStore } from "./githubStore.ts";
 import { useGraphStore } from "./graphStore.ts";
 import { useConnectionStore } from "./connectionStore.ts";
 import { useMcpStore } from "./mcpStore.ts";
@@ -97,6 +98,15 @@ console.log("\nfilling every store with one workspace's data");
     passcodeSet: true,
   } as never);
   useDeployStore.setState({ deployments: [{ id: "d1", agent_id: TENANT_A }] } as never);
+  // Session 10. A repository name and the branch an agent pushes to. Held across a switch it names
+  // one tenant's private repository under another tenant's agent — and the Push button beside it
+  // would be aimed at that repository.
+  useGithubStore.setState({
+    connected: true,
+    accountLogin: TENANT_A,
+    links: [{ id: "l1", agent_id: TENANT_A, repo_full_name: `${TENANT_A}/agent`, branch: TENANT_A }],
+    loaded: true,
+  } as never);
   // Session 6. A spend figure held across a switch is one workspace's invoice shown under
   // another's name — the same class of leak as a trace row, and harder to explain afterwards.
   useBillingStore.setState({

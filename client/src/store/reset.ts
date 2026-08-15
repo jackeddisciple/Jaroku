@@ -25,6 +25,7 @@ import { useChatStore } from "./chatStore.ts";
 import { useConnectionStore } from "./connectionStore.ts";
 import { useDeployStore } from "./deployStore.ts";
 import { useEvalStore } from "./evalStore.ts";
+import { useGithubStore } from "./githubStore.ts";
 import { useGraphStore } from "./graphStore.ts";
 import { useMcpStore } from "./mcpStore.ts";
 import { useMemberStore } from "./memberStore.ts";
@@ -65,6 +66,10 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
   connectionStore: useConnectionStore as unknown as Resettable,
   deployStore: useDeployStore as unknown as Resettable,
   evalStore: useEvalStore as unknown as Resettable,
+  // Which repository each agent's code goes to, under whose GitHub account, and every commit
+  // message on the way. Held across a switch it would name one tenant's private repositories
+  // under another tenant's agent — and the Push button beside it would be pointed at them.
+  githubStore: useGithubStore as unknown as Resettable,
   graphStore: useGraphStore as unknown as Resettable,
   mcpStore: useMcpStore as unknown as Resettable,
   memberStore: useMemberStore as unknown as Resettable,

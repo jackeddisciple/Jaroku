@@ -12,6 +12,7 @@ import { useProviderStore } from "../store/providerStore.ts";
 import { useConnectionStore } from "../store/connectionStore.ts";
 import { useBillingStore } from "../store/billingStore.ts";
 import { useDeployStore } from "../store/deployStore.ts";
+import { useGithubStore } from "../store/githubStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useMemberStore } from "../store/memberStore.ts";
 import { resetWorkspaceStores } from "../store/reset.ts";
@@ -227,6 +228,41 @@ function dispatch(msg: ServerMessage): void {
       } else if (msg.type === "testResult") d.setTestResult({ ok: msg.ok, message: msg.message });
       else if (msg.type === "error") d.setError(msg.message);
       else if (msg.type === "notice") d.setNotice(msg.message);
+      break;
+    }
+    case "github": {
+      // Two lineages, reconciled. Full-snapshot discipline like `providers` and `deploy`: a
+      // `state` message replaces rather than merges, because §1's four regions are views of ONE
+      // reconciliation and a merged half would let the verdict line disagree with the version list
+      // it sits above.
+      //
+      // Nothing on this channel is a credential — `connected` is a boolean and `accountLogin` is a
+      // name GitHub prints on a public profile.
+      const g = useGithubStore.getState();
+      if (msg.type === "state") {
+        g.applyState({
+          agentId: msg.agentId,
+          connected: msg.connected,
+          accountLogin: msg.accountLogin,
+          links: msg.links,
+          view: msg.view,
+        });
+      } else if (msg.type === "repos") g.setRepos(msg.repos);
+      else if (msg.type === "nameCheck") g.setNameCheck(msg.name, msg.available);
+      else if (msg.type === "stage") g.applyStage(msg.agentId, msg.op, msg.stage, msg.status);
+      else if (msg.type === "refused") {
+        // Its own store field rather than the error strip. §3.6's refusal names a file, a check
+        // and three actions; a one-line error could carry none of that, and calling a working
+        // safety guarantee an "error" is the wrong word for what just happened.
+        g.setRefusal({
+          agentId: msg.agentId,
+          check: msg.check,
+          path: msg.path,
+          message: msg.message,
+          candidate: msg.candidate,
+        });
+      } else if (msg.type === "error") g.setError(msg.message);
+      else if (msg.type === "notice") g.setNotice(msg.message);
       break;
     }
     case "session": {
@@ -826,4 +862,100 @@ export function sendLoadRubric(datasetId: string): void {
 }
 export function sendSaveRubric(datasetId: string, criteria: RubricCriterion[], name?: string): void {
   send({ cmd: "saveRubric", datasetId, criteria, name });
+}
+
+// --- github ----------------------------------------------------------------
+// Answered on the "github" channel. Every mutation comes back as a full snapshot, so nothing here
+// optimistically patches local state.
+//
+// THERE IS NO `sendConnectGithub`. Storing a GitHub token is `POST /v1/github/connect`, in the
+// secrets group, behind the elevation gate — a browser cannot put an elevation header on a
+// WebSocket, so a credential command here would be one nothing can gate. Same reason
+// `setProviderKey` is not in this file. See lib/github.ts.
+
+/** The whole panel for one agent, or the workspace-wide half when no agent is selected. */
+export function sendListGithub(agentId?: string): void {
+  send({ cmd: "listGithub", agentId });
+}
+
+export function sendListGithubRepos(query?: string): void {
+  useGithubStore.getState().startRepos();
+  send({ cmd: "listGithubRepos", query });
+}
+
+/** §2.2's live availability check. Creates nothing and costs one request per keystroke. */
+export function sendCheckGithubRepo(name: string): void {
+  send({ cmd: "checkGithubRepo", name });
+}
+
+/** Link an agent. Either an existing `owner/repo`, or a bare name to create under the account. */
+export function sendLinkGithub(opts: {
+  agentId: string;
+  repoFullName?: string;
+  createName?: string;
+  createPrivate?: boolean;
+  branch?: string;
+  subdirectory?: string | null;
+  includeArtifacts?: boolean;
+}): void {
+  send({ cmd: "linkGithub", ...opts });
+}
+
+/** Detach. The repository and everything in it is untouched — see §6. */
+export function sendUnlinkGithub(agentId: string): void {
+  send({ cmd: "unlinkGithub", agentId });
+}
+
+/**
+ * Re-read the remote and recompute the verdict.
+ *
+ * Read-only: it moves what we last SAW, never what we last DID, which is what makes it safe to
+ * fire on opening the panel rather than only on a click.
+ */
+export function sendRefreshGithub(agentId: string): void {
+  send({ cmd: "refreshGithub", agentId });
+}
+
+/**
+ * Push every unpushed version.
+ *
+ * `squash` is per push and never a stored preference — §2.3. `force` requires `confirmSlug` to be
+ * the agent's own slug, typed by the user, and the server refuses it before it reaches the network.
+ */
+export function sendPushGithub(
+  agentId: string,
+  opts: { squash?: boolean; force?: boolean; confirmSlug?: string } = {},
+): void {
+  send({ cmd: "pushGithub", agentId, ...opts });
+}
+
+/** Pull, through the same validate-before-promote path every generation passes. */
+export function sendPullGithub(
+  agentId: string,
+  opts: { force?: boolean; confirmSlug?: string } = {},
+): void {
+  send({ cmd: "pullGithub", agentId, ...opts });
+}
+
+/** §3.2. With unpushed work the server refuses anything but an explicit answer. */
+export function sendSwitchGithubBranch(
+  agentId: string,
+  branch: string,
+  onUnpushed?: "push" | "stash" | "cancel",
+): void {
+  send({ cmd: "switchGithubBranch", agentId, branch, onUnpushed });
+}
+
+export function sendCreateGithubBranch(agentId: string, branch: string): void {
+  send({ cmd: "createGithubBranch", agentId, branch });
+}
+
+/** §3.7's clean handoff: detection here, resolution on GitHub, where review already works. */
+export function sendOpenGithubPr(agentId: string): void {
+  send({ cmd: "openGithubPr", agentId });
+}
+
+/** §3.4's commit box. `push` false is refused server-side — there is no local repository here. */
+export function sendCommitGithub(agentId: string, paths: string[], message: string, push = true): void {
+  send({ cmd: "commitGithub", agentId, paths, message, push });
 }

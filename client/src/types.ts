@@ -689,6 +689,150 @@ export type MemberMessage =
   | { channel: "members"; type: "error"; message: string }
   | { channel: "members"; type: "notice"; message: string };
 
+
+// --- GitHub (see server/src/wsRelay.ts GithubEvent, and the design spec's §0–§8) ---
+//
+// NOTHING ON THIS CHANNEL IS A CREDENTIAL, and the shapes below are where that is enforced on this
+// side of the wire: `connected` is a boolean, `accountLogin` is a name GitHub prints on a public
+// profile, and there is no field a token would fit in. Linking an account is an HTTP request in
+// the secrets group, because elevation rides on a header a WebSocket cannot carry.
+
+/** The six states §3.5's verdict line renders, each with exactly one primary action. */
+export type SyncState = "unlinked" | "in_sync" | "ahead" | "behind" | "diverged" | "broken" | "syncing";
+
+/** Why a link is broken, when it is. Three causes, three different next steps. */
+export type BrokenReason = "repo_missing" | "branch_missing" | "token_revoked";
+
+export interface GithubLinkRow {
+  id: string;
+  agent_id: string;
+  repo_full_name: string;
+  branch: string;
+  subdirectory: string | null;
+  include_artifacts: boolean;
+  last_pushed_version_id: string | null;
+  last_pushed_sha: string | null;
+  last_known_remote_sha: string | null;
+  last_synced_at: string | null;
+}
+
+/** A Jaroku version, as §2.3's rows render it. A projection — never the manifest. */
+export interface GithubVersionRow {
+  id: string;
+  version: number;
+  summary: string;
+  createdAt: string;
+  files: number;
+  additions: number;
+  deletions: number;
+  /** The commit it became, or null while it is still local only. */
+  sha: string | null;
+  shaUrl: string | null;
+}
+
+/** A commit no version accounts for — §3.8's hollow dots. */
+export interface GithubCommitRow {
+  sha: string;
+  message: string;
+  author: string | null;
+  at: string;
+  url: string;
+}
+
+export interface GithubBranchRow {
+  name: string;
+  sha: string;
+  isDefault: boolean;
+  current: boolean;
+}
+
+export interface GithubPrRow {
+  number: number;
+  title: string;
+  url: string;
+  commits: number;
+  files: number;
+  additions: number;
+  deletions: number;
+  /** `success` / `failure` / `pending`, or null when nothing reported. Null is NOT passing. */
+  checks: string | null;
+}
+
+export interface GithubEventRow {
+  id: string;
+  kind: string;
+  outcome: string;
+  version_ids: string[];
+  commit_sha: string | null;
+  detail: string | null;
+  created_at: string;
+}
+
+export interface GithubRepoRow {
+  fullName: string;
+  private: boolean;
+  defaultBranch: string;
+  htmlUrl: string;
+  empty: boolean;
+  pushedAt: string | null;
+}
+
+/** One agent's whole reconciliation. Assembled server-side in one pass — see githubService.ts. */
+export interface GithubView {
+  agentId: string;
+  agentSlug: string;
+  link: GithubLinkRow;
+  repoUrl: string;
+  state: SyncState;
+  reason?: BrokenReason;
+  ahead: number;
+  /** null means "the remote moved and nobody has counted by how much" — not zero. */
+  behind: number | null;
+  badge: string | null;
+  verdict: string;
+  unpushed: GithubVersionRow[];
+  pushed: GithubVersionRow[];
+  remoteOnly: GithubCommitRow[];
+  branches: GithubBranchRow[];
+  /** §3.3's PROTECTED group, repository-relative. From the server, never derived here. */
+  protectedPaths: string[];
+  pr: GithubPrRow | null;
+  events: GithubEventRow[];
+}
+
+/** §3.6's refusal card. Its own message type, because an error strip could carry none of it. */
+export interface GithubRefusal {
+  agentId: string;
+  check: string;
+  path: string | null;
+  message: string;
+  candidate: number | null;
+}
+
+export type GithubMessage =
+  | {
+      channel: "github";
+      type: "state";
+      agentId: string | null;
+      connected: boolean;
+      accountLogin: string | null;
+      links: GithubLinkRow[];
+      view: GithubView | null;
+    }
+  | { channel: "github"; type: "repos"; repos: GithubRepoRow[] }
+  | { channel: "github"; type: "nameCheck"; name: string; available: boolean }
+  | {
+      channel: "github";
+      type: "stage";
+      agentId: string;
+      op: "push" | "pull";
+      stage: string;
+      status: "active" | "done" | "error";
+    }
+  | ({ channel: "github"; type: "refused" } & GithubRefusal)
+  | { channel: "github"; type: "error"; message: string; agentId?: string }
+  | { channel: "github"; type: "notice"; message: string; agentId?: string };
+
 export type ServerMessage =
   | SessionMessage
   | MemberMessage
@@ -715,7 +859,8 @@ export type ServerMessage =
   | McpMessage
   | ProviderMessage
   | ConnectionMessage
-  | DeployMessage;
+  | DeployMessage
+  | GithubMessage;
 
 // --- client → server commands ---
 
@@ -810,7 +955,31 @@ export type ClientCommand =
   | { cmd: "forgetDeployment"; deploymentId: string }
   | { cmd: "loadDeployLogs"; deploymentId: string; sinceSeq?: number }
   | { cmd: "setRailwayToken"; token: string | null }
-  | { cmd: "testRailwayToken"; token: string };
+  | { cmd: "testRailwayToken"; token: string }
+  // GitHub. Twelve commands about REPOSITORIES and not one about a token — connecting an account
+  // is POST /v1/github/connect, in the secrets group, for the same reason `setProviderKey` stopped
+  // being a command here: a browser cannot put an elevation header on a WebSocket.
+  | { cmd: "listGithub"; agentId?: string }
+  | { cmd: "listGithubRepos"; query?: string }
+  | { cmd: "checkGithubRepo"; name: string }
+  | {
+      cmd: "linkGithub";
+      agentId: string;
+      repoFullName?: string;
+      createName?: string;
+      createPrivate?: boolean;
+      branch?: string;
+      subdirectory?: string | null;
+      includeArtifacts?: boolean;
+    }
+  | { cmd: "unlinkGithub"; agentId: string }
+  | { cmd: "refreshGithub"; agentId: string }
+  | { cmd: "pushGithub"; agentId: string; squash?: boolean; force?: boolean; confirmSlug?: string }
+  | { cmd: "pullGithub"; agentId: string; force?: boolean; confirmSlug?: string }
+  | { cmd: "switchGithubBranch"; agentId: string; branch: string; onUnpushed?: "push" | "stash" | "cancel" }
+  | { cmd: "createGithubBranch"; agentId: string; branch: string }
+  | { cmd: "openGithubPr"; agentId: string }
+  | { cmd: "commitGithub"; agentId: string; paths: string[]; message: string; push?: boolean };
 
 // Unified composer "explain" subject — what the question is about, built from already-in-memory
 // context (a trace step, a graph node, or the agent generally). No new data is fetched.

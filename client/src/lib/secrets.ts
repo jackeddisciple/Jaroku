@@ -295,3 +295,34 @@ export interface ImportResult {
 export async function importSecrets(text: string): Promise<ImportResult> {
   return request<ImportResult>("POST", "/v1/secrets/import", { text });
 }
+
+// --- GitHub, which is a credential and therefore lives here ------------------------------------
+//
+// THE ONE PART OF THE GITHUB FEATURE THAT IS NOT A SOCKET COMMAND, and it is in this file rather
+// than in a `lib/github.ts` for the reason the module header gives: elevation rides on a request
+// header, a browser cannot set one on a WebSocket, and `request()` above is the only place in the
+// client that attaches it. A second HTTP helper would be a second place to forget to.
+//
+// Everything else GitHub does — link, push, pull, fetch, branch — is a socket command, because
+// everything else GitHub does is about a repository rather than about a token.
+
+/**
+ * Hand a GitHub token to the server, once.
+ *
+ * The value goes one way. What comes back is the account login GitHub reported, which is what
+ * §2.2 renders as `✓ @username` — proof that the credential works, said in the only form that
+ * carries no secret.
+ */
+export async function connectGithub(token: string): Promise<{ accountLogin: string }> {
+  const body = await request<{ connected: boolean; accountLogin: string }>(
+    "POST",
+    "/v1/github/connect",
+    { token },
+  );
+  return { accountLogin: body.accountLogin };
+}
+
+/** Forget the token and mark the grants dead. Every agent's link stays — see §6. */
+export async function disconnectGithub(): Promise<void> {
+  await request<void>("POST", "/v1/github/disconnect");
+}
