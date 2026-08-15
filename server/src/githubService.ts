@@ -393,7 +393,13 @@ export class GithubService {
     // would spend the token's rate limit on a number the badge does not need.
     let behindBy: number | null = null;
     let remoteChanges: string[] = [];
-    const watermark = link.last_known_remote_sha ?? link.last_pushed_sha;
+    // FROM WHAT WE PUSHED, for the reason `syncVerdict` now computes `remoteMoved` from it: the
+    // question "how far ahead is the remote" is about commits Jaroku does not have, and having is
+    // not seeing. Based on `last_known_remote_sha` this went quiet the moment anybody fetched —
+    // the compare was skipped because the head already equalled the watermark a fetch had just
+    // written, so `behindBy` came back null and `remoteChanges` came back empty on precisely the
+    // repositories that had moved.
+    const watermark = link.last_pushed_sha;
     if (headSha && watermark && headSha !== watermark) {
       try {
         // ONE CALL ANSWERS BOTH. `compare` returns the count and the file list together, so

@@ -175,8 +175,30 @@ export function syncVerdict(
     return { state: "broken", reason: "branch_missing", ahead, behind: null, remoteSha: null };
   }
 
-  const watermark = link.last_known_remote_sha ?? link.last_pushed_sha;
-  const remoteMoved = watermark !== null && remote.headSha !== watermark;
+  // MEASURED AGAINST WHAT JAROKU HAS, NOT AGAINST WHAT IT LAST LOOKED AT.
+  //
+  // This compared `last_known_remote_sha` first, and `refresh()` sets that column to the head it
+  // just read — so a fetch moved the thing the verdict is computed from, and every fetch answered
+  // "in sync" no matter what it had just found. The panel fires a refresh on every open, which
+  // made `behind` unreachable in the shipped product: the ↓ badge, the "Pull into Jaroku" primary
+  // action, the FROM REMOTE group and §3.5's "1 commit behind — weather.py edited on GitHub"
+  // sub-line were all live code that nothing could reach. What a user saw instead was "In sync"
+  // sitting directly above a History row reading `not in Jaroku` — the mirror image of the
+  // failure githubService's header calls the one promise this feature makes.
+  //
+  // Seen is not had. `git fetch` does not make a branch up to date, and neither does this one:
+  // the remote commit is still not in the agent's version lineage until a pull validates and
+  // publishes it. So the comparison is against `last_pushed_sha` — the commit Jaroku actually
+  // put there — and `last_known_remote_sha` goes back to meaning what it is named, a record of
+  // when somebody last looked.
+  //
+  // THE FORCE-PUSH CASE IS UNAFFECTED, and it is worth saying why, because the old comment here
+  // argued the opposite. Sideways is not detected by the watermark: it is detected by `behindBy`,
+  // which comes from a `compare` and is 0 exactly when the head is not a descendant of our
+  // commit. That check is below and is untouched. The watermark never distinguished a force-push
+  // from a fast-forward — it only ever suppressed both.
+  const have = link.last_pushed_sha;
+  const remoteMoved = have !== null && remote.headSha !== have;
 
   // THE SIDEWAYS CASE. `behindBy` of 0 with a moved head means the remote is not a descendant of
   // what we last pushed — a force-push, a reset, or a rewritten history. There is no version of

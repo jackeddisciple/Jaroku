@@ -125,6 +125,34 @@ console.log("\nthe settled states");
     "...and with no compare call, behind carries null rather than a number nobody asked for",
   );
   check(badgeFor(behindUncounted) === "↓", "which the badge renders as ↓ with no digit");
+
+  // A FETCH MUST NOT BE ABLE TO CLEAR A BEHIND, and this is the regression that matters most in
+  // this file. `refresh()` writes the head it just read into `last_known_remote_sha`; while the
+  // verdict was computed from that column, every fetch answered "in sync" regardless of what it
+  // had found — and the panel fires one on every open, so `behind` was unreachable in the shipped
+  // product. The commit is still not in the agent's lineage. Seen is not had.
+  const fetched = link({
+    last_pushed_version_id: "v12",
+    last_pushed_sha: "aaa111",
+    // What the fetch saw a moment ago: the teammate's commit.
+    last_known_remote_sha: "bbb222",
+  });
+  const afterFetch = syncVerdict(fetched, [v(12)], remote({ headSha: "bbb222", behindBy: 1 }));
+  check(
+    afterFetch.state === "behind" && afterFetch.behind === 1,
+    "looking at a commit does not incorporate it — after a fetch the branch is still ↓1",
+  );
+  check(
+    verdictLine(afterFetch, "jaroku/weather") === "1 commit behind",
+    "...and the verdict line says so rather than 'In sync'",
+  );
+  // The same link with the same watermark, once the commit has actually been pulled: the pull
+  // moves `last_pushed_sha` too, and only then is it in sync.
+  const pulled = link({ last_pushed_version_id: "v13", last_pushed_sha: "bbb222", last_known_remote_sha: "bbb222" });
+  check(
+    syncVerdict(pulled, [v(13), v(12)], remote({ headSha: "bbb222" })).state === "in_sync",
+    "and pulling it — which moves what we HAVE — is what makes it in sync",
+  );
 }
 
 console.log("\nthe states that are hard to produce by hand");
