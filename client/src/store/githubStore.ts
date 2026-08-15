@@ -30,6 +30,66 @@ export interface GithubProgress {
   startedAt: number;
 }
 
+/**
+ * Which of §1's four regions are folded away, per agent.
+ *
+ * PER AGENT, NOT PER PANEL, and in localStorage rather than in memory — §A.5. Somebody who
+ * collapses History because they only care about pushing today should not have to re-collapse it
+ * on every visit, and the agent they were pushing has nothing to do with the one they open next.
+ *
+ * KEYED BY WORKSPACE AS WELL, for the reason `uiStore.inputKey` is: agent slugs stopped being
+ * globally unique in Session 1 and are unique PER workspace, so `jaroku.github.regions.weather`
+ * names two different agents belonging to two different tenants. This holds nothing but four
+ * booleans — no leak, and no reason to make the key wrong anyway.
+ *
+ * NOT IN THE STORE'S RESET LIST BY ACCIDENT: it IS reset with the store, and that is harmless —
+ * localStorage is re-read on the next render, which is exactly the behaviour a per-agent
+ * preference should have.
+ */
+export type RegionId = "header" | "sync" | "changes" | "history";
+
+const REGION_KEY_PREFIX = "jaroku.github.regions.";
+
+/** The default: everything open. A panel that opens folded hides the answer somebody came for. */
+const ALL_OPEN: Record<RegionId, boolean> = { header: true, sync: true, changes: true, history: true };
+
+function regionKey(workspaceId: string | null, agentId: string): string {
+  return `${REGION_KEY_PREFIX}${workspaceId ?? "_"}.${agentId}`;
+}
+
+export function readRegions(workspaceId: string | null, agentId: string): Record<RegionId, boolean> {
+  try {
+    const raw = localStorage.getItem(regionKey(workspaceId, agentId));
+    if (!raw) return ALL_OPEN;
+    const parsed = JSON.parse(raw) as Partial<Record<RegionId, boolean>>;
+    // FIELD BY FIELD, because this is user-editable storage that survives across versions: a blob
+    // written by an older build must degrade to the default rather than put `undefined` where the
+    // panel expects a boolean and render a region that is neither open nor closed.
+    return {
+      header: parsed.header !== false,
+      sync: parsed.sync !== false,
+      changes: parsed.changes !== false,
+      history: parsed.history !== false,
+    };
+  } catch {
+    // Storage can be unavailable (private mode, a locked-down browser). Everything open is a far
+    // better failure than a panel that will not render.
+    return ALL_OPEN;
+  }
+}
+
+export function writeRegions(
+  workspaceId: string | null,
+  agentId: string,
+  regions: Record<RegionId, boolean>,
+): void {
+  try {
+    localStorage.setItem(regionKey(workspaceId, agentId), JSON.stringify(regions));
+  } catch {
+    /* see readRegions — an unwritable store must not break the panel in front of somebody */
+  }
+}
+
 interface GithubState {
   /** See deployStore.loaded — distinguishes "not connected" from "not told yet". */
   loaded: boolean;

@@ -30,11 +30,13 @@ import {
 import { connectGithub, disconnectGithub } from "../lib/secrets.ts";
 import { ICON, STATUS } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
-import { useGithubStore, viewFor } from "../store/githubStore.ts";
+import { readRegions, useGithubStore, viewFor, writeRegions, type RegionId } from "../store/githubStore.ts";
+import { useSessionStore } from "../store/sessionStore.ts";
 import { relTime } from "../lib/format.ts";
 import type { GithubVersionRow, GithubView } from "../types.ts";
 import { ActionRow } from "./ActionRow.tsx";
 import { DiffStat } from "./DiffStat.tsx";
+import { CollapsibleRegion } from "./CollapsibleRegion.tsx";
 import { GitHubSyncRegion, RegionLabel } from "./GitHubSync.tsx";
 import { BranchSwitcher, ChangesRegion, HistoryRegion, PullRequestCard } from "./GitHubHistory.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
@@ -459,14 +461,59 @@ function Field({
  * answered in the second region without scrolling; everything under it explains that answer.
  */
 function Linked({ view }: { view: GithubView }) {
+  const workspaceId = useSessionStore((s) => s.workspaceId);
+  // Read once per agent rather than on every render: this is localStorage, the panel re-renders on
+  // every stage of a push, and a synchronous read per frame during a live rail is a read per frame
+  // for a value that only a click changes.
+  const [regions, setRegions] = useState(() => readRegions(workspaceId, view.agentId));
+  useEffect(() => {
+    setRegions(readRegions(workspaceId, view.agentId));
+  }, [workspaceId, view.agentId]);
+
+  const toggle = (id: RegionId) => () => {
+    const next = { ...regions, [id]: !regions[id] };
+    setRegions(next);
+    writeRegions(workspaceId, view.agentId, next);
+  };
+
   return (
     <div className="space-y-4 p-4">
-      <RepoHeader view={view} />
-      <GitHubSyncRegion view={view} />
-      <ChangesRegion view={view} />
-      <VersionLists view={view} />
-      <PullRequestCard view={view} />
-      <HistoryRegion view={view} />
+      {/* REPO HEADER and SYNC STATE omit the count slot rather than showing a fake 1 — §A.5. An
+          empty count column reads as "not applicable"; a 1 reads as "one of something". */}
+      <CollapsibleRegion label="Repository" open={regions.header} onToggle={toggle("header")}>
+        <RepoHeader view={view} />
+      </CollapsibleRegion>
+
+      <CollapsibleRegion label="Sync state" open={regions.sync} onToggle={toggle("sync")}>
+        <GitHubSyncRegion view={view} />
+      </CollapsibleRegion>
+
+      <CollapsibleRegion
+        label="Changes"
+        // The number of items the section's own action operates over — files, not versions.
+        count={view.changes.filter((c) => !c.locked).length}
+        open={regions.changes}
+        onToggle={toggle("changes")}
+      >
+        <ChangesRegion view={view} />
+        <div className="mt-4">
+          <VersionLists view={view} />
+        </div>
+      </CollapsibleRegion>
+
+      <CollapsibleRegion
+        label="History"
+        // Versions AND commits combined, because the section renders one interleaved column and a
+        // count of only half of it would disagree with what expanding shows.
+        count={view.unpushed.length + view.pushed.length + view.remoteOnly.length}
+        open={regions.history}
+        onToggle={toggle("history")}
+      >
+        <PullRequestCard view={view} />
+        <div className="mt-4">
+          <HistoryRegion view={view} />
+        </div>
+      </CollapsibleRegion>
     </div>
   );
 }

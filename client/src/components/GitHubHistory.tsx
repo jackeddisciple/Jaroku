@@ -217,15 +217,10 @@ export function ChangesRegion({ view }: { view: GithubView }) {
   }
 
   return (
+    // No heading of its own: §A.5's CollapsibleRegion above owns the label, the count and the
+    // chevron for all four regions, so that they line up as one column of click targets.
     <section>
-      <RegionLabel>
-        Changes
-        <span className="ml-2 font-normal normal-case tracking-normal tabular-nums text-faint">
-          {changed.length}
-        </span>
-      </RegionLabel>
-
-      <div className="mt-1.5 space-y-0.5">
+      <div className="space-y-0.5">
         {changed.map((c) => (
           <FileRow
             key={c.path}
@@ -428,20 +423,12 @@ export function HistoryRegion({ view }: { view: GithubView }) {
 
   return (
     <section>
-      <div className="flex items-center">
-        <RegionLabel>
-          History
-          <span className="ml-2 font-normal normal-case tracking-normal tabular-nums text-faint">
-            {rows.length}
-          </span>
-        </RegionLabel>
-        <div className="ml-auto flex items-center gap-1">
-          {(["versions", "both"] as const).map((m) => (
-            <Chip key={m} size="sm" selected={mode === m} onClick={() => setMode(m)}>
-              {m === "versions" ? "Versions" : "Both"}
-            </Chip>
-          ))}
-        </div>
+      <div className="flex items-center justify-end gap-1">
+        {(["versions", "both"] as const).map((m) => (
+          <Chip key={m} size="sm" selected={mode === m} onClick={() => setMode(m)}>
+            {m === "versions" ? "Versions" : "Both"}
+          </Chip>
+        ))}
       </div>
 
       <div className="relative mt-1.5">
