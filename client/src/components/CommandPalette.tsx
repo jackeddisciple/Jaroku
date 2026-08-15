@@ -143,6 +143,7 @@ export function CommandPalette() {
                 <Item onSelect={run(() => setRightTab("graph"))}>Open Graph</Item>
                 <Item onSelect={run(() => setRightTab("trace"))}>Open Trace</Item>
                 <Item onSelect={run(() => setRightTab("deploy"))}>Open Deploy</Item>
+                <Item onSelect={run(() => setRightTab("github"))}>Open GitHub</Item>
                 {/* Tabs are reached from here rather than by a dedicated chord — the palette is
                     where this app puts view navigation, and a secrets shortcut would be one more
                     key to collide with while the composer has focus. */}

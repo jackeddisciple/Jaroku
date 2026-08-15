@@ -440,3 +440,63 @@ export function ZapIcon(p: P) {
     <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" />,
   );
 }
+
+/**
+ * The GitHub mark, drawn rather than imported.
+ *
+ * FILLED, and it is the one icon in this file that is. Every other mark here is a Lucide outline at
+ * 1.75 because it describes an ACTION or a KIND — a wrench, an eye, a fork — and outlines read
+ * lighter beside 12px type. This one is a LOGO, and a logo redrawn as a 1.75 outline stops being
+ * recognisable as the thing it is a logo of, which defeats the only job it has. So it keeps its
+ * silhouette and takes `currentColor` as a fill, exactly as the provider marks in lib/icons.tsx do.
+ */
+export function GithubIcon({ size = ICON.sm, className }: P) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
+      <path d="M12 2C6.48 2 2 6.58 2 12.23c0 4.52 2.87 8.35 6.84 9.7.5.1.68-.22.68-.49l-.01-1.7c-2.78.62-3.37-1.37-3.37-1.37-.46-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.3 9.3 0 0 1 5 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.93-2.35 4.8-4.58 5.05.36.32.68.94.68 1.9l-.01 2.82c0 .27.18.6.69.49A10.03 10.03 0 0 0 22 12.23C22 6.58 17.52 2 12 2z" />
+    </svg>
+  );
+}
+
+/** lucide:arrow-up — ahead, and the push half of §A.8's split button. */
+export function ArrowUpIcon(p: P) {
+  return svg(p, <><path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></>);
+}
+
+/** lucide:arrow-down — behind. */
+export function ArrowDownIcon(p: P) {
+  return svg(p, <><path d="M12 5v14" /><path d="m19 12-7 7-7-7" /></>);
+}
+
+/** lucide:arrow-up-down — diverged. Both sides moved, which is a stopped state and not a busy one. */
+export function ArrowUpDownIcon(p: P) {
+  return svg(p, <><path d="m21 16-4 4-4-4" /><path d="M17 20V4" /><path d="m3 8 4-4 4 4" /><path d="M7 4v16" /></>);
+}
+
+/** lucide:external-link — a commit sha, a repo, a PR. Anything that leaves for github.com. */
+export function ExternalLinkIcon(p: P) {
+  return svg(p, <><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6" /></>);
+}
+
+/** lucide:chevron-down — a collapse chevron and a split button's caret. */
+export function ChevronDownIcon(p: P) {
+  return svg(p, <path d="m6 9 6 6 6-6" />);
+}
+
+/** lucide:git-pull-request — §3.9's card. */
+export function GitPullRequestIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="18" cy="18" r="3" />
+      <path d="M13 6h3a2 2 0 0 1 2 2v7" />
+      <path d="M6 9v12" />
+    </>,
+  );
+}
+
+/** lucide:more-vertical — the kebab an escape hatch lives under. */
+export function KebabIcon(p: P) {
+  return svg(p, <><circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" /></>);
+}

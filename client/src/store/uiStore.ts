@@ -8,6 +8,7 @@ import { useSessionStore } from "./sessionStore.ts";
 
 export type RightTab =
   | "secrets"
+  | "github"
   | "graph" | "trace" | "evals" | "mcp" | "connections" | "deploy" | "usage" | "code";
 
 // The single composer has two send modes: "chat" talks to Jaroku (generate/edit/explain/…),

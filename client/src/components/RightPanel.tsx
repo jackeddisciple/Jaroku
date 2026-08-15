@@ -16,8 +16,11 @@ import { ConnectionsPanel } from "./ConnectionsPanel.tsx";
 import { DeployPanel } from "./DeployPanel.tsx";
 import { UsagePanel } from "./UsagePanel.tsx";
 import { SecretsPanel } from "./SecretsPanel.tsx";
+import { GitHubPanel } from "./GitHubPanel.tsx";
 import { useDeployStore } from "../store/deployStore.ts";
 import { needsAttention, useSecretsStore } from "../store/secretsStore.ts";
+import { badgeFor, useGithubStore } from "../store/githubStore.ts";
+import { useBuildStore } from "../store/buildStore.ts";
 import { fetchHealth } from "../lib/secrets.ts";
 import { isDeployInFlight } from "../types.ts";
 import { StepDetailPanel } from "./StepDetailPanel.tsx";
@@ -35,6 +38,10 @@ const TABS: { id: RightTab; label: string }[] = [
   // this workspace reach outside itself, and with whose credentials", and they are audited
   // together.
   { id: "secrets", label: "Secrets" },
+  // Last in the row, and beside Deploy rather than beside Graph. The three tabs to its left answer
+  // "what does this workspace reach outside itself"; this one answers "where does its code go",
+  // which is the same kind of question about the same kind of boundary.
+  { id: "github", label: "GitHub" },
   { id: "usage", label: "Usage" },
 ];
 
@@ -62,6 +69,15 @@ export function RightPanel() {
   }, [deployId, deployRunning, setTab]);
 
   const secretsNeedAttention = useSecretsStore((s) => needsAttention(s.health));
+
+  // §0: THE TAB LABEL CARRIES LIVE STATE, so you never open the tab just to check. It is read off
+  // the view the server already computed rather than derived here — see githubStore's `badgeFor`.
+  //
+  // A GLYPH RATHER THAN A DOT, unlike Secrets beside it, and the difference is what each has to
+  // say. Secrets needs one bit: something needs attention. This needs a DIRECTION and a COUNT —
+  // ↑2 and ↓1 send you to different buttons — and a coloured dot cannot carry either.
+  const githubAgentId = useBuildStore((s) => s.activeAgentId);
+  const githubBadge = useGithubStore((s) => badgeFor(s.views, githubAgentId));
 
   // THE BADGE HAS TO BE COMPUTED BY SOMETHING THAT IS ALWAYS MOUNTED, and until now the only
   // caller of `/secrets/health` was SecretsPanel — which exists only while the Secrets tab is the
@@ -112,6 +128,19 @@ export function RightPanel() {
                 health route answers in counts, without elevation, so somebody is not asked for a
                 passcode to be told whether they need to care. Carries a title as well as a colour,
                 because a coloured dot alone says nothing to a screen reader. */}
+            {/* Amber for anything in flight, the error tone for a stopped state. Diverged is NOT
+                amber, deliberately: it is not something working, it is something waiting for a
+                person, and wearing the running colour would make it read as progress. */}
+            {t.id === "github" && githubBadge ? (
+              <span
+                title={`GitHub: ${githubBadge}`}
+                className={`ml-1.5 align-middle font-mono text-[10px] tabular-nums ${
+                  githubBadge === "⟳" ? "text-run" : githubBadge === "⚠" || githubBadge === "↕" ? "text-err" : "text-muted"
+                }`}
+              >
+                {githubBadge}
+              </span>
+            ) : null}
             {t.id === "secrets" && secretsNeedAttention ? (
               <span
                 title="A credential needs attention"
@@ -130,6 +159,7 @@ export function RightPanel() {
           : tab === "connections" ? <div className="h-full overflow-y-auto px-4 py-3"><ConnectionsPanel /></div>
           : tab === "deploy" ? <DeployPanel />
           : tab === "secrets" ? <SecretsPanel />
+          : tab === "github" ? <GitHubPanel />
           : tab === "usage" ? <UsagePanel />
           : <TraceTimeline />}
       </div>
