@@ -37,6 +37,7 @@ import type { GithubVersionRow, GithubView } from "../types.ts";
 import { ActionRow } from "./ActionRow.tsx";
 import { DiffStat } from "./DiffStat.tsx";
 import { CollapsibleRegion } from "./CollapsibleRegion.tsx";
+import { GitHubCommitBox } from "./GitHubCommitBox.tsx";
 import { GitHubSyncRegion, RegionLabel } from "./GitHubSync.tsx";
 import { BranchSwitcher, ChangesRegion, HistoryRegion, PullRequestCard } from "./GitHubHistory.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
@@ -496,6 +497,14 @@ function Linked({ view }: { view: GithubView }) {
         onToggle={toggle("changes")}
       >
         <ChangesRegion view={view} />
+        {/* §3.4's commit box sits under the file list rather than above it: the message is written
+            about what is in that list, and asking somebody to compose before they have looked is
+            the wrong order. */}
+        {view.changes.some((c) => !c.locked) && (
+          <div className="mt-3 border-t border-hair pt-3">
+            <GitHubCommitBox view={view} />
+          </div>
+        )}
         <div className="mt-4">
           <VersionLists view={view} />
         </div>

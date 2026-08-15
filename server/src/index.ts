@@ -3304,6 +3304,53 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
         return;
       }
 
+      case "generateGithubMessage": {
+        // §3.4's ✨ generate. THE DEFAULT MESSAGE NEEDS NO MODEL CALL AT ALL — it is pre-filled from
+        // the version's stored instruction and summary, which `agent_versions` has held since
+        // migration 014 — so this exists for the case where the staged files do not map cleanly
+        // onto one version: a hand-staged subset, or a post-pull merge.
+        //
+        // ROUTED THROUGH THE SAME `streamExplain` THE PLAN STEP USES, rather than through a second
+        // pathway of its own. That is not tidiness: it means one place decides which model, one
+        // place handles the no-key fallback, and one place meters the call against the workspace's
+        // balance under the right payer.
+        const agentId = String(cmd.agentId ?? "");
+        const view = await githubService.view(ctx, agentId);
+        if (!view) return fail("link a repository first", agentId);
+        if (view.unpushed.length === 0 && view.changes.length === 0) {
+          return fail("there is nothing unpushed to describe", agentId);
+        }
+        const context = [
+          `Agent: ${view.agentSlug}`,
+          `Unpushed versions:`,
+          ...view.unpushed.map((v) => `- v${v.version} ${v.summary} (+${v.additions}/-${v.deletions})`),
+          `Files touched:`,
+          ...view.changes.map((c) => `- ${c.status} ${c.path} (+${c.additions}/-${c.deletions})`),
+        ].join("\n");
+        const key = await providerKeys.platformKey(ctx);
+        let text = "";
+        await streamExplain(
+          context,
+          "Write a git commit message for these changes. First line is a subject under 72 characters in the imperative mood. Then a blank line, then two sentences of body explaining what changed and why. No markdown, no bullet points, no preamble.",
+          {
+            onDelta: (chunk) => { text += chunk; },
+            onUsage: (u) =>
+              meterPlatformCall(ctx, "llm.explain", {
+                model: u.model,
+                inputTokens: u.input,
+                outputTokens: u.output,
+                cacheReadTokens: u.cacheRead,
+                cacheWriteTokens: u.cacheWrite,
+                payer: key ? "workspace" : "platform",
+              }),
+            onDone: () => relay.broadcastGithub(ctx, { type: "message", agentId, message: text.trim() }),
+            onError: (message) => fail(message, agentId),
+          },
+          key,
+        );
+        return;
+      }
+
       case "commitGithub": {
         // §3.4's commit box. A "commit" in Jaroku's model is a push of the staged subset — there is
         // no local git repository here, so there is nothing a commit could land in that a push does

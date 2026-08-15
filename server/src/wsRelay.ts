@@ -448,6 +448,17 @@ export type CommitGithubCommand = {
   push?: boolean;
 };
 
+/**
+ * §3.4's ✨ generate.
+ *
+ * A SEPARATE COMMAND RATHER THAN A FLAG ON `commitGithub`, because it is the one thing in this
+ * family that COSTS MONEY. Folding it into the commit would mean a commit that sometimes makes a
+ * model call and sometimes does not, metered against a workspace's balance, decided by a checkbox
+ * — and the default path (§3.4's pre-fill from the version's own instruction and summary) needs no
+ * call at all, which is the property worth keeping visible.
+ */
+export type GenerateGithubMessageCommand = { cmd: "generateGithubMessage"; agentId: string };
+
 export type GithubCommand =
   | ListGithubCommand
   | ListGithubReposCommand
@@ -460,12 +471,13 @@ export type GithubCommand =
   | SwitchGithubBranchCommand
   | CreateGithubBranchCommand
   | OpenGithubPrCommand
-  | CommitGithubCommand;
+  | CommitGithubCommand
+  | GenerateGithubMessageCommand;
 
 const GITHUB_COMMANDS = new Set([
   "listGithub", "listGithubRepos", "checkGithubRepo", "linkGithub", "unlinkGithub",
   "refreshGithub", "pushGithub", "pullGithub", "switchGithubBranch", "createGithubBranch",
-  "openGithubPr", "commitGithub",
+  "openGithubPr", "commitGithub", "generateGithubMessage",
 ]);
 
 /** MCP-channel commands, grouped so the forwarding switch stays readable. */
@@ -936,6 +948,14 @@ export type GithubEvent =
       /** The candidate version that was staged and discarded, for the "View diff" link. */
       candidate: number | null;
     }
+  /**
+   * A commit message the model wrote — §3.4's ✨ generate.
+   *
+   * Its own event rather than a field on `state`, because it is an answer to a click and not a
+   * fact about the world: folding it into the snapshot would mean every later refresh re-filling a
+   * box the user has since edited.
+   */
+  | { type: "message"; agentId: string; message: string }
   | { type: "error"; message: string; agentId?: string }
   | { type: "notice"; message: string; agentId?: string };
 
@@ -1056,6 +1076,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   linkGithub: "github", unlinkGithub: "github", refreshGithub: "github",
   pushGithub: "github", pullGithub: "github", switchGithubBranch: "github",
   createGithubBranch: "github", openGithubPr: "github", commitGithub: "github",
+  generateGithubMessage: "github",
 };
 
 export function channelFor(cmd: string): string {

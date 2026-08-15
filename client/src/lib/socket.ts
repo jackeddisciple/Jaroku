@@ -261,7 +261,8 @@ function dispatch(msg: ServerMessage): void {
           message: msg.message,
           candidate: msg.candidate,
         });
-      } else if (msg.type === "error") g.setError(msg.message);
+      } else if (msg.type === "message") g.setGenerated(msg.agentId, msg.message);
+      else if (msg.type === "error") g.setError(msg.message);
       else if (msg.type === "notice") g.setNotice(msg.message);
       break;
     }
@@ -953,6 +954,18 @@ export function sendCreateGithubBranch(agentId: string, branch: string): void {
 /** §3.7's clean handoff: detection here, resolution on GitHub, where review already works. */
 export function sendOpenGithubPr(agentId: string): void {
   send({ cmd: "openGithubPr", agentId });
+}
+
+/**
+ * §3.4's ✨ generate.
+ *
+ * For the case where the staged files do not map cleanly onto one version — a hand-staged subset,
+ * or a post-pull merge. The DEFAULT message needs none of this: it is pre-filled from the
+ * version's own instruction and summary, which the version row already carries.
+ */
+export function sendGenerateGithubMessage(agentId: string): void {
+  useGithubStore.getState().startGenerating(agentId);
+  send({ cmd: "generateGithubMessage", agentId });
 }
 
 /** §3.4's commit box. `push` false is refused server-side — there is no local repository here. */

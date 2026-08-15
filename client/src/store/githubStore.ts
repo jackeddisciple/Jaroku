@@ -108,6 +108,15 @@ interface GithubState {
   reposLoading: boolean;
   /** §2.2's live availability check, for the name currently in the field. */
   nameCheck: { name: string; available: boolean } | null;
+  /**
+   * agent slug -> a commit message the model just wrote, waiting to be adopted.
+   *
+   * A ONE-SHOT INTENT, cleared by whoever consumes it, for the reason `uiStore.secretsAddProvider`
+   * is: it describes something that HAPPENED rather than a preference. Left set, it would re-fill
+   * the box every time somebody came back to the tab, over whatever they had since typed.
+   */
+  generated: Record<string, string>;
+  generating: Record<string, boolean>;
   error: string | null;
   notice: string | null;
 
@@ -121,6 +130,9 @@ interface GithubState {
   setRepos: (repos: GithubRepoRow[]) => void;
   startRepos: () => void;
   setNameCheck: (name: string, available: boolean) => void;
+  startGenerating: (agentId: string) => void;
+  setGenerated: (agentId: string, message: string) => void;
+  clearGenerated: (agentId: string) => void;
   applyStage: (
     agentId: string,
     op: "push" | "pull",
@@ -144,6 +156,8 @@ export const useGithubStore = create<GithubState>((set) => ({
   repos: [],
   reposLoading: false,
   nameCheck: null,
+  generated: {},
+  generating: {},
   error: null,
   notice: null,
 
@@ -179,6 +193,18 @@ export const useGithubStore = create<GithubState>((set) => ({
   startRepos: () => set({ reposLoading: true }),
   setRepos: (repos) => set({ repos, reposLoading: false }),
   setNameCheck: (name, available) => set({ nameCheck: { name, available } }),
+
+  startGenerating: (agentId) => set((s) => ({ generating: { ...s.generating, [agentId]: true } })),
+  setGenerated: (agentId, message) =>
+    set((s) => ({
+      generated: { ...s.generated, [agentId]: message },
+      generating: withoutKey(s.generating, agentId),
+    })),
+  clearGenerated: (agentId) =>
+    set((s) => ({
+      generated: withoutKey(s.generated, agentId),
+      generating: withoutKey(s.generating, agentId),
+    })),
 
   /**
    * One phase transition.
@@ -217,7 +243,9 @@ export const useGithubStore = create<GithubState>((set) => ({
     set((s) => ({ refusals: { ...s.refusals, [refusal.agentId]: refusal } })),
   clearRefusal: (agentId) => set((s) => ({ refusals: withoutKey(s.refusals, agentId) })),
 
-  setError: (error) => set({ error, reposLoading: false }),
+  // An error ends anything it could describe, for the same reason a snapshot does — a generate
+  // that failed must not leave its button spinning.
+  setError: (error) => set({ error, reposLoading: false, generating: {} }),
   setNotice: (notice) => set({ notice }),
 }));
 

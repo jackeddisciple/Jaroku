@@ -848,6 +848,7 @@ export type GithubMessage =
       stage: string;
       status: "active" | "done" | "error";
     }
+  | { channel: "github"; type: "message"; agentId: string; message: string }
   | ({ channel: "github"; type: "refused" } & GithubRefusal)
   | { channel: "github"; type: "error"; message: string; agentId?: string }
   | { channel: "github"; type: "notice"; message: string; agentId?: string };
@@ -998,7 +999,10 @@ export type ClientCommand =
   | { cmd: "switchGithubBranch"; agentId: string; branch: string; onUnpushed?: "push" | "stash" | "cancel" }
   | { cmd: "createGithubBranch"; agentId: string; branch: string }
   | { cmd: "openGithubPr"; agentId: string }
-  | { cmd: "commitGithub"; agentId: string; paths: string[]; message: string; push?: boolean };
+  | { cmd: "commitGithub"; agentId: string; paths: string[]; message: string; push?: boolean }
+  // §3.4's ✨ generate. Its own command because it is the one thing in this family that costs
+  // money — the default message needs no model call at all.
+  | { cmd: "generateGithubMessage"; agentId: string };
 
 // Unified composer "explain" subject — what the question is about, built from already-in-memory
 // context (a trace step, a graph node, or the agent generally). No new data is fetched.

@@ -294,6 +294,11 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   createGithubBranch: "github:manage",
   openGithubPr: "github:manage",
   commitGithub: "github:manage",
+  // `github:manage` rather than `agent:write`, even though what it produces is only text. It reads
+  // the agent's unpushed diff to write about it, and it spends a model call against the
+  // workspace's balance — both of which belong to the person who is allowed to push, not to
+  // everybody who can read where the code went.
+  generateGithubMessage: "github:manage",
 
   // An export is deliberately NOT here, and its absence is the decision rather than an omission:
   // it is an HTTP route, not a socket command — see http/lifecycle.ts. A copy of everything the
