@@ -23,7 +23,7 @@ import { useBuildStore } from "./buildStore.ts";
 import { useChatStore } from "./chatStore.ts";
 import { useDeployStore } from "./deployStore.ts";
 import { useEvalStore } from "./evalStore.ts";
-import { useGithubStore } from "./githubStore.ts";
+import { githubRegionKey, useGithubStore } from "./githubStore.ts";
 import { useGraphStore } from "./graphStore.ts";
 import { useConnectionStore } from "./connectionStore.ts";
 import { useMcpStore } from "./mcpStore.ts";
@@ -214,7 +214,14 @@ console.log("\nand so is everything the browser keeps");
   }
 
   /** Keys whose VALUE belongs to one workspace. Each must carry a workspace id in the key. */
-  const WORKSPACE_SCOPED = new Set(["jaroku.input"]);
+  const WORKSPACE_SCOPED = new Set([
+    "jaroku.input",
+    // Session 10. Which of the GitHub panel's four regions are folded away, per agent. It holds
+    // four booleans and nothing a workspace owns — but the key names an AGENT SLUG, and slugs are
+    // unique per workspace rather than globally, so it is keyed by workspace for exactly the
+    // reason `jaroku.input` is. A preference is a bad thing to get wrong quietly.
+    "jaroku.github",
+  ]);
   /** Keys that hold nothing a workspace owns. Each is a decision, not an oversight. */
   const NOT_TENANT_DATA = new Set([
     "jaroku.token",      // the bearer token — the account's, not a workspace's, and cleared on sign-out
@@ -238,6 +245,12 @@ console.log("\nand so is everything the browser keeps");
   useSessionStore.setState({ workspaceId: "ws-BBB" } as never);
   const inB = inputKey("support_bot");
   check(inA !== inB, "the SAME agent slug in two workspaces gets two different keys");
+
+  // ...and the same for the GitHub panel's per-agent collapse state, which names a slug too.
+  const regionsA = githubRegionKey("ws-AAA", "support_bot");
+  const regionsB = githubRegionKey("ws-BBB", "support_bot");
+  check(regionsA !== regionsB, "...and so does the GitHub panel's per-agent collapse state");
+  check(regionsA.includes("ws-AAA"), "...by carrying the workspace in the key rather than trusting the caller");
   check(inA.includes("ws-AAA") && inB.includes("ws-BBB"), "...each naming its own workspace");
   check(inA.startsWith(INPUT_KEY_PREFIX) && inB.startsWith(INPUT_KEY_PREFIX), "...under the prefix the sign-out sweep uses");
 

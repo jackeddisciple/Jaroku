@@ -549,6 +549,10 @@ export function BuildPane({
   // How many files generation has started writing. Subscribed to purely so the scroll effect
   // below has something that changes while they stream — see there for why.
   const genFileCount = useBuildStore((s) => s.fileOrder.length);
+  // The agent's own file list, for §A.6's `@` picker. The same array `genFileCount` measures —
+  // subscribed to directly rather than derived, so the picker offers a file the moment generation
+  // writes it.
+  const agentFileOrder = useBuildStore((s) => s.fileOrder);
 
   // Keep the newest turn in view — the conversation scrolls up like a terminal.
   //
@@ -1174,6 +1178,9 @@ export function BuildPane({
             <GitHubTriggerPicker
               view={github.view}
               trigger={githubTrigger}
+              // The loaded project's own files, so `@agent.py` works for a file that has never
+              // changed — which is the one somebody most often asks about.
+              paths={agentFileOrder}
               onDismiss={() => setGithubTrigger(null)}
               onPick={(attachment) => {
                 github.attach(attachment);

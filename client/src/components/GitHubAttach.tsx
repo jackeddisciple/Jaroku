@@ -320,29 +320,67 @@ export function GitHubAttachChips({
 export function GitHubTriggerPicker({
   view,
   trigger,
+  paths,
   onPick,
   onDismiss,
 }: {
   view: GithubView;
   trigger: ActiveTrigger;
+  /** Every path the agent has, from the loaded project. See `triggerRows`. */
+  paths: string[];
   onPick: (attachment: GithubAttachment) => void;
   onDismiss: () => void;
 }) {
-  const rows = triggerRows(view, trigger);
+  const rows = triggerRows(view, trigger, paths);
+  const [cursor, setCursor] = useState(0);
 
+  // The query changes on every keystroke and the list changes under it, so the highlight goes back
+  // to the top rather than staying on an index that now points at a different row.
+  useEffect(() => {
+    setCursor(0);
+  }, [trigger.kind, trigger.query]);
+
+  // THE PICKER IS DRIVEN WITHOUT LEAVING THE TEXTAREA — that is the entire point of a trigger
+  // character over the menu. Captured at the document so the keys work while the caret is still in
+  // the input, and `preventDefault` so Enter selects a row rather than sending the half-written
+  // message underneath it.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onDismiss();
+      if (e.key === "Escape") {
+        onDismiss();
+        return;
+      }
+      if (rows.length === 0) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setCursor((c) => (c + 1) % rows.length);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setCursor((c) => (c - 1 + rows.length) % rows.length);
+      } else if ((e.key === "Enter" || e.key === "Tab") && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        const row = rows[cursor];
+        if (row) onPick(row.attachment);
+      }
     };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onDismiss]);
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [rows, cursor, onPick, onDismiss]);
 
   if (rows.length === 0) return null;
 
   return (
     <div className="mb-2 max-h-44 overflow-auto rounded-card border border-edge bg-panel p-1 shadow-floating">
-      {rows.map((row) => (
+      {/* `!` HAS NO FILTER AND ONE ENTRY, so Enter attaches it immediately. The row exists so a
+          mistyped `!` is one Escape away rather than an attachment somebody has to notice and
+          remove — and the caption says what it does, because a bare `!` is the shortcut most
+          likely to be misread as an imperative when it still only attaches context. */}
+      {trigger.kind === "sync" && (
+        <div className="px-2 pb-1 pt-0.5 text-[10px] leading-[1.4] text-faint">
+          Attaches the diff. It does not pull.
+        </div>
+      )}
+      {rows.map((row, i) => (
         <button
           key={row.id}
           type="button"
@@ -353,10 +391,18 @@ export function GitHubTriggerPicker({
             e.preventDefault();
             onPick(row.attachment);
           }}
-          className="flex w-full items-baseline gap-2 rounded-control px-2 py-1 text-left transition-colors duration-fast hover:bg-active/40"
+          onMouseEnter={() => setCursor(i)}
+          className={`flex w-full items-baseline gap-2 rounded-control px-2 py-1 text-left transition-colors duration-fast ${
+            i === cursor ? "bg-active text-ink" : "hover:bg-active/40"
+          }`}
         >
           <span className="shrink-0 font-mono text-[11px] text-faint">{row.lead}</span>
-          <Truncate className="min-w-0 flex-1 text-[11px] text-muted">{row.label}</Truncate>
+          <Truncate
+            variant={trigger.kind === "file" ? "path" : "prose"}
+            className="min-w-0 flex-1 text-[11px] text-muted"
+          >
+            {row.label}
+          </Truncate>
         </button>
       ))}
     </div>
@@ -372,6 +418,7 @@ export function GitHubTriggerPicker({
 function triggerRows(
   view: GithubView,
   trigger: ActiveTrigger,
+  agentPaths: string[],
 ): { id: string; lead: string; label: string; attachment: GithubAttachment }[] {
   const q = trigger.query.trim().toLowerCase();
 
@@ -392,11 +439,25 @@ function triggerRows(
   }
 
   if (trigger.kind === "file") {
-    // Every path the panel knows about, on every branch it knows about. A cross product is the
-    // honest offer — §7's entry is "a specific file at a ref" — and it is bounded because both
-    // lists are small and the query narrows it immediately.
-    const paths = [...new Set([...view.changes.map((c) => c.path), ...view.protectedPaths, ...view.remoteChanges])];
-    const refs = view.branches.length > 0 ? view.branches.map((b) => b.name) : [view.link.branch];
+    // THE AGENT'S OWN FILE LIST FIRST, then anything the repository has that the agent does not.
+    // A picker offering only the CHANGED files could not attach `agent.py` — which is the file
+    // somebody most often wants to ask about, precisely because it has not changed. The union is
+    // the honest offer, and the query narrows it on the first keystroke.
+    const paths = [
+      ...new Set([
+        ...agentPaths,
+        ...view.changes.map((c) => c.path),
+        ...view.protectedPaths,
+        ...view.remoteChanges,
+      ]),
+    ].sort();
+    // THE CURRENT BRANCH FIRST. Asking about a file almost always means the branch in front of
+    // you, and ordering by whatever GitHub returned would put `main` at the top and make the
+    // common case the one that needs an arrow key.
+    const refs =
+      view.branches.length > 0
+        ? [...view.branches].sort((a, b) => Number(b.current) - Number(a.current)).map((b) => b.name)
+        : [view.link.branch];
     const rows: { id: string; lead: string; label: string; attachment: GithubAttachment }[] = [];
     for (const path of paths) {
       if (q && !path.toLowerCase().includes(q)) continue;

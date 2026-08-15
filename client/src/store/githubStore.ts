@@ -53,13 +53,20 @@ const REGION_KEY_PREFIX = "jaroku.github.regions.";
 /** The default: everything open. A panel that opens folded hides the answer somebody came for. */
 const ALL_OPEN: Record<RegionId, boolean> = { header: true, sync: true, changes: true, history: true };
 
-function regionKey(workspaceId: string | null, agentId: string): string {
+/**
+ * Exported so `reset.test.ts` can assert it actually carries the workspace.
+ *
+ * The suite reads every `jaroku.*` key the client writes and requires each to be classified as
+ * workspace-scoped or explicitly not tenant data — and for the scoped ones it checks the key, not
+ * the comment above it. A preference is a bad thing to get wrong quietly.
+ */
+export function githubRegionKey(workspaceId: string | null, agentId: string): string {
   return `${REGION_KEY_PREFIX}${workspaceId ?? "_"}.${agentId}`;
 }
 
 export function readRegions(workspaceId: string | null, agentId: string): Record<RegionId, boolean> {
   try {
-    const raw = localStorage.getItem(regionKey(workspaceId, agentId));
+    const raw = localStorage.getItem(githubRegionKey(workspaceId, agentId));
     if (!raw) return ALL_OPEN;
     const parsed = JSON.parse(raw) as Partial<Record<RegionId, boolean>>;
     // FIELD BY FIELD, because this is user-editable storage that survives across versions: a blob
@@ -84,7 +91,7 @@ export function writeRegions(
   regions: Record<RegionId, boolean>,
 ): void {
   try {
-    localStorage.setItem(regionKey(workspaceId, agentId), JSON.stringify(regions));
+    localStorage.setItem(githubRegionKey(workspaceId, agentId), JSON.stringify(regions));
   } catch {
     /* see readRegions — an unwritable store must not break the panel in front of somebody */
   }
