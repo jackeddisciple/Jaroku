@@ -573,7 +573,31 @@ export type ExplainSubject =
   | { kind: "step"; step: { name: string; type: string; seq: number; error: string | null; input: unknown; output: unknown } }
   | { kind: "node"; nodeId: string }
   | { kind: "agent" };
-export type ExplainCommand = { cmd: "explain"; agentId: string; question: string; subject: ExplainSubject };
+/**
+ * What the composer has attached from GitHub — §7.
+ *
+ * A LIST OF REFERENCES ON THE EXISTING COMMAND rather than a command of its own, and that shape is
+ * the rule §7 closes with: the ⊕ menu brings context IN and never takes a git action. There is no
+ * `attachGithub` verb here because attaching is not a thing that happens to a repository — it is
+ * something a QUESTION carries, and the question is `explain`.
+ *
+ * Resolved server-side at send time, so a chip made five minutes ago describes the repository as it
+ * is rather than as it was — see `githubService.resolveAttachments`.
+ */
+export type GithubAttachment =
+  | { kind: "unpushed" }
+  | { kind: "commit"; sha: string }
+  | { kind: "file"; path: string; ref: string }
+  | { kind: "sinceSync" }
+  | { kind: "pr" };
+
+export type ExplainCommand = {
+  cmd: "explain";
+  agentId: string;
+  question: string;
+  subject: ExplainSubject;
+  github?: GithubAttachment[];
+};
 export type ClientCommand =
   | RunCommand
   | LoadRunCommand

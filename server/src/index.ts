@@ -5006,7 +5006,18 @@ async function explainAgent(ctx: TenantContext, cmd: ExplainCommand): Promise<vo
   replyContext = ctx;
   explaining = true;
   relay.broadcastReply(contextForReply(), { type: "started", agentId: cmd.agentId, question: cmd.question });
-  const context = await buildExplainContext(ctx, cmd);
+  let context = await buildExplainContext(ctx, cmd);
+  // §7's attachments, resolved at SEND TIME rather than at attach time — a chip made five minutes
+  // ago should ground the answer in the repository as it is now. Appended rather than prepended so
+  // the agent's own context stays first: what the assistant is being asked about is still this
+  // agent, and the GitHub material is evidence about it.
+  if (Array.isArray(cmd.github) && cmd.github.length > 0) {
+    const attached = await githubService.resolveAttachments(ctx, cmd.agentId, cmd.github);
+    if (attached) context = `${context}
+
+Attached from GitHub:
+${attached}`;
+  }
   const explainKey = await providerKeys.platformKey(ctx);
   void streamExplain(context, cmd.question, {
     onDelta: (text) => relay.broadcastReply(contextForReply(), { type: "delta", agentId: cmd.agentId, text }),

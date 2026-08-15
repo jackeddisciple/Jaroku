@@ -22,7 +22,7 @@ import {
   type AuthFailure,
 } from "./auth.ts";
 import type {
-  ClientCommand, EvalTarget, ExplainSubject, McpConfirmVerdict, McpImpact,
+  ClientCommand, EvalTarget, ExplainSubject, GithubAttachment, McpConfirmVerdict, McpImpact,
   RubricCriterion, ServerMessage,
 } from "../types.ts";
 
@@ -634,8 +634,14 @@ export function sendBranchRun(
 }
 // Unified composer "explain": ask for a prose answer about a step / node / the agent, built from
 // in-context data. Answered on the "reply" channel (chatStore), never a code change.
-export function sendExplain(agentId: string, question: string, subject: ExplainSubject): void {
-  send({ cmd: "explain", agentId, question, subject });
+export function sendExplain(
+  agentId: string,
+  question: string,
+  subject: ExplainSubject,
+  /** §7's attachments. References, resolved server-side at send time — never content. */
+  github?: GithubAttachment[],
+): void {
+  send({ cmd: "explain", agentId, question, subject, ...(github?.length ? { github } : {}) });
 }
 
 // --- MCP: server registry --------------------------------------------------

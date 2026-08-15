@@ -32,6 +32,7 @@ import { Prose } from "./InlineCode.tsx";
 import { StreamingFileRow } from "./FileList.tsx";
 import { PlanCard } from "./PlanCard.tsx";
 import { ArrowUpIcon, ChevronDownIcon, MicIcon, SaveToDatasetIcon } from "./composerIcons.tsx";
+import { GitHubAttachChips, GitHubAttachMenu, useGithubAttachments } from "./GitHubAttach.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { StatRow, STAT_ICON, type Stat } from "./StatRow.tsx";
@@ -497,6 +498,10 @@ export function BuildPane({
   const genStatus = useBuildStore((s) => s.status);
   const agents = useBuildStore((s) => s.agents);
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
+  // §7's GitHub attach. Held beside the draft rather than in a store: it belongs to the message
+  // being written, is cleared when that message is sent, and nothing outside this composer has a
+  // reason to read it.
+  const github = useGithubAttachments(activeAgentId);
   const threads = useChatStore((s) => s.threads);
   const pendingThread = useChatStore((s) => s.pending);
   const streamingAgentId = useChatStore((s) => s.streamingAgentId);
@@ -704,7 +709,12 @@ export function BuildPane({
           s.kind === "step"
             ? { kind: "step", step: { name: s.step.name, type: s.step.type, seq: s.step.seq, error: s.step.error, input: s.step.input, output: s.step.output } }
             : s,
+          // §7's attachments ride the question they were attached to, and are cleared with the
+          // draft below — an attachment outliving the message it was made for would silently
+          // ground the NEXT question in a diff nobody meant to send.
+          github.attachments,
         );
+        github.clear();
         break;
       }
     }
@@ -1147,6 +1157,11 @@ export function BuildPane({
             focus-within:shadow-focusring ${standalone ? "shadow-glow" : "shadow-raised"}`}
           style={{ padding: "14px 16px 12px" }}
         >
+          {/* Attached GitHub context, above the input. Above rather than below because it is
+              part of the message being composed, and a chip under the send button would read as
+              something that happened rather than something about to be sent. */}
+          <GitHubAttachChips attachments={github.attachments} onRemove={github.remove} />
+
           {/* input slot: the textarea and the live waveform crossfade in place (~200ms) so the
               transition from typing to recording is smooth and the card doesn't jump. */}
           <div className="relative" style={{ height: showWave ? recordHeight : undefined }}>
@@ -1215,6 +1230,9 @@ export function BuildPane({
               >
                 <MicIcon size={17} />
               </button>
+              {/* Beside the mic and before the model chip: it is an input to the message, like
+                  the mic, rather than a setting for how the message is handled. */}
+              <GitHubAttachMenu view={github.view} onAttach={github.attach} />
               <ModelSelector provider={provider} model={model} setProvider={setProvider} setModel={setModel} />
               {/* Test mode only: the input IS an eval example, so promotion belongs here
                   rather than in the Evals tab — that's where a case earns its place. */}

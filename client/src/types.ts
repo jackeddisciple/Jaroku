@@ -828,6 +828,20 @@ export interface GithubRefusal {
   candidate: number | null;
 }
 
+/**
+ * What the composer has attached from GitHub — §7.
+ *
+ * A REFERENCE, NOT CONTENT. The chip holds an identifier and the server resolves it when the
+ * message is sent, so an attachment made five minutes ago describes the repository as it is now
+ * rather than as it was when somebody clicked.
+ */
+export type GithubAttachment =
+  | { kind: "unpushed" }
+  | { kind: "commit"; sha: string }
+  | { kind: "file"; path: string; ref: string }
+  | { kind: "sinceSync" }
+  | { kind: "pr" };
+
 export type GithubMessage =
   | {
       channel: "github";
@@ -909,7 +923,7 @@ export type ClientCommand =
   | { cmd: "pauseRun"; runId: string }
   | { cmd: "resumeRun"; runId: string }
   | { cmd: "branchRun"; fromRunId: string; atSeq: number; editNode?: string; editedState?: Record<string, unknown> }
-  | { cmd: "explain"; agentId: string; question: string; subject: ExplainSubject }
+  | { cmd: "explain"; agentId: string; question: string; subject: ExplainSubject; github?: GithubAttachment[] }
   // Eval: dataset CRUD. Every mutation is answered with a fresh snapshot on the "eval"
   // channel, so the client never reconciles a partial update against local state.
   | { cmd: "createDataset"; agentId: string; name: string }

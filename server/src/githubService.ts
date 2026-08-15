@@ -127,6 +127,27 @@ export interface GithubView {
   events: GithubEvent[];
 }
 
+
+/**
+ * One thing the composer has attached — §7.
+ *
+ * A REFERENCE, NOT CONTENT. The chip in the composer holds an identifier and the server resolves
+ * it at send time, which matters for a reason beyond payload size: an attachment made five minutes
+ * ago and sent now should describe the repository AS IT IS, not as it was when somebody clicked.
+ * A client that captured the diff would quietly ground the assistant in a stale one.
+ */
+export type GithubAttachmentRef =
+  /** §7 Phase 1: what is here that GitHub does not have. */
+  | { kind: "unpushed" }
+  /** §7 Phase 1: a commit by sha. */
+  | { kind: "commit"; sha: string }
+  /** §7 Phase 2: one file, as it stands on a ref. */
+  | { kind: "file"; path: string; ref: string }
+  /** §7 Phase 2: what changed on GitHub since we last looked. The sync-state question, in chat. */
+  | { kind: "sinceSync" }
+  /** §7 Phase 2: the open PR. */
+  | { kind: "pr" };
+
 export interface GithubServiceDeps {
   repo: GithubRepository;
   identity: GithubIdentity;
@@ -139,6 +160,26 @@ export interface GithubServiceDeps {
 
 /** How many remote commits and history rows one view carries. Enough to read, not enough to scroll. */
 const HISTORY_LIMIT = 30;
+
+/**
+ * How much attached GitHub context one message may carry, in characters.
+ *
+ * Thirty thousand: a couple of source files or a long diff, well under the model's window, and
+ * small enough that attaching four things cannot turn one question into the most expensive call
+ * the workspace makes that day. Shared across the whole set rather than per attachment — see
+ * `resolveAttachments`.
+ */
+const ATTACHMENT_BUDGET = 30_000;
+
+/**
+ * A newline, named.
+ *
+ * Not style: the attachment block is assembled from template literals, and a literal line break
+ * inside one of those is a line break in the OUTPUT — which is fine — sitting in source that then
+ * has to be edited around. Naming it keeps each of those expressions on one line, where the shape
+ * of what is being built stays readable.
+ */
+const NL = String.fromCharCode(10);
 
 /**
  * The branch Jaroku owns for an agent.
@@ -424,6 +465,111 @@ export class GithubService {
     } catch {
       return null;
     }
+  }
+
+
+  /**
+   * Turn attachment references into text the assistant can be grounded in.
+   *
+   * ONE BUDGET ACROSS THE WHOLE SET, not per attachment. Three files at a ref is three whole
+   * source files, and a context that grows with the number of chips is a context that silently
+   * stops fitting — so the cap is on the total and the block says when it truncated, rather than
+   * quietly ending mid-file.
+   *
+   * A REFERENCE THAT CANNOT BE RESOLVED BECOMES A LINE SAYING SO, never an exception. The user
+   * attached something and pressed send; failing the whole message because one commit was
+   * force-pushed away in the meantime would lose the question they typed.
+   *
+   * NOTHING HERE TRIGGERS A WRITE. §7's closing rule, enforced by there being no code path from
+   * this method to a push, a pull or a ref update — attaching brings context IN, and every action
+   * that reaches GitHub lives in the panel where it is confirmed.
+   */
+  async resolveAttachments(
+    ctx: TenantContext,
+    agentId: string,
+    refs: GithubAttachmentRef[],
+  ): Promise<string> {
+    if (refs.length === 0) return "";
+    const view = await this.view(ctx, agentId);
+    if (!view) return "";
+    const connection = await this.deps.identity.apiFor(ctx);
+    const repo = view.link.repo_full_name;
+    const parts: string[] = [];
+    let budget = ATTACHMENT_BUDGET;
+
+    const push = (heading: string, body: string): void => {
+      if (budget <= 0) return;
+      const text = body.length > budget ? `${body.slice(0, budget)}\n… (truncated)` : body;
+      budget -= text.length;
+      parts.push(`--- ${heading} ---\n${text}`);
+    };
+
+    for (const ref of refs) {
+      try {
+        if (ref.kind === "unpushed") {
+          push(
+            `Unpushed versions (${view.unpushed.length})`,
+            view.unpushed.length === 0
+              ? "nothing unpushed"
+              : [
+                  ...view.unpushed.map((v) => `v${v.version} ${v.summary} (+${v.additions}/-${v.deletions})`),
+                  "",
+                  "Files touched:",
+                  ...view.changes.map((c) => `${c.status} ${c.path} (+${c.additions}/-${c.deletions})`),
+                ].join("\n"),
+          );
+        } else if (ref.kind === "commit") {
+          if (!connection) throw new Error("GitHub is not connected");
+          const commits = await connection.api.commits(repo, view.link.branch, 100);
+          const found = commits.find((c) => c.sha.startsWith(ref.sha));
+          if (!found) throw new Error(`no commit ${ref.sha} on ${view.link.branch}`);
+          const compare = await connection.api.compare(repo, `${found.sha}^`, found.sha);
+          push(
+            `Commit ${found.sha.slice(0, 7)}`,
+            [
+              found.message,
+              found.authorLogin ? `by @${found.authorLogin} at ${found.authoredAt}` : found.authoredAt,
+              "",
+              ...compare.files.map((f) => `changed ${f}`),
+            ].join("\n"),
+          );
+        } else if (ref.kind === "file") {
+          if (!connection) throw new Error("GitHub is not connected");
+          const head = await connection.api.refSha(repo, ref.ref);
+          if (!head) throw new Error(`no ref ${ref.ref}`);
+          const full = repoPath(ref.path, view.link.subdirectory);
+          const entry = (await connection.api.tree(repo, head)).find((e) => e.path === full || e.path === ref.path);
+          if (!entry) throw new Error(`${ref.path} is not on ${ref.ref}`);
+          push(`${ref.path} @ ${ref.ref}`, await connection.api.blob(repo, entry.sha, entry.path));
+        } else if (ref.kind === "sinceSync") {
+          if (!connection) throw new Error("GitHub is not connected");
+          const watermark = view.link.last_pushed_sha ?? view.link.last_known_remote_sha;
+          const head = await connection.api.refSha(repo, view.link.branch);
+          if (!watermark || !head) throw new Error("there is no last-sync point to compare against");
+          const compare = await connection.api.compare(repo, watermark, head);
+          push(
+            `Changed on GitHub since Jaroku last synced (${watermark.slice(0, 7)} → ${head.slice(0, 7)})`,
+            compare.files.length === 0 ? "no files changed" : compare.files.map((f) => `changed ${f}`).join(NL),
+          );
+        } else if (ref.kind === "pr") {
+          if (!view.pr) throw new Error("there is no open pull request");
+          push(
+            `Pull request #${view.pr.number}`,
+            [
+              view.pr.title,
+              `${view.pr.commits} commits, ${view.pr.files} files, +${view.pr.additions}/-${view.pr.deletions}`,
+              `checks: ${view.pr.checks ?? "none reported"}`,
+              view.pr.url,
+            ].join("\n"),
+          );
+        }
+      } catch (err) {
+        // Named rather than dropped. An assistant told "this attachment could not be read" answers
+        // better than one silently given less than the user believes it has.
+        parts.push(`--- attachment unavailable ---${NL}${(err as Error)?.message ?? String(err)}`);
+      }
+    }
+    return parts.join(NL + NL);
   }
 
   // --- linking ----------------------------------------------------------------
