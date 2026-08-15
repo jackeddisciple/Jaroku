@@ -218,10 +218,14 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
 export function ChangesRegion({ view }: { view: GithubView }) {
   const changed = view.changes.filter((c) => !c.locked);
   const locked = view.changes.filter((c) => c.locked);
-  // Protected files that were NOT touched are still worth listing — the group's job is to say what
-  // this surface cannot do, and it can only do that when the files are visible.
+  // Protected files that were NOT touched are still worth being able to see — the group's job is
+  // to say what this surface cannot do — but not worth showing unasked. See the render below.
   const untouched = view.protectedPaths.filter((p) => !view.changes.some((c) => c.path === p));
   const remote = view.remoteChanges;
+  // Closed by default, and not persisted: unlike §A.5's four regions this is not a preference
+  // about how somebody likes to work, it is a one-off "show me the list" — and a disclosure that
+  // remembered itself would put the wall of inert rows back on the next agent.
+  const [showProtected, setShowProtected] = useState(false);
 
   if (changed.length === 0 && locked.length === 0 && untouched.length === 0 && remote.length === 0) {
     return null;
@@ -252,12 +256,43 @@ export function ChangesRegion({ view }: { view: GithubView }) {
         </FileGroup>
       )}
 
-      {(locked.length > 0 || untouched.length > 0) && (
-        <FileGroup label="Protected (not editable here)">
-          {[...locked.map((l) => l.path), ...untouched].map((path) => (
-            <FileRow key={path} path={path} status="protected" muted />
-          ))}
+      {/* TWO KINDS OF PROTECTED, AND ONLY ONE OF THEM IS NEWS.
+
+          A protected file the versions actually TOUCHED is part of this push and belongs in a
+          region about changes. A protected file that merely exists — every clone has all of them —
+          answers "why can't I edit this?", which is a question somebody asks once and then knows.
+          Rendering both flat meant a region reporting zero changes still drew eight permanently
+          inert rows, and they were the visually dominant thing in it: the loudest element on the
+          surface was the list of files that can never change.
+
+          So the touched ones stay, and the rest fold behind a count. Not `CollapsibleRegion` —
+          that owns §1's four top-level regions and their shared header shape, and a fifth chevron
+          at the same weight inside one of them would read as a peer of Changes rather than as
+          something inside it. */}
+      {locked.length > 0 && (
+        <FileGroup label={`Protected (${locked.length}) — changed, but not editable here`}>
+          {locked.map((l) => <FileRow key={l.path} path={l.path} status="protected" muted />)}
         </FileGroup>
+      )}
+
+      {untouched.length > 0 && (
+        <div className="mt-2">
+          <button
+            className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-faint transition-colors duration-fast hover:text-muted"
+            aria-expanded={showProtected}
+            onClick={() => setShowProtected((v) => !v)}
+          >
+            <span className={`transition-transform duration-fast ${showProtected ? "rotate-90" : ""}`} aria-hidden>
+              ▸
+            </span>
+            {untouched.length} protected file{untouched.length === 1 ? "" : "s"} not editable here
+          </button>
+          {showProtected && (
+            <div className="mt-1 space-y-0.5">
+              {untouched.map((path) => <FileRow key={path} path={path} status="protected" muted />)}
+            </div>
+          )}
+        </div>
       )}
     </section>
   );
