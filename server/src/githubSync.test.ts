@@ -72,6 +72,27 @@ console.log("\nwhat counts as unpushed");
     unpushedVersions(withUndone, "v13").map((x) => x.version).join(",") === "14",
     "an undone version is not unpushed work — it is not work at all",
   );
+
+  // ...AND THE POINTER ITSELF CAN BE THE UNDONE ONE. Push v14, press Undo: v14 leaves the live
+  // list while still being the commit on the branch. Resolved against live versions only it reads
+  // as absent, and absent fell through to "nothing was ever pushed" — so the panel offered to push
+  // v11, v12 and v13 again, onto a branch that already has them.
+  const pointerUndone = [v(14, "v14", "2026-01-01T00:00:00.000Z"), v(13), v(12), v(11)];
+  check(
+    unpushedVersions(pointerUndone, "v14").length === 0,
+    "undoing the version that was pushed does not make the whole history unpushed again",
+  );
+  check(
+    unpushedVersions([v(16), v(15, "v15", "2026-01-01T00:00:00.000Z"), v(14)], "v15")
+      .map((x) => x.version).join(",") === "16",
+    "...and work done after it is still counted, which is the half that must not be hidden",
+  );
+  // A pointer at a row that is not in this list at all is the case with genuinely nothing to
+  // anchor on, and only that case falls back to offering everything.
+  check(
+    unpushedVersions([v(13), v(12)], "v-from-another-agent").length === 2,
+    "a pointer at a version that is not here at all falls back to the whole live list",
+  );
 }
 
 console.log("\nthe settled states");

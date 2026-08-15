@@ -110,12 +110,17 @@ export interface RemoteState {
 export function unpushedVersions(versions: LocalVersion[], lastPushedVersionId: string | null): LocalVersion[] {
   const live = versions.filter((v) => v.undone_at === null);
   if (!lastPushedVersionId) return live;
-  const pushed = live.find((v) => v.id === lastPushedVersionId);
-  // A pushed version that is no longer in the live list was undone after being pushed. Treating
-  // that as "nothing was ever pushed" would offer to re-push the entire history; treating it as
-  // "everything is pushed" would hide real work. The honest reading is the second-best watermark
-  // available — the newest live version at or below the pointer is gone, so fall back to the
-  // whole live list only when there is genuinely nothing to anchor on.
+  // THE POINTER IS RESOLVED AGAINST THE WHOLE LIST AND NOT THE LIVE ONE, which is the difference
+  // between a watermark and a badge nobody can clear. Push v14, press Undo, and v14 leaves the
+  // live list while still being the commit sitting on the branch — looked up among live versions
+  // only, it is simply absent, and "absent" fell through to "nothing was ever pushed". The panel
+  // then reported every version the agent has ever had as unpushed, and the push it offered would
+  // have written the entire history onto the branch a second time as new commits.
+  //
+  // A version number is the anchor, and an undone row still has one. The fallback below is for the
+  // case the comment always described and the lookup never reached: a pointer at a row that is not
+  // in this list at all, where there is genuinely nothing to anchor on.
+  const pushed = versions.find((v) => v.id === lastPushedVersionId);
   if (!pushed) return live;
   return live.filter((v) => v.version > pushed.version);
 }
