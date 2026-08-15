@@ -3361,6 +3361,23 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
           // rather than to forward its error.
           return fail("this agent is linked to the default branch, so there is nothing to open a PR against.", agentId);
         }
+        // ASKED BEFORE IT IS OPENED. The panel hides this button when it already knows about a PR,
+        // but `view.pr` is one of the four remote reads allowed to fail — a rate limit or a 500
+        // turns it into null and puts the button back — and a colleague can open one between the
+        // snapshot and the click. GitHub answers the second attempt with a 422 whose body is a
+        // Validation Failed blob, and forwarding that put raw JSON in the error strip to say
+        // something the panel could have said in five words.
+        const existing = await connection.api.openPullRequest(link.repo_full_name, link.branch, base);
+        if (existing) {
+          relay.broadcastGithub(ctx, {
+            type: "notice",
+            agentId,
+            message: `#${existing.number} is already open for ${link.branch}.`,
+          });
+          // So the card replaces the button rather than leaving somebody to press it again.
+          await broadcastGithub(ctx, agentId);
+          return;
+        }
         const pr = await connection.api.createPullRequest(link.repo_full_name, {
           title: `Agent updates: ${agent.display_name ?? agent.slug}`,
           head: link.branch,
