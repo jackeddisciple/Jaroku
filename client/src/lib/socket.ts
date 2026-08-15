@@ -913,8 +913,8 @@ export function sendUnlinkGithub(agentId: string): void {
  * Read-only: it moves what we last SAW, never what we last DID, which is what makes it safe to
  * fire on opening the panel rather than only on a click.
  */
-export function sendRefreshGithub(agentId: string): void {
-  send({ cmd: "refreshGithub", agentId });
+export function sendRefreshGithub(agentId: string, explicit = false): void {
+  send({ cmd: "refreshGithub", agentId, explicit });
 }
 
 /**

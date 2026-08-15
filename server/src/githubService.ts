@@ -538,17 +538,34 @@ export class GithubService {
    * records what we have SEEN, never what we have DONE — so a fetch can change a verdict from
    * "behind" to "diverged" as it learns more, and can never make an unpushed version look pushed.
    */
-  async refresh(ctx: TenantContext, agentId: string): Promise<void> {
+  async refresh(ctx: TenantContext, agentId: string, explicit = false): Promise<void> {
     if (!isSafeAgentId(agentId)) return;
     const agent = await this.deps.agents.bySlug(ctx, agentId);
     if (!agent) return;
     const link = await this.deps.repo.linkFor(ctx, agent.id);
     if (!link) return;
+    const before = link.last_known_remote_sha;
     const remote = await this.readRemote(ctx, link);
     if (!remote.state.repoReachable) return;
     await this.deps.repo.patchLink(ctx, link.id, {
       lastKnownRemoteSha: remote.state.headSha,
       lastSyncedAt: new Date().toISOString(),
+    });
+    // RECORDED ONLY WHEN A PERSON ASKED. The panel refreshes on every open, and an event per
+    // render would bury the rows this table exists for — the refusals and the overrides — under a
+    // log of somebody having the tab in front of them.
+    if (!explicit) return;
+    await this.deps.repo.record(ctx, {
+      agentId: agent.id,
+      linkId: link.id,
+      kind: "fetch",
+      commitSha: remote.state.headSha,
+      // WHAT CHANGED, not just that a check happened. "Nothing moved" is the answer somebody
+      // fetched to get, and a row that only said "fetched" would make them compare shas by eye.
+      detail:
+        before === remote.state.headSha
+          ? "no change"
+          : `${(before ?? "—").slice(0, 7)} → ${(remote.state.headSha ?? "—").slice(0, 7)}`,
     });
   }
 }

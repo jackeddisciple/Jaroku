@@ -3153,10 +3153,22 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
         return;
       }
 
-      case "refreshGithub":
-        await githubService.refresh(ctx, String(cmd.agentId ?? ""));
-        await broadcastGithub(ctx, cmd.agentId);
+      case "refreshGithub": {
+        const agentId = String(cmd.agentId ?? "");
+        await githubService.refresh(ctx, agentId, cmd.explicit === true);
+        await broadcastGithub(ctx, agentId);
+        // Only for the deliberate one. A notice on every panel open would be a toast per
+        // navigation, which is how people learn to stop reading them.
+        if (cmd.explicit === true) {
+          const view = await githubService.view(ctx, agentId);
+          relay.broadcastGithub(ctx, {
+            type: "notice",
+            agentId,
+            message: view ? `Fetched — ${view.verdict.toLowerCase()}.` : "Fetched.",
+          });
+        }
         return;
+      }
 
       case "pushGithub": {
         const agentId = String(cmd.agentId ?? "");

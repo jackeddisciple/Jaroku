@@ -993,7 +993,9 @@ export type ClientCommand =
       includeArtifacts?: boolean;
     }
   | { cmd: "unlinkGithub"; agentId: string }
-  | { cmd: "refreshGithub"; agentId: string }
+  // §A.1's Fetch and the panel's own refresh are ONE command. Both do the identical read; the
+  // flag only decides whether it is worth an audit row.
+  | { cmd: "refreshGithub"; agentId: string; explicit?: boolean }
   | { cmd: "pushGithub"; agentId: string; squash?: boolean; force?: boolean; confirmSlug?: string }
   | { cmd: "pullGithub"; agentId: string; force?: boolean; confirmSlug?: string }
   | { cmd: "switchGithubBranch"; agentId: string; branch: string; onUnpushed?: "push" | "stash" | "cancel" }

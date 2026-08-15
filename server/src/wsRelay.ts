@@ -405,7 +405,25 @@ export type UnlinkGithubCommand = { cmd: "unlinkGithub"; agentId: string };
  * flow, so it carries none of the confirmation weight push and pull do — which is what makes it
  * safe to run on opening the panel rather than only on a click.
  */
-export type RefreshGithubCommand = { cmd: "refreshGithub"; agentId: string };
+export type RefreshGithubCommand = {
+  cmd: "refreshGithub";
+  agentId: string;
+  /**
+   * Whether a person asked for this — §A.1's Fetch.
+   *
+   * ONE COMMAND RATHER THAN TWO, and the flag is the whole difference. The panel already refreshes
+   * on open, and "Fetch" does exactly the same read: it updates `last_known_remote_sha` without
+   * touching the working tree or opening the divergence flow, which is why it carries none of the
+   * confirmation weight Push and Pull do. A second command would be a second implementation of one
+   * read, and the day they drift the automatic one and the deliberate one disagree about what the
+   * remote says.
+   *
+   * What the flag buys is the AUDIT ROW. "Somebody checked at 14:02" is worth recording; "the panel
+   * was open" is not, and writing an event per render would drown the history the force-override
+   * rows live in.
+   */
+  explicit?: boolean;
+};
 export type PushGithubCommand = {
   cmd: "pushGithub";
   agentId: string;
