@@ -238,24 +238,20 @@ export type DisconnectConnectorCommand = { cmd: "disconnectConnector"; connector
 // guessing. `listProviders` is the exception and is answered locally, like `listMcpServers`,
 // because it is a pure read of state already in memory.
 
-/**
- * Store a provider's API key. Answered with a fresh provider snapshot.
- *
- * `key` is the second of the three fields on any command in this file that carry a secret
- * (see AddMcpServerCommand.token and SetRailwayTokenCommand.token). It travels one way — browser to server, over the loopback
- * socket the whole product runs on — is written to runtime/.env by the same credential writer
- * every other key goes through, and is forgotten. Nothing ever sends it back: a provider
- * reports `configured: true`, never its credential. See envWriter.ts and providers.ts.
- */
-export type SetProviderKeyCommand = { cmd: "setProviderKey"; provider: string; key: string };
-/**
- * Prove a key works without storing it — the "Test connection" button.
- *
- * Deliberately not folded into setProviderKey: a test that writes first would put a
- * credential on disk before the user pressed Save, which is not what the button says it does.
- * The same one-way, never-echoed discipline applies to `key` here.
- */
-export type TestProviderKeyCommand = { cmd: "testProviderKey"; provider: string; key: string };
+// STORING AND TESTING A PROVIDER KEY ARE NOT COMMANDS ON THIS SOCKET, AND THAT IS THE POINT.
+//
+// They were: `setProviderKey` took a raw key from the browser and wrote it, and `testProviderKey`
+// probed one. Both were classified `provider:manage` and both worked with nothing but a session —
+// which meant the passcode gate the entire Secrets surface is built on could be walked around by
+// anybody who opened the top bar's popover. A gate that holds on one transport and not the other
+// is not a gate, and the brief says so in its opening section: gating the UI is not gating the data.
+//
+// It cannot be fixed by adding a check here, because elevation rides on a REQUEST HEADER and a
+// browser cannot set one on a WebSocket — that constraint is exactly why the secrets routes are
+// HTTP in the first place. So the commands are gone rather than guarded, and `POST /v1/secrets` and
+// `POST /v1/secrets/:name/test` are the one way in. That also settles §5.1's other complaint: two
+// homes for a credential meant two rotation paths and two validation paths, and this was the one
+// that classified nothing, stored no mask, and wrote no audit row.
 export type ListProvidersCommand = { cmd: "listProviders" };
 
 /** Provider-channel commands, grouped so the forwarding switch stays readable. */
@@ -284,12 +280,9 @@ export type BillingEvent =
   | { type: "usage"; usage: unknown }
   | { type: "error"; message: string };
 
-export type ProviderCommand =
-  | SetProviderKeyCommand
-  | TestProviderKeyCommand
-  | SetOwnKeyForPlatformCommand;
+export type ProviderCommand = SetOwnKeyForPlatformCommand;
 
-const PROVIDER_COMMANDS = new Set(["setProviderKey", "testProviderKey", "setOwnKeyForPlatform"]);
+const PROVIDER_COMMANDS = new Set(["setOwnKeyForPlatform"]);
 
 /**
  * Forwarded, not answered locally — unlike `listProviders` and `listAgents` beside it.
@@ -876,8 +869,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   saveRubric: "eval", loadEvalResults: "eval", listEvals: "eval", estimateEval: "eval",
   listMcpServers: "mcp", addMcpServer: "mcp", removeMcpServer: "mcp", rediscoverMcpServer: "mcp",
   setMcpServerAuth: "mcp", setMcpToolImpact: "mcp", resolveMcpConfirm: "mcp",
-  listProviders: "providers", setProviderKey: "providers", testProviderKey: "providers",
-  setOwnKeyForPlatform: "providers",
+  listProviders: "providers", setOwnKeyForPlatform: "providers",
   listConnections: "connections", connectConnector: "connections", disconnectConnector: "connections",
   loadUsage: "billing",
   listMembers: "members", inviteMember: "members", revokeInvite: "members",

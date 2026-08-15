@@ -769,14 +769,12 @@ export type ClientCommand =
   | { cmd: "setMcpServerAuth"; serverId: string; token: string | null }
   | { cmd: "setMcpToolImpact"; serverId: string; toolName: string; impact: McpImpact | null }
   | { cmd: "resolveMcpConfirm"; runId: string; nonce: string; verdict: McpConfirmVerdict }
-  // Model providers. `key` is the second field in this union carrying a secret, and it obeys
-  // the same rule as `token` above: one way only, written to runtime/.env server-side, never
-  // echoed back. `testProviderKey` proves a key works and writes nothing — which is why it is
-  // a separate command rather than a flag on the one that stores it.
+  // Model providers. NO COMMAND HERE CARRIES A KEY ANY MORE. `setProviderKey` and
+  // `testProviderKey` did, and they were the way around the Secrets passcode gate — elevation
+  // travels on a request header, which a WebSocket cannot carry, so neither could ever be gated.
+  // Both moved to the secrets routes; what is left asks which names are set.
   | { cmd: "listProviders" }
   | { cmd: "loadUsage" }
-  | { cmd: "setProviderKey"; provider: ProviderId; key: string }
-  | { cmd: "testProviderKey"; provider: ProviderId; key: string }
   // Connections. THE ONE SET IN THIS UNION THAT CARRIES NO SECRET IN EITHER DIRECTION: a
   // credential for a connected account is minted by the provider and collected at the callback,
   // so the browser never holds one and never sends one. `returnTo` is a PATH — the server

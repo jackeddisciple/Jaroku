@@ -21,7 +21,7 @@ import {
   type AuthFailure,
 } from "./auth.ts";
 import type {
-  ClientCommand, EvalTarget, ExplainSubject, McpConfirmVerdict, McpImpact, ProviderId,
+  ClientCommand, EvalTarget, ExplainSubject, McpConfirmVerdict, McpImpact,
   RubricCriterion, ServerMessage,
 } from "../types.ts";
 
@@ -647,26 +647,10 @@ export function sendListProviders(): void {
   send({ cmd: "listProviders" });
 }
 
-/**
- * Store a provider's API key.
- *
- * `key` travels one way. It is written to runtime/.env server-side by the same credential
- * writer MCP tokens go through, and the answer is `configured: true` — never the key.
- */
-export function sendSetProviderKey(provider: ProviderId, key: string): void {
-  send({ cmd: "setProviderKey", provider, key });
-}
-
-/**
- * Prove a key works without storing it — the "Test connection" button.
- *
- * Deliberately not a flag on the command above: a test that wrote first would put a credential
- * on disk before the user pressed Save, which is not what the button says it does.
- */
-export function sendTestProviderKey(provider: ProviderId, key: string): void {
-  useProviderStore.getState().startTest(provider);
-  send({ cmd: "testProviderKey", provider, key });
-}
+// STORING AND TESTING A PROVIDER KEY ARE NOT COMMANDS ON THIS SOCKET. They were, and they were
+// the way around the Secrets passcode gate: elevation rides on a request header and a browser
+// cannot set one on a WebSocket, so a credential command here is one nothing can gate. Both live on
+// the secrets routes now — see lib/secrets.ts, which is HTTP for exactly this reason.
 
 // --- deploy ----------------------------------------------------------------
 // Answered on the "deploy" channel. Every mutation comes back as a fresh snapshot of every

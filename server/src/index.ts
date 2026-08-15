@@ -2719,17 +2719,20 @@ async function handleConnectionCommand(ctx: TenantContext, cmd: ConnectionComman
   }
 }
 
-// --- providers: model credentials -------------------------------------------
-// The bring-your-own-key surface, on its own channel. Two commands, deliberately:
-// `testProviderKey` proves a key works and writes NOTHING, `setProviderKey` stores it. Folding
-// them would mean the "Test connection" button put a credential on disk before the user
-// pressed Save.
+// --- providers: which keys are set, and who pays with them ---------------------------------
+// NO KEY IS WRITTEN OR PROBED ON THIS CHANNEL ANY MORE. `setProviderKey` and `testProviderKey`
+// used to live here and were a way around the passcode gate: elevation rides on a request header,
+// a browser cannot set one on a WebSocket, so a credential command on this socket is a credential
+// command nothing can gate. `POST /v1/secrets` and `POST /v1/secrets/:name/test` are the one way
+// in, and they go through the same guard everything else in the group does.
 //
-// Nothing broadcast here carries a key. A provider reports `configured: true/false`, which is
-// the name of a variable being set, and never the value behind it — the same guarantee the MCP
-// registry gives, through the same credential writer.
+// What is left is `setOwnKeyForPlatform`, which carries no credential — it decides which of two
+// already-stored keys pays for the platform's own calls.
+//
+// Nothing broadcast here carries a key either. A provider reports `configured: true/false`, which
+// is the name of a variable being set and never the value behind it.
 
-const PROVIDER_COMMAND_NAMES = new Set(["setProviderKey", "testProviderKey"]);
+const PROVIDER_COMMAND_NAMES = new Set(["setOwnKeyForPlatform"]);
 const CONNECTION_COMMAND_NAMES = new Set(["listConnections", "connectConnector", "disconnectConnector"]);
 
 async function broadcastProviders(ctx: TenantContext): Promise<void> {
@@ -2746,8 +2749,8 @@ async function broadcastProviders(ctx: TenantContext): Promise<void> {
 
 async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): Promise<void> {
   try {
-    // Not a credential command at all: it decides which of two keys pays for the platform's own
-    // calls. Handled first so nothing below has to reason about a command with no provider on it.
+    // The only command left on this channel, and it carries no credential: it decides which of two
+    // already-stored keys pays for the platform's own calls.
     if (cmd.cmd === "setOwnKeyForPlatform") {
       const on = cmd.on === true;
       if (on && !(await providerKeys.configuredNames(ctx)).has(PROVIDER_ENV_KEY.anthropic)) {
@@ -2765,56 +2768,6 @@ async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): 
       console.log(`[providers] own key for platform calls: ${on ? "on" : "off"} (${ctx.workspaceId})`);
       await broadcastProviders(ctx);
       return;
-    }
-    if (!isProviderId(cmd.provider)) {
-      // Named rather than echoed: `cmd.provider` is client-supplied and about to be rendered.
-      relay.broadcastProviders(ctx, {
-        type: "error",
-        message: `"${String(cmd.provider).slice(0, 32)}" is not a provider you can connect — expected anthropic or openai`,
-      });
-      return;
-    }
-    const provider = cmd.provider;
-    const key = typeof cmd.key === "string" ? cmd.key.trim() : "";
-    if (!key) {
-      relay.broadcastProviders(ctx, { type: "error", message: "no key was entered", provider });
-      return;
-    }
-
-    if (cmd.cmd === "testProviderKey") {
-      const result = await verifyProviderKey(provider, key);
-      // The outcome, never the input. A failure message comes from the provider and names the
-      // status, not the credential.
-      console.log(`[providers] ${provider} key tested — ${result.ok ? "ok" : "rejected"}`);
-      relay.broadcastProviders(ctx, { type: "testResult", provider, ok: result.ok, message: result.message });
-      return;
-    }
-
-    // setProviderKey. Through the SecretStore, which is what makes it the WORKSPACE's key
-    // rather than the machine's: locally that store still wraps the one writer of runtime/.env
-    // and the file is byte-for-byte what it was, and hosted it is envelope-encrypted ciphertext
-    // scoped to this workspace. The value is used by `save` and nowhere else in this function.
-    //
-    // PROVED BEFORE IT IS STORED — `save` probes with a models-list call, which authenticates as
-    // conclusively as a completion and costs nothing. Without that, the first thing to discover
-    // a mistyped key is a run, after a sandbox start and a Python import, reporting somebody
-    // else's 401.
-    const written = await providerKeys.save(ctx, provider, key);
-    if (!written.ok) {
-      relay.broadcastProviders(ctx, {
-        type: "error",
-        message: written.message ?? "could not store that key",
-        provider,
-      });
-      return;
-    }
-    // Names only, exactly as loadRuntimeEnv logs them on the way in.
-    console.log(`[providers] ${provider} key set (${PROVIDER_ENV_KEY[provider]})`);
-    await broadcastProviders(ctx);
-    // A key shadowed by the server's own shell works now and reverts on restart. Saying so is
-    // the difference between a puzzling regression tomorrow and a sentence today.
-    if (written.warning) {
-      relay.broadcastProviders(ctx, { type: "notice", message: written.warning, provider });
     }
   } catch (err) {
     const message = (err as Error)?.message ?? String(err);

@@ -230,8 +230,10 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
 
   // providers
   listProviders: "provider:read",
-  setProviderKey: "provider:manage",
-  testProviderKey: "provider:manage",
+  // `setProviderKey` and `testProviderKey` are not here because they no longer exist. A credential
+  // written over the socket could not be gated by elevation — that rides on a request header — so
+  // the passcode gate was bypassable by anyone with a session. See wsRelay.ts.
+
   // provider:manage rather than billing:manage. It decides which of two credentials pays for a
   // call, not what the workspace is subscribed to — and the person who connected the key is the
   // one who knows whether their provider account should carry the platform's calls too.

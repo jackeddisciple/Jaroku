@@ -21,7 +21,7 @@ import { isDeployInFlight } from "../types.ts";
 import { agentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark, BRAND_COLOR, JarokuGlyph } from "../lib/icons.tsx";
 import { SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
-import { ProviderKeyForm } from "./onboarding/ProviderKeyForm.tsx";
+
 import { Truncate } from "./Truncate.tsx";
 import { Chip } from "./Chip.tsx";
 import { KeyIcon } from "./panelIcons.tsx";
@@ -45,20 +45,25 @@ const PROVIDER_LABEL: Record<string, string> = {
 };
 
 /**
- * Where a provider key is added after onboarding — the app's "connect a provider" surface.
+ * Which providers this workspace has a key for — and the one door to changing that.
  *
- * It hangs off the chip that already names the provider, rather than living behind a Settings
- * screen that would exist for one field. The chip was previously a label; a control that says
- * which provider you are on is the obvious place to change what that provider can do.
+ * IT USED TO BE A PLACE TO PASTE ONE, AND THAT WAS THE HOLE. The form here sent the key over the
+ * WebSocket, and elevation travels on a request header that a WebSocket cannot carry: the passcode
+ * gate the whole Secrets surface is built on could be walked around by opening this popover. §5.1
+ * had already asked for one home for a credential and named the cost of two — two rotation paths,
+ * two validation paths — and this was the path that classified nothing, stored no mask, and wrote
+ * no audit row, so a key added here landed in the Secrets tab's Custom group.
  *
- * The form itself is the one onboarding uses, unmodified. A second copy would be a second set
- * of promises about what happens to the key.
+ * So it reads and does not write. What it keeps is the useful half: the chip that names the
+ * provider is still where you find out whether it is connected, and now it is also where you are
+ * sent to the tab that can change it.
  */
 function ProviderMenu({ provider, model }: { provider: string; model: string }) {
   // Open state lives in uiStore, not here, because Settings in the sidebar opens this same
   // panel — the door a first-run user was pointed at.
   const open = useUiStore((s) => s.providerPanelOpen);
   const setOpen = useUiStore((s) => s.setProviderPanel);
+  const setRightTab = useUiStore((s) => s.setRightTab);
   const providers = useProviderStore((s) => s.providers);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -92,29 +97,41 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
         <div className="absolute right-0 top-full z-30 mt-2 w-[440px] max-w-[calc(100vw-2rem)] rounded-card border border-edge bg-panel p-3 shadow-floating">
           <div className={TYPE.sectionLabel}>Provider keys</div>
           <p className="mt-1 text-[11px] leading-[1.55] text-faint">
-            Written to <span className="font-mono text-muted">runtime/.env</span> on this machine.
-            Never logged, never sent back to this page.
+            Kept in Secrets with every other credential, behind the passcode. Never logged, never
+            sent back to this page.
           </p>
-          <div className="mt-2.5 space-y-3">
+          <div className="mt-2.5 space-y-2">
             {providers.map((p) => (
-              <div key={p.id}>
-                <div className="mb-1.5 flex items-center gap-2">
-                  <ProviderMark provider={p.id} size={12} />
-                  <span className="text-[12px] text-ink">{PROVIDER_LABEL[p.id] ?? p.id}</span>
-                  {p.configured && (
-                    <StatusBadge state="ok" variant="outline" label="connected" icon={KeyIcon} />
-                  )}
-                  {p.powers_jaroku && (
-                    <span className="ml-auto text-[11px] text-faint">powers planning &amp; generation</span>
-                  )}
-                </div>
-                <ProviderKeyForm provider={p} saveLabel="Save" />
+              <div key={p.id} className="flex items-center gap-2">
+                <ProviderMark provider={p.id} size={12} />
+                <span className="text-[12px] text-ink">{PROVIDER_LABEL[p.id] ?? p.id}</span>
+                {p.configured ? (
+                  <StatusBadge state="ok" variant="outline" label="connected" icon={KeyIcon} />
+                ) : (
+                  // DISABLED WITH A STATED REASON RATHER THAN ABSENT, the same rule the model
+                  // selector follows: a provider that vanishes reads as one the product does not
+                  // support.
+                  <span className="text-[11px] text-faint">no key</span>
+                )}
+                {p.powers_jaroku && (
+                  <span className="ml-auto text-[11px] text-faint">powers planning &amp; generation</span>
+                )}
               </div>
             ))}
             {providers.length === 0 && (
               <p className="text-[11px] text-faint">Not connected to the server.</p>
             )}
           </div>
+          <button
+            type="button"
+            className="mt-3 w-full rounded-control border-t border-hair pt-2.5 text-left text-[12px] text-muted transition-colors duration-fast hover:text-ink"
+            onClick={() => {
+              setRightTab("secrets");
+              setOpen(false);
+            }}
+          >
+            Add or rotate a key in Secrets →
+          </button>
         </div>
       )}
     </div>

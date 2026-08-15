@@ -282,17 +282,21 @@ console.log("\nthe socket's ROLE decides what it may do");
   // all". B is a member, so it builds and runs agents and touches nothing that commits the
   // workspace to money, a third party, or a public URL.
   commandLog.length = 0;
-  b.send({ cmd: "setProviderKey", provider: "anthropic", key: "sk-ant-should-never-be-written" });
+  // `setOwnKeyForPlatform` rather than `setProviderKey`, which no longer exists: a command that
+  // carries a credential cannot live on this socket, because elevation rides on a request header a
+  // WebSocket cannot set. What is left on the providers channel decides which of two already-stored
+  // keys pays for the platform's calls, and it is still `provider:manage`.
+  b.send({ cmd: "setOwnKeyForPlatform", on: true });
   const refused: any = await b.want(
     (m) => m.channel === "providers" && m.type === "error",
-    "B refused a provider key",
+    "B refused a provider command",
   );
-  check(/member/.test(refused.message), "a member storing a provider key is refused");
+  check(/member/.test(refused.message), "a member spending the workspace's key is refused");
   check(/provider:manage/.test(refused.message), "...naming the capability it needed");
   await sleep(300);
   check(
     commandLog.length === 0,
-    `...and the command NEVER REACHED THE APP (${commandLog.length}) — a refusal that forwards first has already written the key`,
+    `...and the command NEVER REACHED THE APP (${commandLog.length}) — a refusal that forwards first has already acted`,
   );
 
   b.send({ cmd: "addMcpServer", endpoint: "https://mcp.example/x" });
@@ -319,9 +323,9 @@ console.log("\nthe socket's ROLE decides what it may do");
 
   // An owner does what a member may not.
   commandLog.length = 0;
-  a.send({ cmd: "setProviderKey", provider: "anthropic", key: "sk-ant-x" });
+  a.send({ cmd: "setOwnKeyForPlatform", on: true });
   await sleep(400);
-  check(commandLog.some((c) => c.cmd === "setProviderKey"), "an owner's provider key reaches the app");
+  check(commandLog.some((c) => c.cmd === "setOwnKeyForPlatform"), "an owner's provider command reaches the app");
 
   // A command nothing has classified is refused rather than allowed. The default matters more
   // than any single entry: it is what a command added in a later session gets for free.

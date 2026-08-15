@@ -155,6 +155,17 @@ console.log("\nevery command the relay accepts is classified");
   const staleChannels = Object.keys(COMMAND_CHANNEL).filter((c) => !commands.has(c));
   check(staleChannels.length === 0, `no channel entry names a dropped command (${staleChannels.join(", ") || "none"})`);
   check(channelFor("no-such-command") === "log", "an unknown command falls back to `log` — visible, not silent");
+
+  // AND NO COMMAND ON THIS SOCKET WRITES A PROVIDER KEY. Two did, classified `provider:manage`,
+  // and a capability is not the gate the Secrets surface is built on: elevation rides on a request
+  // header, which a WebSocket cannot carry, so anybody holding a session could store or probe a
+  // model credential without ever meeting the passcode. Asserted by name rather than left to the
+  // stale-entry check above, because that one would also pass if somebody re-added them together
+  // with their table entries.
+  for (const gone of ["setProviderKey", "testProviderKey"]) {
+    check(!commands.has(gone), `${gone} is not a command this socket accepts`);
+    check(capabilityFor(gone) === undefined, `...and nothing in the matrix suggests it could be`);
+  }
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
