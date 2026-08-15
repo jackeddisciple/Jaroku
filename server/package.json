@@ -144,7 +144,8 @@
     "secrets:migrate-provider-keys": "tsx src/secrets/migrateProviderKeys.cli.ts",
     "test:provider-key-migration": "tsx src/secrets/migrateProviderKeys.test.ts",
     "test:secrets-e2e": "tsx src/secrets/e2e.test.ts",
-    "mock:github": "tsx fixtures/github/mockGithubApi.ts"
+    "mock:github": "tsx fixtures/github/mockGithubApi.ts",
+    "test:github-webhook": "tsx src/githubWebhook.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",
