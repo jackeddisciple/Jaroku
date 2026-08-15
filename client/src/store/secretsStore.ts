@@ -16,7 +16,7 @@
 // mutation was refused for want of elevation, replayed after a successful unlock.
 
 import { create } from "zustand";
-import type { SecretSummary, SecretsHealth } from "../lib/secrets.ts";
+import { failureCode, type SecretSummary, type SecretsHealth } from "../lib/secrets.ts";
 
 /** A mutation that was interrupted by an expiry, waiting to be replayed. */
 export interface PendingAction {
@@ -119,6 +119,35 @@ export const useSecretsStore = create<SecretsState>((set) => ({
   setNotice: (notice) => set({ notice }),
   setPending: (pending) => set({ pending }),
 }));
+
+/**
+ * Run a mutation, and park it instead of losing it when the ten minutes ran out mid-form.
+ *
+ * THE THING THAT ACTUALLY FILLS `pending`. The store has held a `pending` slot and the lock screen
+ * has rendered "Unlock to finish: …" since the surface was built, and nothing ever put anything in
+ * it: every mutation that was refused for want of elevation surfaced as an error strip, and because
+ * an unelevated panel swaps its whole content branch for the lock screen, the form carrying the
+ * user's typed credential unmounted with it. The brief's word for that is self-inflicted.
+ *
+ * WHAT IS CAPTURED IS THE THUNK, NOT THE FIELDS. The values the user typed are already closed over
+ * by the caller's own function, so nothing about a credential has to be copied into a store to
+ * survive the lock — which is the property the header of this file exists to protect.
+ *
+ * Returns whether the action actually ran. `false` means it is parked and will be replayed by
+ * `SecretsPanel.onUnlocked`; anything other than an elevation refusal is re-thrown to the caller,
+ * because a rejected credential is a message the user needs now and not after unlocking.
+ */
+export async function holdForElevation(label: string, run: () => Promise<void>): Promise<boolean> {
+  try {
+    await run();
+    return true;
+  } catch (err) {
+    const code = failureCode(err);
+    if (code !== "elevation_required" && code !== "step_up_required") throw err;
+    useSecretsStore.getState().setPending({ label, run });
+    return false;
+  }
+}
 
 /** Whether the tab should show its warning dot. Computed here so the tab bar holds no policy. */
 export function needsAttention(health: SecretsHealth | null): boolean {

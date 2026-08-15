@@ -25,6 +25,7 @@ import {
   formatRemaining,
   groupSecrets,
   isFinalMinute,
+  holdForElevation,
   needsAttention,
   useSecretsStore,
 } from "./secretsStore.ts";
@@ -92,6 +93,45 @@ console.log("\na pending action outlives the lock it was interrupted by");
   check(s().pending !== null, "and unlocking does not discard it either — the caller replays it");
   void s().pending?.run();
   check(resumed, "which is a thunk, so the form's own values go with it rather than being retyped");
+}
+
+console.log("\nand something actually puts one there");
+{
+  // The half that was missing: the slot, the lock screen's "Unlock to finish: …" and the replay all
+  // existed, and no code path ever called setPending. Every refused mutation surfaced as an error
+  // strip while the form carrying the typed credential unmounted behind the lock screen.
+  const s = () => useSecretsStore.getState();
+  const refused = (code: string): Error => Object.assign(new Error("this needs an unlocked Secrets session"), { code });
+
+  reset();
+  let attempts = 0;
+  const applied = await holdForElevation("add OPENWEATHER_API_KEY", async () => {
+    attempts++;
+    if (attempts === 1) throw refused("elevation_required");
+  });
+  check(applied === false, "a mutation refused for want of elevation reports that it did not run");
+  check(s().pending?.label === "add OPENWEATHER_API_KEY", "and is parked under a label the lock screen can render");
+  check(s().error === null, "without an error strip, because nothing has gone wrong yet");
+
+  await s().pending?.run();
+  check(attempts === 2, "replaying it re-runs the same attempt");
+
+  reset();
+  let ran = false;
+  const ok = await holdForElevation("add ANOTHER", async () => void (ran = true));
+  check(ok === true && ran && s().pending === null, "a mutation that succeeds parks nothing");
+
+  reset();
+  let threw = false;
+  try {
+    await holdForElevation("add REJECTED", async () => {
+      throw Object.assign(new Error("that credential was not accepted"), { code: "credential_rejected" });
+    });
+  } catch {
+    threw = true;
+  }
+  check(threw, "a rejected credential still throws — that is a message the user needs now");
+  check(s().pending === null, "and is not parked, because unlocking would not make it any more valid");
 }
 
 console.log("\nthe countdown");

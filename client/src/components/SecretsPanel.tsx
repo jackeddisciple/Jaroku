@@ -38,7 +38,7 @@ import {
   joinElevation,
   lockNow,
 } from "../lib/secrets.ts";
-import { formatRemaining, isFinalMinute, useSecretsStore } from "../store/secretsStore.ts";
+import { formatRemaining, holdForElevation, isFinalMinute, useSecretsStore } from "../store/secretsStore.ts";
 
 /** How often the gate state is re-read. Also the countdown's correction against the server. */
 const POLL_MS = 15_000;
@@ -287,7 +287,11 @@ function AddForm({ onDone }: { onDone: () => void }) {
         e.preventDefault();
         setBusy(true);
         setError(null);
-        void createSecret({ name: name.trim().toUpperCase(), value })
+        // HELD RATHER THAN LOST when the ten minutes ran out between opening this form and
+        // submitting it. The thunk closes over what was typed, so unlocking finishes the save the
+        // user already asked for instead of asking them to type a credential again from memory.
+        const typed = { name: name.trim().toUpperCase(), value };
+        void holdForElevation(`add ${typed.name}`, async () => void (await createSecret(typed)))
           .then(() => {
             setName("");
             setValue("");
@@ -336,11 +340,14 @@ function ImportForm({ onDone }: { onDone: () => void }) {
         e.preventDefault();
         setBusy(true);
         setError(null);
-        void importSecrets(text)
-          .then((result) => {
+        const pasted = text;
+        void holdForElevation("finish the import", async () => {
+          const result = await importSecrets(pasted);
+          const rejected = result.rejected.length ? `, ${result.rejected.length} skipped` : "";
+          setNotice(`Imported ${result.imported.length} from a ${result.format} export${rejected}.`);
+        })
+          .then(() => {
             setText("");
-            const rejected = result.rejected.length ? `, ${result.rejected.length} skipped` : "";
-            setNotice(`Imported ${result.imported.length} from a ${result.format} export${rejected}.`);
             onDone();
           })
           .catch((err: Error) => setError(err.message))

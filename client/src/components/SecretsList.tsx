@@ -35,7 +35,7 @@ import {
   type SecretSummary,
   type UsageSite,
 } from "../lib/secrets.ts";
-import { groupSecrets, useSecretsStore } from "../store/secretsStore.ts";
+import { groupSecrets, holdForElevation, useSecretsStore } from "../store/secretsStore.ts";
 
 /** Status as a chip, with a word in it — never colour alone. */
 function StatusChip({ secret }: { secret: SecretSummary }) {
@@ -410,9 +410,14 @@ function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: ()
           onCancel={() => setMode("idle")}
           onSubmit={(value) =>
             void run(async () => {
-              await rotateSecret(secret.name, value);
+              // The same hold the add form uses. A rotation is a credential somebody has just
+              // pasted out of a provider console, and it is not recoverable once this row unmounts
+              // behind the lock screen — so the attempt is parked and finished after unlocking.
+              const applied = await holdForElevation(`rotate ${secret.name}`, async () => {
+                await rotateSecret(secret.name, value);
+              });
               setMode("idle");
-              setNotice(`${secret.name} updated.`);
+              if (applied) setNotice(`${secret.name} updated.`);
               onChanged();
             })
           }
