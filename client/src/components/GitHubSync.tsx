@@ -26,7 +26,7 @@ import { fmtDuration } from "../lib/format.ts";
 import { useGithubStore, type GithubProgress } from "../store/githubStore.ts";
 import type { GithubRefusal, GithubView } from "../types.ts";
 import { ActionRow, type ActionState } from "./ActionRow.tsx";
-import { DisabledReason, ENABLED, firstReason, type DisabledState } from "./DisabledReason.tsx";
+import { SplitButton, type SplitAction } from "./SplitButton.tsx";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { Truncate } from "./Truncate.tsx";
 import {
@@ -91,6 +91,7 @@ export function GitHubSyncRegion({ view }: { view: GithubView }) {
 
 function VerdictLine({ view }: { view: GithubView }) {
   const [squash, setSquash] = useState(false);
+  const [forcing, setForcing] = useState(false);
   const glyph = GLYPH[view.state];
   const tone = TONE[view.state];
 
@@ -112,8 +113,10 @@ function VerdictLine({ view }: { view: GithubView }) {
             </span>
           )}
         </span>
-        <PrimaryAction view={view} squash={squash} />
+        <PrimaryAction view={view} squash={squash} onForce={() => setForcing(true)} />
       </div>
+
+      {forcing && <ForcePushConfirm view={view} squash={squash} onClose={() => setForcing(false)} />}
 
       {/* §2.3's opt-in, and it only exists where it can apply. Jaroku versions are fine-grained —
           every applied edit is one — and somebody who made six small edits usually wants one
@@ -137,96 +140,197 @@ function VerdictLine({ view }: { view: GithubView }) {
  * "Push" beside a tick would be a control whose only state is unavailable — which reads as broken
  * rather than as finished.
  */
-function PrimaryAction({ view, squash }: { view: GithubView; squash: boolean }) {
+function PrimaryAction({
+  view, squash, onForce,
+}: {
+  view: GithubView;
+  squash: boolean;
+  onForce: () => void;
+}) {
   const progress = useGithubStore((s) => s.progress[view.agentId]);
 
-  // §A.2's table, for the two controls in this region.
+  // §A.2's table, for the controls in this region.
   //
   // A REVOKED TOKEN DISABLES PUSH WITH A SENTENCE rather than hiding the button. Hiding it would
   // make a workspace whose credential expired look like a workspace that has nothing to push,
   // which is the most confusing possible reading of ↑2 sitting in the tab bar beside it.
-  const revoked: DisabledState =
-    view.reason === "token_revoked"
-      ? { reason: "GitHub access was revoked — reconnect to push." }
-      : ENABLED;
-  // A validation already running. Its own reason rather than a spinner, because the useful thing
-  // to say is that one is in flight and can be waited out — not merely that this is unavailable.
-  const validating: DisabledState =
+  const revoked = view.reason === "token_revoked" ? "GitHub access was revoked — reconnect to push." : null;
+  const validating =
     progress?.op === "pull" && progress.current !== null
-      ? { reason: "A pull is already validating — wait for it to finish." }
-      : ENABLED;
-  const pushing: DisabledState =
+      ? "A pull is already validating — wait for it to finish."
+      : null;
+  const pushing =
     progress?.op === "push" && progress.current !== null
-      ? { reason: "A push is already running for this agent." }
-      : ENABLED;
+      ? "A push is already running for this agent."
+      : null;
+
+  const push = (): void => sendPushGithub(view.agentId, { squash });
+  const pull = (): void => sendPullGithub(view.agentId);
+  const fetch = (): void => sendRefreshGithub(view.agentId, true);
+
+  // §A.1's table, state by state. WRITTEN OUT RATHER THAN COMPUTED, so that "which commands does a
+  // diverged agent offer" is answerable by reading five lines instead of by simulating a
+  // conditional — the same reason the capability matrix is a table.
+  const FETCH: SplitAction = {
+    id: "fetch",
+    label: "Fetch",
+    onSelect: fetch,
+    // Read-only: it updates what Jaroku last saw and touches neither the working tree nor the
+    // divergence flow, which is why it carries none of the confirmation weight the rest do.
+    title: "Re-read the branch. Changes nothing but what Jaroku last saw.",
+  };
+  const PUSH: SplitAction = { id: "push", label: "Push", onSelect: push, reason: revoked ?? pushing };
+  const PULL: SplitAction = { id: "pull", label: "Pull", onSelect: pull, reason: revoked ?? validating };
+  const FORCE: SplitAction = {
+    id: "force",
+    label: "Force push",
+    danger: true,
+    onSelect: onForce,
+    reason: revoked,
+    // The bar is not lowered by being discoverable. Typing the slug and the audit row apply here
+    // exactly as they do to §3.6's Force — what changes is that somebody no longer has to already
+    // know force push is possible before they would think to look for it.
+    title: "Overwrites the branch. Requires typing the agent slug, and is recorded.",
+  };
 
   switch (view.state) {
     case "in_sync":
-      // NO PUSH AND NO PULL BUTTON AT ALL. §3.5 omits both for ✓, and §A.2's own table says so
-      // explicitly — a control whose only state is unavailable reads as broken rather than as
-      // finished, which is the one case where rendering the reason would be worse than rendering
-      // nothing.
+      // NO PRIMARY. §3.5 gives ✓ no action and §A.1 has the button read "Sync" instead — the
+      // command set is still one caret away, and inventing a suggested action for a state that
+      // needs none would put a button in front of somebody with nothing to do.
+      return <SplitButton className="shrink-0" primary={null} actions={[PUSH, PULL, FETCH]} />;
+    case "ahead":
       return (
-        <button
-          className={`${quietBtn} shrink-0`}
-          title="Re-read the branch. Moves nothing but what Jaroku last saw."
-          onClick={() => sendRefreshGithub(view.agentId)}
-        >
-          <RefreshIcon size={ICON.xs} />
-        </button>
+        <SplitButton
+          className="shrink-0"
+          primary={{
+            label: `Push ${view.ahead} version${view.ahead === 1 ? "" : "s"}`,
+            onSelect: push,
+            reason: revoked ?? pushing,
+          }}
+          actions={[PULL, FETCH, FORCE]}
+        />
       );
-    case "ahead": {
-      const state = firstReason(revoked, pushing);
+    case "behind":
       return (
-        <DisabledReason state={state} className="shrink-0 items-end">
-          <button
-            className={primaryBtn}
-            disabled={Boolean(state.reason)}
-            onClick={() => sendPushGithub(view.agentId, { squash })}
-          >
-            Push {view.ahead} version{view.ahead === 1 ? "" : "s"}
-          </button>
-        </DisabledReason>
+        <SplitButton
+          className="shrink-0"
+          primary={{
+            label: "Pull into Jaroku",
+            onSelect: pull,
+            reason: revoked ?? validating,
+            title: "Stages the remote tree as a candidate version and validates it before anything is published.",
+          }}
+          actions={[PUSH, FETCH]}
+        />
       );
-    }
-    case "behind": {
-      const state = firstReason(revoked, validating);
-      return (
-        <DisabledReason state={state} className="shrink-0 items-end">
-          <button
-            className={primaryBtn}
-            disabled={Boolean(state.reason)}
-            title="Stages the remote tree as a candidate version and validates it before anything is published."
-            onClick={() => sendPullGithub(view.agentId)}
-          >
-            Pull into Jaroku
-          </button>
-        </DisabledReason>
-      );
-    }
     case "diverged":
       // NOT "MERGE". Jaroku does not ship a three-way merge editor — §3.7 — because every file
       // resolved in a hand-rolled merge UI is a file that bypassed the validator on the way in.
       // The panel's job here is precise detection and a clean handoff.
       return (
-        <a
-          className={`${secondaryBtn} shrink-0`}
-          href={`${view.repoUrl}/compare/${encodeURIComponent(view.link.branch)}`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Review &amp; resolve <ExternalLinkIcon size={ICON.xs} />
-        </a>
+        <SplitButton
+          className="shrink-0"
+          primary={{
+            label: "Review & resolve",
+            onSelect: () =>
+              window.open(`${view.repoUrl}/compare/${encodeURIComponent(view.link.branch)}`, "_blank", "noreferrer"),
+            title: "Opens the comparison on GitHub, where review already works.",
+          }}
+          actions={[{ ...FETCH, label: "Fetch (re-check)" }, FORCE]}
+        />
       );
     case "broken":
+      // THE DROPDOWN IS DISABLED UNTIL RELINKED, per §A.1's last row. Every other command in the
+      // set needs a working link to mean anything, and offering them would be offering five
+      // actions that all fail the same way.
       return (
-        <button className={`${primaryBtn} shrink-0`} onClick={() => sendRefreshGithub(view.agentId)}>
-          {view.reason === "token_revoked" ? "Reconnect" : "Relink"}
-        </button>
+        <SplitButton
+          className="shrink-0"
+          disabled
+          primary={{
+            label: view.reason === "token_revoked" ? "Reconnect" : "Relink",
+            onSelect: () => sendRefreshGithub(view.agentId, true),
+          }}
+          actions={[]}
+        />
       );
     default:
       return null;
   }
+}
+
+
+/**
+ * Force push, behind the same bar §3.6's Force sits behind.
+ *
+ * PUTTING IT IN THE MENU DOES NOT LOWER THE BAR — that is the whole argument of §A.1's last
+ * paragraph, and this component is where it has to be true rather than merely stated. Typing the
+ * agent slug and writing to `github_events` apply here identically; what changes is that the
+ * escape hatch is discoverable from the same place as the everyday action, instead of requiring
+ * somebody to already know force push exists before they would think to look for it.
+ *
+ * THE SENTENCE SAYS WHAT IS LOST, not that this is dangerous. "This cannot be undone" is a phrase
+ * people click past; "the commits on the branch that Jaroku did not write will not be there
+ * afterwards" is a fact they can weigh. The count comes from the panel's own remote-only list,
+ * which is the honest number rather than a warning in the abstract.
+ */
+function ForcePushConfirm({
+  view, squash, onClose,
+}: {
+  view: GithubView;
+  squash: boolean;
+  onClose: () => void;
+}) {
+  const [typed, setTyped] = useState("");
+  const losing = view.remoteOnly.length;
+
+  return (
+    <div className="mt-2 rounded-card border p-2.5" style={{ borderColor: `${STATUS.error}55` }}>
+      <div className="flex items-center gap-2">
+        <span className="shrink-0 text-err"><AlertTriangleIcon size={ICON.sm} /></span>
+        <span className="text-[12px] font-medium text-ink">Force push to {view.link.branch}</span>
+        <button className="ml-auto shrink-0 text-faint hover:text-ink" onClick={onClose}>dismiss</button>
+      </div>
+
+      <p className="mt-1.5 text-[11px] leading-[1.5] text-muted">
+        {losing > 0 ? (
+          <>
+            <span className="text-ink">
+              {losing} commit{losing === 1 ? "" : "s"} on GitHub that Jaroku did not write
+            </span>{" "}
+            will not be on the branch afterwards.{" "}
+          </>
+        ) : (
+          <>Overwrites the branch with this agent's versions, whatever is on it now. </>
+        )}
+        Type <span className="font-mono text-ink">{view.agentSlug}</span> to confirm — it is
+        recorded against your account.
+      </p>
+
+      <div className="mt-2 flex items-center gap-2">
+        <input
+          autoFocus
+          className="min-w-0 flex-1 rounded-control bg-panel px-2 py-1 font-mono text-[11px] text-ink outline-none placeholder:text-faint"
+          placeholder={view.agentSlug}
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+        />
+        <button
+          className={`${primaryBtn} !text-err`}
+          // The client checks it so the button reads honestly; the SERVER checks it again before
+          // anything reaches the network, which is the check that matters.
+          disabled={typed.trim() !== view.agentSlug}
+          onClick={() => {
+            sendPushGithub(view.agentId, { squash, force: true, confirmSlug: typed.trim() });
+            onClose();
+          }}
+        >
+          Force push
+        </button>
+      </div>
+    </div>
+  );
 }
 
 const GLYPH: Record<GithubView["state"], React.ReactNode> = {
