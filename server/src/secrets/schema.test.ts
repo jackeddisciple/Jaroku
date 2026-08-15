@@ -166,6 +166,15 @@ async function suite(label: string, db: Db): Promise<void> {
   // --- rotation history ------------------------------------------------------------------
   console.log("\n  rotation history");
   await refs.recordRotation(ws, { name: "BROKEN_KEY", maskedHint: "••••aaaa", reason: "first" });
+  // A CLOCK TICK BETWEEN THEM, because `rotated_at` is what "newest" is read from and it is an
+  // ISO string at millisecond resolution. Two rotations written back to back land in the SAME
+  // millisecond on a quick machine, which makes them equal to the ORDER BY and lets the engine
+  // return either one first — so this assertion failed in CI and passed locally, which is the
+  // most expensive way for a test to be wrong. Nothing in the product records two rotations of
+  // one credential a millisecond apart; this is the test agreeing to be about ordering rather
+  // than about clock resolution. The query carries `id DESC` as well, so the ORDER is at least
+  // stable when a tie does happen.
+  await new Promise((r) => setTimeout(r, 2));
   await refs.recordRotation(ws, { name: "BROKEN_KEY", maskedHint: "••••bbbb", reason: "second" });
   const history = await refs.rotations(ws, "BROKEN_KEY");
   check(history.length === 2, `both rotations are kept (got ${history.length})`);

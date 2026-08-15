@@ -419,9 +419,15 @@ export class SecretRefRepository {
   /** A credential's rotation history, newest first. */
   async rotations(ctx: TenantContext, name: string, limit = 50): Promise<RotationRow[]> {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
+      // `id DESC` IS A TIE-BREAK, not decoration — the same one `github_events.events()` carries
+      // for the same reason. `rotated_at` is an ISO string at millisecond resolution, so two
+      // rotations recorded in the same millisecond sort equal and the engine is then free to
+      // return them in either order, differently on each call. That is a flickering rotation
+      // history in the panel and a test that fails roughly whenever the machine is fast enough,
+      // which is how it was found.
       `SELECT name, rotated_by, masked_hint, reason, rotated_at
          FROM secret_rotations WHERE workspace_id = ? AND name = ?
-        ORDER BY rotated_at DESC LIMIT ?`,
+        ORDER BY rotated_at DESC, id DESC LIMIT ?`,
       [ctx.workspaceId, name, limit],
     );
     return rows.map((r) => ({
