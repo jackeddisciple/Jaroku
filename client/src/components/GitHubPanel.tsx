@@ -27,11 +27,12 @@ import {
   sendCheckGithubRepo, sendLinkGithub, sendListGithub, sendListGithubRepos, sendRefreshGithub,
   sendUnlinkGithub,
 } from "../lib/socket.ts";
-import { connectGithub, disconnectGithub } from "../lib/secrets.ts";
+import { connectGithub, disconnectGithub, failureCode } from "../lib/secrets.ts";
 import { ICON, STATUS } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { readRegions, useGithubStore, viewFor, writeRegions, type RegionId } from "../store/githubStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
+import { useUiStore } from "../store/uiStore.ts";
 import { relTime } from "../lib/format.ts";
 import type { GithubVersionRow, GithubView } from "../types.ts";
 import { ActionRow } from "./ActionRow.tsx";
@@ -140,12 +141,21 @@ function NotConnected() {
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // THE ONE REFUSAL THIS FORM CANNOT RESOLVE WHERE IT STANDS. `POST /v1/github/connect` is in the
+  // secrets group behind `guarded()`, so it needs an unlocked Secrets session — and the elevation
+  // token lives in memory in this tab and is only ever set by the Secrets tab's own unlock. A
+  // first-time user pasting a token here therefore got "this needs an unlocked Secrets session"
+  // and nothing else: a correct sentence, in a panel with no way to act on it, on the first step
+  // of the whole feature. §A.2's rule is that a reason is the way there, so this one is.
+  const [locked, setLocked] = useState(false);
+  const setRightTab = useUiStore((s) => s.setRightTab);
 
   const submit = async (): Promise<void> => {
     const value = token.trim();
     if (!value || busy) return;
     setBusy(true);
     setProblem(null);
+    setLocked(false);
     try {
       await connectGithub(value);
       // Cleared the instant it leaves. The field is the only copy in this tab and it has served
@@ -153,7 +163,10 @@ function NotConnected() {
       setToken("");
       sendListGithub();
     } catch (err) {
-      setProblem((err as Error)?.message ?? "GitHub refused that token");
+      // The token stays in the field for this one, deliberately — the credential was never the
+      // problem, and clearing it would make somebody paste it again after unlocking.
+      if (failureCode(err) === "elevation_required") setLocked(true);
+      else setProblem((err as Error)?.message ?? "GitHub refused that token");
     } finally {
       setBusy(false);
     }
@@ -186,6 +199,15 @@ function NotConnected() {
         </div>
         {problem && (
           <p className="mt-1.5 text-[11px] leading-[1.5] text-err">{problem}</p>
+        )}
+        {locked && (
+          <p className="mt-1.5 text-[11px] leading-[1.5] text-muted">
+            Storing a token writes to the vault, so the Secrets tab has to be unlocked first.{" "}
+            <button className="text-ink underline underline-offset-2" onClick={() => setRightTab("secrets")}>
+              Unlock Secrets
+            </button>{" "}
+            — your token stays in the field.
+          </p>
         )}
         {/* The scope of access, stated. See the note above. */}
         <p className="mt-2 text-[11px] leading-[1.55] text-faint">
