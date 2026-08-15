@@ -11,7 +11,8 @@
 import { createHmac } from "node:crypto";
 
 import {
-  DeliveryLog, parseWebhookEvent, verifyGithubSignature, type PushEvent,
+  DeliveryLog, parseWebhookEvent, verifyGithubSignature,
+  type PushEvent, type SignatureVerdict,
 } from "./githubWebhook.ts";
 
 let failures = 0;
@@ -26,6 +27,9 @@ const check = (ok: boolean, msg: string, detail = ""): void => {
 const SECRET = "a-shared-secret";
 const sign = (body: string, secret = SECRET): string =>
   `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+
+/** The refusal reason, or null when it verified. `reason` only exists on the failing branch. */
+const reasonOf = (v: SignatureVerdict): string | null => (v.ok ? null : v.reason);
 
 console.log("\nthe signature is the authentication");
 {
@@ -51,15 +55,15 @@ console.log("\nthe signature is the authentication");
 
   check(!verifyGithubSignature(body, undefined, SECRET).ok, "no signature header at all is refused");
   check(
-    verifyGithubSignature(body, "sha1=deadbeef", SECRET).reason === "malformed",
+    reasonOf(verifyGithubSignature(body, "sha1=deadbeef", SECRET)) === "malformed",
     "an sha1 signature is malformed here rather than downgraded to",
   );
   check(
-    verifyGithubSignature(body, `sha256=${"z".repeat(64)}`, SECRET).reason === "malformed",
+    reasonOf(verifyGithubSignature(body, `sha256=${"z".repeat(64)}`, SECRET)) === "malformed",
     "...and so is a non-hex digest, so the comparison never runs on attacker-chosen length",
   );
   check(
-    verifyGithubSignature(body, "sha256=abc", SECRET).reason === "malformed",
+    reasonOf(verifyGithubSignature(body, "sha256=abc", SECRET)) === "malformed",
     "...and a short one, which is what would make timingSafeEqual throw",
   );
 
