@@ -16,7 +16,7 @@ import { useProviderStore } from "../store/providerStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { useDeployStore } from "../store/deployStore.ts";
-import { sendCancelDeploy } from "../lib/socket.ts";
+import { sendCancelDeploy, sendSetOwnKeyForPlatform } from "../lib/socket.ts";
 import { isDeployInFlight } from "../types.ts";
 import { agentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark, BRAND_COLOR, JarokuGlyph } from "../lib/icons.tsx";
@@ -65,6 +65,10 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
   const setOpen = useUiStore((s) => s.setProviderPanel);
   const setRightTab = useUiStore((s) => s.setRightTab);
   const providers = useProviderStore((s) => s.providers);
+  const ownKeyForPlatform = useProviderStore((s) => s.ownKeyForPlatform);
+  // The one provider this preference can spend: planning, generation, the fix loop, explain and
+  // the judge are Anthropic-only, so an OpenAI key opted in would buy the workspace nothing.
+  const anthropicReady = providers.some((p) => p.id === "anthropic" && p.configured);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -122,9 +126,40 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
               <p className="text-[11px] text-faint">Not connected to the server.</p>
             )}
           </div>
+          {/* WHO PAYS FOR JAROKU'S OWN THINKING, beside the row that says which provider does it.
+              The server has accepted this command since BYOK shipped and nothing ever sent it, so
+              the preference was permanently false and the Usage panel's note about it was
+              unreachable — while the other branch of that note told people to "connect your own to
+              run past" a ceiling, pointing at a control that did not exist.
+
+              Disabled with a stated reason rather than hidden when there is no Anthropic key: that
+              is the same refusal the server makes, made here so the answer arrives before the
+              click rather than as an error strip after it. */}
+          <label
+            className={`mt-3 flex items-start gap-2 border-t border-hair pt-2.5 text-[11px] ${
+              anthropicReady ? "cursor-pointer text-muted" : "cursor-not-allowed text-faint"
+            }`}
+          >
+            <input
+              type="checkbox"
+              className="mt-0.5 shrink-0"
+              checked={ownKeyForPlatform}
+              disabled={!anthropicReady}
+              onChange={(e) => sendSetOwnKeyForPlatform(e.target.checked)}
+            />
+            <span className="min-w-0 flex-1">
+              Pay for planning &amp; generation with my Anthropic key
+              <span className="block text-faint">
+                {anthropicReady
+                  ? "Off by default — Jaroku's own calls bill to us unless you say otherwise."
+                  : "Needs an Anthropic key in this workspace — that is the key this would spend."}
+              </span>
+            </span>
+          </label>
+
           <button
             type="button"
-            className="mt-3 w-full rounded-control border-t border-hair pt-2.5 text-left text-[12px] text-muted transition-colors duration-fast hover:text-ink"
+            className="mt-2.5 w-full rounded-control border-t border-hair pt-2.5 text-left text-[12px] text-muted transition-colors duration-fast hover:text-ink"
             onClick={() => {
               setRightTab("secrets");
               setOpen(false);

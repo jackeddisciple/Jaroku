@@ -166,6 +166,32 @@ console.log("\nevery command the relay accepts is classified");
     check(!commands.has(gone), `${gone} is not a command this socket accepts`);
     check(capabilityFor(gone) === undefined, `...and nothing in the matrix suggests it could be`);
   }
+
+  // AND EVERY COMMAND THE RELAY FORWARDS IS ONE THE APP ROUTES.
+  //
+  // The relay's job ends at "this caller may do this, send it on"; `index.ts` decides what it
+  // means, and the two are joined by a name in a set on each side. Nothing checked that the sets
+  // agreed, and they did not: `setOwnKeyForPlatform` was forwarded by the relay, classified in the
+  // matrix above, refused correctly for a member — and then fell past every branch of the app's
+  // dispatch chain into the eval handler, whose switch has no default. It returned. Silently. The
+  // one thing a workspace could say about who pays for our calls did nothing at all, for as long
+  // as it has existed.
+  //
+  // Read out of the source rather than imported, because importing `index.ts` starts a server.
+  // Same technique as the audit above, applied to the other end of the same handshake.
+  const app = readFileSync(join(fileURLToPath(new URL(".", import.meta.url)), "..", "index.ts"), "utf8");
+  const setIn = (source: string, name: string): Set<string> => {
+    const found = new RegExp(`${name} = new Set\\(\\[([\\s\\S]*?)\\]\\)`).exec(source);
+    return new Set([...(found?.[1] ?? "").matchAll(/"([a-zA-Z]+)"/g)].map((m) => m[1]!));
+  };
+  const forwarded = setIn(relay, "PROVIDER_COMMANDS");
+  const routed = setIn(app, "PROVIDER_COMMAND_NAMES");
+  check(forwarded.size > 0 && routed.size > 0, `found both ends (${forwarded.size} forwarded, ${routed.size} routed)`);
+  const dropped = [...forwarded].filter((c) => !routed.has(c));
+  check(
+    dropped.length === 0,
+    `every provider command the relay forwards is routed by the app (dropped: ${dropped.join(", ") || "none"})`,
+  );
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

@@ -666,13 +666,26 @@ export type McpEvent =
 // Same discipline as the eval and MCP channels: every mutation answers with a full snapshot,
 // so a client replaces rather than merges. And like them, nothing here ever carries a
 // credential — `configured` says a NAMED VARIABLE IS SET, and that is the whole of it.
+/**
+ * What a client learns about this workspace's model credentials. Names and one preference.
+ *
+ * `ownKeyForPlatform` is a preference, not a credential: whether THIS WORKSPACE'S key pays for the
+ * platform's own calls on its behalf — generation, the plan gate, the fix loop, explain, the judge.
+ * It rides the providers snapshot because it is meaningless without the list of what is connected,
+ * and because a client that had to ask twice could render a checkbox out of step with the keys
+ * beside it.
+ *
+ * REQUIRED, not optional. It was optional, and so two of the three places that build this message
+ * left it out — the on-connect snapshot and the answer to `listProviders`, which between them are
+ * every message a client receives before it changes anything.
+ */
+export interface ProviderSnapshot {
+  providers: unknown[];
+  ownKeyForPlatform: boolean;
+}
+
 export type ProviderEvent =
-  // `ownKeyForPlatform` is a preference, not a credential: whether THIS WORKSPACE'S key pays
-  // for the platform's own calls on its behalf — generation, the plan gate, the fix loop,
-  // explain, the judge. It rides the providers snapshot because it is meaningless without the
-  // list of what is connected, and because a client that had to ask twice could render a
-  // checkbox out of step with the keys beside it.
-  | { type: "providers"; providers: unknown[]; ownKeyForPlatform?: boolean }
+  | ({ type: "providers" } & ProviderSnapshot)
   // The answer to "Test connection": did that key authenticate. Nothing was written.
   | { type: "testResult"; provider: string; ok: boolean; message: string | null }
   // A write that could not happen (an unknown provider, a value the .env format cannot store
@@ -998,14 +1011,20 @@ export interface RelayOptions {
   getAgentGraph?: (ctx: TenantContext, agentId: string) => Promise<unknown>;
   listMcpServers?: (ctx: TenantContext) => unknown[] | Promise<unknown[]>;
   /**
-   * Which provider keys are set, by name. Never a value — see providers.ts.
+   * Which provider keys are set, by name, and whether this workspace's own pays for our calls.
    *
    * Takes the asking socket's context, like every other read here. It used to take nothing,
    * because a provider key lived in one `runtime/.env` and genuinely was process-wide. Hosted
    * it is per workspace, and a snapshot answered without a scope would tell every connected
    * client that a provider is connected because the SERVER has one.
+   *
+   * ONE FUNCTION RETURNING THE WHOLE SNAPSHOT, rather than a list plus a second option beside it.
+   * `ProviderEvent` has always carried `ownKeyForPlatform` and this file's two emitters have
+   * always omitted it: the flag arrived only on the broadcast that follows a mutation, so a client
+   * learned the truth on frame one of nothing and was left rendering a default. Two options would
+   * be two things a caller can fill in separately, which is how that happened. One cannot drift.
    */
-  listProviders?: (ctx: TenantContext) => unknown[] | Promise<unknown[]>;
+  listProviders?: (ctx: TenantContext) => ProviderSnapshot | Promise<ProviderSnapshot>;
   /**
    * Re-check an open socket's session. Called on a timer; absent means never.
    *
@@ -1116,7 +1135,7 @@ export class WsRelay {
         this.sendTo(ws, {
           channel: "providers",
           type: "providers",
-          providers: (await this.opts.listProviders?.(ctx)) ?? [],
+          ...((await this.opts.listProviders?.(ctx)) ?? { providers: [], ownKeyForPlatform: false }),
         });
         // And what is deployed, so the sidebar's Deployed filter is right on frame one rather
         // than after a round trip.
@@ -1372,7 +1391,7 @@ export class WsRelay {
               this.sendTo(ws, {
                 channel: "providers",
                 type: "providers",
-                providers: (await this.opts.listProviders?.(ctx)) ?? [],
+                ...((await this.opts.listProviders?.(ctx)) ?? { providers: [], ownKeyForPlatform: false }),
               }));
           } else if (DEPLOY_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the deploy manager and can answer with a

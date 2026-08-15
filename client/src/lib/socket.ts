@@ -170,7 +170,7 @@ function dispatch(msg: ServerMessage): void {
       // snapshot and this is a replace, never a merge — and nothing on it carries a key, so
       // there is nothing here to be careful with beyond not inventing state the server owns.
       const p = useProviderStore.getState();
-      if (msg.type === "providers") p.setProviders(msg.providers);
+      if (msg.type === "providers") p.setProviders(msg.providers, msg.ownKeyForPlatform);
       else if (msg.type === "testResult") p.setTestResult({ provider: msg.provider, ok: msg.ok, message: msg.message });
       else if (msg.type === "error") p.setError(msg.message);
       else if (msg.type === "notice") p.setNotice(msg.message);
@@ -645,6 +645,20 @@ export function sendSetMcpToolImpact(serverId: string, toolName: string, impact:
 
 export function sendListProviders(): void {
   send({ cmd: "listProviders" });
+}
+
+/**
+ * Decide whether THIS WORKSPACE'S key pays for the calls Jaroku makes on its behalf.
+ *
+ * The one provider command that survived, and the reason it did: it carries no credential. Both
+ * keys are already stored — this says which of them the plan gate, generation, the fix loop,
+ * explain and the judge are billed to.
+ *
+ * Explicit boolean rather than a toggle, matching the server: two clicks racing end up where the
+ * user last said rather than wherever the ordering left them.
+ */
+export function sendSetOwnKeyForPlatform(on: boolean): void {
+  send({ cmd: "setOwnKeyForPlatform", on });
 }
 
 // STORING AND TESTING A PROVIDER KEY ARE NOT COMMANDS ON THIS SOCKET. They were, and they were

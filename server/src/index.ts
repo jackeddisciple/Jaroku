@@ -79,7 +79,7 @@ import {
 import { openCheckpointStore } from "./checkpoints/store.ts";
 import { introspectGraph, introspectGraphCached, type GraphResult } from "./graphIntrospect.ts";
 import { streamExplain } from "./explainer.ts";
-import type { ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand } from "./wsRelay.ts";
+import type { ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, ProviderSnapshot } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
 import { currentTraceparent, formatTraceparent, openTracer, parseTraceparent } from "./obs/trace.ts";
@@ -2129,7 +2129,7 @@ const relay = new WsRelay({
   listMcpServers: (ctx) => mcpRegistry.list(ctx),
   // By name only, and per WORKSPACE. The client learns THAT a key is set, never what it is —
   // and learns it about its own workspace rather than about the machine.
-  listProviders: async (ctx) => providerStatus(await providerKeys.configuredNames(ctx)),
+  listProviders: (ctx) => providerSnapshot(ctx),
   // Same: env_keys are names, railwayConfigured is a boolean. No value crosses this.
   listDeployments: (ctx) => deploySnapshot(ctx),
   // THE ASKING SOCKET'S WORKSPACE, forwarded rather than discarded.
@@ -2752,16 +2752,27 @@ async function handleConnectionCommand(ctx: TenantContext, cmd: ConnectionComman
 const PROVIDER_COMMAND_NAMES = new Set(["setOwnKeyForPlatform"]);
 const CONNECTION_COMMAND_NAMES = new Set(["listConnections", "connectConnector", "disconnectConnector"]);
 
-async function broadcastProviders(ctx: TenantContext): Promise<void> {
-  relay.broadcastProviders(ctx, {
-    type: "providers",
+/**
+ * Everything a client is told about this workspace's model credentials.
+ *
+ * ONE PRODUCER, for the on-connect snapshot, the answer to `listProviders`, and the broadcast that
+ * follows a change. Three call sites used to build this message and only this one carried
+ * `ownKeyForPlatform`, so the flag reached a client exactly once — after it had changed something
+ * it had no control to change.
+ */
+async function providerSnapshot(ctx: TenantContext): Promise<ProviderSnapshot> {
+  return {
     // The workspace's OWN configured names, not the server's environment. Locally these are the
     // same set — the local store is the process environment — and hosted they are emphatically
     // not: reading process.env there would tell every workspace it has a provider connected
     // because the server does.
     providers: providerStatus(await providerKeys.configuredNames(ctx)),
     ownKeyForPlatform: await providerKeys.ownKeyForPlatform(ctx),
-  });
+  };
+}
+
+async function broadcastProviders(ctx: TenantContext): Promise<void> {
+  relay.broadcastProviders(ctx, { type: "providers", ...(await providerSnapshot(ctx)) });
 }
 
 async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): Promise<void> {

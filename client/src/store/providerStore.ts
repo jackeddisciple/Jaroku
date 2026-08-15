@@ -32,13 +32,22 @@ interface ProviderState {
    * user who has a key. Everything that branches on configuration waits for this.
    */
   loaded: boolean;
+  /**
+   * Whether THIS WORKSPACE'S key pays for the calls Jaroku makes on its behalf.
+   *
+   * A preference rather than a credential, and the one thing on this channel a component may ask
+   * the server to change. It rides the providers snapshot because it is meaningless without the
+   * list beside it — a checkbox saying "my key pays for generation" is nonsense next to a provider
+   * that has no key.
+   */
+  ownKeyForPlatform: boolean;
   /** Providers with a test in flight, so the button can say it is working. */
   testing: Record<string, true>;
   testResult: ProviderTestResult | null;
   error: string | null;
   notice: string | null;
 
-  setProviders: (providers: ProviderStatus[]) => void;
+  setProviders: (providers: ProviderStatus[], ownKeyForPlatform: boolean) => void;
   startTest: (provider: string) => void;
   setTestResult: (result: ProviderTestResult) => void;
   clearTestResult: () => void;
@@ -49,6 +58,7 @@ interface ProviderState {
 export const useProviderStore = create<ProviderState>((set) => ({
   providers: [],
   loaded: false,
+  ownKeyForPlatform: false,
   testing: {},
   testResult: null,
   error: null,
@@ -57,7 +67,8 @@ export const useProviderStore = create<ProviderState>((set) => ({
   // A snapshot settles every question a test could still be waiting on, so in-flight state is
   // cleared wholesale rather than by key — a failure we did not anticipate cannot leave a
   // spinner running forever. Same reasoning as mcpStore.setServers.
-  setProviders: (providers) => set({ providers, loaded: true, testing: {} }),
+  setProviders: (providers, ownKeyForPlatform) =>
+    set({ providers, ownKeyForPlatform, loaded: true, testing: {} }),
 
   startTest: (provider) =>
     set((s) => ({ testing: { ...s.testing, [provider]: true }, testResult: null, error: null })),

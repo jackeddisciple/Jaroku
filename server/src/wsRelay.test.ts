@@ -97,7 +97,7 @@ const relay = new WsRelay({
       ? { agent_id: agentId }
       : { agent_id: agentId, error: "no such agent in this workspace" },
   listMcpServers: async (ctx) => [{ id: ctx.workspaceId === A ? "server_a" : "server_b" }],
-  listProviders: () => [],
+  listProviders: () => ({ providers: [], ownKeyForPlatform: false }),
   listDeployments: async (ctx) => ({
     deployments: [{ id: ctx.workspaceId === A ? "deploy_a" : "deploy_b" }],
     railwayConfigured: false,

@@ -502,7 +502,12 @@ export interface ProviderStatus {
 }
 
 export type ProviderMessage =
-  | { channel: "providers"; type: "providers"; providers: ProviderStatus[] }
+  // `ownKeyForPlatform` is a preference, not a credential: whether THIS WORKSPACE'S key pays for
+  // the calls Jaroku makes on its behalf — generation, the plan gate, the fix loop, explain, the
+  // judge. It rides this snapshot because it is meaningless without the list of what is connected.
+  // It was missing from this type while the server was already sending it, so it was parsed off
+  // the wire and thrown away.
+  | { channel: "providers"; type: "providers"; providers: ProviderStatus[]; ownKeyForPlatform: boolean }
   | { channel: "providers"; type: "testResult"; provider: string; ok: boolean; message: string | null }
   | { channel: "providers"; type: "error"; message: string; provider?: string }
   | { channel: "providers"; type: "notice"; message: string; provider?: string };
@@ -774,6 +779,10 @@ export type ClientCommand =
   // travels on a request header, which a WebSocket cannot carry, so neither could ever be gated.
   // Both moved to the secrets routes; what is left asks which names are set.
   | { cmd: "listProviders" }
+  // Carries no credential: both keys are already stored, and this decides which of them pays for
+  // the calls Jaroku makes on the workspace's behalf. Which is why it survived the removal of the
+  // two commands beside it.
+  | { cmd: "setOwnKeyForPlatform"; on: boolean }
   | { cmd: "loadUsage" }
   // Connections. THE ONE SET IN THIS UNION THAT CARRIES NO SECRET IN EITHER DIRECTION: a
   // credential for a connected account is minted by the provider and collected at the callback,

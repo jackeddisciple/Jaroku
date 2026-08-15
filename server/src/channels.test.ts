@@ -257,7 +257,7 @@ const relay = new WsRelay({
     ctx.workspaceId === A && agentId === "agent_a" ? [{ path: "agent.py" }] : [],
   getAgentGraph: async (ctx, agentId) => ({ agent_id: agentId, owner: ctx.workspaceId }),
   listMcpServers: async () => [],
-  listProviders: () => [],
+  listProviders: () => ({ providers: [], ownKeyForPlatform: false }),
   listDeployments: async () => ({ deployments: [], railwayConfigured: false }),
 });
 

@@ -104,7 +104,7 @@ const relay = new WsRelay({
   getAgentGraph: async (ctx, agentId) =>
     AGENTS.get(ctx.workspaceId) === agentId ? { agent_id: agentId } : { agent_id: agentId, error: "not here" },
   listMcpServers: async (ctx) => [{ id: `mcp_${AGENTS.get(ctx.workspaceId)}` }],
-  listProviders: () => [],
+  listProviders: () => ({ providers: [], ownKeyForPlatform: false }),
   listDeployments: async (ctx) => ({ deployments: [{ id: `dep_${AGENTS.get(ctx.workspaceId)}` }], railwayConfigured: false }),
   // The app half, and it does real work in the context it was handed: a `run` writes a run row
   // into the ASKING workspace and pushes fresh history to everybody. That last part is what
