@@ -119,7 +119,9 @@ export function CommandPalette() {
             <Command.Group heading="Files" className="mb-1">
               {fileOrder.map((path) => (
                 <Item key={path} onSelect={run(() => openInCode(path))}>
-                  <Truncate title={path}>{path}</Truncate>
+                  {/* A list of paths, which is the case §A.3 was written about — `tools/we…` and
+                      `tools/tr…` are the same string to somebody scanning for a filename. */}
+                  <Truncate variant="path">{path}</Truncate>
                 </Item>
               ))}
             </Command.Group>

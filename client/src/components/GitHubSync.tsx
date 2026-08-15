@@ -300,7 +300,9 @@ function RefusalCard({ view, refusal }: { view: GithubView; refusal: GithubRefus
 
       {refusal.path && (
         <div className="mt-1.5 font-mono text-[11px] text-ink">
-          <Truncate title={refusal.path}>{refusal.path}</Truncate>
+          {/* §A.3 applies here too: the whole card is about WHICH file, so the filename is the
+              half that must survive the width. */}
+          <Truncate variant="path">{refusal.path}</Truncate>
         </div>
       )}
       <div className="mt-0.5 text-[11px] leading-[1.5] text-muted">→ {refusal.message}</div>

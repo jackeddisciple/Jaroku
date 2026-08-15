@@ -231,7 +231,9 @@ export function ChangesRegion({ view }: { view: GithubView }) {
             >
               {c.status === "added" ? "+" : "✎"}
             </span>
-            <Truncate className="min-w-0 flex-1 font-mono text-ink" title={c.path}>{c.path}</Truncate>
+            {/* §A.3: a path is not prose. The filename and its extension are what identify the
+                row, and a right-edge fade throws away exactly those. */}
+            <Truncate variant="path" className="min-w-0 flex-1 font-mono text-ink">{c.path}</Truncate>
             <DiffStat additions={c.additions} deletions={c.deletions} className="shrink-0" />
           </div>
         ))}
@@ -250,7 +252,7 @@ export function ChangesRegion({ view }: { view: GithubView }) {
                 title="Reviewed code Jaroku keeps read-only. The edit loop cannot change it, the object store's block list covers it, and a change arriving from GitHub that touches it is refused during a pull rather than applied silently."
               >
                 <span className="w-3 shrink-0 text-center" aria-hidden><LockIcon size={10} /></span>
-                <Truncate className="min-w-0 flex-1 font-mono" title={path}>{path}</Truncate>
+                <Truncate variant="path" className="min-w-0 flex-1 font-mono">{path}</Truncate>
               </div>
             ))}
           </div>
