@@ -3055,6 +3055,10 @@ const githubService = new GithubService({
   // The same resolver `agentFilesDeps` uses, so the PROTECTED group in the panel and the read-only
   // set the edit loop enforces are one answer rather than two that agree today.
   connectorFilesFor: agentFilesDeps.connectorFilesFor,
+  // BOTH RUNNERS, because ⟳ answers "is something happening" and not "which of the two". Declared
+  // before either exists and read only at call time, which is the only order available: the
+  // runners need nothing from the service and the service needs a live answer from them.
+  inFlight: (agentUuid) => githubPusher.busy(agentUuid) || githubPuller.busy(agentUuid),
 });
 
 const githubPusher = new GithubPusher({

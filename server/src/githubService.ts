@@ -155,6 +155,21 @@ export interface GithubServiceDeps {
   projects: ProjectStore;
   /** Catalogue filenames, so a reviewed connector template is protected whether installed or not. */
   connectorFilesFor: (agent: Agent | undefined, slug: string) => string[];
+  /**
+   * Whether a push or a pull is running for this agent right now, by uuid.
+   *
+   * §3.5's SIXTH STATE, which existed everywhere except here. `syncVerdict` has taken an
+   * `inFlight` option since it was written, `badgeFor` renders it as ⟳, `verdictLine` says
+   * "Syncing…", the client has a glyph and a tone for it, and `githubSync.test.ts` asserts that it
+   * outranks every settled answer — and nothing ever passed the flag, so the state was
+   * unreachable. What a second tab or a colleague saw during somebody else's push was the stale
+   * ↑2 that push was in the middle of clearing, with a Push button beside it that the runner's own
+   * single-flight guard would have refused.
+   *
+   * Optional so the service stays constructible without the runners, which is what the pure-
+   * function tests rely on.
+   */
+  inFlight?: (agentUuid: string) => boolean;
   log?: (line: string) => void;
 }
 
@@ -229,7 +244,12 @@ export class GithubService {
     }
 
     const remote = await this.readRemote(ctx, link);
-    const verdict = syncVerdict(link, versions, remote.state);
+    // ASKED AFTER THE REMOTE READS RATHER THAN BEFORE THEM. Those reads take a round trip each,
+    // and a push that started during one would otherwise be reported as a settled verdict computed
+    // from numbers it is already changing.
+    const verdict = syncVerdict(link, versions, remote.state, {
+      inFlight: this.deps.inFlight?.(agent.id) === true,
+    });
     const unpushedIds = new Set(unpushedVersions(versions, link.last_pushed_version_id).map((v) => v.id));
 
     const rows = versions.map((v) => this.versionRow(v, link, shaFor.get(v.id) ?? null));
