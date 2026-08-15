@@ -209,12 +209,29 @@ function NotConnected() {
             — your token stays in the field.
           </p>
         )}
-        {/* The scope of access, stated. See the note above. */}
+        {/* THE SCOPE OF ACCESS, STATED ACCURATELY — which it was not.
+
+            This said "`repo` scope — read and write to the repositories you select", and a classic
+            PAT with `repo` does not do that: there is no selection, it grants read and write to
+            EVERY repository the account can reach, public and private. The product's own commit
+            history says so out loud ("a GitHub token can read every private repo somebody owns"),
+            so the code knew the true blast radius while the one screen whose entire job is to be
+            honest about access stated a smaller one.
+
+            A fine-grained token is what actually has the property the old sentence claimed, so it
+            is what is recommended, with the classic PAT named as the wider fallback rather than
+            quietly assumed. */}
         <p className="mt-2 text-[11px] leading-[1.55] text-faint">
-          Needs <span className="font-mono">repo</span> scope — read and write to the repositories
-          you select, and nothing else. The token goes straight into Jaroku's vault behind the
-          Secrets passcode, is never logged, and never comes back to this page. Revoke it any time
-          from GitHub settings, or disconnect here.
+          Use a <span className="text-muted">fine-grained</span> token scoped to the repositories
+          you pick, with <span className="font-mono">Contents: read and write</span> — that way
+          Jaroku can reach those repositories and no others. A classic token with{" "}
+          <span className="font-mono">repo</span> scope also works, but it grants read and write to
+          every repository this account can reach, not just the ones you link here.
+        </p>
+        <p className="mt-1.5 text-[11px] leading-[1.55] text-faint">
+          The token goes straight into Jaroku's vault behind the Secrets passcode, is never logged,
+          and never comes back to this page. Revoke it any time from GitHub settings, or disconnect
+          here.
         </p>
       </div>
     </div>
