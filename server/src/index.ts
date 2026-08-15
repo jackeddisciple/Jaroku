@@ -90,6 +90,8 @@ import { MCP_DISCOVER_CLASS, McpDiscoveryQueue } from "./mcpDiscovery.ts";
 import { WorkspaceExporter } from "./lifecycle/export.ts";
 import { lifecycleRoutes } from "./http/lifecycle.ts";
 import { mountSecretsRoutes, type SecretsCaller } from "./http/secrets.ts";
+import { GithubRepository } from "./db/repositories/github.ts";
+import { GithubIdentity } from "./githubIdentity.ts";
 import { ELEVATION_HEADER, SecretElevations, sessionIdFor } from "./secrets/elevation.ts";
 import { SecretPasscodes } from "./secrets/passcode.ts";
 import { SecretElevationRepository } from "./db/repositories/secretElevations.ts";
@@ -1893,6 +1895,32 @@ const secretPasscodes = new SecretPasscodes({ passcodes: new SecretPasscodeRepos
 const secretElevations = new SecretElevations({ elevations: new SecretElevationRepository(db) });
 const secretUsages = new SecretUsageRepository(db);
 const secretsManager = new SecretsManager({ secrets, refs: secretRefs, usages: secretUsages });
+
+// The one place in this process that ever holds a GitHub token as a value, and the one place that
+// hands out a client without one. Everything else — push, pull, fetch, link — asks it for an api
+// and never learns what is behind it. See githubIdentity.ts.
+const githubRepo = new GithubRepository(db);
+const githubIdentity = new GithubIdentity({
+  repo: githubRepo,
+  secrets,
+  // Through the MANAGER rather than straight to the store, so the token appears in the Secrets tab
+  // beside every other credential — classified, masked, with a rotation history. A value written
+  // directly to the vault would be invisible in the one place somebody goes to audit what a
+  // workspace holds.
+  //
+  // `managed` rather than `custom`: the verbs that apply to it are connect and disconnect, exactly
+  // as they are for a connector's OAuth token. Offering Rotate on a row whose value Jaroku cannot
+  // mint would be offering an action that ends in a paste box either way.
+  store: (ctx, input) =>
+    secretsManager.store(ctx, {
+      name: input.name,
+      value: input.value,
+      kind: "managed",
+      provider: input.provider,
+      actorUserId: input.actorUserId,
+    }),
+  forget: (ctx, name) => secretsManager.revoke(ctx, name),
+});
 // The hole punched at the store's construction, filled now that there is something to fill it
 // with. A run that reads a credential records WHERE, not just when.
 recordRuntimeRead = async (workspaceId, names) => {
@@ -2025,6 +2053,13 @@ mountSecretsRoutes(router, {
       console.error("[rate] limiter failed for secrets.reveal, admitting:", (err as Error)?.message ?? err);
     }
     return null;
+  },
+  // The two credential routes the GitHub feature needs, and the only two of its surfaces that are
+  // HTTP. Everything else it does rides the socket, because everything else it does is about a
+  // repository rather than about a token.
+  github: {
+    connect: (caller, token) => githubIdentity.connect(caller.ctx, token),
+    disconnect: (caller) => githubIdentity.disconnect(caller.ctx),
   },
   notifyLockout: async (caller, until) => {
     // NO MAILER EXISTS IN THIS SERVER, and one invented for this single notification would be a

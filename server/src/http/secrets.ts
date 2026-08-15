@@ -179,6 +179,24 @@ export interface SecretsRouteDeps {
    * somebody makes a revoke decision from.
    */
   usage?: (caller: SecretsCaller, name: string) => Promise<UsageSite[]>;
+  /**
+   * Link or unlink the workspace's GitHub account.
+   *
+   * OPTIONAL, and absent means both routes 404 — the same knob `reveal` has, for the same reason:
+   * a deployment that has not wired GitHub has no reachable path from a request to a stored GitHub
+   * token, and somebody should be able to stand there on purpose.
+   *
+   * `connect` RETURNS AN OUTCOME RATHER THAN THROWING on a bad token. A token GitHub rejects is
+   * not an exception — it is the ordinary answer to "is this credential real", it happens on a
+   * typo, and the route needs to audit it before turning it into a 400.
+   */
+  github?: {
+    connect: (
+      caller: SecretsCaller,
+      token: string,
+    ) => Promise<{ ok: boolean; accountLogin: string | null; message: string | null }>;
+    disconnect: (caller: SecretsCaller) => Promise<void>;
+  };
 }
 
 /**
@@ -694,6 +712,75 @@ export function secretsRoutes(deps: SecretsRouteDeps): SecretsRoute[] {
         const ended = await deps.elevations.lock(caller.ctx, caller.userId, caller.sessionId);
         await deps.audit(caller, "secrets.elevation_revoked", { ended, reason: "locked by the user" });
         return { headers: { "cache-control": "no-store" }, body: { elevated: false, ended } };
+      }),
+    },
+
+    // --- linking a GitHub account -------------------------------------------------------------
+    //
+    // IN THIS GROUP RATHER THAN IN A FILE OF ITS OWN, and that placement is the whole point of the
+    // route existing here at all.
+    //
+    // A GitHub token is a credential in the plainest sense: it writes source code into somebody's
+    // account and it can be used to read every private repository they own. `wsRelay.ts` records
+    // why `setProviderKey` stopped being a socket command — elevation rides on a request header
+    // and a browser cannot set one on a WebSocket — and a GitHub token arriving over the socket
+    // would reopen exactly that hole, on a wider credential. So the twelve GitHub SOCKET commands
+    // are all about repositories and this, the only one about a token, is HTTP.
+    //
+    // Putting it in the secrets group rather than beside the other GitHub code buys the guarantee
+    // CONTRIBUTING names: `guarded()` is the only way to build a handler in this file, its default
+    // is the strictest level, and `test:secret-routes` walks the exported table and fails a route
+    // that was added without it. A `http/github.ts` with its own `router.post` would have had to
+    // remember all of that by hand.
+    //
+    // `secret:manage` RATHER THAN `github:manage`, even though both are admin. What this route
+    // does is write a value into the vault; that it is a GitHub value is incidental to the
+    // authorisation question, and guarding a credential write with a feature's capability would
+    // mean the answer to "who can write to the vault" is spread across as many capabilities as
+    // there are features with credentials.
+    //
+    // ABSENT `deps.github` MEANS 404, exactly as `reveal` does. A build with no GitHub integration
+    // wired has no reachable path from a request to a stored GitHub token, which is a posture
+    // somebody should be able to hold on purpose.
+    {
+      method: "POST",
+      path: "/v1/github/connect",
+      handler: guarded(deps, {}, async (req, caller) => {
+        if (!deps.github) throw notFound("GitHub is not enabled on this deployment");
+        const body = await req.json<{ token?: unknown }>();
+        const token = typeof body.token === "string" ? body.token.trim() : "";
+        if (!token) throw badRequest("a GitHub token is required");
+        const result = await deps.github.connect(caller, token);
+        // THE OUTCOME IS AUDITED EITHER WAY. A rejected token is the more interesting row: it is
+        // somebody trying credentials against the workspace's vault, and a log that recorded only
+        // the successes would show nothing at all during exactly that.
+        await deps.audit(caller, result.ok ? "github.connected" : "github.connect_refused", {
+          accountLogin: result.accountLogin,
+          reason: result.ok ? undefined : result.message,
+        });
+        if (!result.ok) {
+          throw new HttpError(400, "github_rejected", result.message ?? "GitHub rejected that token");
+        }
+        // The login and nothing else. The token is in the vault; there is no field here it fits in.
+        return { headers: { "cache-control": "no-store" }, body: { connected: true, accountLogin: result.accountLogin } };
+      }),
+    },
+
+    // --- and handing it back ------------------------------------------------------------------
+    //
+    // THE LINKS ARE LEFT STANDING, deliberately, and the repository is never touched. Disconnecting
+    // is usually a rotation rather than a decision to stop using GitHub, so wiping every agent's
+    // link would turn a one-click reconnect into fifteen relinks — and §6's rule that Jaroku never
+    // deletes a user's repo applies with more force to the account-wide action than to the
+    // per-agent one.
+    {
+      method: "POST",
+      path: "/v1/github/disconnect",
+      handler: guarded(deps, {}, async (_req, caller) => {
+        if (!deps.github) throw notFound("GitHub is not enabled on this deployment");
+        await deps.github.disconnect(caller);
+        await deps.audit(caller, "github.disconnected", {});
+        return { headers: { "cache-control": "no-store" }, body: { connected: false } };
       }),
     },
   ];
