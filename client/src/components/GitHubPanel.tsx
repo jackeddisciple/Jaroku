@@ -25,16 +25,22 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   sendCheckGithubRepo, sendLinkGithub, sendListGithub, sendListGithubRepos, sendRefreshGithub,
+  sendUnlinkGithub,
 } from "../lib/socket.ts";
 import { connectGithub, disconnectGithub } from "../lib/secrets.ts";
-import { ICON, STATUS, TYPE } from "../lib/tokens.ts";
+import { ICON, STATUS } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useGithubStore, viewFor } from "../store/githubStore.ts";
-import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
+import { relTime } from "../lib/format.ts";
+import type { GithubVersionRow, GithubView } from "../types.ts";
+import { ActionRow } from "./ActionRow.tsx";
+import { DiffStat } from "./DiffStat.tsx";
+import { GitHubSyncRegion, RegionLabel } from "./GitHubSync.tsx";
+import { primaryBtn, quietBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { Truncate } from "./Truncate.tsx";
-import { CheckIcon, GithubIcon, SearchIcon, XIcon } from "./panelIcons.tsx";
+import { CheckIcon, GithubIcon, KebabIcon, SearchIcon, XIcon } from "./panelIcons.tsx";
 
 export function GitHubPanel() {
   // Field by field rather than the whole store, for the reason DeployPanel gives at length: a
@@ -105,8 +111,7 @@ export function GitHubPanel() {
         ) : !view ? (
           <RepoPicker agentId={agentId} />
         ) : (
-          // The linked panel proper lands in the commits that follow — see §1's four regions.
-          <LinkedPlaceholder repo={view.link.repo_full_name} branch={view.link.branch} />
+          <Linked view={view} />
         )}
       </div>
     </div>
@@ -447,22 +452,151 @@ function Field({
 }
 
 /**
- * The linked panel, until the regions that fill it land.
+ * The linked panel: identity, then verdict, then the two version lists.
  *
- * A named placeholder rather than an empty div, because a tab that renders nothing after a
- * successful link reads as a link that failed — and §2.1's own principle is to describe what is
- * true rather than what is missing.
+ * §1's region order, and it is deliberate — identity, verdict, action, context. "Am I okay?" is
+ * answered in the second region without scrolling; everything under it explains that answer.
  */
-function LinkedPlaceholder({ repo, branch }: { repo: string; branch: string }) {
+function Linked({ view }: { view: GithubView }) {
   return (
-    <div className="p-4">
+    <div className="space-y-4 p-4">
+      <RepoHeader view={view} />
+      <GitHubSyncRegion view={view} />
+      <VersionLists view={view} />
+    </div>
+  );
+}
+
+/** §1's first region: what this agent is linked to, and the way out of it. */
+function RepoHeader({ view }: { view: GithubView }) {
+  const [menu, setMenu] = useState(false);
+  return (
+    <div>
       <div className="flex items-center gap-2">
         <span className="shrink-0 text-ink"><GithubIcon size={ICON.sm} /></span>
-        <Truncate className="min-w-0 flex-1 font-mono text-[12px] text-ink" title={repo}>{repo}</Truncate>
+        <a
+          className="min-w-0 flex-1 font-mono text-[12px] text-ink hover:underline"
+          href={view.repoUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <Truncate title={view.link.repo_full_name}>{view.link.repo_full_name}</Truncate>
+        </a>
+        <button className={`${quietBtn} shrink-0`} onClick={() => setMenu((v) => !v)} title="Link options">
+          <KebabIcon size={ICON.xs} />
+        </button>
       </div>
-      <div className="mt-1 font-mono text-[11px] text-muted">{branch}</div>
-      <p className={`${TYPE.meta} mt-3`}>Linked. The sync state and history regions land next.</p>
-      <button className={`${secondaryBtn} mt-2`} onClick={() => sendListGithub()}>Refresh</button>
+      <div className="mt-0.5 flex items-center gap-2 pl-6 font-mono text-[11px] text-muted">
+        <Truncate title={view.link.branch}>{view.link.branch}</Truncate>
+        {view.link.subdirectory && (
+          <Chip size="sm" tone="faint" mono variant="bare" title="Only this directory is pushed and pulled">
+            {view.link.subdirectory}/
+          </Chip>
+        )}
+      </div>
+      {menu && (
+        <div className="mt-2 rounded-control border border-hair p-2">
+          {/* Said before the button rather than after it. §6's rule is absolute — Jaroku never
+              deletes a user's repository — and the only way somebody knows that before clicking is
+              if it is written where the click is. */}
+          <p className="text-[11px] leading-[1.5] text-muted">
+            Unlinking stops Jaroku pushing here. The repository, the branch and every commit
+            already on it are untouched.
+          </p>
+          <button
+            className={`${quietBtn} mt-1 !text-err`}
+            onClick={() => {
+              sendUnlinkGithub(view.agentId);
+              setMenu(false);
+            }}
+          >
+            Unlink repository
+          </button>
+        </div>
+      )}
     </div>
+  );
+}
+
+/**
+ * §2.3: versions as commits, in two lists.
+ *
+ * UNPUSHED FIRST, because it is the list with something to do in it. A pushed version is a
+ * finished thing; an unpushed one is the reason the badge is showing a number.
+ *
+ * Rows are ActionRow with DiffStat trailing figures — the existing narrative-line pattern — so a
+ * push row reads like every other action row in the app rather than like a git client bolted on.
+ * Commit shas are Chip monospace, linking out.
+ */
+function VersionLists({ view }: { view: GithubView }) {
+  return (
+    <div className="space-y-4">
+      {view.unpushed.length > 0 && (
+        <section>
+          <RegionLabel>
+            Unpushed
+            <span className="ml-2 font-normal normal-case tracking-normal text-faint">
+              {view.unpushed.length}
+            </span>
+          </RegionLabel>
+          <div className="mt-1.5">
+            {view.unpushed.map((v) => <VersionRow key={v.id} row={v} />)}
+          </div>
+        </section>
+      )}
+
+      {view.pushed.length > 0 && (
+        <section>
+          <RegionLabel>
+            Pushed
+            <span className="ml-2 font-normal normal-case tracking-normal text-faint">
+              {view.pushed.length}
+            </span>
+          </RegionLabel>
+          <div className="mt-1.5">
+            {view.pushed.map((v) => <VersionRow key={v.id} row={v} />)}
+          </div>
+        </section>
+      )}
+
+      {view.unpushed.length === 0 && view.pushed.length === 0 && (
+        <EmptyState
+          size="inline"
+          icon={GithubIcon}
+          title="No versions yet"
+          hint="Generate or edit this agent and the version becomes a commit here."
+        />
+      )}
+    </div>
+  );
+}
+
+function VersionRow({ row }: { row: GithubVersionRow }) {
+  return (
+    <ActionRow
+      kind={row.sha ? "done" : "wait"}
+      state={row.sha ? "done" : "pending"}
+      hideVerb
+      lead={<span className="w-8 text-right font-mono text-[11px]">v{row.version}</span>}
+      object={<span className="text-ink"><Truncate title={row.summary}>{row.summary}</Truncate></span>}
+      detail={
+        <span className="text-faint">
+          {row.files} file{row.files === 1 ? "" : "s"} · {relTime(row.createdAt)}
+        </span>
+      }
+      trailing={
+        <>
+          {(row.additions > 0 || row.deletions > 0) && (
+            <DiffStat additions={row.additions} deletions={row.deletions} />
+          )}
+          {row.sha && row.shaUrl && (
+            // A monospace chip that leaves for GitHub, which is the one thing a sha is for.
+            <a href={row.shaUrl} target="_blank" rel="noreferrer" className="hover:underline">
+              <Chip size="sm" tone="faint" mono variant="bare">{row.sha.slice(0, 7)}</Chip>
+            </a>
+          )}
+        </>
+      }
+    />
   );
 }
