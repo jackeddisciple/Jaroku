@@ -3099,6 +3099,35 @@ function githubStage(ctx: TenantContext, agentId: string, op: "push" | "pull"): 
   return (stage, status) => relay.broadcastGithub(ctx, { type: "stage", agentId, op, stage, status });
 }
 
+/**
+ * Write an override to `audit_log` as well as to `github_events`.
+ *
+ * TWO TABLES, TWO READERS, AND THAT IS NOT DUPLICATION. `github_events` is the feature's own
+ * history — it is what the panel renders and what answers "is anybody actually editing exported
+ * code", which is the question §8 says decides whether Phase 2 was worth building.
+ * `audit_log` is the WORKSPACE's record, read by somebody who does not know this feature exists
+ * and is asking "what did this person do here". §3.6 asks for the second by name, because a hosted
+ * multi-tenant product needs "who overrode a safety refusal" to be answerable without knowing
+ * which panel the override happened in.
+ *
+ * Written from the handler rather than from inside the pusher, so that the two runners stay
+ * modules that talk to GitHub and a database and nothing else — and so there is one place to read
+ * for "what does this feature put in the audit log".
+ */
+async function auditGithubOverride(
+  ctx: TenantContext,
+  action: string,
+  agentId: string,
+  detail: Record<string, unknown>,
+): Promise<void> {
+  await identityRepo.appendAudit(ctx, {
+    action,
+    targetType: "agent",
+    targetId: agentId,
+    metadata: detail,
+  });
+}
+
 async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Promise<void> {
   const fail = (message: string, agentId?: string): void => {
     relay.broadcastGithub(ctx, { type: "error", message, ...(agentId ? { agentId } : {}) });
@@ -3182,6 +3211,17 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
           },
           githubStage(ctx, agentId, "push"),
         );
+        // BEFORE THE NOTICE AND BEFORE THE SNAPSHOT. An override that succeeded and then failed to
+        // be recorded is the one ordering this must not have — the same "record first, then say it
+        // happened" rule the trace ingest keeps between persisting a step and broadcasting it.
+        if (cmd.force === true) {
+          await auditGithubOverride(ctx, "github.force_push", agentId, {
+            outcome: result.ok ? "ok" : "failed",
+            branch: (await githubService.view(ctx, agentId))?.link.branch ?? null,
+            commits: result.shas.length,
+            failedStage: result.failedStage ?? null,
+          });
+        }
         if (!result.ok) fail(result.message ?? "the push did not complete", agentId);
         else if (result.shas.length) {
           relay.broadcastGithub(ctx, {
@@ -3208,6 +3248,15 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
           },
           githubStage(ctx, agentId, "pull"),
         );
+        if (cmd.force === true) {
+          // A pull override publishes code the validator turned away. Recorded whatever the
+          // outcome, for the reason above.
+          await auditGithubOverride(ctx, "github.force_pull", agentId, {
+            outcome: result.ok ? "ok" : "failed",
+            version: result.version ?? null,
+            refusedCheck: result.refusal?.check ?? null,
+          });
+        }
         if (result.refusal) {
           // ITS OWN EVENT, never an error strip. §3.6's card names the file, the check and the fact
           // that the agent is unchanged, and offers three actions — none of which a one-line error
