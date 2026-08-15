@@ -4206,6 +4206,30 @@ async function runAgent(
     const platformValue = process.env[PROVIDER_ENV_KEY[provider as ProviderId]];
     if (platformValue) env[PROVIDER_ENV_KEY[provider as ProviderId]] = platformValue;
   }
+
+  // NO CREDENTIAL AT ALL IS SAID HERE, NOT DISCOVERED BY THE PROVIDER.
+  //
+  // Everything above is a place a key can legitimately fail to arrive: the workspace revoked it in
+  // the Secrets tab, the run names a provider it never configured, or this deployment carries no
+  // platform key to lend. Every one of them used to end the same way — the sandbox starts, Python
+  // imports, an SDK builds a request with no Authorization header, and twenty seconds later a red
+  // tool_call step shows somebody a 401 from a company they have no account with. §8 asks for the
+  // other thing: a clear "the credential is gone", naming what and where to fix it.
+  //
+  // Refused in the same shape as the budget gate immediately below — an error on the debug channel
+  // and no slot consumed — because it is the same kind of answer: this run cannot usefully start,
+  // and the fix is one click away rather than in a stack trace.
+  if (isRealProvider(provider) && !env[PROVIDER_ENV_KEY[provider as ProviderId]]) {
+    const envKey = PROVIDER_ENV_KEY[provider as ProviderId];
+    console.log(`[manager] refused run ${runId}: no ${envKey} for this workspace`);
+    relay.broadcastDebug(ctx, {
+      type: "error",
+      message:
+        `This workspace has no ${provider} credential — ${envKey} is not set, or was revoked. ` +
+        `Add or rotate it in the Secrets tab, then run again.`,
+    });
+    return;
+  }
   // MONEY ASKS FIRST — before a slot, before a subprocess, before anything that costs.
   //
   // Ordered after the credential resolution above and before the pool, deliberately: a run
