@@ -437,6 +437,21 @@ export class GithubApi {
     return data.sha;
   }
 
+  /**
+   * The tree a commit points at.
+   *
+   * Needed because `createTree`'s `base_tree` takes a TREE sha and a branch head is a COMMIT sha —
+   * two different object types that are both forty hex characters, so passing one where the other
+   * belongs is accepted by the type system, rejected by GitHub, and reads as a mysterious 422 at
+   * the one step of a push where a mysterious failure is most expensive.
+   */
+  async commitTree(fullName: string, commitSha: string): Promise<string> {
+    const data = await this.call<{ tree: { sha: string } }>(
+      "commitTree", "GET", `/repos/${fullName}/git/commits/${commitSha}`,
+    );
+    return data.tree.sha;
+  }
+
   async createCommit(
     fullName: string,
     input: { message: string; tree: string; parents: string[] },
