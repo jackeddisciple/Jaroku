@@ -101,6 +101,18 @@ const DELETION_ORDER = [
   "mcp_servers",
   "deployment_logs",
   "deployments",
+  // Before `agents`, and in this order among themselves: events reference links, links reference
+  // installations, and all three reference the agent. The cascades would take them anyway —
+  // naming them puts their counts in the receipt, and a deletion nobody can read the extent of is
+  // a deletion nobody can defend.
+  //
+  // NOTHING IS DONE TO THE REPOSITORIES THEMSELVES, here or anywhere. §6's rule holds at the
+  // workspace scale exactly as it does for one agent: deleting a Jaroku workspace deletes Jaroku's
+  // record of where the code went, and leaves the user's repos untouched. The alternative — a
+  // "clean up" that reached into somebody's GitHub account — is not a trade this product makes.
+  "github_events",
+  "github_links",
+  "github_installations",
   "agent_versions",
   "agents",
   "usage_events",

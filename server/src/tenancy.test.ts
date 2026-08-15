@@ -46,6 +46,7 @@ import { SecretUsageRepository } from "./db/repositories/secretUsages.ts";
 import { SecretPasscodeRepository } from "./db/repositories/secretPasscodes.ts";
 import { SecretElevationRepository } from "./db/repositories/secretElevations.ts";
 import { OAuthRepository } from "./db/repositories/oauth.ts";
+import { GithubRepository } from "./db/repositories/github.ts";
 import { KmsSecretStore } from "./secrets/kmsSecretStore.ts";
 import { LocalMasterKeyProvider } from "./secrets/masterKey.ts";
 import { hashState, newPkce, newState } from "./oauth/pkce.ts";
@@ -461,6 +462,16 @@ const SCOPED_API: Record<string, string[]> = {
   OAuthRepository: [
     "list", "forConnector", "usable", "upsert", "recordRefresh", "markReauthRequired",
     "markRevoked", "markRevokedWithNote", "beginFlow", "openFlowCount",
+  ],
+  // Session 10. Which repository each agent's code is pushed to, under whose GitHub account, and
+  // every push and pull that has happened. A cross-tenant READ here names another workspace's
+  // private repositories and the account behind them; a cross-tenant WRITE is worse than for any
+  // store above it, because a link is the address a later push SENDS SOURCE CODE TO — repointing
+  // another workspace's agent at a repo you control is exfiltration with a one-row change.
+  GithubRepository: [
+    "linkAccount", "installation", "installations", "revokeAccount",
+    "link", "linkFor", "links", "patchLink", "unlink",
+    "record", "events",
   ],
 };
 
@@ -1100,6 +1111,90 @@ async function connectorIsolation(db: Db): Promise<void> {
   );
 }
 
+/**
+ * Session 10: two workspaces, two GitHub accounts, one agent slug apiece.
+ *
+ * The property under test is sharper than "A cannot read B's rows", and it is worth naming: a
+ * `github_links` row is the ADDRESS THE NEXT PUSH SENDS SOURCE TO. Every other store in this file
+ * leaks history when it leaks; this one, written across a boundary, redirects a future write —
+ * so the mutations below are all aimed at B's real row id by A, which is the shape an attacker
+ * has once they have learned an id from anywhere at all.
+ */
+async function githubIsolation(db: Db): Promise<void> {
+  console.log("  · github: grants, links and history");
+
+  const identity = new IdentityRepository(db);
+  const agents = new AgentRepository(db);
+  const github = new GithubRepository(db);
+
+  const mkWorkspace = async (label: string): Promise<TenantContext> => {
+    const ws = await identity.createWorkspaceUnowned(systemContext(newRequestId()), {
+      name: `gh ${label} ${randomUUID().slice(0, 6)}`,
+    });
+    return systemContextFor(ws.id, newRequestId());
+  };
+  const A = await mkWorkspace("a");
+  const B = await mkWorkspace("b");
+
+  // THE SAME SLUG IN BOTH, which is legal since 008 and is the case a global-namespace bug hides
+  // behind: a lookup that resolved `weather` without a workspace would find whichever row came
+  // first and be right half the time in a two-tenant test.
+  const agentA = await agents.create(A, { id: randomUUID(), slug: "weather", display_name: "A's weather" });
+  const agentB = await agents.create(B, { id: randomUUID(), slug: "weather", display_name: "B's weather" });
+
+  const instA = await github.linkAccount(A, {
+    accountLogin: "ada", tokenSecretName: "GITHUB_TOKEN", scopes: ["repo"],
+  });
+  const instB = await github.linkAccount(B, {
+    accountLogin: "bo", tokenSecretName: "GITHUB_TOKEN", scopes: ["repo"],
+  });
+
+  check((await github.installations(A)).length === 1, "A holds one grant");
+  check(
+    (await github.installations(A)).every((i) => i.account_login !== "bo"),
+    "...and it is not B's account",
+  );
+  check(
+    (await github.installation(A, instB.id)) === undefined,
+    "B's grant does not resolve by id in A's context",
+  );
+
+  await github.link(A, {
+    agentId: agentA.id, installationId: instA.id, repoFullName: "ada/weather", branch: "jaroku/weather",
+  });
+  await github.link(B, {
+    agentId: agentB.id, installationId: instB.id, repoFullName: "bo/weather", branch: "jaroku/weather",
+  });
+
+  check(
+    (await github.linkFor(A, agentA.id))?.repo_full_name === "ada/weather",
+    "each workspace's link names its OWN repository",
+  );
+  check(
+    (await github.linkFor(A, agentB.id)) === undefined,
+    "...and B's agent id resolves to nothing in A's context, same slug or not",
+  );
+  check((await github.links(A)).length === 1, "A's Synced list holds one link");
+
+  // The mutation that matters. A aims at B's real link id and tries to repoint it.
+  const bLink = (await github.linkFor(B, agentB.id))!;
+  await github.patchLink(A, bLink.id, { lastKnownRemoteSha: "deadbeef" });
+  check(
+    (await github.linkFor(B, agentB.id))?.last_known_remote_sha === null,
+    "A cannot move B's remote watermark",
+  );
+  await github.unlink(A, agentB.id);
+  check((await github.linkFor(B, agentB.id)) !== undefined, "...nor unlink B's agent");
+  await github.revokeAccount(A, instB.id, "by A");
+  check((await github.installations(B)).length === 1, "...nor revoke B's GitHub grant");
+
+  // The history. A record of who pushed what and who overrode a refusal is exactly the row an
+  // audit reads back, and a cross-tenant read of it is a timeline of another team's work.
+  await github.record(B, { agentId: agentB.id, linkId: bLink.id, kind: "push", commitSha: "b1b1b1b" });
+  check((await github.events(B, agentB.id)).length === 1, "B's push is in B's history");
+  check((await github.events(A, agentB.id)).length === 0, "...and in nobody else's");
+}
+
 // --- run it -------------------------------------------------------------------------------
 
 const tmp = mkdtempSync(join(tmpdir(), "jaroku-tenancy-"));
@@ -1111,6 +1206,7 @@ const tmp = mkdtempSync(join(tmpdir(), "jaroku-tenancy-"));
     await remainder(db);
     await storageIsolation(db);
     await connectorIsolation(db);
+    await githubIsolation(db);
   } finally {
     await db.close();
   }
@@ -1122,6 +1218,7 @@ await withScratchPostgres(async (db) => {
   await remainder(db);
   await storageIsolation(db);
   await connectorIsolation(db);
+  await githubIsolation(db);
 });
 
 coverage();

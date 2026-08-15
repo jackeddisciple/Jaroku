@@ -101,6 +101,15 @@ export const EXPORTED_TABLES = [
   // own operational record, and it is exactly the sort of thing somebody leaving wants to keep.
   "secret_usages",
   "secret_rotations",
+  // WHICH REPOSITORY EACH AGENT BELONGS TO, and everything that has been pushed or pulled since.
+  // Both are the workspace's own operational record and neither holds a credential:
+  // `github_links` names a repo, a branch and two shas, and `github_events` is a log of actions
+  // somebody in this workspace took. A team leaving with their agents wants to know where the
+  // code went, and the force-override rows are exactly the sort of thing an audit later asks for.
+  //
+  // `github_installations` is deliberately absent — see EXCLUDED_TABLES.
+  "github_links",
+  "github_events",
 ] as const;
 
 /**
@@ -127,6 +136,8 @@ export const EXCLUDED_TABLES: Record<string, string> = {
     "a passcode hash, its salt and its lockout counters. A credential digest is still a credential — and exporting the lockout state would say who is being attacked and when",
   secret_elevations:
     "short-lived authorisations for the secrets surface, hashed at rest and dead within ten minutes. Meaningless outside the moment, exactly as ws_tickets is",
+  github_installations:
+    "a pointer to a GitHub credential in the vault, plus the scopes it was granted. It is a credential reference in the same sense secret_refs is, and the useful half — which repo each agent is linked to — is carried by github_links, which is exported",
 };
 
 /**
