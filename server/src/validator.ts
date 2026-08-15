@@ -8,7 +8,7 @@
 // These checks mirror the hard rules in prompt.ts. The prompt asks; this enforces.
 
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 import type { Manifest } from "./mcpManifest.ts";
 import { LocalCodeCheckSandbox, type CodeCheckSandbox } from "./sandbox/codeCheck.ts";
 
@@ -43,13 +43,30 @@ const ENV_KEY = /os\.environ(?:\.get)?\s*[[(]\s*["']([A-Z0-9_]+)["']/g;
 // after an agent's first deploy, for code no model wrote.
 const REVIEWED_HOST_PY = ["serve.py"];
 
+/**
+ * Every `.py` in the project, as a project-relative path with FORWARD SLASHES on every platform.
+ *
+ * The separator is the whole point of this comment. These paths are compared against `reviewed` —
+ * the list of connector templates and host files that were copied in verbatim and must not be
+ * validated as though a model had written them — and that list is built in `generator.ts` as
+ * `` `tools/${c.file}` ``: a forward slash, hardcoded, on every platform. `relative()` answers with
+ * the platform's own separator, so on Windows this returned `tools\postgres.py`, matched nothing in
+ * `reviewed`, and every audited connector template was handed to the generated-code rules.
+ *
+ * What that looks like from the outside is not a path bug. It is rule 6 firing on the reviewed file
+ * itself — "tools\postgres.py defines 'pg_query', which is the name of a reviewed connector tool" —
+ * and the whole generation being refused and discarded. Any agent with a connector, on Windows.
+ *
+ * Normalised here, where the path is taken, rather than at each comparison: the same fix and the
+ * same reasoning as the exemption map in `boundary.test.ts`.
+ */
 function pythonFiles(dir: string, base = dir): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir)) {
     if (entry === "__pycache__") continue;
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) out.push(...pythonFiles(full, base));
-    else if (entry.endsWith(".py")) out.push(relative(base, full));
+    else if (entry.endsWith(".py")) out.push(relative(base, full).split(sep).join("/"));
   }
   return out;
 }
@@ -94,7 +111,12 @@ for dirpath, dirnames, filenames in os.walk(root):
         if not name.endswith(".py"):
             continue
         path = os.path.join(dirpath, name)
-        rel = os.path.relpath(path, root)
+        # FORWARD SLASHES, on every platform, for the same reason pythonFiles normalises: rel is
+        # matched against "reviewed", which is built as "tools/<file>" with a hardcoded slash.
+        # relpath answers with the platform separator, so on Windows nothing ever matched and
+        # every audited connector template was linted as model output — which is rule 6 accusing
+        # the reviewed file of shadowing its own reviewed tool, and the generation discarded.
+        rel = os.path.relpath(path, root).replace(os.sep, "/")
         try:
             tree = ast.parse(open(path, encoding="utf-8").read(), filename=rel)
         except SyntaxError as e:
