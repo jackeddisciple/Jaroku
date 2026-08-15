@@ -89,7 +89,7 @@ import { McpRegistry } from "./mcpRegistry.ts";
 import { MCP_DISCOVER_CLASS, McpDiscoveryQueue } from "./mcpDiscovery.ts";
 import { WorkspaceExporter } from "./lifecycle/export.ts";
 import { lifecycleRoutes } from "./http/lifecycle.ts";
-import { secretsRoutes, type SecretsCaller } from "./http/secrets.ts";
+import { mountSecretsRoutes, type SecretsCaller } from "./http/secrets.ts";
 import { ELEVATION_HEADER, SecretElevations, sessionIdFor } from "./secrets/elevation.ts";
 import { SecretPasscodes } from "./secrets/passcode.ts";
 import { SecretElevationRepository } from "./db/repositories/secretElevations.ts";
@@ -1890,7 +1890,7 @@ recordRuntimeRead = async (workspaceId, names) => {
  */
 const STEP_UP_MAX_AGE_S = 5 * 60;
 
-for (const route of secretsRoutes({
+mountSecretsRoutes(router, {
   callerFor: async (req): Promise<SecretsCaller> => {
     const bearer = TokenVerifier.bearer(req.header("authorization")) ?? "";
     const auth = await authenticate(req, tokenVerifier);
@@ -2018,12 +2018,7 @@ for (const route of secretsRoutes({
       `[secrets] ${caller.userId} in ${caller.ctx.workspaceId} is locked out of secrets until ${until ?? "unknown"}`,
     );
   },
-})) {
-  if (route.method === "GET") router.get(route.path, route.handler);
-  else if (route.method === "PATCH") router.patch(route.path, route.handler);
-  else if (route.method === "DELETE") router.del(route.path, route.handler);
-  else router.post(route.path, route.handler);
-}
+});
 
 const relay = new WsRelay({
   port: PORT,

@@ -33,7 +33,7 @@ import { SecretUsageRepository } from "../db/repositories/secretUsages.ts";
 import { SecretElevationRepository } from "../db/repositories/secretElevations.ts";
 import { SecretPasscodeRepository } from "../db/repositories/secretPasscodes.ts";
 import { Router } from "../http/router.ts";
-import { secretsRoutes, type SecretsCaller } from "../http/secrets.ts";
+import { mountSecretsRoutes, type SecretsCaller } from "../http/secrets.ts";
 import { ELEVATION_HEADER, SecretElevations, sessionIdFor } from "./elevation.ts";
 import { SecretPasscodes } from "./passcode.ts";
 import { SecretsManager } from "./manager.ts";
@@ -98,7 +98,10 @@ const passcodes = new SecretPasscodes({ passcodes: new SecretPasscodeRepository(
 let freshLogin = false;
 
 const router = new Router();
-for (const route of secretsRoutes({
+// THROUGH THE SHARED MOUNT, not a loop of its own. A test that spells the registration out itself
+// is a test that cannot see the server spelling it out differently — which is exactly how the
+// name-addressed routes came to be mounted as exact paths in `index.ts` while this suite passed.
+mountSecretsRoutes(router, {
   // The real resolution shape: a bearer token becomes a workspace and a user, and the session is a
   // digest of the token. What is stubbed is the JWT verification, not the mapping.
   callerFor: async (req): Promise<SecretsCaller> => {
@@ -137,13 +140,7 @@ for (const route of secretsRoutes({
     });
     return receipt ? manager.reveal(receipt, name) : null;
   },
-})) {
-  if (route.prefix) router.prefixRoute(route.method, route.path, route.handler);
-  else if (route.method === "GET") router.get(route.path, route.handler);
-  else if (route.method === "PATCH") router.patch(route.path, route.handler);
-  else if (route.method === "DELETE") router.del(route.path, route.handler);
-  else router.post(route.path, route.handler);
-}
+});
 
 const server: Server = createServer((req, res) => {
   void router.handle(req, res).then((handled) => {
@@ -282,6 +279,27 @@ try {
     );
     const noElevation = await call(A, "POST", "/v1/secrets/ANTHROPIC_API_KEY/reveal");
     check(noElevation.status === 403, "and refuses without it");
+
+    // EVERY NAME-ADDRESSED ROUTE, HIT AT A REAL PATH. These are the ones declared `prefix: true`,
+    // and a mount that registers them as exact paths answers 404 to all five while every handler
+    // test still passes. Asserting "not 404" rather than a status is the point: what is being
+    // proved here is that the route was reached at all.
+    for (const [method, path] of [
+      ["POST", "/v1/secrets/ANTHROPIC_API_KEY/rotate"],
+      ["POST", "/v1/secrets/ANTHROPIC_API_KEY/test"],
+      ["POST", "/v1/secrets/ANTHROPIC_API_KEY/reveal"],
+      ["GET", "/v1/secrets/ANTHROPIC_API_KEY/usage"],
+      ["DELETE", "/v1/secrets/NOTHING_IS_STORED_HERE"],
+    ] as const) {
+      const answer = await call(A, method, path, {
+        elevation,
+        ...(method === "GET" ? {} : { body: { value: SECRET_A } }),
+      });
+      // An unmounted path never reaches the router's error envelope at all — `handle` returns
+      // false and the bare 404 above carries no body. A mounted one always answers in the
+      // envelope, whatever it decides.
+      check(answer.text !== "", `${method} ${path} is mounted`, `${answer.status} with an empty body`);
+    }
   }
 
   // --- 6. one tenant cannot reach another's -------------------------------------------------------

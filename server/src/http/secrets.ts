@@ -44,7 +44,7 @@ import { isSecretName } from "../secrets/secretStore.ts";
 import { parseSecretBundle, validateBundle } from "../secrets/bundle.ts";
 import type { SecretSummary } from "../secrets/manager.ts";
 import type { UsageRow as UsageSite } from "../db/repositories/secretUsages.ts";
-import { HttpError, badRequest, notFound, type Handler, type HttpRequest, type HttpResponse } from "./router.ts";
+import { HttpError, badRequest, notFound, type Handler, type HttpRequest, type HttpResponse, type Router } from "./router.ts";
 
 /** Which policy a workspace is on. Both implemented; `tab` is the default and what ships. */
 export type SecretsGate = "tab" | "mutations";
@@ -696,6 +696,33 @@ export function secretsRoutes(deps: SecretsRouteDeps): SecretsRoute[] {
       }),
     },
   ];
+}
+
+/**
+ * Put the group on a router.
+ *
+ * ONE FUNCTION, USED BY THE SERVER AND BY EVERY TEST THAT DRIVES ONE, and that is the whole reason
+ * it exists rather than each caller writing the four-line loop for itself. Three of these routes are
+ * addressed by a NAME in the path — rotate, test, reveal, usage, revoke — so they are declared
+ * `prefix: true` and must be mounted with `prefixRoute`. A caller that spells the loop out and
+ * forgets that one branch registers them as exact paths instead, and then `/v1/secrets/NAME/rotate`
+ * matches nothing: the handler is correct, the guard is correct, the audit is correct, and the
+ * feature is a 404. That is the shape of bug a test suite with its own copy of the loop cannot see,
+ * because its copy is the one that is right.
+ *
+ * So the loop lives here, next to the table it reads, and there is nowhere left for the two to
+ * disagree.
+ */
+export function mountSecretsRoutes(router: Router, deps: SecretsRouteDeps): SecretsRoute[] {
+  const routes = secretsRoutes(deps);
+  for (const route of routes) {
+    if (route.prefix) router.prefixRoute(route.method, route.path, route.handler);
+    else if (route.method === "GET") router.get(route.path, route.handler);
+    else if (route.method === "PATCH") router.patch(route.path, route.handler);
+    else if (route.method === "DELETE") router.del(route.path, route.handler);
+    else router.post(route.path, route.handler);
+  }
+  return routes;
 }
 
 /** The three origins, read from a request body without trusting it. */
