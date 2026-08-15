@@ -26,6 +26,7 @@ import { fmtDuration } from "../lib/format.ts";
 import { useGithubStore, type GithubProgress } from "../store/githubStore.ts";
 import type { GithubRefusal, GithubView } from "../types.ts";
 import { ActionRow, type ActionState } from "./ActionRow.tsx";
+import { DisabledReason, ENABLED, firstReason, type DisabledState } from "./DisabledReason.tsx";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { Truncate } from "./Truncate.tsx";
 import {
@@ -137,8 +138,34 @@ function VerdictLine({ view }: { view: GithubView }) {
  * rather than as finished.
  */
 function PrimaryAction({ view, squash }: { view: GithubView; squash: boolean }) {
+  const progress = useGithubStore((s) => s.progress[view.agentId]);
+
+  // §A.2's table, for the two controls in this region.
+  //
+  // A REVOKED TOKEN DISABLES PUSH WITH A SENTENCE rather than hiding the button. Hiding it would
+  // make a workspace whose credential expired look like a workspace that has nothing to push,
+  // which is the most confusing possible reading of ↑2 sitting in the tab bar beside it.
+  const revoked: DisabledState =
+    view.reason === "token_revoked"
+      ? { reason: "GitHub access was revoked — reconnect to push." }
+      : ENABLED;
+  // A validation already running. Its own reason rather than a spinner, because the useful thing
+  // to say is that one is in flight and can be waited out — not merely that this is unavailable.
+  const validating: DisabledState =
+    progress?.op === "pull" && progress.current !== null
+      ? { reason: "A pull is already validating — wait for it to finish." }
+      : ENABLED;
+  const pushing: DisabledState =
+    progress?.op === "push" && progress.current !== null
+      ? { reason: "A push is already running for this agent." }
+      : ENABLED;
+
   switch (view.state) {
     case "in_sync":
+      // NO PUSH AND NO PULL BUTTON AT ALL. §3.5 omits both for ✓, and §A.2's own table says so
+      // explicitly — a control whose only state is unavailable reads as broken rather than as
+      // finished, which is the one case where rendering the reason would be worse than rendering
+      // nothing.
       return (
         <button
           className={`${quietBtn} shrink-0`}
@@ -148,22 +175,35 @@ function PrimaryAction({ view, squash }: { view: GithubView; squash: boolean }) 
           <RefreshIcon size={ICON.xs} />
         </button>
       );
-    case "ahead":
+    case "ahead": {
+      const state = firstReason(revoked, pushing);
       return (
-        <button className={`${primaryBtn} shrink-0`} onClick={() => sendPushGithub(view.agentId, { squash })}>
-          Push {view.ahead} version{view.ahead === 1 ? "" : "s"}
-        </button>
+        <DisabledReason state={state} className="shrink-0 items-end">
+          <button
+            className={primaryBtn}
+            disabled={Boolean(state.reason)}
+            onClick={() => sendPushGithub(view.agentId, { squash })}
+          >
+            Push {view.ahead} version{view.ahead === 1 ? "" : "s"}
+          </button>
+        </DisabledReason>
       );
-    case "behind":
+    }
+    case "behind": {
+      const state = firstReason(revoked, validating);
       return (
-        <button
-          className={`${primaryBtn} shrink-0`}
-          title="Stages the remote tree as a candidate version and validates it before anything is published."
-          onClick={() => sendPullGithub(view.agentId)}
-        >
-          Pull into Jaroku
-        </button>
+        <DisabledReason state={state} className="shrink-0 items-end">
+          <button
+            className={primaryBtn}
+            disabled={Boolean(state.reason)}
+            title="Stages the remote tree as a candidate version and validates it before anything is published."
+            onClick={() => sendPullGithub(view.agentId)}
+          >
+            Pull into Jaroku
+          </button>
+        </DisabledReason>
       );
+    }
     case "diverged":
       // NOT "MERGE". Jaroku does not ship a three-way merge editor — §3.7 — because every file
       // resolved in a hand-rolled merge UI is a file that bypassed the validator on the way in.
