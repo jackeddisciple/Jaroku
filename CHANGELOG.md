@@ -8,6 +8,100 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.2.15 : GitHub Integration
+
+Jaroku already had a version lineage. Git has one too. This release is not "git inside Jaroku" —
+it is the place where the relationship between the two is legible at every moment, and every
+decision in it follows from treating GitHub as a second lineage rather than as a file store.
+Jaroku owns `agent_versions`; the repository owns its commits; the panel's job is to say what each
+side has that the other does not, and to never resolve that on anybody's behalf.
+
+### Added
+
+- **A GitHub tab**, per agent, with four regions in one deliberate order — identity, verdict,
+  changes, history. "Am I okay?" is answered in the second region without scrolling, and everything
+  below it exists to explain that answer. All four are views of ONE reconciliation, computed
+  together and sent as one snapshot, because a panel that can show "in sync" above two unpushed
+  versions has broken the only promise the feature makes.
+- **Linking**, to a repository created on the spot or an existing one, with a branch, an optional
+  subdirectory for monorepos, and a checkbox for the deploy artifacts. The existing-repo list is
+  filtered server-side to repositories the token can WRITE to — offering a read-only one would
+  produce a successful link whose first push fails, which moves a refusal from the moment of
+  choosing to the moment of working.
+- **Six sync states and exactly six**, each with one primary action: `unlinked`, `in_sync`,
+  `ahead`, `behind`, `diverged`, `broken`, plus `syncing` while a request is in flight. Ahead is
+  counted in VERSIONS, locally, exactly. Behind is counted in COMMITS, remotely, and is only ever
+  approximate until somebody fetches — so an uncounted "behind" renders as `↓` rather than as `↓0`,
+  which is a different claim.
+- **Push, as the Git Data API and not the contents endpoint.** `PUT /contents` writes one file per
+  commit, so a version touching three files would be three commits and two intermediate states that
+  never existed. A tree, a commit object and one ref move means the whole version lands or none of
+  it does. One commit per version by default; squash is opt-in per push and never a stored
+  preference, because the lineage is the product's own record and a default that collapsed it would
+  be the feature undoing its own premise.
+- **Pull, held to the identical bar as generated code.** The remote tree is staged as a candidate
+  version and put through the same parse · import · contract validation every generation passes.
+  A failure is a refusal, not a warning: the candidate is discarded, the pointer never moves, and
+  the card says which file, which check, and that the agent is unchanged.
+- **Protected paths**, enforced against a third door. Reviewed connector templates, the MCP bridge
+  and its manifest are read-only in the edit loop and in the object store; a pull is the one route
+  into them that comes from outside the product entirely, and a remote hand-edit to them is refused
+  rather than applied.
+- **Divergence detection with no merge editor.** A rewritten remote is `diverged` and never
+  `behind` — the watermark is compared rather than the last pushed sha, so a force-push reads as
+  "the remote moved sideways" instead of inviting a pull that would adopt a history in which
+  Jaroku's commits never existed. Reconciliation is a pull request, because every file resolved in
+  a hand-rolled merge UI is a file that bypassed the validator on the way in.
+- **Migration 034**: separate tables for the grant, the per-agent link, and an append-only event
+  log with no update counterpart. Every statement carries `workspace_id` in its WHERE even where
+  the uuid alone would do — on SQLite there is no RLS, so that clause IS the tenancy boundary.
+- **Composer attachments** (`#` a commit, `@` a file at a ref, `!` what changed since the last
+  sync), resolved server-side at send time so an attachment made five minutes ago describes the
+  repository as it IS. Attaching brings context in and nothing on that path can trigger a write.
+- **A Synced filter** in the sidebar, a tab badge carrying the delta so nobody opens the tab to
+  find out there is nothing to do, and per-agent collapse state keyed by workspace.
+- Suites: `test:github-sync` and `test:github-push`, plus `test:truncate-path` and
+  `test:composer-triggers` on the client.
+
+### Changed
+
+- **The credential is a pasted token in the existing vault**, not a catalogue OAuth connector. It
+  goes one way, over HTTPS, into the same store behind the same passcode gate, and what comes back
+  is an account login. Connect and disconnect are HTTP routes rather than socket commands, because
+  a browser cannot set an elevation header on a WebSocket and a GitHub token can read every private
+  repository somebody owns.
+- **Jaroku pushes to `jaroku/<slug>` and never to a default branch.** A user may point a link at
+  `main` — it is their repository — but nothing in the product proposes it.
+- **A disabled control states its reason.** Commit, Push, Commit & push and Pull each name the
+  exact thing that is wrong instead of greying out, which is the silent failure the rest of this
+  product avoids by name. Push stays visible and disabled when a token is revoked, because hiding
+  it makes an agent with two unpushed versions look finished.
+- **Fetch and the panel's own refresh are one read.** Two commands would be two answers about one
+  remote. It moves what Jaroku last SAW and never what it last DID, which is what makes it safe to
+  fire on panel open.
+
+### Fixed
+
+- **A force-push is `diverged`, not `behind`.** Zero commits between the two heads reads as in
+  sync, and is the one case where a pull destroys work.
+- **Deletions are derived from the tree comparison.** `file_stats` has no `deleted` status, so a
+  tool the user removed would otherwise live on in their repository forever.
+- **A subdirectory push inherits everything outside itself.** Without `base_tree` the new tree is
+  the WHOLE repository, so pushing `agents/weather/` into a monorepo would delete every other
+  directory in one commit.
+- **A truncated recursive tree is an error rather than a diff.** GitHub cuts the response off at
+  its own limit and says so in one boolean; ignoring it would report the missing half as deleted.
+- **A commit sha is not a tree sha.** Both are forty hex characters, so the mistake typechecks and
+  arrives as a mysterious 422 at the step of a push where a mysterious failure costs most.
+- **A rate limit is told apart from a permission failure by the header, not the body.** GitHub
+  answers 403 for both, and getting it wrong sends somebody to re-authorise a token that works.
+- **Paths truncate in the middle.** A right-edge fade makes `tools/we…` and `tools/tr…` the same
+  string to anybody scanning a list for a filename.
+- **`#`, `@` and `!` fire only where they are triggers** — a picker that opens while somebody is
+  typing an email address is worse than no shortcut at all.
+
+---
+
 ## v0.2.14 : The Secrets Tab
 
 A credential surface, and the gate in front of it. Session 9 is not a new store — the vault, its
