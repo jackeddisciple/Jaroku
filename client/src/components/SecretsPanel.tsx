@@ -40,6 +40,8 @@ import {
   lockNow,
 } from "../lib/secrets.ts";
 import { formatRemaining, holdForElevation, isFinalMinute, useSecretsStore } from "../store/secretsStore.ts";
+import { useUiStore } from "../store/uiStore.ts";
+import { useProviderStore } from "../store/providerStore.ts";
 
 /** How often the gate state is re-read. Also the countdown's correction against the server. */
 const POLL_MS = 15_000;
@@ -107,6 +109,24 @@ export function SecretsPanel() {
   const [importing, setImporting] = useState(false);
   const [changingPasscode, setChangingPasscode] = useState(false);
   const hiddenSince = useRef<number | null>(null);
+
+  // ARRIVING FROM A DEAD END RATHER THAN FROM THE TAB BAR. §5.2: the way out of a model with no key
+  // opens this tab "with the add dialog pre-opened for that provider", and switching the tab used
+  // to be the whole of it — somebody landed on a list and had to work out that Add was next, and
+  // then which UPPER_SNAKE_CASE name the provider wanted. Consumed once and cleared, because it
+  // describes a navigation that has happened: left set, the form would reopen on every visit.
+  const addProvider = useUiStore((s) => s.secretsAddProvider);
+  const clearAddProvider = useUiStore((s) => s.clearSecretsAddProvider);
+  const [arrivedFor, setArrivedFor] = useState<string | null>(null);
+  const arrivedForProvider = useProviderStore((s) => s.providers.find((p) => p.id === arrivedFor) ?? null);
+  useEffect(() => {
+    if (addProvider === null && arrivedFor === null) return;
+    setAdding(true);
+    setArrivedFor(addProvider);
+    clearAddProvider();
+    // `addProvider` only; re-running on `arrivedFor` would reopen the form the moment it is closed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addProvider]);
 
   // Under `mutations` the metadata list is readable without elevation, so the content renders
   // while locked and only the verbs are gated. Under `tab` — the default, and what ships —
@@ -272,7 +292,18 @@ export function SecretsPanel() {
               </button>
             </div>
 
-            {adding ? <AddForm onDone={() => { setAdding(false); void refresh(); }} /> : null}
+            {adding ? (
+              <AddForm
+                // Keyed on the provider, so arriving for a SECOND one while the form is already
+                // open remounts it with the new name rather than leaving the first one in the field.
+                key={arrivedForProvider?.env_key ?? "manual"}
+                // Pre-filled when the tab was reached from a model the workspace has no key for.
+                // §5.2 asks for the dialog "pre-opened for that provider", and the provider's own
+                // variable name is the part somebody would otherwise have to know.
+                initialName={arrivedForProvider?.env_key ?? ""}
+                onDone={() => { setAdding(false); void refresh(); }}
+              />
+            ) : null}
             {importing ? <ImportForm onDone={() => { setImporting(false); void refresh(); }} /> : null}
             {changingPasscode ? (
               <PasscodeForm onDone={() => { setChangingPasscode(false); void refresh(); }} />
@@ -286,8 +317,8 @@ export function SecretsPanel() {
   );
 }
 
-function AddForm({ onDone }: { onDone: () => void }) {
-  const [name, setName] = useState("");
+function AddForm({ initialName = "", onDone }: { initialName?: string; onDone: () => void }) {
+  const [name, setName] = useState(initialName);
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const setError = useSecretsStore((s) => s.setError);

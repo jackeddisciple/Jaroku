@@ -134,6 +134,23 @@ interface UiState {
   rightTab: RightTab;
   setRightTab: (t: RightTab) => void;
 
+  /**
+   * Which provider the Secrets tab should open its add form for, when it was reached from a dead
+   * end rather than from the tab bar.
+   *
+   * §5.2: `+ Add a provider key…` opens the Secrets tab "with the add dialog pre-opened for that
+   * provider". Switching the tab was the whole of what happened, so somebody who clicked out of a
+   * disabled model arrived at a list and had to work out for themselves that the next step was
+   * Add, then which UPPER_SNAKE_CASE name the provider wanted.
+   *
+   * A one-shot intent rather than persistent state, cleared by whoever consumes it: it describes a
+   * navigation that has happened, not a preference. Left set, the add form would reopen every time
+   * somebody came back to the tab.
+   */
+  secretsAddProvider: string | null;
+  openSecretsForProvider: (providerId: string | null) => void;
+  clearSecretsAddProvider: () => void;
+
   // Bumped to ask the chat composer to take focus (Cmd+/). A nonce, not a boolean, so repeated
   // requests always fire an effect.
   focusChatNonce: number;
@@ -196,6 +213,11 @@ export const useUiStore = create<UiState>((set) => ({
 
   rightTab: "trace",
   setRightTab: (rightTab) => set({ rightTab }),
+
+  secretsAddProvider: null,
+  // Both fields in one call, so the tab and the reason for being there can never be set apart.
+  openSecretsForProvider: (secretsAddProvider) => set({ rightTab: "secrets", secretsAddProvider }),
+  clearSecretsAddProvider: () => set({ secretsAddProvider: null }),
 
   focusChatNonce: 0,
   focusChat: () => set((s) => ({ focusChatNonce: s.focusChatNonce + 1 })),

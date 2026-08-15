@@ -258,7 +258,7 @@ function ModelSelector({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const label = provider === "fake" ? "Dry run (free)" : model;
-  const setRightTab = useUiStore((s) => s.setRightTab);
+  const openSecretsForProvider = useUiStore((s) => s.openSecretsForProvider);
   // WHICH PROVIDERS CAN ACTUALLY RUN. `fake` always can — it is the free dry-run path and needs no
   // key, which is the thing this product is rightly proud of. The rest need one in THIS workspace,
   // which `providerStore` already knows from the providers channel.
@@ -304,6 +304,23 @@ function ModelSelector({
               <div className={`flex items-center gap-1.5 px-2 pb-1 pt-0.5 ${TYPE.sectionLabel}`}>
                 <ProviderMark provider={p.id} size={10} />
                 {p.label}
+                {/* THE WAY OUT, ATTACHED TO THE PROVIDER IT IS ABOUT. The models below are disabled
+                    with a reason, which is right — a model that vanishes reads as unsupported — but
+                    a disabled control cannot also be the fix. §5.2 asks that the way out open the
+                    add dialog FOR THAT PROVIDER, and it can only carry which provider if it lives
+                    beside one. */}
+                {!usableProviders.has(p.id) ? (
+                  <button
+                    type="button"
+                    className="ml-auto text-[10px] text-muted underline-offset-2 hover:text-ink hover:underline"
+                    onClick={() => {
+                      openSecretsForProvider(p.id);
+                      setOpen(false);
+                    }}
+                  >
+                    Add key
+                  </button>
+                ) : null}
               </div>
               {p.models.map((m) => {
                 const active = provider === p.id && model === m;
@@ -348,7 +365,9 @@ function ModelSelector({
           <button
             type="button"
             onClick={() => {
-              setRightTab("secrets");
+              // No provider named: this one sits under every group, so it opens the tab and the
+              // add form without claiming to know which key somebody came for.
+              openSecretsForProvider(null);
               setOpen(false);
             }}
             className="mt-1 flex w-full items-center gap-1.5 rounded-control border-t border-hair px-2 pt-2 pb-1 text-left text-[12px] text-muted transition-colors duration-fast hover:text-ink"
