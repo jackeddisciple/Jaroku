@@ -458,6 +458,18 @@ export function GithubIcon({ size = ICON.sm, className }: P) {
   );
 }
 
+/**
+ * lucide:minus — a deleted file.
+ *
+ * U+2212 IS THE GLYPH DiffStat USES for the same idea in text, and this is the same idea as a
+ * drawn mark. Kept as a stroke rather than a character so it sits in the icon column at the icon
+ * weight, beside the plus, rather than on the text baseline at whatever weight the row happens to
+ * be — which is the artefact promoting these to their own column exists to remove.
+ */
+export function MinusIcon(p: P) {
+  return svg(p, <path d="M5 12h14" />);
+}
+
 /** lucide:arrow-up — ahead, and the push half of §A.8's split button. */
 export function ArrowUpIcon(p: P) {
   return svg(p, <><path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></>);

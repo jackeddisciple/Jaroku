@@ -26,7 +26,12 @@ import {
   DatabaseIcon,
   EyeIcon,
   GitBranchIcon,
+  GithubIcon,
+  LockIcon,
+  MinusIcon,
+  PencilIcon,
   PlugIcon,
+  PlusIcon,
   SearchIcon,
   ShieldCheckIcon,
   SparklesIcon,
@@ -153,3 +158,75 @@ export function actionForToolOrigin(origin: "connector" | "bespoke" | "mcp"): Ac
 export function actionForFile(path: string): ActionDescriptor {
   return { ...ACTION.write, Icon: iconForPath(path) };
 }
+
+// ── What happened to a file ─────────────────────────────────────────────────
+//
+// A SECOND SEMANTIC AXIS, and the reason it needs its own column.
+//
+// A file row used to carry ONE icon slot doing double duty: the file-type mark told you it was
+// Python and, by sitting in a section headed STAGED, told you it had changed. A fresh file and a
+// modified one therefore read identically at a glance unless you had already looked up at the
+// section header — an extra lookup the row should not require, and one that gets more expensive
+// the longer the list gets.
+//
+// So a row has two icon columns now, and they answer two different questions: a LEADING status
+// glyph for what happened, and a TRAILING file-type icon for what it is. Same stroke weight, same
+// size, different axes — the icon/verb/object shape ActionRow already establishes for trace steps,
+// applied to files instead of steps.
+//
+// ONE GLYPH, ONE MEANING, NO REUSE. That is the whole discipline of this registry and the reason it
+// is a table rather than five inline conditionals. `+`, `✎` and `−` already existed as the diff
+// stat's marks and are PROMOTED here rather than redrawn; the fork and the lock are the two genuine
+// additions, and both mean something no existing mark could be stretched to cover.
+
+export type FileStatus =
+  /** New here, and not on the other side yet. */
+  | "added"
+  | "modified"
+  | "deleted"
+  /**
+   * Arrived from GitHub and not yet reconciled.
+   *
+   * DISTINCT FROM `added`, and the distinction is the point: a file somebody else wrote is a
+   * different fact from a file this workspace wrote, and it is the one that has not been through
+   * Jaroku's validator yet. Collapsing the two would hide exactly the rows a pull's refusal is
+   * about.
+   */
+  | "remote"
+  /**
+   * Reviewed code the edit loop and the staging area cannot touch.
+   *
+   * NOT A CHANGE AT ALL, which is why it is in this vocabulary rather than beside it: the row still
+   * has to say something in the status column, and leaving it blank would read as "nothing happened
+   * to this file" when the truth is "nothing CAN happen to this file here".
+   */
+  | "protected";
+
+export interface FileStatusDescriptor {
+  Icon: (p: { size?: number }) => React.ReactElement;
+  /** The one-word meaning, for a title attribute and for a screen reader. */
+  label: string;
+  accent: string;
+}
+
+const FILE_STATUS: Record<FileStatus, FileStatusDescriptor> = {
+  // Green and red are borrowed from DiffStat, where they already mean added and removed. A third
+  // vocabulary for the same two ideas would be the thing this registry exists to prevent.
+  added: { Icon: PlusIcon, label: "new file", accent: STATUS.ok },
+  modified: { Icon: PencilIcon, label: "modified", accent: TEXT.muted },
+  deleted: { Icon: MinusIcon, label: "deleted", accent: STATUS.error },
+  // Neither ok nor error: it is somebody else's work, pending. The state accent — the colour this
+  // app already uses for "the agent's own shape" — is the closest honest reading, and deliberately
+  // not amber, which means running.
+  remote: { Icon: GithubIcon, label: "arrived from GitHub, not yet reconciled", accent: ACCENT.state },
+  // The reviewed teal, which already means audited-and-read-only everywhere else in this app.
+  protected: { Icon: LockIcon, label: "protected — the edit loop and staging cannot touch it", accent: ACCENT.reviewed },
+};
+
+/** The one lookup for a file's status mark. */
+export function fileStatusFor(status: FileStatus): FileStatusDescriptor {
+  return FILE_STATUS[status];
+}
+
+/** Every registered status, for a legend or a test that asserts the vocabulary has not grown. */
+export const FILE_STATUSES = Object.keys(FILE_STATUS) as FileStatus[];
