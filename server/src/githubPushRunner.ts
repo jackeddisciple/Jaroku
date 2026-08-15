@@ -25,7 +25,10 @@
 import { GithubError, type GithubApi } from "./githubApi.ts";
 import type { GithubLink, GithubRepository } from "./db/repositories/github.ts";
 import type { GithubIdentity } from "./githubIdentity.ts";
-import { PUSH_STAGES, planPush, repoPath, type PlannedCommit, type VersionSnapshot } from "./githubPush.ts";
+import {
+  PUSH_STAGES, planPush, repoPath, withVersionTrailer,
+  type PlannedCommit, type VersionSnapshot,
+} from "./githubPush.ts";
 import { unpushedVersions } from "./githubSync.ts";
 import type { AgentRepository } from "./db/repositories/agents.ts";
 import type { ProjectStore } from "./storage/projectStore.ts";
@@ -40,6 +43,15 @@ export interface PushRequest {
   force?: boolean;
   /** The agent slug, typed by the user. Required whenever `force` is set. */
   confirmSlug?: string;
+  /**
+   * §3.4's commit box, when somebody wrote in it.
+   *
+   * ONLY MEANINGFUL WITH `squash`, and that is a property of the surface rather than a limitation
+   * here: one typed sentence describes one commit, and applying it to each of six would put the
+   * same message on six commits that did different things. The commit box squashes for exactly
+   * this reason, so a message arriving without one is ignored rather than smeared.
+   */
+  message?: string;
 }
 
 export interface PushResult {
@@ -177,6 +189,21 @@ export class GithubPusher {
         squash: req.squash === true,
         remotePaths: baseTree,
       });
+
+      // THE MESSAGE SOMEBODY TYPED WINS OVER THE ONE THIS CODE COMPOSED. The commit box pre-fills
+      // from the version's own instruction and summary, so the two are usually the same sentence —
+      // which is exactly why dropping an edited one was invisible: the commit that landed read
+      // plausibly, and only somebody comparing it against what they had written would notice that
+      // the box was decorative. The trailer is re-attached rather than left to the user, because
+      // the panel identifies its own commits by it.
+      const typed = req.message?.trim();
+      const onlyCommit = plan.commits.length === 1 ? plan.commits[0] : undefined;
+      if (typed && onlyCommit) {
+        onlyCommit.message = withVersionTrailer(
+          typed,
+          snapshots.map((s) => s.version),
+        );
+      }
 
       // 3. THE BLOBS. Deduplicated by content across the whole push: an unchanged file in six
       // consecutive versions is one upload, not six, and git would store one object either way.

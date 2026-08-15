@@ -18,7 +18,10 @@
 
 import type { AgentVersion } from "./db/repositories/agents.ts";
 import type { StoredFile } from "./storage/projectStore.ts";
-import { messageFor, planPush, pushableFiles, repoPath, squashMessageFor, type VersionSnapshot } from "./githubPush.ts";
+import {
+  messageFor, planPush, pushableFiles, repoPath, squashMessageFor, withVersionTrailer,
+  type VersionSnapshot,
+} from "./githubPush.ts";
 
 let failures = 0;
 const check = (ok: boolean, msg: string, detail = ""): void => {
@@ -154,6 +157,26 @@ console.log("\nsquash");
     squashMessageFor([version(11, { instruction: "Only one" })]).startsWith("Only one"),
     "a squash of one is just that version's message, not a range of one",
   );
+}
+
+console.log("\na message somebody typed");
+{
+  const run = [version(11), version(12), version(13)];
+  const typed = withVersionTrailer("Rewrite the retry ladder\n\nBackoff was linear.", run);
+  check(typed.startsWith("Rewrite the retry ladder"), "the typed subject is the commit's subject");
+  check(typed.includes("Backoff was linear."), "...and the typed body survives with it");
+  // The trailer is what `remoteOnlyCommits` identifies a Jaroku commit by. Without it the panel
+  // reports its own commit as somebody else's work on the very next fetch.
+  check(typed.endsWith("Jaroku-Versions: 11-13"), "and the run's trailer is re-attached");
+  check(
+    withVersionTrailer("One version", [version(7)]).endsWith("Jaroku-Version: 7"),
+    "a run of one gets the singular trailer, matching what messageFor writes",
+  );
+  check(
+    withVersionTrailer("Pasted back\n\nJaroku-Versions: 11-13", run).match(/Jaroku-Versions:/g)?.length === 1,
+    "a message that already carries a trailer does not get a second",
+  );
+  check(withVersionTrailer("   ", run) === "Jaroku-Versions: 11-13", "an empty box leaves the trailer alone");
 }
 
 console.log("\nedges");

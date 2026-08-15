@@ -3428,7 +3428,19 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
         if (cmd.push === false) {
           return fail("Jaroku has no local repository to commit into — use push.", agentId);
         }
-        const result = await githubPusher.push(ctx, { agentId, squash: true }, githubStage(ctx, agentId, "push"));
+        // THE MESSAGE IS FORWARDED, which it was not. The box pre-fills from the version's own
+        // instruction, so a commit written from an untouched box read correctly and a commit
+        // written from an edited one read correctly too — as the pre-fill. ✨ generate existed to
+        // fill a field whose contents were then thrown away on the way to the runner.
+        const result = await githubPusher.push(
+          ctx,
+          {
+            agentId,
+            squash: true,
+            ...(typeof cmd.message === "string" && cmd.message.trim() ? { message: cmd.message } : {}),
+          },
+          githubStage(ctx, agentId, "push"),
+        );
         if (!result.ok) fail(result.message ?? "the commit did not complete", agentId);
         await broadcastGithub(ctx, agentId);
         return;

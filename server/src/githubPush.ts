@@ -158,6 +158,32 @@ export function squashMessageFor(versions: AgentVersion[]): string {
   return [subject, "", ...lines, "", `Jaroku-Versions: ${oldest.version}-${newest.version}`].join("\n");
 }
 
+/**
+ * A message a person typed, carrying the trailer a Jaroku commit has to have.
+ *
+ * THE TRAILER IS NOT DECORATION AND IS NOT THE USER'S TO DROP. `githubService.remoteOnlyCommits`
+ * decides which commits on the branch Jaroku wrote by looking for exactly this line — it is the
+ * one signal that survives a rebase, a squash-merge or a repository whose commits are all authored
+ * by one bot account. A commit written from the commit box without it would come back on the next
+ * fetch as a §3.8 hollow dot: a commit the panel reports as somebody else's work, which would then
+ * be counted among what a force push is about to destroy.
+ *
+ * Appended rather than imposed, so somebody who pasted a message that already carries the trailer
+ * — a re-commit, or text copied out of `git log` — does not get two.
+ */
+export function withVersionTrailer(message: string, versions: AgentVersion[]): string {
+  const body = message.trim();
+  const oldest = versions[0];
+  const newest = versions[versions.length - 1];
+  if (!oldest || !newest) return body;
+  if (/^Jaroku-Versions?:/m.test(body)) return body;
+  const trailer =
+    oldest.version === newest.version
+      ? `Jaroku-Version: ${newest.version}`
+      : `Jaroku-Versions: ${oldest.version}-${newest.version}`;
+  return body ? [body, "", trailer].join("\n") : trailer;
+}
+
 function firstLine(text: string): string {
   const line = text.split("\n")[0]?.trim() ?? "";
   return line.length > 72 ? `${line.slice(0, 71)}…` : line || "Agent update";
