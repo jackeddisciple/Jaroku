@@ -17,7 +17,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
-  sendCreateGithubBranch, sendOpenGithubPr, sendSwitchGithubBranch,
+  sendCreateGithubBranch, sendOpenGithubPr, sendShadowRunGithub, sendSwitchGithubBranch,
 } from "../lib/socket.ts";
 import { relTime } from "../lib/format.ts";
 import { useUiStore } from "../store/uiStore.ts";
@@ -120,25 +120,47 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
               <p className="px-2 py-1 text-[11px] text-muted">nothing matches</p>
             ) : (
               branches.map((b) => (
-                <button
+                // A ROW RATHER THAN A BUTTON, since §B.2.1 puts two actions on it. Switch is still
+                // the whole row — it is what somebody opening a branch list came to do — and Run
+                // sits at the end as its own control, because the two are not variations of each
+                // other: one re-materialises the agent's working state and the other throws its
+                // result away.
+                <div
                   key={b.name}
-                  onClick={() => choose(b.name)}
-                  className={`flex w-full items-start gap-2 rounded-control px-2 py-1 text-left transition-colors duration-fast ${
-                    b.current ? "bg-active text-ink" : "text-muted hover:bg-active/40 hover:text-ink"
+                  className={`flex w-full items-start gap-2 rounded-control px-2 py-1 transition-colors duration-fast ${
+                    b.current ? "bg-active text-ink" : "text-muted hover:bg-active/40"
                   }`}
                 >
-                  <span className="inline-flex w-[11px] shrink-0 items-center justify-center pt-[2px]" aria-hidden>
-                    {b.current && <CheckIcon size={ICON.xs} />}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <Truncate className="font-mono text-[11px]" title={b.name}>{b.name}</Truncate>
-                    {b.isDefault && (
-                      // Named rather than hidden. Jaroku never writes to it on its own, and knowing
-                      // which one that is before switching is the point of the label.
-                      <span className="block text-[10px] text-faint">default — Jaroku does not push here</span>
-                    )}
-                  </span>
-                </button>
+                  <button
+                    className="flex min-w-0 flex-1 items-start gap-2 text-left hover:text-ink"
+                    onClick={() => choose(b.name)}
+                    title={b.current ? "Already the linked branch" : `Switch this agent to ${b.name}`}
+                  >
+                    <span className="inline-flex w-[11px] shrink-0 items-center justify-center pt-[2px]" aria-hidden>
+                      {b.current && <CheckIcon size={ICON.xs} />}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <Truncate className="font-mono text-[11px]" title={b.name}>{b.name}</Truncate>
+                      {b.isDefault && (
+                        // Named rather than hidden. Jaroku never writes to it on its own, and knowing
+                        // which one that is before switching is the point of the label.
+                        <span className="block text-[10px] text-faint">default — Jaroku does not push here</span>
+                      )}
+                    </span>
+                  </button>
+                  {/* §B.2.1. The tooltip says what it does NOT do, because that is the question
+                      somebody hovering a Run button next to a Switch button is actually asking. */}
+                  <button
+                    className={`${quietBtn} shrink-0`}
+                    title={`Run ${b.name} once and throw the result away — the published version is untouched`}
+                    onClick={() => {
+                      sendShadowRunGithub(view.agentId, b.name);
+                      setOpen(false);
+                    }}
+                  >
+                    Run ◆
+                  </button>
+                </div>
               ))
             )}
           </div>

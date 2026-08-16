@@ -42,6 +42,7 @@ import { GitHubCommitBox } from "./GitHubCommitBox.tsx";
 import { GitHubSyncRegion, RegionLabel } from "./GitHubSync.tsx";
 import { BranchSwitcher, ChangesRegion, HistoryRegion, PullRequestCard } from "./GitHubHistory.tsx";
 import { RestackRegion, StagingRegion } from "./GitHubStaging.tsx";
+import { ShadowRunsRegion } from "./ShadowRuns.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
 import { EmptyState } from "./EmptyState.tsx";
@@ -587,6 +588,10 @@ function Linked({ view }: { view: GithubView }) {
         onToggle={toggle("history")}
       >
         <PullRequestCard view={view} />
+        {/* §B.2.2's transient list, inside History and above the lineage rather than beside it:
+            these are things that happened to this agent, and they are the only things in this
+            region that did not change it. Renders nothing until somebody runs a ref. */}
+        <ShadowRunsRegion view={view} />
         <div className="mt-4">
           <HistoryRegion view={view} />
         </div>
