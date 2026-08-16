@@ -90,10 +90,33 @@ export class GithubError extends Error {
     readonly operation: string,
     /** Seconds to wait, on a `rate_limited`. Read from GitHub's own header, never guessed. */
     readonly retryAfterS?: number,
+    /**
+     * GitHub's own sentence, on a refusal, kept beside the one this codebase wrote.
+     *
+     * KEPT RATHER THAN DISCARDED because two 403s that need completely different things from the
+     * user are otherwise indistinguishable: "the token does not have write access" and "you must
+     * authenticate via a GitHub App" arrive with the same status, no distinguishing header, and
+     * only this string between them. It is never rendered raw — it is matched on, and the message
+     * the user reads is still one written here.
+     */
+    readonly detail?: string,
   ) {
     super(message);
     this.name = "GithubError";
   }
+}
+
+/**
+ * Whether a refusal was "this endpoint is only for GitHub Apps".
+ *
+ * THE CHECKS API IS APP-ONLY, and that is a fact about GitHub rather than about a token's
+ * permissions. `POST /check-runs` answers 403 "You must authenticate via a GitHub App." to every
+ * personal access token — classic or fine-grained, `repo` scope or not, `checks: write` ticked or
+ * not. Jaroku authenticates as a user with a PAT (see GITHUB_ENV_KEY), so §B.1's check run cannot
+ * be posted by this product as it is built, on any repository, ever.
+ */
+export function needsGithubApp(err: unknown): boolean {
+  return err instanceof GithubError && err.kind === "auth" && /GitHub App/i.test(err.detail ?? "");
 }
 
 export interface GithubAccount {
@@ -236,6 +259,9 @@ export class GithubApi {
       const remaining = response.headers.get("x-ratelimit-remaining");
       const retryAfter = Number(response.headers.get("retry-after") ?? "0");
       const reset = Number(response.headers.get("x-ratelimit-reset") ?? "0");
+      // READ, NOT QUOTED. It rides on the error as `detail` so a caller can tell an app-only
+      // endpoint from a missing permission; nothing renders it, and it is truncated either way.
+      const detail = truncate(await response.text());
       if (response.status === 429 || remaining === "0" || retryAfter > 0) {
         const waitS = retryAfter > 0
           ? retryAfter
@@ -253,6 +279,8 @@ export class GithubApi {
         "auth",
         "GitHub refused: the token does not have write access to this repository.",
         operation,
+        undefined,
+        detail,
       );
     }
     if (response.status === 404) throw new GithubError("not_found", "GitHub has no such repository, branch or commit — or this token cannot see it.", operation);
@@ -771,12 +799,21 @@ export class GithubApi {
   // SUMMARY that GitHub renders inline, which is where "pass-rate 92% → 96%" belongs — on the pull
   // request, next to the build check, without a click.
   //
-  // IT ALSO NEEDS A DIFFERENT TOKEN, and that is worth naming rather than discovering: the Checks
-  // API requires `checks: write`, which a classic PAT with `repo` has and a fine-grained token has
-  // only if it was ticked. The panel recommends fine-grained tokens with `Contents: read and write`
-  // — enough for everything in the base spec and not for this — so a 403 here is a permission the
-  // user has not granted rather than a bug, and `createCheckRun` says so in the one place somebody
-  // will read it.
+  // AND IT NEEDS A KIND OF TOKEN JAROKU DOES NOT HAVE, which is not what the comment here used to
+  // say. It said the Checks API "requires `checks: write`, which a classic PAT with `repo` has" —
+  // and that is wrong in the way that matters. `POST /check-runs` answers 403 "You must
+  // authenticate via a GitHub App." to EVERY personal access token: classic, fine-grained, scope
+  // ticked or not. Jaroku authenticates as a user with a PAT (`GITHUB_ENV_KEY`), so §B.1's check
+  // could never appear on anybody's pull request, and the error the user got sent them to re-issue
+  // a token that would have failed identically.
+  //
+  // SO THERE IS A FALLBACK, AND IT IS THE STATUSES API — the thing this section opens by explaining
+  // why it is not good enough. It is not: a commit status is a state, a context, a 140-character
+  // description and a link, so §B.1.1's three-row table becomes one line. But a one-line gate that
+  // exists beats a rendered table that cannot be posted, the numbers still reach the pull request,
+  // and `checksFor` reads both mechanisms so the panel's own verdict line counts it either way.
+  // The check run is still tried first, so a deployment that ever does authenticate as an App gets
+  // the better rendering with nothing to change.
 
   /**
    * Open a check run on a commit, or update one that exists.
@@ -816,6 +853,14 @@ export class GithubApi {
     if (!input.checkRunId && !input.name) {
       throw new GithubError("api", "a check run cannot be created without a name.", "createCheckRun");
     }
+    // Already on the fallback. The id a commit status has is its CONTEXT — posting the same context
+    // again replaces it, which is exactly the update semantics a check run's id provides — so the
+    // context travels in the same field the check run id does and no schema had to learn about this.
+    const context = input.checkRunId?.startsWith(STATUS_PREFIX)
+      ? input.checkRunId.slice(STATUS_PREFIX.length)
+      : null;
+    if (context !== null) return { id: await this.putCommitStatus(fullName, context, input) };
+
     const body: Record<string, unknown> = {
       ...(input.name ? { name: input.name } : {}),
       head_sha: input.headSha,
@@ -837,18 +882,68 @@ export class GithubApi {
         : await this.call<{ id: number }>("createCheckRun", "POST", `/repos/${fullName}/check-runs`, body);
       return { id: String(data.id) };
     } catch (err) {
-      // The permission this feature needs and the base spec's recommended token does not have. A
-      // bare "GitHub refused" here sends somebody to check their repository settings; naming the
-      // scope sends them to the one screen that fixes it.
+      // APP-ONLY IS NOT A PERMISSION PROBLEM AND MUST NOT BE REPORTED AS ONE. Every personal access
+      // token gets this refusal, so telling somebody to tick `checks: write` sends them to re-issue
+      // a token that will fail identically. The check goes out as a commit status instead — see the
+      // section header — and the caller never learns the difference, because the id it gets back
+      // updates the same way a check run's does.
+      if (needsGithubApp(err) && input.name) {
+        this.log(`[github] check runs are App-only for this token; posting a commit status instead`);
+        return { id: await this.putCommitStatus(fullName, input.name, input) };
+      }
       if (err instanceof GithubError && err.kind === "auth") {
         throw new GithubError(
           "auth",
-          "GitHub refused to write a check run. This token needs the `checks: write` permission — a fine-grained token has it only if it was ticked when the token was made.",
+          "GitHub refused to write a check on this commit. The token needs write access to the repository.",
           err.operation,
         );
       }
       throw err;
     }
+  }
+
+  /**
+   * §B.1's check, as much of it as a commit status can carry.
+   *
+   * THE CONTEXT IS THE IDENTITY. GitHub keeps one status per context per commit and the newest wins,
+   * so "post pending, then post the result" needs no id and no second endpoint — which is why this
+   * fits behind `putCheckRun` without a column anywhere learning that it happened.
+   *
+   * THE DESCRIPTION IS 140 CHARACTERS AND THE TITLE IS WHERE THE NUMBERS ARE. §B.1.1's summary is a
+   * three-row table that does not fit, and the title is the line that does: "pass-rate 92% → 96%
+   * (+4)". Truncated rather than dropped if somebody's dataset name makes even that too long — a
+   * cut-off number still says which direction it went.
+   *
+   * FIVE CONCLUSIONS INTO FOUR STATES, and `cancelled` is the one that has to be decided rather than
+   * mapped. It becomes `error` and says why: a superseded check that reported `success` would be a
+   * green tick claiming a run that never finished, and the commit it sits on is not the pull
+   * request's head any more in the first place.
+   */
+  private async putCommitStatus(
+    fullName: string,
+    context: string,
+    input: {
+      headSha: string;
+      status: "queued" | "in_progress" | "completed";
+      conclusion?: string | null;
+      title: string;
+      detailsUrl?: string | null;
+    },
+  ): Promise<string> {
+    const state = input.status !== "completed"
+      ? "pending"
+      : input.conclusion === "failure" || input.conclusion === "timed_out"
+        ? "failure"
+        : input.conclusion === "cancelled"
+          ? "error"
+          : "success";
+    await this.call<unknown>("createStatus", "POST", `/repos/${fullName}/statuses/${input.headSha}`, {
+      state,
+      context,
+      description: truncate(input.title, 140),
+      ...(input.detailsUrl ? { target_url: input.detailsUrl } : {}),
+    });
+    return `${STATUS_PREFIX}${context}`;
   }
 
   /**
@@ -946,3 +1041,12 @@ export class GithubApi {
 
 /** Conclusions that are not a reason to hold a pull request. See `checksFor`. */
 const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
+
+/**
+ * What a stored check run id looks like when the check is really a commit status.
+ *
+ * A PREFIX RATHER THAN A COLUMN, so `check_runs` did not need a migration to record which of the
+ * two mechanisms a check went out on. GitHub's own check run ids are decimal, so nothing it issues
+ * can collide with this, and a row carrying one reads as what it is: where the check lives.
+ */
+const STATUS_PREFIX = "status:";

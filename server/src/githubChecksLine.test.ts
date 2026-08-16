@@ -100,6 +100,46 @@ try {
     check(verdict?.state === "success", "neutral does not hold the pull request", JSON.stringify(verdict));
     check(verdict?.total === 1, "but it is still a check that reported");
   }
+  console.log("\nthe Checks API refuses every token this product has");
+  {
+    // `POST /check-runs` answers 403 "You must authenticate via a GitHub App." to every personal
+    // access token — classic, fine-grained, `checks: write` ticked or not — and Jaroku
+    // authenticates as a user with a PAT. So §B.1's check could not appear on anybody's pull
+    // request, and the message it failed with told people to re-issue a token that would fail the
+    // same way. It goes out as a commit status instead: fewer rows than §B.1.1's table, on the
+    // pull request, where a gate belongs.
+    mock.setAppOnlyChecks(true);
+    const fresh = await api.createRepo("app-only-agent");
+    await api.initialCommit(fresh.fullName, "main", { path: "README.md", content: "# a\n", message: "Initial commit" });
+    const head = (await api.refSha(fresh.fullName, "main"))!;
+
+    const opened = await api.putCheckRun(fresh.fullName, {
+      name: "Jaroku eval · weather-suite", headSha: head, status: "queued",
+      title: "Queued", summary: "on the free dry-run provider",
+    });
+    check(opened.id.startsWith("status:"), "the check falls back rather than throwing", opened.id);
+    check((await api.checksFor(fresh.fullName, head))?.state === "pending", "and the pull request has a gate");
+
+    // The id it handed back updates the same way a check run's would — the context IS the identity.
+    await api.putCheckRun(fresh.fullName, {
+      checkRunId: opened.id, headSha: head, status: "completed", conclusion: "success",
+      title: "pass-rate 92% → 96% (+4)", summary: "",
+    });
+    const settled = await api.checksFor(fresh.fullName, head);
+    check(settled?.state === "success", "and settles it rather than adding a second");
+    check(settled?.total === 1, "…one gate, not two", `${settled?.total}`);
+
+    const raw2 = await raw<{ statuses: { context: string; description: string }[] }>(
+      `/repos/${fresh.fullName}/commits/${head}/status`,
+    );
+    check(raw2.statuses[0]?.context === "Jaroku eval · weather-suite", "under the check's own name");
+    check(
+      raw2.statuses[0]?.description === "pass-rate 92% → 96% (+4)",
+      "carrying the numbers §B.1.1 exists to put there",
+      raw2.statuses[0]?.description,
+    );
+    mock.setAppOnlyChecks(false);
+  }
 } finally {
   await mock.close();
 }
