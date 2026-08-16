@@ -893,6 +893,22 @@ export interface GithubRefusal {
 }
 
 /**
+ * §B.4.4's refusal card: a reordered history that does not work at every step.
+ *
+ * ITS OWN SHAPE FOR THE SAME REASON `GithubRefusal` IS. The panel highlights the row at `position`
+ * and renders `problems` under it, and an error strip carrying one sentence could do neither. The
+ * position is a number rather than a phrase inside the message, so the row that lights up is the
+ * one that actually failed.
+ */
+export interface GithubRestackRefusal {
+  agentId: string;
+  /** Zero-based, in the NEW order — where the user just put it, not where it used to be. */
+  position: number;
+  message: string;
+  problems: string[];
+}
+
+/**
  * What the composer has attached from GitHub — §7.
  *
  * A REFERENCE, NOT CONTENT. The chip holds an identifier and the server resolves it when the
@@ -928,6 +944,7 @@ export type GithubMessage =
     }
   | { channel: "github"; type: "message"; agentId: string; message: string }
   | ({ channel: "github"; type: "refused" } & GithubRefusal)
+  | ({ channel: "github"; type: "restackRefused" } & GithubRestackRefusal)
   | { channel: "github"; type: "error"; message: string; agentId?: string }
   | { channel: "github"; type: "notice"; message: string; agentId?: string };
 
@@ -1074,7 +1091,19 @@ export type ClientCommand =
   // §A.1's Fetch and the panel's own refresh are ONE command. Both do the identical read; the
   // flag only decides whether it is worth an audit row.
   | { cmd: "refreshGithub"; agentId: string; explicit?: boolean }
-  | { cmd: "pushGithub"; agentId: string; squash?: boolean; force?: boolean; confirmSlug?: string }
+  | {
+      cmd: "pushGithub";
+      agentId: string;
+      squash?: boolean;
+      force?: boolean;
+      confirmSlug?: string;
+      /** §B.4.1's hand-staged subset. Absent is the ordinary push; empty is refused as a no-op. */
+      stage?: GithubHunkSelection[];
+      /** §B.4.4's restacked order. Carried with the push and never stored — see §B.9. */
+      steps?: GithubRestackStep[];
+      /** §3.4's box, for a staged subset with no version instruction to borrow. */
+      message?: string;
+    }
   | { cmd: "pullGithub"; agentId: string; force?: boolean; confirmSlug?: string }
   | { cmd: "switchGithubBranch"; agentId: string; branch: string; onUnpushed?: "push" | "keep" | "cancel" }
   | { cmd: "createGithubBranch"; agentId: string; branch: string }

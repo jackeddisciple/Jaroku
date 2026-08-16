@@ -439,6 +439,22 @@ export type PushGithubCommand = {
   force?: boolean;
   /** The agent slug, typed by the user, when `force` is set. Refused without it. */
   confirmSlug?: string;
+  /**
+   * §B.4.1's hand-staged subset. Absent means the ordinary push; an empty array means somebody
+   * unticked everything, which is refused rather than treated as the same thing.
+   */
+  stage?: { path: string; hunks: number[] }[];
+  /**
+   * §B.4.4's restacked order over the UNPUSHED list. A step with several ids is a squash, an
+   * omitted version is a drop, and an amend is a squash of the tip with the version before it.
+   *
+   * CARRIED WITH THE PUSH RATHER THAN STORED, which is why §B.9 needs no table for it: a restack
+   * rearranges the commits THIS push writes and has no lifetime beyond it. Cancelling leaves every
+   * `agent_versions` row exactly where it was.
+   */
+  steps?: { versionIds: string[] }[];
+  /** §3.4's message box, for a hand-staged subset that has no version's instruction to borrow. */
+  message?: string;
 };
 export type PullGithubCommand = {
   cmd: "pullGithub";
@@ -1007,6 +1023,23 @@ export type GithubEvent =
    * box the user has since edited.
    */
   | { type: "message"; agentId: string; message: string }
+  /**
+   * A restacked order the validator turned away — §B.4.4.
+   *
+   * ITS OWN EVENT FOR THE SAME REASON `refused` IS, and with the same argument one feature over: the
+   * panel highlights the ROW at the failing position and renders the validator's own words beneath
+   * it, and an error strip carrying one sentence could do neither. The position is a number rather
+   * than a phrase inside the message, because parsing it back out of prose is how a UI ends up
+   * highlighting a different row than the one that failed.
+   */
+  | {
+      type: "restackRefused";
+      agentId: string;
+      /** Zero-based, in the NEW order. What the user just moved, not where it used to be. */
+      position: number;
+      message: string;
+      problems: string[];
+    }
   | { type: "error"; message: string; agentId?: string }
   | { type: "notice"; message: string; agentId?: string };
 

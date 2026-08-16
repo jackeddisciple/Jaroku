@@ -22,8 +22,8 @@ import {
   type AuthFailure,
 } from "./auth.ts";
 import type {
-  ClientCommand, EvalTarget, ExplainSubject, GithubAttachment, McpConfirmVerdict, McpImpact,
-  RubricCriterion, ServerMessage,
+  ClientCommand, EvalTarget, ExplainSubject, GithubAttachment, GithubHunkSelection,
+  GithubRestackStep, McpConfirmVerdict, McpImpact, RubricCriterion, ServerMessage,
 } from "../types.ts";
 
 const RECONNECT_MS = 1000;
@@ -931,7 +931,16 @@ export function sendRefreshGithub(agentId: string, explicit = false): void {
  */
 export function sendPushGithub(
   agentId: string,
-  opts: { squash?: boolean; force?: boolean; confirmSlug?: string } = {},
+  opts: {
+    squash?: boolean;
+    force?: boolean;
+    confirmSlug?: string;
+    /** §B.4.1's staged subset. Omit for the ordinary push — an empty array is refused as a no-op. */
+    stage?: GithubHunkSelection[];
+    /** §B.4.4's restacked order over the UNPUSHED list. */
+    steps?: GithubRestackStep[];
+    message?: string;
+  } = {},
 ): void {
   send({ cmd: "pushGithub", agentId, ...opts });
 }

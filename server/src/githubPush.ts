@@ -323,6 +323,74 @@ export function planPush(snapshots: VersionSnapshot[], opts: PlanOptions = {}): 
 }
 
 /**
+ * The plan for §B.4.1's hand-staged subset: one commit, carrying no version.
+ *
+ * WHY IT IS A SEPARATE ENTRY POINT AND NOT AN OPTION ON `planPush`. `planPush` maps versions to
+ * commits; that is its whole subject, and every field of its output is about which version became
+ * which sha. A staged subset has no version to map — §3.4 says so, and §B.4.2 leans on it — so
+ * folding it in would mean a `versionIds` that is sometimes a list of ids and sometimes empty for a
+ * reason nothing in the function could name. Two entry points, one of which is honest about having
+ * nothing to attribute.
+ *
+ * THE TRAILER STILL GOES ON. A hand-staged commit is still a Jaroku commit, and
+ * `githubService.remoteOnlyCommits` identifies those by the version trailer — a commit written
+ * without one comes back on the next fetch as §3.8's hollow dot, which is to say as somebody else's
+ * work, and is then counted among what a force push is about to destroy. The version it names is
+ * the newest one the tree was built from, which is the truest single number available: the staged
+ * content is a subset of the difference up to that version and of nothing later.
+ *
+ * DELETIONS ARE COMPUTED THE SAME WAY THEY ALWAYS ARE — against the remote tree, scoped to the
+ * subdirectory. A staged subset that removes a file removes it; a subset that simply does not
+ * mention a file leaves it alone, and `stagedTree` has already resolved which of those happened.
+ */
+export function planStaged(
+  files: StoredFile[],
+  snapshots: VersionSnapshot[],
+  opts: PlanOptions & { message?: string } = {},
+): PushPlan {
+  const newest = snapshots[snapshots.length - 1]?.version;
+  const planned = pushableFiles(files, opts);
+  const kept = new Set(planned.map((f) => f.path));
+  const prefix = repoPath("", opts.subdirectory);
+  const inScope = (path: string): boolean => (prefix ? path.startsWith(prefix) : true);
+
+  const typed = opts.message?.trim();
+  const subject = typed || `Staged changes${newest ? ` up to v${newest.version}` : ""}`;
+  const message = newest
+    ? withVersionTrailer(subject, [newest], opts.provenance ?? {})
+    : subject;
+
+  return {
+    commits: [
+      {
+        // EMPTY, DELIBERATELY. `github_events` takes this list, and a hand-staged commit is exactly
+        // the §3.4 case whose row carries no version id — which is what makes HISTORY render it
+        // without a filled dot, and what §B.9 means by "hunk-partial commits are ordinary
+        // github_events rows with no version_id".
+        versionIds: [],
+        version: newest?.version ?? 0,
+        message,
+        files: planned,
+        deletions: (opts.remotePaths ?? []).filter((p) => inScope(p) && !kept.has(p)).sort(),
+      },
+    ],
+    // THE POINTER DOES NOT MOVE. A staged subset is not a version having been pushed, so recording
+    // it as one would make the next push believe work reached GitHub that never did — the exact
+    // failure the "pointer moves last" rule at the top of the runner exists to prevent, arrived at
+    // by a different road.
+    headVersionId: null,
+    headVersion: null,
+  };
+}
+
+/** Whether two file sets are the same content at the same paths. Order-independent. */
+export function sameFiles(a: readonly StoredFile[], b: readonly StoredFile[]): boolean {
+  if (a.length !== b.length) return false;
+  const left = new Map(a.map((f) => [f.path, f.content]));
+  return b.every((f) => left.get(f.path) === f.content);
+}
+
+/**
  * The stage list a push walks, for §2.4's progress rail.
  *
  * A DATA TABLE RATHER THAN A SWITCH, the same shape DeployPanel's STAGES is, so the list a user

@@ -9,7 +9,7 @@
 // Run:  npm run dev        (in server/)
 // Then open http://localhost:4317 to watch traces live.
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -66,6 +66,7 @@ import { isMemberRole } from "./db/tenant.ts";
 import { resolveDevTenancy, type DevTenancy } from "./devTenancy.ts";
 import { loadConnectors } from "./connectors.ts";
 import { isSafeAgentId, listProjectFiles, readOnlyPaths, type ProjectFile } from "./projectFs.ts";
+import { validateProject } from "./validator.ts";
 import { openObjectStore } from "./storage/open.ts";
 import { resolveSigningKey } from "./storage/presign.ts";
 import { filesFromDirectory, ProjectStore } from "./storage/projectStore.ts";
@@ -3098,6 +3099,45 @@ const githubPusher = new GithubPusher({
     }
     return { model, costs };
   },
+  // §3.3's PROTECTED group, the same answer the service and the puller get, so a hand-staged
+  // selection cannot reach a file the edit loop already refuses.
+  connectorFilesFor: (agentUuid, slug) => agentFilesDeps.connectorFilesFor(undefined, slug),
+  // §B.4.4's bar for every intermediate state of a restack.
+  //
+  // THE REAL VALIDATOR, ON A REAL DIRECTORY, and that is the expensive part of the feature rather
+  // than an incidental one: a reorder of four versions runs it four times, each with a sandboxed
+  // import. It is what makes the guarantee true — a state that only parses is exactly the class
+  // v0.1.0's changelog says AST checks cannot catch — and the alternative is a cheaper check that
+  // would let a broken middle version through to be promoted later.
+  //
+  // A SCRATCH DIRECTORY PER STATE, removed in a finally. These states are candidates that mostly do
+  // not become anything, so nothing is written to the object store and nothing reaches
+  // `agent_versions` — which is the same discipline the puller keeps, one step earlier in its own
+  // pipeline.
+  validateFiles: async (ctx, agentUuid, files) => {
+    const agent = await agentRepo.byId(ctx, agentUuid);
+    if (!agent) return { ok: false, problems: ["no such agent in this workspace"] };
+    const readOnly = readOnlyPaths(agentFilesDeps.connectorFilesFor(agent, agent.slug));
+    const scratch = mkdtempSync(join(tmpdir(), `jaroku-restack-${agent.slug.slice(0, 12)}-`));
+    try {
+      for (const file of files) {
+        const target = join(scratch, file.path);
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, file.content, "utf8");
+      }
+      const result = await validateProject(scratch, {
+        runtimeDir: RUNTIME_DIR,
+        connectorFiles: [...readOnly],
+        // DON'T-REGRESS, read exactly as the edit loop and the puller read it: demanded only of an
+        // agent that already had it, so a version generated before the templates started raising
+        // stays reorderable.
+        requireToolErrorHandling: files.some((f) => /handle_tool_errors\s*=\s*True/.test(f.content)),
+      });
+      return { ok: result.ok, problems: result.problems };
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  },
 });
 
 const githubPuller = new GithubPuller({
@@ -3201,6 +3241,41 @@ async function auditGithubOverride(
   });
 }
 
+/**
+ * §B.4.1's selection, from whatever the socket delivered.
+ *
+ * ENTRIES THAT ARE NOT WHAT THEY CLAIM ARE DROPPED, not refused. A stale index or a path that has
+ * stopped changing is what a client one snapshot behind sends, and refusing the whole push over one
+ * of them would lose the four files that are still valid. What protects the tree is
+ * `githubStaging.stagedTree` — which ignores an index it cannot find and drops a protected path —
+ * and the validator after it.
+ */
+function readSelections(raw: unknown[]): { path: string; hunks: number[] }[] {
+  const out: { path: string; hunks: number[] }[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const entry = item as { path?: unknown; hunks?: unknown };
+    if (typeof entry.path !== "string" || !entry.path) continue;
+    const hunks = Array.isArray(entry.hunks)
+      ? entry.hunks.filter((n): n is number => Number.isInteger(n) && (n as number) >= 0)
+      : [];
+    out.push({ path: entry.path, hunks });
+  }
+  return out;
+}
+
+/** §B.4.4's restacked order, read the same way and for the same reason. */
+function readSteps(raw: unknown[]): { versionIds: string[] }[] {
+  const out: { versionIds: string[] }[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const ids = (item as { versionIds?: unknown }).versionIds;
+    if (!Array.isArray(ids)) continue;
+    out.push({ versionIds: ids.filter((v): v is string => typeof v === "string" && v.length > 0) });
+  }
+  return out;
+}
+
 async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Promise<void> {
   const fail = (message: string, agentId?: string): void => {
     relay.broadcastGithub(ctx, { type: "error", message, ...(agentId ? { agentId } : {}) });
@@ -3281,9 +3356,31 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
             squash: cmd.squash === true,
             force: cmd.force === true,
             confirmSlug: typeof cmd.confirmSlug === "string" ? cmd.confirmSlug : undefined,
+            // SHAPE-CHECKED HERE RATHER THAN TRUSTED, because these two arrive from a browser and
+            // both are lists of things that name other things. A malformed entry is dropped rather
+            // than refused: a selection can be a snapshot behind, and the runner's own checks —
+            // `checkSteps` for the shape of a restack, the validator for its result — are what
+            // decide whether the outcome is allowed, not the parse.
+            ...(Array.isArray(cmd.stage) ? { stage: readSelections(cmd.stage) } : {}),
+            ...(Array.isArray(cmd.steps) ? { steps: readSteps(cmd.steps) } : {}),
+            ...(typeof cmd.message === "string" && cmd.message.trim() ? { message: cmd.message } : {}),
           },
           githubStage(ctx, agentId, "push"),
         );
+        // §B.4.4'S REFUSAL IS ITS OWN MESSAGE, never an error strip. The panel highlights the row
+        // that failed and renders the validator's own words under it, and a one-line error could
+        // carry neither — the same argument §3.6's refusal card makes for a refused pull.
+        if (result.failedPosition !== undefined) {
+          relay.broadcastGithub(ctx, {
+            type: "restackRefused",
+            agentId,
+            position: result.failedPosition,
+            message: result.message ?? "that order does not validate",
+            problems: result.problems ?? [],
+          });
+          await broadcastGithub(ctx, agentId);
+          return;
+        }
         // BEFORE THE NOTICE AND BEFORE THE SNAPSHOT. An override that succeeded and then failed to
         // be recorded is the one ordering this must not have — the same "record first, then say it
         // happened" rule the trace ingest keeps between persisting a step and broadcasting it.

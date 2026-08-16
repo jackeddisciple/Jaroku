@@ -26,12 +26,16 @@ import { GithubError, type GithubApi } from "./githubApi.ts";
 import type { GithubLink, GithubRepository } from "./db/repositories/github.ts";
 import type { GithubIdentity } from "./githubIdentity.ts";
 import {
-  PUSH_STAGES, planPush, repoPath, withVersionTrailer,
+  PUSH_STAGES, planPush, planStaged, repoPath, sameFiles, withVersionTrailer,
   type PlannedCommit, type VersionSnapshot,
 } from "./githubPush.ts";
 import { unpushedVersions } from "./githubSync.ts";
+import { everything, stagedFiles, stagedTree } from "./githubStaging.ts";
+import {
+  checkSteps, deltasFor, firstBrokenState, replay, type StackEntry,
+} from "./unpushedStack.ts";
 import type { AgentRepository } from "./db/repositories/agents.ts";
-import type { ProjectStore } from "./storage/projectStore.ts";
+import type { ProjectStore, StoredFile } from "./storage/projectStore.ts";
 import type { TenantContext } from "./db/tenant.ts";
 import { isSafeAgentId } from "./projectFs.ts";
 
@@ -43,6 +47,38 @@ export interface PushRequest {
   force?: boolean;
   /** The agent slug, typed by the user. Required whenever `force` is set. */
   confirmSlug?: string;
+  /**
+   * §B.4.1's hand-staged subset: which hunks of which files go into this push.
+   *
+   * ABSENT MEANS THE ORDINARY PUSH, and that is not the same as an empty array — an empty array is
+   * "somebody unticked everything", which is a push with nothing in it and is refused as such. The
+   * two are told apart here rather than defaulted, because the difference between "no opinion" and
+   * "the opinion is nothing" is the difference between pushing the work and pushing a no-op.
+   *
+   * A SELECTION MAKES THE PUSH HAND-STAGED, whatever it contains. Even a selection that happens to
+   * cover every hunk of every file arrives having been assembled by a person, and §3.4's answer for
+   * a hand-staged commit — one commit, no filled version dot, a message that is not a version's
+   * stored instruction — is the honest rendering of that. Silently promoting a complete selection
+   * back to a version-mapped push would make the HISTORY dot depend on whether a checkbox happened
+   * to be ticked, which nobody could predict.
+   */
+  stage?: { path: string; hunks: number[] }[];
+  /**
+   * §B.4.4's restacked order: which unpushed versions become which commits, in what order.
+   *
+   * A STEP WITH MORE THAN ONE VERSION IS A SQUASH, AN OMITTED VERSION IS A DROP, AND AN AMEND IS
+   * NEITHER A THIRD OPERATION NOR A COMMAND OF ITS OWN — it is a squash of the tip with the version
+   * before it. That is not a shortcut: §B.4.3 requires an amend to re-run validation on the
+   * resulting file set before it may replace the previous local commit, which is exactly what
+   * `firstBrokenState` does to every step of a restack. A separate amend path would be the same
+   * operation reached without the check.
+   *
+   * MUTUALLY EXCLUSIVE WITH `stage`, and refused rather than resolved. A staged subset does not
+   * correspond to a version, and a restack is a rearrangement OF versions — combining them would
+   * ask which half of a hand-staged file belongs to which reordered commit, a question with no
+   * answer that is not invented.
+   */
+  steps?: { versionIds: string[] }[];
   /**
    * §3.4's commit box, when somebody wrote in it.
    *
@@ -61,6 +97,17 @@ export interface PushResult {
   message?: string;
   /** Which stage it stopped at, so the rail can render a red row rather than just stopping. */
   failedStage?: string;
+  /**
+   * Which restacked position failed to validate, zero-based — §B.4.4's "naming which reordered
+   * position fails".
+   *
+   * Its own field rather than a sentence inside `message`, because the panel highlights the row
+   * rather than only quoting the reason, and parsing a number back out of prose is how a UI ends up
+   * highlighting the wrong one.
+   */
+  failedPosition?: number;
+  /** What the validator said about that position. Rendered under the row, not in the error strip. */
+  problems?: string[];
 }
 
 export interface GithubPusherDeps {
@@ -87,6 +134,36 @@ export interface GithubPusherDeps {
     agentUuid: string,
     versions: { id: string; version: number; created_at: string }[],
   ) => Promise<{ model: string | null; costs: (number | null)[] }>;
+  /**
+   * §B.4.4's bar for an intermediate state: the real validator, on a file set.
+   *
+   * INJECTED FOR THE SAME REASON THE PROVENANCE RESOLVER IS — this module writes git objects, and
+   * running the validator means materialising a project and starting a Python interpreter, which is
+   * `validator.ts`'s business and needs a runtime directory this file has no reason to know about.
+   *
+   * OPTIONAL, AND ITS ABSENCE REFUSES A RESTACK RATHER THAN WAIVING ONE. A pusher constructed
+   * without it can still do every ordinary push; what it cannot do is rearrange history, because
+   * the check that makes rearranging safe is the thing that is missing. Defaulting to "valid" would
+   * make the one dependency that enforces §B.4.4's guarantee optional in practice.
+   */
+  validateFiles?: (
+    ctx: TenantContext,
+    agentUuid: string,
+    files: StoredFile[],
+  ) => Promise<{ ok: boolean; problems: string[] }>;
+  /**
+   * §3.3's PROTECTED group, so a hand-staged selection cannot reach a file the rest of the product
+   * has already decided nobody may edit.
+   *
+   * THE SAME RESOLVER THE SERVICE AND THE PULLER TAKE, threaded here for the third time rather than
+   * re-derived, because three answers to "which files are read-only" is three chances for the
+   * staging column, the pull refusal and the push filter to disagree — and the one that would be
+   * wrong is whichever an attacker had a hand in.
+   *
+   * Takes the agent by its uuid and slug because that is what this module has; the catalogue
+   * lookup that needs an `Agent` row happens at the wiring site, which already has one.
+   */
+  connectorFilesFor?: (agentUuid: string, slug: string) => string[];
   log?: (line: string) => void;
 }
 
@@ -127,6 +204,23 @@ export class GithubPusher {
       return { ok: false, shas: [], message: `type ${agent.slug} to confirm a force push` };
     }
 
+    // BEFORE THE CONNECTION, FOR THE SAME REASON THE SLUG IS. Neither of these needs GitHub to
+    // decide, and a request that cannot be honoured should say so without having spent a round trip
+    // learning what a branch points at.
+    if (req.stage && req.steps) {
+      return {
+        ok: false,
+        shas: [],
+        message:
+          "a hand-staged subset and a reordered history are two different pushes — a staged subset does not belong to any version, so there is nothing to reorder it as.",
+      };
+    }
+    if (req.steps && !this.deps.validateFiles) {
+      // §B.4.4's guarantee is the per-position validation. Without it this would be a rearrangement
+      // with no check, which is the one shape the feature must not have.
+      return { ok: false, shas: [], message: "reordering is unavailable on this server" };
+    }
+
     if (this.inFlight.has(agent.id)) return { ok: false, shas: [], message: "a push is already running for this agent" };
     this.inFlight.add(agent.id);
     try {
@@ -134,6 +228,55 @@ export class GithubPusher {
     } finally {
       this.inFlight.delete(agent.id);
     }
+  }
+
+  /**
+   * §B.4.4: replay a new order, check every state, and hand back the snapshots to plan commits from.
+   *
+   * THE SNAPSHOTS THAT COME BACK ARE SYNTHETIC, and that is the whole trick. A `VersionSnapshot`
+   * pairs a version row with the files it published; a restacked step pairs the row of its LAST
+   * member with the files the replay produced. So `planPush` — which knows nothing about any of
+   * this — writes one commit per step with the message and trailer of the version that ends it,
+   * exactly as it does for an ordinary push. There is no second commit-planning path.
+   *
+   * A SQUASH KEEPS THE LAST VERSION'S ROW AND NOT THE FIRST'S, because a commit describes the state
+   * it leaves behind. The versions it collapsed are still named in `versionIds`, so the event log
+   * records what went into it and the trailer's range form still renders.
+   */
+  private async restack(
+    ctx: TenantContext,
+    agentUuid: string,
+    pushedFiles: StoredFile[],
+    snapshots: VersionSnapshot[],
+    steps: { versionIds: string[] }[],
+  ): Promise<{ refusal: { reason: string; position: number | null; problems?: string[] } | null; snapshots: VersionSnapshot[] }> {
+    const entries: StackEntry[] = snapshots.map((s) => ({
+      versionId: s.version.id,
+      version: s.version.version,
+      summary: s.version.instruction?.trim() || s.version.summary?.trim() || `Version ${s.version.version}`,
+      files: s.files,
+    }));
+
+    const shapeProblem = checkSteps(entries, steps);
+    if (shapeProblem) return { refusal: shapeProblem, snapshots: [] };
+
+    const states = replay(pushedFiles, deltasFor(pushedFiles, entries), steps);
+    const broken = await firstBrokenState(states, async (state) =>
+      // Guarded by the constructor check above: `req.steps` is refused outright when this dep is
+      // absent, so reaching here without it is impossible rather than defaulted to "valid".
+      this.deps.validateFiles!(ctx, agentUuid, state.files),
+    );
+    if (broken) return { refusal: broken, snapshots: [] };
+
+    const byId = new Map(snapshots.map((s) => [s.version.id, s]));
+    const restacked: VersionSnapshot[] = [];
+    for (const state of states) {
+      const last = state.versionIds[state.versionIds.length - 1];
+      const anchor = last ? byId.get(last) : undefined;
+      if (!anchor) continue;
+      restacked.push({ version: anchor.version, files: state.files });
+    }
+    return { refusal: null, snapshots: restacked };
   }
 
   private async run(
@@ -224,14 +367,82 @@ export class GithubPusher {
         }
       }
 
-      const plan = planPush(snapshots, {
-        subdirectory: link.subdirectory,
-        includeArtifacts: link.include_artifacts,
-        squash: req.squash === true,
-        remotePaths: baseTree,
-        provenance: { agentSlug: slug, ...(resolved?.model ? { model: resolved.model } : {}) },
-        ...(resolved ? { costs: resolved.costs } : {}),
-      });
+      // THE PUSHED STATE, needed by both of the two paths below and by neither of the ordinary one.
+      // Read once here rather than inside each, so a restack and a staged subset cannot disagree
+      // about what GitHub already has.
+      const pushedRow = link.last_pushed_version_id
+        ? versions.find((v) => v.id === link.last_pushed_version_id)
+        : undefined;
+      const pushedFiles = pushedRow
+        ? await this.deps.projects.readVersion(ctx, agentUuid, pushedRow.version)
+        : [];
+
+      // §B.4.4'S RESTACK, REPLAYED AND CHECKED AT EVERY POSITION.
+      //
+      // Reordering, squashing and dropping happen HERE and never against `agent_versions`. The
+      // version rows are untouched: what a restack rearranges is which commits this push writes, so
+      // nothing that was published stops being published, and cancelling the push leaves the agent
+      // exactly as it was. That is also why §B.9 needs no table for it — a restack has no lifetime
+      // beyond the push it is part of.
+      const restack = req.steps
+        ? await this.restack(ctx, agentUuid, pushedFiles, snapshots, req.steps)
+        : null;
+      if (restack?.refusal) {
+        report(stage, "error");
+        await this.deps.repo.record(ctx, {
+          agentId: agentUuid,
+          linkId: link.id,
+          kind: "push",
+          outcome: "refused",
+          detail: `restack: ${restack.refusal.reason}`,
+        });
+        return {
+          ok: false,
+          shas: [],
+          message: restack.refusal.reason,
+          failedStage: stage,
+          ...(restack.refusal.position === null ? {} : { failedPosition: restack.refusal.position }),
+          ...(restack.refusal.problems ? { problems: restack.refusal.problems } : {}),
+        };
+      }
+
+      // §B.4.1'S HAND-STAGED SUBSET.
+      //
+      // ONE COMMIT, NO VERSION IDS, AND THAT IS §3.4'S EXISTING ANSWER RATHER THAN A NEW ONE: a
+      // staged subset does not correspond to a version, so the event carries no version and HISTORY
+      // renders it without a filled dot, exactly like every other hand-staged commit since the base
+      // spec. Hunk staging is a finer knife for reaching that case, not a new category.
+      const staged = req.stage
+        ? stagedTree(
+            pushedFiles,
+            snapshots[snapshots.length - 1]?.files ?? [],
+            req.stage,
+            this.deps.connectorFilesFor?.(agentUuid, slug) ?? [],
+          )
+        : null;
+      if (staged && staged.length === 0 && pushedFiles.length > 0) {
+        return await fail("nothing is staged — tick at least one hunk.", "refused");
+      }
+      if (staged && sameFiles(staged, pushedFiles)) {
+        return await fail("that selection is what GitHub already has — nothing would change.", "refused");
+      }
+
+      const plan = staged
+        ? planStaged(staged, snapshots, {
+            subdirectory: link.subdirectory,
+            includeArtifacts: link.include_artifacts,
+            remotePaths: baseTree,
+            message: req.message,
+            provenance: { agentSlug: slug, ...(resolved?.model ? { model: resolved.model } : {}) },
+          })
+        : planPush(restack ? restack.snapshots : snapshots, {
+            subdirectory: link.subdirectory,
+            includeArtifacts: link.include_artifacts,
+            squash: req.squash === true,
+            remotePaths: baseTree,
+            provenance: { agentSlug: slug, ...(resolved?.model ? { model: resolved.model } : {}) },
+            ...(resolved && !restack ? { costs: resolved.costs } : {}),
+          });
 
       // THE MESSAGE SOMEBODY TYPED WINS OVER THE ONE THIS CODE COMPOSED. The commit box pre-fills
       // from the version's own instruction and summary, so the two are usually the same sentence —
@@ -239,7 +450,12 @@ export class GithubPusher {
       // plausibly, and only somebody comparing it against what they had written would notice that
       // the box was decorative. The trailer is re-attached rather than left to the user, because
       // the panel identifies its own commits by it.
-      const typed = req.message?.trim();
+      //
+      // SKIPPED FOR A STAGED SUBSET, which has already applied it. `planStaged` puts the typed
+      // message on its one commit with a trailer naming the newest version the tree was built from;
+      // re-attaching here would rebuild the same trailer from EVERY unpushed version's range, which
+      // would claim a hand-picked subset of one file's hunks was v11 through v14.
+      const typed = staged ? undefined : req.message?.trim();
       const onlyCommit = plan.commits.length === 1 ? plan.commits[0] : undefined;
       if (typed && onlyCommit) {
         onlyCommit.message = withVersionTrailer(
@@ -309,8 +525,16 @@ export class GithubPusher {
 
       // AND ONLY NOW THE POINTERS. See the header: a watermark written before the ref move is a
       // watermark that can be permanently wrong.
+      //
+      // THE VERSION POINTER IS OMITTED RATHER THAN SET TO NULL WHEN THERE IS NO VERSION TO POINT AT.
+      // `planStaged` returns a null `headVersionId` because a hand-staged subset is not a version
+      // having been pushed — and `patchLink` distinguishes "set this to null" from "leave this
+      // alone" precisely so a caller can say which it means. Passing the null through would CLEAR
+      // the pointer, which would report every version the agent has ever had as unpushed and offer
+      // a push that writes the whole history onto the branch a second time. The sha watermarks do
+      // move, because a commit genuinely landed and the next push has to build on it.
       await this.deps.repo.patchLink(ctx, link.id, {
-        lastPushedVersionId: plan.headVersionId,
+        ...(plan.headVersionId === null ? {} : { lastPushedVersionId: plan.headVersionId }),
         lastPushedSha: parent,
         lastKnownRemoteSha: parent,
         lastSyncedAt: new Date().toISOString(),
