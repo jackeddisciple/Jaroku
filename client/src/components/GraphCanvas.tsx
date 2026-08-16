@@ -139,18 +139,18 @@ export function GraphCanvas({ view }: { view: GithubView }) {
       (d) => d.agent_id === view.agentId && d.status === "live",
     );
     if (!live) return null;
-    // WHICH VERSION IS LIVE IS INFERRED FROM WHEN THE DEPLOY WAS MADE, and that is an approximation
-    // this comment exists to be honest about. A `deployments` row records the agent, the host and
-    // the status; it does not record the version it built from, so the closest available answer is
-    // the newest pushed version that existed when it was created. It is right whenever nobody
-    // published a version between the deploy starting and finishing, which is the ordinary case —
-    // and it is a lens over existing data rather than a new column, which is the trade §B.8.2 makes
-    // for the whole canvas. The day `deployments` carries a version id, this becomes a lookup.
-    const version = view.pushed
-      .filter((v) => v.sha && v.createdAt <= live.created_at)
-      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0];
-    // Null draws no ▼ at all rather than one under nothing — an agent deployed from a version that
-    // was never pushed has no commit for the marker to sit beneath.
+    // A LOOKUP, since migration 041. `deployments.version` records the version the deploy actually
+    // packaged, read at the moment it was packaged — so publishing a version while a build is in
+    // flight no longer moves this marker onto the wrong commit.
+    //
+    // NULL FOR A DEPLOY OLDER THAN THAT MIGRATION, which draws no ▼ rather than one under a guess.
+    // 041 deliberately did not backfill: writing today's version onto a three-week-old row would
+    // make it confidently wrong about somebody's production, which is the exact claim the column
+    // exists to stop making.
+    if (live.version === null) return null;
+    const version = view.pushed.find((v) => v.version === live.version);
+    // A version that was deployed but never pushed has no commit for a marker to sit beneath. That
+    // is a real state — deploying does not require GitHub — and it draws nothing.
     return version?.sha ?? null;
   }, [deployments, view.agentId, view.pushed]);
 

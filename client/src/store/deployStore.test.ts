@@ -13,7 +13,11 @@ let fails = 0;
 const check = (n: string, ok: boolean, d = "") => { console.log((ok?"  ok   ":"  FAIL ")+n+(ok||!d?"":" — "+d)); if(!ok) fails++; };
 const dep = (id: string, agent: string, status: DeployStatus, url: string | null = null): Deployment => ({
   id, agent_id: agent, target: "railway", status, url, provider: "anthropic", model: "m",
-  env_keys: [], error: null, created_at: "2026-01-01T00:00:00Z", updated_at: "x", ended_at: null,
+  // `version: null` by default rather than a number, deliberately: null is what every row written
+  // before migration 041 carries, so the fixture makes the case most likely to be got wrong the
+  // easy one to construct.
+  env_keys: [], error: null, version: null,
+  created_at: "2026-01-01T00:00:00Z", updated_at: "x", ended_at: null,
 });
 const S = () => useDeployStore.getState();
 

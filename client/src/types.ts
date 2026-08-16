@@ -628,6 +628,13 @@ export interface Deployment {
   /** NAMES of the variables handed to the host. Never values. */
   env_keys: string[];
   error: string | null;
+  /**
+   * The agent version this deploy built from — migration 041.
+   *
+   * NULL for a row written before it, and never backfilled: a guess here would be a confident lie
+   * about somebody's production. §B.8.2's canvas draws no ▼ rather than one under a guess.
+   */
+  version: number | null;
   created_at: string;
   updated_at: string;
   ended_at: string | null;
