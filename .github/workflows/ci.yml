@@ -175,6 +175,7 @@ jobs:
           npm run test:github-sync
           npm run test:github-push
           npm run test:github-first-push
+          npm run test:github-checks-line
           npm run test:github-webhook
 
       - name: cost, abuse and the data lifecycle

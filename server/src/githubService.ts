@@ -743,7 +743,10 @@ export class GithubService {
       let checks: string | null = null;
       try {
         const head = await api.refSha(link.repo_full_name, link.branch);
-        checks = head ? ((await api.combinedStatus(link.repo_full_name, head))?.state ?? null) : null;
+        // BOTH MECHANISMS, not just commit statuses — see `checksFor`. The build check §B.6.2's
+        // generated workflow produces and the eval check §B.1 posts are both CHECK RUNS, so the
+        // endpoint this used to ask reported neither of the two checks this feature creates itself.
+        checks = head ? ((await api.checksFor(link.repo_full_name, head))?.state ?? null) : null;
       } catch {
         checks = null;
       }

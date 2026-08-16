@@ -870,17 +870,66 @@ export class GithubApi {
   }
 
   /**
-   * The combined CI verdict for a commit, or null when nothing has reported.
+   * The CI verdict for a commit, across BOTH of the two things GitHub calls a check.
    *
-   * NULL IS NOT "PASSING". §3.9 says CI status is a genuine gate rather than decoration precisely
-   * because Jaroku emits a Dockerfile, and rendering "no checks configured" as a green tick would
-   * turn the one honest signal on that card into a decoration after all.
+   * THE STATUSES API ALONE WAS THE BUG, and it was invisible because it fails by saying "nothing".
+   * `GET /commits/{sha}/status` returns COMMIT STATUSES — the older mechanism, written by external
+   * services through `POST /statuses`. It does not include CHECK RUNS, which is what GitHub Actions
+   * writes and what this file's own `putCheckRun` writes. So on any repository whose CI is Actions
+   * — including every repository §B.6.2 generates `jaroku-build.yml` into, and every pull request
+   * carrying §B.1's eval check — this endpoint answered `total_count: 0` and §3.9's card rendered
+   * "no checks reported" over a build that had failed. Measured against this repository's own
+   * latest commit: the statuses API said 0, the check-runs API said two, both failing.
+   *
+   * BOTH ARE ASKED AND THE ANSWER IS THE PESSIMISTIC ONE. A commit can carry some of each, and a
+   * card that reported whichever mechanism it happened to look at first would be the same defect
+   * with a different shape. Failure outranks pending outranks success, because §3.9's claim is that
+   * the pull request is a genuine gate — and a gate reports the reason it is shut.
+   *
+   * NULL IS NOT "PASSING". Nothing has reported is its own answer and the panel renders it as one:
+   * a repository with no CI configured has no checks to pass, and a green tick there would turn the
+   * one honest signal on that card into the decoration §3.9 says it is not.
+   *
+   * NEUTRAL AND SKIPPED COUNT AS PASSING, because that is what they mean — a check that decided it
+   * had nothing to say. §B.1.3's dry-run check concludes `neutral` on a stranger's pull request,
+   * and reading that as a failure would make the boundary look like a refusal of the code.
    */
-  async combinedStatus(fullName: string, sha: string): Promise<{ state: string; total: number } | null> {
-    const data = await this.call<{ state: string; total_count: number }>(
-      "combinedStatus", "GET", `/repos/${fullName}/commits/${sha}/status`,
-    );
-    if (!data.total_count) return null;
-    return { state: data.state, total: data.total_count };
+  async checksFor(fullName: string, sha: string): Promise<{ state: string; total: number } | null> {
+    let failed = 0;
+    let pending = 0;
+    let total = 0;
+
+    try {
+      const runs = await this.call<{ total_count: number; check_runs?: { status: string; conclusion: string | null }[] }>(
+        "checkRuns", "GET", `/repos/${fullName}/commits/${sha}/check-runs?per_page=100`,
+      );
+      for (const run of runs.check_runs ?? []) {
+        total++;
+        if (run.status !== "completed") pending++;
+        else if (run.conclusion !== null && !PASSING_CONCLUSIONS.has(run.conclusion)) failed++;
+      }
+    } catch {
+      // Reading one half is better than reading neither. A repository whose checks this token
+      // cannot list still has its statuses counted below.
+    }
+
+    try {
+      const data = await this.call<{ state: string; total_count: number }>(
+        "combinedStatus", "GET", `/repos/${fullName}/commits/${sha}/status`,
+      );
+      if (data.total_count) {
+        total += data.total_count;
+        if (data.state === "failure" || data.state === "error") failed++;
+        else if (data.state === "pending") pending++;
+      }
+    } catch {
+      // As above.
+    }
+
+    if (total === 0) return null;
+    return { state: failed > 0 ? "failure" : pending > 0 ? "pending" : "success", total };
   }
 }
+
+/** Conclusions that are not a reason to hold a pull request. See `checksFor`. */
+const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
