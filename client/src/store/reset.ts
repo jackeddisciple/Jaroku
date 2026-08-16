@@ -24,6 +24,7 @@ import { useBuildStore } from "./buildStore.ts";
 import { useChatStore } from "./chatStore.ts";
 import { useConnectionStore } from "./connectionStore.ts";
 import { useDeployStore } from "./deployStore.ts";
+import { useDiagnosticsStore } from "./diagnosticsStore.ts";
 import { useEvalStore } from "./evalStore.ts";
 import { useGithubStore } from "./githubStore.ts";
 import { useGraphStore } from "./graphStore.ts";
@@ -65,6 +66,12 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
   // the "Reconnect" button beside it would start a flow in the wrong workspace.
   connectionStore: useConnectionStore as unknown as Resettable,
   deployStore: useDeployStore as unknown as Resettable,
+  // §B.3's squiggles, keyed by agent uuid and path. It looks like the one store here that holds
+  // nothing worth clearing — a diagnostic is a rule number and a line — but the KEY is a path out
+  // of another tenant's project and the message quotes the line it is about, which is source. And
+  // an agent uuid from the old workspace can never be asked for again, so nothing would ever
+  // overwrite these: they would sit in the store for the life of the tab.
+  diagnosticsStore: useDiagnosticsStore as unknown as Resettable,
   evalStore: useEvalStore as unknown as Resettable,
   // Which repository each agent's code goes to, under whose GitHub account, and every commit
   // message on the way. Held across a switch it would name one tenant's private repositories
