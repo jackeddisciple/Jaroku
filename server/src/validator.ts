@@ -21,15 +21,24 @@ export interface ValidationResult {
   problems: string[];
 }
 
-const CONTRACT_CHECKS: Array<{ re: RegExp; missing: string }> = [
+// EXPORTED SINCE §B.3, and the export is the point rather than a convenience. `liveDiagnostics.ts`
+// runs the cheap half of this file against an unsaved buffer, 400ms after typing pauses, and it
+// imports these patterns rather than restating them. Two copies of rule 3 would be two definitions
+// of what "writes to stdout" means, and the day they drift the squiggle and the gate disagree —
+// which is worse than having no squiggle, because a person would have learned to trust it.
+//
+// What is deliberately NOT shared is the DECISION. This file refuses a publish; that one annotates
+// a line. §B.3.2 is explicit that a live diagnostic is advisory and changes only when a user learns
+// about a problem, never what stops a bad file from being committed.
+export const CONTRACT_CHECKS: Array<{ re: RegExp; missing: string }> = [
   { re: /^\s*def\s+build_graph\s*\(/m, missing: "def build_graph(llm)" },
   { re: /^\s*def\s+build_initial_state\s*\(/m, missing: "def build_initial_state(user_input)" },
 ];
 
 // print(...) with no file= argument. Allows the documented print(..., file=sys.stderr).
-const BARE_PRINT = /(^|[^.\w])print\s*\((?![^)]*\bfile\s*=)/;
-const JAROKU_IMPORT = /^\s*(from|import)\s+jaroku/m;
-const MODEL_IMPORT = /^\s*from\s+langchain_(anthropic|openai)\s+import/m;
+export const BARE_PRINT = /(^|[^.\w])print\s*\((?![^)]*\bfile\s*=)/;
+export const JAROKU_IMPORT = /^\s*(from|import)\s+jaroku/m;
+export const MODEL_IMPORT = /^\s*from\s+langchain_(anthropic|openai)\s+import/m;
 // ToolNode(...) anywhere, and whether it was given handle_tool_errors.
 const TOOL_NODE = /ToolNode\s*\(/;
 const TOOL_ERRORS_HANDLED = /ToolNode\s*\([^)]*handle_tool_errors\s*=\s*True/s;

@@ -39,6 +39,20 @@ export interface CodeCheckSpec {
   /** Positional args to `uv run python`, e.g. ["-c", script] or ["-m", "jaroku_runner.graph", agentId]. */
   args: string[];
   timeoutMs: number;
+  /**
+   * Text to write to the check's stdin, then close it.
+   *
+   * ADDED FOR §B.3'S LIVE DIAGNOSTICS, which analyse a BUFFER rather than a directory — and a
+   * buffer is up to 200 KB of arbitrary text, which is not a thing to put in argv. Every operating
+   * system this runs on caps a command line well below that, the failure is a spawn error rather
+   * than a truncation, and the text in question is a person's half-written source with whatever
+   * quoting characters they have typed so far.
+   *
+   * CLOSED IMMEDIATELY AFTER WRITING, always, including when this is absent. A check that reads
+   * stdin and is never given an EOF waits forever and is killed by the timeout, which turns a
+   * script's bug into a three-second stall on every keystroke pause.
+   */
+  stdin?: string;
   env?: NodeJS.ProcessEnv;
   /** Override MAX_OUTPUT_BYTES. Exists so the test can cross the cap without producing four
    *  megabytes; no caller in the server sets it. */
@@ -108,6 +122,13 @@ export class LocalCodeCheckSandbox implements CodeCheckSandbox {
         child.kill("SIGKILL");
         finish({ stdout, stderr, timedOut: false, exitCode: null, spawnError: null, truncated: true });
       };
+
+      // Written and closed before anything is read, and the error handler is not optional: a check
+      // that exits before consuming its input gives us EPIPE on this stream, which is an unhandled
+      // 'error' event and therefore a process-level crash rather than a failed check.
+      child.stdin.on("error", () => {});
+      if (spec.stdin !== undefined) child.stdin.write(spec.stdin);
+      child.stdin.end();
 
       child.stdout.on("data", collect("out"));
       child.stderr.on("data", collect("err"));
