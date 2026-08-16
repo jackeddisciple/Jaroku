@@ -64,7 +64,8 @@ import { AgentRepository } from "./db/repositories/agents.ts";
 import { IdentityRepository } from "./db/repositories/identity.ts";
 import { isMemberRole } from "./db/tenant.ts";
 import { resolveDevTenancy, type DevTenancy } from "./devTenancy.ts";
-import { loadConnectors } from "./connectors.ts";
+import { loadConnectors, templatesDir } from "./connectors.ts";
+import { buildArtifacts } from "./dockerfile.ts";
 import { isSafeAgentId, listProjectFiles, readOnlyPaths, type ProjectFile } from "./projectFs.ts";
 import { validateProject } from "./validator.ts";
 import { liveDiagnostics } from "./liveDiagnostics.ts";
@@ -3133,6 +3134,34 @@ const githubPusher = new GithubPusher({
   // §3.3's PROTECTED group, the same answer the service and the puller get, so a hand-staged
   // selection cannot reach a file the edit loop already refuses.
   connectorFilesFor: (agentUuid, slug) => agentFilesDeps.connectorFilesFor(undefined, slug),
+  // §2.2's "Include Dockerfile & pyproject", rendered here because this is where the connector
+  // catalogue and the serve template live — the same reason `provenanceFor` resolves here.
+  //
+  // THE SAME `buildArtifacts` THE DEPLOY PATH CALLS, from the agent's own row rather than from
+  // `jaroku.json` on disk: the row is the source of truth since migration 008, and a push must not
+  // depend on the agent happening to be materialised locally. `serve.py` is copied rather than
+  // rendered — it is the one reviewed template of the four — and is read from the same directory
+  // `writeDeployArtifacts` reads it from, so the pushed repo builds the image the deploy would.
+  deployArtifactsFor: async (ctx, agentUuid, slug, files) => {
+    const agent = await agentRepo.byId(ctx, agentUuid);
+    if (!agent) return [];
+    const { files: rendered } = buildArtifacts(
+      {
+        agentId: slug,
+        connectors: agent.connectors,
+        hasMcpTools: files.some((f) => f.path === MANIFEST_FILE),
+        provider: agent.default_provider,
+        ...(agent.description ? { description: agent.description } : {}),
+      },
+      loadConnectors(RUNTIME_DIR),
+    );
+    const out = Object.entries(rendered).map(([path, content]) => ({ path, content }));
+    const serve = join(templatesDir(RUNTIME_DIR), "serve.py");
+    // Absent means the three synthesised files still go, and the Dockerfile's own CMD is what
+    // reports the missing entrypoint — which is a clearer failure than a repo with no artifacts.
+    if (existsSync(serve)) out.push({ path: "serve.py", content: readFileSync(serve, "utf8") });
+    return out;
+  },
   // §B.6.1's literal pass: this workspace's credential VALUES.
   //
   // NAMES FROM THE VAULT, VALUES FROM THE ENVIRONMENT, which is the same pairing

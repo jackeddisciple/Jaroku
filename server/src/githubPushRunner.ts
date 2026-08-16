@@ -184,6 +184,33 @@ export interface GithubPusherDeps {
    */
   connectorFilesFor?: (agentUuid: string, slug: string) => string[];
   /**
+   * §2.2's "Include Dockerfile & pyproject", actually producing a Dockerfile.
+   *
+   * THE CHECKBOX PROMISED SOMETHING THE PUSH DID NOT DELIVER. `pushableFiles` implements it as a
+   * FILTER — with the box ticked nothing is held back — which is correct only if the artifacts are
+   * in the version's files to begin with. They are not: `deployArtifacts.writeDeployArtifacts`
+   * synthesises them into the project when a DEPLOY is prepared, so an agent nobody has deployed
+   * has none of them stored, and the box "exposes what v0.2.3 already synthesises" by exposing
+   * nothing. The pushed repository was source-only, which is the exact opposite of what §2.2 says
+   * it is for — and then §B.6.2's generated workflow ran `docker build` against a Dockerfile that
+   * was not there and put a red cross on the first pull request the feature ever opened.
+   *
+   * SYNTHESISED, NOT STORED. What comes back goes into the pushed TREE and never into
+   * `agent_versions` — the artifacts are host-owned and derived, so a version that recorded them
+   * would be recording something no user wrote and no edit may touch.
+   *
+   * INJECTED AND OPTIONAL, like every other dependency here: rendering them needs the connector
+   * catalogue and the serve template, which live under the runtime directory this module has no
+   * reason to know about. Absent, a push is exactly what it was before — source-only, and honest
+   * about it because the workflow is only written when the box is ticked in the first place.
+   */
+  deployArtifactsFor?: (
+    ctx: TenantContext,
+    agentUuid: string,
+    slug: string,
+    files: readonly StoredFile[],
+  ) => Promise<StoredFile[]>;
+  /**
    * The workspace's own stored credential VALUES, for §B.6.1's literal pass.
    *
    * INJECTED AND NEVER HELD. This module asks for them at the moment of the scan, hands them
@@ -408,6 +435,24 @@ export class GithubPusher {
           version,
           files: await this.deps.projects.readVersion(ctx, agentUuid, version.version),
         });
+      }
+      // §2.2'S CHECKBOX, MADE TRUE. The artifacts are derived from the agent rather than stored on
+      // it, so they are rendered here and added to every commit's tree — see `deployArtifactsFor`.
+      // Never overwriting a file the version already carries: a project that HAS been deployed has
+      // real ones on it, and those are the bytes that were validated.
+      if (link.include_artifacts && this.deps.deployArtifactsFor && snapshots.length > 0) {
+        try {
+          const newest = snapshots[snapshots.length - 1]!;
+          const artifacts = await this.deps.deployArtifactsFor(ctx, agentUuid, slug, newest.files);
+          for (const snapshot of snapshots) {
+            const have = new Set(snapshot.files.map((f) => f.path));
+            snapshot.files = [...snapshot.files, ...artifacts.filter((a) => !have.has(a.path))];
+          }
+        } catch (err) {
+          // A push is worth more than a Dockerfile. Named in the log rather than swallowed, because
+          // the pull request's build check is about to say something about it.
+          this.log(`[github] ${slug} could not render the deploy artifacts: ${(err as Error)?.message}`);
+        }
       }
       report(stage, "done");
 
