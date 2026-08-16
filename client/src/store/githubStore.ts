@@ -18,6 +18,7 @@
 import { create } from "zustand";
 import type {
   GithubLinkRow, GithubRefusal, GithubRepoRow, GithubRestackRefusal, GithubScanRefusal,
+  GithubShadowRun,
   GithubView,
 } from "../types.ts";
 
@@ -128,6 +129,15 @@ interface GithubState {
    * make answering one of them silently dismiss another.
    */
   scanRefusals: Record<string, GithubScanRefusal>;
+  /**
+   * agent slug -> §B.2.2's transient list.
+   *
+   * ITS OWN FIELD, NOT PART OF `views`, and that is §B.2.2's requirement rather than a preference:
+   * shadow runs never appear in the agent's ordinary run history, and the way that stays true is
+   * that nothing which renders a version list ever holds one. A snapshot REPLACES a `views` entry;
+   * these arrive on their own message and survive it.
+   */
+  shadowRuns: Record<string, GithubShadowRun[]>;
   /** §2.2's existing-repo search results. */
   repos: GithubRepoRow[];
   reposLoading: boolean;
@@ -170,6 +180,7 @@ interface GithubState {
   clearRestackRefusal: (agentId: string) => void;
   setScanRefusal: (refusal: GithubScanRefusal) => void;
   clearScanRefusal: (agentId: string) => void;
+  setShadowRuns: (agentId: string, runs: GithubShadowRun[]) => void;
   setError: (error: string | null) => void;
   setNotice: (notice: string | null) => void;
 }
@@ -184,6 +195,7 @@ export const useGithubStore = create<GithubState>((set) => ({
   refusals: {},
   restackRefusals: {},
   scanRefusals: {},
+  shadowRuns: {},
   repos: [],
   reposLoading: false,
   nameCheck: null,
@@ -282,6 +294,8 @@ export const useGithubStore = create<GithubState>((set) => ({
   setScanRefusal: (refusal) =>
     set((s) => ({ scanRefusals: { ...s.scanRefusals, [refusal.agentId]: refusal } })),
   clearScanRefusal: (agentId) => set((s) => ({ scanRefusals: withoutKey(s.scanRefusals, agentId) })),
+
+  setShadowRuns: (agentId, runs) => set((s) => ({ shadowRuns: { ...s.shadowRuns, [agentId]: runs } })),
 
   // An error ends anything it could describe, for the same reason a snapshot does — a generate
   // that failed must not leave its button spinning.

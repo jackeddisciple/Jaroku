@@ -69,6 +69,8 @@ import { isSafeAgentId, listProjectFiles, readOnlyPaths, type ProjectFile } from
 import { validateProject } from "./validator.ts";
 import { liveDiagnostics } from "./liveDiagnostics.ts";
 import { resolveSecretValues } from "./deploySecrets.ts";
+import { ShadowRunRepository, hasReadableTrace, shouldSweep } from "./shadowRuns.ts";
+import { ShadowRunner } from "./shadowRunner.ts";
 import { openObjectStore } from "./storage/open.ts";
 import { resolveSigningKey } from "./storage/presign.ts";
 import { filesFromDirectory, ProjectStore } from "./storage/projectStore.ts";
@@ -3049,6 +3051,7 @@ const GITHUB_COMMAND_NAMES = new Set([
   "listGithub", "listGithubRepos", "checkGithubRepo", "linkGithub", "unlinkGithub",
   "refreshGithub", "pushGithub", "pullGithub", "switchGithubBranch", "createGithubBranch",
   "openGithubPr", "commitGithub", "generateGithubMessage", "diagnoseFile",
+  "shadowRunGithub", "listShadowRuns",
 ]);
 
 const githubService = new GithubService({
@@ -3155,6 +3158,47 @@ const githubPusher = new GithubPusher({
     }
   },
 });
+
+/**
+ * §B.2's ephemeral runs.
+ *
+ * THE STAGING ROOT IS THE ONE THE BOOT SWEEP ALREADY CLEARS — `runtime/agents/.staging/` — so a
+ * process that died holding a materialised ref leaves nothing behind across a restart, on top of
+ * the timed sweep that handles the ordinary case. Two mechanisms for the same directory is not
+ * duplication here: one covers a crash and the other covers a long-lived process.
+ */
+const shadowRepo = new ShadowRunRepository(db);
+const shadowRunner = new ShadowRunner({
+  shadows: shadowRepo,
+  projects,
+  stagingRoot: join(RUNTIME_DIR, "agents", ".staging"),
+});
+
+/**
+ * §B.2.2's sweep, on a timer.
+ *
+ * FIVE MINUTES AGAINST A FIFTEEN-MINUTE WINDOW, which is the same relationship the checkpoint sweep
+ * keeps to its own: often enough that a directory outlives its window by a fraction of it, rare
+ * enough that a quiet server is not walking a table every few seconds for nothing.
+ *
+ * SCOPED TO THE SERVER'S OWN WORKSPACE ON THE LOCAL PATH, exactly as `sweepRetention` is. A hosted
+ * deployment sweeps per tenant through the same repository, which is why `sweepable` takes a
+ * context rather than reading across workspaces the way the webhook's link lookup deliberately
+ * does — a garbage collector has no reason to be the second method in this codebase that can.
+ *
+ * `unref`'d, because a timer is never a reason a process refuses to exit.
+ */
+const sweepShadowRuns = (): void => {
+  const ctx = serverContext();
+  void shadowRepo
+    .sweepable(ctx)
+    .then((rows) => shadowRunner.sweep(ctx, rows.filter((r) => shouldSweep(r))))
+    .then((n) => {
+      if (n > 0) console.log(`[shadow] swept ${n} staging director${n === 1 ? "y" : "ies"}`);
+    })
+    .catch((err) => console.error("[shadow] sweep failed:", (err as Error)?.message ?? err));
+};
+setInterval(sweepShadowRuns, 5 * 60_000).unref();
 
 const githubPuller = new GithubPuller({
   repo: githubRepo,
@@ -3290,6 +3334,75 @@ function readSteps(raw: unknown[]): { versionIds: string[] }[] {
     out.push({ versionIds: ids.filter((v): v is string => typeof v === "string" && v.length > 0) });
   }
   return out;
+}
+
+/**
+ * §B.2.2's transient list, on its own message.
+ *
+ * DELIBERATELY NOT PART OF `broadcastGithub`'s snapshot. §B.2.2 requires shadow runs never to
+ * appear in the agent's ordinary run history, and the way that stays true over time is that nothing
+ * which assembles the ordinary history ever sees them — a field on the panel snapshot would be one
+ * refactor away from being folded in beside `unpushed` and `pushed`.
+ */
+/**
+ * Close out the `shadow_runs` row for a process that has ended, if the run was one.
+ *
+ * WHETHER IT FAILED IS READ OFF THE RUN ITSELF rather than from the exit code. The runner reports
+ * a broken agent as a run with `status: "error"` and a message — v0.0.1's graceful failure — and
+ * that is a better answer than "the process exited non-zero", which is true of a timeout, a kill
+ * and a crash alike.
+ *
+ * SILENT WHEN THERE IS NO SHADOW ROW, which is almost every run. The teardown path runs for every
+ * process in the system, and a lookup that finds nothing is the ordinary case rather than a
+ * condition worth logging.
+ */
+async function finishShadowFor(runId: string): Promise<void> {
+  const ctx = contextForRun(runId);
+  try {
+    const run = await store.getRun(ctx, runId);
+    if (!run) return;
+    // TWO ID SPACES MEET HERE AND THEY ARE NOT THE SAME ONE. `runs.agent_id` is the SLUG — the
+    // frozen trace schema has held a text agent id since v0.0.1 and `runAgent` passes one — while
+    // `shadow_runs.agent_id` is the uuid, because it carries a composite foreign key to
+    // `agents (workspace_id, id)`. Handing the slug straight to `forAgent` finds nothing, silently,
+    // which would leave every shadow row `running` forever and every staging directory unswept.
+    const agent = await agentRepo.bySlug(ctx, run.agent_id);
+    if (!agent) return;
+    const row = (await shadowRepo.forAgent(ctx, agent.id, 50)).find((r) => r.run_id === runId);
+    if (!row || row.ended_at !== null) return;
+    await shadowRepo.finish(ctx, row.id, {
+      status: run.status === "error" ? "error" : "completed",
+      error: run.error ?? null,
+    });
+    await broadcastShadowRuns(ctx, agent.slug);
+  } catch (err) {
+    console.warn(`[shadow] could not close out ${runId}: ${(err as Error)?.message ?? String(err)}`);
+  }
+}
+
+async function broadcastShadowRuns(ctx: TenantContext, agentId: string): Promise<void> {
+  if (!isSafeAgentId(agentId)) return;
+  const agent = await agentRepo.bySlug(ctx, agentId);
+  if (!agent) return;
+  const runs = await shadowRepo.forAgent(ctx, agent.id);
+  relay.broadcastGithub(ctx, {
+    type: "shadowRuns",
+    agentId,
+    runs: runs.map((r) => ({
+      id: r.id,
+      ref: r.ref,
+      headSha: r.head_sha,
+      // Null until a run was dispatched. `hasReadableTrace` is what decides whether the row opens
+      // into a trace, and it stays true after the staging directory is swept — the trace is an
+      // ordinary run on retention's own schedule.
+      runId: hasReadableTrace(r) ? r.run_id : null,
+      status: r.status,
+      error: r.error,
+      createdAt: r.created_at,
+      endedAt: r.ended_at,
+      staged: r.swept_at === null && r.staging_key !== null,
+    })),
+  });
 }
 
 async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Promise<void> {
@@ -3640,6 +3753,73 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
           },
           key,
         );
+        return;
+      }
+
+      case "listShadowRuns": {
+        await broadcastShadowRuns(ctx, String(cmd.agentId ?? ""));
+        return;
+      }
+
+      case "shadowRunGithub": {
+        // §B.2. Stage a ref, run it once, and never touch the published version.
+        const agentId = String(cmd.agentId ?? "");
+        const ref = String(cmd.ref ?? "").trim();
+        if (!ref) return fail("name a branch, tag or commit", agentId);
+        const agent = await agentRepo.bySlug(ctx, agentId);
+        if (!agent) return fail("no such agent in this workspace", agentId);
+        const link = await githubRepo.linkFor(ctx, agent.id);
+        if (!link) return fail("link a repository first", agentId);
+        const connection = await githubIdentity.apiFor(ctx);
+        if (!connection) return fail("connect GitHub first", agentId);
+
+        const prepared = await shadowRunner.prepare(ctx, {
+          api: connection.api,
+          agentUuid: agent.id,
+          agentSlug: agent.slug,
+          link,
+          ref,
+        });
+        if ("error" in prepared) {
+          await broadcastShadowRuns(ctx, agentId);
+          return fail(prepared.error, agentId);
+        }
+
+        // A CONTRACT FAILURE IS A FINISHED RUN, NOT A REFUSAL. §B.2.2: somebody asked what this
+        // branch does, and "it does not satisfy the contract, so it does not run" is an answer.
+        // The row ends as `error` with the reason on it, the panel renders it like any other
+        // failed run, and nothing is refused — there was nothing to refuse.
+        if (prepared.contractProblem) {
+          await shadowRepo.finish(ctx, prepared.run.id, {
+            status: "error",
+            error: prepared.contractProblem,
+          });
+          await broadcastShadowRuns(ctx, agentId);
+          relay.broadcastGithub(ctx, {
+            type: "notice",
+            agentId,
+            message: `${ref} does not run: ${prepared.contractProblem}`,
+          });
+          return;
+        }
+
+        relay.broadcastGithub(ctx, {
+          type: "notice",
+          agentId,
+          // Said before the run rather than after it, because the whole reason somebody hesitates
+          // over this button is the fear that it changes something.
+          message: `Running ${ref} at ${prepared.headSha.slice(0, 7)} — this does not affect ${agent.slug}'s published version.`,
+        });
+        await broadcastShadowRuns(ctx, agentId);
+        await runAgent(
+          ctx,
+          typeof cmd.input === "string" ? cmd.input : undefined,
+          typeof cmd.provider === "string" ? cmd.provider : undefined,
+          typeof cmd.model === "string" ? cmd.model : undefined,
+          agent.slug,
+          { projectDir: prepared.projectDir, shadowRunId: prepared.run.id },
+        );
+        await broadcastShadowRuns(ctx, agentId);
         return;
       }
 
@@ -4485,6 +4665,12 @@ onBothPools("exit", ({ runId, code, signal, timedOut, elapsedMs }) => {
     // subprocess is gone.
     activeRunId = null;
   }
+  // §B.2. A shadow run's row learns how its process ended, from the same place every other run's
+  // teardown happens. Looked up by run id rather than tracked in a second map: a shadow run is a
+  // rare thing and a per-process map would be a second lifetime to get wrong, where a query that
+  // finds nothing is exactly right for the ninety-nine runs in a hundred that are not shadows.
+  void finishShadowFor(runId);
+
   // A paused run is coming back — resume re-registers it, and dropping it here would send
   // the resumed segment's events to the server's workspace instead of its own.
   if (runId !== pausedRunId) {
@@ -4814,6 +5000,21 @@ async function runAgent(
   provider?: string,
   model?: string,
   agentId?: string,
+  /**
+   * §B.2: run a project that is NOT this agent's published version.
+   *
+   * ONE OPTIONAL ARGUMENT RATHER THAN A SECOND `runShadowAgent`, and that is the reuse §B.2 claims
+   * rather than merely asserts. Everything a run needs — the budget gate, the hold, the payer, the
+   * egress policy, the run token, the interactive reservation, the span, the metering — is decided
+   * in the two hundred lines below, and a second entry point would be a second place for each of
+   * those to be got right. A shadow run is an ordinary run whose project came from a git ref, so
+   * what changes is one environment variable and one row that learns the run id.
+   *
+   * `projectDir` IS WHAT `JAROKU_AGENT_DIR` POINTS AT. `contract.py` already reads it — it is how
+   * graph introspection builds a project the object store materialised — so nothing in the runner
+   * has to learn what a shadow run is.
+   */
+  shadow?: { projectDir: string; shadowRunId: string },
 ): Promise<void> {
   if (interactivePool.busy) {
     console.log("[manager] agent already running; ignoring run request");
@@ -4871,6 +5072,10 @@ async function runAgent(
     // because one file per run is already a namespace.
     JAROKU_WORKSPACE_ID: ctx.workspaceId,
   };
+  // §B.2. The ref's tree, materialised, instead of the agent's published version. Set here — with
+  // everything else about the environment — so a shadow run is metered, gated and traced by exactly
+  // the code that does it for every other run.
+  if (shadow) env.JAROKU_AGENT_DIR = shadow.projectDir;
   if (provider) env.JAROKU_PROVIDER = provider;
   if (model) env.JAROKU_MODEL = model;
 
@@ -5063,6 +5268,10 @@ async function runAgent(
   runActive = true;
   activeRunId = runId;
   pausedRunId = null;
+  // AFTER THE START, so a run that was refused a slot never gets attached to a shadow row that
+  // would then look `running` forever. The row already exists and already says `staging`, which is
+  // the honest state for a run that never got one.
+  if (shadow) await shadowRepo.attachRun(ctx, shadow.shadowRunId, runId);
 }
 
 // Pause the live run at its next node boundary (the runner honours the control file there).

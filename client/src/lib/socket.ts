@@ -262,6 +262,8 @@ function dispatch(msg: ServerMessage): void {
           message: msg.message,
           candidate: msg.candidate,
         });
+      } else if (msg.type === "shadowRuns") {
+        g.setShadowRuns(msg.agentId, msg.runs);
       } else if (msg.type === "scanRefused") {
         // §B.6.1. Its own field, for the third time on this channel and the third time for the same
         // reason: the card names files and rules and offers two actions, and nothing about it is an
@@ -982,6 +984,20 @@ export function sendDiagnoseFile(agentId: string, path: string, source: string):
   const nonce = store.nextNonce();
   store.markSent(agentId, path, nonce);
   send({ cmd: "diagnoseFile", agentId, path, source, nonce });
+}
+
+/** §B.2: run a ref once, without switching the agent to it. */
+export function sendShadowRunGithub(
+  agentId: string,
+  ref: string,
+  opts: { input?: string; provider?: string; model?: string } = {},
+): void {
+  send({ cmd: "shadowRunGithub", agentId, ref, ...opts });
+}
+
+/** §B.2.2's transient list. Its own read, because it is deliberately not the run history. */
+export function sendListShadowRuns(agentId: string): void {
+  send({ cmd: "listShadowRuns", agentId });
 }
 
 /** Pull, through the same validate-before-promote path every generation passes. */

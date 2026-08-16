@@ -551,6 +551,28 @@ export type DiagnoseFileCommand = {
   nonce?: number;
 };
 
+/**
+ * §B.2's `[ Run ◆ ]`: run a ref once, without switching to it.
+ *
+ * DELIBERATELY NOT `switchGithubBranch` WITH A FLAG. §3.2 treats switching as heavy because it
+ * re-materialises the agent's working state, and the whole point of a shadow run is that it does
+ * not do that — folding the two into one command with a boolean would put the heavy action and the
+ * disposable one behind the same name, one keystroke apart.
+ */
+export type ShadowRunGithubCommand = {
+  cmd: "shadowRunGithub";
+  agentId: string;
+  /** The ref, as the user named it: a branch, a tag, or a sha. */
+  ref: string;
+  /** The test input to run it against. The same field an ordinary run takes. */
+  input?: string;
+  provider?: string;
+  model?: string;
+};
+
+/** §B.2.2's transient list, which is deliberately not the ordinary run history. */
+export type ListShadowRunsCommand = { cmd: "listShadowRuns"; agentId: string };
+
 export type GithubCommand =
   | ListGithubCommand
   | ListGithubReposCommand
@@ -565,12 +587,15 @@ export type GithubCommand =
   | OpenGithubPrCommand
   | CommitGithubCommand
   | GenerateGithubMessageCommand
-  | DiagnoseFileCommand;
+  | DiagnoseFileCommand
+  | ShadowRunGithubCommand
+  | ListShadowRunsCommand;
 
 const GITHUB_COMMANDS = new Set([
   "listGithub", "listGithubRepos", "checkGithubRepo", "linkGithub", "unlinkGithub",
   "refreshGithub", "pushGithub", "pullGithub", "switchGithubBranch", "createGithubBranch",
   "openGithubPr", "commitGithub", "generateGithubMessage", "diagnoseFile",
+  "shadowRunGithub", "listShadowRuns",
 ]);
 
 /** MCP-channel commands, grouped so the forwarding switch stays readable. */
@@ -1129,6 +1154,30 @@ export type GithubEvent =
         rule: number | null;
         message: string;
         severity: "warning";
+      }[];
+    }
+  /**
+   * §B.2.2's transient list: this agent's shadow runs, newest first.
+   *
+   * ITS OWN MESSAGE RATHER THAN A FIELD ON `state`, and the separation is the requirement rather
+   * than a preference: §B.2.2 says shadow runs never appear in the agent's ordinary run history,
+   * and the way that stays true is that nothing which assembles the ordinary history ever sees
+   * them. A field on the panel snapshot would be one refactor away from being merged in.
+   */
+  | {
+      type: "shadowRuns";
+      agentId: string;
+      runs: {
+        id: string;
+        ref: string;
+        headSha: string;
+        runId: string | null;
+        status: string;
+        error: string | null;
+        createdAt: string;
+        endedAt: string | null;
+        /** False once the staging directory is gone. The TRACE outlives it — see hasReadableTrace. */
+        staged: boolean;
       }[];
     }
   | { type: "error"; message: string; agentId?: string }

@@ -939,6 +939,27 @@ export interface GithubScanRefusal {
   findings: GithubScanFinding[];
 }
 
+/**
+ * One §B.2 shadow run, as the transient list renders it.
+ *
+ * `staged` GOES FALSE BEFORE `runId` DOES, and the two are genuinely independent: the sweep
+ * reclaims the materialised project after fifteen minutes, and the TRACE is an ordinary run on
+ * retention's own schedule. So a row an hour old still opens into its trace and no longer has a
+ * directory — which is exactly what makes a short sweep window safe.
+ */
+export interface GithubShadowRun {
+  id: string;
+  ref: string;
+  headSha: string;
+  /** The ordinary run this produced. Null while staging, or if it never got a slot. */
+  runId: string | null;
+  status: string;
+  error: string | null;
+  createdAt: string;
+  endedAt: string | null;
+  staged: boolean;
+}
+
 export interface GithubRestackRefusal {
   agentId: string;
   /** Zero-based, in the NEW order — where the user just put it, not where it used to be. */
@@ -984,6 +1005,7 @@ export type GithubMessage =
   | { channel: "github"; type: "message"; agentId: string; message: string }
   | ({ channel: "github"; type: "refused" } & GithubRefusal)
   | ({ channel: "github"; type: "scanRefused" } & GithubScanRefusal)
+  | { channel: "github"; type: "shadowRuns"; agentId: string; runs: GithubShadowRun[] }
   | ({ channel: "github"; type: "restackRefused" } & GithubRestackRefusal)
   | {
       channel: "github";
@@ -1169,7 +1191,16 @@ export type ClientCommand =
    * THE SOURCE TRAVELS WITH THE COMMAND, unlike every other command here, because there is nothing
    * to look up — the buffer has not been saved. That is the feature.
    */
-  | { cmd: "diagnoseFile"; agentId: string; path: string; source: string; nonce?: number };
+  | { cmd: "diagnoseFile"; agentId: string; path: string; source: string; nonce?: number }
+  /**
+   * §B.2's `[ Run ◆ ]`: run a ref once, without switching to it.
+   *
+   * Its own command rather than a flag on `switchGithubBranch`, because §3.2 treats switching as
+   * heavy — it re-materialises the working state — and this deliberately does not. One name for
+   * each, rather than the heavy action and the disposable one a boolean apart.
+   */
+  | { cmd: "shadowRunGithub"; agentId: string; ref: string; input?: string; provider?: string; model?: string }
+  | { cmd: "listShadowRuns"; agentId: string };
 
 // Unified composer "explain" subject — what the question is about, built from already-in-memory
 // context (a trace step, a graph node, or the agent generally). No new data is fetched.
