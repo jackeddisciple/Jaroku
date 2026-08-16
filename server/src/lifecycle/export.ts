@@ -110,6 +110,35 @@ export const EXPORTED_TABLES = [
   // `github_installations` is deliberately absent — see EXCLUDED_TABLES.
   "github_links",
   "github_events",
+  // ADDENDUM B'S FIVE TABLES (migrations 036–040). Every one of them is the workspace's own
+  // operational record and not one of them holds a credential, which is the only question
+  // EXCLUDED_TABLES is asking:
+  //
+  //   `agent_ci_config` is a dataset id and a spending policy somebody chose. The policy in
+  //   particular is the answer to "why did this pull request run on the free provider", which is a
+  //   question asked months later.
+  //
+  //   `check_runs` is the measurement history — pass rate, cost and latency per commit, with the
+  //   baseline each was compared against. It is the only place those numbers exist once the eval
+  //   jobs behind them have been swept, and it is what §B.8.2's canvas is drawn from.
+  //
+  //   `shadow_runs` says what a run WAS: which ref, which sha, which staging directory. The run
+  //   itself is in `runs` and its cost is in `usage_events`, and without this row neither of them
+  //   can be attributed to anything.
+  //
+  //   `pr_comments` mirrors a review. It carries other people's words, which is exactly what
+  //   `steps` and `audit_log` already carry and exactly what a team leaving with their agents
+  //   needs in order to know why the code says what it says.
+  //
+  //   `secret_scan_findings` is a path, a rule and whether somebody overrode it. Migration 040 is
+  //   explicit that the matched text is never stored, and the override rows are the only evidence
+  //   that anybody ever pushed over a credential — which is the sort of thing an audit asks for
+  //   after the workspace has left.
+  "agent_ci_config",
+  "check_runs",
+  "shadow_runs",
+  "pr_comments",
+  "secret_scan_findings",
 ] as const;
 
 /**
