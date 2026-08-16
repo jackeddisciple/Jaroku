@@ -116,6 +116,7 @@
     "test:github-sync": "tsx src/githubSync.test.ts",
     "test:github-push": "tsx src/githubPush.test.ts",
     "test:github-trailers": "tsx src/githubTrailers.test.ts",
+    "test:hunks": "tsx src/hunks.test.ts",
     "test:mcp-impact": "tsx src/mcpImpact.test.ts",
     "test:mcp-client": "tsx src/mcpClient.test.ts",
     "test:mcp-isolation": "tsx src/mcpIsolation.test.ts",
