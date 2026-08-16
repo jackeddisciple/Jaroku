@@ -960,6 +960,31 @@ export interface GithubShadowRun {
   staged: boolean;
 }
 
+/**
+ * One row of §B.7's Agent diff.
+ *
+ * `verb` AND `object` ARRIVE SEPARATELY so the panel renders them through `ActionRow` — the same
+ * narrative-line vocabulary the whole app speaks, which is what makes "tool added" here read
+ * exactly like "tool added" in a plan card. A pre-composed sentence would be a second vocabulary
+ * in one product.
+ */
+export interface GithubSemanticRow {
+  kind: string;
+  verb: string;
+  object: string;
+  detail?: string;
+  /** True on exactly one kind: a widened MCP grant. §B.7.2 — nothing else may borrow the tone. */
+  warn?: boolean;
+}
+
+export interface GithubSemanticDiff {
+  agentId: string;
+  ref: string;
+  rows: GithubSemanticRow[];
+  /** Set when one side did not fully parse. The rows that came back are still real. */
+  partial?: string;
+}
+
 export interface GithubRestackRefusal {
   agentId: string;
   /** Zero-based, in the NEW order — where the user just put it, not where it used to be. */
@@ -1006,6 +1031,7 @@ export type GithubMessage =
   | ({ channel: "github"; type: "refused" } & GithubRefusal)
   | ({ channel: "github"; type: "scanRefused" } & GithubScanRefusal)
   | { channel: "github"; type: "shadowRuns"; agentId: string; runs: GithubShadowRun[] }
+  | ({ channel: "github"; type: "semanticDiff" } & GithubSemanticDiff)
   | ({ channel: "github"; type: "restackRefused" } & GithubRestackRefusal)
   | {
       channel: "github";
@@ -1200,7 +1226,12 @@ export type ClientCommand =
    * each, rather than the heavy action and the disposable one a boolean apart.
    */
   | { cmd: "shadowRunGithub"; agentId: string; ref: string; input?: string; provider?: string; model?: string }
-  | { cmd: "listShadowRuns"; agentId: string };
+  | { cmd: "listShadowRuns"; agentId: string }
+  /**
+   * §B.7's Agent diff. On demand rather than on the snapshot: it costs a tree read from GitHub and
+   * a parse of both sides, and a toggle is a click where a snapshot is a render.
+   */
+  | { cmd: "semanticDiffGithub"; agentId: string; ref?: string };
 
 // Unified composer "explain" subject — what the question is about, built from already-in-memory
 // context (a trace step, a graph node, or the agent generally). No new data is fetched.

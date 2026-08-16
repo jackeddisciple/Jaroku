@@ -18,7 +18,7 @@
 import { create } from "zustand";
 import type {
   GithubLinkRow, GithubRefusal, GithubRepoRow, GithubRestackRefusal, GithubScanRefusal,
-  GithubShadowRun,
+  GithubSemanticDiff, GithubShadowRun,
   GithubView,
 } from "../types.ts";
 
@@ -138,6 +138,8 @@ interface GithubState {
    * these arrive on their own message and survive it.
    */
   shadowRuns: Record<string, GithubShadowRun[]>;
+  /** agent slug -> §B.7's Agent diff, for whichever ref was asked about. */
+  semanticDiffs: Record<string, GithubSemanticDiff>;
   /** §2.2's existing-repo search results. */
   repos: GithubRepoRow[];
   reposLoading: boolean;
@@ -181,6 +183,7 @@ interface GithubState {
   setScanRefusal: (refusal: GithubScanRefusal) => void;
   clearScanRefusal: (agentId: string) => void;
   setShadowRuns: (agentId: string, runs: GithubShadowRun[]) => void;
+  setSemanticDiff: (diff: GithubSemanticDiff) => void;
   setError: (error: string | null) => void;
   setNotice: (notice: string | null) => void;
 }
@@ -196,6 +199,7 @@ export const useGithubStore = create<GithubState>((set) => ({
   restackRefusals: {},
   scanRefusals: {},
   shadowRuns: {},
+  semanticDiffs: {},
   repos: [],
   reposLoading: false,
   nameCheck: null,
@@ -296,6 +300,8 @@ export const useGithubStore = create<GithubState>((set) => ({
   clearScanRefusal: (agentId) => set((s) => ({ scanRefusals: withoutKey(s.scanRefusals, agentId) })),
 
   setShadowRuns: (agentId, runs) => set((s) => ({ shadowRuns: { ...s.shadowRuns, [agentId]: runs } })),
+
+  setSemanticDiff: (diff) => set((s) => ({ semanticDiffs: { ...s.semanticDiffs, [diff.agentId]: diff } })),
 
   // An error ends anything it could describe, for the same reason a snapshot does — a generate
   // that failed must not leave its button spinning.

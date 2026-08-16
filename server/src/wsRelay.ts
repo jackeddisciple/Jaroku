@@ -573,6 +573,15 @@ export type ShadowRunGithubCommand = {
 /** §B.2.2's transient list, which is deliberately not the ordinary run history. */
 export type ListShadowRunsCommand = { cmd: "listShadowRuns"; agentId: string };
 
+/**
+ * §B.7's Agent diff: what changed about the agent, between the current version and a ref.
+ *
+ * COMPUTED ON DEMAND RATHER THAN CARRIED ON THE SNAPSHOT, because it costs a tree read from GitHub
+ * and a Python parse of both sides — and §1's snapshot is assembled on every panel open, for every
+ * agent somebody clicks. A toggle is a click; a snapshot is a render.
+ */
+export type SemanticDiffCommand = { cmd: "semanticDiffGithub"; agentId: string; ref?: string };
+
 export type GithubCommand =
   | ListGithubCommand
   | ListGithubReposCommand
@@ -589,13 +598,14 @@ export type GithubCommand =
   | GenerateGithubMessageCommand
   | DiagnoseFileCommand
   | ShadowRunGithubCommand
-  | ListShadowRunsCommand;
+  | ListShadowRunsCommand
+  | SemanticDiffCommand;
 
 const GITHUB_COMMANDS = new Set([
   "listGithub", "listGithubRepos", "checkGithubRepo", "linkGithub", "unlinkGithub",
   "refreshGithub", "pushGithub", "pullGithub", "switchGithubBranch", "createGithubBranch",
   "openGithubPr", "commitGithub", "generateGithubMessage", "diagnoseFile",
-  "shadowRunGithub", "listShadowRuns",
+  "shadowRunGithub", "listShadowRuns", "semanticDiffGithub",
 ]);
 
 /** MCP-channel commands, grouped so the forwarding switch stays readable. */
@@ -1180,6 +1190,22 @@ export type GithubEvent =
         staged: boolean;
       }[];
     }
+  /**
+   * §B.7's Agent diff rows.
+   *
+   * `verb` AND `object` SEPARATELY, so the client renders them through `ActionRow` — the same
+   * narrative-line vocabulary as everything else in the app, which is what makes "tool added" here
+   * read exactly like "tool added" in a plan card. A pre-composed sentence would be a second
+   * vocabulary in one product.
+   */
+  | {
+      type: "semanticDiff";
+      agentId: string;
+      ref: string;
+      rows: { kind: string; verb: string; object: string; detail?: string; warn?: boolean }[];
+      /** Set when one side could not be fully parsed. The rows that DID come back are still real. */
+      partial?: string;
+    }
   | { type: "error"; message: string; agentId?: string }
   | { type: "notice"; message: string; agentId?: string };
 
@@ -1305,6 +1331,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // and a command whose channel is missing here answers on `log` by default, which puts its
   // refusals in the status bar instead of the surface that asked for them.
   diagnoseFile: "github", shadowRunGithub: "github", listShadowRuns: "github",
+  semanticDiffGithub: "github",
 };
 
 export function channelFor(cmd: string): string {

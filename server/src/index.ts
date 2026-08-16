@@ -73,6 +73,10 @@ import { ShadowRunRepository, hasReadableTrace, shouldSweep } from "./shadowRuns
 import { ShadowRunner } from "./shadowRunner.ts";
 import { ChecksRepository } from "./db/repositories/checks.ts";
 import { CheckRunner } from "./checkRunner.ts";
+import { diffShapes, readShape } from "./semanticDiff.ts";
+import { inSubdirectory, repoPrefix } from "./githubPush.ts";
+import { MANIFEST_FILE } from "./mcpManifest.ts";
+import type { McpImpact } from "./mcpStore.ts";
 import { openObjectStore } from "./storage/open.ts";
 import { resolveSigningKey } from "./storage/presign.ts";
 import { filesFromDirectory, ProjectStore } from "./storage/projectStore.ts";
@@ -3059,7 +3063,7 @@ const GITHUB_COMMAND_NAMES = new Set([
   "listGithub", "listGithubRepos", "checkGithubRepo", "linkGithub", "unlinkGithub",
   "refreshGithub", "pushGithub", "pullGithub", "switchGithubBranch", "createGithubBranch",
   "openGithubPr", "commitGithub", "generateGithubMessage", "diagnoseFile",
-  "shadowRunGithub", "listShadowRuns",
+  "shadowRunGithub", "listShadowRuns", "semanticDiffGithub",
 ]);
 
 const githubService = new GithubService({
@@ -3920,6 +3924,65 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
           },
           key,
         );
+        return;
+      }
+
+      case "semanticDiffGithub": {
+        // §B.7. What changed about the AGENT between the current version and a ref, rather than
+        // what changed about the text. Presentation, permanently — see the module's own boundary.
+        const agentId = String(cmd.agentId ?? "");
+        const agent = await agentRepo.bySlug(ctx, agentId);
+        if (!agent) return fail("no such agent in this workspace", agentId);
+        const link = await githubRepo.linkFor(ctx, agent.id);
+        if (!link) return fail("link a repository first", agentId);
+        const connection = await githubIdentity.apiFor(ctx);
+        if (!connection) return fail("connect GitHub first", agentId);
+        const ref = (typeof cmd.ref === "string" && cmd.ref.trim()) || link.branch;
+
+        const head = await connection.api.refSha(link.repo_full_name, ref);
+        if (!head) return fail(`there is no ref called ${ref} on ${link.repo_full_name}`, agentId);
+
+        // THE REMOTE SIDE IS READ, NEVER RUN. §B.7's graph reading is static for exactly this
+        // reason — the other side of the diff is a tree this machine has never executed and must
+        // not, so `readShape` parses it and nothing imports it.
+        const prefix = repoPrefix(link.subdirectory);
+        const remote: { path: string; content: string }[] = [];
+        for (const entry of (await connection.api.tree(link.repo_full_name, head)).filter(
+          (e) => inSubdirectory(e.path, link.subdirectory),
+        )) {
+          const path = prefix ? entry.path.slice(prefix.length + 1) : entry.path;
+          if (!path.endsWith(".py") && path !== MANIFEST_FILE) continue;
+          remote.push({ path, content: await connection.api.blob(link.repo_full_name, entry.sha, entry.path) });
+        }
+
+        const local = await projects.readCurrent(ctx, agent.id, agent.current_version);
+        const [before, after] = await Promise.all([
+          readShape(remote, { runtimeDir: RUNTIME_DIR }),
+          readShape(local, { runtimeDir: RUNTIME_DIR }),
+        ]);
+
+        // THE STORED CLASSIFICATION, LOOKED UP — never computed here. §B.7.2 mirrors the McpImpact
+        // ratchet: a classification may only be raised by an untrusted signal, and "an external
+        // commit changed the manifest" is precisely such a signal. Classifying a newly granted tool
+        // from its name at this point would be that signal deciding its own impact.
+        // EVERY TOOL THIS WORKSPACE HAS DISCOVERED, rather than only the ones this agent is
+        // scoped to — because the whole question is about a grant that just WIDENED, and a tool the
+        // agent did not have yesterday is by definition not in its current scope. A lookup narrowed
+        // to the agent would return undefined for exactly the row §B.7.2 exists for, and undefined
+        // reads as high, which is safe and unhelpful: the workspace may well have classified this
+        // tool already, on another agent.
+        const granted = new Map<string, McpImpact>();
+        for (const tool of await mcpStore.listTools(ctx).catch(() => [])) {
+          granted.set(`${tool.server_id}/${tool.name}`, tool.impact);
+        }
+
+        relay.broadcastGithub(ctx, {
+          type: "semanticDiff",
+          agentId,
+          ref,
+          rows: diffShapes(before, after, (r) => granted.get(r)),
+          ...(before.error || after.error ? { partial: before.error ?? after.error ?? "" } : {}),
+        });
         return;
       }
 

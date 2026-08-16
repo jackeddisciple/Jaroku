@@ -262,6 +262,13 @@ function dispatch(msg: ServerMessage): void {
           message: msg.message,
           candidate: msg.candidate,
         });
+      } else if (msg.type === "semanticDiff") {
+        g.setSemanticDiff({
+          agentId: msg.agentId,
+          ref: msg.ref,
+          rows: msg.rows,
+          ...(msg.partial ? { partial: msg.partial } : {}),
+        });
       } else if (msg.type === "shadowRuns") {
         g.setShadowRuns(msg.agentId, msg.runs);
       } else if (msg.type === "scanRefused") {
@@ -993,6 +1000,11 @@ export function sendShadowRunGithub(
   opts: { input?: string; provider?: string; model?: string } = {},
 ): void {
   send({ cmd: "shadowRunGithub", agentId, ref, ...opts });
+}
+
+/** §B.7: what changed about the AGENT between the current version and a ref. */
+export function sendSemanticDiffGithub(agentId: string, ref?: string): void {
+  send({ cmd: "semanticDiffGithub", agentId, ...(ref ? { ref } : {}) });
 }
 
 /** §B.2.2's transient list. Its own read, because it is deliberately not the run history. */

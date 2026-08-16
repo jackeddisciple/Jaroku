@@ -43,6 +43,7 @@ import { GitHubSyncRegion, RegionLabel } from "./GitHubSync.tsx";
 import { BranchSwitcher, ChangesRegion, HistoryRegion, PullRequestCard } from "./GitHubHistory.tsx";
 import { RestackRegion, StagingRegion } from "./GitHubStaging.tsx";
 import { ShadowRunsRegion } from "./ShadowRuns.tsx";
+import { SemanticDiffRegion } from "./SemanticDiff.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
 import { EmptyState } from "./EmptyState.tsx";
@@ -556,6 +557,9 @@ function Linked({ view }: { view: GithubView }) {
         open={regions.changes}
         onToggle={toggle("changes")}
       >
+        {/* §B.7's toggle, above the file list rather than below it: it decides what the region is
+            ABOUT, and a control that changes what is above it belongs above it. */}
+        <SemanticDiffRegion view={view} />
         <ChangesRegion view={view} />
         {/* §B.4.1's checkbox column, between the file list and the commit box, because it is a
             narrowing OF that list and the message is written about whatever survives the narrowing.

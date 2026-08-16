@@ -311,6 +311,8 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // disposable to the bill.
   shadowRunGithub: "github:manage",
   listShadowRuns: "github:read",
+  // §B.7. Presentation over two trees the reader can already see — permanently, per §B.7.3.
+  semanticDiffGithub: "github:read",
 
   // An export is deliberately NOT here, and its absence is the decision rather than an omission:
   // it is an HTTP route, not a socket command — see http/lifecycle.ts. A copy of everything the
