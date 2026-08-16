@@ -108,8 +108,18 @@ export interface GithubRepo {
   private: boolean;
   defaultBranch: string;
   htmlUrl: string;
-  /** A repository with no commits at all. §6's "empty repo" state, answered by the API itself. */
-  empty: boolean;
+  /**
+   * A repository with no commits at all — §6's "empty repo" state.
+   *
+   * NULL MEANS NOT ASKED, and that is most of the time. The repository object carries no field
+   * that answers this: `pushed_at` is set to the moment of CREATION on a repository with nothing
+   * in it, and `size` is computed asynchronously and reads 0 for minutes after a real push. Both
+   * were tried here, and both said "empty" about repositories that were not and "not empty" about
+   * repositories that were. The only exact answer costs a request — `isEmpty` — so the list this
+   * flag renders in leaves it null rather than guessing a hundred times per keystroke, and the one
+   * caller that has to be right asks.
+   */
+  empty: boolean | null;
   pushedAt: string | null;
 }
 
@@ -314,10 +324,9 @@ export class GithubApi {
       private: r["private"] === true,
       defaultBranch: String(r["default_branch"] ?? "main"),
       htmlUrl: String(r["html_url"] ?? ""),
-      // GitHub reports a repository with no commits as size 0 and, more reliably, with a null
-      // pushed_at. Both are checked because the first is also true of a repo holding one empty
-      // file, and mistaking that for empty would skip the divergence check on a repo that has one.
-      empty: r["pushed_at"] == null,
+      // NOT ASKED. See the field's own comment: neither `pushed_at` nor `size` answers this, and a
+      // repository list is the wrong place to spend a request per row finding out.
+      empty: null,
       pushedAt: (r["pushed_at"] as string | null) ?? null,
     };
   }
@@ -343,12 +352,12 @@ export class GithubApi {
    * Create a repository under the token's own account.
    *
    * `auto_init: false` deliberately. An auto-initialised repo arrives with a README commit on
-   * `main` that Jaroku did not write, which would make the very first push a divergence — the
-   * panel would open on ↕ before the user had done anything. An empty repo is §6's first row and
-   * is handled: the first push creates the initial commit.
+   * `main` that Jaroku did not write and did not choose the contents of. An empty repo is §6's
+   * first row and is handled — but not by the Git Data API, which refuses to write into a
+   * repository with no commits at all; see `initialCommit`, which the push path reaches for.
    */
   async createRepo(name: string, opts: { private?: boolean; description?: string } = {}): Promise<GithubRepo> {
-    return this.hydrateRepo(
+    const created = this.hydrateRepo(
       await this.call<Record<string, unknown>>("createRepo", "POST", "/user/repos", {
         name,
         private: opts.private ?? true,
@@ -356,6 +365,62 @@ export class GithubApi {
         auto_init: false,
       }),
     );
+    // The one place emptiness is known without asking: we just made it, and asked for no commit.
+    return { ...created, empty: true };
+  }
+
+  /**
+   * Whether this repository has any commits at all.
+   *
+   * ASKED RATHER THAN READ OFF THE REPOSITORY OBJECT, for the reason `GithubRepo.empty` gives: the
+   * two fields that look like they answer this do not. `/git/refs/heads` does, exactly — GitHub
+   * answers 409 "Git Repository is empty" for a repository with nothing in it, and an empty array
+   * for one whose every branch has been deleted, which is the same fact by a different road.
+   *
+   * UNREACHABLE IS "NOT EMPTY". The one caller uses this to decide whether to write an initial
+   * commit, and the cheap answer to a question we could not ask is the one that writes nothing.
+   */
+  async isEmpty(fullName: string): Promise<boolean> {
+    try {
+      const refs = await this.call<Array<unknown>>("isEmpty", "GET", `/repos/${fullName}/git/refs/heads`);
+      return Array.isArray(refs) && refs.length === 0;
+    } catch (err) {
+      return err instanceof GithubError && err.kind === "conflict";
+    }
+  }
+
+  /**
+   * Give a repository with no commits its first one — the one write here that is not the Git Data
+   * API, because the Git Data API cannot do it.
+   *
+   * THIS IS NOT A STYLE PREFERENCE. `POST /git/blobs`, `/git/trees` and `/git/commits` all answer
+   * 409 "Git Repository is empty" against a repository that has never been pushed to, so the whole
+   * mechanism §2.4's push is built on is unavailable at exactly the moment §6's first row says it
+   * has to work: "empty repo — the first push creates the initial commit". `PUT /contents/{path}`
+   * is the one endpoint GitHub accepts there, it creates the branch it is given, and after it the
+   * ordinary path works for every commit that follows.
+   *
+   * WRITTEN TO THE REPOSITORY'S DECLARED DEFAULT BRANCH AND NOT TO `jaroku/<slug>`, and the caller
+   * is the one that decides that — see `githubPushRunner`. Seeding Jaroku's own branch in a
+   * repository that has no others makes it the default branch, which is a thing to have done to
+   * somebody's repository without asking.
+   */
+  async initialCommit(
+    fullName: string,
+    branch: string,
+    input: { path: string; content: string; message: string },
+  ): Promise<string> {
+    const data = await this.call<{ commit: { sha: string } }>(
+      "initialCommit",
+      "PUT",
+      `/repos/${fullName}/contents/${input.path.split("/").map(encodeURIComponent).join("/")}`,
+      {
+        message: input.message,
+        content: Buffer.from(input.content, "utf8").toString("base64"),
+        branch,
+      },
+    );
+    return data.commit.sha;
   }
 
   // --- refs and branches ------------------------------------------------------

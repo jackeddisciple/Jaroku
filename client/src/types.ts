@@ -850,7 +850,8 @@ export interface GithubRepoRow {
   private: boolean;
   defaultBranch: string;
   htmlUrl: string;
-  empty: boolean;
+  /** Null is "not asked", and it is what the repository list carries — see `GithubRepo.empty`. */
+  empty: boolean | null;
   pushedAt: string | null;
 }
 

@@ -311,6 +311,59 @@ export class GithubPusher {
     return { refusal: null, snapshots: restacked };
   }
 
+  /**
+   * The commit a branch that does not exist yet is created on top of — §6's first two rows, in one
+   * place.
+   *
+   * TWO FAILURES USED TO SHARE ONE LINE OF CODE, and the line was `parents: parent ? [parent] : []`.
+   *
+   *   THE EMPTY REPOSITORY. §6 promises "the first push creates the initial commit", and §2.2's
+   *   create-a-repo path makes an empty one on purpose. But the Git Data API — every write a push
+   *   makes — answers 409 "Git Repository is empty" against a repository with no commits, so the
+   *   first push into a repository Jaroku had just created for the user failed at the FIRST blob,
+   *   reported as a conflict, on the most common path this feature has. `PUT /contents` is the one
+   *   endpoint GitHub accepts there, so the initial commit is written with it, once, to the
+   *   repository's own declared default branch.
+   *
+   *   THE ORPHAN BRANCH. In a repository that DOES have commits, a first push still wrote a commit
+   *   with no parents — a branch sharing no history with `main`. GitHub then refuses to open a pull
+   *   request between them (422, no merge base) and refuses to compare them (404), which takes out
+   *   §3.9's PR card, §3.7's divergence detection and the whole reconciliation path §3.1 says is
+   *   the only one. Rooting the branch on the default branch's head is what a person doing this by
+   *   hand would do, and it is what makes the picture in §3.1 the picture on GitHub.
+   *
+   * BEST EFFORT, AND ITS FAILURE IS THE OLD BEHAVIOUR. A repository whose default branch cannot be
+   * read still gets its push, as an orphan — losing the root is worth less than losing the work.
+   */
+  private async rootFor(
+    api: GithubApi,
+    repo: string,
+    link: GithubLink,
+    slug: string,
+  ): Promise<{ root: string | null; branchExists: boolean }> {
+    const orphan = { root: null, branchExists: false };
+    try {
+      const defaultBranch = (await api.repo(repo)).defaultBranch;
+      const onDefault = await api.refSha(repo, defaultBranch);
+      if (onDefault) return { root: onDefault, branchExists: false };
+      // No default branch AND no commits anywhere is §6's empty repository. No default branch in a
+      // repository that HAS commits is somebody having deleted it, which is not ours to repair.
+      if (!(await api.isEmpty(repo))) return orphan;
+      const seeded = await api.initialCommit(repo, defaultBranch, {
+        path: "README.md",
+        content: initialReadme(repo, slug),
+        message: "Initial commit",
+      });
+      this.log(`[github] ${slug} wrote the initial commit to ${repo}:${defaultBranch}`);
+      // Seeding CREATES the branch it names. When that is the linked branch — somebody pointed the
+      // link at `main` in an empty repository — the ref now exists and must be updated, not created.
+      return { root: seeded, branchExists: defaultBranch === link.branch };
+    } catch (err) {
+      this.log(`[github] ${slug} could not root ${link.branch}: ${(err as Error)?.message ?? String(err)}`);
+      return orphan;
+    }
+  }
+
   private async run(
     ctx: TenantContext,
     agentUuid: string,
@@ -374,6 +427,16 @@ export class GithubPusher {
           "refused",
         );
       }
+      // WHERE A BRANCH THAT DOES NOT EXIST YET BEGINS. Until this existed the answer was "nowhere":
+      // a null head produced a commit with no parents, which is an ORPHAN branch. §3.1's picture
+      // has `jaroku/<agent-slug>` growing out of the default branch and §3.7 hands reconciliation
+      // to a pull request — and GitHub refuses to open one between two branches with no merge base
+      // (422), refuses to compare them (404), and therefore leaves the panel unable to detect
+      // divergence on precisely the repositories this feature is for. See `rootFor`.
+      const rooted = head === null ? await this.rootFor(api, repo, link, slug) : { root: head, branchExists: true };
+      // DELETIONS ARE STILL COMPUTED AGAINST `head` AND NOT AGAINST THE ROOT. A first push has
+      // nothing to have left behind — the root's own files are what the branch inherits, and
+      // listing them here would make the first commit delete the README it was just rooted on.
       const baseTree = head ? (await api.tree(repo, head)).map((e) => e.path) : [];
       report(stage, "done");
 
@@ -554,10 +617,10 @@ export class GithubPusher {
       // so a subdirectory push inherits everything outside it untouched — see createTree.
       stage = stageId("tree");
       report(stage, "active");
-      let parent = head;
+      let parent = rooted.root;
       // A COMMIT SHA IS NOT A TREE SHA. Both are forty hex characters, so the mistake typechecks;
       // GitHub answers 422 at the one step of a push where a mysterious failure costs the most.
-      let treeBase: string | null = head ? await api.commitTree(repo, head) : null;
+      let treeBase: string | null = rooted.root ? await api.commitTree(repo, rooted.root) : null;
       const written: { sha: string; commit: PlannedCommit }[] = [];
       const trees: { tree: string; commit: PlannedCommit }[] = [];
       for (const commit of plan.commits) {
@@ -641,7 +704,11 @@ export class GithubPusher {
       stage = stageId("ref");
       report(stage, "active");
       if (!parent) return await fail("nothing was written");
-      if (head === null) await api.createRef(repo, link.branch, parent);
+      // CREATED WHEN IT IS NOT THERE, UPDATED WHEN IT IS — and `rooted.branchExists` is what knows
+      // the difference in the one case `head` cannot: seeding an EMPTY repository whose default
+      // branch is the linked one creates that branch on the way past, so a `createRef` here would
+      // be a 422 on a push that has otherwise entirely succeeded.
+      if (!rooted.branchExists) await api.createRef(repo, link.branch, parent);
       else await api.updateRef(repo, link.branch, parent, req.force === true);
       report(stage, "done");
 
@@ -685,6 +752,27 @@ export class GithubPusher {
       return await fail((err as Error)?.message ?? String(err));
     }
   }
+}
+
+/**
+ * The one file an initial commit contains.
+ *
+ * A README AND NOT A `.gitkeep`, because this commit is visible forever on somebody's repository
+ * and the first thing anybody opening it will see. It says what the repository is and who writes to
+ * it, which is the same sentence §2.1's empty state makes before any of this happens — and it is
+ * the only file Jaroku writes that the agent's own versions do not own, so it is never rewritten.
+ */
+function initialReadme(repo: string, slug: string): string {
+  const name = repo.split("/")[1] ?? repo;
+  return [
+    `# ${name}`,
+    "",
+    `Source for the Jaroku agent \`${slug}\`.`,
+    "",
+    `Jaroku pushes to \`jaroku/${slug}\` and never to this branch. Changes come back here through a`,
+    "pull request, reviewed the way any other change would be.",
+    "",
+  ].join("\n");
 }
 
 /** Repository-relative path of a project file under this link. Re-exported for the handler. */
