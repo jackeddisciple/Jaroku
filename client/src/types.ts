@@ -762,6 +762,60 @@ export interface GithubChangeRow {
   locked: boolean;
 }
 
+/**
+ * One hunk of one file — §B.4.1's checkbox row.
+ *
+ * `index` IS THE IDENTITY AND THE POSITION AT ONCE, which is safe only because the server sorts
+ * both the file list and each file's hunks deterministically: two reads of an unchanged pair
+ * produce the same list, so a checkbox a person ticked does not become a different hunk between
+ * renders. Nothing here is derived in the browser — the hunks, their figures and their headers all
+ * arrive computed, for the same reason the verdict does.
+ */
+export interface GithubHunkRow {
+  index: number;
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: string[];
+  additions: number;
+  deletions: number;
+  /** `@@ -12,6 +12,9 @@ def get_weather` — range plus the definition the hunk opens inside. */
+  header: string;
+}
+
+/** One changed file, with the hunks a checkbox column renders. */
+export interface GithubStagedFile {
+  path: string;
+  status: "added" | "modified" | "deleted";
+  additions: number;
+  deletions: number;
+  /** §3.3's PROTECTED group. Listed, visible, and never stageable — never merely unchecked. */
+  locked: boolean;
+  /** Empty for a deletion: a file is in the tree or it is not, so there is no half of one. */
+  hunks: GithubHunkRow[];
+}
+
+/** One unpushed version, as §B.4.4's draggable row renders it. */
+export interface GithubStackRow {
+  versionId: string;
+  version: number;
+  summary: string;
+  /** True on exactly one row — the single most recent unpushed version. §B.4.3's whole bound. */
+  amendable: boolean;
+}
+
+/** What the panel staged, sent with a push. Absent means the ordinary everything-push. */
+export interface GithubHunkSelection {
+  path: string;
+  hunks: number[];
+}
+
+/** One step of a restacked history. More than one version id is a squash; omission is a drop. */
+export interface GithubRestackStep {
+  versionIds: string[];
+}
+
 export interface GithubPrRow {
   number: number;
   title: string;
@@ -813,6 +867,16 @@ export interface GithubView {
   /** §3.3's PROTECTED group, repository-relative. From the server, never derived here. */
   protectedPaths: string[];
   changes: GithubChangeRow[];
+  /**
+   * §B.4.1's hunk-level view of those same changes, beside `changes` rather than instead of it.
+   *
+   * The two agree in every ordinary case; where they differ, this one is what a push would write,
+   * because it is computed from the snapshots themselves rather than from what the versions
+   * recorded they did. Empty when the object store could not be read — never a partial list.
+   */
+  staging: GithubStagedFile[];
+  /** §B.4.4's UNPUSHED list, newest first. The bounded set a restack may operate within. */
+  stack: GithubStackRow[];
   /** Paths the remote changed since our watermark — §A.4's FROM REMOTE group. Paths, not a diff. */
   remoteChanges: string[];
   pr: GithubPrRow | null;

@@ -22,6 +22,7 @@ import { GithubError, type GithubApi, type GithubCommit } from "./githubApi.ts";
 import type { GithubEvent, GithubLink, GithubRepository } from "./db/repositories/github.ts";
 import type { GithubIdentity } from "./githubIdentity.ts";
 import { badgeFor, syncVerdict, unpushedVersions, verdictLine, type SyncVerdict } from "./githubSync.ts";
+import { stagedFiles, type StagedFile } from "./githubStaging.ts";
 import { inSubdirectory, repoPath } from "./githubPush.ts";
 import type { Agent, AgentRepository, AgentVersion } from "./db/repositories/agents.ts";
 import type { ProjectStore } from "./storage/projectStore.ts";
@@ -88,6 +89,22 @@ export interface BranchRow {
   current: boolean;
 }
 
+/**
+ * One unpushed version as §B.4.4's draggable row renders it.
+ *
+ * A PROJECTION OF `VersionRow` AND NOT A SECOND LIST. The reorder UI needs the id to name a version
+ * in a restack step and the summary to render it; it does not need the figures or the sha, and a
+ * row carrying them would invite the panel to render the two lists from two sources that can
+ * disagree about which versions are unpushed.
+ */
+export interface StackRow {
+  versionId: string;
+  version: number;
+  summary: string;
+  /** Whether this is the one row §B.4.3 offers Amend on — the single most recent unpushed version. */
+  amendable: boolean;
+}
+
 export interface GithubView {
   agentId: string;
   agentSlug: string;
@@ -114,6 +131,30 @@ export interface GithubView {
    */
   protectedPaths: string[];
   changes: ChangeRow[];
+  /**
+   * §B.4.1's hunk-level view of those same changes.
+   *
+   * BESIDE `changes` RATHER THAN INSTEAD OF IT, and the duplication is deliberate. `changes` is
+   * derived from `file_stats` across the unpushed run — what the versions RECORDED they did — and
+   * this is derived from the two snapshots themselves. They agree in every ordinary case, and when
+   * they disagree the second one is the one a push will actually write, which is why the staging
+   * column is computed from it. Replacing `changes` with this would change what §3.3's region has
+   * meant since the base spec for a feature that only adds a checkbox to it.
+   *
+   * EMPTY WHENEVER THE OBJECT STORE COULD NOT BE READ, never a partial list. A staging column
+   * missing three files reads as "those files are unchanged", which is the one wrong answer that
+   * looks like a right one.
+   */
+  staging: StagedFile[];
+  /**
+   * §B.4.4's UNPUSHED list, newest first — the bounded set a restack may operate within.
+   *
+   * THE BOUND IS THE LIST, and that is why it is its own field rather than a flag on the version
+   * rows: a client that reordered by filtering `unpushed` out of a combined list would be one bug
+   * away from including a pushed version, and the refusal for that would have to live in the
+   * browser. Here there is nothing to filter.
+   */
+  stack: StackRow[];
   /**
    * Paths the remote changed since our watermark — §A.4's FROM REMOTE group.
    *
@@ -250,9 +291,11 @@ export class GithubService {
     const verdict = syncVerdict(link, versions, remote.state, {
       inFlight: this.deps.inFlight?.(agent.id) === true,
     });
-    const unpushedIds = new Set(unpushedVersions(versions, link.last_pushed_version_id).map((v) => v.id));
+    const unpushed = unpushedVersions(versions, link.last_pushed_version_id);
+    const unpushedIds = new Set(unpushed.map((v) => v.id));
 
     const rows = versions.map((v) => this.versionRow(v, link, shaFor.get(v.id) ?? null));
+    const staging = await this.stagingFor(ctx, agent, link, versions);
 
     return {
       agentId: agent.slug,
@@ -271,6 +314,16 @@ export class GithubService {
       branches: remote.branches.map((b) => ({ ...b, current: b.name === link.branch })),
       protectedPaths: this.protectedFor(agent, link),
       changes: this.changesFor(agent, versions, unpushedIds),
+      staging,
+      // NEWEST FIRST, matching the list the panel already renders above it, and `amendable` set on
+      // exactly the head — `unpushedStack.amendTarget` is the one that decides which row that is,
+      // and asking it here rather than in the browser is what keeps §B.4.3's bound out of a client.
+      stack: unpushed.map((v, i) => ({
+        versionId: v.id,
+        version: v.version,
+        summary: rows.find((r) => r.id === v.id)?.summary ?? `Version ${v.version}`,
+        amendable: i === 0,
+      })),
       remoteChanges: remote.remoteChanges,
       pr: remote.pr,
       events,
@@ -302,6 +355,44 @@ export class GithubService {
       }
     }
     return [...merged.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  }
+
+  /**
+   * §B.4.1's hunks, from the two snapshots a push is the difference between.
+   *
+   * TWO OBJECT-STORE READS PER PANEL RENDER, AND THAT IS THE COST OF THE FEATURE. `changes` is
+   * computed from `file_stats` and costs nothing; this reads two whole projects. It is bounded — an
+   * agent project is a few kilobytes of Python and `projectFs` caps a file at 200 KB — and the
+   * alternative is a second round trip when somebody expands a diff card, which is the moment they
+   * are least willing to wait.
+   *
+   * A FAILURE IS AN EMPTY LIST AND NOT A FAILED PANEL, the same rule the remote reads follow: the
+   * staging column disappears and every other region is still exactly right. What it must never do
+   * is return SOME of the files, because a staging column missing three of them reads as "those are
+   * unchanged" — the one wrong answer that looks like a right one.
+   */
+  private async stagingFor(
+    ctx: TenantContext,
+    agent: Agent,
+    link: GithubLink,
+    versions: AgentVersion[],
+  ): Promise<StagedFile[]> {
+    // The version whose files GitHub already has. Resolved through the version list rather than
+    // trusted as a number, because `last_pushed_version_id` can point at a version that has since
+    // been undone — the same case `unpushedVersions` handles by anchoring on the version number.
+    const pushedRow = link.last_pushed_version_id
+      ? versions.find((v) => v.id === link.last_pushed_version_id)
+      : undefined;
+    const currentRow = versions.find((v) => v.undone_at === null);
+    if (!currentRow) return [];
+    try {
+      const pushed = pushedRow ? await this.deps.projects.readVersion(ctx, agent.id, pushedRow.version) : [];
+      const current = await this.deps.projects.readVersion(ctx, agent.id, currentRow.version);
+      return stagedFiles(pushed, current, this.deps.connectorFilesFor(agent, agent.slug));
+    } catch (err) {
+      this.log(`[github] ${agent.slug} staging unavailable: ${(err as Error)?.message ?? String(err)}`);
+      return [];
+    }
   }
 
   private versionRow(version: AgentVersion, link: GithubLink, sha: string | null): VersionRow {
