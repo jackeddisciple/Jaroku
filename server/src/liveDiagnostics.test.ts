@@ -85,17 +85,38 @@ console.log("\nthe debounce is a number this module owns");
   check(DEBOUNCE_MS === 400, "400ms, as §B.3.1's table states it", String(DEBOUNCE_MS));
 }
 
-if (!hasRuntime) {
-  console.log("\n(skipping the AST half: no runtime/ with a Python project)");
-} else {
-  // ONE THROWAWAY CALL FIRST, and it is worth explaining rather than looking like superstition.
-  // `uv run python` resolves and locks the virtualenv on its first invocation in a process tree,
-  // which takes seconds — comfortably past the 3s ceiling this module sets deliberately, since a
-  // live check that answered late would be annotating text the user has already replaced. In the
-  // product that cost is paid once, by a keystroke pause that quietly produces nothing; here it
-  // would land on whichever assertion happened to be first and look like a rule that does not fire.
-  await astDiagnostics("warmup.py", "x = 1\n", { runtimeDir: RUNTIME_DIR });
+// ONE THROWAWAY CALL FIRST, and it is worth explaining rather than looking like superstition.
+// `uv run python` resolves and locks the virtualenv on its first invocation in a process tree,
+// which takes seconds — comfortably past the 3s ceiling this module sets deliberately, since a
+// live check that answered late would be annotating text the user has already replaced. In the
+// product that cost is paid once, by a keystroke pause that quietly produces nothing; here it
+// would land on whichever assertion happened to be first and look like a rule that does not fire.
+if (hasRuntime) await astDiagnostics("warmup.py", "x = 1\n", { runtimeDir: RUNTIME_DIR });
 
+/**
+ * Whether the AST half can run AT ALL, asked by running it.
+ *
+ * `existsSync(runtime/pyproject.toml)` WAS THE WRONG QUESTION, and it was wrong in the direction
+ * that costs the most: the file is in the checkout on every machine, including one with no Python
+ * and no `uv`. `astDiagnostics` fails SILENT by design — an unavailable sandbox means no squiggle
+ * and a responsive editor, which is right in the product and indistinguishable from "the rule did
+ * not fire" here. So this suite reported four rules broken on any machine without an interpreter,
+ * which is precisely the machine that could not have told you either way.
+ *
+ * A SYNTAX ERROR IS THE PROBE because it is the one input whose answer cannot be empty: Python
+ * either parses the buffer or reports where it could not, and an empty list means nothing ran.
+ */
+const canRunPython =
+  hasRuntime &&
+  (await astDiagnostics("probe.py", "def f(:\n", { runtimeDir: RUNTIME_DIR })).length > 0;
+
+if (!canRunPython) {
+  console.log(
+    hasRuntime
+      ? "\n(skipping the AST half: runtime/ is here but no Python interpreter would run)"
+      : "\n(skipping the AST half: no runtime/ with a Python project)",
+  );
+} else {
   console.log("\nthe AST rules a regex cannot see");
   {
     const sql = [

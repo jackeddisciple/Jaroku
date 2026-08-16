@@ -153,14 +153,30 @@ console.log("\nthe one-line summary §B.7.3 hands to the Overlapping list");
   check(summariseChanges([]) === "", "and nothing structural is an empty summary, not a fabricated one");
 }
 
-if (!hasRuntime) {
-  console.log("\n(skipping the AST half: no runtime/ with a Python project)");
-} else {
-  const py = (path: string, content: string): StoredFile => ({ path, content });
+const py = (path: string, content: string): StoredFile => ({ path, content });
 
-  // One `uv run` resolves the venv before anything is timed — the same warm-up the live-diagnostics
-  // suite explains at length.
-  await readShape([py("warm.py", "x = 1\n")], { runtimeDir: RUNTIME_DIR });
+// One `uv run` resolves the venv before anything is timed — the same warm-up the live-diagnostics
+// suite explains at length.
+if (hasRuntime) await readShape([py("warm.py", "x = 1\n")], { runtimeDir: RUNTIME_DIR });
+
+/**
+ * Whether the AST half can run AT ALL, asked by running it — the same probe `liveDiagnostics.test`
+ * makes, for the same reason.
+ *
+ * `existsSync(runtime/pyproject.toml)` IS TRUE ON A MACHINE WITH NO PYTHON, because the file is in
+ * the checkout everywhere. `readShape` reports its inability to run as an `error` rather than
+ * throwing — correctly, since §B.7's Agent diff has to say "the analysis could not run" instead of
+ * "nothing changed" — and this suite read that as six rules being broken.
+ */
+const canRunPython = hasRuntime && (await readShape([py("probe.py", "x = 1\n")], { runtimeDir: RUNTIME_DIR })).error === undefined;
+
+if (!canRunPython) {
+  console.log(
+    hasRuntime
+      ? "\n(skipping the AST half: runtime/ is here but no Python interpreter would run)"
+      : "\n(skipping the AST half: no runtime/ with a Python project)",
+  );
+} else {
 
   console.log("\nreading a tree's shape, through the validator's own AST paths");
   {
