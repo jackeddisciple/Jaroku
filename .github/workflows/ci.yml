@@ -158,17 +158,20 @@ jobs:
           npm run test:escape-suite
           npm run test:tenancy-isolation
 
-      # THESE TWO SUITES SHIPPED WITH v0.2.15 AND CI HAS NEVER RUN EITHER OF THEM. They were
-      # written, they passed, and nothing but the person who wrote them ever executed them — the
-      # same gap the client job's comment below describes, in the job that was supposed to have
-      # learned from it.
+      # THE SUITES THAT SHIPPED WITH v0.2.15 AND CI HAS NEVER RUN. They were written, they passed,
+      # and nothing but the person who wrote them ever executed them — the same gap the client job's
+      # comment below describes, in the job that was supposed to have learned from it.
       #
-      # They are the whole of what is testable about the GitHub feature without a network: six
-      # sync states including the three that are almost impossible to produce by hand against a
-      # real repository, and the version-to-commit mapping, where getting a deletion wrong leaves
-      # a tool the user removed in their repository forever. Their own step rather than an
-      # addition to one above, because neither needs Postgres or Redis and a reader looking for
-      # "what covers GitHub" should find it in one place.
+      # THAT COMMENT SAID "THESE TWO", AND ADDENDUM B ADDED ELEVEN MORE without any of them being
+      # added here. `package.json` had a script for every one; the workflow had three. So the whole
+      # of Addendum B — the secret scanner that decides whether a credential leaves the machine, the
+      # provider boundary that decides whose money a stranger's pull request spends, the restack
+      # that rewrites which commits a push writes, the eleven live rules — merged on the word of
+      # whoever last ran them by hand. A suite that is not in this file is a suite that runs when
+      # somebody remembers, which is to say on the days it was least needed.
+      #
+      # ONE STEP RATHER THAN AN ADDITION TO ONE ABOVE, because none of them needs Postgres or Redis
+      # and a reader looking for "what covers GitHub" should find it in one place.
       - name: the two lineages
         working-directory: server
         run: |
@@ -178,6 +181,21 @@ jobs:
           npm run test:github-checks-line
           npm run test:check-runner
           npm run test:github-webhook
+          npm run test:github-staging
+          npm run test:github-trailers
+          npm run test:github-workflow
+          npm run test:hunks
+          npm run test:unpushed-stack
+          npm run test:secret-scan
+          npm run test:live-diagnostics
+          npm run test:semantic-diff
+          npm run test:trace-diff
+          npm run test:eval-check
+          npm run test:check-policy
+          # §B.7.2's ratchet, which the Agent diff reads directly: a classification may only be
+          # raised by an untrusted signal, and here the untrusted signal is an external commit
+          # changing the manifest. It lives with the MCP suites and belongs to this feature.
+          npm run test:mcp-impact
 
       - name: cost, abuse and the data lifecycle
         working-directory: server
