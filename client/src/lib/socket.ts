@@ -261,6 +261,17 @@ function dispatch(msg: ServerMessage): void {
           message: msg.message,
           candidate: msg.candidate,
         });
+      } else if (msg.type === "restackRefused") {
+        // §B.4.4's refusal, and its own field for the same reason the one above is: the panel puts
+        // a border on the row at `position` and prints the validator's own words under it, neither
+        // of which an error strip could do. Nothing was written when this arrives — the versions
+        // are exactly where they were — so it is not an error either.
+        g.setRestackRefusal({
+          agentId: msg.agentId,
+          position: msg.position,
+          message: msg.message,
+          problems: msg.problems,
+        });
       } else if (msg.type === "message") g.setGenerated(msg.agentId, msg.message);
       else if (msg.type === "error") g.setError(msg.message);
       else if (msg.type === "notice") g.setNotice(msg.message);

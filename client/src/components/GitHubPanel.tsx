@@ -41,6 +41,7 @@ import { CollapsibleRegion } from "./CollapsibleRegion.tsx";
 import { GitHubCommitBox } from "./GitHubCommitBox.tsx";
 import { GitHubSyncRegion, RegionLabel } from "./GitHubSync.tsx";
 import { BranchSwitcher, ChangesRegion, HistoryRegion, PullRequestCard } from "./GitHubHistory.tsx";
+import { RestackRegion, StagingRegion } from "./GitHubStaging.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
 import { EmptyState } from "./EmptyState.tsx";
@@ -555,6 +556,11 @@ function Linked({ view }: { view: GithubView }) {
         onToggle={toggle("changes")}
       >
         <ChangesRegion view={view} />
+        {/* §B.4.1's checkbox column, between the file list and the commit box, because it is a
+            narrowing OF that list and the message is written about whatever survives the narrowing.
+            It renders nothing when there is nothing stageable, so the ordinary agent sees exactly
+            the surface it always did. */}
+        <StagingRegion view={view} />
         {/* §3.4's commit box sits under the file list rather than above it: the message is written
             about what is in that list, and asking somebody to compose before they have looked is
             the wrong order. */}
@@ -563,6 +569,10 @@ function Linked({ view }: { view: GithubView }) {
             <GitHubCommitBox view={view} />
           </div>
         )}
+        {/* §B.4.4's reorder list sits with the version lists rather than with the file list,
+            because it is about versions and not about files — and it renders nothing below two
+            unpushed versions, where there is no order to have. */}
+        <RestackRegion view={view} />
         <div className="mt-4">
           <VersionLists view={view} />
         </div>

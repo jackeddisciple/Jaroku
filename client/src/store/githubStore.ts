@@ -17,7 +17,7 @@
 
 import { create } from "zustand";
 import type {
-  GithubLinkRow, GithubRefusal, GithubRepoRow, GithubView,
+  GithubLinkRow, GithubRefusal, GithubRepoRow, GithubRestackRefusal, GithubView,
 } from "../types.ts";
 
 /** A push or pull in flight, as §2.4's rail renders it. */
@@ -110,6 +110,15 @@ interface GithubState {
   progress: Record<string, GithubProgress>;
   /** agent slug -> the pull the validator turned away. Cleared by the next attempt. */
   refusals: Record<string, GithubRefusal>;
+  /**
+   * agent slug -> the reordered history the validator turned away — §B.4.4.
+   *
+   * ITS OWN MAP RATHER THAN A SECOND USE OF `refusals`, because the two are read in different
+   * places and cleared by different things: a pull refusal belongs to the sync region and is
+   * superseded by the next pull, and this one belongs to a row in the reorder list and is cleared
+   * by the next drag. Sharing a map would make one of them disappear when the other was answered.
+   */
+  restackRefusals: Record<string, GithubRestackRefusal>;
   /** §2.2's existing-repo search results. */
   repos: GithubRepoRow[];
   reposLoading: boolean;
@@ -148,6 +157,8 @@ interface GithubState {
   ) => void;
   setRefusal: (refusal: GithubRefusal) => void;
   clearRefusal: (agentId: string) => void;
+  setRestackRefusal: (refusal: GithubRestackRefusal) => void;
+  clearRestackRefusal: (agentId: string) => void;
   setError: (error: string | null) => void;
   setNotice: (notice: string | null) => void;
 }
@@ -160,6 +171,7 @@ export const useGithubStore = create<GithubState>((set) => ({
   views: {},
   progress: {},
   refusals: {},
+  restackRefusals: {},
   repos: [],
   reposLoading: false,
   nameCheck: null,
@@ -249,6 +261,11 @@ export const useGithubStore = create<GithubState>((set) => ({
   setRefusal: (refusal) =>
     set((s) => ({ refusals: { ...s.refusals, [refusal.agentId]: refusal } })),
   clearRefusal: (agentId) => set((s) => ({ refusals: withoutKey(s.refusals, agentId) })),
+
+  setRestackRefusal: (refusal) =>
+    set((s) => ({ restackRefusals: { ...s.restackRefusals, [refusal.agentId]: refusal } })),
+  clearRestackRefusal: (agentId) =>
+    set((s) => ({ restackRefusals: withoutKey(s.restackRefusals, agentId) })),
 
   // An error ends anything it could describe, for the same reason a snapshot does — a generate
   // that failed must not leave its button spinning.
