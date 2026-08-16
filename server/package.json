@@ -120,6 +120,7 @@
     "test:secret-scan": "tsx src/secretScan.test.ts",
     "test:trace-diff": "tsx src/traceDiff.test.ts",
     "test:eval-check": "tsx src/evalCheck.test.ts",
+    "test:check-policy": "tsx src/checkPolicy.test.ts",
     "test:github-workflow": "tsx src/githubWorkflow.test.ts",
     "test:live-diagnostics": "tsx src/liveDiagnostics.test.ts",
     "test:github-staging": "tsx src/githubStaging.test.ts",

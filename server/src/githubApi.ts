@@ -621,6 +621,37 @@ export class GithubApi {
   }
 
   /**
+   * Whether a login has WRITE access to this repository — §B.1.3's boundary.
+   *
+   * ASKED, RATHER THAN READ OFF THE WEBHOOK'S `author_association`. That field is GitHub's own
+   * opinion and would be perfectly accurate — but the whole point of this boundary is that the
+   * delivery describes a request from somebody untrusted, and a field inside it is a field they are
+   * adjacent to. One round trip on the path that is about to spend real money is the right price.
+   *
+   * PERMISSION, NOT MEMBERSHIP. `GET /collaborators/{user}` answers 204 for anybody with ANY access
+   * including read-only, which on a public repository is everyone. The permission endpoint says
+   * which level, and only `write` and `admin` are people who could already spend this money by
+   * pushing to a branch — which is the actual justification for not gating them.
+   *
+   * FALSE ON ANY FAILURE, INCLUDING A 404. A token that cannot see the collaborator list, a
+   * repository that has moved, a rate limit — every one of those is a question we could not answer,
+   * and the answer this boundary must give to an unanswered question is the cheap one.
+   */
+  async hasWriteAccess(fullName: string, login: string): Promise<boolean> {
+    if (!login) return false;
+    try {
+      const data = await this.call<{ permission?: string }>(
+        "collaboratorPermission",
+        "GET",
+        `/repos/${fullName}/collaborators/${encodeURIComponent(login)}/permission`,
+      );
+      return data.permission === "write" || data.permission === "admin";
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * The combined CI verdict for a commit, or null when nothing has reported.
    *
    * NULL IS NOT "PASSING". §3.9 says CI status is a genuine gate rather than decoration precisely

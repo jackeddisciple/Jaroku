@@ -345,6 +345,30 @@ export class ChecksRepository {
   }
 
   /**
+   * Whether a collaborator has already approved real providers for this commit — §B.1.3.
+   *
+   * DERIVED FROM THE CHECK ROWS RATHER THAN STORED SEPARATELY, and §B.9's discipline is the reason:
+   * storage goes only where a feature actually needs memory. An approval is "a paid check was
+   * authorised for this sha", and a paid check for this sha IS that record — a second table would
+   * be a second answer to the same question, and the day they disagree the one an attacker's pull
+   * request reads is the one that matters.
+   *
+   * PER COMMIT, WHICH IS THE POINT. The query is keyed on `head_sha` and nothing else, so pushing a
+   * new commit to an approved pull request produces a sha nobody has approved — which is exactly
+   * the hole GitHub's own first-time-contributor gate exists to close, and would be wide open if
+   * this were keyed on the pull request number.
+   */
+  async approvedForSha(ctx: TenantContext, agentId: string, headSha: string): Promise<boolean> {
+    const row = await this.q(ctx).get<Record<string, unknown>>(
+      `SELECT 1 AS ok FROM check_runs
+        WHERE workspace_id = ? AND agent_id = ? AND head_sha = ? AND provider_mode = 'paid'
+        LIMIT 1`,
+      [ctx.workspaceId, agentId, headSha],
+    );
+    return row !== undefined;
+  }
+
+  /**
    * This agent's checks, newest first — what §B.8.2's graph canvas hangs its ⧫ markers off.
    *
    * BY COMMIT, which is how the canvas reads it: a marker sits beneath the commit it ran against,
