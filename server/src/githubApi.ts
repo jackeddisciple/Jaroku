@@ -794,7 +794,17 @@ export class GithubApi {
     input: {
       /** Present to update, absent to create. */
       checkRunId?: string | null;
-      name: string;
+      /**
+       * The check's name, as it renders on the pull request.
+       *
+       * OPTIONAL ON AN UPDATE, AND OMITTING IT IS HOW A CHECK KEEPS THE NAME IT HAS. GitHub takes
+       * `name` on a PATCH and RENAMES the run when it is given one — so a caller that does not know
+       * the original must send nothing rather than send its best guess. `supersede` is that caller:
+       * it works from a stored row, which carries a check run id and not the dataset the title was
+       * built from, and passing a generic "Jaroku eval" there renamed the cancelled check away from
+       * the one somebody had been watching.
+       */
+      name?: string;
       headSha: string;
       status: "queued" | "in_progress" | "completed";
       conclusion?: string | null;
@@ -803,8 +813,11 @@ export class GithubApi {
       detailsUrl?: string | null;
     },
   ): Promise<{ id: string }> {
+    if (!input.checkRunId && !input.name) {
+      throw new GithubError("api", "a check run cannot be created without a name.", "createCheckRun");
+    }
     const body: Record<string, unknown> = {
-      name: input.name,
+      ...(input.name ? { name: input.name } : {}),
       head_sha: input.headSha,
       status: input.status,
       output: { title: input.title, summary: input.summary },

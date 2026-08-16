@@ -207,7 +207,12 @@ export class CheckRunner {
         await api
           .putCheckRun(repoFullName, {
             checkRunId: row.github_check_run_id,
-            name: "Jaroku eval",
+            // NO NAME, because this row does not know the one the check was posted under. §B.1.1's
+            // title carries the dataset — "Jaroku eval · weather-agent-suite" — and `check_runs`
+            // stores the check's id rather than its title, so the generic string that used to be
+            // here RENAMED the run on its way to being cancelled: the check somebody had been
+            // watching vanished from the list and a differently-named cancelled one appeared.
+            // GitHub keeps the existing name when a PATCH does not carry one.
             headSha: row.head_sha,
             status: "completed",
             conclusion: "cancelled",

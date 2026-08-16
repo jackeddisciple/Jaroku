@@ -35,14 +35,14 @@ const check = (ok: boolean, msg: string, detail = ""): void => {
  * `check_runs`, in memory, with the one property that matters reproduced exactly: `open` hands back
  * the row as it was written, and `attachGithubId` changes the store rather than that object.
  */
-function fakeChecks(config: AgentCiConfig | undefined) {
+function fakeChecks(config: AgentCiConfig | undefined, stale: CheckRunRow[] = []) {
   const rows = new Map<string, CheckRunRow>();
   let next = 1;
   return {
     rows,
     config: async () => config,
     approvedForSha: async () => false,
-    supersededBy: async () => [] as CheckRunRow[],
+    supersededBy: async () => stale,
     cancel: async () => {},
     baselineFor: async () => undefined,
     open: async (_ctx: TenantContext, input: { agentId: string; linkId: string | null; prNumber: number; headSha: string; providerMode: "dry_run" | "paid" }) => {
@@ -120,6 +120,41 @@ try {
       [...checks.rows.values()][0]?.github_check_run_id === String(posted.check_runs[0]?.id),
       "and the row we keep names the check GitHub actually has",
     );
+  }
+
+  console.log("\na superseded check is cancelled under the name it was posted with");
+  {
+    // §B.1.1's title carries the dataset, and `check_runs` stores an id rather than a title — so
+    // the cancel path has no name to send and must send none. It used to send "Jaroku eval", which
+    // RENAMED the run: the check somebody was watching disappeared from the pull request's list and
+    // a differently-named cancelled one took its place.
+    const old = await api.putCheckRun(repo, {
+      name: "Jaroku eval · weather-suite", headSha, status: "in_progress", title: "Running", summary: "",
+    });
+    const staleRow = {
+      id: "row-old", agent_id: "agent-1", link_id: "link-1", pr_number: 42, head_sha: headSha,
+      github_check_run_id: old.id, eval_run_id: null, status: "in_progress", conclusion: null,
+      provider_mode: "dry_run", pass_rate: null, cost_per_run_usd: null, latency_p50_ms: null,
+      pass_rate_delta: null, cost_delta: null, latency_delta: null, baseline_check_id: null,
+      created_at: new Date().toISOString(), completed_at: null,
+    } as CheckRunRow;
+
+    const checks = fakeChecks(
+      { agent_id: "agent-1", ci_dataset_id: "dataset-1", provider_policy: "dry_run_only", updated_at: "" },
+      [staleRow],
+    );
+    const runner = new CheckRunner({ checks: checks as never, repo: {} as never, startEval: async () => "eval-3", log: () => {} });
+    await runner.onPullRequest(ctx, {
+      api, agentUuid: "agent-1", agentSlug: "weather-agent", linkId: "link-1",
+      repoFullName: repo, event, configuredTargets: [], datasetName: "weather-suite",
+    });
+
+    const posted = await fetch(`${mock.url}/repos/${repo}/commits/${headSha}/check-runs`, {
+      headers: { Authorization: "Bearer test-token" },
+    }).then((r) => r.json() as Promise<{ check_runs: { id: number; name: string; conclusion: string | null }[] }>);
+    const cancelled = posted.check_runs.find((c) => String(c.id) === old.id);
+    check(cancelled?.conclusion === "cancelled", "the older check is cancelled");
+    check(cancelled?.name === "Jaroku eval · weather-suite", "…keeping its own name", cancelled?.name);
   }
 
   console.log("\nno dataset is no check, and no request either");
