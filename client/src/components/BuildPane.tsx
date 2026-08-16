@@ -509,6 +509,16 @@ export function BuildPane({
   // every keystroke — a pure function of both, so there is no popover state to fall out of step
   // with what is actually typed. Null is the ordinary case and renders nothing.
   const [githubTrigger, setGithubTrigger] = useState<ActiveTrigger | null>(null);
+  // §B.5.1's Fix in Jaroku, arriving from the GitHub panel. A ONE-SHOT INTENT consumed here and
+  // cleared immediately: it describes a click that happened, and leaving it set would re-attach the
+  // same two chips every time this component re-rendered, over whatever somebody had since removed.
+  const attachRequest = useUiStore((s) => s.githubAttachRequest);
+  const clearAttachRequest = useUiStore((s) => s.clearGithubAttachRequest);
+  useEffect(() => {
+    if (!attachRequest) return;
+    for (const a of attachRequest) github.attach(a);
+    clearAttachRequest();
+  }, [attachRequest, clearAttachRequest]);
   const threads = useChatStore((s) => s.threads);
   const pendingThread = useChatStore((s) => s.pending);
   const streamingAgentId = useChatStore((s) => s.streamingAgentId);
@@ -539,6 +549,9 @@ export function BuildPane({
   // ⌘↵ will send it. Pure heuristics; no per-keystroke network/LLM cost.
   const intent = classifyIntent(text, {
     agentId: activeAgentId, pendingPlanId: planId, step: selectedStep, nodeId: selectedNodeId,
+    // §B.5.2's one new signal. It changes no destination — a review-grounded message already routed
+    // to the edit loop — and changes what the route label SAYS, which is the visible half.
+    hasReviewComment: github.attachments.some((a) => a.kind === "reviewComment"),
   });
   const contextLabel = selectedNodeId
     ? `node: ${selectedNodeId}`

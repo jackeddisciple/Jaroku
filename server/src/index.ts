@@ -73,6 +73,7 @@ import { ShadowRunRepository, hasReadableTrace, shouldSweep } from "./shadowRuns
 import { ShadowRunner } from "./shadowRunner.ts";
 import { ChecksRepository } from "./db/repositories/checks.ts";
 import { CheckRunner } from "./checkRunner.ts";
+import { PrCommentsRepository } from "./db/repositories/prComments.ts";
 import { diffShapes, readShape } from "./semanticDiff.ts";
 import { inSubdirectory, repoPrefix } from "./githubPush.ts";
 import { MANIFEST_FILE } from "./mcpManifest.ts";
@@ -3063,14 +3064,20 @@ const GITHUB_COMMAND_NAMES = new Set([
   "listGithub", "listGithubRepos", "checkGithubRepo", "linkGithub", "unlinkGithub",
   "refreshGithub", "pushGithub", "pullGithub", "switchGithubBranch", "createGithubBranch",
   "openGithubPr", "commitGithub", "generateGithubMessage", "diagnoseFile",
-  "shadowRunGithub", "listShadowRuns", "semanticDiffGithub",
+  "shadowRunGithub", "listShadowRuns", "semanticDiffGithub", "resolveReviewComment",
 ]);
+
+const prComments = new PrCommentsRepository(db);
 
 const githubService = new GithubService({
   repo: githubRepo,
   identity: githubIdentity,
   agents: agentRepo,
   projects,
+  // §B.5's mirrored review comments. The service syncs them on every view, which is one request per
+  // panel open against a pull request that exists — and the only way the REVIEW region can be
+  // current without a second webhook.
+  comments: prComments,
   // The same resolver `agentFilesDeps` uses, so the PROTECTED group in the panel and the read-only
   // set the edit loop enforces are one answer rather than two that agree today.
   connectorFilesFor: agentFilesDeps.connectorFilesFor,
@@ -3924,6 +3931,58 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
           },
           key,
         );
+        return;
+      }
+
+      case "resolveReviewComment": {
+        // §B.5.3, and everything it deliberately is not. The edit has already been applied — by the
+        // ordinary Apply, on the ordinary diff card, through the ordinary validator, against the
+        // PROTECTED file list. This records what happened and tells the reviewer.
+        const agentId = String(cmd.agentId ?? "");
+        const agent = await agentRepo.bySlug(ctx, agentId);
+        if (!agent) return fail("no such agent in this workspace", agentId);
+        const comment = await prComments.byId(ctx, String(cmd.commentId ?? ""));
+        if (!comment) return fail("that review comment is no longer here", agentId);
+
+        // RECORDED FIRST, POSTED SECOND. The resolution is the fact this product owns; the reply is
+        // a courtesy to somebody outside it. Losing the first because the second failed would make
+        // an applied edit read as an open comment on the next panel open.
+        await prComments.setResolution(
+          ctx,
+          comment.id,
+          cmd.resolution === "dismissed" ? "dismissed" : "applied",
+          typeof cmd.version === "number" ? cmd.version : null,
+        );
+
+        const body = typeof cmd.reply === "string" ? cmd.reply.trim() : "";
+        if (body) {
+          const link = await githubRepo.linkFor(ctx, agent.id);
+          const connection = await githubIdentity.apiFor(ctx);
+          if (link && connection) {
+            try {
+              // A THREADED REPLY to this specific comment, never a general pull request comment.
+              // §B.5.3: a teammate who never opens Jaroku still sees the conversation resolve IN
+              // PLACE, under the line they commented on.
+              await connection.api.replyToReviewComment(
+                link.repo_full_name,
+                comment.pr_number,
+                comment.github_comment_id,
+                body,
+              );
+              await prComments.markReplied(ctx, comment.id);
+            } catch (err) {
+              // NOT A FAILURE OF THE RESOLUTION, which is already recorded. The panel renders the
+              // difference — an applied edit whose reply did not land says so on the row — because
+              // claiming the teammate was told would be the one silent failure §B.5.3 is about.
+              relay.broadcastGithub(ctx, {
+                type: "notice",
+                agentId,
+                message: `Recorded here, but the reply did not reach GitHub: ${(err as Error)?.message ?? String(err)}`,
+              });
+            }
+          }
+        }
+        await broadcastGithub(ctx, agentId);
         return;
       }
 

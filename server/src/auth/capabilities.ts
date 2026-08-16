@@ -313,6 +313,9 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   listShadowRuns: "github:read",
   // §B.7. Presentation over two trees the reader can already see — permanently, per §B.7.3.
   semanticDiffGithub: "github:read",
+  // §B.5.3. It posts to somebody else's pull request under this workspace's token, which is a
+  // write to the repository even though it changes no code.
+  resolveReviewComment: "github:manage",
 
   // An export is deliberately NOT here, and its absence is the decision rather than an omission:
   // it is an HTTP route, not a socket command — see http/lifecycle.ts. A copy of everything the

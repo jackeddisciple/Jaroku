@@ -880,6 +880,8 @@ export interface GithubView {
   /** Paths the remote changed since our watermark — §A.4's FROM REMOTE group. Paths, not a diff. */
   remoteChanges: string[];
   pr: GithubPrRow | null;
+  /** §B.5.1's REVIEW region, oldest first. Empty when there is no open pull request. */
+  review: GithubReviewRow[];
   events: GithubEventRow[];
 }
 
@@ -985,6 +987,26 @@ export interface GithubSemanticDiff {
   partial?: string;
 }
 
+/**
+ * One review comment, as §B.5.1's REVIEW region renders it.
+ *
+ * `path` IS PROJECT-RELATIVE, translated server-side out of GitHub's repository-relative form, so
+ * this row's filename matches the file row above it in the same panel. Two lists about the same
+ * file spelling it two ways would look like two files.
+ */
+export interface GithubReviewRow {
+  id: string;
+  author: string | null;
+  path: string | null;
+  line: number | null;
+  body: string;
+  resolution: "open" | "proposed" | "applied" | "dismissed";
+  resolvedVersion: number | null;
+  /** When the threaded reply reached GitHub. Null after an applied edit whose reply failed. */
+  repliedAt: string | null;
+  createdAt: string;
+}
+
 export interface GithubRestackRefusal {
   agentId: string;
   /** Zero-based, in the NEW order — where the user just put it, not where it used to be. */
@@ -1005,7 +1027,15 @@ export type GithubAttachment =
   | { kind: "commit"; sha: string }
   | { kind: "file"; path: string; ref: string }
   | { kind: "sinceSync" }
-  | { kind: "pr" };
+  | { kind: "pr" }
+  /**
+   * §B.5.1: one review comment.
+   *
+   * A CHIP RATHER THAN PASTED TEXT. §B.5.1 is emphatic: a review comment is CONTEXT, not an
+   * instruction, and attaching it keeps it exactly as inert as every other chip §7 defines. Pasting
+   * it into the composer would put a stranger's words where a user's own instruction goes.
+   */
+  | { kind: "reviewComment"; commentId: string };
 
 export type GithubMessage =
   | {
@@ -1231,7 +1261,22 @@ export type ClientCommand =
    * §B.7's Agent diff. On demand rather than on the snapshot: it costs a tree read from GitHub and
    * a parse of both sides, and a toggle is a click where a snapshot is a render.
    */
-  | { cmd: "semanticDiffGithub"; agentId: string; ref?: string };
+  | { cmd: "semanticDiffGithub"; agentId: string; ref?: string }
+  /**
+   * §B.5.3: record what happened to a review comment, and optionally reply in its thread.
+   *
+   * SEPARATE FROM APPLYING THE EDIT. The apply is the ordinary one, on the ordinary diff card,
+   * through the ordinary validator — an apply that also replied would be a write path a review
+   * comment reached, which is what §B's governing constraint forbids.
+   */
+  | {
+      cmd: "resolveReviewComment";
+      agentId: string;
+      commentId: string;
+      resolution: "applied" | "dismissed";
+      version?: number;
+      reply?: string;
+    };
 
 // Unified composer "explain" subject — what the question is about, built from already-in-memory
 // context (a trace step, a graph node, or the agent generally). No new data is fetched.

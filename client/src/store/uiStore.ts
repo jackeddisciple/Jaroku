@@ -5,6 +5,7 @@
 
 import { create } from "zustand";
 import { useSessionStore } from "./sessionStore.ts";
+import type { GithubAttachment } from "../types.ts";
 
 export type RightTab =
   | "secrets"
@@ -168,6 +169,23 @@ interface UiState {
   githubBranchNonce: number;
   openGithubBranches: () => void;
 
+  /**
+   * §B.5.1's Fix in Jaroku, as a request rather than a call.
+   *
+   * A ONE-SHOT INTENT, exactly like `secretsAddProvider`, and for a structural reason: the
+   * attachment list is local state inside `useGithubAttachments`, which lives in the composer's
+   * column — and the button that wants to add to it lives in the GitHub panel, on the other side of
+   * the app. Lifting the whole attachment list into this store to solve that would put a
+   * per-composer working set in global state so that one button could reach it.
+   *
+   * CLEARED BY WHOEVER CONSUMES IT, because it describes something that HAPPENED. Left set, it
+   * would re-attach the same two chips every time somebody came back to the tab, over whatever they
+   * had since assembled.
+   */
+  githubAttachRequest: GithubAttachment[] | null;
+  requestGithubAttach: (attachments: GithubAttachment[]) => void;
+  clearGithubAttachRequest: () => void;
+
   // Bumped to ask the chat composer to take focus (Cmd+/). A nonce, not a boolean, so repeated
   // requests always fire an effect.
   focusChatNonce: number;
@@ -239,6 +257,13 @@ export const useUiStore = create<UiState>((set) => ({
   githubBranchNonce: 0,
   // Both fields in one call, so the tab and the reason for being there can never be set apart.
   openGithubBranches: () => set((s) => ({ rightTab: "github", githubBranchNonce: s.githubBranchNonce + 1 })),
+
+  githubAttachRequest: null,
+  // The chips and the focus in one call, for the reason above: attaching without moving somebody to
+  // the composer would leave two chips in a box they cannot see.
+  requestGithubAttach: (githubAttachRequest) =>
+    set((s) => ({ githubAttachRequest, focusChatNonce: s.focusChatNonce + 1 })),
+  clearGithubAttachRequest: () => set({ githubAttachRequest: null }),
 
   focusChatNonce: 0,
   focusChat: () => set((s) => ({ focusChatNonce: s.focusChatNonce + 1 })),

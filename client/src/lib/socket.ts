@@ -1002,6 +1002,16 @@ export function sendShadowRunGithub(
   send({ cmd: "shadowRunGithub", agentId, ref, ...opts });
 }
 
+/** §B.5.3: record what happened to a review comment, and reply in its thread. */
+export function sendResolveReviewComment(
+  agentId: string,
+  commentId: string,
+  resolution: "applied" | "dismissed",
+  opts: { version?: number; reply?: string } = {},
+): void {
+  send({ cmd: "resolveReviewComment", agentId, commentId, resolution, ...opts });
+}
+
 /** §B.7: what changed about the AGENT between the current version and a ref. */
 export function sendSemanticDiffGithub(agentId: string, ref?: string): void {
   send({ cmd: "semanticDiffGithub", agentId, ...(ref ? { ref } : {}) });

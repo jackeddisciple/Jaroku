@@ -37,6 +37,10 @@ export function attachmentId(a: GithubAttachment): string {
   switch (a.kind) {
     case "commit": return `commit:${a.sha}`;
     case "file": return `file:${a.ref}:${a.path}`;
+    // §B.5.1's chip. Identified by the comment it quotes, so attaching two different comments is
+    // two chips and attaching the same one twice is one — which matters because Fix in Jaroku is a
+    // button somebody can press again while the first edit is still on screen.
+    case "reviewComment": return `reviewComment:${a.commentId}`;
     default: return a.kind;
   }
 }
@@ -49,6 +53,10 @@ export function attachmentLabel(a: GithubAttachment): string {
     case "file": return `${a.path} @ ${a.ref}`;
     case "sinceSync": return "diff since last sync";
     case "pr": return "open PR";
+    // The id and not the body, because a chip sits in one line above something somebody is typing
+    // into — and a reviewer's sentence is the wrong length for that. The body is in the attachment
+    // the server resolves, which is where the model reads it.
+    case "reviewComment": return `review comment #${a.commentId.slice(0, 8)}`;
   }
 }
 

@@ -44,6 +44,7 @@ import { BranchSwitcher, ChangesRegion, HistoryRegion, PullRequestCard } from ".
 import { RestackRegion, StagingRegion } from "./GitHubStaging.tsx";
 import { ShadowRunsRegion } from "./ShadowRuns.tsx";
 import { SemanticDiffRegion } from "./SemanticDiff.tsx";
+import { ReviewRegion } from "./ReviewRegion.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
 import { EmptyState } from "./EmptyState.tsx";
@@ -592,6 +593,9 @@ function Linked({ view }: { view: GithubView }) {
         onToggle={toggle("history")}
       >
         <PullRequestCard view={view} />
+        {/* §B.5.1, directly under the pull request card it belongs to. A review is about a PR, and
+            putting the comments anywhere else would make somebody hold two places in their head. */}
+        <ReviewRegion view={view} />
         {/* §B.2.2's transient list, inside History and above the lineage rather than beside it:
             these are things that happened to this agent, and they are the only things in this
             region that did not change it. Renders nothing until somebody runs a ref. */}

@@ -582,6 +582,30 @@ export type ListShadowRunsCommand = { cmd: "listShadowRuns"; agentId: string };
  */
 export type SemanticDiffCommand = { cmd: "semanticDiffGithub"; agentId: string; ref?: string };
 
+/**
+ * §B.5.3: an edit that answers a review comment has landed, so tell the reviewer where.
+ *
+ * SEPARATE FROM APPLYING THE EDIT, and that separation is the feature rather than an accident of
+ * plumbing. §B.5.1's whole design is that a review comment is context and not an instruction — so
+ * the edit is applied by the ordinary Apply on the ordinary diff card, through the ordinary
+ * validator, and this is what happens AFTERWARDS. An apply that also replied would be a write path
+ * that a review comment reached, which is precisely what §B's governing constraint forbids.
+ *
+ * `resolution` LETS SOMEBODY CLOSE A COMMENT WITHOUT ACTING ON IT. `dismissed` exists so that
+ * deciding not to change anything is a decision the region records, rather than being
+ * indistinguishable from never having read it.
+ */
+export type ResolveReviewCommentCommand = {
+  cmd: "resolveReviewComment";
+  agentId: string;
+  commentId: string;
+  resolution: "applied" | "dismissed";
+  /** The version the applied edit produced, when there is one. */
+  version?: number;
+  /** What to say back on GitHub. Absent means resolve locally and post nothing. */
+  reply?: string;
+};
+
 export type GithubCommand =
   | ListGithubCommand
   | ListGithubReposCommand
@@ -599,13 +623,14 @@ export type GithubCommand =
   | DiagnoseFileCommand
   | ShadowRunGithubCommand
   | ListShadowRunsCommand
-  | SemanticDiffCommand;
+  | SemanticDiffCommand
+  | ResolveReviewCommentCommand;
 
 const GITHUB_COMMANDS = new Set([
   "listGithub", "listGithubRepos", "checkGithubRepo", "linkGithub", "unlinkGithub",
   "refreshGithub", "pushGithub", "pullGithub", "switchGithubBranch", "createGithubBranch",
   "openGithubPr", "commitGithub", "generateGithubMessage", "diagnoseFile",
-  "shadowRunGithub", "listShadowRuns", "semanticDiffGithub",
+  "shadowRunGithub", "listShadowRuns", "semanticDiffGithub", "resolveReviewComment",
 ]);
 
 /** MCP-channel commands, grouped so the forwarding switch stays readable. */
@@ -1331,7 +1356,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // and a command whose channel is missing here answers on `log` by default, which puts its
   // refusals in the status bar instead of the surface that asked for them.
   diagnoseFile: "github", shadowRunGithub: "github", listShadowRuns: "github",
-  semanticDiffGithub: "github",
+  semanticDiffGithub: "github", resolveReviewComment: "github",
 };
 
 export function channelFor(cmd: string): string {

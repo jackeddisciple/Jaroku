@@ -15,7 +15,14 @@ export type ExplainSubject =
 export type Intent =
   | { kind: "generate" }
   | { kind: "replan"; planId: string }
-  | { kind: "edit" }
+  /**
+   * `grounding` NAMES WHAT THE EDIT IS ABOUT, and changes nothing about where it goes.
+   *
+   * §B.5.2 adds one signal to the router and no new destination. This field is what lets the
+   * composer say "edit this agent, from @teammate's comment" instead of just "edit this agent" —
+   * which is the whole visible difference, and is why it is optional rather than a second kind.
+   */
+  | { kind: "edit"; grounding?: "review" }
   | { kind: "fix"; step: Step }
   | { kind: "rerun"; step: Step }
   | { kind: "explain"; subject: ExplainSubject };
@@ -27,6 +34,16 @@ export type ComposerContext = {
   pendingPlanId?: string | null;
   step?: Step; // the selected trace step, if any
   nodeId?: string | null; // the selected graph node, if any (takes precedence for "explain")
+  /**
+   * §B.5.2: whether the composer is carrying a review-comment chip.
+   *
+   * ONE NEW SIGNAL AND NOT A NEW INTENT. A comment pinned to a specific file and line is
+   * unambiguous in exactly the way "a failed step is selected → fix" already is, so it routes to
+   * the EDIT loop — which is where a change to an agent's code has always gone. A `review` intent
+   * would be a second write path to the same place, with its own diff card and its own Apply, and
+   * §B's governing constraint is that nothing adds a second way to make code land.
+   */
+  hasReviewComment?: boolean;
 };
 
 const RE_EXPLAIN = /^(why|what|whats|what's|how|when|where|which|who|explain|describe|tell me|walk me)\b|\bexplain\b/i;
@@ -53,6 +70,11 @@ export function classifyIntent(text: string, ctx: ComposerContext): Intent {
   }
   if (RE_RERUN.test(t) && step) return { kind: "rerun", step };
   if (RE_FIX.test(t) && step?.error) return { kind: "fix", step };
+  // §B.5.2's one new signal. It lands on `edit`, which is where the default already goes — and that
+  // is the design rather than a coincidence: the signal exists so the route LABEL can name what is
+  // grounding the edit, not to send it somewhere new. A step or a node still wins, because somebody
+  // who selected one and then typed is looking at that.
+  if (ctx.hasReviewComment && !step && !nodeId) return { kind: "edit", grounding: "review" };
   return { kind: "edit" };
 }
 
@@ -62,7 +84,8 @@ export function routeLabel(intent: Intent): string {
   switch (intent.kind) {
     case "generate": return "plan a new agent";
     case "replan": return "revise the plan";
-    case "edit": return "edit this agent";
+    case "edit":
+      return intent.grounding === "review" ? "edit this agent, from the review comment" : "edit this agent";
     case "fix": return `fix step #${intent.step.seq}`;
     case "rerun": return `re-run from step #${intent.step.seq}`;
     case "explain":

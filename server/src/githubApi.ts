@@ -620,6 +620,84 @@ export class GithubApi {
     return { number: data.number, htmlUrl: data.html_url };
   }
 
+  // --- review comments -------------------------------------------------------
+
+  /**
+   * The REVIEW comments on a pull request — §B.5.1.
+   *
+   * `/pulls/{n}/comments` AND NOT `/issues/{n}/comments`, and the distinction is the whole feature.
+   * The issues endpoint returns the conversation: general remarks with no file and no line. The
+   * pulls endpoint returns comments pinned to a path and a position, which is what makes §B.5.2's
+   * routing signal unambiguous — "a comment pinned to a specific file and line" is the same class
+   * of decision v0.1.7's table already makes for "a failed step is selected → fix". A general
+   * comment saying "this looks wrong" is not that, and pulling it in would send the edit loop at a
+   * file nobody named.
+   *
+   * `line` IS THE ONE ON THE CURRENT DIFF, and `original_line` is where it was when the comment was
+   * written. Preferring the first means a comment on a line the branch has since moved still points
+   * at the right place; falling back to the second means a comment on a line the branch has since
+   * DELETED still says where it was, rather than reporting null and losing the pin altogether.
+   */
+  async reviewComments(fullName: string, prNumber: number, limit = 100): Promise<{
+    id: string;
+    inReplyToId: string | null;
+    authorLogin: string | null;
+    path: string | null;
+    line: number | null;
+    body: string;
+    commitSha: string | null;
+    createdAt: string;
+  }[]> {
+    const data = await this.call<Array<Record<string, unknown>>>(
+      "reviewComments",
+      "GET",
+      `/repos/${fullName}/pulls/${prNumber}/comments?per_page=${Math.min(limit, 100)}`,
+    );
+    return data.map((c) => ({
+      id: String(c["id"]),
+      inReplyToId: c["in_reply_to_id"] === undefined || c["in_reply_to_id"] === null
+        ? null
+        : String(c["in_reply_to_id"]),
+      authorLogin: ((c["user"] as { login?: string } | null)?.login) ?? null,
+      path: typeof c["path"] === "string" ? c["path"] : null,
+      line: typeof c["line"] === "number"
+        ? c["line"]
+        : typeof c["original_line"] === "number"
+          ? c["original_line"]
+          : null,
+      body: String(c["body"] ?? ""),
+      commitSha: typeof c["commit_id"] === "string" ? c["commit_id"] : null,
+      createdAt: String(c["created_at"] ?? new Date(0).toISOString()),
+    }));
+  }
+
+  /**
+   * Reply to one review comment, in its own thread — §B.5.3.
+   *
+   * A THREADED REPLY AND NOT A GENERAL PULL REQUEST COMMENT, which is §B.5.3's requirement and the
+   * whole point of the loop closing: a teammate who never opens Jaroku still sees the conversation
+   * resolve IN PLACE, under the line they commented on, rather than as a new remark at the bottom
+   * of a thread they have to go and correlate by hand.
+   *
+   * `/replies` RATHER THAN A NEW COMMENT WITH `in_reply_to`. Both exist; the second requires
+   * re-supplying the path, the position and the commit, which are three chances to pin the reply
+   * one line away from what it answers.
+   */
+  async replyToReviewComment(
+    fullName: string,
+    prNumber: number,
+    commentId: string,
+    body: string,
+  ): Promise<{ id: string }> {
+    const data = await this.call<{ id: number }>(
+      "replyToReviewComment",
+      "POST",
+      `/repos/${fullName}/pulls/${prNumber}/comments/${commentId}/replies`,
+      { body },
+    );
+    return { id: String(data.id) };
+  }
+
   // --- checks ----------------------------------------------------------------
   //
   // THE CHECKS API AND NOT THE STATUSES API, and the difference is the whole of §B.1.1. A commit
