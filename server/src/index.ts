@@ -3068,6 +3068,9 @@ const GITHUB_COMMAND_NAMES = new Set([
 ]);
 
 const prComments = new PrCommentsRepository(db);
+// DECLARED HERE RATHER THAN BESIDE `checkRunner` BELOW, purely because the panel reads it: §B.8.2's
+// markers are on the snapshot, so `githubService` needs it before `checkRunner` is constructed.
+const checksRepo = new ChecksRepository(db);
 
 const githubService = new GithubService({
   repo: githubRepo,
@@ -3078,6 +3081,10 @@ const githubService = new GithubService({
   // panel open against a pull request that exists — and the only way the REVIEW region can be
   // current without a second webhook.
   comments: prComments,
+  // §B.8.2's ⧫ markers, fed straight from B.1's check_runs rows — which is what makes a glance at
+  // the canvas answer three questions at once: which commit is live, which scored best, and how far
+  // main is from either.
+  checks: checksRepo,
   // The same resolver `agentFilesDeps` uses, so the PROTECTED group in the panel and the read-only
   // set the edit loop enforces are one answer rather than two that agree today.
   connectorFilesFor: agentFilesDeps.connectorFilesFor,
@@ -3227,7 +3234,6 @@ setInterval(sweepShadowRuns, 5 * 60_000).unref();
  * webhook produces. `CheckRunner` itself imports none of them — §B.10's claim that eval-as-CI is
  * not new execution machinery is only true if the file that would grow some cannot reach any.
  */
-const checksRepo = new ChecksRepository(db);
 const checkRunner = new CheckRunner({
   checks: checksRepo,
   repo: githubRepo,

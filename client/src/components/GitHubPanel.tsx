@@ -45,6 +45,7 @@ import { RestackRegion, StagingRegion } from "./GitHubStaging.tsx";
 import { ShadowRunsRegion } from "./ShadowRuns.tsx";
 import { SemanticDiffRegion } from "./SemanticDiff.tsx";
 import { ReviewRegion } from "./ReviewRegion.tsx";
+import { GraphCanvas } from "./GraphCanvas.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
 import { EmptyState } from "./EmptyState.tsx";
@@ -600,10 +601,51 @@ function Linked({ view }: { view: GithubView }) {
             these are things that happened to this agent, and they are the only things in this
             region that did not change it. Renders nothing until somebody runs a ref. */}
         <ShadowRunsRegion view={view} />
+        {/* §B.8.2's toggle. The two views answer different questions over the same rows — List says
+            what happened in order, Graph says how far three lanes are from each other — so it is a
+            toggle rather than two regions, and List stays the default because it is what somebody
+            opening a history came for. */}
         <div className="mt-4">
-          <HistoryRegion view={view} />
+          <HistoryView view={view} />
         </div>
       </CollapsibleRegion>
+    </div>
+  );
+}
+
+/**
+ * §B.8.2's `[ List | Graph ]`.
+ *
+ * THE STATE IS LOCAL AND IS NOT PERSISTED, unlike §A.5's four collapsed regions. Those are a
+ * preference about how somebody likes to work; this is a question they are asking right now — "how
+ * far is the deploy from main" is asked, answered and finished, and reopening on Graph tomorrow
+ * would answer a question nobody asked.
+ */
+function HistoryView({ view }: { view: GithubView }) {
+  const [mode, setMode] = useState<"list" | "graph">("list");
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center">
+        <div className="ml-auto flex items-center gap-0.5 rounded-control bg-active p-0.5">
+          {(["list", "graph"] as const).map((m) => (
+            <button
+              key={m}
+              className={`rounded-control px-2 py-0.5 text-[11px] capitalize transition-colors duration-fast ${
+                mode === m ? "bg-panel text-ink" : "text-muted hover:text-ink"
+              }`}
+              onClick={() => setMode(m)}
+              title={
+                m === "list"
+                  ? "What happened, in order"
+                  : "Three lanes on one timeline: what is on main, what this agent has, and what is live"
+              }
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+      </div>
+      {mode === "list" ? <HistoryRegion view={view} /> : <GraphCanvas view={view} />}
     </div>
   );
 }

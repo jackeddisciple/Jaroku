@@ -882,6 +882,8 @@ export interface GithubView {
   pr: GithubPrRow | null;
   /** §B.5.1's REVIEW region, oldest first. Empty when there is no open pull request. */
   review: GithubReviewRow[];
+  /** §B.8.2's eval markers, newest first. Empty until §B.1 is opted into on this agent. */
+  checks: GithubCheckMarker[];
   events: GithubEventRow[];
 }
 
@@ -994,6 +996,22 @@ export interface GithubSemanticDiff {
  * this row's filename matches the file row above it in the same panel. Two lists about the same
  * file spelling it two ways would look like two files.
  */
+/**
+ * One eval check, as §B.8.2's ⧫ marker renders it.
+ *
+ * KEYED ON `headSha` because that is where the marker sits — beneath the commit it ran against. A
+ * pull request is a range of commits and a check is about one, so hanging a marker off the range
+ * would put it under whichever commit the canvas happened to draw last.
+ */
+export interface GithubCheckMarker {
+  headSha: string;
+  prNumber: number;
+  /** 0..1, or null when nothing scored. The marker renders no percentage rather than "0%". */
+  passRate: number | null;
+  conclusion: string | null;
+  createdAt: string;
+}
+
 export interface GithubReviewRow {
   id: string;
   author: string | null;

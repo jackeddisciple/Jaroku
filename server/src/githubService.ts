@@ -25,6 +25,7 @@ import { badgeFor, syncVerdict, unpushedVersions, verdictLine, type SyncVerdict 
 import { stagedFiles, type StagedFile } from "./githubStaging.ts";
 import { WORKFLOW_PATH, buildWorkflow, workflowVerdict } from "./githubWorkflow.ts";
 import type { PrCommentsRepository } from "./db/repositories/prComments.ts";
+import type { ChecksRepository } from "./db/repositories/checks.ts";
 import { inSubdirectory, repoPath, repoPrefix } from "./githubPush.ts";
 import type { Agent, AgentRepository, AgentVersion } from "./db/repositories/agents.ts";
 import type { ProjectStore } from "./storage/projectStore.ts";
@@ -130,6 +131,26 @@ export interface ReviewCommentRow {
   createdAt: string;
 }
 
+/**
+ * One eval check, as §B.8.2's ⧫ marker renders it.
+ *
+ * KEYED ON `headSha` BECAUSE THAT IS WHERE THE MARKER SITS — "beneath the commit it ran against",
+ * per §B.8.2 — and not on the pull request number, which is where a person would naturally look for
+ * it. A pull request is a range of commits; a check is about one, and hanging the marker off the
+ * range would put it under whichever commit the canvas happened to draw last.
+ *
+ * A PROJECTION AND NOT THE ROW. The canvas needs a sha, a pass rate and a conclusion; the row also
+ * carries three deltas, a baseline pointer and two provider fields, none of which fit on a marker.
+ */
+export interface CheckMarkerRow {
+  headSha: string;
+  prNumber: number;
+  /** 0..1, or null when nothing was scored. The marker renders no percentage rather than "0%". */
+  passRate: number | null;
+  conclusion: string | null;
+  createdAt: string;
+}
+
 export interface GithubView {
   agentId: string;
   agentSlug: string;
@@ -198,6 +219,17 @@ export interface GithubView {
    * somebody is reviewing.
    */
   review: ReviewCommentRow[];
+  /**
+   * §B.8.2's eval markers, newest first.
+   *
+   * ON THE SNAPSHOT RATHER THAN ON DEMAND, unlike §B.7's Agent diff — because this costs one indexed
+   * read of a table this workspace owns, where that costs a tree read from GitHub and two Python
+   * parses. The rule is the cost, not the feature.
+   *
+   * EMPTY WHEN NOTHING HAS EVER CHECKED, which is the ordinary case: §B.1 is opt-in, so most agents
+   * have no rows here and the canvas simply draws no markers.
+   */
+  checks: CheckMarkerRow[];
   events: GithubEvent[];
 }
 
@@ -261,6 +293,14 @@ export interface GithubServiceDeps {
    * is no open pull request, so there is no second empty state to design.
    */
   comments?: PrCommentsRepository;
+  /**
+   * §B.8.2's eval markers.
+   *
+   * OPTIONAL FOR THE SAME REASON `comments` IS: the pure-function tests construct a service without
+   * a database, and a canvas with no markers is a canvas — where a canvas that could not render
+   * would be a missing feature.
+   */
+  checks?: ChecksRepository;
   log?: (line: string) => void;
 }
 
@@ -377,6 +417,16 @@ export class GithubService {
       remoteChanges: remote.remoteChanges,
       pr: remote.pr,
       review: await this.reviewFor(ctx, agent.id, link, remote.pr),
+      // §B.8.2. One indexed read, projected to what a marker needs — see `CheckMarkerRow`.
+      checks: this.deps.checks
+        ? (await this.deps.checks.forAgent(ctx, agent.id).catch(() => [])).map((c) => ({
+            headSha: c.head_sha,
+            prNumber: c.pr_number,
+            passRate: c.pass_rate,
+            conclusion: c.conclusion,
+            createdAt: c.created_at,
+          }))
+        : [],
       events,
     };
   }
