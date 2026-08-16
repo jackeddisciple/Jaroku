@@ -67,6 +67,7 @@ import { resolveDevTenancy, type DevTenancy } from "./devTenancy.ts";
 import { loadConnectors } from "./connectors.ts";
 import { isSafeAgentId, listProjectFiles, readOnlyPaths, type ProjectFile } from "./projectFs.ts";
 import { validateProject } from "./validator.ts";
+import { liveDiagnostics } from "./liveDiagnostics.ts";
 import { openObjectStore } from "./storage/open.ts";
 import { resolveSigningKey } from "./storage/presign.ts";
 import { filesFromDirectory, ProjectStore } from "./storage/projectStore.ts";
@@ -3046,7 +3047,7 @@ async function handleMemberCommand(ctx: TenantContext, cmd: MemberCommand): Prom
 const GITHUB_COMMAND_NAMES = new Set([
   "listGithub", "listGithubRepos", "checkGithubRepo", "linkGithub", "unlinkGithub",
   "refreshGithub", "pushGithub", "pullGithub", "switchGithubBranch", "createGithubBranch",
-  "openGithubPr", "commitGithub", "generateGithubMessage",
+  "openGithubPr", "commitGithub", "generateGithubMessage", "diagnoseFile",
 ]);
 
 const githubService = new GithubService({
@@ -3602,6 +3603,50 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
           },
           key,
         );
+        return;
+      }
+
+      case "diagnoseFile": {
+        // §B.3. The cheap half of the validator, against text that has never been saved.
+        //
+        // NOTHING HERE GATES ANYTHING, and the shape of this handler is the proof: it reads, it
+        // answers, and there is no path from it to a publish, a push or a version. §B.3.2's rule is
+        // that the LSP surface changes when a user learns about a problem and never what stops a
+        // bad file from being committed — a handler that could refuse something would already have
+        // broken that.
+        const agentId = String(cmd.agentId ?? "");
+        const path = String(cmd.path ?? "");
+        const source = typeof cmd.source === "string" ? cmd.source : "";
+        const nonce = Number.isFinite(cmd.nonce) ? Number(cmd.nonce) : 0;
+        if (!isSafeAgentId(agentId) || !path) return;
+        const agent = await agentRepo.bySlug(ctx, agentId);
+        if (!agent) return;
+
+        // Rule 9 needs to know what counts as a tool, and the answer lives across the project
+        // rather than in the buffer: the reviewed connector tools this agent is scoped to, plus
+        // whatever MCP grant it holds. `@tool`s defined in the buffer itself are added by the
+        // analysis, so a caller that knew neither would still catch most of it.
+        const installed = new Set(agent.connectors ?? []);
+        const knownTools = [
+          ...loadConnectors(RUNTIME_DIR)
+            .filter((c) => installed.has(c.id))
+            .flatMap((c) => c.tools.map((t) => t.name)),
+          ...(agent.mcp_tools ?? []),
+        ];
+        const diagnostics = await liveDiagnostics(path, source, {
+          runtimeDir: RUNTIME_DIR,
+          knownTools,
+        });
+        relay.broadcastGithub(ctx, {
+          type: "diagnostics",
+          agentId,
+          path,
+          nonce,
+          // Stripped to the wire shape rather than sent whole: `Diagnostic` carries `path`, which
+          // the message already names, and repeating it per row would put the same string on the
+          // wire once per squiggle.
+          diagnostics: diagnostics.map(({ path: _p, ...rest }) => rest),
+        });
         return;
       }
 

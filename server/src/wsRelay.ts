@@ -502,6 +502,38 @@ export type CommitGithubCommand = {
  */
 export type GenerateGithubMessageCommand = { cmd: "generateGithubMessage"; agentId: string };
 
+/**
+ * §B.3's live diagnostics: analyse a buffer nobody has saved.
+ *
+ * ON THE GITHUB CHANNEL BECAUSE THE SURFACE IS, and that is worth stating because the file editor
+ * is not otherwise a GitHub thing. §B.3 puts a real editor in the diff/file view — the view this
+ * addendum's staging column, semantic diff and PR loop all live in — and the diagnostics it draws
+ * are read there. A channel of its own would be a channel with one message on it, delivered to the
+ * same clients, cleared by the same navigation.
+ *
+ * THE SOURCE TRAVELS WITH THE COMMAND, which is the one place this differs from every other
+ * command in this file: the rest name something the server can look up, and this one carries text
+ * the server has never seen. That is the whole point — the buffer is unsaved, so there is nothing
+ * to look up — and it is why the handler treats the content as untrusted input to a parser rather
+ * than as an agent's published bytes.
+ */
+export type DiagnoseFileCommand = {
+  cmd: "diagnoseFile";
+  agentId: string;
+  /** Project-relative, POSIX. Used to decide whether the contract checks apply. */
+  path: string;
+  source: string;
+  /**
+   * A monotonic number the client increments per request.
+   *
+   * ECHOED BACK UNCHANGED so a client can drop an answer that is about text it has already
+   * replaced. Answers arrive over a socket in whatever order the network delivers them, and a
+   * stale one would paint squiggles under lines that have since moved — the same staleness the
+   * repo-name availability check solves by comparing the name back.
+   */
+  nonce?: number;
+};
+
 export type GithubCommand =
   | ListGithubCommand
   | ListGithubReposCommand
@@ -515,12 +547,13 @@ export type GithubCommand =
   | CreateGithubBranchCommand
   | OpenGithubPrCommand
   | CommitGithubCommand
-  | GenerateGithubMessageCommand;
+  | GenerateGithubMessageCommand
+  | DiagnoseFileCommand;
 
 const GITHUB_COMMANDS = new Set([
   "listGithub", "listGithubRepos", "checkGithubRepo", "linkGithub", "unlinkGithub",
   "refreshGithub", "pushGithub", "pullGithub", "switchGithubBranch", "createGithubBranch",
-  "openGithubPr", "commitGithub", "generateGithubMessage",
+  "openGithubPr", "commitGithub", "generateGithubMessage", "diagnoseFile",
 ]);
 
 /** MCP-channel commands, grouped so the forwarding switch stays readable. */
@@ -1039,6 +1072,31 @@ export type GithubEvent =
       position: number;
       message: string;
       problems: string[];
+    }
+  /**
+   * §B.3's PROBLEMS list, for one buffer.
+   *
+   * ADDRESSED BY (agent, path, nonce) AND CARRYING THE WHOLE LIST, never a delta. A diagnostic set
+   * is small — a handful of lines — and the alternative is a client reconciling additions against
+   * removals for a buffer that is changing under both of them. The same coarse-snapshot argument
+   * `githubService` makes for the panel, at a scale where it is not even a trade.
+   *
+   * AN EMPTY `diagnostics` IS A REAL ANSWER and is the common one: it means the buffer is clean
+   * right now, and the client clears its squiggles on it. That is why the array is not optional.
+   */
+  | {
+      type: "diagnostics";
+      agentId: string;
+      path: string;
+      nonce: number;
+      diagnostics: {
+        line: number;
+        column?: number;
+        endColumn?: number;
+        rule: number | null;
+        message: string;
+        severity: "warning";
+      }[];
     }
   | { type: "error"; message: string; agentId?: string }
   | { type: "notice"; message: string; agentId?: string };

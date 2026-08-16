@@ -15,6 +15,7 @@ import { ICON } from "../lib/tokens.ts";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { LockIcon } from "./panelIcons.tsx";
+import { ProblemsPanel, useDiagnostics, useLiveDiagnostics } from "./ProblemsPanel.tsx";
 
 const LANGS = ["python", "json", "markdown", "toml"] as const;
 const THEME = "vitesse-dark"; // muted, close to the app's near-black palette
@@ -86,11 +87,19 @@ function FileRail() {
 export function CodeViewer() {
   const activeFile = useBuildStore((s) => s.activeFile);
   const file = useBuildStore((s) => (s.activeFile ? s.files[s.activeFile] : undefined));
+  const agentId = useBuildStore((s) => s.activeAgentId);
   const [html, setHtml] = useState<string | null>(null);
 
   const content = file?.content ?? "";
   const complete = file?.complete ?? false;
   const lang = activeFile ? langFor(activeFile) : "text";
+
+  // §B.3. Asked only for a file that has finished arriving: a streaming file is one a model is
+  // halfway through writing, and annotating it would put a squiggle under every incomplete
+  // statement in turn as it appears — for a person who is watching a generation rather than
+  // editing anything.
+  useLiveDiagnostics(agentId, activeFile, content, complete);
+  const diagnostics = useDiagnostics(agentId, activeFile);
 
   useEffect(() => {
     // Only highlight finished files in a supported language.
@@ -126,7 +135,18 @@ export function CodeViewer() {
         <div className="flex items-center gap-2 px-6 py-2 shrink-0 border-b border-hair">
           <Truncate className="text-[12px] text-ink" title={file.path}>{file.path}</Truncate>
           <span className="text-faint text-[11px] shrink-0">{lang}</span>
-          {file.readOnly && <span className="text-faint text-[11px] shrink-0">read-only</span>}
+          {/* §B.3.2: a PROTECTED file opens READ-ONLY, never as an editable buffer that merely
+              refuses to save. The flag arrives on the file from the server — the block list is
+              §3.3's, not a second one computed here, for the reason a block list a browser owns is
+              a block list an attacker owns. */}
+          {file.readOnly && (
+            <span
+              className="text-faint text-[11px] shrink-0"
+              title="Reviewed code Jaroku keeps read-only. The edit loop cannot touch it and neither can this view."
+            >
+              read-only
+            </span>
+          )}
           {!complete && <span className="shrink-0 animate-stream-pulse text-[11px] text-run motion-reduce:animate-none">writing…</span>}
           <span className="ml-auto text-faint text-[11px] shrink-0 tabular-nums">
             {content.split("\n").length} lines
@@ -140,6 +160,11 @@ export function CodeViewer() {
             <pre className="whitespace-pre text-ink">{content}</pre>
           )}
         </div>
+
+        {/* Under the code rather than over it. §B.3's mock puts PROBLEMS at the foot of the pane,
+            and that is where a list of things to go and look at belongs — a strip across the top
+            would push the line somebody is reading down by its own height every time it changed. */}
+        <ProblemsPanel diagnostics={diagnostics} />
       </div>
     </div>
   );

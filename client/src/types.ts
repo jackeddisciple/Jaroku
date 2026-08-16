@@ -900,6 +900,24 @@ export interface GithubRefusal {
  * position is a number rather than a phrase inside the message, so the row that lights up is the
  * one that actually failed.
  */
+/**
+ * One squiggle — §B.3's live diagnostics.
+ *
+ * ALWAYS ADVISORY. There is no `severity` value at which this stops anything, and the type says so
+ * rather than leaving it to a comment: what blocks a commit is the real validator, on the real file
+ * set, at the moment somebody presses Commit & Push. This surface changes when a person LEARNS
+ * about a problem and never what a bad file is allowed to do.
+ */
+export interface Diagnostic {
+  line: number;
+  column?: number;
+  endColumn?: number;
+  /** The rule number, when the check is one of the eleven. Null for the contract checks. */
+  rule: number | null;
+  message: string;
+  severity: "warning";
+}
+
 export interface GithubRestackRefusal {
   agentId: string;
   /** Zero-based, in the NEW order — where the user just put it, not where it used to be. */
@@ -945,6 +963,15 @@ export type GithubMessage =
   | { channel: "github"; type: "message"; agentId: string; message: string }
   | ({ channel: "github"; type: "refused" } & GithubRefusal)
   | ({ channel: "github"; type: "restackRefused" } & GithubRestackRefusal)
+  | {
+      channel: "github";
+      type: "diagnostics";
+      agentId: string;
+      path: string;
+      /** Echoed back unchanged, so a client can drop an answer about text it has replaced. */
+      nonce: number;
+      diagnostics: Diagnostic[];
+    }
   | { channel: "github"; type: "error"; message: string; agentId?: string }
   | { channel: "github"; type: "notice"; message: string; agentId?: string };
 
@@ -1111,7 +1138,14 @@ export type ClientCommand =
   | { cmd: "commitGithub"; agentId: string; message: string; push?: boolean }
   // §3.4's ✨ generate. Its own command because it is the one thing in this family that costs
   // money — the default message needs no model call at all.
-  | { cmd: "generateGithubMessage"; agentId: string };
+  | { cmd: "generateGithubMessage"; agentId: string }
+  /**
+   * §B.3: analyse an unsaved buffer.
+   *
+   * THE SOURCE TRAVELS WITH THE COMMAND, unlike every other command here, because there is nothing
+   * to look up — the buffer has not been saved. That is the feature.
+   */
+  | { cmd: "diagnoseFile"; agentId: string; path: string; source: string; nonce?: number };
 
 // Unified composer "explain" subject — what the question is about, built from already-in-memory
 // context (a trace step, a graph node, or the agent generally). No new data is fetched.

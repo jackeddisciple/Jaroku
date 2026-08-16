@@ -13,6 +13,7 @@ import { useConnectionStore } from "../store/connectionStore.ts";
 import { useBillingStore } from "../store/billingStore.ts";
 import { useDeployStore } from "../store/deployStore.ts";
 import { useGithubStore } from "../store/githubStore.ts";
+import { useDiagnosticsStore } from "../store/diagnosticsStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useMemberStore } from "../store/memberStore.ts";
 import { resetWorkspaceStores } from "../store/reset.ts";
@@ -272,6 +273,12 @@ function dispatch(msg: ServerMessage): void {
           message: msg.message,
           problems: msg.problems,
         });
+      } else if (msg.type === "diagnostics") {
+        // §B.3. Its own store, not this one: these answer a question THIS tab asked about text
+        // THIS tab is holding, and a `state` message from somebody else's push must not clear them.
+        useDiagnosticsStore
+          .getState()
+          .apply(msg.agentId, msg.path, msg.nonce, msg.diagnostics);
       } else if (msg.type === "message") g.setGenerated(msg.agentId, msg.message);
       else if (msg.type === "error") g.setError(msg.message);
       else if (msg.type === "notice") g.setNotice(msg.message);
@@ -954,6 +961,20 @@ export function sendPushGithub(
   } = {},
 ): void {
   send({ cmd: "pushGithub", agentId, ...opts });
+}
+
+/**
+ * §B.3: ask for diagnostics on an unsaved buffer.
+ *
+ * THE NONCE IS RECORDED BEFORE THE SEND, so an answer that arrives after a later request has
+ * already been recorded is dropped rather than painted. Doing it the other way round would leave a
+ * window in which the newest request is not yet the newest known one.
+ */
+export function sendDiagnoseFile(agentId: string, path: string, source: string): void {
+  const store = useDiagnosticsStore.getState();
+  const nonce = store.nextNonce();
+  store.markSent(agentId, path, nonce);
+  send({ cmd: "diagnoseFile", agentId, path, source, nonce });
 }
 
 /** Pull, through the same validate-before-promote path every generation passes. */
