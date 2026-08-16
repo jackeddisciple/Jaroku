@@ -32,7 +32,15 @@ CREATE TABLE agent_ci_config (
   -- Which dataset a pull request's check runs. NULL means configured-but-posting-nothing; see
   -- the header. ON DELETE SET NULL rather than CASCADE: deleting a dataset should stop the check,
   -- not silently discard the provider policy somebody chose alongside it.
-  ci_dataset_id   uuid REFERENCES datasets(id) ON DELETE SET NULL,
+  --
+  -- `text` AND NOT `uuid`, BECAUSE THAT IS WHAT `datasets.id` IS. The eval control plane predates
+  -- the uuid convention by two sessions — 002 gave every table it created a `text` primary key and
+  -- 005 added tenancy around them without changing it — so a `uuid` column here does not merely
+  -- read oddly, it makes the constraint unbuildable: Postgres refuses a foreign key whose types
+  -- have no equality operator between them, with "cannot be implemented" and nothing about which
+  -- of the two columns it thinks is wrong. Every id in this table that points at a Session-3 table
+  -- stays `uuid`; the two that point back into the eval engine follow the eval engine.
+  ci_dataset_id   text REFERENCES datasets(id) ON DELETE SET NULL,
   provider_policy text NOT NULL DEFAULT 'collaborators_paid',
   updated_by      uuid REFERENCES users(id) ON DELETE SET NULL,
   created_at      timestamptz NOT NULL DEFAULT now(),

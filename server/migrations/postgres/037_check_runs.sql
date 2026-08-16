@@ -40,7 +40,11 @@ CREATE TABLE check_runs (
   -- GitHub's own id for the check run, so a later update patches rather than posts a second one.
   -- NULL between deciding to check and GitHub accepting the creation.
   github_check_run_id text,
-  eval_run_id         uuid REFERENCES eval_runs(id) ON DELETE SET NULL,
+  -- `text`, for the reason 036's `ci_dataset_id` is: `eval_runs.id` is a `text` primary key from
+  -- 002, and a `uuid` column here would make the foreign key unbuildable rather than merely
+  -- inconsistent. The SQLite half already spells it TEXT, which is why this only ever failed on
+  -- the driver the eval engine is actually deployed against.
+  eval_run_id         text REFERENCES eval_runs(id) ON DELETE SET NULL,
   -- GitHub's vocabulary, deliberately, because these two go out on the wire as they are stored.
   -- Inventing a third spelling here would mean a translation table nobody would keep current.
   status              text NOT NULL DEFAULT 'queued',
