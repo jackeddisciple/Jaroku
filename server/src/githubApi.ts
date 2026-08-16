@@ -67,8 +67,27 @@ const REQUEST_TIMEOUT_MS = numberFromEnv("JAROKU_GITHUB_TIMEOUT_MS", 20_000);
 export const MAX_BLOB_BYTES = 1_000_000;
 
 export type GithubFailureKind =
-  /** The token is missing, wrong, revoked, or lacks the scope. The user must fix a credential. */
+  /**
+   * The token is missing, wrong, or revoked — a 401, and nothing else.
+   *
+   * NARROWED TO 401 ON PURPOSE, because this kind is what `markRevoked` fires on: the grant is
+   * marked dead, `apiFor` starts returning null and the panel falls back to §2.1's empty state
+   * asking for a token. That is the right answer to "GitHub no longer recognises this credential"
+   * and the wrong one to everything else — see `forbidden`.
+   */
   | "auth"
+  /**
+   * Reached GitHub with a credential it recognises; it refused this operation.
+   *
+   * ITS OWN KIND BECAUSE THE TOKEN IS FINE. A fine-grained token scoped to three repositories
+   * answers 403 on the fourth, and a token with `Contents: read` answers 403 on every write —
+   * in both cases it is working perfectly everywhere else. Folded into `auth`, as it was, one
+   * refused push disconnected the whole workspace's GitHub account: the panel dropped back to
+   * "Connect GitHub", every OTHER agent's link went dark with it, and the only way back was
+   * pasting the credential that had never stopped working. Observed by pushing to a repository
+   * Jaroku had itself just created, which is the most ordinary thing this feature does.
+   */
+  | "forbidden"
   /** The repository, branch or commit is not there. Distinct from `api`: the fix is to relink. */
   | "not_found"
   /**
@@ -116,7 +135,7 @@ export class GithubError extends Error {
  * be posted by this product as it is built, on any repository, ever.
  */
 export function needsGithubApp(err: unknown): boolean {
-  return err instanceof GithubError && err.kind === "auth" && /GitHub App/i.test(err.detail ?? "");
+  return err instanceof GithubError && err.kind === "forbidden" && /GitHub App/i.test(err.detail ?? "");
 }
 
 export interface GithubAccount {
@@ -276,8 +295,8 @@ export class GithubApi {
         );
       }
       throw new GithubError(
-        "auth",
-        "GitHub refused: the token does not have write access to this repository.",
+        "forbidden",
+        "GitHub refused: this token cannot write to that repository. A fine-grained token reaches only the repositories it was scoped to, and only with the permissions that were ticked — Contents: read and write is the one a push needs.",
         operation,
         undefined,
         detail,
@@ -891,9 +910,9 @@ export class GithubApi {
         this.log(`[github] check runs are App-only for this token; posting a commit status instead`);
         return { id: await this.putCommitStatus(fullName, input.name, input) };
       }
-      if (err instanceof GithubError && err.kind === "auth") {
+      if (err instanceof GithubError && err.kind === "forbidden") {
         throw new GithubError(
-          "auth",
+          "forbidden",
           "GitHub refused to write a check on this commit. The token needs write access to the repository.",
           err.operation,
         );

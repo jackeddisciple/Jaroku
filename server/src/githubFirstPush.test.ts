@@ -122,6 +122,42 @@ try {
     }
     check(refused, "so creating it again is refused — which is why the runner asks");
   }
+
+  console.log("\na token that cannot write to ONE repository has not been revoked");
+  {
+    // OBSERVED AGAINST REAL GITHUB, by pushing to a repository Jaroku had just created for
+    // somebody with a fine-grained token scoped elsewhere. GitHub answers 403; this classified it
+    // as `auth`; the push runner's catch calls `markRevoked` on `auth`; the workspace's whole
+    // GitHub grant went dead. The panel dropped to §2.1's "Connect GitHub" empty state, every
+    // other agent's link went with it, and the way back was pasting the credential that had never
+    // stopped working. A 401 means the credential is gone. A 403 means it is not allowed HERE.
+    const kinds: string[] = [];
+    for (const [status, headers] of [
+      [401, {}],
+      [403, {}],
+      [403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "0" }],
+    ] as [number, Record<string, string>][]) {
+      // A one-response server rather than the fixture, because what is being asserted is the
+      // CLASSIFICATION of a status code and the fixture has no way to produce a bare 403.
+      const server = (await import("node:http")).createServer((_req, res) => {
+        res.writeHead(status, { "content-type": "application/json", ...headers });
+        res.end(JSON.stringify({ message: "no" }));
+      });
+      await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+      const port = (server.address() as { port: number }).port;
+      const client = new GithubApi({ token: "t", base: `http://127.0.0.1:${port}` });
+      try {
+        await client.viewer();
+        kinds.push("no-error");
+      } catch (err) {
+        kinds.push(err instanceof GithubError ? err.kind : "not-github");
+      }
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+    check(kinds[0] === "auth", "401 is `auth`, and `auth` is what revokes a grant", kinds[0]);
+    check(kinds[1] === "forbidden", "403 is `forbidden`, and nothing revokes anything", kinds[1]);
+    check(kinds[2] === "rate_limited", "…and a rate limit is still told apart from both", kinds[2]);
+  }
 } finally {
   await mock.close();
 }
