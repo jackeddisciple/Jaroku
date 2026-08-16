@@ -117,6 +117,7 @@
     "test:github-push": "tsx src/githubPush.test.ts",
     "test:github-trailers": "tsx src/githubTrailers.test.ts",
     "test:hunks": "tsx src/hunks.test.ts",
+    "test:secret-scan": "tsx src/secretScan.test.ts",
     "test:live-diagnostics": "tsx src/liveDiagnostics.test.ts",
     "test:github-staging": "tsx src/githubStaging.test.ts",
     "test:unpushed-stack": "tsx src/unpushedStack.test.ts",
