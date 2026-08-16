@@ -127,6 +127,14 @@ export class CheckRunner {
     });
 
     const name = titleFor(input.datasetName ?? null);
+    // GITHUB'S OWN ID FOR THE CHECK, HELD HERE RATHER THAN RE-READ OFF `row`. `open` returns the
+    // row as it was INSERTed — `github_check_run_id` null, because GitHub has not been asked yet —
+    // and `attachGithubId` writes the column without refreshing the object. The in-progress update
+    // below read `row.github_check_run_id`, got that null, and `putCheckRun` reads an absent id as
+    // "create": every pull request got a SECOND check run, and it was the one nothing ever
+    // finished. The first went queued → completed; the duplicate sat at `in_progress` forever,
+    // which on a repository where the check is required is a merge button that never unlocks.
+    let githubCheckRunId: string;
     try {
       const created = await api.putCheckRun(input.repoFullName, {
         name,
@@ -138,6 +146,7 @@ export class CheckRunner {
         // to be numbers from a real model.
         summary: modeReason(facts),
       });
+      githubCheckRunId = created.id;
       await this.deps.checks.attachGithubId(ctx, row.id, created.id);
     } catch (err) {
       // A CHECK THAT COULD NOT BE POSTED IS NOT AN EVAL THAT SHOULD RUN. The whole value of this
@@ -158,7 +167,7 @@ export class CheckRunner {
     await this.deps.checks.attachEval(ctx, row.id, evalRunId);
     await api
       .putCheckRun(input.repoFullName, {
-        checkRunId: row.github_check_run_id,
+        checkRunId: githubCheckRunId,
         name,
         headSha: event.headSha,
         status: "in_progress",
