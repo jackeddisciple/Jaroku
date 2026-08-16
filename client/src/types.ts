@@ -918,6 +918,27 @@ export interface Diagnostic {
   severity: "warning";
 }
 
+/**
+ * §B.6.1's refusal card: a push the scanner turned away.
+ *
+ * NO FINDING CARRIES A MATCHED VALUE, which is what lets this shape cross a socket into a browser
+ * at all. A path, a rule name, a line and a sentence — enough to open the file and know what to
+ * do, and nothing a screenshot of this panel could leak.
+ */
+export interface GithubScanFinding {
+  path: string;
+  kind: string;
+  rule: string;
+  line: number | null;
+  message: string;
+}
+
+export interface GithubScanRefusal {
+  agentId: string;
+  message: string;
+  findings: GithubScanFinding[];
+}
+
 export interface GithubRestackRefusal {
   agentId: string;
   /** Zero-based, in the NEW order — where the user just put it, not where it used to be. */
@@ -962,6 +983,7 @@ export type GithubMessage =
     }
   | { channel: "github"; type: "message"; agentId: string; message: string }
   | ({ channel: "github"; type: "refused" } & GithubRefusal)
+  | ({ channel: "github"; type: "scanRefused" } & GithubScanRefusal)
   | ({ channel: "github"; type: "restackRefused" } & GithubRestackRefusal)
   | {
       channel: "github";
@@ -1130,12 +1152,14 @@ export type ClientCommand =
       steps?: GithubRestackStep[];
       /** §3.4's box, for a staged subset with no version instruction to borrow. */
       message?: string;
+      /** §B.6.1's "Ignore & push anyway", from under the kebab. Recorded, never silent. */
+      ignoreSecrets?: boolean;
     }
   | { cmd: "pullGithub"; agentId: string; force?: boolean; confirmSlug?: string }
   | { cmd: "switchGithubBranch"; agentId: string; branch: string; onUnpushed?: "push" | "keep" | "cancel" }
   | { cmd: "createGithubBranch"; agentId: string; branch: string }
   | { cmd: "openGithubPr"; agentId: string }
-  | { cmd: "commitGithub"; agentId: string; message: string; push?: boolean }
+  | { cmd: "commitGithub"; agentId: string; message: string; push?: boolean; ignoreSecrets?: boolean }
   // §3.4's ✨ generate. Its own command because it is the one thing in this family that costs
   // money — the default message needs no model call at all.
   | { cmd: "generateGithubMessage"; agentId: string }

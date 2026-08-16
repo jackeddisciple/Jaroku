@@ -455,6 +455,14 @@ export type PushGithubCommand = {
   steps?: { versionIds: string[] }[];
   /** §3.4's message box, for a hand-staged subset that has no version's instruction to borrow. */
   message?: string;
+  /**
+   * §B.6.1's "Ignore & push anyway", from under the kebab.
+   *
+   * Its own field rather than its own command, for the reason `force` is: one handler, one scan,
+   * one recorded outcome — and the findings are written either way, which is what makes the
+   * override auditable at all.
+   */
+  ignoreSecrets?: boolean;
 };
 export type PullGithubCommand = {
   cmd: "pullGithub";
@@ -489,6 +497,15 @@ export type CommitGithubCommand = {
   message: string;
   /** §A.8's second half — commit, then push, in one step. */
   push?: boolean;
+  /**
+   * §B.6.1's "Ignore & push anyway", here as well as on `pushGithub`.
+   *
+   * NOT A DUPLICATE FIELD SO MUCH AS THE SAME ONE ON THE OTHER DOOR. The commit box resolves to a
+   * push — `handleGithubCommand` says so at length — so the scan refuses it identically, and a
+   * surface that could be refused with no way to override would be an escape hatch that exists
+   * everywhere except where somebody hit the wall.
+   */
+  ignoreSecrets?: boolean;
 };
 
 /**
@@ -1065,6 +1082,22 @@ export type GithubEvent =
    * than a phrase inside the message, because parsing it back out of prose is how a UI ends up
    * highlighting a different row than the one that failed.
    */
+  /**
+   * §B.6.1's refusal card: a push the scanner turned away.
+   *
+   * ITS OWN EVENT, for the third time in this channel and the third time for the same reason — the
+   * card names a file, a rule and two actions, and an error strip could carry none of that. It is
+   * also not an error: nothing failed, and the branch is exactly where it was.
+   *
+   * NO FINDING CARRIES A MATCHED VALUE. `secretScan.Finding` has no field one would fit in, which
+   * is what lets this go over a socket to a browser at all.
+   */
+  | {
+      type: "scanRefused";
+      agentId: string;
+      message: string;
+      findings: { path: string; kind: string; rule: string; line: number | null; message: string }[];
+    }
   | {
       type: "restackRefused";
       agentId: string;

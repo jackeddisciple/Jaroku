@@ -26,9 +26,11 @@ import { GithubError, type GithubApi } from "./githubApi.ts";
 import type { GithubLink, GithubRepository } from "./db/repositories/github.ts";
 import type { GithubIdentity } from "./githubIdentity.ts";
 import {
-  PUSH_STAGES, planPush, planStaged, repoPath, sameFiles, withVersionTrailer,
+  PUSH_STAGES, planPush, planStaged, repoPath, sameFiles, stageId, withVersionTrailer,
   type PlannedCommit, type VersionSnapshot,
 } from "./githubPush.ts";
+import { refusalLine, scanTree, type Finding } from "./secretScan.ts";
+import type { ValidationGate } from "./githubTrailers.ts";
 import { unpushedVersions } from "./githubSync.ts";
 import { everything, stagedFiles, stagedTree } from "./githubStaging.ts";
 import {
@@ -80,6 +82,15 @@ export interface PushRequest {
    */
   steps?: { versionIds: string[] }[];
   /**
+   * §B.6.1's "Ignore & push anyway".
+   *
+   * A FIELD RATHER THAN ITS OWN COMMAND, for the reason `force` is one: the ordinary path and the
+   * escape hatch go through one handler, one scan and one recorded outcome. A separate
+   * `pushGithubAnyway` would be a second code path that could drift out of writing the finding
+   * rows — which are the only evidence that anybody ever pushed over a credential.
+   */
+  ignoreSecrets?: boolean;
+  /**
    * §3.4's commit box, when somebody wrote in it.
    *
    * ONLY MEANINGFUL WITH `squash`, and that is a property of the surface rather than a limitation
@@ -108,6 +119,14 @@ export interface PushResult {
   failedPosition?: number;
   /** What the validator said about that position. Rendered under the row, not in the error strip. */
   problems?: string[];
+  /**
+   * §B.6.1's findings, when the scan is what refused.
+   *
+   * CARRIED SO THE PANEL CAN NAME THE FILE AND THE RULE, which is the whole difference between a
+   * refusal somebody can act on and an error strip. None of them contains a matched value — see
+   * `secretScan.Finding`, which has no field one would fit in.
+   */
+  findings?: Finding[];
 }
 
 export interface GithubPusherDeps {
@@ -164,6 +183,19 @@ export interface GithubPusherDeps {
    * lookup that needs an `Agent` row happens at the wiring site, which already has one.
    */
   connectorFilesFor?: (agentUuid: string, slug: string) => string[];
+  /**
+   * The workspace's own stored credential VALUES, for §B.6.1's literal pass.
+   *
+   * INJECTED AND NEVER HELD. This module asks for them at the moment of the scan, hands them
+   * straight to `scanTree`, and keeps no reference — the same rule `deploySecrets.resolveSecretValues`
+   * states for the deploy path, which is the only other place in this codebase that reads a
+   * credential to compare against rather than to send.
+   *
+   * OPTIONAL, AND ITS ABSENCE NARROWS THE SCAN RATHER THAN DISABLING IT. Without it the shape
+   * checks, the .env rule and the manifest check all still run; what is lost is the pass that
+   * catches a chosen password, which no pattern could recognise anyway.
+   */
+  knownSecretValues?: (ctx: TenantContext) => Promise<string[]>;
   log?: (line: string) => void;
 }
 
@@ -292,7 +324,7 @@ export class GithubPusher {
     const { api } = connection;
     const repo = link.repo_full_name;
 
-    let stage = PUSH_STAGES[0]!.id;
+    let stage = stageId("read");
     const fail = async (message: string, kind: "failed" | "refused" = "failed"): Promise<PushResult> => {
       report(stage, "error");
       await this.deps.repo.record(ctx, {
@@ -329,7 +361,7 @@ export class GithubPusher {
       // 2. WHERE THE BRANCH IS NOW. Read here rather than trusted from the link, because the
       // watermark can be minutes old and the whole point of the next few steps is to build on top
       // of what is actually there.
-      stage = PUSH_STAGES[1]!.id;
+      stage = stageId("remote");
       report(stage, "active");
       const head = await api.refSha(repo, link.branch);
       // A CONCURRENT PUSH IS CAUGHT HERE AS WELL AS BY THE REF MOVE. Catching it now saves
@@ -427,20 +459,31 @@ export class GithubPusher {
         return await fail("that selection is what GitHub already has — nothing would change.", "refused");
       }
 
+      // §B.8.1'S GATE LIST GAINS `secret-scan`, AND WHETHER IT MAY IS DECIDED HERE RATHER THAN
+      // AFTER THE SCAN. The plan is built before the scan runs — the scan needs the planned files —
+      // so the trailer has to be composed without knowing what was found. What IS known now is
+      // whether this push is ALLOWED to proceed over findings: with `ignoreSecrets` unset, the only
+      // way a commit gets written at all is a scan that cleared, so the claim is true by
+      // construction. With it set, the push may go ahead over a finding, and claiming the gate
+      // would put a false receipt on the one commit where the receipt matters most. So the gate is
+      // added in the first case and withheld in the second, and the override is recorded in
+      // secret_scan_findings and audit_log where it belongs.
+      const extraGates: ValidationGate[] = req.ignoreSecrets === true ? [] : ["secret-scan"];
+
       const plan = staged
         ? planStaged(staged, snapshots, {
             subdirectory: link.subdirectory,
             includeArtifacts: link.include_artifacts,
             remotePaths: baseTree,
             message: req.message,
-            provenance: { agentSlug: slug, ...(resolved?.model ? { model: resolved.model } : {}) },
+            provenance: { agentSlug: slug, extraGates, ...(resolved?.model ? { model: resolved.model } : {}) },
           })
         : planPush(restack ? restack.snapshots : snapshots, {
             subdirectory: link.subdirectory,
             includeArtifacts: link.include_artifacts,
             squash: req.squash === true,
             remotePaths: baseTree,
-            provenance: { agentSlug: slug, ...(resolved?.model ? { model: resolved.model } : {}) },
+            provenance: { agentSlug: slug, extraGates, ...(resolved?.model ? { model: resolved.model } : {}) },
             ...(resolved && !restack ? { costs: resolved.costs } : {}),
           });
 
@@ -463,6 +506,7 @@ export class GithubPusher {
           snapshots.map((s) => s.version),
           {
             agentSlug: slug,
+            extraGates,
             ...(resolved?.model ? { model: resolved.model } : {}),
             ...(resolved ? { costs: resolved.costs } : {}),
           },
@@ -471,7 +515,7 @@ export class GithubPusher {
 
       // 3. THE BLOBS. Deduplicated by content across the whole push: an unchanged file in six
       // consecutive versions is one upload, not six, and git would store one object either way.
-      stage = PUSH_STAGES[2]!.id;
+      stage = stageId("blobs");
       report(stage, "active");
       const blobShas = new Map<string, string>();
       for (const commit of plan.commits) {
@@ -484,7 +528,7 @@ export class GithubPusher {
 
       // 4 & 5. TREES AND COMMITS, chained. Each commit's tree is built on the previous commit's,
       // so a subdirectory push inherits everything outside it untouched — see createTree.
-      stage = PUSH_STAGES[3]!.id;
+      stage = stageId("tree");
       report(stage, "active");
       let parent = head;
       // A COMMIT SHA IS NOT A TREE SHA. Both are forty hex characters, so the mistake typechecks;
@@ -502,7 +546,61 @@ export class GithubPusher {
       }
       report(stage, "done");
 
-      stage = PUSH_STAGES[4]!.id;
+      // 5. §B.6.1'S SCAN, BETWEEN THE TREE AND THE COMMITS.
+      //
+      // Everything above this line is content-addressed and invisible: blobs and trees exist in
+      // GitHub's object store and nothing points at them, so refusing here leaves the branch exactly
+      // where it was and costs a garbage collection. One stage later would be the same refusal with
+      // a commit object somebody could still fetch by sha.
+      //
+      // SCANNED OVER WHAT THE COMMITS WOULD CONTAIN, not over the versions. A hand-staged subset, a
+      // restacked history and an ordinary push all arrive here as `plan.commits[].files`, so there
+      // is one place a credential can be caught rather than three that have to agree.
+      stage = stageId("scan");
+      report(stage, "active");
+      const scanned = new Map<string, string>();
+      for (const commit of plan.commits) {
+        for (const file of commit.files) scanned.set(file.path, file.content);
+      }
+      const findings = scanTree(
+        [...scanned.entries()].map(([path, content]) => ({ path, content })),
+        { knownValues: (await this.deps.knownSecretValues?.(ctx)) ?? [] },
+      );
+      if (findings.length > 0) {
+        // RECORDED WHETHER OR NOT IT IS OVERRIDDEN, and before the outcome is decided. §B.6's rows
+        // are mostly refusals nobody overrode, and the interesting minority is only meaningful
+        // because the majority is written down too.
+        await this.deps.repo.recordFindings(ctx, {
+          agentId: agentUuid,
+          linkId: link.id,
+          findings,
+          overridden: req.ignoreSecrets === true,
+        });
+        if (req.ignoreSecrets !== true) {
+          // A REFUSAL, NOT A WARNING — the same posture as every other refusal in this product. The
+          // override exists, it is one field, and §B.6.1 puts it under a kebab so that it is
+          // available without being the path of least resistance.
+          report(stage, "error");
+          await this.deps.repo.record(ctx, {
+            agentId: agentUuid,
+            linkId: link.id,
+            kind: "push",
+            outcome: "refused",
+            detail: `${stage}: ${refusalLine(findings)}`,
+          });
+          return {
+            ok: false,
+            shas: [],
+            message: refusalLine(findings),
+            failedStage: stage,
+            findings,
+          };
+        }
+        this.log(`[github] ${slug} pushed over ${findings.length} scan finding(s)`);
+      }
+      report(stage, "done");
+
+      stage = stageId("commit");
       report(stage, "active");
       for (const { tree, commit } of trees) {
         const created = await api.createCommit(repo, {
@@ -516,7 +614,7 @@ export class GithubPusher {
       report(stage, "done");
 
       // 6. THE ONE DESTRUCTIVE INSTANT.
-      stage = PUSH_STAGES[5]!.id;
+      stage = stageId("ref");
       report(stage, "active");
       if (!parent) return await fail("nothing was written");
       if (head === null) await api.createRef(repo, link.branch, parent);

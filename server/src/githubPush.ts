@@ -391,6 +391,19 @@ export function sameFiles(a: readonly StoredFile[], b: readonly StoredFile[]): b
 }
 
 /**
+ * One stage's id, by name.
+ *
+ * EXISTS BECAUSE THE RUNNER USED TO INDEX THIS ARRAY, and §B.6.1 inserted a stage into the middle
+ * of it. Every index after `tree` shifted by one, which is not a type error anywhere: the runner
+ * would have gone on compiling, reporting the commit stage as "scan" and the ref stage as "commit",
+ * so a failed ref update would have drawn its red row on the wrong line of the rail. A name cannot
+ * shift.
+ */
+export function stageId(name: "read" | "remote" | "blobs" | "tree" | "scan" | "commit" | "ref"): string {
+  return name;
+}
+
+/**
  * The stage list a push walks, for §2.4's progress rail.
  *
  * A DATA TABLE RATHER THAN A SWITCH, the same shape DeployPanel's STAGES is, so the list a user
@@ -403,6 +416,12 @@ export const PUSH_STAGES: { id: string; active: string; done: string; detail: st
   { id: "remote", active: "Checking the branch", done: "Checked the branch", detail: "where it points now, so a concurrent push loses the race rather than the work" },
   { id: "blobs", active: "Uploading files", done: "Uploaded files", detail: "one blob per changed file" },
   { id: "tree", active: "Building tree", done: "Built tree", detail: "on the existing tree, so nothing outside the subdirectory moves" },
+  // §B.6.1 PUTS THIS BETWEEN TREE-BUILD AND COMMIT-CREATE, and the position is the whole safety
+  // argument. Blobs and trees are content-addressed and INVISIBLE until a ref points at them, so a
+  // refusal here costs some unreferenced objects GitHub garbage-collects and leaves the branch
+  // exactly where it was. One stage later — after the commit objects exist — would be the same
+  // refusal with a commit somebody could still fetch by sha.
+  { id: "scan", active: "Scanning for secrets", done: "Scanned for secrets", detail: "nothing leaves this machine that was never meant to" },
   { id: "commit", active: "Writing commits", done: "Wrote commits", detail: "one per version, unless you asked for a squash" },
   { id: "ref", active: "Updating ref", done: "Updated ref", detail: "fast-forward only — never a force, unless you typed the slug to say so" },
 ];

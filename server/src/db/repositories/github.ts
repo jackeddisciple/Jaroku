@@ -471,4 +471,71 @@ export class GithubRepository {
     );
     return rows.map((r) => this.hydrateEvent(r));
   }
+
+  // --- §B.6's findings ---------------------------------------------------------
+
+  /**
+   * Record what a pre-push scan found.
+   *
+   * NO VALUE REACHES THIS METHOD, and the signature is where that is enforced: there is no
+   * parameter a matched string would fit in. Migration 040's header makes the argument at length —
+   * a table of "here is where the credentials are, and here is a bit of each one" would be a
+   * strictly worse leak than the push it prevented — and a repository method that ACCEPTED one
+   * would make that argument depend on every caller remembering it.
+   *
+   * WRITTEN EVEN WHEN THE PUSH IS ABOUT TO BE REFUSED, which is the ordinary case and the whole
+   * point. §B.6's rows are mostly refusals nobody overrode; the interesting minority is the ones
+   * somebody did, and that minority is only meaningful because the majority is recorded too.
+   */
+  async recordFindings(
+    ctx: TenantContext,
+    entry: {
+      agentId: string;
+      linkId?: string | null;
+      eventId?: string | null;
+      findings: readonly { path: string; rule: string; kind: "secret" | "artifact"; line: number | null }[];
+      /** Set when this push went ahead over the findings. See `github_events`' force_override. */
+      overridden?: boolean;
+    },
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    for (const finding of entry.findings) {
+      await this.q(ctx).run(
+        `INSERT INTO secret_scan_findings
+           (id, workspace_id, agent_id, link_id, event_id, path, rule, kind, line,
+            overridden, overridden_by, overridden_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          randomUUID(), ctx.workspaceId, entry.agentId, entry.linkId ?? null, entry.eventId ?? null,
+          finding.path, finding.rule, finding.kind, finding.line,
+          entry.overridden ? 1 : 0,
+          entry.overridden ? ctx.actorUserId : null,
+          entry.overridden ? now : null,
+          now,
+        ],
+      );
+    }
+  }
+
+  /** One agent's findings, newest first. What the panel renders under a refusal. */
+  async findings(
+    ctx: TenantContext,
+    agentId: string,
+    limit = 50,
+  ): Promise<{ path: string; rule: string; kind: string; line: number | null; overridden: boolean; created_at: string }[]> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT path, rule, kind, line, overridden, created_at FROM secret_scan_findings
+        WHERE workspace_id = ? AND agent_id = ?
+        ORDER BY created_at DESC, id DESC LIMIT ?`,
+      [ctx.workspaceId, agentId, limit],
+    );
+    return rows.map((r) => ({
+      path: String(r["path"]),
+      rule: String(r["rule"]),
+      kind: String(r["kind"]),
+      line: (r["line"] as number | null) ?? null,
+      overridden: asBool(r["overridden"]),
+      created_at: String(r["created_at"]),
+    }));
+  }
 }

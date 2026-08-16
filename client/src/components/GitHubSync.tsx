@@ -24,7 +24,7 @@ import { sendPullGithub, sendPushGithub, sendRefreshGithub } from "../lib/socket
 import { ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { fmtDuration } from "../lib/format.ts";
 import { useGithubStore, type GithubProgress } from "../store/githubStore.ts";
-import type { GithubRefusal, GithubView } from "../types.ts";
+import type { GithubRefusal, GithubScanRefusal, GithubView } from "../types.ts";
 import { ActionRow, type ActionState } from "./ActionRow.tsx";
 import { SplitButton, type SplitAction } from "./SplitButton.tsx";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
@@ -73,6 +73,7 @@ function useTick(active: boolean, ms = 250): number {
 export function GitHubSyncRegion({ view }: { view: GithubView }) {
   const progress = useGithubStore((s) => s.progress[view.agentId]);
   const refusal = useGithubStore((s) => s.refusals[view.agentId]);
+  const scanRefusal = useGithubStore((s) => s.scanRefusals[view.agentId]);
 
   // IN THIS ORDER, and the order is the argument. A refusal is the most recent thing that happened
   // and is the thing the user has to act on; a rail is what is happening now; the verdict is the
@@ -82,6 +83,11 @@ export function GitHubSyncRegion({ view }: { view: GithubView }) {
   return (
     <div className="space-y-2">
       {refusal && <RefusalCard view={view} refusal={refusal} />}
+      {/* ABOVE THE VERDICT, like the pull refusal and for the same reason: it is the most recent
+          thing that happened and the thing to act on. Beside it rather than instead of it, because
+          the two are about different directions — one refused code coming IN, one refused code
+          going OUT — and an agent can genuinely be in both states at once. */}
+      {scanRefusal && <ScanRefusalCard view={view} refusal={scanRefusal} />}
       <VerdictLine view={view} />
     </div>
   );
@@ -427,6 +433,92 @@ function ProgressRail({ agentId, progress }: { agentId: string; progress: Github
  * `github_events`. A hosted multi-tenant product needs "who overrode a safety refusal" to be
  * answerable, and a confirmation you can click through without reading is not an answer.
  */
+/**
+ * §B.6.1's refusal: a push the scanner turned away.
+ *
+ * ITS OWN CARD RATHER THAN A SECOND USE OF THE PULL ONE, and the differences are the reason. A pull
+ * refusal is about ONE file and one check and offers a force that publishes anyway; this one lists
+ * SEVERAL findings, each with its own path and its own sentence, and the override is a different
+ * action with a different consequence — a force pull publishes code that failed validation into
+ * this workspace, and this pushes a credential into a repository, where it stays in the reflog
+ * after anybody deletes it.
+ *
+ * WHICH IS WHY THE OVERRIDE SAYS "ROTATE IT" RATHER THAN "ARE YOU SURE". The honest thing to tell
+ * somebody about to push a key is not that it is risky; it is that the key is now burned and the
+ * fix is to replace it. §B.6.1 puts this under a kebab — available, never the path of least
+ * resistance — and it is recorded in `secret_scan_findings` and in `audit_log` either way.
+ */
+function ScanRefusalCard({ view, refusal }: { view: GithubView; refusal: GithubScanRefusal }) {
+  const [overriding, setOverriding] = useState(false);
+  const clearScanRefusal = useGithubStore((s) => s.clearScanRefusal);
+  const secrets = refusal.findings.filter((f) => f.kind === "secret");
+
+  return (
+    <div className="rounded-card border p-2.5" style={{ borderColor: `${STATUS.error}55` }}>
+      <div className="flex items-center gap-2">
+        <span className="shrink-0 text-err"><AlertTriangleIcon size={ICON.sm} /></span>
+        <span className="text-[12px] font-medium text-ink">{refusal.message}</span>
+        <button className="ml-auto shrink-0 text-faint hover:text-ink" onClick={() => clearScanRefusal(view.agentId)}>
+          dismiss
+        </button>
+      </div>
+
+      <div className="mt-1.5 space-y-1.5">
+        {refusal.findings.map((f) => (
+          <div key={`${f.path} ${f.rule}`}>
+            <div className="font-mono text-[11px] text-ink">
+              <Truncate variant="path" title={f.path}>
+                {f.path}{f.line === null ? "" : `:${f.line}`}
+              </Truncate>
+            </div>
+            <div className="text-[11px] leading-[1.5] text-muted">→ {f.message}</div>
+          </div>
+        ))}
+      </div>
+
+      <p className="mt-2 text-[11px] leading-[1.5] text-ink">
+        Nothing was pushed. <span className="text-muted">
+          The branch is exactly where it was — the files were uploaded as loose objects nothing
+          points at, and GitHub collects those.
+        </span>
+      </p>
+
+      <div className="mt-2 flex items-center gap-2">
+        <button className={`${quietBtn} ml-auto !text-err`} onClick={() => setOverriding((v) => !v)}>
+          Ignore &amp; push anyway ⋯
+        </button>
+      </div>
+
+      {overriding && (
+        <div className="mt-2 border-t border-hair pt-2">
+          <p className="text-[11px] leading-[1.5] text-muted">
+            {secrets.length > 0 ? (
+              <>
+                A credential in a commit stays in the reflog after the commit is deleted, so the fix
+                is to <span className="text-ink">rotate it</span> rather than to remove it later.
+                Pushing anyway is recorded against your account.
+              </>
+            ) : (
+              <>
+                Large files make every clone of this repository slower, permanently. Pushing anyway
+                is recorded against your account.
+              </>
+            )}
+          </p>
+          <div className="mt-1.5 flex items-center gap-2">
+            <button
+              className={`${primaryBtn} ml-auto !text-err`}
+              onClick={() => sendPushGithub(view.agentId, { ignoreSecrets: true })}
+            >
+              Push anyway
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RefusalCard({ view, refusal }: { view: GithubView; refusal: GithubRefusal }) {
   const [forcing, setForcing] = useState(false);
   const [typed, setTyped] = useState("");

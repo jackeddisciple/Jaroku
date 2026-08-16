@@ -262,6 +262,11 @@ function dispatch(msg: ServerMessage): void {
           message: msg.message,
           candidate: msg.candidate,
         });
+      } else if (msg.type === "scanRefused") {
+        // §B.6.1. Its own field, for the third time on this channel and the third time for the same
+        // reason: the card names files and rules and offers two actions, and nothing about it is an
+        // error — the branch is exactly where it was.
+        g.setScanRefusal({ agentId: msg.agentId, message: msg.message, findings: msg.findings });
       } else if (msg.type === "restackRefused") {
         // §B.4.4's refusal, and its own field for the same reason the one above is: the panel puts
         // a border on the row at `position` and prints the validator's own words under it, neither
@@ -958,6 +963,8 @@ export function sendPushGithub(
     /** §B.4.4's restacked order over the UNPUSHED list. */
     steps?: GithubRestackStep[];
     message?: string;
+    /** §B.6.1's override. Available, never the path of least resistance, always recorded. */
+    ignoreSecrets?: boolean;
   } = {},
 ): void {
   send({ cmd: "pushGithub", agentId, ...opts });

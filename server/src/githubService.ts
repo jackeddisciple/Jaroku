@@ -23,6 +23,7 @@ import type { GithubEvent, GithubLink, GithubRepository } from "./db/repositorie
 import type { GithubIdentity } from "./githubIdentity.ts";
 import { badgeFor, syncVerdict, unpushedVersions, verdictLine, type SyncVerdict } from "./githubSync.ts";
 import { stagedFiles, type StagedFile } from "./githubStaging.ts";
+import { WORKFLOW_PATH, buildWorkflow, workflowVerdict } from "./githubWorkflow.ts";
 import { inSubdirectory, repoPath } from "./githubPush.ts";
 import type { Agent, AgentRepository, AgentVersion } from "./db/repositories/agents.ts";
 import type { ProjectStore } from "./storage/projectStore.ts";
@@ -783,7 +784,96 @@ export class GithubService {
       kind: "link",
       detail: `${repoFullName} · ${link.branch}`,
     });
+
+    // §B.6.2's workflow, on the first link with artifacts included.
+    //
+    // TIED TO THE ARTIFACT CHECKBOX because it is tied to the Dockerfile: the workflow runs
+    // `docker build` against the synthesised one, and writing a build check for a file this link is
+    // configured not to push would be writing a check that fails on the first pull request.
+    //
+    // WRITTEN TO THE DEFAULT BRANCH AND NOT TO `jaroku/<slug>`, which is the one place in this
+    // feature Jaroku touches `main` — and it is worth naming rather than letting pass. §3.1's rule
+    // is that Jaroku never writes to the default branch as part of RECONCILING TWO LINEAGES, so
+    // that a person's own branch is never rewritten under them. A workflow file is not part of that
+    // lineage at all: GitHub only runs workflows that exist on the default branch, so a build check
+    // written to `jaroku/<slug>` would never run on the pull requests it exists to gate. It is
+    // written once, at the moment somebody asks for this, and never again unless it is still
+    // byte-for-byte what we wrote.
+    //
+    // A FAILURE HERE DOES NOT FAIL THE LINK. Somebody just pointed an agent at a repository and it
+    // worked; a token without workflow scope, or a protected default branch, is a reason to say so
+    // rather than to unwind the thing they asked for.
+    const artifacts = input.includeArtifacts ?? true;
+    if (artifacts) {
+      const outcome = await this.writeWorkflow(ctx, agent.slug, repoFullName, link.subdirectory);
+      if (outcome) return { ok: true, message: outcome };
+    }
     return { ok: true };
+  }
+
+  /**
+   * Write, keep, update or hand off the build workflow — §B.6.2.
+   *
+   * RETURNS A SENTENCE ONLY WHEN THERE IS SOMETHING TO SAY. The ordinary outcomes — created, or
+   * already ours and unchanged — are silent, because a notice on every link would be a notice
+   * people stop reading before the one that matters arrives.
+   */
+  private async writeWorkflow(
+    ctx: TenantContext,
+    slug: string,
+    repoFullName: string,
+    subdirectory: string | null,
+  ): Promise<string | null> {
+    const connection = await this.deps.identity.apiFor(ctx);
+    if (!connection) return null;
+    const { api } = connection;
+    try {
+      const defaultBranch = (await api.repo(repoFullName)).defaultBranch;
+      const head = await api.refSha(repoFullName, defaultBranch);
+      let existing: string | null = null;
+      if (head) {
+        const entry = (await api.tree(repoFullName, head)).find((e) => e.path === WORKFLOW_PATH);
+        if (entry) existing = await api.blob(repoFullName, entry.sha, WORKFLOW_PATH);
+      }
+
+      const verdict = workflowVerdict(existing, buildWorkflow({ agentSlug: slug, subdirectory }));
+      if (verdict.action === "keep") return null;
+      if (verdict.action === "surface") return verdict.reason;
+      if (!head) {
+        // An empty repository has no default branch to commit onto yet. §6's first row: the first
+        // push creates the branch, and the workflow can be written the next time somebody links or
+        // pushes. Saying nothing is right — the user has not done anything wrong.
+        return null;
+      }
+
+      const blob = await api.createBlob(repoFullName, { path: WORKFLOW_PATH, content: verdict.content });
+      const tree = await api.createTree(
+        repoFullName,
+        [{ path: WORKFLOW_PATH, sha: blob }],
+        await api.commitTree(repoFullName, head),
+      );
+      const commit = await api.createCommit(repoFullName, {
+        message: [
+          "Add the Jaroku build check",
+          "",
+          "Runs `docker build` against the synthesised Dockerfile on every pull request, so the",
+          "PR's checks line has something real to report. This file is yours to edit — Jaroku will",
+          "leave it alone from then on.",
+        ].join("\n"),
+        tree,
+        parents: [head],
+      });
+      // NOT FORCED, like every other ref move in this feature. If somebody pushed to the default
+      // branch between the read and the write, the 422 arrives as a `conflict` and this reports it
+      // rather than overwriting them.
+      await api.updateRef(repoFullName, defaultBranch, commit.sha, false);
+      this.log(`[github] wrote ${WORKFLOW_PATH} to ${repoFullName}:${defaultBranch}`);
+      return null;
+    } catch (err) {
+      const message = (err as Error)?.message ?? String(err);
+      this.log(`[github] could not write ${WORKFLOW_PATH} to ${repoFullName}: ${message}`);
+      return `Linked. The build workflow could not be written (${message}) — the link itself is fine.`;
+    }
   }
 
   /** Detach. Soft, and the repository is never touched — see §6 and the repository's own note. */

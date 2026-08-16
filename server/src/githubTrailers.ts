@@ -70,6 +70,17 @@ export interface VersionProvenance {
   costUsd?: number | null;
   /** Which gates this version cleared. Empty means the line is omitted, not that none ran. */
   gates?: readonly ValidationGate[];
+  /**
+   * Gates cleared by THIS PUSH rather than by the version, unioned with whatever `gates` resolves
+   * to — §B.6's `secret-scan`.
+   *
+   * SEPARATE FROM `gates` RATHER THAN FOLDED INTO IT, because the two answer different questions
+   * and are known at different times. `gates` is per version and derived from its source; a push
+   * clears one more gate for every version in it at once, and passing a single combined list would
+   * flatten the per-version derivation — putting `parse,import,contract` on an imported version
+   * that never met the validator, because a generation elsewhere in the same push did.
+   */
+  extraGates?: readonly ValidationGate[];
 }
 
 /**
@@ -135,7 +146,7 @@ export function trailerLines(
   // which runs at push time and cannot be inferred from the version row — reports what happened
   // rather than what the source implies. Ordered by GATE_ORDER rather than by arrival, so two
   // commits that cleared the same gates read identically regardless of who assembled the list.
-  const gates = provenance.gates ?? gatesFor(version);
+  const gates = [...(provenance.gates ?? gatesFor(version)), ...(provenance.extraGates ?? [])];
   const ordered = GATE_ORDER.filter((g) => gates.includes(g));
   if (ordered.length) lines.push(`Jaroku-Validated: ${ordered.join(",")}`);
 
@@ -182,7 +193,9 @@ export function squashTrailerLines(
   // only three of four versions cleared is not a gate this commit cleared — claiming it would make
   // the receipt say the strongest thing true of any part rather than the strongest thing true of
   // the whole, which is the direction that cannot be walked back by a reader.
-  const each = versions.map((v) => new Set(provenance.gates ?? gatesFor(v)));
+  const each = versions.map(
+    (v) => new Set([...(provenance.gates ?? gatesFor(v)), ...(provenance.extraGates ?? [])]),
+  );
   const common = GATE_ORDER.filter((g) => each.length > 0 && each.every((s) => s.has(g)));
   if (common.length) lines.push(`Jaroku-Validated: ${common.join(",")}`);
 

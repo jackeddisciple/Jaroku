@@ -68,6 +68,7 @@ import { loadConnectors } from "./connectors.ts";
 import { isSafeAgentId, listProjectFiles, readOnlyPaths, type ProjectFile } from "./projectFs.ts";
 import { validateProject } from "./validator.ts";
 import { liveDiagnostics } from "./liveDiagnostics.ts";
+import { resolveSecretValues } from "./deploySecrets.ts";
 import { openObjectStore } from "./storage/open.ts";
 import { resolveSigningKey } from "./storage/presign.ts";
 import { filesFromDirectory, ProjectStore } from "./storage/projectStore.ts";
@@ -3103,6 +3104,20 @@ const githubPusher = new GithubPusher({
   // §3.3's PROTECTED group, the same answer the service and the puller get, so a hand-staged
   // selection cannot reach a file the edit loop already refuses.
   connectorFilesFor: (agentUuid, slug) => agentFilesDeps.connectorFilesFor(undefined, slug),
+  // §B.6.1's literal pass: this workspace's credential VALUES.
+  //
+  // NAMES FROM THE VAULT, VALUES FROM THE ENVIRONMENT, which is the same pairing
+  // `deploySecrets.resolveSecretValues` makes and for the same reason — the vault deliberately has
+  // no plaintext-return path reachable from a request handler. `SecretsManager.reveal` needs an
+  // elevation receipt, and a push is not an elevated operation: somebody pushing code has not
+  // unlocked the Secrets tab and should not have to.
+  //
+  // SO THIS PASS IS NARROWER THAN IT LOOKS, and that is the honest trade rather than a gap: it
+  // catches a credential this machine can actually see, which is every one the runtime can use. A
+  // value only the vault holds is not one this process could leak into a file in the first place.
+  knownSecretValues: async (ctx) => [
+    ...resolveSecretValues((await secrets.listNames(ctx)).map((s) => s.name)).values(),
+  ],
   // §B.4.4's bar for every intermediate state of a restack.
   //
   // THE REAL VALIDATOR, ON A REAL DIRECTORY, and that is the expensive part of the feature rather
@@ -3365,9 +3380,31 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
             ...(Array.isArray(cmd.stage) ? { stage: readSelections(cmd.stage) } : {}),
             ...(Array.isArray(cmd.steps) ? { steps: readSteps(cmd.steps) } : {}),
             ...(typeof cmd.message === "string" && cmd.message.trim() ? { message: cmd.message } : {}),
+            ignoreSecrets: cmd.ignoreSecrets === true,
           },
           githubStage(ctx, agentId, "push"),
         );
+        // §B.6.1's override, in `audit_log` as well as in `secret_scan_findings`. The same two-
+        // readers argument `auditGithubOverride` already makes for a force push: the findings table
+        // is the feature's own record, and the audit log is the WORKSPACE's — read by somebody who
+        // does not know this feature exists and is asking what a person did here.
+        if (cmd.ignoreSecrets === true) {
+          await auditGithubOverride(ctx, "github.ignore_secret_scan", agentId, {
+            outcome: result.ok ? "ok" : "failed",
+            findings: result.findings?.length ?? 0,
+            paths: result.findings?.map((f) => f.path) ?? [],
+          });
+        }
+        if (result.findings && !result.ok) {
+          relay.broadcastGithub(ctx, {
+            type: "scanRefused",
+            agentId,
+            message: result.message ?? "the scan refused this push",
+            findings: result.findings,
+          });
+          await broadcastGithub(ctx, agentId);
+          return;
+        }
         // §B.4.4'S REFUSAL IS ITS OWN MESSAGE, never an error strip. The panel highlights the row
         // that failed and renders the validator's own words under it, and a one-line error could
         // carry neither — the same argument §3.6's refusal card makes for a refused pull.
@@ -3670,9 +3707,31 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
             agentId,
             squash: true,
             ...(typeof cmd.message === "string" && cmd.message.trim() ? { message: cmd.message } : {}),
+            ignoreSecrets: cmd.ignoreSecrets === true,
           },
           githubStage(ctx, agentId, "push"),
         );
+        // §B.6.1's override, in `audit_log` as well as in `secret_scan_findings`. The same two-
+        // readers argument `auditGithubOverride` already makes for a force push: the findings table
+        // is the feature's own record, and the audit log is the WORKSPACE's — read by somebody who
+        // does not know this feature exists and is asking what a person did here.
+        if (cmd.ignoreSecrets === true) {
+          await auditGithubOverride(ctx, "github.ignore_secret_scan", agentId, {
+            outcome: result.ok ? "ok" : "failed",
+            findings: result.findings?.length ?? 0,
+            paths: result.findings?.map((f) => f.path) ?? [],
+          });
+        }
+        if (result.findings && !result.ok) {
+          relay.broadcastGithub(ctx, {
+            type: "scanRefused",
+            agentId,
+            message: result.message ?? "the scan refused this push",
+            findings: result.findings,
+          });
+          await broadcastGithub(ctx, agentId);
+          return;
+        }
         if (!result.ok) fail(result.message ?? "the commit did not complete", agentId);
         await broadcastGithub(ctx, agentId);
         return;

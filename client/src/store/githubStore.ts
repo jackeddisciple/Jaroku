@@ -17,7 +17,8 @@
 
 import { create } from "zustand";
 import type {
-  GithubLinkRow, GithubRefusal, GithubRepoRow, GithubRestackRefusal, GithubView,
+  GithubLinkRow, GithubRefusal, GithubRepoRow, GithubRestackRefusal, GithubScanRefusal,
+  GithubView,
 } from "../types.ts";
 
 /** A push or pull in flight, as §2.4's rail renders it. */
@@ -119,6 +120,14 @@ interface GithubState {
    * by the next drag. Sharing a map would make one of them disappear when the other was answered.
    */
   restackRefusals: Record<string, GithubRestackRefusal>;
+  /**
+   * agent slug -> the push the scanner turned away — §B.6.1.
+   *
+   * A THIRD MAP RATHER THAN A SHARED ONE, for the third time and the same reason: these three
+   * refusals live in three regions, are cleared by three different actions, and a shared map would
+   * make answering one of them silently dismiss another.
+   */
+  scanRefusals: Record<string, GithubScanRefusal>;
   /** §2.2's existing-repo search results. */
   repos: GithubRepoRow[];
   reposLoading: boolean;
@@ -159,6 +168,8 @@ interface GithubState {
   clearRefusal: (agentId: string) => void;
   setRestackRefusal: (refusal: GithubRestackRefusal) => void;
   clearRestackRefusal: (agentId: string) => void;
+  setScanRefusal: (refusal: GithubScanRefusal) => void;
+  clearScanRefusal: (agentId: string) => void;
   setError: (error: string | null) => void;
   setNotice: (notice: string | null) => void;
 }
@@ -172,6 +183,7 @@ export const useGithubStore = create<GithubState>((set) => ({
   progress: {},
   refusals: {},
   restackRefusals: {},
+  scanRefusals: {},
   repos: [],
   reposLoading: false,
   nameCheck: null,
@@ -266,6 +278,10 @@ export const useGithubStore = create<GithubState>((set) => ({
     set((s) => ({ restackRefusals: { ...s.restackRefusals, [refusal.agentId]: refusal } })),
   clearRestackRefusal: (agentId) =>
     set((s) => ({ restackRefusals: withoutKey(s.restackRefusals, agentId) })),
+
+  setScanRefusal: (refusal) =>
+    set((s) => ({ scanRefusals: { ...s.scanRefusals, [refusal.agentId]: refusal } })),
+  clearScanRefusal: (agentId) => set((s) => ({ scanRefusals: withoutKey(s.scanRefusals, agentId) })),
 
   // An error ends anything it could describe, for the same reason a snapshot does — a generate
   // that failed must not leave its button spinning.
