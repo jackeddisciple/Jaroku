@@ -1004,6 +1004,34 @@ export class GithubService {
   }
 
   /**
+   * §B.6.2's workflow, checked after a push rather than only at link time.
+   *
+   * THE FLOW THIS FEATURE IS BUILT AROUND NEVER GOT ONE. `link` writes the workflow, and it writes
+   * it to the repository's DEFAULT branch, because GitHub only runs workflows that exist there. A
+   * repository §2.2 has just created has no default branch — it has no commits at all — so
+   * `writeWorkflow` correctly declined and left a comment saying it could be written "the next time
+   * somebody links or pushes". Nothing wrote it on a push. So create-a-repo → link → push, which is
+   * the path the empty state in §2.1 walks a new user down, produced a repository with a Dockerfile
+   * and no build check — and §3.9's "the PR is a genuine gate, not decoration" was decoration
+   * exactly where the product had promised to supply the gate itself.
+   *
+   * IDEMPOTENT AND QUIET, because it runs after every push. `workflowVerdict` answers `keep` for the
+   * file we already wrote, so the ordinary case is one tree read and no write; a workflow somebody
+   * has since customised is surfaced rather than overwritten, exactly as at link time.
+   */
+  async ensureWorkflow(ctx: TenantContext, agentId: string): Promise<string | null> {
+    if (!isSafeAgentId(agentId)) return null;
+    const agent = await this.deps.agents.bySlug(ctx, agentId);
+    if (!agent) return null;
+    const link = await this.deps.repo.linkFor(ctx, agent.id);
+    // TIED TO THE ARTIFACT CHECKBOX, as at link time: the workflow runs `docker build` against the
+    // synthesised Dockerfile, and writing a build check for a file this link is configured not to
+    // push would be writing a check that fails on the first pull request.
+    if (!link || !link.include_artifacts) return null;
+    return await this.writeWorkflow(ctx, agent.slug, link.repo_full_name, link.subdirectory);
+  }
+
+  /**
    * Write, keep, update or hand off the build workflow — §B.6.2.
    *
    * RETURNS A SENTENCE ONLY WHEN THERE IS SOMETHING TO SAY. The ordinary outcomes — created, or

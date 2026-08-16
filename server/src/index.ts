@@ -3734,6 +3734,13 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
             agentId,
             message: `Pushed ${result.shas.length} commit${result.shas.length === 1 ? "" : "s"}.`,
           });
+          // §B.6.2's build check, on the first push that gives the repository a default branch to
+          // put it on. `link` declines on an empty repository — there is nowhere for a workflow to
+          // run from — and said so expecting a push to follow up, which nothing did. Idempotent, so
+          // every later push reads a tree and writes nothing; failures are surfaced as a notice
+          // rather than turning a successful push into a failed one.
+          const workflow = await githubService.ensureWorkflow(ctx, agentId).catch(() => null);
+          if (workflow) relay.broadcastGithub(ctx, { type: "notice", agentId, message: workflow });
         }
         // BROADCAST EITHER WAY. A failed push still changed what the panel should say — the branch
         // moved under us, or the token died — and leaving the old snapshot up would show the user
