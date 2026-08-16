@@ -219,6 +219,35 @@ async function storeSuite(label: string, db: Db): Promise<void> {
     check(await enforcement.appeal(a, "we were running a benchmark"), "the workspace can appeal");
     check((await enforcement.history(a))[0]!.appeal_note !== null, "...and the appeal is on the record");
 
+    // WHY THAT ASSERTION USED TO BE A COIN FLIP, pinned so it cannot go back. `applied_at` is an
+    // ISO string at millisecond resolution and two rungs applied in the same millisecond — which is
+    // an ordinary thing on a fast machine, and what a CI runner is — tie. Ordered by `applied_at`
+    // alone, the reader that asks "what is this workspace under" got the LIFTED row whenever they
+    // did, because nothing else decided. It showed up as the same suite failing on one driver and
+    // passing on the other inside one CI run, and as nothing at all anywhere it was run once.
+    //
+    // FORCED HERE RATHER THAN WAITED FOR: two applies back to back is the case, so the tie is made
+    // deliberately instead of hoping the machine is fast enough to produce it.
+    {
+      await enforcement.apply(a, { level: "soft_limit", reason: "tie A", appliedBy: SOMEBODY });
+      await enforcement.apply(a, { level: "suspended", reason: "tie B", appliedBy: SOMEBODY });
+      const rows = await enforcement.history(a);
+      const live = rows.filter((r) => r.lifted_at === null);
+      check(live.length === 1, "exactly one rung is in force");
+      check(rows[0]!.reason === "tie B", "and the newest is first, whatever the clock did");
+      const again = await enforcement.history(a);
+      check(
+        again.map((r) => r.id).join(",") === rows.map((r) => r.id).join(","),
+        "...and reading it twice gives the same order, which is what makes [0] an answer",
+      );
+      await enforcement.lift(a, "done with the tie", SOMEBODY);
+      await enforcement.apply(a, {
+        level: "suspended", reason: "a person looked at this", appliedBy: SOMEBODY,
+      });
+      await enforcement.appeal(a, "we were running a benchmark");
+      gate.invalidate(a.workspaceId);
+    }
+
     check(await enforcement.lift(a, "appeal upheld", SOMEBODY), "a person can lift it");
     gate.invalidate(a.workspaceId);
     check((await gate.mayStartWork(a)).ok, "...and then work may start again");

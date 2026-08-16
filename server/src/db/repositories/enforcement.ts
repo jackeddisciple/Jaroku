@@ -195,14 +195,30 @@ export class EnforcementRepository {
     return true;
   }
 
-  /** The whole history for one workspace, newest first. What an appeal review reads. */
+  /**
+   * The whole history for one workspace, newest first. What an appeal review reads.
+   *
+   * `applied_at` ALONE IS NOT AN ORDER, and the reason is two lines up in `apply`: replacing a rung
+   * lifts the previous row with `lifted_at = row.applied_at` and inserts the new one with that same
+   * `applied_at`. Two rows share the instant BY CONSTRUCTION, every time the ladder moves — so
+   * which one came back first was whatever the planner felt like, and the caller that reads
+   * `history()[0]` to answer "what is this workspace under" got the lifted one about half the time.
+   * It showed up as a test that failed on one driver and passed on the other in the same CI run,
+   * which is the shape this class of bug always has.
+   *
+   * SO THE TIEBREAK IS THE STATE, THEN THE ID. Among rows applied at the same instant the live one
+   * is by definition the newer — an older rung has to be lifted to make room for it — and the id
+   * after that makes the order total, so two reads of an unchanged table agree.
+   */
   async history(ctx: TenantContext, limit = 50): Promise<EnforcementRow[]> {
     const rows = await this.db.forWorkspace(ctx.workspaceId).all<Record<string, unknown>>(
       `SELECT id, workspace_id, level, reason, evidence, applied_by, applied_at, expires_at,
               lifted_at, lifted_by, lifted_reason, appeal_note, appealed_at
          FROM workspace_enforcements
         WHERE workspace_id = ?
-        ORDER BY applied_at DESC
+        ORDER BY applied_at DESC,
+                 CASE WHEN lifted_at IS NULL THEN 0 ELSE 1 END,
+                 id DESC
         LIMIT ?`,
       [ctx.workspaceId, limit],
     );
