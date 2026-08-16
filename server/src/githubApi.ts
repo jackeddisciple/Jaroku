@@ -620,6 +620,81 @@ export class GithubApi {
     return { number: data.number, htmlUrl: data.html_url };
   }
 
+  // --- checks ----------------------------------------------------------------
+  //
+  // THE CHECKS API AND NOT THE STATUSES API, and the difference is the whole of §B.1.1. A commit
+  // status is a coloured dot with a link: it carries a state, a context and a target URL, and the
+  // pass-rate table would have to live on a page somewhere else. A check run carries a TITLE and a
+  // SUMMARY that GitHub renders inline, which is where "pass-rate 92% → 96%" belongs — on the pull
+  // request, next to the build check, without a click.
+  //
+  // IT ALSO NEEDS A DIFFERENT TOKEN, and that is worth naming rather than discovering: the Checks
+  // API requires `checks: write`, which a classic PAT with `repo` has and a fine-grained token has
+  // only if it was ticked. The panel recommends fine-grained tokens with `Contents: read and write`
+  // — enough for everything in the base spec and not for this — so a 403 here is a permission the
+  // user has not granted rather than a bug, and `createCheckRun` says so in the one place somebody
+  // will read it.
+
+  /**
+   * Open a check run on a commit, or update one that exists.
+   *
+   * ONE METHOD FOR BOTH, because the shape is identical and the only difference is whether GitHub
+   * already has an id — and a caller that had to choose would be a caller that gets it wrong on the
+   * retry path, where a check was created and the row that records its id was not written.
+   *
+   * `status` AND `conclusion` ARE GITHUB'S OWN VOCABULARY, passed through as stored. `check_runs`
+   * keeps them in that spelling deliberately (see migration 037) so there is no translation table
+   * between what is recorded and what is sent.
+   */
+  async putCheckRun(
+    fullName: string,
+    input: {
+      /** Present to update, absent to create. */
+      checkRunId?: string | null;
+      name: string;
+      headSha: string;
+      status: "queued" | "in_progress" | "completed";
+      conclusion?: string | null;
+      title: string;
+      summary: string;
+      detailsUrl?: string | null;
+    },
+  ): Promise<{ id: string }> {
+    const body: Record<string, unknown> = {
+      name: input.name,
+      head_sha: input.headSha,
+      status: input.status,
+      output: { title: input.title, summary: input.summary },
+      ...(input.conclusion ? { conclusion: input.conclusion } : {}),
+      ...(input.detailsUrl ? { details_url: input.detailsUrl } : {}),
+    };
+    // GitHub refuses a `completed` check with no conclusion, and refuses a conclusion on one that
+    // is not completed. Both are 422s that arrive as `conflict` and read as a mysterious refusal,
+    // so the shape is corrected here rather than left to every call site.
+    if (input.status !== "completed") delete body["conclusion"];
+
+    try {
+      const data = input.checkRunId
+        ? await this.call<{ id: number }>(
+            "updateCheckRun", "PATCH", `/repos/${fullName}/check-runs/${input.checkRunId}`, body,
+          )
+        : await this.call<{ id: number }>("createCheckRun", "POST", `/repos/${fullName}/check-runs`, body);
+      return { id: String(data.id) };
+    } catch (err) {
+      // The permission this feature needs and the base spec's recommended token does not have. A
+      // bare "GitHub refused" here sends somebody to check their repository settings; naming the
+      // scope sends them to the one screen that fixes it.
+      if (err instanceof GithubError && err.kind === "auth") {
+        throw new GithubError(
+          "auth",
+          "GitHub refused to write a check run. This token needs the `checks: write` permission — a fine-grained token has it only if it was ticked when the token was made.",
+          err.operation,
+        );
+      }
+      throw err;
+    }
+  }
+
   /**
    * Whether a login has WRITE access to this repository — §B.1.3's boundary.
    *

@@ -109,8 +109,51 @@ export interface PushEvent {
   senderLogin: string | null;
 }
 
+/**
+ * A pull request opened, or a new commit pushed to one — §B.1.2's trigger.
+ *
+ * TWO ACTIONS AND NOT ALL OF THEM. `opened` and `synchronize` are the two that mean "there is new
+ * code here to check"; `reopened` is a third, because a pull request somebody reopens has code
+ * nobody has checked since it was closed. Everything else GitHub sends on this event — a label
+ * added, a reviewer assigned, a title edited — changes no code, and running an eval over each of
+ * them would spend a workspace's balance on somebody renaming a branch.
+ *
+ * THE BASE REF IS CARRIED BECAUSE THE BASELINE IS COMPUTED FROM IT. §B.1.1's comparison is against
+ * the last eval recorded on the pull request's BASE, which is usually `main` and is emphatically
+ * not always — a stacked pull request bases on another branch, and comparing it against `main`
+ * would report every change in the stack below it as this one's.
+ *
+ * `authorLogin` IS THE PULL REQUEST'S AUTHOR AND NOT THE SENDER. On a `synchronize` the sender is
+ * whoever pushed, which for a maintainer pushing a fix to somebody's fork is not the person whose
+ * pull request it is — and §B.1.3's boundary is about whose pull request it is.
+ */
+export interface PullRequestEvent {
+  kind: "pull_request";
+  repoFullName: string;
+  action: "opened" | "synchronize" | "reopened";
+  number: number;
+  /** The branch the pull request is FROM. What a link's branch is matched against. */
+  headBranch: string;
+  headSha: string;
+  /** The branch it is INTO, and the ref a baseline is looked up against. */
+  baseBranch: string;
+  baseSha: string | null;
+  authorLogin: string | null;
+  /**
+   * Whether the head branch lives in a DIFFERENT repository.
+   *
+   * Carried because it is the shape §B.1.3 is about — a fork's pull request is the attacker-adjacent
+   * case by construction — but deliberately NOT used as the boundary itself. Somebody with write
+   * access can open a pull request from a branch in their own fork, and somebody without it can be
+   * given write access to a branch in the main repository. The question the boundary asks is about
+   * PERMISSION, and only GitHub can answer that.
+   */
+  fromFork: boolean;
+}
+
 export type WebhookEvent =
   | PushEvent
+  | PullRequestEvent
   /** GitHub's setup handshake. Answered 200 or the delivery goes red in their UI forever. */
   | { kind: "ping"; zen: string | null }
   /** A real event this build does not act on yet. Named rather than dropped — see the route. */
@@ -128,6 +171,7 @@ export function parseWebhookEvent(event: string, payload: Record<string, unknown
   if (event === "ping") {
     return { kind: "ping", zen: typeof payload["zen"] === "string" ? payload["zen"] : null };
   }
+  if (event === "pull_request") return parsePullRequest(event, payload);
   if (event !== "push") return { kind: "ignored", event, reason: "not a push" };
 
   const ref = typeof payload["ref"] === "string" ? payload["ref"] : "";
@@ -160,6 +204,52 @@ export function parseWebhookEvent(event: string, payload: Record<string, unknown
       })
       .filter((s) => s.length > 0),
     senderLogin: typeof sender["login"] === "string" ? sender["login"] : null,
+  };
+}
+
+/**
+ * A pull request delivery, reduced — or ignored with a reason.
+ *
+ * IGNORED-WITH-A-REASON RATHER THAN DROPPED, matching what this module already does for a tag
+ * pushed to a repository: the route logs the reason, so "why did my check not run" is answerable
+ * from a log line rather than from a debugger.
+ */
+function parsePullRequest(event: string, payload: Record<string, unknown>): WebhookEvent {
+  const action = typeof payload["action"] === "string" ? payload["action"] : "";
+  if (action !== "opened" && action !== "synchronize" && action !== "reopened") {
+    return { kind: "ignored", event, reason: `${action || "an empty action"} changes no code` };
+  }
+  const repo = (payload["repository"] ?? {}) as Record<string, unknown>;
+  const repoFullName = typeof repo["full_name"] === "string" ? repo["full_name"] : "";
+  if (!repoFullName) return { kind: "ignored", event, reason: "no repository on the payload" };
+
+  const pr = (payload["pull_request"] ?? {}) as Record<string, unknown>;
+  const head = (pr["head"] ?? {}) as Record<string, unknown>;
+  const base = (pr["base"] ?? {}) as Record<string, unknown>;
+  const headRepo = (head["repo"] ?? {}) as Record<string, unknown>;
+  const user = (pr["user"] ?? {}) as Record<string, unknown>;
+
+  const number = Number(pr["number"] ?? payload["number"] ?? 0);
+  const headSha = typeof head["sha"] === "string" ? head["sha"] : "";
+  if (!number || !headSha) return { kind: "ignored", event, reason: "no pull request head on the payload" };
+
+  return {
+    kind: "pull_request",
+    repoFullName,
+    action,
+    number,
+    headBranch: typeof head["ref"] === "string" ? head["ref"] : "",
+    headSha,
+    baseBranch: typeof base["ref"] === "string" ? base["ref"] : "",
+    // The base's sha at the moment of the delivery. Nullable because a caller that needs it exactly
+    // right re-reads the ref anyway — the base moves under a long-lived pull request, and a
+    // baseline computed from a stale sha would compare against a commit that is no longer the base.
+    baseSha: typeof base["sha"] === "string" ? base["sha"] : null,
+    authorLogin: typeof user["login"] === "string" ? user["login"] : null,
+    // Compared by full name rather than by id, because that is what the rest of this feature keys
+    // on — and a repository that was renamed between the fork and the delivery is a repository the
+    // link no longer matches either.
+    fromFork: (typeof headRepo["full_name"] === "string" ? headRepo["full_name"] : repoFullName) !== repoFullName,
   };
 }
 

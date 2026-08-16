@@ -24,6 +24,7 @@
 // says so in the body; a delivery that blows up is logged and still acknowledged, because the
 // retry would blow up identically.
 
+import type { PullRequestEvent } from "../githubWebhook.ts";
 import { badRequest, unauthorized, type Handler, type HttpRequest, type HttpResponse } from "./router.ts";
 import {
   DELIVERY_HEADER, DeliveryLog, EVENT_HEADER, SIGNATURE_HEADER,
@@ -44,6 +45,20 @@ export interface GithubWebhookDeps {
    * reached. It is optional so the suite can run the whole path with nothing listening.
    */
   notify?: (ctx: TenantContext, agentId: string) => void;
+  /**
+   * §B.1.2: a pull request has new code in it.
+   *
+   * A CALLBACK FOR THE SAME REASON `notify` IS ONE, and a stronger one: acting on this means
+   * resolving a collaborator against GitHub, opening a check run, dispatching an eval and spending
+   * a workspace's provider balance. None of that belongs in the module whose job is to verify a
+   * signature and reduce a payload — and its absence here is what lets the whole verified path be
+   * exercised by a suite with no eval engine anywhere.
+   *
+   * RETURNS HOW MANY WORKSPACES IT ACTED FOR, which the route reports back to GitHub's delivery
+   * log. A zero there is the ordinary answer for a repository nobody has linked, and it is the
+   * difference between "the hook is misconfigured" and "nothing here is watching that repo".
+   */
+  onPullRequest?: (event: PullRequestEvent) => Promise<number>;
   log?: (line: string) => void;
 }
 
@@ -92,6 +107,20 @@ function webhookHandler(deps: GithubWebhookDeps): Handler {
     }
     if (event.kind === "ignored") {
       return { status: 200, body: { ok: true, applied: false, reason: event.reason } };
+    }
+
+    // §B.1.2's trigger. Its own branch rather than a widened `applyPush`, because the two share
+    // only the repository lookup: a push records a watermark and a pull request opens a check, and
+    // folding them into one function with a discriminant would put a workspace's provider spend in
+    // the same code path as a field assignment.
+    if (event.kind === "pull_request") {
+      try {
+        const applied = (await deps.onPullRequest?.(event)) ?? 0;
+        return { status: 200, body: { ok: true, applied } };
+      } catch (err) {
+        log(`[github] webhook ${event.repoFullName}#${event.number} failed: ${(err as Error)?.message ?? err}`);
+        return { status: 200, body: { ok: true, applied: 0, error: "handler failed" } };
+      }
     }
 
     try {

@@ -1301,6 +1301,10 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   pushGithub: "github", pullGithub: "github", switchGithubBranch: "github",
   createGithubBranch: "github", openGithubPr: "github", commitGithub: "github",
   generateGithubMessage: "github",
+  // The addendum's three. All on `github`, because all three are read or acted on in that panel —
+  // and a command whose channel is missing here answers on `log` by default, which puts its
+  // refusals in the status bar instead of the surface that asked for them.
+  diagnoseFile: "github", shadowRunGithub: "github", listShadowRuns: "github",
 };
 
 export function channelFor(cmd: string): string {

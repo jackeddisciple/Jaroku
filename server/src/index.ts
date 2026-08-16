@@ -71,6 +71,8 @@ import { liveDiagnostics } from "./liveDiagnostics.ts";
 import { resolveSecretValues } from "./deploySecrets.ts";
 import { ShadowRunRepository, hasReadableTrace, shouldSweep } from "./shadowRuns.ts";
 import { ShadowRunner } from "./shadowRunner.ts";
+import { ChecksRepository } from "./db/repositories/checks.ts";
+import { CheckRunner } from "./checkRunner.ts";
 import { openObjectStore } from "./storage/open.ts";
 import { resolveSigningKey } from "./storage/presign.ts";
 import { filesFromDirectory, ProjectStore } from "./storage/projectStore.ts";
@@ -2379,6 +2381,11 @@ const judge = new JudgeScorer({
   onScoringFinished: (e) => {
     console.log(`[eval] ${e.evalId} scoring done — ${e.scored} scored, ${e.unscored} unscored`);
     relay.broadcastEval(contextForEval(e.evalId), { type: "scoringFinished", ...e });
+    // §B.1, AND HERE RATHER THAN ON `onFinished`. The pass rate IS the judge's answer, so posting a
+    // check the moment the runs finish would post a quality number computed from scores that have
+    // not landed — which for a fast eval is most of them. This is the same distinction the Evals
+    // tab already draws by showing "scoring…" instead of a quality column about to fill in.
+    void postCheckResult(e.evalId);
   },
 });
 
@@ -2427,6 +2434,7 @@ evalRunner = new EvalRunner({
     void relay.broadcastHistory();
     // No more jobs are coming: the judge reports done once its own queue drains.
     judge.seal(e.evalId);
+
     // Sweep the resumable-checkpoint blobs these runs left behind. The traces stay —
     // only the pause/resume machinery goes, and nobody resumes a finished eval job.
     void sweepEvalArtifacts(contextForEval(e.evalId), evalStore, checkpoints, e.evalId).then((swept) => {
@@ -3200,6 +3208,119 @@ const sweepShadowRuns = (): void => {
 };
 setInterval(sweepShadowRuns, 5 * 60_000).unref();
 
+/**
+ * §B.1's eval-as-CI.
+ *
+ * WIRED HERE AND NOWHERE ELSE, because this is the only place that has all four things it needs at
+ * once: the checks repository, the eval runner, the GitHub client and the workspace resolution the
+ * webhook produces. `CheckRunner` itself imports none of them — §B.10's claim that eval-as-CI is
+ * not new execution machinery is only true if the file that would grow some cannot reach any.
+ */
+const checksRepo = new ChecksRepository(db);
+const checkRunner = new CheckRunner({
+  checks: checksRepo,
+  repo: githubRepo,
+  // THE SAME `evalRunner.start` THE EVALS TAB CALLS, with the targets the boundary decided. A
+  // second dispatch path would be a second place for the budget gate, the workspace binding and the
+  // job fan-out to be got right — and the one that is exercised least would be the one a stranger's
+  // pull request reaches.
+  startEval: async (ctx, input) => {
+    const started = await evalRunner.start({
+      ctx,
+      datasetId: input.datasetId,
+      agentId: input.agentId,
+      rubricId: await rubricIdFor(ctx, input.datasetId),
+      targets: input.targets,
+      // NO CEILING FROM HERE. The workspace's own balance and its plan already bound this — the
+      // budget gate runs inside `start` — and inventing a per-check ceiling in this file would be a
+      // number nobody configured, applied to somebody else's money, in a place they would never
+      // find it.
+      budgetUsd: null,
+    });
+    if ("error" in started) throw new Error(started.error);
+    checkForEval.set(started.evalId, { checkRunId: input.checkRunId, workspaceId: ctx.workspaceId });
+    return started.evalId;
+  },
+  cancelEval: async (_ctx, evalRunId) => {
+    // §B.1.2: a cancelled check never starts new jobs, but a job already dispatched runs to
+    // completion. That is the eval engine's own rule (v0.1.9) and `cancel` already implements it,
+    // which is why this is a call rather than a policy.
+    await evalRunner.cancel(evalRunId);
+  },
+});
+
+/**
+ * eval id -> the check it belongs to.
+ *
+ * IN MEMORY, AND THAT IS THE HONEST LIMIT RATHER THAN AN OVERSIGHT. `check_runs.eval_run_id` is the
+ * durable record and is written the moment the eval starts; this map is a cache so the completion
+ * callback does not query for it. A restart loses the map and not the row, so a check whose eval
+ * finished across a restart is recoverable by reading the table — which is a repair somebody can
+ * make, unlike a fact nothing wrote down.
+ */
+const checkForEval = new Map<string, { checkRunId: string; workspaceId: string }>();
+
+/**
+ * An eval that was a CI check has finished scoring: turn its aggregate into three numbers and post.
+ *
+ * THE NUMBERS COME FROM `aggregateEval`, which the Evals dashboard already reads, rather than from
+ * a second rollup written for this. That is the point of §B.1's claim to be built from the eval
+ * engine: the pass rate on a pull request and the quality column in the dashboard are the same
+ * computation, so they cannot disagree about what this eval scored.
+ *
+ * ACROSS THE LEGS RATHER THAN PER LEG. A dataset configured for three providers produces three
+ * `ProviderMetrics`, and a check is one number — so the pass rate is the mean over legs that
+ * actually scored something, and cost is the mean per-run cost over legs that were priced.
+ * Excluding the unscored and the unpriced rather than counting them as zero is `aggregateEval`'s
+ * own rule, applied one level up: a judge that failed says nothing about a provider, and averaging
+ * its silence in as a zero would punish the provider for it.
+ *
+ * SILENT WHEN THE EVAL WAS NOT A CHECK, which is almost all of them.
+ */
+async function postCheckResult(evalId: string): Promise<void> {
+  const entry = checkForEval.get(evalId);
+  if (!entry) return;
+  checkForEval.delete(evalId);
+  const ctx = contextForEval(evalId);
+  try {
+    const row = await checksRepo.byId(ctx, entry.checkRunId);
+    if (!row) return;
+    const link = (await githubRepo.links(ctx)).find((l) => l.id === row.link_id);
+    const connection = await githubIdentity.apiFor(ctx);
+    if (!link || !connection) return;
+
+    const aggregate = await aggregateEval(ctx, evalStore, evalId);
+    const legs = aggregate?.providers ?? [];
+    const scored = legs.filter((p) => p.qualityScore !== null);
+    const priced = legs.filter((p) => p.costPerRunUsd !== null && !p.costUnknown);
+    const timed = legs.filter((p) => p.latencyP50Ms !== null);
+
+    const mean = (ns: number[]): number | null =>
+      ns.length === 0 ? null : ns.reduce((a, b) => a + b, 0) / ns.length;
+
+    // The base ref's commit, read NOW rather than taken from the delivery: a long-running check
+    // outlives the base moving, and a baseline computed against a stale sha compares this pull
+    // request to a commit that is no longer what it is based on.
+    const baseSha = await connection.api
+      .refSha(link.repo_full_name, (await connection.api.repo(link.repo_full_name)).defaultBranch)
+      .catch(() => null);
+
+    await checkRunner.onEvalFinished(ctx, {
+      api: connection.api,
+      repoFullName: link.repo_full_name,
+      checkRunId: row.id,
+      metrics: {
+        passRate: mean(scored.map((p) => p.qualityScore!)),
+        costPerRunUsd: mean(priced.map((p) => p.costPerRunUsd!)),
+        latencyP50Ms: mean(timed.map((p) => p.latencyP50Ms!)),
+      },
+      baseSha,
+    });
+  } catch (err) {
+    console.error(`[checks] could not post the result for ${evalId}:`, (err as Error)?.message ?? err);
+  }
+}
+
 const githubPuller = new GithubPuller({
   repo: githubRepo,
   identity: githubIdentity,
@@ -3256,6 +3377,52 @@ for (const route of githubWebhookRoutes({
     void agentRepo.byId(ctx, agentUuid).then((agent) => {
       if (agent) void broadcastGithub(ctx, agent.slug);
     }),
+  // §B.1.2's trigger.
+  //
+  // MATCHED ON THE HEAD BRANCH, which is the branch the pull request is FROM — because that is the
+  // branch a link points at. §3.1 has Jaroku own `jaroku/<agent-slug>`, and a pull request from it
+  // into `main` is the reconciliation §3.7 hands off to. A lookup keyed on the BASE would match
+  // every agent linked to `main` and check all of them against a pull request that touches one.
+  //
+  // THE CROSS-WORKSPACE READ IS THE LOOKUP AND NOTHING ELSE, exactly as `applyPush` keeps it: each
+  // link comes back carrying the workspace it belongs to, and every statement after that is an
+  // ordinary scoped one under that workspace's own context.
+  onPullRequest: async (event) => {
+    const owners = await githubRepo.linksForRepo(event.repoFullName, event.headBranch);
+    let acted = 0;
+    for (const { workspaceId, link } of owners) {
+      // A SYSTEM CONTEXT, for the reason the push path gives: there is no user here, and putting a
+      // name in `actor_user_id` that did not do this would be inventing one. The pull request
+      // belongs to whoever GitHub says opened it, and that is a login rather than a Jaroku account.
+      const ctx = systemContextFor(workspaceId, newRequestId());
+      const agent = await agentRepo.byId(ctx, link.agent_id);
+      const connection = await githubIdentity.apiFor(ctx);
+      if (!agent || !connection) continue;
+
+      const config = await checksRepo.config(ctx, agent.id);
+      const dataset = config?.ci_dataset_id
+        ? await evalStore.getDataset(ctx, config.ci_dataset_id)
+        : undefined;
+
+      const decision = await checkRunner.onPullRequest(ctx, {
+        api: connection.api,
+        agentUuid: agent.id,
+        agentSlug: agent.slug,
+        linkId: link.id,
+        repoFullName: link.repo_full_name,
+        event,
+        // The legs this agent's own default provider implies. A dataset does not carry a target
+        // list of its own — the Evals tab picks them per run — so the honest configured set is the
+        // one an ordinary run of this agent would use, and §B.1.3's boundary filters it.
+        configuredTargets: [{ provider: agent.default_provider, model: "" }],
+        datasetName: dataset?.name ?? null,
+      });
+      if (decision.checkRunId) acted++;
+      else console.log(`[checks] ${agent.slug}#${event.number}: ${decision.reason}`);
+      void broadcastGithub(ctx, agent.slug);
+    }
+    return acted;
+  },
 })) {
   router.post(route.path, route.handler);
 }

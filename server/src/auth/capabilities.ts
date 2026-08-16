@@ -300,6 +300,18 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // everybody who can read where the code went.
   generateGithubMessage: "github:manage",
 
+  // §B.3's live diagnostics. `github:read` and not `manage`: it analyses a buffer and returns
+  // squiggles, it changes nothing, and §B.3.2 is explicit that it never blocks a commit — so
+  // requiring push rights to SEE a problem would gate the cheap half of the validator behind the
+  // permission for the expensive half.
+  diagnoseFile: "github:read",
+  // §B.2's shadow run. `github:manage`, and the reason is money rather than mutation: it publishes
+  // nothing and moves no pointer, but it runs an agent on a real provider against this workspace's
+  // balance. §B.2.2 says it plainly — a shadow run is disposable to the product and is not
+  // disposable to the bill.
+  shadowRunGithub: "github:manage",
+  listShadowRuns: "github:read",
+
   // An export is deliberately NOT here, and its absence is the decision rather than an omission:
   // it is an HTTP route, not a socket command — see http/lifecycle.ts. A copy of everything the
   // workspace has is a file a browser downloads, and a download is a request with a URL, not a
