@@ -470,20 +470,43 @@ export class GithubPusher {
       // secret_scan_findings and audit_log where it belongs.
       const extraGates: ValidationGate[] = req.ignoreSecrets === true ? [] : ["secret-scan"];
 
+      // WHICH OF THESE VERSIONS A VALIDATED PULL PRODUCED — the fact `agent_versions.source` cannot
+      // carry, because a pull publishes as `import` and so does a disk import.
+      //
+      // READ FROM `github_events`, WHICH ALREADY HOLDS IT. The pull runner writes a row naming the
+      // version it published, and the KIND on that row draws the distinction the source column
+      // could not: `pull` with `outcome: "ok"` cleared the same validator a generation does, and
+      // `force_override` is precisely the pull that FAILED it and was published anyway. Only the
+      // first may claim the gates — a receipt on the second would say the code was validated by the
+      // one commit where it demonstrably was not.
+      //
+      // A READ FAILURE LEAVES THE SET EMPTY, which puts a pulled version back to under-claiming.
+      // That is the safe direction and was the behaviour before this: a reader learns less than the
+      // truth rather than something false.
+      const validatedByPull = new Set<string>();
+      try {
+        for (const event of await this.deps.repo.events(ctx, agentUuid, 200)) {
+          if (event.kind !== "pull" || event.outcome !== "ok") continue;
+          for (const id of event.version_ids) validatedByPull.add(id);
+        }
+      } catch (err) {
+        this.log(`[github] ${slug} could not read the event log for trailers: ${(err as Error)?.message}`);
+      }
+
       const plan = staged
         ? planStaged(staged, snapshots, {
             subdirectory: link.subdirectory,
             includeArtifacts: link.include_artifacts,
             remotePaths: baseTree,
             message: req.message,
-            provenance: { agentSlug: slug, extraGates, ...(resolved?.model ? { model: resolved.model } : {}) },
+            provenance: { agentSlug: slug, extraGates, validatedByPull, ...(resolved?.model ? { model: resolved.model } : {}) },
           })
         : planPush(restack ? restack.snapshots : snapshots, {
             subdirectory: link.subdirectory,
             includeArtifacts: link.include_artifacts,
             squash: req.squash === true,
             remotePaths: baseTree,
-            provenance: { agentSlug: slug, extraGates, ...(resolved?.model ? { model: resolved.model } : {}) },
+            provenance: { agentSlug: slug, extraGates, validatedByPull, ...(resolved?.model ? { model: resolved.model } : {}) },
             ...(resolved && !restack ? { costs: resolved.costs } : {}),
           });
 
@@ -507,6 +530,7 @@ export class GithubPusher {
           {
             agentSlug: slug,
             extraGates,
+            validatedByPull,
             ...(resolved?.model ? { model: resolved.model } : {}),
             ...(resolved ? { costs: resolved.costs } : {}),
           },

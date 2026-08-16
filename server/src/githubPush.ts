@@ -84,6 +84,7 @@ export interface PlanOptions {
    * after they are ordered, so a squash can refuse to sum a partial set.
    */
   provenance?: VersionProvenance;
+  // `validatedByPull` rides on `provenance` rather than beside it — see VersionProvenance.
   /**
    * Per-version cost in USD, index-aligned with the OLDEST-FIRST version order.
    *

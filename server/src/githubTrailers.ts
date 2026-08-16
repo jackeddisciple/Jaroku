@@ -71,6 +71,14 @@ export interface VersionProvenance {
   /** Which gates this version cleared. Empty means the line is omitted, not that none ran. */
   gates?: readonly ValidationGate[];
   /**
+   * Version ids a validated pull produced — see `gatesFor`.
+   *
+   * ON THE PROVENANCE RECORD RATHER THAN PASSED SEPARATELY, because it is per-push context in
+   * exactly the way the agent slug and the model are: resolved once by the pusher, consulted per
+   * version by the builder.
+   */
+  validatedByPull?: ReadonlySet<string>;
+  /**
    * Gates cleared by THIS PUSH rather than by the version, unioned with whatever `gates` resolves
    * to — §B.6's `secret-scan`.
    *
@@ -91,23 +99,43 @@ export interface VersionProvenance {
  * the publish if any of them fails — so a version of either source EXISTING is the evidence that
  * all three passed. That is a stronger guarantee than a column, which could be written by anything.
  *
- * A PULLED VERSION IS UNDER-CLAIMED, DELIBERATELY, AND THIS IS THE ONE PLACE THAT COSTS SOMETHING.
- * §3.6 holds a pull to the identical bar as generated code — the remote tree is staged as a
- * candidate and put through the same validator — but `githubPullRunner` publishes it with
- * `source: "import"`, because that is the vocabulary the source column has. So a pulled version's
- * trailer says nothing about validation, even though it cleared everything. That is the safe
- * direction for a receipt: a reader who sees no `Jaroku-Validated` learns less than the truth,
- * where a reader who sees one that was inferred from an ambiguous column could learn something
- * false. The day `source` distinguishes a pull from a disk import, this switch gains one case.
+ * A PULLED VERSION NEEDS TO BE TOLD, AND THAT IS WHAT `validatedByPull` IS FOR. §3.6 holds a pull to
+ * the identical bar as generated code — the remote tree is staged as a candidate and put through
+ * the same validator — but `githubPullRunner` publishes it with `source: "import"`, because that is
+ * the vocabulary the source column has. So the source alone cannot tell a validated pull from a
+ * disk import, and this used to under-claim: every pulled version's trailer said nothing about
+ * validation even though it had cleared everything.
+ *
+ * THE ANSWER CAME FROM A TABLE THAT ALREADY HELD IT, rather than from widening `agent_versions.source`.
+ * The pull runner writes a `github_events` row carrying the version id, and the KIND on that row
+ * draws a distinction the source column could not have: `pull` with `outcome: "ok"` is a candidate
+ * that cleared the validator, and `force_override` is precisely the pull that FAILED it and was
+ * published anyway. Only the first may claim the gates. Widening the enum would have needed a CHECK
+ * change — a table rebuild on SQLite, on the table that holds every version's manifest — to arrive
+ * at a coarser answer.
  *
  * A `deploy` VERSION GETS NOTHING for the ordinary reason: the artifact synthesis writes its own
  * files and never went through the generation validator at all.
  */
-export function gatesFor(version: Pick<AgentVersion, "source">): ValidationGate[] {
+export function gatesFor(
+  version: Pick<AgentVersion, "source" | "id">,
+  /**
+   * Version ids a validated pull produced.
+   *
+   * ONLY CONSULTED FOR AN `import` VERSION, so a caller that cannot resolve it loses nothing it had:
+   * a generation and an edit answer from their own source, and the absence of this set puts a pull
+   * back where it was — under-claiming, which is the safe direction for a receipt.
+   */
+  validatedByPull?: ReadonlySet<string>,
+): ValidationGate[] {
   switch (version.source) {
     case "generation":
     case "edit":
       return ["parse", "import", "contract"];
+    case "import":
+      // See the comment above: a pull cleared the same three gates a generation does, and the only
+      // record of which imports were pulls is the event log.
+      return validatedByPull?.has(version.id) ? ["parse", "import", "contract"] : [];
     default:
       return [];
   }
@@ -133,7 +161,7 @@ function formatCost(usd: number): string {
  * what a force push is about to destroy.
  */
 export function trailerLines(
-  version: Pick<AgentVersion, "version" | "source">,
+  version: Pick<AgentVersion, "id" | "version" | "source">,
   provenance: VersionProvenance = {},
 ): string[] {
   const lines = [`Jaroku-Version: v${version.version}`];
@@ -146,7 +174,10 @@ export function trailerLines(
   // which runs at push time and cannot be inferred from the version row — reports what happened
   // rather than what the source implies. Ordered by GATE_ORDER rather than by arrival, so two
   // commits that cleared the same gates read identically regardless of who assembled the list.
-  const gates = [...(provenance.gates ?? gatesFor(version)), ...(provenance.extraGates ?? [])];
+  const gates = [
+    ...(provenance.gates ?? gatesFor(version, provenance.validatedByPull)),
+    ...(provenance.extraGates ?? []),
+  ];
   const ordered = GATE_ORDER.filter((g) => gates.includes(g));
   if (ordered.length) lines.push(`Jaroku-Validated: ${ordered.join(",")}`);
 
@@ -173,7 +204,7 @@ export function trailerLines(
  * commit while looking exact. Null is the honest total, and null omits the line.
  */
 export function squashTrailerLines(
-  versions: Pick<AgentVersion, "version" | "source">[],
+  versions: Pick<AgentVersion, "id" | "version" | "source">[],
   provenance: VersionProvenance & { costs?: readonly (number | null | undefined)[] } = {},
 ): string[] {
   const oldest = versions[0];
@@ -194,7 +225,10 @@ export function squashTrailerLines(
   // the receipt say the strongest thing true of any part rather than the strongest thing true of
   // the whole, which is the direction that cannot be walked back by a reader.
   const each = versions.map(
-    (v) => new Set([...(provenance.gates ?? gatesFor(v)), ...(provenance.extraGates ?? [])]),
+    (v) => new Set([
+      ...(provenance.gates ?? gatesFor(v, provenance.validatedByPull)),
+      ...(provenance.extraGates ?? []),
+    ]),
   );
   const common = GATE_ORDER.filter((g) => each.length > 0 && each.every((s) => s.has(g)));
   if (common.length) lines.push(`Jaroku-Validated: ${common.join(",")}`);

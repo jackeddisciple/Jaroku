@@ -67,9 +67,34 @@ console.log("\nwhich gates a version's source implies");
   check(gatesFor(version(1, { source: "edit" })).join(",") === "parse,import,contract",
     "an edit did too, for the same reason");
   check(gatesFor(version(1, { source: "import" })).length === 0,
-    "an import claims nothing — and a pulled version publishes as one, so it under-claims");
+    "a bare import claims nothing — nobody validated bytes somebody put on disk");
   check(gatesFor(version(1, { source: "deploy" })).length === 0,
     "a deploy version is artifact synthesis, which never met the validator");
+}
+
+console.log("\na pulled version cleared the same gates, and the event log is what says so");
+{
+  // §3.6 holds a pull to the identical bar as generated code, but the runner publishes it as
+  // `import` — so the source alone cannot tell a validated pull from a disk import, and this
+  // under-claimed on every pulled version until the runner started resolving the set.
+  const pulled = version(9, { source: "import", id: "ver-pulled" });
+  check(gatesFor(pulled, new Set(["ver-pulled"])).join(",") === "parse,import,contract",
+    "an import a validated pull produced claims all three");
+  check(gatesFor(pulled).length === 0,
+    "…and the same version claims nothing without the set — under-claiming, which is the safe direction");
+  check(gatesFor(version(9, { source: "import", id: "ver-disk" }), new Set(["ver-pulled"])).length === 0,
+    "a DIFFERENT import is unaffected by some other version having been pulled");
+
+  // The distinction `agent_versions.source` could never have drawn, and the reason the event log is
+  // a better answer than widening that enum: a `force_override` pull is precisely the one that
+  // FAILED the validator and was published anyway. The runner puts only `outcome: "ok"` pulls in
+  // the set, so an override arrives here as an id that is simply not in it.
+  check(gatesFor(pulled, new Set()).length === 0,
+    "an empty set is an import with no validated pull behind it — which is what an override looks like");
+
+  const block = trailerLines(pulled, { agentSlug: "a", validatedByPull: new Set(["ver-pulled"]) }).join("\n");
+  check(trailer(block, "Jaroku-Validated") === "parse,import,contract",
+    "and the trailer carries it, which is the whole point", trailer(block, "Jaroku-Validated"));
 }
 
 console.log("\nan absent field is an absent line");
