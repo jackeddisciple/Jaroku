@@ -535,6 +535,63 @@ export class BillingRepository {
       .sort((a, b) => b.usd - a.usd);
   }
 
+  /**
+   * What the platform spent AUTHORING code, in one window — §B.8.1's `Jaroku-Model` and
+   * `Jaroku-Cost`.
+   *
+   * A TIME WINDOW IS THE ONLY JOIN AVAILABLE, AND THIS IS THE COMMENT THAT SAYS SO OUT LOUD. A
+   * generation, an edit and a plan call have no `run_id` — migration 020's own comment says why —
+   * and `agent_versions` has never carried a model or a cost column. So the honest question is
+   * "which authoring calls happened while this version was being made", answered by the interval
+   * between the previous version's timestamp and this one's, and it is an approximation. It is
+   * used for a trailer line and for nothing that decides anything: no gate, no bill, no refusal.
+   *
+   * COST IS NULL WHENEVER ANY MATCHED EVENT WAS UNPRICED, not a partial sum. That is v0.1.9's rule
+   * applied at the only point where under-reporting would be invisible — a receipt that said
+   * `$0.0012` when two of five calls could not be priced would be exact-looking and wrong, and
+   * §B.8.1's whole argument is that an omitted line is better than a fabricated one.
+   *
+   * NULL WHEN NOTHING MATCHED AT ALL, which is the ordinary case for a version generated before
+   * cost accounting existed. The trailer omits both lines and says nothing, which is true.
+   *
+   * The kinds are the authoring ones only. `llm.provider` is the agent RUNNING, which is a
+   * different question with a different answer, and rolling it in would put a user's test runs in
+   * the commit's price tag.
+   */
+  async authoringSpend(
+    ctx: TenantContext,
+    window: { after: string | null; until: string },
+  ): Promise<{ model: string | null; costUsd: number | null }> {
+    const params: unknown[] = [ctx.workspaceId];
+    let range = "";
+    if (window.after) {
+      range = " AND occurred_at > ?";
+      params.push(window.after);
+    }
+    params.push(window.until);
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT model,
+              COALESCE(SUM(cost_usd), 0) AS usd,
+              COUNT(*) AS n,
+              COUNT(CASE WHEN cost_usd IS NULL THEN 1 END) AS unpriced
+         FROM usage_events
+        WHERE workspace_id = ?${range} AND occurred_at <= ?
+          AND kind IN ('llm.generation', 'llm.edit', 'llm.plan')
+        GROUP BY model`,
+      params,
+    );
+    if (rows.length === 0) return { model: null, costUsd: null };
+
+    // The model that did the most work in the window, by event count. A version authored by one
+    // model and then explained by another is one commit, and naming both would make the line a
+    // list nobody can act on; naming the busier one is a claim that is true of most of the work.
+    const byUse = [...rows].sort((a, b) => asInt(b["n"]) - asInt(a["n"]));
+    const model = (byUse[0]?.["model"] as string | null) ?? null;
+    const unpriced = rows.reduce((n, r) => n + asInt(r["unpriced"]), 0);
+    const usd = rows.reduce((n, r) => n + Number(r["usd"] ?? 0), 0);
+    return { model, costUsd: unpriced > 0 ? null : usd };
+  }
+
   /** Every event for one run, oldest first. The dashboard's per-run drill-down. */
   async eventsForRun(ctx: TenantContext, runId: string): Promise<UsageEventRow[]> {
     const rows = await this.q(ctx).all<Record<string, unknown>>(

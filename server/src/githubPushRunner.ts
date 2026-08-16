@@ -68,6 +68,25 @@ export interface GithubPusherDeps {
   identity: GithubIdentity;
   agents: AgentRepository;
   projects: ProjectStore;
+  /**
+   * §B.8.1's two facts nothing on the version row carries: which model authored it, and what it
+   * cost.
+   *
+   * INJECTED RATHER THAN READ HERE, and the reason is the same one that keeps `githubApi.ts` a
+   * transport: this module writes git objects, and the answer lives in the billing layer. It is
+   * also the reason it is OPTIONAL — the pure-function tests construct a pusher without a
+   * database, and a trailer that omits two lines is exactly what the omit-rather-than-guess rule
+   * says an unanswerable question produces.
+   *
+   * A REJECTION IS AN OMISSION, NOT A FAILED PUSH. Nothing about a commit's receipt is worth
+   * refusing to write the commit over, so this is called inside a catch and its failure costs two
+   * lines rather than the work.
+   */
+  provenanceFor?: (
+    ctx: TenantContext,
+    agentUuid: string,
+    versions: { id: string; version: number; created_at: string }[],
+  ) => Promise<{ model: string | null; costs: (number | null)[] }>;
   log?: (line: string) => void;
 }
 
@@ -183,11 +202,35 @@ export class GithubPusher {
       const baseTree = head ? (await api.tree(repo, head)).map((e) => e.path) : [];
       report(stage, "done");
 
+      // §B.8.1'S RECEIPT, RESOLVED ONCE FOR THE WHOLE PUSH AND NEVER ALLOWED TO FAIL IT. The agent
+      // slug and the gate list come free — one from the row we already have, the other derived
+      // from each version's own source — and the model and the costs are asked for. A resolver
+      // that throws leaves both lines off, which is what the trailer's own rule says an
+      // unanswerable question produces.
+      let resolved: { model: string | null; costs: (number | null)[] } | null = null;
+      if (this.deps.provenanceFor) {
+        try {
+          resolved = await this.deps.provenanceFor(
+            ctx,
+            agentUuid,
+            snapshots.map((s) => ({
+              id: s.version.id,
+              version: s.version.version,
+              created_at: s.version.created_at,
+            })),
+          );
+        } catch (err) {
+          this.log(`[github] ${slug} provenance unavailable, trailer will omit it: ${(err as Error)?.message}`);
+        }
+      }
+
       const plan = planPush(snapshots, {
         subdirectory: link.subdirectory,
         includeArtifacts: link.include_artifacts,
         squash: req.squash === true,
         remotePaths: baseTree,
+        provenance: { agentSlug: slug, ...(resolved?.model ? { model: resolved.model } : {}) },
+        ...(resolved ? { costs: resolved.costs } : {}),
       });
 
       // THE MESSAGE SOMEBODY TYPED WINS OVER THE ONE THIS CODE COMPOSED. The commit box pre-fills
@@ -202,6 +245,11 @@ export class GithubPusher {
         onlyCommit.message = withVersionTrailer(
           typed,
           snapshots.map((s) => s.version),
+          {
+            agentSlug: slug,
+            ...(resolved?.model ? { model: resolved.model } : {}),
+            ...(resolved ? { costs: resolved.costs } : {}),
+          },
         );
       }
 

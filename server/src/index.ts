@@ -3067,6 +3067,37 @@ const githubPusher = new GithubPusher({
   identity: githubIdentity,
   agents: agentRepo,
   projects,
+  // §B.8.1's `Jaroku-Model` and `Jaroku-Cost`, resolved here because the pusher writes git objects
+  // and this is where the billing repository lives. Per version, against the window between it and
+  // the version before it — `billing.authoringSpend` says at length why a window is the only join
+  // available and why a partial sum is null rather than a smaller number.
+  //
+  // WALKED OLDEST FIRST WITH A ROLLING BOUNDARY, so a push of six versions asks six bounded
+  // questions rather than one unbounded one. The first version in the push is bounded BELOW by
+  // whatever came before it in the agent's own history, not by the push — otherwise the earliest
+  // commit in every push would be charged with everything that ever happened before it.
+  provenanceFor: async (ctx, agentUuid, versions) => {
+    const all = await agentRepo.versions(ctx, agentUuid);
+    const previousOf = new Map<number, string | null>();
+    // `versions()` is newest first; the row after a given one in that order is the one before it
+    // in time, which is the lower bound each window wants.
+    for (const [i, v] of all.entries()) previousOf.set(v.version, all[i + 1]?.created_at ?? null);
+
+    const costs: (number | null)[] = [];
+    let model: string | null = null;
+    for (const v of versions) {
+      const spend = await billing.authoringSpend(ctx, {
+        after: previousOf.get(v.version) ?? null,
+        until: v.created_at,
+      });
+      costs.push(spend.costUsd);
+      // The first model named by any version in the push. A squash writes one line, and a push of
+      // six separate commits gets the same line on each — the alternative is a per-version model
+      // lookup that would usually answer the same thing at six times the cost.
+      model ??= spend.model;
+    }
+    return { model, costs };
+  },
 });
 
 const githubPuller = new GithubPuller({

@@ -103,7 +103,7 @@ console.log("\none commit per version");
     "a version with no instruction is named by its source, not left blank",
   );
   check(
-    plan.commits[1]!.message.includes("Jaroku-Version: 12"),
+    plan.commits[1]!.message.includes("Jaroku-Version: v12"),
     "every commit carries the version it came from, for a `git log` read months later",
   );
 }
@@ -190,16 +190,23 @@ console.log("\na message somebody typed");
   check(typed.includes("Backoff was linear."), "...and the typed body survives with it");
   // The trailer is what `remoteOnlyCommits` identifies a Jaroku commit by. Without it the panel
   // reports its own commit as somebody else's work on the very next fetch.
-  check(typed.endsWith("Jaroku-Versions: 11-13"), "and the run's trailer is re-attached");
+  check(typed.includes("Jaroku-Versions: 11-13"), "and the run's trailer is re-attached");
   check(
-    withVersionTrailer("One version", [version(7)]).endsWith("Jaroku-Version: 7"),
+    withVersionTrailer("One version", [version(7)]).includes("Jaroku-Version: v7"),
     "a run of one gets the singular trailer, matching what messageFor writes",
   );
+  // Since §B.8.1 the block is REWRITTEN rather than skipped when one is already there, because the
+  // pasted one belongs to a different commit and now carries a model, a gate list and a cost.
+  // What has to stay true either way is that there is exactly one.
   check(
-    withVersionTrailer("Pasted back\n\nJaroku-Versions: 11-13", run).match(/Jaroku-Versions:/g)?.length === 1,
+    withVersionTrailer("Pasted back\n\nJaroku-Versions: 9-10", run).match(/Jaroku-Versions:/g)?.length === 1,
     "a message that already carries a trailer does not get a second",
   );
-  check(withVersionTrailer("   ", run) === "Jaroku-Versions: 11-13", "an empty box leaves the trailer alone");
+  check(
+    withVersionTrailer("Pasted back\n\nJaroku-Versions: 9-10", run).includes("Jaroku-Versions: 11-13"),
+    "and the one it keeps is this push's, not the one that came in with the text",
+  );
+  check(withVersionTrailer("   ", run).startsWith("Jaroku-Versions: 11-13"), "an empty box leaves the trailer alone");
 }
 
 console.log("\nedges");

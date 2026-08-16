@@ -23,6 +23,9 @@
 // across six versions — are asserted without a repository existing anywhere.
 
 import { DEPLOY_ARTIFACTS } from "./projectFs.ts";
+import {
+  squashTrailerLines, trailerLines, withTrailerBlock, type VersionProvenance,
+} from "./githubTrailers.ts";
 import type { AgentVersion } from "./db/repositories/agents.ts";
 import type { StoredFile } from "./storage/projectStore.ts";
 
@@ -71,6 +74,24 @@ export interface PlanOptions {
    * nothing to have left behind.
    */
   remotePaths?: string[];
+  /**
+   * §B.8.1's receipt, for every commit this plan writes.
+   *
+   * ONE RECORD FOR THE WHOLE PUSH RATHER THAN ONE PER VERSION, because the fields that vary per
+   * version — the version number, the gates its source implies — are already read off the version
+   * row inside the trailer builder, and the fields that do not vary are the agent and the model.
+   * Per-version cost is the exception and is passed as `costs`, index-aligned with `snapshots`
+   * after they are ordered, so a squash can refuse to sum a partial set.
+   */
+  provenance?: VersionProvenance;
+  /**
+   * Per-version cost in USD, index-aligned with the OLDEST-FIRST version order.
+   *
+   * A `null` entry is "nothing priced this version", and one of them makes a squashed commit's
+   * total null too — see `squashTrailerLines`. Absent entirely means no version was priced, which
+   * omits the line rather than writing a zero.
+   */
+  costs?: readonly (number | null | undefined)[];
 }
 
 /**
@@ -138,15 +159,21 @@ export function pushableFiles(files: StoredFile[], opts: PlanOptions): PlannedFi
 /**
  * The commit message for one version.
  *
- * SUBJECT FROM `instruction`, BODY FROM `summary`, and a trailer naming the version. The trailer
- * is not decoration: it is what makes a commit in somebody's repository traceable back to a row in
- * `agent_versions` months later, when the panel is closed and all anybody has is `git log`.
+ * SUBJECT FROM `instruction`, BODY FROM `summary`, and a trailer BLOCK naming the version and
+ * everything else §B.8.1 asks a commit to carry. The trailer is not decoration: it is what makes a
+ * commit in somebody's repository traceable back to a row in `agent_versions` months later, when
+ * the panel is closed and all anybody has is `git log` — and what tells a reader with no Jaroku
+ * access which gates the code passed and what it cost.
+ *
+ * THE BLOCK IS BUILT IN `githubTrailers.ts` AND NOT HERE, because every field in it is subject to
+ * the same omit-rather-than-guess rule and that rule is easier to hold in one place than in three
+ * call sites. What this function keeps is the shape: subject, body, blank line, block.
  *
  * The subject is capped at git's conventional 72 columns and the body is left alone. Truncating a
  * summary would lose the half that explains why, and a long body in a commit message is not a
  * problem anybody has.
  */
-export function messageFor(version: AgentVersion): string {
+export function messageFor(version: AgentVersion, provenance: VersionProvenance = {}): string {
   const subject = firstLine(
     version.instruction?.trim() || version.summary?.trim() || defaultSubject(version),
   );
@@ -154,8 +181,7 @@ export function messageFor(version: AgentVersion): string {
   // Only when it adds something. A body that repeats the subject is noise in every log viewer.
   const parts = [subject];
   if (body && firstLine(body) !== subject) parts.push("", body);
-  parts.push("", `Jaroku-Version: ${version.version}`);
-  return parts.join("\n");
+  return withTrailerBlock(parts.join("\n"), trailerLines(version, provenance));
 }
 
 /**
@@ -166,7 +192,10 @@ export function messageFor(version: AgentVersion): string {
  * summarises and the body is the list, one line per version, oldest first. Anybody reading the
  * commit gets the same history the panel would have shown them.
  */
-export function squashMessageFor(versions: AgentVersion[]): string {
+export function squashMessageFor(
+  versions: AgentVersion[],
+  provenance: VersionProvenance & { costs?: readonly (number | null | undefined)[] } = {},
+): string {
   const oldest = versions[0];
   const newest = versions[versions.length - 1];
   if (!oldest || !newest) return "Agent updates\n";
@@ -177,7 +206,7 @@ export function squashMessageFor(versions: AgentVersion[]): string {
   const lines = versions.map(
     (v) => `- v${v.version} ${firstLine(v.instruction?.trim() || v.summary?.trim() || defaultSubject(v))}`,
   );
-  return [subject, "", ...lines, "", `Jaroku-Versions: ${oldest.version}-${newest.version}`].join("\n");
+  return withTrailerBlock([subject, "", ...lines].join("\n"), squashTrailerLines(versions, provenance));
 }
 
 /**
@@ -190,20 +219,21 @@ export function squashMessageFor(versions: AgentVersion[]): string {
  * fetch as a §3.8 hollow dot: a commit the panel reports as somebody else's work, which would then
  * be counted among what a force push is about to destroy.
  *
- * Appended rather than imposed, so somebody who pasted a message that already carries the trailer
- * — a re-commit, or text copied out of `git log` — does not get two.
+ * REWRITTEN RATHER THAN SKIPPED WHEN ONE IS ALREADY THERE, which is a change from what this did
+ * before §B.8.1. Skipping was right while the trailer was one line naming a version — the pasted
+ * one said the same thing the computed one would. It is wrong now that the block also carries a
+ * model, a gate list and a cost: text copied out of `git log` carries the trailer of a DIFFERENT
+ * commit, and keeping it would put another version's receipt on this one. `withTrailerBlock`
+ * strips every `Jaroku-*` line and writes the block whole for exactly this reason.
  */
-export function withVersionTrailer(message: string, versions: AgentVersion[]): string {
+export function withVersionTrailer(
+  message: string,
+  versions: AgentVersion[],
+  provenance: VersionProvenance & { costs?: readonly (number | null | undefined)[] } = {},
+): string {
   const body = message.trim();
-  const oldest = versions[0];
-  const newest = versions[versions.length - 1];
-  if (!oldest || !newest) return body;
-  if (/^Jaroku-Versions?:/m.test(body)) return body;
-  const trailer =
-    oldest.version === newest.version
-      ? `Jaroku-Version: ${newest.version}`
-      : `Jaroku-Versions: ${oldest.version}-${newest.version}`;
-  return body ? [body, "", trailer].join("\n") : trailer;
+  if (versions.length === 0) return body;
+  return withTrailerBlock(body, squashTrailerLines(versions, provenance));
 }
 
 function firstLine(text: string): string {
@@ -250,24 +280,38 @@ export function planPush(snapshots: VersionSnapshot[], opts: PlanOptions = {}): 
 
   const commits: PlannedCommit[] = [];
 
+  const provenance = opts.provenance ?? {};
+
   if (opts.squash) {
     const files = pushableFiles(head.files, opts);
     const kept = new Set(files.map((f) => f.path));
     commits.push({
       versionIds: ordered.map((s) => s.version.id),
       version: head.version.version,
-      message: squashMessageFor(ordered.map((s) => s.version)),
+      message: squashMessageFor(ordered.map((s) => s.version), {
+        ...provenance,
+        ...(opts.costs ? { costs: opts.costs } : {}),
+      }),
       files,
       deletions: [...previous].filter((p) => !kept.has(p)).sort(),
     });
   } else {
-    for (const snapshot of ordered) {
+    for (const [i, snapshot] of ordered.entries()) {
       const files = pushableFiles(snapshot.files, opts);
       const kept = new Set(files.map((f) => f.path));
+      // The cost of THIS version, by position in the oldest-first order — the same order the
+      // caller built `costs` against. An absent entry omits the line; it never falls back to the
+      // record's own `costUsd`, which describes a squash total and would be wrong on one commit
+      // of several.
+      const { costUsd: _total, ...perCommit } = provenance;
+      const costUsd = opts.costs ? opts.costs[i] : undefined;
       commits.push({
         versionIds: [snapshot.version.id],
         version: snapshot.version.version,
-        message: messageFor(snapshot.version),
+        message: messageFor(snapshot.version, {
+          ...perCommit,
+          ...(costUsd === undefined ? {} : { costUsd }),
+        }),
         files,
         deletions: [...previous].filter((p) => !kept.has(p)).sort(),
       });
