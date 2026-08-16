@@ -1025,6 +1025,15 @@ export class GithubApi {
     let failed = 0;
     let pending = 0;
     let total = 0;
+    /**
+     * Whether a read was REFUSED rather than empty — see the return below.
+     *
+     * The distinction this variable exists for was observed on a real pull request: a fine-grained
+     * token without `Checks: read` gets 403 from the check-runs endpoint, so the build check that
+     * had just gone red was reported as "no checks reported" — the same words a repository with no
+     * CI at all gets. That is the decoration §3.9 says this line must not be.
+     */
+    let unreadable = false;
 
     try {
       const runs = await this.call<{ total_count: number; check_runs?: { status: string; conclusion: string | null }[] }>(
@@ -1035,9 +1044,11 @@ export class GithubApi {
         if (run.status !== "completed") pending++;
         else if (run.conclusion !== null && !PASSING_CONCLUSIONS.has(run.conclusion)) failed++;
       }
-    } catch {
+    } catch (err) {
       // Reading one half is better than reading neither. A repository whose checks this token
-      // cannot list still has its statuses counted below.
+      // cannot list still has its statuses counted below — but the fact that we could not look is
+      // carried out of here rather than dropped.
+      unreadable = err instanceof GithubError && (err.kind === "forbidden" || err.kind === "auth");
     }
 
     try {
@@ -1049,12 +1060,18 @@ export class GithubApi {
         if (data.state === "failure" || data.state === "error") failed++;
         else if (data.state === "pending") pending++;
       }
-    } catch {
-      // As above.
+    } catch (err) {
+      unreadable = unreadable || (err instanceof GithubError && (err.kind === "forbidden" || err.kind === "auth"));
     }
 
-    if (total === 0) return null;
-    return { state: failed > 0 ? "failure" : pending > 0 ? "pending" : "success", total };
+    // SAW SOMETHING: report it, even if the other half was refused. A failing build is a failing
+    // build whether or not the statuses endpoint also answered.
+    if (total > 0) return { state: failed > 0 ? "failure" : pending > 0 ? "pending" : "success", total };
+    // SAW NOTHING BECAUSE WE WERE NOT ALLOWED TO LOOK. Its own state, because "there is no gate
+    // here" and "there may be a gate and this token cannot see it" are different sentences, and
+    // the second one names a permission somebody can go and grant.
+    if (unreadable) return { state: "unreadable", total: 0 };
+    return null;
   }
 }
 

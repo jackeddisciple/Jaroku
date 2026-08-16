@@ -405,6 +405,8 @@ export function PullRequestCard({ view }: { view: GithubView }) {
   }
 
   const pr = view.pr;
+  // `unreadable` is muted rather than red: nothing is known to be wrong with the code, only with
+  // what this token may look at.
   const checkTone = pr.checks === "success" ? "text-ok" : pr.checks === "failure" ? "text-err" : "text-muted";
   return (
     <section>
@@ -427,7 +429,13 @@ export function PullRequestCard({ view }: { view: GithubView }) {
                 ? "checks failing"
                 : pr.checks === "pending"
                   ? "checks running"
-                  : "no checks reported"}
+                  : pr.checks === "unreadable"
+                    // NOT THE SAME SENTENCE AS "no checks reported", and the difference was
+                    // observed on a real pull request: a token without `Checks: read` gets a 403,
+                    // and rendering that as "nothing reported" said a build that had just gone red
+                    // was a repository with no CI. This names the permission instead.
+                    ? "checks unreadable — the token has no Checks: read"
+                    : "no checks reported"}
           </span>
           <span className="text-faint">·</span>
           <span className="tabular-nums text-muted">

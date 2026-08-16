@@ -140,6 +140,31 @@ try {
     );
     mock.setAppOnlyChecks(false);
   }
+
+  console.log("\na token that may not READ checks is not a repository without any");
+  {
+    // OBSERVED ON A REAL PULL REQUEST. A fine-grained token without `Checks: read` gets 403 from
+    // the check-runs endpoint, so a build that had just gone red rendered as "no checks reported"
+    // — word for word what a repository with no CI at all shows. §3.9's whole argument is that this
+    // line is a gate rather than decoration, and a gate that says nothing when it cannot see is
+    // decoration with extra steps.
+    const fresh = await api.createRepo("blind-agent");
+    await api.initialCommit(fresh.fullName, "main", { path: "README.md", content: "# b\n", message: "Initial commit" });
+    const head = (await api.refSha(fresh.fullName, "main"))!;
+    mock.setChecksReadable(false);
+    const verdict = await api.checksFor(fresh.fullName, head);
+    check(verdict?.state === "unreadable", "it says so", JSON.stringify(verdict));
+    check(verdict?.total === 0, "and counts nothing, because it saw nothing");
+
+    // And it must not swallow what it CAN see: a commit status still reports.
+    await api.putCheckRun(fresh.fullName, {
+      checkRunId: "status:status-only", headSha: head, status: "completed", conclusion: "failure",
+      title: "the build failed", summary: "",
+    });
+    const partial = await api.checksFor(fresh.fullName, head);
+    check(partial?.state === "failure", "a refused half does not hide the half that answered", JSON.stringify(partial));
+    mock.setChecksReadable(true);
+  }
 } finally {
   await mock.close();
 }
