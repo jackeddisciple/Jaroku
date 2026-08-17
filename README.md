@@ -917,7 +917,14 @@ Scoring is a **separate phase** from execution. A job is scored once its run is 
 terminal and recorded, so a broken judge costs you the quality column and nothing else.
 
 - **The rubric is data, not code.** Criteria live in the `rubrics` table and are editable per
-  dataset. "Correct" for a refund bot is not "correct" for a SQL agent.
+  dataset — in the dataset builder, under **Judge rubric**, beside the examples they will be applied
+  to. "Correct" for a refund bot is not "correct" for a SQL agent. Saving writes a rubric for *that
+  dataset* and never touches the built-in one, which is what a dataset with no rubric of its own is
+  scored against — and is what the editor opens with, so editing starts from the real criteria
+  rather than from a blank list. A criterion's **id** is fixed once it exists: it is the key a
+  stored verdict's per-criterion score is recorded against, so renaming it would orphan every score
+  already taken and leave the drill-down showing blanks beside a criterion that looks identical. The
+  label is the display name and is free to change.
 - **A coarse, anchored scale.** Each criterion is scored 0–4 against written anchors, not on
   a continuous 0–1. Judges are far more consistent choosing between described levels than
   emitting a float, and "0.73" implies a precision that isn't there. The overall 0–1 is

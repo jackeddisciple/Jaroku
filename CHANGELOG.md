@@ -58,6 +58,15 @@ there. What is new is that the product's own surface reaches them.
   list is the server's (`purchasable` and the price id are columns; the limits come from the code
   that enforces them), a deployment with no Stripe keys shows nothing rather than a refusing
   control, and choosing is `billing:manage` while reading spend stays a member's.
+- **The judge's rubric can be edited.** ADR-012 is titled *LLM-as-judge with a data-driven rubric*
+  and the data was not user-supplied anywhere: the table, both commands, the store fields and both
+  senders existed, `EvalDrillDown` already rendered per-criterion breakdowns, and no component read
+  or wrote any of it — so every eval scored against the built-in rubric and the server validated two
+  refusals no user could produce. The dataset builder now has a **Judge rubric** block beside the
+  examples: it opens with whatever the dataset is actually scored against (the built-in one, when it
+  has none of its own), edits as a draft and saves in one command, because a half-saved rubric is a
+  scoring standard nobody chose. A criterion's id is fixed once it exists — it is what stored
+  verdicts are keyed by.
 - **The sidebar footer names the person signed in and the plan they are on.** It was three
   literals — the avatar letter `J`, the name `jaroku`, and a `Free` chip — shown to every user
   whatever their account and whatever their plan, while the product held a correct copy of both
