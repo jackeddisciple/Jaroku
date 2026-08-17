@@ -84,6 +84,15 @@ export interface AgentSummary {
    * answerable without N round trips. `url` is null until the host has one — never a guess.
    */
   deployment?: { id: string; status: DeployStatus; url: string | null } | null;
+  /**
+   * When somebody put this agent away, or null.
+   *
+   * ARCHIVED AGENTS ARE ON THE LIST AND FILTERED OUT OF IT, which is deliberate: the sidebar's
+   * Archived tab has to be able to show them and offer Restore, and every other consumer looks an
+   * agent up by id — including the one that is selected, which should keep rendering if it happens
+   * to be archived. Only the lists that OFFER work exclude them.
+   */
+  archived_at?: string | null;
 }
 
 export interface GenUsage {
@@ -1463,6 +1472,19 @@ export type ClientCommand =
   | { cmd: "planAgent"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; revisePlanId?: string; threadId?: string }
   | { cmd: "discardPlan"; planId: string }
   | { cmd: "listAgents" }
+  /**
+   * The agent lifecycle: put one away, bring it back, give it a name a person chose.
+   *
+   * ARCHIVE RATHER THAN DELETE, for the reason threads are archived: an agent's versions, runs,
+   * traces and costs are the record every past comparison points at. Nothing else moves — its
+   * threads keep pointing at it, because an archived agent is not a deleted one.
+   *
+   * The rename changes the DISPLAY NAME and never the slug: the slug is the directory on disk, the
+   * key datasets and eval runs hold, and the id every past run row names.
+   */
+  | { cmd: "archiveAgent"; agentId: string }
+  | { cmd: "restoreAgent"; agentId: string }
+  | { cmd: "renameAgent"; agentId: string; name: string }
   | { cmd: "edit"; agentId: string; instruction: string; threadId?: string }
   | { cmd: "applyEdit"; proposalId: string }
   | { cmd: "undoEdit"; agentId: string }

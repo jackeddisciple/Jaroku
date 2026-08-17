@@ -41,6 +41,14 @@ export interface Agent {
   id: string;
   slug: string;
   display_name: string | null;
+  /**
+   * Whether the name was chosen by a person rather than read off disk.
+   *
+   * The same field, for the same reason, as `threads.title_is_custom`: `upsertFromDisk` overwrites
+   * `display_name` from `jaroku.json` on every reconciliation, so a rename with nothing to stop it
+   * survives until the next sync. This is what stops it.
+   */
+  display_name_is_custom: boolean;
   description: string | null;
   connectors: string[];
   mcp_tools: string[];
@@ -49,6 +57,15 @@ export interface Agent {
   hand_written: boolean;
   current_version: number;
   creation_cost: number | null;
+  /**
+   * When somebody put this agent away, or null.
+   *
+   * DELIBERATELY NOT `deleted_at`, which means something else and is written by something else — the
+   * disk sweep's mark for "the directory this row mirrored has gone", cleared by `upsertFromDisk`
+   * every time it comes back. An archive stored there would be undone by the next boot that
+   * materialised the project.
+   */
+  archived_at: string | null;
   created_at: string;
 }
 
@@ -102,8 +119,9 @@ export interface AgentOnDisk {
   created_at?: string | null;
 }
 
-const COLUMNS = `id, slug, display_name, description, connectors, mcp_tools, required_env,
-                 default_provider, hand_written, current_version, creation_cost, created_at`;
+const COLUMNS = `id, slug, display_name, display_name_is_custom, description, connectors,
+                 mcp_tools, required_env, default_provider, hand_written, current_version,
+                 creation_cost, archived_at, created_at`;
 
 export class AgentRepository {
   constructor(private db: Db) {}
@@ -125,19 +143,86 @@ export class AgentRepository {
       mcp_tools: arr(row["mcp_tools"]),
       required_env: arr(row["required_env"]),
       hand_written: asBool(row["hand_written"]),
+      display_name_is_custom: asBool(row["display_name_is_custom"]),
       current_version: asInt(row["current_version"], 1),
+      archived_at: (row["archived_at"] as string | null) ?? null,
     };
   }
 
-  /** Newest first, hand-written reference agents last — the order the sidebar renders. */
-  async list(ctx: TenantContext): Promise<Agent[]> {
+  /**
+   * Newest first, hand-written reference agents last — the order the sidebar renders.
+   *
+   * ARCHIVED ROWS ARE EXCLUDED BY DEFAULT, and that default is what makes archiving mean anything:
+   * this one method feeds the sidebar, the agent snapshot, the eval picker, the composer's target
+   * list, the deploy form and every sweep. An `includeArchived` caller is the Archived view and the
+   * lifecycle commands, which are the only things that have a reason to see what was put away.
+   *
+   * `deleted_at` is a different exclusion and stays unconditional — see `archived_at`'s own note.
+   * A swept row is a mirror of a directory that is gone; nothing asks to see those.
+   */
+  async list(ctx: TenantContext, opts?: { includeArchived?: boolean }): Promise<Agent[]> {
+    const archived = opts?.includeArchived ? "" : "AND archived_at IS NULL";
     const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT ${COLUMNS} FROM agents
-        WHERE workspace_id = ? AND deleted_at IS NULL
+        WHERE workspace_id = ? AND deleted_at IS NULL ${archived}
         ORDER BY hand_written ASC, created_at DESC`,
       [ctx.workspaceId],
     );
     return rows.map((r) => this.hydrate(r));
+  }
+
+  /**
+   * Put an agent away, or bring it back. Returns false when there was no such live agent.
+   *
+   * NOTHING ELSE MOVES. Its versions, runs, traces, evals, deployments, GitHub link and threads are
+   * all exactly where they were, and its threads keep pointing at it — an archived agent is not a
+   * deleted one, so §3.2's `(deleted)` chip is not what this produces. That is the same promise
+   * archiving a thread makes, and it is why this is reversible in one call.
+   *
+   * WHY IT IS NOT A DELETE. The audit that asked for this asked for a delete, and archive is the
+   * honest version: an agent's versions and runs are the record every past comparison, every trace
+   * and every invoice line points at, and a product that destroyed them because somebody tidied a
+   * sidebar would be the one thing this codebase is most careful not to be. The row is small; what
+   * hangs off it is not.
+   */
+  async setArchived(ctx: TenantContext, id: string, archived: boolean): Promise<boolean> {
+    const res = await this.q(ctx).run(
+      `UPDATE agents SET archived_at = ?
+        WHERE workspace_id = ? AND id = ? AND deleted_at IS NULL
+          AND (archived_at IS NULL) = ?`,
+      [
+        archived ? new Date().toISOString() : null,
+        ctx.workspaceId,
+        id,
+        // The row must currently be in the OTHER state, so a second click is a no-op rather than a
+        // re-stamp: archiving twice would move `archived_at` forward and make "when was this put
+        // away" a lie about the second press.
+        archived ? 1 : 0,
+      ],
+    );
+    return res.changes > 0;
+  }
+
+  /**
+   * Rename an agent, for a person to read. Returns false when there was no such live agent.
+   *
+   * THE SLUG DOES NOT MOVE, and that is the whole design of this. `slug` is an identity: it is the
+   * directory on disk, the key `datasets.agent_id` and `eval_runs.agent_id` hold, the working
+   * directory of every job's subprocess, and the id every past run row names. A rename that changed
+   * it would orphan all of that to change a label. `display_name` is the label, it is what the
+   * sidebar and every thread row render, and it is the only thing this touches.
+   *
+   * IT SETS THE CUSTOM FLAG IN THE SAME STATEMENT. `upsertFromDisk` overwrites `display_name` from
+   * `jaroku.json` on every reconciliation, so a rename without the flag survives until the next
+   * sync — exactly the trap `threads.title` was in, and the flag is the same answer.
+   */
+  async rename(ctx: TenantContext, id: string, displayName: string): Promise<boolean> {
+    const res = await this.q(ctx).run(
+      `UPDATE agents SET display_name = ?, display_name_is_custom = ?
+        WHERE workspace_id = ? AND id = ? AND deleted_at IS NULL`,
+      [displayName, 1, ctx.workspaceId, id],
+    );
+    return res.changes > 0;
   }
 
   /**
@@ -229,7 +314,12 @@ export class AgentRepository {
          mcp_tools, required_env, default_provider, hand_written, creation_cost, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (workspace_id, slug) DO UPDATE SET
-         display_name = excluded.display_name,
+         -- A NAME A PERSON CHOSE SURVIVES THE SYNC. Without the CASE this column is overwritten
+         -- from jaroku.json on every reconciliation, so a rename lasts until the next boot that
+         -- materialises the project -- the trap threads.title was in, and display_name_is_custom
+         -- is the same answer title_is_custom was.
+         display_name = CASE WHEN agents.display_name_is_custom
+                             THEN agents.display_name ELSE excluded.display_name END,
          description = excluded.description,
          connectors = excluded.connectors,
          mcp_tools = excluded.mcp_tools,

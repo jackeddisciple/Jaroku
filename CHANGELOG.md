@@ -75,6 +75,21 @@ there. What is new is that the product's own surface reaches them.
   order, with each provider's display name resolved server-side — which also removed the two
   disagreeing copies of that mapping in the browser, the reason one provider was "Gemini" where you
   picked it and `google` where you configured it. `test:pricing` asserts what keeps it safe.
+- **An agent has a lifecycle.** The product's central object had no removal, no archive and no rename
+  in any layer — no command, no route, no repository method, no affordance — while datasets, examples,
+  MCP servers, threads, deployments, links, secrets, invitations and members all had one. The only way
+  an agent left was the disk sweep, which refuses a row with a published version: every agent the
+  product builds has one, so none could be removed short of SQL. Meanwhile the Threads specification
+  had a section about what happens when an agent is deleted, and declined to build a thread-delete
+  confirmation on the grounds that "that confirmation applies to Agents only" — a safety net that did
+  not exist.
+  Now: `archiveAgent` / `restoreAgent` / `renameAgent` at `agent:write`, migration 047, an **Archived**
+  tab in the sidebar, and rename in place on the row. Archived rather than deleted, because the
+  versions, runs and costs hanging off an agent are the record; archiving removes it from the lists
+  that offer work and from nothing else, its threads stay attached, and a deployed agent is refused
+  because it is still serving. The rename changes `display_name` and never the slug — and sets
+  `display_name_is_custom`, so the next disk sync cannot overwrite it, which is the trap
+  `threads.title` was in and the same fix.
 - **Pull-request checks can be switched on.** Four modules, two migrations, a webhook branch and
   four passing suites sat behind one row in `agent_ci_config` that nothing in the product could
   write: `setConfig` had no caller, so `ci_dataset_id` was always null and every delivery logged "no

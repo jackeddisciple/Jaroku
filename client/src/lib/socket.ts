@@ -793,6 +793,26 @@ export function sendListAgents(): void {
   send({ cmd: "listAgents" });
 }
 
+/**
+ * The agent lifecycle — archive, restore, rename.
+ *
+ * WHAT THESE REPLACE. Nothing: the product's central object had no lifecycle operation of any kind,
+ * in any layer, while every other resource in it had one. An agent created by mistake stayed in the
+ * sidebar, the filter counts, the eval picker and the composer's target list forever.
+ *
+ * Each answers with a refreshed agent snapshot rather than a per-command event, which is why there
+ * is nothing here to handle on the way back: the list every surface renders IS the answer.
+ */
+export function sendArchiveAgent(agentId: string): void {
+  send({ cmd: "archiveAgent", agentId });
+}
+export function sendRestoreAgent(agentId: string): void {
+  send({ cmd: "restoreAgent", agentId });
+}
+export function sendRenameAgent(agentId: string, name: string): void {
+  send({ cmd: "renameAgent", agentId, name });
+}
+
 // --- fix loop -------------------------------------------------------------
 
 export function sendEdit(agentId: string, instruction: string): void {

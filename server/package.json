@@ -23,6 +23,7 @@
     "test:thread-status": "tsx src/threadStatus.test.ts",
     "test:thread-channel": "tsx src/threadChannel.test.ts",
     "test:thread-binding": "tsx src/threadBinding.test.ts",
+    "test:agent-lifecycle": "tsx src/agentLifecycle.test.ts",
     "test:thread-title": "tsx src/threadTitle.test.ts",
     "test:thread-archive": "tsx src/threadArchive.test.ts",
     "test:rls": "tsx src/db/rls.test.ts",

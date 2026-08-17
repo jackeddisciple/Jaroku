@@ -203,6 +203,19 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   loadAgentGraph: "agent:read",
   explain: "agent:read",
 
+  /**
+   * The agent lifecycle: archive, restore, rename.
+   *
+   * `agent:write`, beside generate and edit, and that is the decision. Archiving is reversible and
+   * destroys nothing — the versions, runs, traces and threads all stay exactly where they were — so
+   * it is the same authority as editing the agent, not the workspace-shaped authority that deleting
+   * one would need. It is also the same call the thread commands make for the same reason: a member
+   * who may build an agent may put one away, and it is one click back either way.
+   */
+  archiveAgent: "agent:write",
+  restoreAgent: "agent:write",
+  renameAgent: "agent:write",
+
   // build
   planAgent: "agent:write",
   discardPlan: "agent:write",

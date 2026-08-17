@@ -113,6 +113,7 @@ import { metrics, routeLabel, statusClass } from "./obs/metrics.ts";
 import { McpStore } from "./mcpStore.ts";
 import {
   ThreadStore,
+  TITLE_MAX,
   type Thread,
   type ThreadItem,
   type ThreadItemKind,
@@ -1298,6 +1299,90 @@ async function syncAgents(): Promise<void> {
     },
   );
 }
+/**
+ * Put an agent away, or bring it back — PS-01's missing lifecycle.
+ *
+ * WHY ARCHIVE AND NOT DELETE. An agent's versions, runs, traces, evals and costs are the record every
+ * past comparison, every invoice line and every thread points at. A delete that took them would make
+ * "tidy the sidebar" and "destroy the history" the same button; a delete that left them would leave
+ * rows pointing at an agent that no longer exists, which is the state §3.2's `(deleted)` chip exists
+ * to render and not one to manufacture on purpose. So this is the same answer threads got, for the
+ * same reasons, and it is reversible in one command.
+ *
+ * NOTHING ELSE MOVES, and that is what makes it safe: no version is dropped, no run is closed, no
+ * deployment is torn down, no thread is detached. An archived agent simply stops appearing in the
+ * lists that offer work — the sidebar, the eval picker, the composer's targets, the deploy form —
+ * because `AgentRepository.list` excludes it by default.
+ *
+ * A DEPLOYED AGENT IS REFUSED. Archiving one would take it out of every list while it is still
+ * serving traffic in somebody's Railway account, which is precisely the "forgetting a record does not
+ * stop the thing it described" trap the deploy panel is careful about. Cancel or forget the
+ * deployment first — the refusal says so.
+ */
+async function setAgentArchived(ctx: TenantContext, agentId: string, archived: boolean): Promise<void> {
+  const slug = String(agentId ?? "");
+  // `includeArchived`, because restoring one has to be able to find it. `bySlug` cannot serve here:
+  // it is the read every other command uses and it must keep meaning "a live agent".
+  const agent = (await agentRepo.list(ctx, { includeArchived: true })).find((a) => a.slug === slug);
+  if (!agent) {
+    relay.broadcastLog(ctx, "stderr", `agents: no agent called ${slug} in this workspace`);
+    return;
+  }
+  if (archived) {
+    const live = (await deployStore.currentByAgent(ctx)).get(agent.slug);
+    if (live && live.status === "live") {
+      relay.broadcastLog(
+        ctx,
+        "stderr",
+        `agents: ${slug} is still serving at ${live.url ?? "a public URL"} — forget or cancel the deployment first`,
+      );
+      return;
+    }
+  }
+  if (!(await agentRepo.setArchived(ctx, agent.id, archived))) {
+    // The row was already in the state that was asked for. Not an error — two tabs, or a second
+    // click — and saying nothing is right, because the snapshot below already says the truth.
+    await relay.broadcastAgents();
+    return;
+  }
+  console.log(`[agents] ${slug} ${archived ? "archived" : "restored"}`);
+  await relay.broadcastAgents();
+  // The threads of this agent render its name and its chip, so their snapshot is stale the moment
+  // this changes. Coalesced on the same timer every other thread-affecting transition uses.
+  scheduleThreadBroadcast(ctx);
+}
+
+/**
+ * Give an agent a name a person chose.
+ *
+ * THE SLUG DOES NOT MOVE. It is the directory on disk, the key `datasets.agent_id` and
+ * `eval_runs.agent_id` hold, the working directory of every job's subprocess, and the id every past
+ * run row names — a rename that changed it would orphan all of that to change a label. What changes
+ * is `display_name`, which is what the sidebar and every thread row actually render.
+ *
+ * Bounded by the same `TITLE_MAX` a thread title is, and for the same reason: it is rendered in a
+ * sidebar row, a chip and a snapshot, and one definition of "a storable name" beats three.
+ */
+async function renameAgent(ctx: TenantContext, agentId: string, name: unknown): Promise<void> {
+  const slug = String(agentId ?? "");
+  const next = typeof name === "string" ? name.trim().slice(0, TITLE_MAX).trim() : "";
+  if (!next) {
+    relay.broadcastLog(ctx, "stderr", "agents: an agent needs a name — Escape cancels the edit");
+    return;
+  }
+  const agent = (await agentRepo.list(ctx, { includeArchived: true })).find((a) => a.slug === slug);
+  if (!agent) {
+    relay.broadcastLog(ctx, "stderr", `agents: no agent called ${slug} in this workspace`);
+    return;
+  }
+  await agentRepo.rename(ctx, agent.id, next);
+  console.log(`[agents] ${slug} renamed to "${next}"`);
+  await relay.broadcastAgents();
+  // Every thread of this agent renders the name. BUG-17 was exactly this going stale: a rename left
+  // every thread row showing the old name beside a sidebar showing the new one.
+  scheduleThreadBroadcast(ctx);
+}
+
 await syncAgents();
 await importAgentFiles(serverContext());
 
@@ -2212,7 +2297,11 @@ const relay = new WsRelay({
     // published agent and the disk answers for one somebody dropped in by hand.
     const edits = await agentRepo.editCounts(ctx);
     const onDisk = new Map(scanAgentDirectory(RUNTIME_DIR).map((a) => [a.agent_id, a]));
-    return (await agentRepo.list(ctx)).map((a) => {
+    // ARCHIVED AGENTS ARE INCLUDED AND FLAGGED. The sidebar's Archived tab has to be able to show
+    // them and offer Restore, and every other consumer of this snapshot looks an agent up by id —
+    // including whichever one is selected, which must keep rendering if it happens to be archived.
+    // What excludes them is the LIST that offers work, in the browser, at one filter point.
+    return (await agentRepo.list(ctx, { includeArchived: true })).map((a) => {
       const d = deployed.get(a.slug);
       return {
         agent_id: a.slug,
@@ -2227,6 +2316,7 @@ const relay = new WsRelay({
         runnable: onDisk.get(a.slug)?.runnable ?? false,
         edit_count: edits.get(a.id) ?? 0,
         deployment: d ? { id: d.id, status: d.status, url: d.url } : null,
+        archived_at: a.archived_at,
       };
     });
   },
@@ -2345,6 +2435,9 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (cmd.cmd === "cancelRun") void cancelRun(ctx, cmd.runId);
     else if (cmd.cmd === "branchRun") void branchRun(ctx, cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState);
     else if (cmd.cmd === "explain") explainAgent(ctx, cmd);
+    else if (cmd.cmd === "archiveAgent") void setAgentArchived(ctx, cmd.agentId, true);
+    else if (cmd.cmd === "restoreAgent") void setAgentArchived(ctx, cmd.agentId, false);
+    else if (cmd.cmd === "renameAgent") void renameAgent(ctx, cmd.agentId, cmd.name);
     else if (MCP_COMMAND_NAMES.has(cmd.cmd)) void handleMcpCommand(ctx, cmd as McpCommand);
     else if (DEPLOY_COMMAND_NAMES.has(cmd.cmd)) void handleDeployCommand(ctx, cmd as DeployChannelCommand);
     else if (GITHUB_COMMAND_NAMES.has(cmd.cmd)) void handleGithubCommand(ctx, cmd as GithubCommand);

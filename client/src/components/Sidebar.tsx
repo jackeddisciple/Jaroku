@@ -11,7 +11,7 @@ import { relTime } from "../lib/format.ts";
 import { agentStatus, type AgentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark, ConnectorDot } from "../lib/icons.tsx";
 import { selectAgent, selectRun } from "../lib/selection.ts";
-import { sendLoadRun } from "../lib/socket.ts";
+import { sendArchiveAgent, sendLoadRun, sendRenameAgent, sendRestoreAgent } from "../lib/socket.ts";
 import { ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { useUiStore, type NavDestination } from "../store/uiStore.ts";
 import { useGithubStore } from "../store/githubStore.ts";
@@ -24,7 +24,7 @@ import { ThreadGlyph } from "./ThreadGlyph.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import {
   ActivityIcon, ChevronRightIcon, DatabaseIcon, GitForkIcon, GithubIcon, GlobeIcon, HashIcon,
-  LoaderIcon, PauseIcon, PlusIcon, SearchIcon, SettingsIcon, SparklesIcon, XIcon,
+  LoaderIcon, PauseIcon, PencilIcon, PlusIcon, SearchIcon, SettingsIcon, SparklesIcon, XIcon,
 } from "./panelIcons.tsx";
 
 /**
@@ -40,7 +40,10 @@ const NAV_DESTINATIONS: { id: NavDestination; label: string; icon: (p: { size?: 
   { id: "activity", label: "Activity", icon: ActivityIcon },
 ];
 
-type Filter = "all" | "running" | "deployed" | "synced" | "drafts";
+// `archived` is the sixth, and it is a filter rather than a section for the reason §3.4 gives about
+// threads: an archived thing has LEFT the default list, and a list that showed both would make
+// "archived" a decoration instead of a state. It is last, after the states that describe live work.
+type Filter = "all" | "running" | "deployed" | "synced" | "drafts" | "archived";
 
 // A run's outcome, in the same marks the rest of the app uses for the same facts.
 // It was font characters — a pulsing ●, a ✗ and a ✓ — which sat on the text baseline at
@@ -119,6 +122,76 @@ function RunRow({ run }: { run: RunSummary }) {
   );
 }
 
+/**
+ * The row's lifecycle actions — PS-01's missing affordance.
+ *
+ * THERE WAS NO WAY TO REMOVE OR RENAME AN AGENT AT ALL. The row was a single button with no context
+ * menu and no overflow, and there was no `deleteAgent`, `renameAgent` or `archiveAgent` anywhere in
+ * the product — so an agent created by mistake stayed in this list, in the filter counts, in the eval
+ * picker and in the composer's targets forever, while every other resource in the product had a
+ * lifecycle.
+ *
+ * ARCHIVE, NOT DELETE, which is the answer threads got and for the same reasons: the versions, runs,
+ * traces and costs hanging off an agent are the record, and "tidy the sidebar" must not be the same
+ * button as "destroy the history". One press back either way.
+ *
+ * ON HOVER AND ON KEYBOARD FOCUS, not always. Two controls on every row of a dense column would
+ * out-weigh the agent's own name; `group-focus-within` is what keeps them reachable without a mouse,
+ * which is the trap a hover-only affordance sets.
+ */
+function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const archived = Boolean(agent.archived_at);
+
+  if (archived) {
+    return (
+      <button
+        onClick={() => sendRestoreAgent(agent.agent_id)}
+        title="Bring this agent back"
+        className="shrink-0 rounded-control px-1.5 py-0.5 text-[11px] text-muted transition-colors hover:bg-active hover:text-ink"
+      >
+        Restore
+      </button>
+    );
+  }
+
+  return (
+    <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+      <button
+        onClick={onRename}
+        title="Rename (double-click the row)"
+        className="rounded-control p-1 text-faint transition-colors hover:bg-active hover:text-ink"
+      >
+        <PencilIcon size={ICON.xs} />
+      </button>
+      {confirming ? (
+        <button
+          autoFocus
+          onBlur={() => setConfirming(false)}
+          onClick={() => {
+            sendArchiveAgent(agent.agent_id);
+            setConfirming(false);
+          }}
+          className="rounded-control border border-hair px-1.5 py-0.5 text-[11px] text-ink"
+        >
+          Archive?
+        </button>
+      ) : (
+        <button
+          onClick={() => setConfirming(true)}
+          // The tooltip is the promise. Archiving is reversible and destroys nothing, and somebody
+          // reaching for a control on the product's central object is entitled to know that before
+          // they press it rather than after.
+          title="Archive — nothing is deleted; its versions, runs and threads stay"
+          className="rounded-control p-1 text-faint transition-colors hover:bg-active hover:text-ink"
+        >
+          <XIcon size={ICON.xs} />
+        </button>
+      )}
+    </span>
+  );
+}
+
 function AgentRow({ agent }: { agent: AgentSummary }) {
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const runs = useTraceStore((s) => s.runs);
@@ -127,6 +200,9 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
   const github = useGithubStore((s) => s.views[agent.agent_id]);
   const active = agent.agent_id === activeAgentId;
   const status = agentStatus(agent.agent_id, runs, agent.deployment);
+  const archived = Boolean(agent.archived_at);
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(agent.name);
 
   // Newest run for this agent → last-active timestamp.
   let last: RunSummary | undefined;
@@ -134,19 +210,57 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
     if (r.agent_id === agent.agent_id && (!last || r.started_at > last.started_at)) last = r;
   }
 
+  const commit = (): void => {
+    const next = draft.trim();
+    // SENT EVEN WHEN IT MATCHES the name already shown, because committing the editor is a CHOICE:
+    // the server's rename also sets the custom flag that stops the next disk sync overwriting it, so
+    // "I want this name" and "this name happens to be what the file says" are different states. That
+    // is the same mistake §5's thread rename made and the same fix.
+    if (next) sendRenameAgent(agent.agent_id, next);
+    setRenaming(false);
+  };
+
   return (
-    <button
-      onClick={() => selectAgent(agent.agent_id)}
-      className={`relative w-full text-left px-4 py-2.5 transition-colors ${active ? "bg-active" : "hover:bg-active/40"}`}
+    // A DIV WRAPPING TWO BUTTONS rather than one button wrapping everything, which is what it was:
+    // a control inside a control is invalid markup and un-clickable in practice, so the row's own
+    // selection and its lifecycle actions have to be siblings.
+    <div
+      className={`group relative transition-colors ${active ? "bg-active" : "hover:bg-active/40"} ${
+        archived ? "opacity-60" : ""
+      }`}
+      onDoubleClick={() => {
+        if (archived) return;
+        setDraft(agent.name);
+        setRenaming(true);
+      }}
     >
       {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-ink" />}
+      <div className="flex items-start gap-1 px-4 py-2.5">
+        <button onClick={() => selectAgent(agent.agent_id)} className="min-w-0 flex-1 text-left">
       <div className="flex items-center gap-2">
         {agent.runnable ? (
           <AgentDot status={status} />
         ) : (
           <StatusDot state="error" icon={XIcon} title="missing agent.py" />
         )}
-        <Truncate className="text-ink" title={agent.name}>{agent.name}</Truncate>
+        {renaming ? (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit();
+              if (e.key === "Escape") setRenaming(false);
+            }}
+            // The click that lands in the field must not also select the agent underneath it.
+            onClick={(e) => e.stopPropagation()}
+            className="min-w-0 flex-1 rounded-control bg-void px-1.5 py-0.5 text-[13px] text-ink outline-none"
+          />
+        ) : (
+          <Truncate className="text-ink" title={agent.name}>{agent.name}</Truncate>
+        )}
+        {archived && <Chip size="sm" tone="faint" variant="bare">archived</Chip>}
         {github?.badge && (
           <span
             className={`ml-auto shrink-0 font-mono text-[10px] tabular-nums ${
@@ -198,7 +312,16 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
           </Chip>
         )}
       </div>
-    </button>
+        </button>
+        <AgentActions
+          agent={agent}
+          onRename={() => {
+            setDraft(agent.name);
+            setRenaming(true);
+          }}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -324,8 +447,15 @@ export function Sidebar() {
   // keyed by workspace — see uiStore.
   const pinnedIds = useUiStore((s) => s.pinnedAgents);
 
-  const counts = { running: 0, deployed: 0, synced: 0, drafts: 0 };
+  const counts = { running: 0, deployed: 0, synced: 0, drafts: 0, archived: 0 };
   for (const a of agents) {
+    // COUNTED FIRST AND THEN SKIPPED. An archived agent is not running, not a draft and not
+    // deployed as far as this column is concerned — it is not offering work at all — so counting it
+    // under a live state would put a number beside a tab whose list does not contain it.
+    if (a.archived_at) {
+      counts.archived++;
+      continue;
+    }
     const st = agentStatus(a.agent_id, runs, a.deployment);
     if (st === "running") counts.running++;
     else if (st === "draft") counts.drafts++;
@@ -342,6 +472,10 @@ export function Sidebar() {
   const q = query.trim().toLowerCase();
   const visible = agents.filter((a) => {
     if (q && !(`${a.name} ${a.agent_id}`.toLowerCase().includes(q))) return false;
+    // ARCHIVED IS ITS OWN LIST AND IS IN NO OTHER, which is what makes archiving mean something:
+    // §3.4's rule for threads, applied to the object threads hang off.
+    if (filter === "archived") return Boolean(a.archived_at);
+    if (a.archived_at) return false;
     if (filter === "all") return true;
     const st = agentStatus(a.agent_id, runs, a.deployment);
     if (filter === "running") return st === "running";
@@ -357,7 +491,9 @@ export function Sidebar() {
   // is gone would be a sidebar entry that cannot be selected.
   const pinned = pinnedIds
     .map((id) => agents.find((a) => a.agent_id === id))
-    .filter((a): a is AgentSummary => a !== undefined);
+    // ...and not the ones that have been put away. A pinned agent that is archived would sit at the
+    // top of the column it was just removed from, which is the one place it must not be.
+    .filter((a): a is AgentSummary => a !== undefined && !a.archived_at);
 
   const runList = orderedRuns(runs);
   const tab = (id: Filter, label: string, count?: number) => (
@@ -410,6 +546,10 @@ export function Sidebar() {
         {tab("deployed", "Deployed", counts.deployed)}
         {tab("synced", "Synced", counts.synced)}
         {tab("drafts", "Drafts", counts.drafts)}
+        {/* Only when there is something in it. An Archived tab on a workspace that has never
+            archived anything is a tab that leads to an empty state, which is the same noise an empty
+            section is in the Threads view. */}
+        {counts.archived > 0 && tab("archived", "Archived", counts.archived)}
       </div>
 
       {/* PINNED, above the rest of the list — §2's order for this column.

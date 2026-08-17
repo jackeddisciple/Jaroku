@@ -530,6 +530,37 @@ on Claude, or on GPT.
 dependency-free tools, a custom `notes` state field, a system prompt as editable markdown. It
 exists so a fresh checkout has something to run before anything has been generated.
 
+### Putting an agent away, and giving it a name
+
+**Archived, never deleted** — the answer threads got, for the same reasons. An agent's versions,
+runs, traces, evals and costs are the record every past comparison and every invoice line points at,
+so "tidy the sidebar" must not be the same button as "destroy the history". Archiving takes an agent
+out of the lists that offer work — the sidebar, the eval picker, the composer's targets, the deploy
+form, every sweep — and out of nothing else: the row still resolves by id, so nothing pointing at it
+dangles, and its threads stay attached rather than rendering `(deleted)`. It is one press back, from
+the sidebar's **Archived** tab, which only appears when there is something in it.
+
+A **deployed** agent is refused: archiving one would take it out of every list while it is still
+serving traffic in your hosting account, which is the same trap "forgetting a deployment does not
+stop the thing it described" is careful about. Cancel or forget the deployment first.
+
+**A rename changes the name, never the slug.** The slug is the identity: the directory on disk, the
+key `datasets.agent_id` and `eval_runs.agent_id` hold, the working directory of every job's
+subprocess, and the id every past run row names. `display_name` is the label the sidebar and every
+thread row render, and it is the only thing a rename touches — and it sets
+`display_name_is_custom`, which is what stops the next disk reconciliation overwriting it from
+`jaroku.json`. That is exactly the trap `threads.title` was in, solved by the column
+`title_is_custom` already established; an agent nobody has renamed still follows the file, so
+editing `jaroku.json` by hand is still how you rename by hand.
+
+None of this existed until v0.3.0. There was no `deleteAgent`, `renameAgent` or `archiveAgent`
+anywhere — no command, no route, no repository method, no affordance — while every other resource in
+the product had a lifecycle, and the Threads specification devoted a section to what happens when an
+agent is deleted and used that deletion as the reason not to build a thread-delete confirmation. The
+only way an agent left was the disk sweep, which refuses to touch a row with a published version:
+every agent the product actually builds has one, so none of them could be removed by any means short
+of SQL.
+
 ---
 
 ## The Node server
@@ -1755,7 +1786,8 @@ frozen event schema, and everything added since rides beside it.
 
 **Client → server**
 
-`run` · `loadRun` · `listAgents` · `loadAgentFiles` · `loadAgentGraph` · `planAgent` ·
+`run` · `loadRun` · `listAgents` · `archiveAgent` · `restoreAgent` · `renameAgent` ·
+`loadAgentFiles` · `loadAgentGraph` · `planAgent` ·
 `discardPlan` · `generate` · `edit` · `applyEdit` · `undoEdit` · `discardEdit` · `pauseRun` ·
 `resumeRun` · `cancelRun` · `branchRun` · `explain` · and the eval set: `createDataset` · `renameDataset` ·
 `deleteDataset` · `listDatasets` · `loadDataset` · `addExample` · `updateExample` ·
@@ -2159,6 +2191,7 @@ npm run test:threads         # what a row promises: one agent, many sessions, an
 npm run test:thread-status   # §3.3's precedence, one fixture per rung, and the collision count
 npm run test:thread-channel   # two sockets in two workspaces; a read answers one, a write tells all
 npm run test:thread-binding   # ownership from the items, liveness from the owner, through the app
+npm run test:agent-lifecycle  # archive leaves the pickers and nothing else; a rename survives the sync
 npm run test:thread-title     # the cut: one line, at a word boundary, saying it was cut
 npm run test:thread-archive   # the ABSENCE: 208 source files audited for a path that deletes one
 ```

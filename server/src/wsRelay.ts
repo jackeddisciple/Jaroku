@@ -72,6 +72,31 @@ export type PlanAgentCommand = {
 };
 export type DiscardPlanCommand = { cmd: "discardPlan"; planId: string };
 export type ListAgentsCommand = { cmd: "listAgents" };
+
+/**
+ * The agent lifecycle: put one away, bring it back, give it a name a person chose.
+ *
+ * WHAT THESE REPLACE. Nothing. Until now the product's central object had no lifecycle operation of
+ * any kind — no delete, no archive, no rename, in any layer — while every other resource in it had
+ * one, and the Threads specification devoted a section to what happens when an agent is deleted and
+ * used that deletion as the reason not to build a thread-delete confirmation.
+ *
+ * ARCHIVE RATHER THAN DELETE, for the reason threads are archived: an agent's versions, runs, traces
+ * and costs are the record every past comparison points at, and destroying them because somebody
+ * tidied a sidebar is not a trade this product makes. Reversible in one command, and nothing else
+ * moves — the threads keep pointing at it, because an archived agent is not a deleted one.
+ *
+ * `agentId` IS THE SLUG, like every other agent-addressed command on this socket. The rename changes
+ * `display_name` and never the slug: the slug is the directory on disk, the key datasets and eval
+ * runs hold, and the id every past run row names.
+ */
+export type ArchiveAgentCommand = { cmd: "archiveAgent"; agentId: string };
+export type RestoreAgentCommand = { cmd: "restoreAgent"; agentId: string };
+export type RenameAgentCommand = { cmd: "renameAgent"; agentId: string; name: string };
+
+export type AgentCommand = ArchiveAgentCommand | RestoreAgentCommand | RenameAgentCommand;
+
+const AGENT_COMMANDS = new Set(["archiveAgent", "restoreAgent", "renameAgent"]);
 // The fix loop (doc §8 Week 4): every mutation is proposal -> explicit apply/undo.
 export type EditCommand = {
   cmd: "edit";
@@ -856,6 +881,7 @@ export type ClientCommand =
   | PlanAgentCommand
   | DiscardPlanCommand
   | ListAgentsCommand
+  | AgentCommand
   | EditCommand
   | ApplyEditCommand
   | UndoEditCommand
@@ -920,6 +946,7 @@ export type ForwardedCommand =
   | ApplyEditCommand
   | UndoEditCommand
   | DiscardEditCommand
+  | AgentCommand
   | PauseRunCommand
   | ResumeRunCommand
   | CancelRunCommand
@@ -1715,6 +1742,12 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // than left to the fallback: "log because that is right" and "log because nobody decided"
   // must not look the same.
   run: "log", loadRun: "log", listAgents: "log", loadAgentFiles: "log", loadAgentGraph: "log",
+  // The three lifecycle commands answer on `log` for the same reason `listAgents` does, and it is
+  // the same decision rather than the same oversight: their success IS the refreshed agent snapshot,
+  // which every client already applies, and the `agents` channel has no error shape a store would
+  // recognise. A refusal ("that name is too long", "no such agent") lands in the status bar, which is
+  // where every other refusal about the agent list already lands.
+  archiveAgent: "log", restoreAgent: "log", renameAgent: "log",
 
   planAgent: "gen", discardPlan: "gen", generate: "gen",
   edit: "edit", applyEdit: "edit", undoEdit: "edit", discardEdit: "edit",
@@ -2388,6 +2421,10 @@ export class WsRelay {
             // Shape-checked in the app, which owns the eval store and can answer with a
             // precise error on the "eval" channel rather than dropping the message here.
             void withContext((ctx) => this.onCommand?.(msg as EvalCommand, ctx));
+          } else if (AGENT_COMMANDS.has(msg.cmd)) {
+            // Forwarded, not answered here: the relay holds no agent repository and the answer is a
+            // re-broadcast agent snapshot, which the app owns.
+            void withContext((ctx) => this.onCommand?.(msg as AgentCommand, ctx));
           } else if (msg.cmd === "listAgents") {
             void this.answer(ws, async (ctx) => ({
               channel: "agents",

@@ -210,6 +210,10 @@ jobs:
           npm run test:thread-status
           npm run test:thread-channel
           npm run test:thread-binding
+          # The agent lifecycle, in the threads step rather than a new one: what it asserts is mostly
+          # about what archiving does NOT touch, and the thread still attached to an archived agent is
+          # the load-bearing half of that.
+          npm run test:agent-lifecycle
           npm run test:thread-title
           npm run test:thread-archive
 
