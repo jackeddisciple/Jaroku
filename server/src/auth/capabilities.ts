@@ -198,6 +198,8 @@ export function requireCapability(ctx: TenantContext, capability: Capability): v
 export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // reads
   loadRun: "agent:read",
+  // A bigger window on the same list the connect snapshot already sends. See LoadHistoryCommand.
+  loadHistory: "agent:read",
   listAgents: "agent:read",
   loadAgentFiles: "agent:read",
   loadAgentGraph: "agent:read",

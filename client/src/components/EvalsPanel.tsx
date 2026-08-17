@@ -30,8 +30,19 @@ export function EvalsPanel() {
   const selectEval = useEvalStore((s) => s.selectEval);
   const resultsByEval = useEvalStore((s) => s.resultsByEval);
   const progress = useEvalStore((s) => s.progress);
+  const evalsWindow = useEvalStore((s) => s.evalsWindow);
+  const evalsComplete = useEvalStore((s) => s.evalsComplete);
 
   const [mode, setMode] = useState<Mode>("dataset");
+  /**
+   * How many past evals the strip is showing.
+   *
+   * TWO CEILINGS USED TO SIT ON TOP OF EACH OTHER HERE, and both were unreachable: the server read
+   * the newest fifty with no way to ask past it, and this strip then rendered the first SIX of those
+   * — so the seventh-newest comparison could not be selected at all, in the panel whose entire job is
+   * comparing. This is the local half; the window below is the server's.
+   */
+  const [shown, setShown] = useState(6);
   const results = selectedEvalId ? resultsByEval[selectedEvalId] : undefined;
   const running = progress !== null && (progress.status === undefined || progress.scoring === true);
 
@@ -92,7 +103,7 @@ export function EvalsPanel() {
           {/* Past evals — a comparison keeps its value after the run that produced it. */}
           {evals.length > 1 && (
             <div className="flex flex-wrap items-center gap-1.5 pb-3">
-              {evals.slice(0, 6).map((e) => (
+              {evals.slice(0, shown).map((e) => (
                 <Chip
                   key={e.id}
                   onClick={() => selectEval(e.id)}
@@ -108,6 +119,20 @@ export function EvalsPanel() {
                   )}
                 </Chip>
               ))}
+              {/* OLDER COMPARISONS. It widens the strip first and then asks the server for a bigger
+                  window when the loaded ones run out, so one control answers "show me more" whichever
+                  of the two ceilings is the one in the way. It disappears when both are exhausted. */}
+              {(shown < evals.length || !evalsComplete) && (
+                <button
+                  onClick={() => {
+                    if (shown < evals.length) setShown(shown + 12);
+                    else sendListEvals(selectedDatasetId ?? undefined, Math.min(evalsWindow * 2, 500));
+                  }}
+                  className="rounded-control px-2 py-1 text-[11px] text-muted transition-colors hover:bg-active hover:text-ink"
+                >
+                  older…
+                </button>
+              )}
             </div>
           )}
 

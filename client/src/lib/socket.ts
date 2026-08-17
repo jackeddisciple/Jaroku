@@ -69,7 +69,7 @@ function dispatch(msg: ServerMessage): void {
   const s = useTraceStore.getState();
   switch (msg.channel) {
     case "history":
-      s.applyHistory(msg.runs);
+      s.applyHistory(msg.runs, { complete: msg.complete, window: msg.window });
       break;
     case "trace":
       s.applyEvent(msg.event);
@@ -198,7 +198,7 @@ function dispatch(msg: ServerMessage): void {
         e.patchProgress({ scoring: false });
         sendLoadEvalResults(msg.evalId);
       } else if (msg.type === "evalResults") e.setResults(msg.evalId, msg.results);
-      else if (msg.type === "evals") e.setEvals(msg.evals);
+      else if (msg.type === "evals") e.setEvals(msg.evals, { complete: msg.complete, window: msg.window });
       else if (msg.type === "rubric") e.setRubric(msg.rubric, msg.isDefault);
       else if (msg.type === "estimate") e.setEstimate(msg.estimate);
       else if (msg.type === "error") e.setError(msg.message);
@@ -721,6 +721,18 @@ export function sendRun(
   send({ cmd: "run", input: input || undefined, provider, model, agentId, threadId: activeThread() });
 }
 
+/**
+ * Ask for a LARGER WINDOW on the run history.
+ *
+ * The 51st-newest run used to be unreachable: `loadRun` needs an id, and the only source of ids was a
+ * list that stopped at fifty, while retention keeps traces for a month to a year by plan. A window
+ * rather than a page, so the channel keeps its full-snapshot discipline — `applyHistory` merges by
+ * run id, so a bigger window adds rows and can never assemble a list out of two moments.
+ */
+export function sendLoadHistory(limit: number): void {
+  send({ cmd: "loadHistory", limit });
+}
+
 export function sendLoadRun(runId: string): void {
   send({ cmd: "loadRun", runId });
 }
@@ -1131,8 +1143,15 @@ export function sendCancelEval(evalId: string): void {
 export function sendLoadEvalResults(evalId: string): void {
   send({ cmd: "loadEvalResults", evalId });
 }
-export function sendListEvals(datasetId?: string): void {
-  send({ cmd: "listEvals", datasetId });
+/**
+ * The eval history, optionally for one dataset, with a growing window.
+ *
+ * `limit` is the same growing-window idea `loadHistory` uses and for the same reason: this list was
+ * `ORDER BY started_at DESC LIMIT 50` with no way to ask past it, so the 51st-oldest comparison was
+ * unreachable — including from the dashboard whose whole job is to compare.
+ */
+export function sendListEvals(datasetId?: string, limit?: number): void {
+  send({ cmd: "listEvals", datasetId, ...(limit === undefined ? {} : { limit }) });
 }
 /** Ask what a real-provider eval would roughly cost, BEFORE committing to it. */
 export function sendEstimateEval(datasetId: string, agentId: string, targets: EvalTarget[]): void {

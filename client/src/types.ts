@@ -419,7 +419,7 @@ export type EvalMessage =
   | { channel: "eval"; type: "scored"; evalId: string; jobId: string; score: number | null; error?: string | null }
   | { channel: "eval"; type: "scoringFinished"; evalId: string; scored: number; unscored: number }
   | { channel: "eval"; type: "evalResults"; evalId: string; results: EvalResults }
-  | { channel: "eval"; type: "evals"; evals: EvalRunSummary[] }
+  | { channel: "eval"; type: "evals"; evals: EvalRunSummary[]; complete?: boolean; window?: number }
   | { channel: "eval"; type: "estimate"; estimate: EvalEstimate }
   | { channel: "eval"; type: "rubric"; datasetId: string; rubric: Rubric; isDefault: boolean }
   | { channel: "eval"; type: "error"; message: string; datasetId?: string };
@@ -1385,7 +1385,10 @@ export type ServerMessage =
   | SessionMessage
   | MemberMessage
   | ThreadMessage
-  | { channel: "history"; runs: RunSummary[] }
+  // `complete` and `window` are present only on the answer to `loadHistory` — a growing WINDOW
+  // rather than a cursor, so the channel keeps its full-snapshot discipline and `applyHistory` keeps
+  // merging by run id. A broadcast that carries neither leaves the flags alone.
+  | { channel: "history"; runs: RunSummary[]; complete?: boolean; window?: number }
   | { channel: "trace"; event: TraceEvent }
   | { channel: "runSteps"; runId: string; steps: Step[] }
   | { channel: "log"; level: "stderr" | "parseError"; text: string }
@@ -1466,6 +1469,14 @@ export type ClientCommand =
   // which is the continuity the backfill established.
   | { cmd: "run"; input?: string; provider?: string; model?: string; agentId?: string; threadId?: string }
   | { cmd: "loadRun"; runId: string }
+  /**
+   * A LARGER WINDOW ON THE RUN HISTORY — the paging this product had none of.
+   *
+   * The 51st-newest run used to be unreachable: `loadRun` needs an id, and the only source of ids was
+   * a list that stopped at fifty, while retention keeps traces for a month to a year. A window rather
+   * than a cursor, so the channel stays a full-snapshot channel and nothing has to merge two moments.
+   */
+  | { cmd: "loadHistory"; limit?: number }
   // `mcpTools` is per-TOOL (`"server/tool"` refs), never per-server: a connected server's
   // whole catalogue is never handed to an agent just because the server is connected.
   | { cmd: "generate"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; planId?: string; threadId?: string }
@@ -1514,7 +1525,7 @@ export type ClientCommand =
   | { cmd: "startEval"; datasetId: string; agentId: string; targets: EvalTarget[]; budgetUsd?: number | null; threadId?: string }
   | { cmd: "cancelEval"; evalId: string }
   | { cmd: "loadEvalResults"; evalId: string }
-  | { cmd: "listEvals"; datasetId?: string }
+  | { cmd: "listEvals"; datasetId?: string; limit?: number }
   | { cmd: "estimateEval"; datasetId: string; agentId: string; targets: EvalTarget[] }
   | { cmd: "loadRubric"; datasetId: string }
   | { cmd: "saveRubric"; datasetId: string; name?: string; criteria: RubricCriterion[] }

@@ -59,8 +59,17 @@ interface EvalState {
   /** The dataset's rubric, once loaded. */
   rubric: Rubric | null;
   rubricIsDefault: boolean;
+  /** The window the eval list was last read with, and whether it reached the end. */
+  evalsWindow: number;
+  evalsComplete: boolean;
 
-  setEvals: (evals: EvalRunSummary[]) => void;
+  /**
+   * The eval history, and how much of it has been asked for.
+   *
+   * A growing WINDOW rather than a page — see socket.sendListEvals. `evalsComplete` starts true
+   * because nothing has asked yet: a "load more" control on a list nobody has scrolled is noise.
+   */
+  setEvals: (evals: EvalRunSummary[], meta?: { complete?: boolean; window?: number }) => void;
   selectEval: (evalId: string | null) => void;
   setResults: (evalId: string, results: EvalResults) => void;
   setProgress: (p: EvalProgress | null) => void;
@@ -117,10 +126,14 @@ export const useEvalStore = create<EvalState>((set) => ({
   progress: null,
   rubric: null,
   rubricIsDefault: true,
+  evalsWindow: 50,
+  evalsComplete: true,
 
-  setEvals: (evals) =>
+  setEvals: (evals, meta) =>
     set((s) => ({
       evals,
+      ...(meta?.complete === undefined ? {} : { evalsComplete: meta.complete }),
+      ...(meta?.window === undefined ? {} : { evalsWindow: meta.window }),
       // Default to the newest eval so finishing one lands you on its results.
       selectedEvalId:
         s.selectedEvalId && evals.some((e) => e.id === s.selectedEvalId)

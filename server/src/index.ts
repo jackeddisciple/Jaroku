@@ -33,6 +33,7 @@ import { estimateEval, estimateRun } from "./evalEstimate.ts";
 import { fmtBytes, sweepEvalArtifacts, sweepOrphanedEvalArtifacts } from "./evalCleanup.ts";
 import {
   WsRelay,
+  HISTORY_WINDOW_MAX,
   type ForwardedCommand,
   type GenerateCommand,
   type McpCommand,
@@ -5725,10 +5726,20 @@ async function handleEvalCommand(ctx: TenantContext, cmd: ForwardedCommand): Pro
         return;
       }
       case "listEvals": {
-        const all = await evalStore.listEvalRuns(ctx);
+        // A GROWING WINDOW, like the run history's — see wsRelay's LoadHistoryCommand for why a
+        // window rather than a cursor. The default is the repository's fifty; the cap is the same
+        // one the history uses, because it is the same question about the same kind of list.
+        const asked = typeof cmd.limit === "number" && Number.isFinite(cmd.limit) ? Math.floor(cmd.limit) : 50;
+        const limit = Math.max(1, Math.min(asked, HISTORY_WINDOW_MAX));
+        const all = await evalStore.listEvalRuns(ctx, limit);
         relay.broadcastEval(ctx, {
           type: "evals",
           evals: cmd.datasetId ? all.filter((e) => e.dataset_id === cmd.datasetId) : all,
+          // Whether there is anything further back. Computed against the UNFILTERED window, because
+          // the filter is applied here rather than in the query: a dataset with two evals in a
+          // fifty-row window would otherwise report "complete" while older ones sit unread.
+          complete: all.length < limit,
+          window: limit,
         });
         return;
       }

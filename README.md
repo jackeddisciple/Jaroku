@@ -1760,7 +1760,7 @@ frozen event schema, and everything added since rides beside it.
 
 | Channel | Carries |
 |---|---|
-| `history` | Run-history snapshot (sent on connect, and after a branch is created) |
+| `history` | Run-history snapshot (sent on connect, and after a branch is created). Carries the WINDOW it was read with and whether anything is behind it, which is what makes "load older runs" possible without breaking the full-snapshot rule |
 | `agents` | The agent list (sent on connect, and after a generation or apply/undo) |
 | `trace` | Live schema-v1 trace events for the interactive run |
 | `runSteps` | A specific run's steps, ordered by `seq` (answer to `loadRun`) |
@@ -1786,8 +1786,8 @@ frozen event schema, and everything added since rides beside it.
 
 **Client → server**
 
-`run` · `loadRun` · `listAgents` · `archiveAgent` · `restoreAgent` · `renameAgent` ·
-`loadAgentFiles` · `loadAgentGraph` · `planAgent` ·
+`run` · `loadRun` · `loadHistory` · `listAgents` · `archiveAgent` · `restoreAgent` ·
+`renameAgent` · `loadAgentFiles` · `loadAgentGraph` · `planAgent` ·
 `discardPlan` · `generate` · `edit` · `applyEdit` · `undoEdit` · `discardEdit` · `pauseRun` ·
 `resumeRun` · `cancelRun` · `branchRun` · `explain` · and the eval set: `createDataset` · `renameDataset` ·
 `deleteDataset` · `listDatasets` · `loadDataset` · `addExample` · `updateExample` ·
@@ -1823,6 +1823,22 @@ free.
 Reads are answered locally by the relay (only the requesting client); mutations are forwarded
 to the app, which answers by broadcasting the affected snapshot — the same shape a fresh read
 would return, so a client never has to reconcile a partial update against local state.
+
+**Lists are paged by a growing WINDOW rather than by a cursor**, and that follows from the rule
+above. Every list read is `ORDER BY <time> DESC LIMIT n`, and until v0.3.0 `n` could not be changed
+from the client: the 51st-newest run was unreachable, because `loadRun` needs an id and the only
+source of ids was the list that stopped at fifty — while retention keeps traces for a month to a
+year, by plan. A cursor plus an append would have made one channel a merging channel; asking for a
+bigger window keeps the invariant, at the cost of re-sending rows the client already has (`history`
+merges by run id, so the cost is bytes and never duplicates). The window is capped at 500 per
+request, and `complete` — a window that came back short — is the only end-of-list signal a control
+needs. The run history and the eval history both work this way; the sidebar's search box says plainly
+that it is searching what has been loaded, which used to be the silent half of the same problem.
+
+GitHub's own history is deliberately **not** paged: what the panel renders is versions and remote
+commits read 30 at a time from GitHub's API, and the `github_events` rows behind it feed a five-row
+refusal-and-override strip. Widening those means paging somebody else's API for a surface nobody
+scrolls, which is a different feature from this one.
 
 A socket is opened with a **single-use ticket** rather than a token — see [why the ticket
 exists](#why-the-ticket-exists) — and the `Origin` is checked before the handshake. The client

@@ -14,6 +14,21 @@ export type LogLine = { level: "stderr" | "parseError"; text: string };
 
 interface TraceState {
   runs: Record<string, RunSummary>;
+  /**
+   * How many rows the last window asked for, and whether it reached the end.
+   *
+   * WHAT THEY ARE FOR. The list read is `ORDER BY started_at DESC LIMIT n` and there was no way to
+   * ask for more than the default fifty — so the 51st-newest run could not be opened at all, because
+   * `loadRun` needs an id and the only source of ids was that list. These two fields are what a "load
+   * more" control needs: the size to ask for next, and whether to offer itself at all.
+   *
+   * `historyComplete` starts TRUE, which is the honest default before anything has arrived: an app
+   * with no history yet must not offer to load more of it. Every history message carries both fields
+   * — the connect snapshot included — so the control is right from frame one rather than only after
+   * somebody has already pressed it once.
+   */
+  historyWindow: number;
+  historyComplete: boolean;
   stepsByRun: Record<string, Record<string, Step>>; // runId -> (stepId -> Step)
   loaded: Record<string, true>; // runIds whose steps are fully in memory
   activeRunId: string | null;
@@ -26,7 +41,16 @@ interface TraceState {
   connection: ConnectionState;
   logs: LogLine[];
 
-  applyHistory: (runs: RunSummary[]) => void;
+  /**
+   * The run history, merged by id.
+   *
+   * `complete` and `window` arrive only on the answer to `loadHistory`, which is a growing WINDOW
+   * rather than a page: the channel is a full-snapshot channel and this merges, so a larger window
+   * adds rows and never assembles a list out of two moments. A broadcast that carries neither — the
+   * one every new run sends — leaves both alone, so pressing "load more" is not undone by somebody
+   * else starting a run.
+   */
+  applyHistory: (runs: RunSummary[], meta?: { complete?: boolean; window?: number }) => void;
   applyEvent: (event: TraceEvent) => void;
   applyRunSteps: (runId: string, steps: Step[]) => void;
   selectRun: (id: string) => void;
@@ -51,6 +75,10 @@ function bucketFrom(steps: Step[]): Record<string, Step> {
 
 export const useTraceStore = create<TraceState>((set, get) => ({
   runs: {},
+  // The default window the connect snapshot serves, and the honest starting answer about what is
+  // behind it: nothing has asked yet, so nothing offers to load more yet.
+  historyWindow: 50,
+  historyComplete: true,
   stepsByRun: {},
   loaded: {},
   activeRunId: null,
@@ -59,11 +87,15 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   connection: "connecting",
   logs: [],
 
-  applyHistory: (runs) =>
+  applyHistory: (runs, meta) =>
     set((state) => {
       const merged = { ...state.runs };
       for (const r of runs) merged[r.id] = { ...merged[r.id], ...r };
-      return { runs: merged };
+      return {
+        runs: merged,
+        ...(meta?.complete === undefined ? {} : { historyComplete: meta.complete }),
+        ...(meta?.window === undefined ? {} : { historyWindow: meta.window }),
+      };
     }),
 
   applyEvent: (event) =>

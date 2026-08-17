@@ -75,6 +75,16 @@ there. What is new is that the product's own surface reaches them.
   order, with each provider's display name resolved server-side — which also removed the two
   disagreeing copies of that mapping in the browser, the reason one provider was "Gemini" where you
   picked it and `google` where you configured it. `test:pricing` asserts what keeps it safe.
+- **Lists can be paged.** Every list read is `ORDER BY <time> DESC LIMIT 50` and nothing could ask
+  past it, so the 51st-newest run was unreachable — `loadRun` needs an id, and the only source of ids
+  was that list — while retention keeps traces for up to a year. The eval strip was worse: two
+  ceilings on top of each other, a fifty-row read and then a six-chip render, so the seventh-newest
+  comparison could not be selected in the panel whose whole job is comparing. Both grow a WINDOW
+  rather than walking a cursor, which keeps every channel a full-snapshot channel — `applyHistory`
+  merges by run id — capped at 500 a request, with `complete` (a window that came back short) as the
+  only end-of-list signal. The sidebar's search box now says it is searching what has been loaded,
+  which was the silent half of the same problem: looking for last month's run said there was no such
+  run.
 - **An agent has a lifecycle.** The product's central object had no removal, no archive and no rename
   in any layer — no command, no route, no repository method, no affordance — while datasets, examples,
   MCP servers, threads, deployments, links, secrets, invitations and members all had one. The only way

@@ -38,6 +38,31 @@ export type RunCommand = {
   threadId?: string;
 };
 export type LoadRunCommand = { cmd: "loadRun"; runId: string };
+
+/**
+ * A LARGER WINDOW ON THE RUN HISTORY — the paging this product had none of.
+ *
+ * WHAT WAS UNREACHABLE. Every list read is `ORDER BY <time> DESC LIMIT 50` with no offset, no cursor
+ * and no way to ask for more, so the 51st-newest run could not be opened: `loadRun` needs an id, and
+ * the only source of ids was the list that stopped at fifty. The sidebar's search box filters what
+ * was fetched, so looking for an older run found nothing and said so as though it did not exist —
+ * while retention keeps traces for a month to a year, by plan.
+ *
+ * A GROWING WINDOW RATHER THAN A CURSOR, and that is a deliberate trade. Every channel in this
+ * product is a full-snapshot channel: a client REPLACES rather than merges, which is what makes it
+ * impossible to hold a list assembled from two moments. A cursor plus an append would break that
+ * invariant for one feature; asking for a bigger window keeps it, at the cost of re-sending rows the
+ * client already has. `applyHistory` merges by run id, so the cost is bytes and never duplicates.
+ *
+ * Capped, because a client asking for everything is a client asking this process to read a year of
+ * runs into memory. `complete` on the answer is what a "load more" control needs: it is true when the
+ * window returned fewer rows than it asked for, which is the only reliable signal that there is
+ * nothing further back.
+ */
+export type LoadHistoryCommand = { cmd: "loadHistory"; limit?: number };
+
+/** The most rows one client may pull into a sidebar. See LoadHistoryCommand. */
+export const HISTORY_WINDOW_MAX = 500;
 export type GenerateCommand = {
   cmd: "generate";
   prompt: string;
@@ -184,7 +209,8 @@ export type LoadRubricCommand = { cmd: "loadRubric"; datasetId: string };
 /** The comparison dashboard's data: per-provider rollups plus per-example rows. */
 export type LoadEvalResultsCommand = { cmd: "loadEvalResults"; evalId: string };
 /** Past evals for a dataset (or all), so a finished comparison stays reachable. */
-export type ListEvalsCommand = { cmd: "listEvals"; datasetId?: string };
+/** `limit` is a growing WINDOW, capped at HISTORY_WINDOW_MAX — see LoadHistoryCommand. */
+export type ListEvalsCommand = { cmd: "listEvals"; datasetId?: string; limit?: number };
 /** What a real-provider eval will roughly cost, BEFORE committing to it. */
 export type EstimateEvalCommand = {
   cmd: "estimateEval";
@@ -877,6 +903,7 @@ export type ExplainCommand = {
 export type ClientCommand =
   | RunCommand
   | LoadRunCommand
+  | LoadHistoryCommand
   | GenerateCommand
   | PlanAgentCommand
   | DiscardPlanCommand
@@ -1059,7 +1086,10 @@ export type EvalEvent =
   | { type: "scored"; evalId: string; jobId: string; score: number | null; error?: string | null }
   | { type: "scoringFinished"; evalId: string; scored: number; unscored: number }
   | { type: "evalResults"; evalId: string; results: unknown }
-  | { type: "evals"; evals: unknown[] }
+  // `complete` is false when there are older evals than the window returned; `window` is what was
+  // actually served after the cap, so a "load more" control asks for the next size up rather than
+  // guessing what it already has.
+  | { type: "evals"; evals: unknown[]; complete?: boolean; window?: number }
   | { type: "estimate"; estimate: unknown }
   | { type: "error"; message: string; datasetId?: string };
 
@@ -1741,7 +1771,8 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // their refusals go to `log`, which the status bar already renders. Listed explicitly rather
   // than left to the fallback: "log because that is right" and "log because nobody decided"
   // must not look the same.
-  run: "log", loadRun: "log", listAgents: "log", loadAgentFiles: "log", loadAgentGraph: "log",
+  run: "log", loadRun: "log", loadHistory: "log", listAgents: "log", loadAgentFiles: "log",
+  loadAgentGraph: "log",
   // The three lifecycle commands answer on `log` for the same reason `listAgents` does, and it is
   // the same decision rather than the same oversight: their success IS the refreshed agent snapshot,
   // which every client already applies, and the `agents` channel has no error shape a store would
@@ -2062,7 +2093,7 @@ export class WsRelay {
       // belong to agents it has not been told about yet.
       void (async () => {
         const ctx = await pending;
-        this.sendTo(ws, { channel: "history", runs: await this.store.listRuns(ctx) });
+        this.sendTo(ws, { channel: "history", ...(await this.historyWindow(ctx)) });
         this.sendTo(ws, { channel: "agents", agents: (await this.opts.listAgents?.(ctx)) ?? [] });
         this.sendTo(ws, { channel: "mcp", type: "servers", servers: (await this.opts.listMcpServers?.(ctx)) ?? [] });
         // Which providers are connected, so a first-run client knows on frame one whether it
@@ -2429,6 +2460,19 @@ export class WsRelay {
             void this.answer(ws, async (ctx) => ({
               channel: "agents",
               agents: (await this.opts.listAgents?.(ctx)) ?? [],
+            }), live);
+          } else if (msg.cmd === "loadHistory") {
+            // ANSWERED LOCALLY, like the other reads the relay can serve from the store it already
+            // holds, and to the ASKING SOCKET only: one person scrolling back through their own
+            // history is not a reason to push five hundred run rows at every other tab.
+            const asked = typeof msg.limit === "number" && Number.isFinite(msg.limit) ? Math.floor(msg.limit) : 50;
+            const limit = Math.max(1, Math.min(asked, HISTORY_WINDOW_MAX));
+            // Fewer rows than the window asked for is the only reliable "there is nothing further
+            // back" — a count would be a second query, and an equal count is genuinely ambiguous,
+            // which is why the control asks again rather than guessing.
+            void this.answer(ws, async (ctx) => ({
+              channel: "history",
+              ...(await this.historyWindow(ctx, limit)),
             }), live);
           } else if (msg.cmd === "loadRun" && typeof msg.runId === "string") {
             // Answer only the requesting client with that run's steps (ordered by seq).
@@ -2822,9 +2866,24 @@ export class WsRelay {
    * the one thing a tenant boundary cannot survive. Per recipient now — more queries, and the
    * only correct number of them.
    */
+  /**
+   * One window on the run history, with whether there is anything behind it.
+   *
+   * SHARED BY THE CONNECT SNAPSHOT AND EVERY REFRESH, so the "load older runs" control is honest
+   * from frame one rather than only after somebody has already pressed it once. `complete` is
+   * computed the one way that needs no second query: a window that came back short is the end.
+   */
+  private async historyWindow(
+    ctx: TenantContext,
+    limit = 50,
+  ): Promise<{ runs: unknown[]; complete: boolean; window: number }> {
+    const runs = await this.store.listRuns(ctx, limit);
+    return { runs, complete: runs.length < limit, window: limit };
+  }
+
   async broadcastHistory(): Promise<void> {
     await this.perClient(async (ws, ctx) => {
-      this.sendTo(ws, { channel: "history", runs: await this.store.listRuns(ctx) });
+      this.sendTo(ws, { channel: "history", ...(await this.historyWindow(ctx)) });
     });
   }
 

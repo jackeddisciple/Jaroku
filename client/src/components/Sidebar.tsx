@@ -11,7 +11,9 @@ import { relTime } from "../lib/format.ts";
 import { agentStatus, type AgentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark, ConnectorDot } from "../lib/icons.tsx";
 import { selectAgent, selectRun } from "../lib/selection.ts";
-import { sendArchiveAgent, sendLoadRun, sendRenameAgent, sendRestoreAgent } from "../lib/socket.ts";
+import {
+  sendArchiveAgent, sendLoadHistory, sendLoadRun, sendRenameAgent, sendRestoreAgent,
+} from "../lib/socket.ts";
 import { ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { useUiStore, type NavDestination } from "../store/uiStore.ts";
 import { useGithubStore } from "../store/githubStore.ts";
@@ -496,6 +498,9 @@ export function Sidebar() {
     .filter((a): a is AgentSummary => a !== undefined && !a.archived_at);
 
   const runList = orderedRuns(runs);
+  // How wide the window is, and whether the server says there is anything behind it.
+  const historyWindow = useTraceStore((st) => st.historyWindow);
+  const historyComplete = useTraceStore((st) => st.historyComplete);
   const tab = (id: Filter, label: string, count?: number) => (
     <button
       onClick={() => setFilter(id)}
@@ -595,6 +600,28 @@ export function Sidebar() {
           <EmptyState size="inline" icon={ActivityIcon} title="No runs yet" />
         ) : (
           runList.map((r) => <RunRow key={r.id} run={r} />)
+        )}
+        {/* OLDER RUNS — the paging this product had none of.
+            The list read stops at a window, and until now that window could not be widened: the
+            51st-newest run was unreachable because `loadRun` needs an id and the only source of ids
+            was this list. It offers itself once the window is full, because before that there is
+            demonstrably nothing behind it, and it disappears when the server says a window came back
+            short — which is the only reliable end-of-list signal there is. */}
+        {runList.length >= historyWindow && !historyComplete && (
+          <button
+            onClick={() => sendLoadHistory(Math.min(historyWindow * 2, 500))}
+            className="w-full px-4 py-2 text-left text-[11px] text-muted transition-colors hover:bg-active/40 hover:text-ink"
+          >
+            Load older runs…
+          </button>
+        )}
+        {/* AND THE HONEST NOTE ABOUT THE SEARCH BOX. It filters what has been loaded, so somebody
+            searching for last month's run used to be told there was no such run. Said plainly rather
+            than left to be inferred, and only while there is more to load. */}
+        {q && !historyComplete && (
+          <p className="px-4 pb-2 text-[11px] leading-[1.5] text-faint">
+            Searching the {runList.length} loaded runs. Load older ones to search further back.
+          </p>
         )}
       </div>
 
