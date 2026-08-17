@@ -204,12 +204,12 @@ console.log("\nan in-flight operation's channel scope belongs to it alone");
   // that could refuse the request, so a refused command from another workspace repointed it
   // while the real operation was still streaming. Every claim must now come after its guard.
   const claims = [
-    { scope: "genContext", guard: "if (generating)", fn: "async function generateAgent" },
-    { scope: "planContext", guard: "if (planner.inFlight)", fn: "async function planAgent" },
-    { scope: "editContext", guard: "if (editor.inFlight)", fn: "function editAgent" },
-    { scope: "replyContext", guard: "if (explaining)", fn: "function explainAgent" },
+    { scope: "genContext", guard: "if (generating)", flag: "generating = true", fn: "async function generateAgent" },
+    { scope: "planContext", guard: "if (!planner.tryClaim())", flag: "if (!planner.tryClaim())", fn: "async function planAgent" },
+    { scope: "editContext", guard: "if (!editor.tryClaim())", flag: "if (!editor.tryClaim())", fn: "function editAgent" },
+    { scope: "replyContext", guard: "if (explaining)", flag: "explaining = true", fn: "function explainAgent" },
   ];
-  for (const { scope, guard, fn } of claims) {
+  for (const { scope, guard, flag, fn } of claims) {
     const start = indexSource.indexOf(fn);
     const body = indexSource.slice(start, start + 2500);
     const guardAt = body.indexOf(guard);
@@ -218,6 +218,18 @@ console.log("\nan in-flight operation's channel scope belongs to it alone");
       guardAt !== -1 && claimAt !== -1 && guardAt < claimAt,
       `${fn.split(" ").pop()} claims ${scope} only AFTER "${guard}"`,
       guardAt === -1 ? "guard not found" : claimAt === -1 ? "claim not found" : "claim precedes the guard",
+    );
+
+    // AND THE SLOT IS TAKEN BEFORE THE FIRST `await`. Ordering the guard before the claim is only
+    // half of it: a guard that reads a flag some later `await` will set is not a guard at all, and
+    // that is exactly what `planner.inFlight` / `editor.inFlight` / a late `generating = true`
+    // were — two workspaces both passed, and the second repointed the scope above.
+    const flagAt = body.indexOf(flag);
+    const between = body.slice(guardAt, flagAt === -1 ? guardAt : flagAt);
+    check(
+      flagAt !== -1 && !/\bawait\b/.test(between),
+      `${fn.split(" ").pop()} takes the slot with no await between the guard and the flag`,
+      flagAt === -1 ? "the flag is never set" : "an await sits between the guard and the flag it reads",
     );
   }
 

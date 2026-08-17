@@ -144,6 +144,16 @@ function readManifest(files: Map<string, string>): Manifest | undefined {
 export class Editor extends EventEmitter<EditorEvents> {
   private pending = new Map<string, PendingProposal>();
   private busy = false;
+  /**
+   * The slot won by a caller that has not reached `propose` yet.
+   *
+   * `busy` covers the edit itself; this covers the window before it. The caller resolves a
+   * provider key first — a secret-store read, so milliseconds to tens of them — and for the whole
+   * of that window `busy` was false, which made the caller's guard a test of a flag nothing had
+   * set. Two workspaces both passed it, and the second one repointed the edit scope the first
+   * one's source files were still streaming to.
+   */
+  private claimed = false;
 
   constructor(private readonly opts: EditorDeps) {
     super();
@@ -159,7 +169,31 @@ export class Editor extends EventEmitter<EditorEvents> {
    * index.ts.
    */
   get inFlight(): boolean {
-    return this.busy;
+    return this.busy || this.claimed;
+  }
+
+  /**
+   * Take the single edit slot, or answer false because somebody else holds it.
+   *
+   * TEST AND SET IN ONE SYNCHRONOUS STATEMENT, which is the whole of the fix: a caller that reads
+   * `inFlight`, awaits anything, and only then calls `propose` has left a window in which a second
+   * caller reads the same false. Nothing in JavaScript protects a flag across an `await`, so the
+   * flag has to be claimed before the first one.
+   */
+  tryClaim(): boolean {
+    if (this.busy || this.claimed) return false;
+    this.claimed = true;
+    return true;
+  }
+
+  /**
+   * Give back a claim that never became an edit — a key lookup that threw before `propose` ran.
+   *
+   * Only the pre-`propose` claim: an edit that has genuinely started clears itself when it ends,
+   * and this must not be able to unlock one that is still streaming.
+   */
+  releaseClaim(): void {
+    this.claimed = false;
   }
 
   /**
@@ -210,6 +244,9 @@ export class Editor extends EventEmitter<EditorEvents> {
       return;
     }
     this.busy = true;
+    // The claim, if the caller took one, has now become the edit it was holding the slot for.
+    // A direct caller that never claimed clears a flag that was already false.
+    this.claimed = false;
     const { runtimeDir, agents, projects } = this.opts;
     const stagingId = newStagingId();
     let agentUuid = "";

@@ -5568,7 +5568,10 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
     relay.broadcastGen(ctx, { type: "plan_error", message: "a generation is already in progress" });
     return;
   }
-  if (planner.inFlight) {
+  // TESTS AND SETS IN ONE STATEMENT. Reading `planner.inFlight` here and calling `planner.plan()`
+  // three awaits later tested a flag `plan()` had not set yet, so two workspaces both passed and
+  // the second repointed `planContext` at itself while the first one's plan was still streaming.
+  if (!planner.tryClaim()) {
     relay.broadcastGen(ctx, { type: "plan_error", message: "a plan is already being written" });
     return;
   }
@@ -5578,33 +5581,43 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
   // session (§1.1) — filing each in a thread of its own would put three rows in a list whose whole
   // job is to be scannable, and the two of them nobody clicked would sit there with a plan awaiting
   // confirm forever.
-  planThread =
-    (cmd.revisePlanId ? await threadStore.threadForRef(ctx, "plan", cmd.revisePlanId) : undefined) ??
-    (await threadForWork(ctx, cmd.threadId));
-  // The brief, or the feedback on a revision — which is what the user actually typed this turn and
-  // therefore what §4.3's preview should show.
-  noteUserMessage(ctx, planThread, cmd.prompt);
-  console.log(
-    `[plan] planning${cmd.revisePlanId ? " (revision)" : ""} — "${cmd.prompt.slice(0, 80)}"`,
-  );
-  const planKey = await providerKeys.platformKey(ctx);
-  planPayer = planKey ? "workspace" : "platform";
-  void planner.plan({
-    runtimeDir: RUNTIME_DIR,
-    workspaceId: ctx.workspaceId,
-    // WHOSE KEY THINKS. Undefined for every workspace that has not opted in, which is all of
-    // them by default and is the whole local path — and undefined means the platform's own key,
-    // exactly as before. See billing/providerKeys.ts.
-    apiKey: planKey,
-    prompt: cmd.prompt,
-    connectors: cmd.connectors,
+  // Everything between the claim and `plan()` awaits, and anything that throws in there would
+  // otherwise leave the slot held for the life of the process — a refusal every workspace would
+  // then get forever. The claim is given back on the way out.
+  try {
+    planThread =
+      (cmd.revisePlanId ? await threadStore.threadForRef(ctx, "plan", cmd.revisePlanId) : undefined) ??
+      (await threadForWork(ctx, cmd.threadId));
+    // The brief, or the feedback on a revision — which is what the user actually typed this turn and
+    // therefore what §4.3's preview should show.
+    noteUserMessage(ctx, planThread, cmd.prompt);
+    console.log(
+      `[plan] planning${cmd.revisePlanId ? " (revision)" : ""} — "${cmd.prompt.slice(0, 80)}"`,
+    );
+    const planKey = await providerKeys.platformKey(ctx);
+    planPayer = planKey ? "workspace" : "platform";
     // Resolved here rather than in the planner, so the planner keeps its single dependency
     // on the connector catalogue. Refs naming a server or tool that has since gone away
     // resolve to nothing rather than to a guess — the same posture as resolveSelected.
-    mcpTools: await mcpRegistry.resolve(ctx, cmd.mcpTools ?? []),
-    name: cmd.name,
-    revisePlanId: cmd.revisePlanId,
-  });
+    const mcpTools = await mcpRegistry.resolve(ctx, cmd.mcpTools ?? []);
+    void planner.plan({
+      runtimeDir: RUNTIME_DIR,
+      workspaceId: ctx.workspaceId,
+      // WHOSE KEY THINKS. Undefined for every workspace that has not opted in, which is all of
+      // them by default and is the whole local path — and undefined means the platform's own key,
+      // exactly as before. See billing/providerKeys.ts.
+      apiKey: planKey,
+      prompt: cmd.prompt,
+      connectors: cmd.connectors,
+      mcpTools,
+      name: cmd.name,
+      revisePlanId: cmd.revisePlanId,
+    });
+  } catch (err) {
+    planner.releaseClaim();
+    console.error(`[plan] could not start: ${(err as Error)?.message ?? err}`);
+    relay.broadcastGen(ctx, { type: "plan_error", message: "could not start the plan" });
+  }
 }
 
 // --- generation -------------------------------------------------------------
@@ -5631,6 +5644,12 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     }
     return;
   }
+  // CLAIMED IN THE SAME SYNCHRONOUS BLOCK AS THE GUARD, before the awaits below. The planned path
+  // resolves the MCP catalogue between the two, and for that whole window `generating` was false —
+  // so two planned generations both passed, both repointed `genContext`, and both registered a
+  // listener set, which made one model call emit `done` twice and meter itself twice under two
+  // different random idempotency keys. Every refusal below has to hand the slot back.
+  generating = true;
   genContext = ctx;
 
   // The confirmed plan, if there is one. Everything downstream comes from the RECORD, not
@@ -5650,6 +5669,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
       // Never fall through to an unplanned generation here. The user approved a specific
       // plan; quietly building something they never reviewed is the exact failure this gate
       // exists to prevent.
+      generating = false;
       relay.broadcastGen(contextForGen(), {
         type: "plan_error",
         message: "that plan is no longer available — describe the agent again",
@@ -5665,6 +5685,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     const known = new Set(loadConnectors(RUNTIME_DIR).map((c) => c.id));
     const missing = (rec.connectors ?? []).filter((id) => !known.has(id));
     if (missing.length) {
+      generating = false;
       relay.broadcastGen(contextForGen(), {
         type: "plan_error",
         message:
@@ -5684,6 +5705,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     );
     const goneMcp = approvedRefs.filter((r) => !stillThere.has(r));
     if (goneMcp.length) {
+      generating = false;
       relay.broadcastGen(contextForGen(), {
         type: "plan_error",
         message:
@@ -5701,7 +5723,6 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     planUsage = rec.usage;
   }
 
-  generating = true;
   // THE PLAN'S OWN SESSION WHEN THERE WAS A PLAN. `cmd.planId` was just spent, so the lookup is
   // against the row written when the plan arrived rather than against the planner — and it means a
   // generation lands in the thread the brief was written in rather than opening a second one beside
@@ -5796,17 +5817,27 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
 
   // Resolved fresh at build time, so the manifest carries the schemas and impact ratings as
   // they stand now rather than as they stood when the plan was written.
+  //
+  // Caught, because the listeners are already registered and the slot is already claimed: a key
+  // lookup that throws here would otherwise leave both standing for the life of the process, and
+  // `cleanup()` is the one place that undoes both.
   const genCtx = ctx;
-  const genKey = await providerKeys.platformKey(genCtx);
-  genPayer = genKey ? "workspace" : "platform";
-  const mcpTools = await mcpRegistry.resolve(genCtx, mcpRefs);
-  const mcpServers = await mcpRegistry.list(genCtx);
-  void generator.generate({
-    runtimeDir: RUNTIME_DIR, ctx: genCtx, prompt, connectors, mcpTools, mcpServers, name, plan, planUsage,
-    // See planAgent: undefined unless this workspace asked that its own key pay for the
-    // platform's calls, and undefined is the platform's key.
-    apiKey: genKey,
-  });
+  try {
+    const genKey = await providerKeys.platformKey(genCtx);
+    genPayer = genKey ? "workspace" : "platform";
+    const mcpTools = await mcpRegistry.resolve(genCtx, mcpRefs);
+    const mcpServers = await mcpRegistry.list(genCtx);
+    void generator.generate({
+      runtimeDir: RUNTIME_DIR, ctx: genCtx, prompt, connectors, mcpTools, mcpServers, name, plan, planUsage,
+      // See planAgent: undefined unless this workspace asked that its own key pay for the
+      // platform's calls, and undefined is the platform's key.
+      apiKey: genKey,
+    });
+  } catch (err) {
+    console.error(`[gen] could not start: ${(err as Error)?.message ?? err}`);
+    relay.broadcastGen(contextForGen(), { type: "error", message: "could not start the generation" });
+    cleanup();
+  }
 }
 
 // --- editing (fix loop) -----------------------------------------------------
@@ -5873,7 +5904,11 @@ function editAgent(ctx: TenantContext, agentId: string, instruction: string, thr
   // edit scope is left pointing at the workspace whose edit is actually running. The editor
   // refuses a second edit either way; what this adds is that a refused one cannot redirect the
   // in-flight edit's diff — which is another workspace's source — to whoever asked second.
-  if (editor.inFlight) {
+  // TESTS AND SETS IN ONE STATEMENT. `propose` claims the slot at its own entry, but it is not
+  // reached until the key lookup below resolves — so reading `editor.inFlight` here tested a flag
+  // nothing had set yet, and a second workspace passed the same guard and repointed `editContext`
+  // at itself while the first one's source files were still streaming out on that scope.
+  if (!editor.tryClaim()) {
     relay.broadcastEdit(ctx, { type: "error", message: "an edit is already in progress", agentId });
     return;
   }
@@ -5896,6 +5931,9 @@ function editAgent(ctx: TenantContext, agentId: string, instruction: string, thr
       return editor.propose(ctx, agentId, instruction, apiKey);
     })
     .catch((err) => {
+      // The claim never became an edit, so it has to go back — otherwise one failed key lookup
+      // refuses every edit in the deployment until the process restarts.
+      editor.releaseClaim();
       console.error(`[edit] could not start: ${(err as Error)?.message ?? err}`);
       relay.broadcastEdit(ctx, { type: "error", message: "could not start the edit", agentId });
     });

@@ -118,6 +118,14 @@ export interface PlannerEvents {
 export class Planner extends EventEmitter<PlannerEvents> {
   private pending: PendingPlan | null = null;
   private busy = false;
+  /**
+   * The slot won by a caller that has not reached `plan()` yet.
+   *
+   * The widest of the three such windows in the product: `planAgent` resolves a thread, a provider
+   * key and the MCP catalogue between its guard and this call. For all three awaits `busy` was
+   * false, so the guard was testing a flag nothing had set — see `tryClaim`.
+   */
+  private claimed = false;
 
   /** This workspace's plan awaiting confirmation, if any. Read-only — use take() to consume it. */
   peek(workspaceId: string): PendingPlan | null {
@@ -132,7 +140,24 @@ export class Planner extends EventEmitter<PlannerEvents> {
    * broadcast to. See `planContext` in index.ts.
    */
   get inFlight(): boolean {
-    return this.busy;
+    return this.busy || this.claimed;
+  }
+
+  /**
+   * Take the single planning slot, or answer false because somebody else holds it.
+   *
+   * Test and set in one synchronous statement, for the reason spelled out on `Editor.tryClaim`:
+   * a guard separated from its flag by an `await` is not a guard.
+   */
+  tryClaim(): boolean {
+    if (this.busy || this.claimed) return false;
+    this.claimed = true;
+    return true;
+  }
+
+  /** Give back a claim that never became a plan — the caller threw before `plan()` ran. */
+  releaseClaim(): void {
+    this.claimed = false;
   }
 
   /**
@@ -160,6 +185,8 @@ export class Planner extends EventEmitter<PlannerEvents> {
       return;
     }
     this.busy = true;
+    // The caller's claim has become the plan it was holding the slot for.
+    this.claimed = false;
 
     try {
       const all = loadConnectors(opts.runtimeDir);
