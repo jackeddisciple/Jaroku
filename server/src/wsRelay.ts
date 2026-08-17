@@ -1384,6 +1384,20 @@ export interface ThreadView {
    * and a map would be a second thing to keep in step with the statuses it was derived from.
    */
   agent_active: number;
+  /**
+   * True when this session accounts for a large share of what the workspace has spent this period
+   * (§4.3.6).
+   *
+   * A FLAG AND NOT A PERCENTAGE, on purpose. A bare `$0.04` carries no sense of whether that is
+   * typical, and the answer — "this one is worth a second look" — is the whole of what the row needs.
+   * The number itself belongs in Activity: this view is a triage surface, not a cost dashboard, and a
+   * percentage on the row would be a second metric competing for space in an already-dense line.
+   *
+   * The share is computed against the rolling spend the billing layer already aggregates. No new spend
+   * computation exists for this: it is a threshold comparison over a figure the usage panel is drawn
+   * from.
+   */
+  cost_share_high: boolean;
 }
 
 /** The five §4.4 chips, counted once on the server and rendered twice (§2.1). */

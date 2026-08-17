@@ -42,6 +42,7 @@ const thread = (over: Partial<ThreadView> = {}): ThreadView => ({
   live_run_ids: [],
   eval_progress: null,
   agent_active: 1,
+  cost_share_high: false,
   ...over,
 });
 

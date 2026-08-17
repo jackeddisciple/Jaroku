@@ -353,5 +353,36 @@ async function statusesFor(
     (await h.threads.get(ctx, live.id))?.agent_id === published.id);
 }
 
+// --- 10. §4.3.6's share of the period ------------------------------------------------------
+{
+  // The comparison itself is one line in the snapshot builder; what is worth asserting is the FIGURES it
+  // compares, because both come from the billing layer and neither is invented here. A quarter of the
+  // period's spend is the threshold — see HIGH_COST_SHARE.
+  const h = await harness();
+  await seedAgent(h.db, "support_bot");
+  const expensive = await h.threads.create(ctx, { title: "expensive" });
+  const cheap = await h.threads.create(ctx, { title: "cheap" });
+
+  for (const [thread, usd, key] of [[expensive, 0.9, "big"], [cheap, 0.1, "small"]] as const) {
+    const runId = randomUUID();
+    await h.store.upsertRun(ctx, run(runId, "support_bot", "completed"));
+    await h.threads.addItem(ctx, thread.id, { kind: "run", refId: runId });
+    await h.billing.record(ctx, {
+      kind: "llm.provider", idempotencyKey: key, runId, provider: "anthropic",
+      model: "claude-haiku-4-5", inputTokens: 10, outputTokens: 10, costUsd: usd,
+    });
+  }
+
+  const spend = await h.billing.spendByThread(ctx);
+  const period = await h.billing.spendSince(ctx, "1970-01-01T00:00:00.000Z");
+  check("the period total is the sum of the workspace's rows", Math.abs(period.usd - 1) < 1e-9, String(period.usd));
+  check("the expensive session is most of it",
+    (spend.get(expensive.id)!.usd / period.usd) >= 0.25);
+  check("...and the cheap one is not",
+    (spend.get(cheap.id)!.usd / period.usd) < 0.25);
+  check("neither figure is invented for this — both come from the ledger",
+    Math.abs(spend.get(expensive.id)!.usd + spend.get(cheap.id)!.usd - period.usd) < 1e-9);
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);

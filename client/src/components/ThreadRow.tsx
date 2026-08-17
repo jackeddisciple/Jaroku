@@ -230,14 +230,23 @@ export function ThreadRow({
         {cost && (
           <>
             <span className="text-faint">·</span>
+            {/* §4.3.6: an outline rather than a plain render when this session is a large share of the
+                period's spend. THE LIGHTEST POSSIBLE TREATMENT — a hairline box and nothing else. No
+                percentage on the row (that belongs in Activity), no colour (there are four and none is
+                spare for "expensive"), and no icon, which would read as a warning about a number that is
+                merely worth a second look. */}
             <span
-              className="tabular-nums"
+              className={`tabular-nums ${
+                thread.cost_share_high ? "rounded-control px-1 ring-1 ring-edge" : ""
+              }`}
               title={
-                thread.cost_known
-                  ? thread.eval_progress
-                    ? "spent so far, and a linear projection over the remaining steps"
-                    : undefined
-                  : "a floor — something here ran on an unpriced model"
+                thread.cost_share_high
+                  ? "a large share of this workspace's spend this period — Activity has the breakdown"
+                  : thread.cost_known
+                    ? thread.eval_progress
+                      ? "spent so far, and a linear projection over the remaining steps"
+                      : undefined
+                    : "a floor — something here ran on an unpriced model"
               }
             >
               {cost}

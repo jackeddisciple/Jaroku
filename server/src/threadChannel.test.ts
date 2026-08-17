@@ -88,6 +88,7 @@ async function snapshot(ctx: TenantContext): Promise<{ threads: ThreadView[]; co
       live_run_ids: [],
       eval_progress: null,
       agent_active: 1,
+      cost_share_high: false,
     } satisfies ThreadView;
   });
   counts.all = counts.needs_you + counts.running + counts.recent;

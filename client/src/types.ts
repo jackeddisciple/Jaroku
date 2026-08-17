@@ -758,6 +758,14 @@ export interface ThreadView {
    * hypothetical. Counting `needs_you` and `running` only: an idle thread on the same agent is history.
    */
   agent_active: number;
+  /**
+   * True when this session is a large share of what the workspace has spent this period (§4.3.6).
+   *
+   * A FLAG, NOT A PERCENTAGE. A bare figure says nothing about whether it is typical, and "worth a
+   * second look" is the whole of what a triage row needs — the number itself belongs in Activity, and
+   * putting it here would be a second metric competing for space in an already-dense line.
+   */
+  cost_share_high: boolean;
 }
 
 /** §4.4's five chips. Counted once on the server and rendered twice — see the nav badge, §2.1. */

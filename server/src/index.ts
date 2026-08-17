@@ -2998,6 +2998,17 @@ async function broadcastUsage(ctx: TenantContext): Promise<void> {
 // hold a list assembled from two moments, and the counts the nav badge is drawn from can never be
 // one snapshot behind the rows beside them.
 
+/**
+ * The share of a period's spend that makes one thread worth a second look (§4.3.6).
+ *
+ * A QUARTER, and the number is a judgement rather than a derivation. Low enough that a genuinely
+ * expensive session is marked in a workspace with a handful of them; high enough that a workspace with
+ * four threads does not have all four outlined, which would make the treatment mean nothing. It is a
+ * constant here rather than a setting because §4.3.6 asks for "the lightest possible treatment", and a
+ * threshold somebody can tune is a feature with a settings row and a migration behind it.
+ */
+const HIGH_COST_SHARE = 0.25;
+
 const THREAD_COMMAND_NAMES = new Set([
   "createThread", "renameThread", "archiveThread", "restoreThread",
 ]);
@@ -3249,8 +3260,9 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
       // stopped moving should show.
       live_run_ids: status === "running" ? (entry?.liveRunIds ?? []) : [],
       eval_progress: status === "running" ? (entry?.facts.evalProgress ?? null) : null,
-      // Filled in below, once every row's status is known — see the pass after this loop.
+      // Both filled in below: the first needs every row's status, the second needs the period total.
       agent_active: 0,
+      cost_share_high: false,
     });
 
     if (status === "archived") counts.archived++;
@@ -3270,6 +3282,26 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
   const active = activePerAgent(views);
   for (const v of views) {
     v.agent_active = v.agent_id ? (active.get(v.agent_id) ?? 0) : 0;
+  }
+
+  // §4.3.6'S CONTEXT FOR A BARE FIGURE. `$0.04` says nothing about whether that is a lot here, and the
+  // answer the row needs is one bit: worth a second look, or not.
+  //
+  // AGAINST THE ROLLING SPEND THE BILLING LAYER ALREADY AGGREGATES — the same period total the usage
+  // panel is drawn from — so no new spend computation exists for this. One extra read, and a comparison.
+  //
+  // A THREAD'S TOTAL IS CUMULATIVE AND THE PERIOD'S IS NOT, which is why the comparison is bounded
+  // below: a session that ran for three months against a workspace that started billing last week would
+  // otherwise be "high share" simply for being older than the window. Threads that cost less than the
+  // period total are the only ones the share can honestly be computed for; a thread that exceeds it is
+  // marked anyway, because it is by definition the expensive one on the screen.
+  const period = await budgetGate.status(ctx).then((s) => s.periodStart).catch(() => null);
+  const periodTotal = period ? (await billing.spendSince(ctx, period)).usd : 0;
+  if (periodTotal > 0) {
+    for (const v of views) {
+      if (v.cost_usd === null) continue;
+      v.cost_share_high = v.cost_usd / periodTotal >= HIGH_COST_SHARE;
+    }
   }
 
   // `all` is every active thread, not every row: the All chip and the Archived chip are two
