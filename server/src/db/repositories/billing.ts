@@ -821,9 +821,16 @@ export class BillingRepository {
       // and nothing else must patch the status and nothing else. The DO UPDATE binds its own
       // parameters rather than reading `excluded`, because the insert side has to supply a
       // non-null plan and would otherwise hide the caller's "I do not know" behind that default.
+      //
+      // THE DEFAULTS ARE APPLIED IN JS, NOT IN SQL, and that is a driver-parity decision rather
+      // than a style one. `COALESCE(?, 0)` resolves to INTEGER on Postgres, and
+      // `cancel_at_period_end` is `boolean` there — "column is of type boolean but expression is of
+      // type integer". A bare placeholder carries no type at all, so Postgres reads it from the
+      // column and SQLite stores what it is given; putting a literal beside it is what forces a
+      // type onto the pair. Same reasoning for the plan's `'free'`.
       `INSERT INTO subscriptions (id, workspace_id, plan_id, status, external_customer_id,
          external_subscription_id, current_period_end, cancel_at_period_end, created_at, updated_at)
-       VALUES (?, ?, COALESCE(?, 'free'), ?, ?, ?, ?, COALESCE(?, 0), ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (external_subscription_id) DO UPDATE SET
          plan_id = COALESCE(?, subscriptions.plan_id),
          status = excluded.status,
@@ -835,12 +842,14 @@ export class BillingRepository {
       [
         randomUUID(),
         ctx.workspaceId,
-        s.planId ?? null,
+        // The INSERT side has to supply a value; a subscription nobody named a plan for is `free`,
+        // and one nobody said anything about cancelling is not cancelling.
+        s.planId ?? "free",
         s.status,
         s.externalCustomerId ?? null,
         s.externalSubscriptionId,
         s.currentPeriodEnd ?? null,
-        cancelling,
+        cancelling ?? 0,
         now,
         now,
         // The DO UPDATE's own three, in the order they appear above.
