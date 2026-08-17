@@ -28,6 +28,16 @@ import type { Db } from "./db/db.ts";
 /** Name or slug of the workspace `npm run dev` acts in. Defaults to the local one. */
 export const DEV_WORKSPACE_ENV = "JAROKU_DEV_WORKSPACE";
 
+/**
+ * The kind a workspace named by that variable is created as.
+ *
+ * `team`, because the reason to name a second workspace at all is to watch two of them fail to see
+ * each other — and the isolation suite's interesting cases (roles, membership, the author column)
+ * only exist in a team. Named as a constant rather than written inline so it is greppable and so
+ * the boot log and the documentation can both state it rather than restate it.
+ */
+export const DEV_WORKSPACE_KIND = "team" as const;
+
 export interface DevTenancy {
   workspaceId: string;
   slug: string;
@@ -42,6 +52,16 @@ export interface DevTenancy {
  * which is what makes an existing jaroku.db open with all of its history rather than empty.
  * Set means a named one — the way to run two workspaces against one server and watch them
  * fail to see each other, which is the point of the isolation suite.
+ *
+ * IT CREATES A `team` WORKSPACE, AND THAT USED TO BE A HIDDEN SIDE EFFECT. For a long time this
+ * was the ONLY `kind: "team"` construction reachable from `npm run dev`, so every capability
+ * gated on it — §6's collaboration rules, the Threads author column, the whole roles and
+ * invitations subsystem — was obtainable only by setting a variable the README described as
+ * naming which workspace the server acts in on its own behalf. Creating a workspace is a
+ * first-class action now (`POST /v1/workspaces`, from the workspace switcher), so this is a
+ * development convenience again rather than the product's only door — and it says which kind it
+ * made, in the line it already prints, because a switch that quietly decides a workspace's kind
+ * is the thing this file's own header says must be impossible.
  */
 export async function resolveDevTenancy(db: Db, log: (m: string) => void = console.log): Promise<DevTenancy> {
   const requested = (process.env[DEV_WORKSPACE_ENV] ?? "").trim();
@@ -67,8 +87,11 @@ export async function resolveDevTenancy(db: Db, log: (m: string) => void = conso
   if (!ws) {
     // Unowned, like the importer's: nobody has signed in, and inventing a member to hold it
     // would put a person in the list who does not exist.
-    ws = await identity.createWorkspaceUnowned(sys, { name: requested, kind: "team" });
-    log(`[tenancy] created workspace "${ws.name}" (${ws.slug}) for ${DEV_WORKSPACE_ENV}`);
+    ws = await identity.createWorkspaceUnowned(sys, { name: requested, kind: DEV_WORKSPACE_KIND });
+    log(
+      `[tenancy] created ${ws.kind} workspace "${ws.name}" (${ws.slug}) for ${DEV_WORKSPACE_ENV}. ` +
+        `The first local sign-in adopts it; ${ws.kind === "team" ? "members, roles and the Threads author column apply" : "it has no members list"}.`,
+    );
   }
   const id = ws.id;
   log(

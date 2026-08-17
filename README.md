@@ -1765,7 +1765,7 @@ to happen because a browser cannot put a header on a WebSocket:
 | `JAROKU_DB` | `server/jaroku.db` | SQLite file. Everything, not just traces — see [where data lives](#where-data-lives) |
 | `JAROKU_DB_DRIVER` | `sqlite` | `sqlite` \| `postgres`. Refuses anything else rather than falling back |
 | `JAROKU_PG_URL` | — | Jaroku's own Postgres. Deliberately **not** `DATABASE_URL`, which is the credential the Postgres *connector* reads — reusing it would point every agent's `pg_query` at the control plane |
-| `JAROKU_DEV_WORKSPACE` | the local workspace | Which workspace the server acts in **on its own behalf** — the startup run, the sweepers, the restart reconciliations. Announced at boot |
+| `JAROKU_DEV_WORKSPACE` | the local workspace | Which workspace the server acts in **on its own behalf** — the startup run, the sweepers, the restart reconciliations. Announced at boot. **It also creates that workspace when the name does not exist, as a `team` one**, which is a development convenience and not the way to get a team workspace: that is the workspace switcher (`POST /v1/workspaces`) |
 | `JAROKU_AUTH_ISSUER` | — | Your OIDC issuer. **Unset runs the local issuer**, which refuses `NODE_ENV=production` |
 | `JAROKU_AUTH_AUDIENCE` | `jaroku` | The `aud` a token must carry |
 | `JAROKU_AUTH_JWKS_URL` | `<issuer>/.well-known/jwks.json` | Where the signing keys live |
@@ -2367,7 +2367,11 @@ the projects still live on this machine's disk until Session 3 moves them to an 
   membership](#authentication-and-membership). Session 1's prediction held exactly: the shape did
   not change, only the resolution became real. `JAROKU_DEV_WORKSPACE` still names the workspace
   the server acts in **on its own behalf** — the startup run, the sweepers, the restart
-  reconciliations — because work nobody triggered still needs a scope.
+  reconciliations — because work nobody triggered still needs a scope. It also *creates* that
+  workspace when the name is one no workspace has, as a `team` one, and it prints which kind it
+  made. That used to be the only reachable way to obtain a team workspace, which made a plumbing
+  switch the door to the entire collaboration half of the product; creating one is a first-class
+  action now.
 - **The filesystem is still one namespace.** Agent slugs are unique per workspace in the *table*,
   but two workspaces with a `support_bot` would still collide on `runtime/agents/support_bot/`.
   Session 3's object store fixes that with keys built from the workspace id and the agent uuid.

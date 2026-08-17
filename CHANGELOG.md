@@ -42,6 +42,15 @@ there. What is new is that the product's own surface reaches them.
   that reads like forgery. `kind` is required on creation and cannot be defaulted: it decides
   whether the workspace has a members list, roles and a Threads author column at all.
 
+### Changed
+
+- **`JAROKU_DEV_WORKSPACE` says what it does.** The README described it as naming which workspace
+  the server acts in on its own behalf, and did not mention that setting it to an unused name
+  *creates* that workspace — as a `team` one, which for a long time made this the only reachable
+  route to the collaboration half of the product. The boot line now names the kind it made and what
+  follows from it, and both README entries say so. The variable is a development convenience again
+  rather than a door.
+
 ---
 
 ## v0.2.17 : Threads, Documented — and Thirty-One Defects an Adversarial Read Found
