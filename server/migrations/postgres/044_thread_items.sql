@@ -113,7 +113,22 @@ SELECT a.workspace_id,
        COALESCE(a.display_name, a.slug),
        a.created_by,
        a.created_at,
-       COALESCE((SELECT MAX(r.started_at) FROM runs r
+       -- `::timestamptz` ON BOTH SIDES OF THE COALESCE, and this is the one place the two dialects
+       -- genuinely diverge rather than merely spelling a type differently.
+       --
+       -- `runs.started_at` is ISO-8601 `text` — deliberately, and 029 argues it at length, because
+       -- the steps table is partitioned on it. `threads.last_activity_at` is `timestamptz`. SQLite
+       -- has neither type and compares both as strings, so the same statement is correct there and
+       -- is a planner error here: "COALESCE types text and timestamp with time zone cannot be
+       -- matched". Postgres resolves a COALESCE to one common type and there is no implicit cast
+       -- between those two, by design — an implicit text→timestamp cast is exactly how a badly
+       -- formatted string becomes a silently wrong date somewhere else.
+       --
+       -- The cast is INSIDE the aggregate rather than around it. `MAX` over the text column is a
+       -- lexicographic maximum, which happens to agree with chronological order for UTC ISO-8601
+       -- and stops agreeing the moment a row carries an offset — so the aggregate is given real
+       -- timestamps and asked for the latest one, which is what this actually means.
+       COALESCE((SELECT MAX(r.started_at::timestamptz) FROM runs r
                   WHERE r.workspace_id = a.workspace_id AND r.agent_id = a.slug),
                 a.created_at),
        'idle'
@@ -134,8 +149,12 @@ SELECT a.workspace_id,
 -- The OLDEST thread for the agent, rather than any of them: the row above was dated with the
 -- agent's own `created_at`, so it is the earliest by construction, and a workspace with a
 -- hand-made thread from between the two migrations keeps that thread's own contents to itself.
+-- `r.started_at::timestamptz` again, for the same reason as above. Postgres would accept the bare
+-- text here — an assignment into a column is allowed an I/O conversion where an expression is not —
+-- but relying on that would leave the two statements in this file disagreeing about whether the
+-- conversion is worth writing down, and the next reader would have to work out which is which.
 INSERT INTO thread_items (workspace_id, thread_id, kind, ref_id, created_at)
-SELECT r.workspace_id, t.id, 'run', r.id, r.started_at
+SELECT r.workspace_id, t.id, 'run', r.id, r.started_at::timestamptz
   FROM runs r
   JOIN agents a ON a.workspace_id = r.workspace_id AND a.slug = r.agent_id
   JOIN threads t ON t.id = (SELECT t2.id FROM threads t2

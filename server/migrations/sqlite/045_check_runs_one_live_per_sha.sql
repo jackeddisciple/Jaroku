@@ -12,7 +12,11 @@
 UPDATE check_runs
    SET status = 'completed',
        conclusion = 'cancelled',
-       completed_at = COALESCE(completed_at, datetime('now'))
+       -- `strftime` rather than `datetime('now')`: this column is TEXT on this driver and every
+       -- other writer of it is `new Date().toISOString()`, so a bare `datetime` would put
+       -- `2026-08-17 20:11:04` beside `2026-08-17T20:11:04.812Z` in one column — two formats that
+       -- do not sort against each other, in a table read newest-first.
+       completed_at = COALESCE(completed_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
  WHERE status <> 'completed'
    AND EXISTS (
      SELECT 1 FROM check_runs newer
