@@ -2350,6 +2350,7 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (PROVIDER_COMMAND_NAMES.has(cmd.cmd)) void handleProviderCommand(ctx, cmd as ProviderCommand);
     else if (CONNECTION_COMMAND_NAMES.has(cmd.cmd)) void handleConnectionCommand(ctx, cmd as ConnectionCommand);
     else if (MEMBER_COMMAND_NAMES.has(cmd.cmd)) void handleMemberCommand(ctx, cmd as MemberCommand);
+    else if (cmd.cmd === "listAudit") void sendAuditLog(ctx, cmd.limit);
     else if (THREAD_COMMAND_NAMES.has(cmd.cmd)) void handleThreadCommand(ctx, cmd as ThreadCommand);
     else if (cmd.cmd === "loadUsage") void broadcastUsage(ctx);
     else if (cmd.cmd === "setSpendCeiling") void setSpendCeiling(ctx, cmd.usd);
@@ -3805,6 +3806,41 @@ async function handleMemberCommand(ctx: TenantContext, cmd: MemberCommand): Prom
     const message = (err as Error)?.message ?? String(err);
     console.error(`[members] ${cmd.cmd} failed: ${message}`);
     relay.broadcastMembers(ctx, { type: "error", message: `${cmd.cmd} failed: ${message}` });
+  }
+}
+
+/**
+ * The workspace's own record of what has been done to it (§the audit trail).
+ *
+ * WHY THIS EXISTS AT ALL. Every membership mutation writes an `audit_log` row inside the
+ * transaction that makes the change; so does every GitHub safety override, every secret reveal and
+ * rotation, every enforcement appeal, and workspace export and deletion. The reason given in the
+ * code for writing them is that somebody will need to read them — `auditGithubOverride`'s own
+ * comment says the record has to be readable "by somebody who does not know this feature exists".
+ * The reader was written and had no caller: no command, no route, no UI. The rows were kept for a
+ * question nobody could ask.
+ *
+ * ANSWERED TO THE ASKING SOCKET, and bounded. The default is the repository's hundred; a client may
+ * ask for fewer or more, up to a cap, because this is the one read in the product whose useful range
+ * is "the last few things" to "everything since the incident started".
+ */
+const AUDIT_LIMIT_MAX = 500;
+
+async function sendAuditLog(ctx: TenantContext, limit?: number): Promise<void> {
+  try {
+    // Clamped rather than refused: an out-of-range number is a client being generous with a
+    // parameter, not an attack, and answering 500 rows to a request for 50,000 is the useful
+    // response. A non-number falls through to the repository's own default.
+    const bounded =
+      typeof limit === "number" && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.floor(limit), AUDIT_LIMIT_MAX)
+        : undefined;
+    const entries = await identityRepo.listAudit(ctx, bounded);
+    relay.sendAudit(ctx, ctx.requestId, { type: "audit", entries });
+  } catch (err) {
+    const message = (err as Error)?.message ?? String(err);
+    console.error(`[audit] listAudit failed: ${message}`);
+    relay.sendAudit(ctx, ctx.requestId, { type: "error", message: "could not read the audit log" });
   }
 }
 

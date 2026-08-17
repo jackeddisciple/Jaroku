@@ -16,6 +16,7 @@ import { useGithubStore } from "../store/githubStore.ts";
 import { useDiagnosticsStore } from "../store/diagnosticsStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useMemberStore } from "../store/memberStore.ts";
+import { useAuditStore } from "../store/auditStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { resetWorkspaceStores } from "../store/reset.ts";
 import { INPUT_KEY_PREFIX, useUiStore } from "../store/uiStore.ts";
@@ -363,6 +364,14 @@ function dispatch(msg: ServerMessage): void {
         const { workspaces, workspaceId } = sess;
         sess.setWorkspaces(workspaces.map((w) => (w.id === workspaceId ? { ...w, role: msg.role } : w)));
       }
+      break;
+    }
+    case "audit": {
+      // A read, answered to this socket alone — so unlike every other channel here there is no
+      // broadcast to reconcile with, and a snapshot replaces rather than merges.
+      const a = useAuditStore.getState();
+      if (msg.type === "audit") a.setEntries(msg.entries);
+      else if (msg.type === "error") a.setError(msg.message);
       break;
     }
     case "members": {
@@ -970,6 +979,16 @@ export function sendTestRailwayToken(token: string): void {
 // Answered on the "members" channel with a full snapshot, the same discipline as every other
 // control-plane channel. `inviteLink` is the exception: it carries a credential, is sent only
 // to the socket that asked, and is never stored — see wsRelay's MemberEvent.
+
+/**
+ * The workspace's audit trail, newest first.
+ *
+ * Bounded by the server at 500 and defaulted there too, so a caller that wants "the recent ones"
+ * sends no limit. Answered to this socket alone.
+ */
+export function sendListAudit(limit?: number): void {
+  send(limit === undefined ? { cmd: "listAudit" } : { cmd: "listAudit", limit });
+}
 
 export function sendListMembers(): void {
   send({ cmd: "listMembers" });

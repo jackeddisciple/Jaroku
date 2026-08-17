@@ -281,6 +281,19 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   setSpendCeiling: "billing:manage",
 
   listMembers: "member:read",
+  /**
+   * The workspace's audit trail.
+   *
+   * `workspace:manage` — THE OWNER'S — and not `member:read` beside it, because of what the rows
+   * contain rather than because reading is privileged: who revealed which credential, who overrode
+   * a secret-scan refusal on a push, who was removed and by whom. Those are facts about people, and
+   * a member does not need them to do any of the work `member:read` exists for.
+   *
+   * Not a capability of its own for the reason the thread commands are not: a second gate in front
+   * of one surface is a gate that can disagree with the surface, and "may read what happened to this
+   * workspace" is the same authority as "may change what this workspace is".
+   */
+  listAudit: "workspace:manage",
   inviteMember: "member:manage",
   revokeInvite: "member:manage",
   setMemberRole: "member:manage",

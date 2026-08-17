@@ -58,6 +58,14 @@ there. What is new is that the product's own surface reaches them.
   list is the server's (`purchasable` and the price id are columns; the limits come from the code
   that enforces them), a deployment with no Stripe keys shows nothing rather than a refusing
   control, and choosing is `billing:manage` while reading spend stays a member's.
+- **The audit log stopped being write-only.** Five subsystems write `audit_log` rows — membership,
+  GitHub safety overrides, secret reveals and rotations, enforcement appeals, export and deletion —
+  and `auditGithubOverride`'s own comment says the record has to be readable "by somebody who does
+  not know this feature exists". `listAudit` had no caller at all, so the rows were kept for a
+  question nobody could ask. It is a channel of its own (the log is not a footnote on membership),
+  answered to the asking socket and never broadcast, at `workspace:manage` — and the metadata is
+  printed as stored, because a trail read during an incident must not have summarised away the field
+  the question turned on.
 - **A workspace can set its own spend ceiling.** `BudgetGate.status` has always preferred the
   workspace's own ceiling over its plan's, and the Usage panel has always rendered the result — so
   the number was visible, was what runs are refused against, and could only be changed with SQL. A

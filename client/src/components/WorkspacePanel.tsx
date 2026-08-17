@@ -17,26 +17,33 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  sendInviteMember, sendListMembers, sendRemoveMember, sendRevokeInvite, sendSetMemberRole,
+  sendInviteMember, sendListAudit, sendListMembers, sendRemoveMember, sendRevokeInvite,
+  sendSetMemberRole,
 } from "../lib/socket.ts";
 import { inviteUrl } from "../lib/invite.ts";
 import {
   deleteWorkspace, startWorkspaceExport, workspaceExportStatus,
   type DeletionReceipt, type ExportStatus,
 } from "../lib/workspaceApi.ts";
+import { useAuditStore } from "../store/auditStore.ts";
 import { useMemberStore, type Invite, type Member } from "../store/memberStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore, type WorkspaceSection } from "../store/uiStore.ts";
-import { fmtUntil } from "../lib/format.ts";
+import { fmtUntil, relTime } from "../lib/format.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { Truncate } from "./Truncate.tsx";
-import { AlertTriangleIcon, CheckIcon, UserCircleIcon, XIcon } from "./panelIcons.tsx";
+import {
+  ActivityIcon, AlertTriangleIcon, CheckIcon, UserCircleIcon, XIcon,
+} from "./panelIcons.tsx";
 
 const SECTIONS: { id: WorkspaceSection; label: string }[] = [
   { id: "members", label: "Members" },
+  // Beside Members because most of what it records is membership, and because the two answer
+  // the same question at different tenses: who is here, and what has been done here.
+  { id: "audit", label: "Audit" },
   // Last, and deliberately: it is the section with the irreversible button in it.
   { id: "data", label: "Data" },
 ];
@@ -315,6 +322,101 @@ function MembersSection() {
 }
 
 /**
+ * What has been done to this workspace, and by whom.
+ *
+ * WHY THE ROWS ARE RENDERED ALMOST RAW. An audit trail is read during an incident, by somebody
+ * answering a question like "who overrode the secret scan on Tuesday" — and a prettified view that
+ * summarised `metadata` would be a view that dropped the field the question turned on. So the action
+ * is the headline, the actor and the target are named, and the metadata is printed as it is stored.
+ *
+ * WHAT IS NOT HERE: paging, filtering, and a date picker. The reader answers the last N rows and this
+ * asks for a bounded window of them; the honest thing at this size is to say so rather than to build
+ * a search over a table whose rows a person can read in one screen. When it needs more it needs the
+ * same offset the rest of the product's lists needed.
+ */
+function AuditSection() {
+  const entries = useAuditStore((s) => s.entries);
+  const loaded = useAuditStore((s) => s.loaded);
+  const error = useAuditStore((s) => s.error);
+  const members = useMemberStore((s) => s.members);
+  const workspaceId = useSessionStore((s) => s.workspaceId);
+  const role = useSessionStore((s) => s.role());
+  const canRead = role === "owner";
+
+  // Asked for on open. Nothing pushes an audit row — the log is append-only and there is no
+  // broadcast for it — so this is a read whose signal is somebody looking.
+  useEffect(() => {
+    if (canRead) sendListAudit();
+  }, [canRead, workspaceId]);
+
+  // WHO, in the words the members list uses. An actor is a uuid on the row; a workspace holding
+  // three people has three names, and rendering the uuid instead would make every question start
+  // with a second lookup. It degrades to nothing rather than to a raw id — the same choice
+  // `useAuthorLabel` makes on a thread row.
+  const nameFor = (userId: string | null): string | null => {
+    if (!userId) return null;
+    const member = members.find((m) => m.user_id === userId);
+    return member ? member.display_name || member.email : null;
+  };
+
+  if (!canRead) {
+    return (
+      <p className="text-[12px] leading-[1.55] text-muted">
+        The audit trail is an owner&rsquo;s. Its rows name who revealed which credential, who
+        overrode a push refusal and who removed whom.
+      </p>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex items-center pb-1">
+        <span className={TYPE.panelLabel}>Newest first</span>
+        <span className="ml-auto text-[11px] text-faint">{entries.length}</span>
+      </div>
+      {error && <p className="mb-2 text-[11px] text-err">{error}</p>}
+      {entries.length === 0 ? (
+        <EmptyState
+          size="inline"
+          icon={ActivityIcon}
+          title={loaded ? "Nothing recorded yet" : "Loading…"}
+          hint={
+            loaded
+              ? "Membership changes, credential reveals, push overrides, exports and deletions land here."
+              : undefined
+          }
+        />
+      ) : (
+        entries.map((e) => {
+          const who = nameFor(e.actor_user_id);
+          const detail = Object.keys(e.metadata ?? {}).length > 0 ? JSON.stringify(e.metadata) : null;
+          return (
+            <div key={e.id} className="border-b border-hair py-1.5 last:border-b-0">
+              <div className="flex items-baseline gap-2">
+                <span className="font-mono text-[11px] text-ink">{e.action}</span>
+                {who && <span className="text-[11px] text-muted">{who}</span>}
+                {/* An action with no actor is the SERVER acting on its own behalf — a sweeper, a
+                    reconciliation, a webhook. Named as such rather than left blank, because "nobody
+                    did this" and "we do not know who did this" are different answers. */}
+                {!who && !e.actor_user_id && <span className="text-[11px] text-faint">the server</span>}
+                <span className="ml-auto shrink-0 text-[11px] text-faint">{relTime(e.created_at)}</span>
+              </div>
+              {(e.target_type || detail || e.ip) && (
+                <div className="mt-0.5 break-words font-mono text-[10px] leading-[1.5] text-faint">
+                  {e.target_type && <span>{e.target_type}{e.target_id ? ` ${e.target_id}` : ""}</span>}
+                  {detail && <span>{e.target_type ? " · " : ""}{detail}</span>}
+                  {e.ip && <span> · {e.ip}</span>}
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+/**
  * Asking for everything you have, and asking for it to be destroyed.
  *
  * BOTH IN ONE SECTION, and that pairing is the point: the two questions a person asks about their
@@ -533,7 +635,9 @@ export function WorkspacePanel() {
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3.5">
-          {section === "data" ? <DataSection /> : <MembersSection />}
+          {section === "data" ? <DataSection />
+            : section === "audit" ? <AuditSection />
+            : <MembersSection />}
         </div>
       </div>
     </div>

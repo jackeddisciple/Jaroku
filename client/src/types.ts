@@ -637,6 +637,19 @@ export interface UsageSnapshot {
   paymentsConfigured: boolean;
 }
 
+/** One row of the audit log, as the wire carries it. Mirrors `IdentityRepository.AuditEntry`. */
+export interface AuditEntryView {
+  id: number;
+  workspace_id: string | null;
+  actor_user_id: string | null;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  metadata: Record<string, unknown>;
+  ip: string | null;
+  created_at: string;
+}
+
 export type BillingMessage =
   | { channel: "billing"; type: "usage"; usage: UsageSnapshot }
   | { channel: "billing"; type: "error"; message: string };
@@ -1294,6 +1307,11 @@ export type ServerMessage =
   // frame the button was pressed, rather than whenever the next history snapshot lands.
   | { channel: "debug"; type: "cancelled"; runId: string }
   | { channel: "debug"; type: "error"; runId?: string; message: string }
+  // The workspace's own record of what has been done to it. Answered to the socket that asked;
+  // a channel of its own because `audit_log` is written by five subsystems and only one of them
+  // is membership.
+  | { channel: "audit"; type: "audit"; entries: AuditEntryView[] }
+  | { channel: "audit"; type: "error"; message: string }
   | (InThread & { channel: "reply"; type: "started"; agentId: string; question: string })
   | (InThread & { channel: "reply"; type: "delta"; agentId: string; text: string })
   | (InThread & { channel: "reply"; type: "done"; agentId: string })
@@ -1322,6 +1340,14 @@ export type ClientCommand =
   | { cmd: "archiveThread"; threadId: string }
   | { cmd: "restoreThread"; threadId: string }
   | { cmd: "listMembers" }
+  /**
+   * The workspace's audit trail, newest first.
+   *
+   * `workspace:manage` — the owner's — because of what the rows contain rather than because reading
+   * is privileged: who revealed which credential, who overrode a push refusal, who removed whom.
+   * Answered to this socket alone; nothing about a read is anybody else's business.
+   */
+  | { cmd: "listAudit"; limit?: number }
   | { cmd: "inviteMember"; email: string; role: string }
   | { cmd: "revokeInvite"; inviteId: string }
   | { cmd: "setMemberRole"; userId: string; role: string }

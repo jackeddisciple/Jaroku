@@ -19,6 +19,7 @@
 // looks empty in the devtools panel somebody happens to open, and the field nobody looked at
 // still holds the last tenant's data.
 
+import { useAuditStore } from "./auditStore.ts";
 import { useBillingStore } from "./billingStore.ts";
 import { useBuildStore } from "./buildStore.ts";
 import { useChatStore } from "./chatStore.ts";
@@ -57,6 +58,10 @@ interface Resettable {
  *   onboarding and then switched workspace would be sent back to the welcome screen.
  */
 export const WORKSPACE_STORES: Record<string, Resettable> = {
+  // Who revealed which credential, who overrode a secret-scan refusal, who removed whom. The most
+  // person-identifying list in the client after the member list, and for the same reason it is here:
+  // held across a switch it would show one workspace's decisions under another workspace's name.
+  auditStore: useAuditStore as unknown as Resettable,
   // A spend figure held across a switch is one workspace's invoice shown under another's name —
   // the same class of leak as a trace row, and rather harder to explain afterwards.
   billingStore: useBillingStore as unknown as Resettable,

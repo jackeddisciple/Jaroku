@@ -1689,6 +1689,7 @@ frozen event schema, and everything added since rides beside it.
 | `deploy` | Deployment snapshots, the pre-deploy plan, live stage transitions, scrubbed build-log lines, and the one-shot serve token |
 | `session` | The only channel about the CONNECTION rather than the work: `expiring`, `expired`, `revoked`, `workspace_changed`, `role_changed` |
 | `members` | Who is in the workspace, who has been invited, and the one-shot invite link |
+| `audit` | The workspace's own record of what has been done to it, newest first. Answered to the socket that asked and never broadcast — the rows name who revealed which credential and who removed whom |
 | `providers` | Which provider keys are set (`configured: true/false`, by name), test results, and whether the workspace's own key pays for platform calls |
 | `connections` | Which third-party accounts this workspace has authorised, their status and granted scopes, and the URL a consent flow must be started at. Never a token |
 | `billing` | What this workspace has spent this period, against which ceilings — see [cost metering](#cost-metering-budgets-and-billing) |
@@ -1711,7 +1712,7 @@ frozen event schema, and everything added since rides beside it.
 `loadUsage` · `setSpendCeiling` · and the deploy set: `listDeployments` · `planDeploy` ·
 `deploy` · `cancelDeploy` · `forgetDeployment` · `loadDeployLogs` · `setRailwayToken` ·
 `testRailwayToken` · and the membership set: `listMembers` · `inviteMember` · `revokeInvite` ·
-`setMemberRole` · `removeMember` · and the thread set: `listThreads` · `loadThread` ·
+`setMemberRole` · `removeMember` · `listAudit` · and the thread set: `listThreads` · `loadThread` ·
 `createThread` · `renameThread` · `archiveThread` · `restoreThread` · and the GitHub set:
 `listGithub` · `listGithubRepos` · `checkGithubRepo` · `linkGithub` · `unlinkGithub` ·
 `refreshGithub` · `pushGithub` · `pullGithub` · `switchGithubBranch` · `createGithubBranch` ·
@@ -3914,6 +3915,16 @@ first has already written the key.
 
 Every one of them writes an `audit_log` row **inside the transaction that makes the change**, so
 there is no path that alters membership without a record of who did it.
+
+**And the record is readable.** `audit_log` is written by five subsystems — membership mutations,
+every GitHub safety override, secret reveals and rotations, enforcement appeals, workspace export
+and deletion — and the reason given in the code for writing those rows is that somebody will need
+to read them. The reader existed and had no caller: no command, no route, no UI, so the rows were
+kept for a question nobody could ask. `listAudit` is the workspace panel's **Audit** section, on a
+channel of its own, answered to the asking socket and never broadcast. It is `workspace:manage` —
+the owner's — because of what the rows contain rather than because reading is privileged: an actor,
+a target, an IP, and the metadata printed as stored, because an audit trail read during an incident
+must not have summarised away the field the question turned on.
 
 **Where all of it is in the product.** The workspace switcher in the top bar creates a workspace and
 opens **Members and invitations**, a panel over the shell — the same panel every other

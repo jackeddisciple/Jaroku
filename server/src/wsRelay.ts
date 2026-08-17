@@ -742,6 +742,27 @@ export type MemberEvent =
   | { type: "error"; message: string }
   | { type: "notice"; message: string };
 
+/**
+ * The workspace's own record of what has been done to it.
+ *
+ * A CHANNEL OF ITS OWN rather than a field on `members`, even though the identity repository owns
+ * both. `audit_log` is written by membership mutations, by every GitHub safety override, by secret
+ * reveals and rotations, by enforcement appeals and by workspace export and deletion — five
+ * subsystems, only one of which is membership. Answering it on the members channel would make the
+ * widest read in the product a footnote on the narrowest one.
+ *
+ * ANSWERED TO THE ASKING SOCKET, never broadcast. It is a read, nothing about it changes, and its
+ * rows name who revealed which credential and who removed whom — there is no reason for one
+ * person's decision to open a log to put that on every other tab in the workspace.
+ */
+export type ListAuditCommand = { cmd: "listAudit"; limit?: number };
+
+export type AuditEvent =
+  | { type: "audit"; entries: unknown[] }
+  | { type: "error"; message: string };
+
+const AUDIT_COMMANDS = new Set(["listAudit"]);
+
 // Unified composer "explain": a prose answer about a step / node / the agent, built from
 // in-context data — the one genuinely-new composer intent (no code change).
 export type ExplainSubject =
@@ -804,6 +825,7 @@ export type ClientCommand =
   | ListDeploymentsCommand
   | GithubCommand
   | MemberCommand
+  | ListAuditCommand
   | ThreadCommand
   | ListThreadsCommand
   | LoadThreadCommand;
@@ -856,6 +878,7 @@ export type ForwardedCommand =
   | DeployChannelCommand
   | GithubCommand
   | MemberCommand
+  | ListAuditCommand
   | ThreadCommand
   | BillingCommand;
 
@@ -1639,6 +1662,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   loadUsage: "billing", setSpendCeiling: "billing",
   listMembers: "members", inviteMember: "members", revokeInvite: "members",
   setMemberRole: "members", removeMember: "members",
+  listAudit: "audit",
   // All six on `threads`, the reads included. The channel HAS an error shape, so unlike
   // `loadAgentFiles` there is nowhere better for a refusal to go — and a refusal about a rename
   // that landed in the status bar instead of the list would leave the row it was about still
@@ -2276,6 +2300,10 @@ export class WsRelay {
             // every one of them makes a network call to a third party that can take seconds and
             // fail five ways, and the relay holds no token to make it with.
             void withContext((ctx) => this.onCommand?.(msg as GithubCommand, ctx));
+          } else if (AUDIT_COMMANDS.has(msg.cmd)) {
+            // Forwarded rather than answered locally, for the reason BILLING_COMMANDS is: the relay
+            // holds no identity repository and should not grow one. Shape-checked in the app.
+            void withContext((ctx) => this.onCommand?.(msg as ListAuditCommand, ctx));
           } else if (MEMBER_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the identity repository and can answer with
             // a precise error on the "members" channel rather than dropping the message here.
@@ -2610,6 +2638,23 @@ export class WsRelay {
       if (session.context.workspaceId !== ctx.workspaceId) continue;
       if (session.context.requestId !== requestId) continue;
       this.sendTo(ws, { channel: "members", ...event });
+    }
+  }
+
+  /**
+   * Send the audit log to ONE socket — the one that asked for it.
+   *
+   * Never broadcast, and this is the strongest case for that of any channel here: the rows name who
+   * revealed which credential, who overrode a secret-scan refusal, and who removed whom. One
+   * person opening a log is not a reason to put that in front of every other tab. It is also a pure
+   * read — nothing changes, so there is nothing for anybody else to be kept in step with.
+   */
+  sendAudit(ctx: TenantContext, requestId: string, event: AuditEvent): void {
+    for (const [ws, session] of this.sessions) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (session.context.workspaceId !== ctx.workspaceId) continue;
+      if (session.context.requestId !== requestId) continue;
+      this.sendTo(ws, { channel: "audit", ...event });
     }
   }
 
