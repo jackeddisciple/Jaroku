@@ -58,6 +58,14 @@ there. What is new is that the product's own surface reaches them.
   list is the server's (`purchasable` and the price id are columns; the limits come from the code
   that enforces them), a deployment with no Stripe keys shows nothing rather than a refusing
   control, and choosing is `billing:manage` while reading spend stays a member's.
+- **An enforcement can be appealed.** The ladder is one-sided by construction — a score rises, a
+  rung is applied, work is refused — and `appeal_note` is the column that makes it two-sided.
+  `EnforcementRepository.appeal` was written, audited, and had no caller, so the note could only be
+  written with SQL: the one hand that does not need an appeal mechanism. A workspace under a rung now
+  gets a strip under the top bar with the rung's own sentence (the same one a refusal carries), when
+  it lapses, what it has been under before, and one text field. `watch` gets no strip because it
+  changes nothing; the two rungs that refuse work outright cannot be dismissed. `enforcement:appeal`
+  is a **member's** capability, for the reason the repository gives.
 - **The audit log stopped being write-only.** Five subsystems write `audit_log` rows — membership,
   GitHub safety overrides, secret reveals and rotations, enforcement appeals, export and deletion —
   and `auditGithubOverride`'s own comment says the record has to be readable "by somebody who does

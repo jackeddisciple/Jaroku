@@ -72,6 +72,21 @@ export const CAPABILITIES = [
    * owner's.
    */
   "billing:read",
+  /**
+   * See which rung of the abuse ladder this workspace is under, and answer it.
+   *
+   * ONE CAPABILITY FOR THE READ AND THE APPEAL, and a MEMBER's, which is two decisions worth
+   * stating. A member's, for the reason `billing:read` is a member's: the rung is what refused their
+   * work, and a refusal nobody affected may read is unactionable. One capability, because the
+   * repository's own doc is explicit that the appeal has to be available to the workspace rather
+   * than to the party that applied the rung — a split where a member could read the sentence and
+   * only an owner could answer it would reintroduce exactly the asymmetry the column exists to
+   * remove, in a workspace whose owner may be the person on holiday.
+   *
+   * It does not lift anything. An appeal is a note a human reads; `lift` is not a capability any
+   * role in this table holds, because it is the platform's.
+   */
+  "enforcement:appeal",
 
   // --- commits the workspace to something outside itself: admin ---------------------------
   /** Connect, re-discover, remove or re-classify a third-party MCP server. */
@@ -137,6 +152,7 @@ const MEMBER: readonly Capability[] = [
   "github:read",
   "member:read",
   "billing:read",
+  "enforcement:appeal",
 ];
 
 /** What an admin adds. Nested, so a new member capability is automatically an admin's too. */
@@ -279,6 +295,11 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // a decision about the workspace's money. A member whose run is refused for budget can see the
   // number; raising it is not theirs.
   setSpendCeiling: "billing:manage",
+
+  // The rung a workspace is under, and the note it answers with. A MEMBER's, because the refusal
+  // it explains is a member's — see the capability's own entry.
+  loadEnforcement: "enforcement:appeal",
+  appealEnforcement: "enforcement:appeal",
 
   listMembers: "member:read",
   /**

@@ -17,6 +17,7 @@ import { useDiagnosticsStore } from "../store/diagnosticsStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useMemberStore } from "../store/memberStore.ts";
 import { useAuditStore } from "../store/auditStore.ts";
+import { useEnforcementStore } from "../store/enforcementStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { resetWorkspaceStores } from "../store/reset.ts";
 import { INPUT_KEY_PREFIX, useUiStore } from "../store/uiStore.ts";
@@ -366,6 +367,15 @@ function dispatch(msg: ServerMessage): void {
       }
       break;
     }
+    case "enforcement": {
+      // The workspace's standing. Broadcast rather than answered to one socket, because a rung
+      // applies to the workspace: one member appealing is something every open tab should see.
+      const e = useEnforcementStore.getState();
+      if (msg.type === "enforcement") e.apply(msg.state, msg.history);
+      else if (msg.type === "notice") e.setNotice(msg.message);
+      else if (msg.type === "error") e.setError(msg.message);
+      break;
+    }
     case "audit": {
       // A read, answered to this socket alone — so unlike every other channel here there is no
       // broadcast to reconcile with, and a snapshot replaces rather than merges.
@@ -498,6 +508,12 @@ async function connect(): Promise<void> {
     attempt = 0;
     useTraceStore.getState().setConnection("open");
     useSessionStore.getState().setStatus("ready");
+    // WHAT THE INITIAL SNAPSHOT DOES NOT CARRY. The relay pushes history, agents, mcp, providers,
+    // deploy, threads and members on connect; a workspace's STANDING is not among them, and it is
+    // the one fact that changes what every other surface is allowed to do. Asked for here rather
+    // than by the panel that renders it, because a suspended workspace has to say so on frame one —
+    // the alternative is a user pressing Run, being refused, and having nowhere to read why.
+    sendLoadEnforcement();
   };
 
   socket.onmessage = (ev) => {
@@ -979,6 +995,27 @@ export function sendTestRailwayToken(token: string): void {
 // Answered on the "members" channel with a full snapshot, the same discipline as every other
 // control-plane channel. `inviteLink` is the exception: it carries a credential, is sent only
 // to the socket that asked, and is never stored — see wsRelay's MemberEvent.
+
+/**
+ * Which rung this workspace is under, and everything it has been under.
+ *
+ * Sent once per connection from `connect`, not polled: a rung changes when a person or the ladder
+ * moves it, which is rare, and every mutation to it re-broadcasts the snapshot anyway.
+ */
+export function sendLoadEnforcement(): void {
+  send({ cmd: "loadEnforcement" });
+}
+
+/**
+ * Answer the rung. Records a note on the live enforcement and changes nothing else.
+ *
+ * The one write in the product that is deliberately available to a MEMBER about their own
+ * workspace: an appeal that has to go through the party that applied the enforcement is not an
+ * appeal.
+ */
+export function sendAppealEnforcement(note: string): boolean {
+  return send({ cmd: "appealEnforcement", note });
+}
 
 /**
  * The workspace's audit trail, newest first.

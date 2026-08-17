@@ -108,6 +108,15 @@ const TENANT_CHANNELS = new Set([
   // it, and `created_by` names a person — so a snapshot delivered across the boundary would be one
   // tenant's whole backlog, in their own words, under another tenant's name.
   "threads",
+  // Who revealed which credential, who overrode a push refusal, who removed whom. It is answered to
+  // one socket rather than broadcast, which is a stronger guarantee than scoping — but it is in this
+  // list because the classification is about what the PAYLOAD is, and this payload is a workspace's
+  // record of what its people did.
+  "audit",
+  // Which rung of the abuse ladder a workspace is under, why, and what it said about it. A rung is
+  // one tenant's standing with the platform, and the reason on the row is the evidence that produced
+  // it — delivered across the boundary it would tell one workspace that another is suspended.
+  "enforcement",
 ]);
 
 /**
@@ -455,6 +464,8 @@ console.log("\nfired live, in A, and B receives none of it");
   relay.broadcastBilling(ctxA, { type: "error", message: MARK });
   relay.broadcastGithub(ctxA, { type: "error", message: MARK });
   relay.broadcastThreads(ctxA, { type: "error", message: MARK });
+  relay.broadcastEnforcement(ctxA, { type: "notice", message: MARK });
+  relay.sendAudit(ctxA, ctxA.requestId, { type: "error", message: MARK });
   relay.sendMembers(ctxA, ctxA.requestId, { type: "notice", message: MARK });
   relay.broadcastAgentFiles(ctxA, "agent_a");
   await relay.broadcastAgentGraph(ctxA, "agent_a");

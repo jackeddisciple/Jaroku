@@ -55,7 +55,7 @@ import {
 import { SIGNALS, signalsFromRun, subjectDigest, type DetectedSignal } from "./abuse/signals.ts";
 import { AbuseRepository } from "./db/repositories/abuse.ts";
 import { AbuseGate } from "./abuse/gate.ts";
-import { enforcementRefusal, limitsUnderEnforcement } from "./abuse/enforcement.ts";
+import { enforcementRefusal, limitsUnderEnforcement, refusesWork } from "./abuse/enforcement.ts";
 import { EnforcementRepository } from "./db/repositories/enforcement.ts";
 import { healthz, readyz } from "./http/health.ts";
 import { AUTH_ENV, resolveAuthConfig } from "./auth/config.ts";
@@ -2351,6 +2351,8 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (CONNECTION_COMMAND_NAMES.has(cmd.cmd)) void handleConnectionCommand(ctx, cmd as ConnectionCommand);
     else if (MEMBER_COMMAND_NAMES.has(cmd.cmd)) void handleMemberCommand(ctx, cmd as MemberCommand);
     else if (cmd.cmd === "listAudit") void sendAuditLog(ctx, cmd.limit);
+    else if (cmd.cmd === "loadEnforcement") void broadcastEnforcement(ctx);
+    else if (cmd.cmd === "appealEnforcement") void appealEnforcement(ctx, cmd.note);
     else if (THREAD_COMMAND_NAMES.has(cmd.cmd)) void handleThreadCommand(ctx, cmd as ThreadCommand);
     else if (cmd.cmd === "loadUsage") void broadcastUsage(ctx);
     else if (cmd.cmd === "setSpendCeiling") void setSpendCeiling(ctx, cmd.usd);
@@ -3806,6 +3808,81 @@ async function handleMemberCommand(ctx: TenantContext, cmd: MemberCommand): Prom
     const message = (err as Error)?.message ?? String(err);
     console.error(`[members] ${cmd.cmd} failed: ${message}`);
     relay.broadcastMembers(ctx, { type: "error", message: `${cmd.cmd} failed: ${message}` });
+  }
+}
+
+/**
+ * The rung this workspace is under, its explanation, and everything it has been under before.
+ *
+ * WHAT WAS MISSING WAS THE OTHER HALF OF THE LADDER. Work really is refused, and the workspace
+ * really is told — by a message on whichever channel it happened to be working in. What it could
+ * not do was read its own standing anywhere, or answer it: `appeal()` and `history()` had no
+ * command, no route and no caller, so `appeal_note` could only be written with SQL. An appeal that
+ * requires database access is not an appeal.
+ *
+ * THE RUNG'S OWN SENTENCE TRAVELS WITH IT. `enforcementRefusal` is what a refusal is built from,
+ * and sending the same sentence here means the strip explaining the state and the refusal that
+ * produced it cannot drift apart — the same rule the usage panel follows about `BudgetGate.status`.
+ */
+async function broadcastEnforcement(ctx: TenantContext): Promise<void> {
+  try {
+    const [state, history] = await Promise.all([
+      enforcementRepo.current(ctx),
+      enforcementRepo.history(ctx),
+    ]);
+    relay.broadcastEnforcement(ctx, {
+      type: "enforcement",
+      state: {
+        ...state,
+        // The sentence a refusal would carry, so the strip and the refusal are one computation.
+        explain: state.level === "none" ? null : enforcementRefusal(state),
+        // Whether this rung refuses work outright, rather than leaving a client to re-derive the
+        // ladder's ordering from a level name.
+        refusesWork: refusesWork(state.level),
+      },
+      history,
+    });
+  } catch (err) {
+    const message = (err as Error)?.message ?? String(err);
+    console.error(`[abuse] loadEnforcement failed: ${message}`);
+    relay.broadcastEnforcement(ctx, { type: "error", message: "could not read this workspace's standing" });
+  }
+}
+
+/**
+ * Record what the workspace says about the rung it is under.
+ *
+ * It changes NOTHING about the enforcement, and the notice says so. A control that appeared to lift
+ * a suspension and did not would be worse than no control — so the answer is the same snapshot with
+ * `appealed_at` on the row, plus a sentence about what happens next.
+ */
+async function appealEnforcement(ctx: TenantContext, note: unknown): Promise<void> {
+  const text = typeof note === "string" ? note.trim() : "";
+  if (!text) {
+    relay.broadcastEnforcement(ctx, { type: "error", message: "an appeal needs something to say" });
+    return;
+  }
+  try {
+    // False means there was nothing in force to appeal against — a rung lifted or lapsed between
+    // the strip being rendered and the button being pressed, which is the ordinary race here.
+    const recorded = await enforcementRepo.appeal(ctx, text);
+    if (!recorded) {
+      relay.broadcastEnforcement(ctx, {
+        type: "notice",
+        message: "there is nothing in force to appeal — this workspace is not under a rung",
+      });
+    } else {
+      console.log(`[abuse] ${ctx.workspaceId} appealed its enforcement (${text.length} chars)`);
+      relay.broadcastEnforcement(ctx, {
+        type: "notice",
+        message: "your appeal is recorded on the enforcement — a person reviews it, and nothing changes until they do",
+      });
+    }
+    await broadcastEnforcement(ctx);
+  } catch (err) {
+    const message = (err as Error)?.message ?? String(err);
+    console.error(`[abuse] appealEnforcement failed: ${message}`);
+    relay.broadcastEnforcement(ctx, { type: "error", message: "could not record that appeal" });
   }
 }
 

@@ -637,6 +637,39 @@ export interface UsageSnapshot {
   paymentsConfigured: boolean;
 }
 
+// The abuse ladder, as the wire carries it.
+//
+// NOTHING HERE IS DERIVED CLIENT-SIDE, which is the reason `explain` and `refusesWork` are fields
+// rather than functions: both are computed by the same server code a REFUSAL is built from, so the
+// strip explaining the state and the refusal a user just hit cannot drift apart. A client that
+// re-derived either would eventually disagree with the thing that stopped their run.
+export type EnforcementLevelView =
+  | "none" | "watch" | "soft_limit" | "verify" | "suspended" | "blocked";
+
+export interface EnforcementStateView {
+  level: EnforcementLevelView;
+  reason: string;
+  appliedAt: string | null;
+  expiresAt: string | null;
+  /** Whether a person applied it. The two rungs that stop work outright always have one. */
+  byHuman: boolean;
+  /** The rung's own sentence, as a refusal carries it. Null when nothing is in force. */
+  explain: string | null;
+  refusesWork: boolean;
+}
+
+export interface EnforcementRowView {
+  id: number;
+  level: EnforcementLevelView;
+  reason: string;
+  applied_at: string;
+  expires_at: string | null;
+  lifted_at: string | null;
+  lifted_reason: string | null;
+  appeal_note: string | null;
+  appealed_at: string | null;
+}
+
 /** One row of the audit log, as the wire carries it. Mirrors `IdentityRepository.AuditEntry`. */
 export interface AuditEntryView {
   id: number;
@@ -1312,6 +1345,11 @@ export type ServerMessage =
   // is membership.
   | { channel: "audit"; type: "audit"; entries: AuditEntryView[] }
   | { channel: "audit"; type: "error"; message: string }
+  // The workspace's standing on the abuse ladder. Broadcast, not answered to one socket: a rung
+  // refuses every member's work, so one member's appeal is every tab's business.
+  | { channel: "enforcement"; type: "enforcement"; state: EnforcementStateView; history: EnforcementRowView[] }
+  | { channel: "enforcement"; type: "notice"; message: string }
+  | { channel: "enforcement"; type: "error"; message: string }
   | (InThread & { channel: "reply"; type: "started"; agentId: string; question: string })
   | (InThread & { channel: "reply"; type: "delta"; agentId: string; text: string })
   | (InThread & { channel: "reply"; type: "done"; agentId: string })
@@ -1348,6 +1386,15 @@ export type ClientCommand =
    * Answered to this socket alone; nothing about a read is anybody else's business.
    */
   | { cmd: "listAudit"; limit?: number }
+  /**
+   * Which rung of the abuse ladder this workspace is under, and its answer to it.
+   *
+   * A MEMBER's, both of them: the rung is what refused their work, and the repository's own doc is
+   * explicit that an appeal which has to go through the party that applied the enforcement is not
+   * an appeal. It records a note and changes nothing — a person reviews it.
+   */
+  | { cmd: "loadEnforcement" }
+  | { cmd: "appealEnforcement"; note: string }
   | { cmd: "inviteMember"; email: string; role: string }
   | { cmd: "revokeInvite"; inviteId: string }
   | { cmd: "setMemberRole"; userId: string; role: string }

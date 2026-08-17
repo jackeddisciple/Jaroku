@@ -26,6 +26,7 @@ import { useChatStore } from "./chatStore.ts";
 import { useConnectionStore } from "./connectionStore.ts";
 import { useDeployStore } from "./deployStore.ts";
 import { useDiagnosticsStore } from "./diagnosticsStore.ts";
+import { useEnforcementStore } from "./enforcementStore.ts";
 import { useEvalStore } from "./evalStore.ts";
 import { useGithubStore } from "./githubStore.ts";
 import { useGraphStore } from "./graphStore.ts";
@@ -78,6 +79,10 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
   // an agent uuid from the old workspace can never be asked for again, so nothing would ever
   // overwrite these: they would sit in the store for the life of the tab.
   diagnosticsStore: useDiagnosticsStore as unknown as Resettable,
+  // Which rung a workspace is under and what it said about it. The reason it must not survive a
+  // switch is the loudest one on this list: a strip reading "this workspace is suspended" over the
+  // workspace you have just moved to would be the app accusing the wrong tenant.
+  enforcementStore: useEnforcementStore as unknown as Resettable,
   evalStore: useEvalStore as unknown as Resettable,
   // Which repository each agent's code goes to, under whose GitHub account, and every commit
   // message on the way. Held across a switch it would name one tenant's private repositories

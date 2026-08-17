@@ -763,6 +763,33 @@ export type AuditEvent =
 
 const AUDIT_COMMANDS = new Set(["listAudit"]);
 
+/**
+ * What rung this workspace is under, and its answer to it.
+ *
+ * TWO COMMANDS, AND THE APPEAL IS THE POINT. The abuse ladder is one-sided by construction: a
+ * score rises, a rung is applied, work is refused, and the workspace is told. `appeal_note` is the
+ * column that makes it two-sided, and the repository's own doc says why it is a MEMBER's write —
+ * "an appeal that has to go through the party that applied the enforcement is not an appeal". It
+ * had no command, no route and no surface, so the note could only be written by SQL, which is the
+ * one hand that does not need an appeal mechanism.
+ *
+ * ITS OWN CHANNEL, not `billing` and not `providers`. Today the only signal a workspace gets is a
+ * refusal on whichever channel it was working in plus a `providers` notice, so "why can I not start
+ * anything" is answered in a different place each time. A rung is a fact about the workspace's
+ * standing, which is neither its money nor its credentials.
+ */
+export type LoadEnforcementCommand = { cmd: "loadEnforcement" };
+export type AppealEnforcementCommand = { cmd: "appealEnforcement"; note: string };
+
+export type EnforcementCommand = LoadEnforcementCommand | AppealEnforcementCommand;
+
+export type EnforcementEvent =
+  | { type: "enforcement"; state: unknown; history: unknown[] }
+  | { type: "notice"; message: string }
+  | { type: "error"; message: string };
+
+const ENFORCEMENT_COMMANDS = new Set(["loadEnforcement", "appealEnforcement"]);
+
 // Unified composer "explain": a prose answer about a step / node / the agent, built from
 // in-context data — the one genuinely-new composer intent (no code change).
 export type ExplainSubject =
@@ -826,6 +853,7 @@ export type ClientCommand =
   | GithubCommand
   | MemberCommand
   | ListAuditCommand
+  | EnforcementCommand
   | ThreadCommand
   | ListThreadsCommand
   | LoadThreadCommand;
@@ -879,6 +907,7 @@ export type ForwardedCommand =
   | GithubCommand
   | MemberCommand
   | ListAuditCommand
+  | EnforcementCommand
   | ThreadCommand
   | BillingCommand;
 
@@ -1663,6 +1692,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   listMembers: "members", inviteMember: "members", revokeInvite: "members",
   setMemberRole: "members", removeMember: "members",
   listAudit: "audit",
+  loadEnforcement: "enforcement", appealEnforcement: "enforcement",
   // All six on `threads`, the reads included. The channel HAS an error shape, so unlike
   // `loadAgentFiles` there is nowhere better for a refusal to go — and a refusal about a rename
   // that landed in the status bar instead of the list would leave the row it was about still
@@ -2300,6 +2330,10 @@ export class WsRelay {
             // every one of them makes a network call to a third party that can take seconds and
             // fail five ways, and the relay holds no token to make it with.
             void withContext((ctx) => this.onCommand?.(msg as GithubCommand, ctx));
+          } else if (ENFORCEMENT_COMMANDS.has(msg.cmd)) {
+            // Forwarded, like the audit read below it and for the same reason: the relay holds no
+            // enforcement repository, and the ladder's own state lives with the gate that applies it.
+            void withContext((ctx) => this.onCommand?.(msg as EnforcementCommand, ctx));
           } else if (AUDIT_COMMANDS.has(msg.cmd)) {
             // Forwarded rather than answered locally, for the reason BILLING_COMMANDS is: the relay
             // holds no identity repository and should not grow one. Shape-checked in the app.
@@ -2639,6 +2673,19 @@ export class WsRelay {
       if (session.context.requestId !== requestId) continue;
       this.sendTo(ws, { channel: "members", ...event });
     }
+  }
+
+  /**
+   * Broadcast the workspace's standing: which rung is in force, and what it has said about it.
+   *
+   * BROADCAST rather than answered to the asker, unlike the audit log beside it, and the difference
+   * is what the payload is about. A rung applies to the WORKSPACE — every member's work is refused
+   * by it — so one member appealing is something every open tab should see, exactly as a plan change
+   * is. The rows carry no third party's identity: the reason, the rung, and the note the workspace
+   * itself wrote.
+   */
+  broadcastEnforcement(ctx: TenantContext, event: EnforcementEvent): void {
+    this.broadcastTo(ctx, { channel: "enforcement", ...event });
   }
 
   /**

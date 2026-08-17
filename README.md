@@ -1690,6 +1690,7 @@ frozen event schema, and everything added since rides beside it.
 | `session` | The only channel about the CONNECTION rather than the work: `expiring`, `expired`, `revoked`, `workspace_changed`, `role_changed` |
 | `members` | Who is in the workspace, who has been invited, and the one-shot invite link |
 | `audit` | The workspace's own record of what has been done to it, newest first. Answered to the socket that asked and never broadcast — the rows name who revealed which credential and who removed whom |
+| `enforcement` | Which rung of the abuse ladder is in force, its own sentence, the history, and the workspace's appeal. Broadcast, because a rung refuses every member's work |
 | `providers` | Which provider keys are set (`configured: true/false`, by name), test results, and whether the workspace's own key pays for platform calls |
 | `connections` | Which third-party accounts this workspace has authorised, their status and granted scopes, and the URL a consent flow must be started at. Never a token |
 | `billing` | What this workspace has spent this period, against which ceilings — see [cost metering](#cost-metering-budgets-and-billing) |
@@ -1712,7 +1713,8 @@ frozen event schema, and everything added since rides beside it.
 `loadUsage` · `setSpendCeiling` · and the deploy set: `listDeployments` · `planDeploy` ·
 `deploy` · `cancelDeploy` · `forgetDeployment` · `loadDeployLogs` · `setRailwayToken` ·
 `testRailwayToken` · and the membership set: `listMembers` · `inviteMember` · `revokeInvite` ·
-`setMemberRole` · `removeMember` · `listAudit` · and the thread set: `listThreads` · `loadThread` ·
+`setMemberRole` · `removeMember` · `listAudit` · `loadEnforcement` · `appealEnforcement` · and the
+thread set: `listThreads` · `loadThread` ·
 `createThread` · `renameThread` · `archiveThread` · `restoreThread` · and the GitHub set:
 `listGithub` · `listGithubRepos` · `checkGithubRepo` · `linkGithub` · `unlinkGithub` ·
 `refreshGithub` · `pushGithub` · `pullGithub` · `switchGithubBranch` · `createGithubBranch` ·
@@ -3584,6 +3586,18 @@ platform that holds data hostage over an automated score is worse than the abuse
 responding to. Rows are append-only with a `lifted_at`, the evidence is copied in (signals are
 swept at thirty days and an appeal arrives later than that), and there is a column to appeal in,
 because a promise of an appeal with nowhere to make one is a sentence in a README.
+
+**And there is now somewhere to make it.** The column existed, `appeal()` was written and audited,
+and nothing called it — so the note could only be written with SQL, which is the one hand that does
+not need an appeal mechanism. A workspace under a rung gets a strip under the top bar carrying the
+rung's own sentence (the same one a refusal is built from, so the two cannot drift apart), when it
+lapses if it does, what it has been under before, and one text field. `watch` gets no strip — it
+changes nothing about what the workspace may do, and an alarm about a recorded observation is
+noise — and the two rungs that refuse work outright cannot be dismissed, because hiding the
+explanation for why nothing starts would leave the product silently broken. The appeal is
+`enforcement:appeal`, a **member's** capability: the refusal is a member's problem, and an appeal
+that has to go through the party that applied the enforcement is not an appeal. It changes no limit
+by itself and the copy says so.
 
 ### Prompt injection, restated honestly
 
