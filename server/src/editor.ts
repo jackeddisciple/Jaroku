@@ -463,8 +463,22 @@ export class Editor extends EventEmitter<EditorEvents> {
       this.fail({ message: "that proposal is no longer available", proposalId });
       return;
     }
+    // CLAIMED SYNCHRONOUSLY, BEFORE THE FIRST `await`. It used to be deleted after two of them —
+    // an agent lookup and the publish itself — so a double-click ran both applies past the same
+    // record: both read the same `current_version`, both passed the staleness guard, and both
+    // published. One proposal became two identical versions, `current_version` jumped by two, and
+    // Undo had to be pressed twice to get back to where the user started. `discard`, one method
+    // below, has always deleted before its first await, which is what makes this an oversight
+    // rather than a design.
+    //
+    // Every refusal below puts it back, because a refused apply is retryable — which is what the
+    // `fail(...)` branches have always assumed.
+    this.pending.delete(proposalId);
+    const restore = (): void => { this.pending.set(proposalId, rec); };
+
     const refusal = this.opts.canMutate?.();
     if (refusal) {
+      restore();
       this.fail({ message: refusal, proposalId, agentId: rec.agentId });
       return;
     }
@@ -475,10 +489,14 @@ export class Editor extends EventEmitter<EditorEvents> {
     // between — silently, because the staged copy is complete and looks perfectly valid.
     const agent = await this.opts.agents.bySlug(rec.ctx, rec.agentId);
     if (!agent) {
+      restore();
       this.fail({ message: `agent "${rec.agentId}" was not found`, proposalId, agentId: rec.agentId });
       return;
     }
     if (agent.current_version !== rec.baseVersion) {
+      // Put it back so `discard` has something to clean up — it is what removes the staging copy
+      // and tells the workspace, and this proposal genuinely is over.
+      restore();
       await this.discard(rec.ctx, proposalId);
       this.fail({
         message:
@@ -503,9 +521,13 @@ export class Editor extends EventEmitter<EditorEvents> {
         ),
       });
       await this.materialise(rec.ctx, rec.agentUuid, version, rec.agentId);
-      this.pending.delete(proposalId);
       this.emit("applied", { proposalId, agentId: rec.agentId, version, summary: rec.summary });
     } catch (err) {
+      // NOT put back. The publish either happened or it did not, and this catch cannot tell which:
+      // `materialise` runs after `publishStaging`, so a throw here may sit on the far side of a
+      // version that already exists. Restoring would offer an Apply button that could publish it a
+      // second time, which is the bug this claim was added to close. The user asks for the edit
+      // again, which is what the staleness guard would tell them anyway.
       this.fail({ message: `apply failed: ${(err as Error).message}`, proposalId, agentId: rec.agentId });
     }
   }

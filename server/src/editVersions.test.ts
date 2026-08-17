@@ -367,6 +367,45 @@ console.log("\na proposal whose base version moved");
   );
 }
 
+// --- one proposal publishes ONE version, however many times Apply is pressed ----------------
+console.log("\na double-click on Apply");
+{
+  // The record used to be deleted AFTER two awaits — an agent lookup and the publish — so both
+  // applies read the same `current_version`, both passed the staleness guard directly above them,
+  // and both published. `current_version` jumped by two, the history showed the same edit twice,
+  // and Undo had to be pressed twice to get back. `discard` has always deleted before its first
+  // await, which is what made this an oversight rather than a design.
+  const out = await propose(editor, A, "support_bot", "make the tone warmer again");
+  if (out.kind !== "proposal") throw new Error("cannot continue without a proposal");
+  const before = (await agents.bySlug(A, "support_bot"))!.current_version;
+  const undosBefore = (await agents.editCounts(A)).get(agent.id) ?? 0;
+
+  // An `error` with no listener is a throw on an EventEmitter, and the second apply is expected to
+  // refuse — so the refusals are collected rather than left to blow up the suite.
+  const refusals: string[] = [];
+  const onError = (e: { message: string }): void => { refusals.push(e.message); };
+  editor.on("error", onError);
+  // Both in flight before either resolves, which is exactly what a double-click produces.
+  await Promise.all([editor.apply(A, out.proposalId), editor.apply(A, out.proposalId)]);
+  editor.off("error", onError);
+
+  const after = (await agents.bySlug(A, "support_bot"))!.current_version;
+  check(after === before + 1, `one proposal publishes ONE version (v${before} -> v${after})`, String(after));
+  check(
+    (await agents.versions(A, agent.id)).filter((v) => v.version === after).length === 1,
+    "...and the history holds one row for it, not two",
+  );
+  check(
+    ((await agents.editCounts(A)).get(agent.id) ?? 0) === undosBefore + 1,
+    "...so Undo has to be pressed once, not twice, to get back",
+  );
+  check(
+    refusals.length === 1 && refusals[0] === "that proposal is no longer available",
+    "...and the second click is told the proposal is gone, which is what discard already said",
+    refusals.join(" / "),
+  );
+}
+
 delete process.env.JAROKU_EDIT_FIXTURE;
 await db.close();
 for (const d of scratch) rmSync(d, { recursive: true, force: true });

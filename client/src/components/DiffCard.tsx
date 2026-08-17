@@ -203,6 +203,18 @@ function VersionPicker({ current, count }: { current: number; count: number }) {
 
 export function DiffCard({ turn }: { turn: ProposalTurn }) {
   const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === turn.agentId));
+  /**
+   * This card's Apply or Discard has been sent and not yet answered.
+   *
+   * LOCAL, AND ONLY UNTIL THE SERVER SPEAKS. `turn.status` is the shared truth and it stays
+   * "pending" until the `applied` / `discarded` event lands, which on a hosted object store is
+   * several round trips away — so with no in-flight state of its own the card offered a live Apply
+   * button for the whole of that window. Keyed by proposal id so a card that is re-rendered for a
+   * different proposal starts clean.
+   */
+  const [answeredId, setAnsweredId] = useState<string | null>(null);
+  const answered = answeredId !== null && answeredId === turn.proposalId;
+  const setAnswered = (): void => setAnsweredId(turn.proposalId);
 
   // Streaming: the model is rewriting files right now.
   if (turn.status === "streaming") {
@@ -319,12 +331,30 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
 
       {turn.status === "pending" && (
         <div className="mt-5 flex items-center gap-2">
-          <button className={primaryBtn} onClick={() => turn.proposalId && sendApplyEdit(turn.proposalId)}>
+          {/* DISABLED ON THE FIRST CLICK, because `turn.status` only leaves "pending" when the
+              server's `applied` event arrives — and on a hosted object store an apply is several
+              network round trips, so the window is comfortably human-sized. The correctness fix is
+              the editor's, which claims the proposal before its first await; this is what stops the
+              user watching two requests go out and wondering which one counted. */}
+          <button
+            className={primaryBtn}
+            disabled={answered}
+            onClick={() => {
+              if (answered || !turn.proposalId) return;
+              setAnswered();
+              sendApplyEdit(turn.proposalId);
+            }}
+          >
             Apply
           </button>
           <button
             className={quietBtn}
-            onClick={() => turn.proposalId && sendDiscardEdit(turn.proposalId)}
+            disabled={answered}
+            onClick={() => {
+              if (answered || !turn.proposalId) return;
+              setAnswered();
+              sendDiscardEdit(turn.proposalId);
+            }}
           >
             Discard
           </button>
