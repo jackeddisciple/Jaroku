@@ -169,7 +169,15 @@ export class CheckRunner {
     }
 
     const evalRunId = await this.deps.startEval(ctx, {
-      agentId: input.agentUuid,
+      // THE SLUG, NOT THE UUID, and the difference is not cosmetic: `agentId` here becomes the
+      // eval row's `agent_id` and then the working directory of every job's subprocess —
+      // `runtime/agents/<agentId>` — exactly as an ordinary eval's does. A uuid there names a
+      // directory that does not exist, so every job of every check would have failed to start.
+      // It could not be observed until now: `setConfig` had no caller, so this line was never
+      // reached in a running product. The two ids are both here on purpose — the CONFIG is keyed
+      // by uuid, because that is a row in this database, and the RUN is keyed by slug, because
+      // that is a directory on disk.
+      agentId: input.agentSlug,
       datasetId: config.ci_dataset_id,
       targets: targetsFor(mode, input.configuredTargets),
       checkRunId: row.id,

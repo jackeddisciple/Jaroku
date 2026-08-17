@@ -25,7 +25,7 @@ import { badgeFor, syncVerdict, unpushedVersions, verdictLine, type SyncVerdict 
 import { stagedFiles, type StagedFile } from "./githubStaging.ts";
 import { WORKFLOW_PATH, buildWorkflow, workflowVerdict } from "./githubWorkflow.ts";
 import type { PrCommentsRepository } from "./db/repositories/prComments.ts";
-import type { ChecksRepository } from "./db/repositories/checks.ts";
+import type { ChecksRepository, ProviderPolicy } from "./db/repositories/checks.ts";
 import { inSubdirectory, repoPath, repoPrefix } from "./githubPush.ts";
 import type { Agent, AgentRepository, AgentVersion } from "./db/repositories/agents.ts";
 import type { ProjectStore } from "./storage/projectStore.ts";
@@ -230,6 +230,20 @@ export interface GithubView {
    * have no rows here and the canvas simply draws no markers.
    */
   checks: CheckMarkerRow[];
+  /**
+   * §B.1.2's opt-in, as it stands for this agent — or null when nothing has ever configured it.
+   *
+   * NULL IS A STATE AND NOT AN ABSENCE OF DATA. The row's absence means "post nothing": linking a
+   * repository deliberately does not enable an eval check, because silent unbounded spend on every
+   * push to a pull request is not a default this product gets to have. So the panel renders "off"
+   * from null and "on, against this dataset" from a row, and the two are different sentences.
+   *
+   * ON THE SNAPSHOT for the reason `checks` above it is: one indexed read of a table this workspace
+   * owns. It is what makes the feature configurable at all — `setConfig` had no caller anywhere, so
+   * `ci_dataset_id` was always null and every pull request logged "no dataset is linked for CI on
+   * this agent" and did nothing, with four modules, two migrations and four passing suites behind it.
+   */
+  ci: { datasetId: string | null; policy: ProviderPolicy } | null;
   events: GithubEvent[];
 }
 
@@ -427,6 +441,12 @@ export class GithubService {
             createdAt: c.created_at,
           }))
         : [],
+      ci: this.deps.checks
+        ? await this.deps.checks
+            .config(ctx, agent.id)
+            .then((c) => (c ? { datasetId: c.ci_dataset_id, policy: c.provider_policy } : null))
+            .catch(() => null)
+        : null,
       events,
     };
   }

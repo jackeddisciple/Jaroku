@@ -58,6 +58,14 @@ there. What is new is that the product's own surface reaches them.
   list is the server's (`purchasable` and the price id are columns; the limits come from the code
   that enforces them), a deployment with no Stripe keys shows nothing rather than a refusing
   control, and choosing is `billing:manage` while reading spend stays a member's.
+- **Pull-request checks can be switched on.** Four modules, two migrations, a webhook branch and
+  four passing suites sat behind one row in `agent_ci_config` that nothing in the product could
+  write: `setConfig` had no caller, so `ci_dataset_id` was always null and every delivery logged "no
+  dataset is linked for CI on this agent". `setAgentCiConfig` is on the github channel at
+  `github:manage` — it decides whether a stranger's pull request may spend this workspace's provider
+  balance — and the panel has a **Checks** region with the dataset picker and §B.1.3's three-position
+  policy. The dataset is the switch; the two fields patch independently, so clearing one keeps the
+  other.
 - **The judge's rubric can be edited.** ADR-012 is titled *LLM-as-judge with a data-driven rubric*
   and the data was not user-supplied anywhere: the table, both commands, the store fields and both
   senders existed, `EvalDrillDown` already rendered per-criterion breakdowns, and no component read
@@ -103,6 +111,16 @@ there. What is new is that the product's own surface reaches them.
   `?workspace=`. It was inside the Secrets module, which is where it had to be while the Secrets
   group was the only such surface; forgetting the scoping on an EXPORT would mean handing somebody
   an archive of whichever workspace the server picked as their default.
+
+### Fixed
+
+- **A CI check would have failed every job it dispatched.** `checkRunner` passed the agent's **uuid**
+  to `startEval`, where the eval engine takes the **slug** — which becomes the eval row's `agent_id`
+  and then `runtime/agents/<agentId>`, the working directory of every job's subprocess. It could not
+  be observed while the feature was unreachable: with no way to write `agent_ci_config`, the line was
+  never executed in a running product. `test:check-runner` asserts the slug now, and the two ids are
+  documented where they meet — the config is keyed by uuid because it is a row, the run by slug
+  because it is a directory.
 
 ### Changed
 

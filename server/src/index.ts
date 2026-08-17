@@ -3942,6 +3942,7 @@ const GITHUB_COMMAND_NAMES = new Set([
   "refreshGithub", "pushGithub", "pullGithub", "switchGithubBranch", "createGithubBranch",
   "openGithubPr", "commitGithub", "generateGithubMessage", "diagnoseFile",
   "shadowRunGithub", "listShadowRuns", "semanticDiffGithub", "resolveReviewComment",
+  "setAgentCiConfig",
 ]);
 
 const prComments = new PrCommentsRepository(db);
@@ -4941,6 +4942,59 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
             }
           }
         }
+        await broadcastGithub(ctx, agentId);
+        return;
+      }
+
+      case "setAgentCiConfig": {
+        // §B.1.2's opt-in, and the row that four modules, two migrations, a webhook branch and four
+        // passing suites were waiting for. `setConfig` had no caller anywhere, so `ci_dataset_id`
+        // was always null and `checkRunner.open` returned "no dataset is linked for CI on this
+        // agent" on every pull request, for every agent, always.
+        const agentId = String(cmd.agentId ?? "");
+        const agent = await agentRepo.bySlug(ctx, agentId);
+        if (!agent) return fail("no such agent in this workspace", agentId);
+
+        // THE DATASET IS CHECKED AGAINST THIS WORKSPACE'S OWN. A dataset id is a client-supplied
+        // identifier, and this one decides what a pull request executes — so an id from another
+        // tenant must not be storable, whatever the reads downstream would do with it.
+        if (typeof cmd.datasetId === "string" && cmd.datasetId) {
+          const dataset = await evalStore.getDataset(ctx, cmd.datasetId);
+          if (!dataset) return fail("no such dataset in this workspace", agentId);
+          // AND IT HAS TO BELONG TO THIS AGENT. A check runs the agent the pull request touches
+          // against the named dataset; a dataset built for a different agent would score this one
+          // against inputs nobody chose for it, and the pass rate would be meaningless rather than
+          // wrong in a visible way.
+          //
+          // COMPARED AGAINST THE SLUG. `datasets.agent_id` holds a slug — it is written from the
+          // client's `activeAgentId` and is what the job's working directory is derived from — while
+          // `agent_ci_config.agent_id` holds the uuid. Both are deliberate and this is the seam.
+          if (dataset.agent_id !== agent.slug) {
+            return fail("that dataset belongs to a different agent", agentId);
+          }
+        }
+
+        const policy = cmd.policy;
+        if (
+          policy !== undefined &&
+          policy !== "dry_run_only" &&
+          policy !== "collaborators_paid" &&
+          policy !== "always_paid"
+        ) {
+          return fail(`"${String(policy).slice(0, 24)}" is not a provider policy`, agentId);
+        }
+
+        // FIELD BY FIELD FROM WHAT IS PRESENT, which is the repository's own contract: clearing the
+        // dataset turns checks off and keeps the policy somebody chose, and choosing a policy does
+        // not clear the dataset.
+        await checksRepo.setConfig(ctx, agent.id, {
+          ...(cmd.datasetId !== undefined ? { datasetId: cmd.datasetId } : {}),
+          ...(policy !== undefined ? { policy } : {}),
+        });
+        console.log(
+          `[checks] ${agentId} CI config: dataset ${cmd.datasetId === undefined ? "unchanged" : (cmd.datasetId ?? "none")}` +
+            `, policy ${policy ?? "unchanged"}`,
+        );
         await broadcastGithub(ctx, agentId);
         return;
       }

@@ -44,6 +44,7 @@ import { RestackRegion, StagingRegion } from "./GitHubStaging.tsx";
 import { ShadowRunsRegion } from "./ShadowRuns.tsx";
 import { SemanticDiffRegion } from "./SemanticDiff.tsx";
 import { ReviewRegion } from "./ReviewRegion.tsx";
+import { ChecksRegion } from "./GitHubChecks.tsx";
 import { GraphCanvas } from "./GraphCanvas.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
@@ -562,6 +563,14 @@ function Linked({ view }: { view: GithubView }) {
         <div className="mt-4">
           <VersionLists view={view} />
         </div>
+      </CollapsibleRegion>
+
+      {/* §B.1.2's opt-in, between Changes and History: it is a setting about what happens to a pull
+          request, and a pull request is the thing History renders. Under Changes rather than in the
+          Repository header because it is not part of the link — an agent can be linked for a year
+          with checks off, which is the default. */}
+      <CollapsibleRegion label="Checks" open={regions.checks} onToggle={toggle("checks")}>
+        <ChecksRegion view={view} />
       </CollapsibleRegion>
 
       <CollapsibleRegion

@@ -646,6 +646,30 @@ export type ResolveReviewCommentCommand = {
   reply?: string;
 };
 
+/**
+ * §B.1.2's opt-in: which dataset a pull request runs, and whose money it may spend.
+ *
+ * TWO FIELDS, BOTH OPTIONAL, BECAUSE THE DIFFERENCE BETWEEN "SET THIS TO NULL" AND "LEAVE IT
+ * ALONE" IS LOAD-BEARING — the same rule `patchLink` follows. Clearing the dataset (turning checks
+ * off) must keep the policy somebody chose, and choosing a policy must not clear the dataset.
+ *
+ * WHY IT IS ON THE GITHUB CHANNEL and not the eval one, even though it names a dataset: what is
+ * being configured is what happens on a PULL REQUEST, it is read by the webhook branch, and its
+ * results are the markers the GitHub panel already renders. The dataset is the parameter, not the
+ * subject.
+ *
+ * `github:manage`, like every other write in this family. It decides whether a stranger's pull
+ * request can spend this workspace's provider balance, which is the sharpest version of what
+ * "commits the workspace to something outside itself" means.
+ */
+export type SetAgentCiConfigCommand = {
+  cmd: "setAgentCiConfig";
+  agentId: string;
+  /** Null turns checks off while keeping the policy. Absent leaves it alone. */
+  datasetId?: string | null;
+  policy?: "dry_run_only" | "collaborators_paid" | "always_paid";
+};
+
 export type GithubCommand =
   | ListGithubCommand
   | ListGithubReposCommand
@@ -664,13 +688,15 @@ export type GithubCommand =
   | ShadowRunGithubCommand
   | ListShadowRunsCommand
   | SemanticDiffCommand
-  | ResolveReviewCommentCommand;
+  | ResolveReviewCommentCommand
+  | SetAgentCiConfigCommand;
 
 const GITHUB_COMMANDS = new Set([
   "listGithub", "listGithubRepos", "checkGithubRepo", "linkGithub", "unlinkGithub",
   "refreshGithub", "pushGithub", "pullGithub", "switchGithubBranch", "createGithubBranch",
   "openGithubPr", "commitGithub", "generateGithubMessage", "diagnoseFile",
   "shadowRunGithub", "listShadowRuns", "semanticDiffGithub", "resolveReviewComment",
+  "setAgentCiConfig",
 ]);
 
 /** MCP-channel commands, grouped so the forwarding switch stays readable. */
@@ -1717,6 +1743,8 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // refusals in the status bar instead of the surface that asked for them.
   diagnoseFile: "github", shadowRunGithub: "github", listShadowRuns: "github",
   semanticDiffGithub: "github", resolveReviewComment: "github",
+  // §B.1.2's opt-in. On `github` because what it configures happens on a pull request.
+  setAgentCiConfig: "github",
 };
 
 export function channelFor(cmd: string): string {

@@ -103,10 +103,14 @@ try {
       agent_id: "agent-1", ci_dataset_id: "dataset-1",
       provider_policy: "collaborators_paid", updated_at: new Date().toISOString(),
     });
+    const started: { agentId: string; datasetId: string }[] = [];
     const runner = new CheckRunner({
       checks: checks as never,
       repo: {} as never,
-      startEval: async () => "eval-1",
+      startEval: async (_ctx, input) => {
+        started.push({ agentId: input.agentId, datasetId: input.datasetId });
+        return "eval-1";
+      },
       log: () => {},
     });
 
@@ -132,6 +136,18 @@ try {
       [...checks.rows.values()][0]?.github_check_run_id === String(posted.check_runs[0]?.id),
       "and the row we keep names the check GitHub actually has",
     );
+
+    // THE SLUG, NOT THE UUID. `agentId` here becomes the eval row's `agent_id` and then the working
+    // directory of every job's subprocess — `runtime/agents/<agentId>` — exactly as an ordinary
+    // eval's does. This line passed `agentUuid` for as long as the feature was unreachable, which is
+    // how it stayed unobserved: with no way to write `agent_ci_config`, the dispatch was never
+    // reached in a running product, and the first real check would have failed every job.
+    check(
+      started[0]?.agentId === "weather-agent",
+      "the eval is started against the agent SLUG, which is what a job's directory is derived from",
+      started[0]?.agentId ?? "nothing was started",
+    );
+    check(started[0]?.datasetId === "dataset-1", "...against the dataset the config named");
   }
 
   console.log("\na superseded check is cancelled under the name it was posted with");

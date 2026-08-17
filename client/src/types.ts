@@ -1110,8 +1110,26 @@ export interface GithubView {
   review: GithubReviewRow[];
   /** §B.8.2's eval markers, newest first. Empty until §B.1 is opted into on this agent. */
   checks: GithubCheckMarker[];
+  /**
+   * §B.1.2's opt-in for this agent, or null when nothing has ever configured it.
+   *
+   * NULL IS A STATE. The absence of a row means "post nothing": linking a repository deliberately
+   * does not enable an eval check, because unbounded spend on every push to a pull request is not a
+   * default. So "off" and "on, against this dataset" are different sentences, and neither is
+   * inferred from an empty string.
+   */
+  ci: { datasetId: string | null; policy: GithubProviderPolicy } | null;
   events: GithubEventRow[];
 }
+
+/**
+ * §B.1.3's three positions. Never a boolean — the middle one is the interesting case.
+ *
+ * `dry_run_only`        a check runs the free dry-run provider. Nobody's money.
+ * `collaborators_paid`  a collaborator's pull request may spend; a stranger's may not.
+ * `always_paid`         any pull request may spend this workspace's provider balance.
+ */
+export type GithubProviderPolicy = "dry_run_only" | "collaborators_paid" | "always_paid";
 
 /** §3.6's refusal card. Its own message type, because an error strip could carry none of it. */
 export interface GithubRefusal {
@@ -1542,6 +1560,19 @@ export type ClientCommand =
   // §3.4's ✨ generate. Its own command because it is the one thing in this family that costs
   // money — the default message needs no model call at all.
   | { cmd: "generateGithubMessage"; agentId: string }
+  /**
+   * §B.1.2's opt-in: which dataset a pull request runs, and whose money it may spend.
+   *
+   * BOTH FIELDS OPTIONAL, because "set this to null" and "leave this alone" are different
+   * instructions: clearing the dataset turns checks off and must keep the policy somebody chose,
+   * and choosing a policy must not clear the dataset.
+   */
+  | {
+      cmd: "setAgentCiConfig";
+      agentId: string;
+      datasetId?: string | null;
+      policy?: GithubProviderPolicy;
+    }
   /**
    * §B.3: analyse an unsaved buffer.
    *

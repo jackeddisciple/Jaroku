@@ -48,12 +48,14 @@ export interface GithubProgress {
  * localStorage is re-read on the next render, which is exactly the behaviour a per-agent
  * preference should have.
  */
-export type RegionId = "header" | "sync" | "changes" | "history";
+export type RegionId = "header" | "sync" | "changes" | "checks" | "history";
 
 const REGION_KEY_PREFIX = "jaroku.github.regions.";
 
 /** The default: everything open. A panel that opens folded hides the answer somebody came for. */
-const ALL_OPEN: Record<RegionId, boolean> = { header: true, sync: true, changes: true, history: true };
+const ALL_OPEN: Record<RegionId, boolean> = {
+  header: true, sync: true, changes: true, checks: true, history: true,
+};
 
 /**
  * Exported so `reset.test.ts` can assert it actually carries the workspace.
@@ -78,6 +80,7 @@ export function readRegions(workspaceId: string | null, agentId: string): Record
       header: parsed.header !== false,
       sync: parsed.sync !== false,
       changes: parsed.changes !== false,
+      checks: parsed.checks !== false,
       history: parsed.history !== false,
     };
   } catch {

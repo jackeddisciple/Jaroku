@@ -1390,6 +1390,37 @@ edited is surfaced rather than overwritten.
 - **A rewritten remote is `diverged`, never `behind`.** Zero commits between two heads reads as in
   sync and is the one case where a pull destroys work.
 
+### Checks on a pull request
+
+A pull request that touches an agent can run a dataset against it and post the pass rate, the cost
+per run and the latency as a GitHub check, with the delta against the base branch. It is configured
+per agent in the panel's **Checks** region, and it is **off until somebody picks a dataset** —
+linking a repository deliberately does not enable it, because unbounded spend on every push to a
+pull request is not a default this product gets to have.
+
+The dataset is the switch, so there is no separate enable toggle: without one there is nothing to
+enable. The second decision is **whose money a check may spend**, and it is three positions rather
+than a boolean, because the middle one is the interesting case:
+
+| Policy | What a check may use |
+|---|---|
+| Dry run | The free dry-run provider. Nobody's money |
+| Collaborators | A collaborator's pull request may spend this workspace's balance; a stranger's runs dry |
+| Anybody | Any pull request may spend it |
+
+The default when a config row is first written is the middle one — defaulting to *anybody* would make
+opting in an opt-out of the boundary, and defaulting to *dry run* would make the feature do nothing
+until configured twice. The two fields are patched independently: clearing the dataset turns checks
+off and keeps the policy, and changing the policy does not clear the dataset.
+
+**This was written a release before it could be reached.** `checkRunner`, `checkPolicy`, `evalCheck`,
+`githubChecksLine`, two migrations, the webhook branch and four suites all sat behind one row in
+`agent_ci_config`, and `setConfig` had no caller — so `ci_dataset_id` was always null and every
+delivery logged *"no dataset is linked for CI on this agent"*. Closing that surfaced a second thing
+nothing could have observed: the dispatch passed the agent's **uuid** where the eval engine takes the
+**slug**, which is what a job's working directory is derived from, so the first real check would have
+failed every job. The suite asserts the slug now.
+
 ### The first push into an empty repository
 
 Worth knowing because it is not obvious from the outside: GitHub's Git Data API refuses **every**
@@ -1726,7 +1757,8 @@ thread set: `listThreads` · `loadThread` ·
 `listGithub` · `listGithubRepos` · `checkGithubRepo` · `linkGithub` · `unlinkGithub` ·
 `refreshGithub` · `pushGithub` · `pullGithub` · `switchGithubBranch` · `createGithubBranch` ·
 `openGithubPr` · `commitGithub` · `generateGithubMessage` · `diagnoseFile` ·
-`shadowRunGithub` · `listShadowRuns` · `semanticDiffGithub` · `resolveReviewComment`
+`shadowRunGithub` · `listShadowRuns` · `semanticDiffGithub` · `resolveReviewComment` ·
+`setAgentCiConfig`
 
 Accepting an invitation is deliberately **not** a command: the accepter is not a member yet, so
 there is no socket scoped to the workspace they are joining. It is `POST /v1/invites/accept`.

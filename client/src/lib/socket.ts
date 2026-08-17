@@ -31,7 +31,8 @@ import {
 } from "./auth.ts";
 import type {
   ClientCommand, EvalTarget, ExplainSubject, GithubAttachment, GithubHunkSelection,
-  GithubRestackStep, McpConfirmVerdict, McpImpact, RubricCriterion, ServerMessage,
+  GithubProviderPolicy, GithubRestackStep, McpConfirmVerdict, McpImpact, RubricCriterion,
+  ServerMessage,
 } from "../types.ts";
 
 const RECONNECT_MS = 1000;
@@ -1319,6 +1320,22 @@ export function sendOpenGithubPr(agentId: string): void {
  * or a post-pull merge. The DEFAULT message needs none of this: it is pre-filled from the
  * version's own instruction and summary, which the version row already carries.
  */
+/**
+ * §B.1.2's opt-in: run this dataset as a check on every pull request, and decide whose money it may
+ * spend.
+ *
+ * BOTH FIELDS OPTIONAL AND THE OMISSION IS MEANINGFUL — the server patches field by field. Passing
+ * `datasetId: null` turns checks off and keeps the policy; passing only a policy leaves the dataset
+ * alone. A sender that always sent both would make every policy change a re-statement of the
+ * dataset, which is the shape that loses one of them under two tabs.
+ */
+export function sendSetAgentCiConfig(
+  agentId: string,
+  patch: { datasetId?: string | null; policy?: GithubProviderPolicy },
+): void {
+  send({ cmd: "setAgentCiConfig", agentId, ...patch });
+}
+
 export function sendGenerateGithubMessage(agentId: string): void {
   useGithubStore.getState().startGenerating(agentId);
   send({ cmd: "generateGithubMessage", agentId });
