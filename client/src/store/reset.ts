@@ -32,6 +32,7 @@ import { useMcpStore } from "./mcpStore.ts";
 import { useMemberStore } from "./memberStore.ts";
 import { useProviderStore } from "./providerStore.ts";
 import { useSecretsStore } from "./secretsStore.ts";
+import { useThreadStore } from "./threadStore.ts";
 import { useTraceStore } from "./traceStore.ts";
 import { forgetElevation } from "../lib/secrets.ts";
 
@@ -86,6 +87,11 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
   // tenant's rows shown under another's name, but the gate on the second workspace standing open
   // because somebody unlocked the first.
   secretsStore: useSecretsStore as unknown as Resettable,
+  // Every build session in the workspace: what it was called, what it left unresolved, what it cost,
+  // and the last thing somebody typed into it. The preview line alone is a person's own words — held
+  // across a switch it would show one tenant's questions under another tenant's name, and the row
+  // beside it would offer to open a thread the new workspace cannot see.
+  threadStore: useThreadStore as unknown as Resettable,
   traceStore: useTraceStore as unknown as Resettable,
 };
 

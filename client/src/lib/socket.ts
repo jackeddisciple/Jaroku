@@ -16,6 +16,7 @@ import { useGithubStore } from "../store/githubStore.ts";
 import { useDiagnosticsStore } from "../store/diagnosticsStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useMemberStore } from "../store/memberStore.ts";
+import { useThreadStore } from "../store/threadStore.ts";
 import { resetWorkspaceStores } from "../store/reset.ts";
 import { INPUT_KEY_PREFIX } from "../store/uiStore.ts";
 import {
@@ -324,6 +325,18 @@ function dispatch(msg: ServerMessage): void {
       else if (msg.type === "inviteLink") m.setInviteLink(msg);
       else if (msg.type === "error") m.setError(msg.message);
       else if (msg.type === "notice") m.setNotice(msg.message);
+      break;
+    }
+    case "threads": {
+      // Every message here is a FULL SNAPSHOT except `thread`, which is one row answered to this
+      // client because it asked to open it. Nothing merges: see threadStore's own header.
+      const t = useThreadStore.getState();
+      if (msg.type === "threads") t.setThreads(msg.threads, msg.counts);
+      else if (msg.type === "thread") t.setThread(msg.thread);
+      else if (msg.type === "error") t.setError(msg.message);
+      // A notice is not an error and must not render as one. Nothing on this channel sends one yet;
+      // it is handled rather than dropped so a server running ahead of the client is visible.
+      else if (msg.type === "notice") console.info("[threads]", msg.message);
       break;
     }
     case "reply": {
@@ -901,6 +914,45 @@ export function sendLoadRubric(datasetId: string): void {
 }
 export function sendSaveRubric(datasetId: string, criteria: RubricCriterion[], name?: string): void {
   send({ cmd: "saveRubric", datasetId, criteria, name });
+}
+
+// --- threads ---------------------------------------------------------------
+// §7.1: the two reads are answered to this client alone, the four mutations come back as a full
+// snapshot to the whole workspace. So nothing here optimistically patches local state — a client that
+// did would be holding a list assembled from its own guess and the server's answer, and the §4.4
+// counts beside it would belong to only one of the two.
+
+/** The whole list for the active workspace, with derived status and counts. */
+export function sendListThreads(): void {
+  send({ cmd: "listThreads" });
+}
+
+/** Open one thread. Answered to this client only — opening is one client's navigation (§4.5). */
+export function sendLoadThread(threadId: string): void {
+  send({ cmd: "loadThread", threadId });
+}
+
+/**
+ * Open a new thread, optionally on an agent.
+ *
+ * `agentId` is omitted for §3.1's planning stage: a thread legitimately exists before any agent does,
+ * and that is the state somebody is in when they start describing one.
+ */
+export function sendCreateThread(agentId?: string | null, title?: string): void {
+  send({ cmd: "createThread", agentId, title });
+}
+
+export function sendRenameThread(threadId: string, title: string): void {
+  send({ cmd: "renameThread", threadId, title });
+}
+
+/** §3.4. Sets a timestamp; there is no delete command, because there is no delete path. */
+export function sendArchiveThread(threadId: string): void {
+  send({ cmd: "archiveThread", threadId });
+}
+
+export function sendRestoreThread(threadId: string): void {
+  send({ cmd: "restoreThread", threadId });
 }
 
 // --- github ----------------------------------------------------------------

@@ -689,6 +689,70 @@ export type SessionMessage =
   | { channel: "session"; type: "workspace_changed"; message: string }
   | { channel: "session"; type: "role_changed"; role: string };
 
+// --- threads (see server/src/wsRelay.ts ThreadEvent, and the Threads spec §3–§4) ---
+//
+// A THREAD IS NOT A CHAT. It is a build session with side effects: it spent money, it may have left
+// an unapplied diff, it may have deployed something. So what the list renders is not "what was last
+// said" but what the session LEFT — which is why every derived field below arrives from the server
+// rather than being computed here. §3.3's status is a function of pending diffs, in-flight runs,
+// failed steps and awaiting plans, none of which a browser can see.
+
+/** §3.3's five, derived server-side and never sent back. */
+export type ThreadStatus = "needs_you" | "running" | "errored" | "idle" | "archived";
+
+export interface ThreadView {
+  id: string;
+  /** Null before an agent exists (§3.1's planning stage) and null again once one is deleted. */
+  agent_id: string | null;
+  /**
+   * What the agent chip renders: a live name, a deleted one's snapshot, or null for `(no agent)`.
+   *
+   * The pair with `agent_deleted` is what tells §4.3's three cases apart — a name with no id is
+   * `name (deleted)`, dimmed, and null with no id is a thread that never had one.
+   */
+  agent_name: string | null;
+  agent_deleted: boolean;
+  title: string;
+  /** True once somebody renamed it. Auto-titling never overwrites one afterwards (§5). */
+  title_is_custom: boolean;
+  /** The user id, for the Team-only author column. In Personal the column does not exist. */
+  created_by: string | null;
+  created_at: string;
+  last_activity_at: string;
+  archived_at: string | null;
+  status: ThreadStatus;
+  /** §4.3's state fragment: one decision-relevant fact, or null when there is nothing to say. */
+  fragment: string | null;
+  /**
+   * Cumulative spend, or null when nothing has cost anything yet.
+   *
+   * THREE STATES, NOT TWO. Null is "nothing spent"; a figure with `cost_known: false` is a floor and
+   * renders as `$0.04+`; a figure with it true is the answer. A zero would claim the last about the
+   * first, which is the confidently-wrong number §9 forbids everywhere.
+   */
+  cost_usd: number | null;
+  cost_known: boolean;
+  /** The last thing the USER said. Their own intent is what makes a session recognisable (§4.3). */
+  preview: string | null;
+}
+
+/** §4.4's five chips. Counted once on the server and rendered twice — see the nav badge, §2.1. */
+export interface ThreadCounts {
+  all: number;
+  /** The Needs You SECTION: `needs_you` plus `errored`, which is what §4.2 puts in it. */
+  needs_you: number;
+  running: number;
+  recent: number;
+  archived: number;
+}
+
+/** Threads. Full snapshots, plus the single row `loadThread` answers the asking client with. */
+export type ThreadMessage =
+  | { channel: "threads"; type: "threads"; threads: ThreadView[]; counts: ThreadCounts }
+  | { channel: "threads"; type: "thread"; thread: ThreadView }
+  | { channel: "threads"; type: "error"; message: string; threadId?: string }
+  | { channel: "threads"; type: "notice"; message: string; threadId?: string };
+
 /** Membership. Full snapshots, except `inviteLink`, which carries a credential once. */
 export type MemberMessage =
   | { channel: "members"; type: "members"; members: unknown[]; invites: unknown[] }
@@ -1104,6 +1168,7 @@ export type GithubMessage =
 export type ServerMessage =
   | SessionMessage
   | MemberMessage
+  | ThreadMessage
   | { channel: "history"; runs: RunSummary[] }
   | { channel: "trace"; event: TraceEvent }
   | { channel: "runSteps"; runId: string; steps: Step[] }
@@ -1135,20 +1200,31 @@ export type ServerMessage =
 export type ClientCommand =
   // Membership. `acceptInvite` is deliberately absent: the accepter is not a member yet, so
   // they have no socket scoped to the workspace they are joining — it is POST /v1/invites/accept.
+  // Threads (§7.1). The two reads are answered to this client alone; the four mutations come back
+  // as a full snapshot to the whole workspace, so nothing here ever merges a partial update.
+  | { cmd: "listThreads" }
+  | { cmd: "loadThread"; threadId: string }
+  | { cmd: "createThread"; agentId?: string | null; title?: string }
+  | { cmd: "renameThread"; threadId: string; title: string }
+  | { cmd: "archiveThread"; threadId: string }
+  | { cmd: "restoreThread"; threadId: string }
   | { cmd: "listMembers" }
   | { cmd: "inviteMember"; email: string; role: string }
   | { cmd: "revokeInvite"; inviteId: string }
   | { cmd: "setMemberRole"; userId: string; role: string }
   | { cmd: "removeMember"; userId: string }
-  | { cmd: "run"; input?: string; provider?: string; model?: string; agentId?: string }
+  // `threadId` on the five commands that START work: the session it belongs to. Optional on every
+  // one of them — a client that does not name a thread gets the agent's most recently active one,
+  // which is the continuity the backfill established.
+  | { cmd: "run"; input?: string; provider?: string; model?: string; agentId?: string; threadId?: string }
   | { cmd: "loadRun"; runId: string }
   // `mcpTools` is per-TOOL (`"server/tool"` refs), never per-server: a connected server's
   // whole catalogue is never handed to an agent just because the server is connected.
-  | { cmd: "generate"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; planId?: string }
-  | { cmd: "planAgent"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; revisePlanId?: string }
+  | { cmd: "generate"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; planId?: string; threadId?: string }
+  | { cmd: "planAgent"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; revisePlanId?: string; threadId?: string }
   | { cmd: "discardPlan"; planId: string }
   | { cmd: "listAgents" }
-  | { cmd: "edit"; agentId: string; instruction: string }
+  | { cmd: "edit"; agentId: string; instruction: string; threadId?: string }
   | { cmd: "applyEdit"; proposalId: string }
   | { cmd: "undoEdit"; agentId: string }
   | { cmd: "discardEdit"; proposalId: string }
@@ -1157,7 +1233,7 @@ export type ClientCommand =
   | { cmd: "pauseRun"; runId: string }
   | { cmd: "resumeRun"; runId: string }
   | { cmd: "branchRun"; fromRunId: string; atSeq: number; editNode?: string; editedState?: Record<string, unknown> }
-  | { cmd: "explain"; agentId: string; question: string; subject: ExplainSubject; github?: GithubAttachment[] }
+  | { cmd: "explain"; agentId: string; question: string; subject: ExplainSubject; github?: GithubAttachment[]; threadId?: string }
   // Eval: dataset CRUD. Every mutation is answered with a fresh snapshot on the "eval"
   // channel, so the client never reconciles a partial update against local state.
   | { cmd: "createDataset"; agentId: string; name: string }
@@ -1169,7 +1245,7 @@ export type ClientCommand =
   | { cmd: "updateExample"; datasetId: string; exampleId: string; input?: string; expected?: string | null; notes?: string | null }
   | { cmd: "deleteExample"; datasetId: string; exampleId: string }
   | { cmd: "promoteTestInput"; agentId: string; agentName?: string; input: string; expected?: string | null }
-  | { cmd: "startEval"; datasetId: string; agentId: string; targets: EvalTarget[]; budgetUsd?: number | null }
+  | { cmd: "startEval"; datasetId: string; agentId: string; targets: EvalTarget[]; budgetUsd?: number | null; threadId?: string }
   | { cmd: "cancelEval"; evalId: string }
   | { cmd: "loadEvalResults"; evalId: string }
   | { cmd: "listEvals"; datasetId?: string }

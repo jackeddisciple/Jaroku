@@ -19,6 +19,7 @@
     "test:csv": "tsx src/lib/csv.test.ts",
     "test:auth": "tsx src/lib/auth.test.ts",
     "test:reset": "tsx src/store/reset.test.ts",
+    "test:thread-store": "tsx src/store/threadStore.test.ts",
     "test:secrets-store": "tsx src/store/secretsStore.test.ts"
   },
   "dependencies": {
