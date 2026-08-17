@@ -267,6 +267,49 @@ async function suite(driver: string, db: Db): Promise<void> {
     check(noToken.status === 401, "a ticket cannot be had without a token at all");
   }
 
+  console.log("  · creating a workspace");
+  {
+    // WHY THIS ROUTE EXISTS AT ALL. `createWorkspace` had no production caller: one personal
+    // workspace was made on first sight and nothing else ever made another, so `kind: "team"` —
+    // which the roles matrix, the invitation flow and the Threads author column are all built for
+    // — was reachable only by setting JAROKU_DEV_WORKSPACE, a variable documented as naming which
+    // workspace the server acts in on its own behalf.
+    const { token } = issuer.mint({ email: `founder-${label}@example.com` });
+    const before = await post(base, "/v1/auth/session", token);
+    const created = await post(base, "/v1/workspaces", token, { name: "  Acme Robotics  ", kind: "team" });
+    check(created.status === 201, `an authenticated caller creates a workspace (${created.status})`);
+    check(created.json?.workspace?.kind === "team", "...of the kind they asked for");
+    check(created.json?.workspace?.name === "Acme Robotics", "...with a trimmed name");
+    check(created.json?.role === "owner", "...owned by them, because a workspace nobody administers is a dead end");
+    check(
+      created.json?.workspaces?.length === (before.json?.workspaces?.length ?? 0) + 1,
+      "...and the answer carries the full list, so a switcher needs no second round trip",
+    );
+
+    // The membership is real: a ticket for it is issued, which is the only proof that matters —
+    // the resolver refuses a workspace the caller is not in before a ticket exists.
+    const ticket = await post(base, "/v1/ws-ticket", token, { workspaceId: created.json.workspace.id });
+    check(ticket.status === 200 && ticket.json?.role === "owner", "a socket can be opened in it as its owner");
+
+    const personal = await post(base, "/v1/workspaces", token, { name: `second-${label}`, kind: "personal" });
+    check(personal.json?.workspace?.kind === "personal", "a personal one can be created too");
+
+    check((await post(base, "/v1/workspaces", token, { name: "  ", kind: "team" })).status === 400, "a blank name is refused");
+    check(
+      (await post(base, "/v1/workspaces", token, { name: "x".repeat(65), kind: "team" })).status === 400,
+      "...and one past the length bound, rather than being silently cut",
+    );
+    // NO DEFAULT FOR `kind`. The repository defaults it to `team`, which is right for the importer
+    // and wrong here: it decides whether the workspace has a members list and an author column at
+    // all, and it cannot be changed afterwards.
+    check((await post(base, "/v1/workspaces", token, { name: "no kind" })).status === 400, "a missing kind is refused");
+    check(
+      (await post(base, "/v1/workspaces", token, { name: "odd kind", kind: "enterprise" })).status === 400,
+      "...as is one nothing recognises",
+    );
+    check((await post(base, "/v1/workspaces", undefined, { name: "anon", kind: "team" })).status === 401, "and no token is 401");
+  }
+
   await server.close();
 
   console.log("  · provider mode never adopts");

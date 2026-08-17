@@ -644,6 +644,11 @@ export function switchWorkspace(workspaceId: string): void {
   stopSocket();
   resetWorkspaceStores();
   storeWorkspace(workspaceId);
+  // The workspace panel is a view of the workspace being left. Its own store is reset above, so
+  // leaving it open would render an empty members list under the new workspace's name until the
+  // snapshot landed — a panel showing the wrong tenant's shape, briefly, which is the thing the
+  // reset ordering exists to prevent.
+  useUiStore.getState().closeWorkspacePanel();
   useSessionStore.setState({ workspaceId, status: "connecting", message: null });
   startSocket();
 }

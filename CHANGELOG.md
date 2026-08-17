@@ -29,6 +29,18 @@ there. What is new is that the product's own surface reaches them.
   resume and apply until it timed out — while two of the server's own refusals instructed the user
   to stop it first. Confirmed in place rather than in a modal: it destroys nothing that was
   written, and it cannot be undone.
+- **Workspaces, members and invitations — the whole half of the product that had no surface.**
+  `IdentityRepository` implemented workspace creation, membership, roles, invitations and their
+  audit rows; five commands were wired end to end; `acceptInvite` existed with its own test. None of
+  it was reachable: a user had exactly one workspace, made for them on first sign-in, always
+  `personal`. Now there is `POST /v1/workspaces` (HTTP, not a command — a socket is scoped to a
+  workspace by its ticket, and this is the request that creates one), a **Members and invitations**
+  panel behind the workspace switcher, and an invitation round trip that ends in a membership: the
+  client assembles `<origin>/?invite=<token>` from the one-shot secret, the sign-in screen says an
+  invitation is waiting, and it is redeemed as soon as there is a session — then removed from the
+  URL, because a spent single-use token in an address bar is a link whose reload fails in a way
+  that reads like forgery. `kind` is required on creation and cannot be defaulted: it decides
+  whether the workspace has a members list, roles and a Threads author column at all.
 
 ---
 

@@ -207,6 +207,27 @@ export async function fetchTicket(
   return post("/v1/ws-ticket", workspaceId ? { workspaceId } : {}, token);
 }
 
+/**
+ * Create a workspace, owned by whoever is signed in.
+ *
+ * HTTP rather than a socket command for the reason `acceptInvite` is: a socket is scoped to a
+ * workspace by its ticket, and this is the request that brings one into existence. Answers with
+ * the full workspace list, so the switcher can render the new one without a second round trip.
+ *
+ * `kind` is deliberately not optional. It decides whether the workspace has a members list, an
+ * author column and roles at all — a caller that had not decided should not be able to omit it.
+ */
+export async function createWorkspace(
+  token: string,
+  input: { name: string; kind: "personal" | "team" },
+): Promise<{
+  workspace: { id: string; slug: string; name: string; kind: string };
+  role: string;
+  workspaces: SessionWorkspace[];
+}> {
+  return post("/v1/workspaces", input, token);
+}
+
 /** Redeem an invitation. Provisions the account first if this is also their first sight. */
 export async function acceptInvite(
   token: string,

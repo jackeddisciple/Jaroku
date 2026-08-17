@@ -14,6 +14,28 @@ export function relTime(iso: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+/**
+ * A deadline, forwards: "in 6d" / "in 3h" / "in 12m" / "expired".
+ *
+ * NOT `relTime` WITH A SIGN FLIP. `relTime` clamps a future timestamp to zero and renders "just
+ * now", which is the worst available answer for an expiry — an invitation good for another week
+ * would read as one that had only this moment been issued. Everything this formats is a thing that
+ * stops working at a stated time (an invitation, a presigned download, a token), and the useful
+ * fact is how long is left, including that the answer is "none".
+ */
+export function fmtUntil(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "";
+  const s = Math.floor((t - Date.now()) / 1000);
+  if (s <= 0) return "expired";
+  if (s < 60) return `in ${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `in ${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `in ${h}h`;
+  return `in ${Math.floor(h / 24)}d`;
+}
+
 /** Duration in ms → "820 ms" / "2.4s" / "1m 05s". */
 export function fmtDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)} ms`;

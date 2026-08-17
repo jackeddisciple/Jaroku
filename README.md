@@ -1749,6 +1749,7 @@ to happen because a browser cannot put a header on a WebSocket:
 | `POST /v1/auth/session` | Token → account + the workspaces you may act in. Provisions on first sight |
 | `POST /v1/ws-ticket` | A single-use, 30-second, workspace-scoped ticket for one socket |
 | `POST /v1/invites/accept` | Redeem an invitation |
+| `POST /v1/workspaces` | Create a workspace, owned by the caller. `{name, kind}`, both required |
 | `GET /v1/auth/jwks.json` | The **local issuer's** public key. Absent in provider mode |
 | `POST /v1/auth/dev-login` | Mint a local token. Absent in provider mode |
 
@@ -2109,6 +2110,7 @@ npm run test:deploy-store # the deploy panel's state, and the races it has to su
 npm run test:export      # CSV/JSON export preserves every caveat
 npm run test:csv         # RFC-4180 quoting
 npm run test:auth        # retry vs stop: the one decision the socket layer must not get wrong
+npm run test:invite      # the invitation link round trip, including the tokens `+` and `/` break
 npm run test:reset       # NO store retains a row across a workspace switch
 npm run test:secrets-store # the credential list's own state, and what elevation does to it
 npm run test:truncate-path # a filename survives the width; the middle of the path gives way
@@ -3865,6 +3867,7 @@ first has already written the key.
 
 | Action | Who | Notes |
 |---|---|---|
+| Create a workspace | anybody signed in | `POST /v1/workspaces`, not a socket command: a socket is scoped to a workspace by its ticket, and this is the request that brings one into existence. The caller becomes its owner, and `kind` (`personal` \| `team`) is required rather than defaulted — it decides whether the workspace has a members list and an author column at all, and it does not change afterwards. Rate-limited per person |
 | Invite | owner | The link is shown **once** — only a hash is stored, and there is no email sender here |
 | Accept | the invitee | `POST /v1/invites/accept`, not a socket command: the accepter is not a member yet, so there is no socket scoped to the workspace they are joining |
 | Change role | owner | Refuses to demote the **last** owner |
@@ -3872,6 +3875,22 @@ first has already written the key.
 
 Every one of them writes an `audit_log` row **inside the transaction that makes the change**, so
 there is no path that alters membership without a record of who did it.
+
+**Where all of it is in the product.** The workspace switcher in the top bar creates a workspace and
+opens **Members and invitations**, a panel over the shell — the same panel every other
+workspace-scoped setting hangs off, because none of it is a fact about an agent and a tab beside
+`GitHub` would put "delete this workspace" one click from an agent's diff. The panel lists members
+with their roles as editable selects, lists outstanding invitations separately (nobody has accepted
+one, so counting them as members would be a lie about who has access), and shows the invite link
+once.
+
+**The link is assembled in the browser, not by the server.** `inviteMember` answers the asking
+socket with the secret — once, because only a hash is stored — and the server has no idea what
+origin the app is served from and deliberately has no mailer. So the client builds
+`<origin>/?invite=<token>`, the invitee opens it, the sign-in screen says an invitation is waiting,
+and the redemption fires as soon as there is a session to spend it with. The parameter is removed
+from the URL the moment it is spent: an invitation is single-use, and a URL still carrying a spent
+one is a link whose reload fails with a message that reads exactly like a forgery.
 
 The invite token is `<workspace_id>.<secret>`, and the workspace id in it **authorises nothing**:
 it selects which rows to search so the query can be scoped, and the 256-bit secret is the whole

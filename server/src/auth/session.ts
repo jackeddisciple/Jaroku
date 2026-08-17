@@ -18,7 +18,7 @@
 // workspace list is what the caller MAY act in, computed from membership rows — never echoed
 // back from anything the client sent.
 
-import { badRequest, forbidden, unauthorized, type Handler, type HttpRequest } from "../http/router.ts";
+import { badRequest, forbidden, tooMany, unauthorized, type Handler, type HttpRequest } from "../http/router.ts";
 import { newRequestId, systemContext } from "../db/tenant.ts";
 import { IdentityConflictError, defaultWorkspace, type IdentityRepository } from "../db/repositories/identity.ts";
 import { AuthError, TokenVerifier, type AuthContext } from "./verifier.ts";
@@ -36,6 +36,14 @@ export interface SessionDeps {
   /** Present once there are sockets to authorise — see `/v1/ws-ticket` below. */
   tickets?: TicketStore;
   resolver?: ContextResolver;
+  /**
+   * Bound how often one PERSON may create a workspace. Returns the seconds to wait, or null.
+   *
+   * Supplied rather than reached for, like every other limiter call in this codebase, and it
+   * fails open inside the supplier: a limiter that cannot answer must not be the reason nobody
+   * can make a workspace. The boundary here is authentication, not the bucket.
+   */
+  limitWorkspaceCreate?: (userId: string) => Promise<number | null>;
   log?: (m: string) => void;
 }
 
@@ -96,6 +104,7 @@ export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" 
   }
   routes.push({ path: "/v1/auth/onboarded", method: "POST", handler: onboardedHandler(deps) });
   routes.push({ path: "/v1/invites/accept", method: "POST", handler: acceptInviteHandler(deps) });
+  routes.push({ path: "/v1/workspaces", method: "POST", handler: createWorkspaceHandler(deps) });
   if (deps.localIssuer) {
     routes.push({ path: "/v1/auth/jwks.json", method: "GET", handler: jwksHandler(deps.localIssuer) });
     routes.push({ path: "/v1/auth/dev-login", method: "POST", handler: devLoginHandler(deps) });
@@ -312,6 +321,104 @@ function acceptInviteHandler(deps: SessionDeps): Handler {
         role: result.role,
         // The full list, so a client can render its switcher without a second round trip —
         // and so the workspace it just joined is visibly in it.
+        workspaces: memberships.map((w) => ({
+          id: w.id,
+          slug: w.slug,
+          name: w.name,
+          kind: w.kind,
+          role: w.role,
+        })),
+      },
+    };
+  };
+}
+
+/**
+ * The longest a workspace may be called.
+ *
+ * A bound rather than a preference: the name is rendered in the switcher, in the sidebar and in
+ * every audit row's metadata, and it feeds the slug. Sixty-four is more than any real team name
+ * and short enough that nothing downstream has to decide where to cut.
+ */
+export const WORKSPACE_NAME_MAX = 64;
+
+/**
+ * Create a workspace, owned by whoever asked.
+ *
+ * HTTP AND NOT A SOCKET COMMAND, for the same structural reason accepting an invitation is not
+ * one: a socket is scoped to a workspace by a ticket, and this is the request that brings a
+ * workspace into existence. There is no scope for it to arrive in. It also means the capability
+ * matrix stays honest — `workspace:manage` is a role IN a workspace, and no role in workspace A
+ * should have anything to say about whether B may exist.
+ *
+ * WHICH IS ALSO WHY THIS WAS THE MISSING HALF OF TEAM WORKSPACES. `createWorkspace` had no
+ * production caller: `provisionUser` made one personal workspace on first sight and nothing else
+ * ever made another, so the only reachable way to obtain a TEAM workspace — the kind the roles
+ * matrix, the invite flow and the Threads author column all exist for — was an environment
+ * variable documented as naming which workspace the server acts in on its own behalf.
+ *
+ * `kind` IS EXPLICIT AND HAS NO DEFAULT. The repository defaults it to `team`, which is right for
+ * the importer and wrong here: the difference decides whether the product renders collaboration
+ * at all, and a request that did not say is a request whose author had not decided.
+ *
+ * Rate-limited PER PERSON rather than per workspace, because a workspace is what is being
+ * created — there is no workspace to key a bucket by yet, and the thing being bounded is one
+ * account minting tenancies.
+ */
+function createWorkspaceHandler(deps: SessionDeps): Handler {
+  const log = deps.log ?? console.log;
+  return async (req) => {
+    const auth = await authenticate(req, deps.verifier);
+    if (!auth.email) {
+      throw forbidden(
+        "your identity provider did not supply a verified email address, which this server needs to create an account",
+      );
+    }
+    const body = await req.json<{ name?: unknown; kind?: unknown }>();
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name) throw badRequest("a workspace needs a name");
+    if (name.length > WORKSPACE_NAME_MAX) {
+      throw badRequest(`a workspace name is at most ${WORKSPACE_NAME_MAX} characters`);
+    }
+    const kind = body.kind === "personal" || body.kind === "team" ? body.kind : null;
+    if (!kind) {
+      throw badRequest(`"${String(body.kind ?? "").slice(0, 24)}" is not a workspace kind — expected personal or team`);
+    }
+
+    const sys = systemContext(req.requestId);
+    // Provisioned first, exactly as the invite path does it, so a brand-new account creating its
+    // second workspace in its first session is one round trip rather than an ordering rule.
+    const provisioned = await deps.identity.provisionUser(sys, {
+      externalId: auth.subject,
+      email: auth.email,
+      displayName: auth.displayName,
+    });
+
+    const retryAfter = await deps.limitWorkspaceCreate?.(provisioned.user.id);
+    if (retryAfter !== null && retryAfter !== undefined) {
+      throw tooMany("you are creating workspaces faster than this server allows", retryAfter);
+    }
+
+    const workspace = await deps.identity.createWorkspace(sys, {
+      name,
+      kind,
+      ownerUserId: provisioned.user.id,
+    });
+    log(`[auth] ${provisioned.user.email} created the ${kind} workspace "${workspace.slug}"`);
+
+    const memberships = await deps.identity.workspacesForUser(sys, provisioned.user.id);
+    return {
+      status: 201,
+      body: {
+        workspace: {
+          id: workspace.id,
+          slug: workspace.slug,
+          name: workspace.name,
+          kind: workspace.kind,
+        },
+        role: "owner",
+        // The full list, for the reason the invite route answers with one: the switcher can
+        // render the workspace that was just made without a second round trip.
         workspaces: memberships.map((w) => ({
           id: w.id,
           slug: w.slug,

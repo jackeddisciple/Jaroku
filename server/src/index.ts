@@ -1802,6 +1802,21 @@ for (const route of sessionRoutes({
   localIssuer,
   tickets: ticketStore,
   resolver: contextResolver,
+  // FAILS OPEN, like every other limiter call in this file — see rateLimit.ts. A workspace is a
+  // tenancy rather than a row, so it is worth a bucket; a Redis blip is not worth being the
+  // reason nobody can make one.
+  limitWorkspaceCreate: async (userId) => {
+    try {
+      const decision = await rateLimiter.take("workspace.create", userId);
+      if (!decision.ok) {
+        metrics.increment("rate_limited_total", { action: "workspace.create" });
+        return retryAfterSeconds(decision);
+      }
+    } catch (err) {
+      console.error("[rate] limiter failed for workspace.create, admitting:", (err as Error)?.message ?? err);
+    }
+    return null;
+  },
 })) {
   if (route.method === "GET") router.get(route.path, route.handler);
   else router.post(route.path, route.handler);

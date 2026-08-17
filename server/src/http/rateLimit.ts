@@ -65,7 +65,9 @@ export type RateAction =
   | "secrets.elevation.user"
   | "secrets.elevation.ip"
   | "secrets.reveal"
-  | "billing.checkout";
+  | "billing.checkout"
+  // --- per person: creating the tenancy itself ------------------------------------------------
+  | "workspace.create";
 
 export interface RateRule {
   /** The most that may happen at once, from an empty-handed start. Bounds a BURST. */
@@ -148,6 +150,12 @@ export const RATE_RULES: Record<RateAction, RateRule> = {
   "secrets.reveal": { capacity: 20, perMinute: 20 / 60, scope: "user" },
   // A checkout session is a row in somebody else's system that we cannot delete.
   "billing.checkout": { capacity: 10, perMinute: 10 / 60, scope: "workspace" },
+  // A WORKSPACE IS A TENANCY: rows in every table, a prefix in the object store, a schema in the
+  // checkpoint database. `user` scope, because there is no workspace to key a bucket by yet and
+  // the thing being bounded is one account minting tenancies — a per-IP bucket would put a whole
+  // office behind one, which is the mistake the elevation rules explain at length. Ten an hour is
+  // more than any real reorganisation and far less than a farm wants.
+  "workspace.create": { capacity: 10, perMinute: 10 / 60, scope: "user" },
 };
 
 export interface RateDecision {

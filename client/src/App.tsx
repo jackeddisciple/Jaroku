@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { RightPanel } from "./components/RightPanel.tsx";
@@ -9,6 +9,10 @@ import { CodeOverlay } from "./components/CodeOverlay.tsx";
 import { SignIn } from "./components/SignIn.tsx";
 import { McpConfirmModal } from "./components/McpConfirmModal.tsx";
 import { FullScreenView } from "./components/FullScreenView.tsx";
+import { WorkspacePanel } from "./components/WorkspacePanel.tsx";
+import { InviteNotice } from "./components/InviteNotice.tsx";
+import { redeemPendingInvite } from "./lib/invite.ts";
+import { switchWorkspace } from "./lib/socket.ts";
 import { ComposerColumn } from "./components/onboarding/ComposerColumn.tsx";
 import { WelcomeStep } from "./components/onboarding/WelcomeStep.tsx";
 import { useOnboarding } from "./components/onboarding/useOnboarding.ts";
@@ -38,6 +42,41 @@ export function App() {
   useEffect(() => {
     if (activeAgentId && connected) sendLoadAgentFiles(activeAgentId);
   }, [activeAgentId, connected]);
+
+  // AN INVITATION IN THE URL, redeemed once there is a session to redeem it with.
+  //
+  // Here rather than in `lib/socket.ts`'s connect loop, because a redemption is not part of
+  // opening a socket: it succeeds or fails exactly once per link, and a reconnect must not retry
+  // it. The ref is what makes "exactly once" true across the re-renders `sessionStatus` causes.
+  //
+  // It waits for a session rather than for a socket. The redemption is an HTTP request carrying a
+  // bearer token, and the workspace being joined is by definition not the one this tab's socket is
+  // scoped to — so there is nothing to wait for the socket to finish.
+  const redeemed = useRef(false);
+  useEffect(() => {
+    if (redeemed.current) return;
+    if (sessionStatus !== "ready" && sessionStatus !== "connecting") return;
+    redeemed.current = true;
+    void redeemPendingInvite().then((outcome) => {
+      if (outcome.kind === "none") {
+        // Nothing was there, or there was no credential yet. Either way this may run again once
+        // the session lands — which is why the latch is released rather than kept.
+        redeemed.current = false;
+        return;
+      }
+      if (outcome.kind === "failed") {
+        useUiStore.getState().setInviteNotice({ ok: false, message: outcome.message });
+        return;
+      }
+      useUiStore.getState().setInviteNotice({
+        ok: true,
+        message: `You have joined ${outcome.name} as ${outcome.role === "admin" ? "an" : "a"} ${outcome.role}.`,
+      });
+      // The membership is real now; this is the navigation. A no-op when the invitation was to
+      // the workspace this tab is already in, which is the case when somebody re-uses a link.
+      switchWorkspace(outcome.workspaceId);
+    });
+  }, [sessionStatus]);
 
   // BEFORE EVERYTHING, INCLUDING ONBOARDING. There is no session, so there is no workspace,
   // and every screen below this line — the welcome step included — is a view of one
@@ -138,6 +177,12 @@ export function App() {
       {phase === "complete" && <CommandPalette />}
       {/* code opens on demand (diff card / Cmd+P), overlaying the conversation */}
       <CodeOverlay />
+      {/* Who is in this workspace, and everything else true of the workspace rather than of an
+          agent in it. Outside the shell like the other overlays, and above the three panes: its
+          subject is the scope they are all inside. */}
+      <WorkspacePanel />
+      {/* What became of the invitation this tab was opened with, if it was opened with one. */}
+      <InviteNotice />
       {/* Mounted last so it sits above everything. A run is halted mid-graph waiting for
           this answer, on a timer, and nothing else on screen can be more important — including
           during onboarding, where a generated agent can reach an MCP tool on its first run. */}

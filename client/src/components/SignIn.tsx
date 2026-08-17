@@ -12,6 +12,7 @@
 
 import { useEffect, useState } from "react";
 import { devSignIn, localIssuerAvailable } from "../lib/auth.ts";
+import { pendingInvite } from "../lib/invite.ts";
 import { restartSocket } from "../lib/socket.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { JarokuGlyph } from "../lib/icons.tsx";
@@ -25,6 +26,10 @@ export function SignIn() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Read once, at mount. The URL cannot change under this screen — there is no router — and the
+  // redemption that removes the parameter only runs once there is a session, which is the moment
+  // this screen stops being rendered.
+  const [invited] = useState(() => pendingInvite() !== null);
 
   // Ask the server which kind it is. Until the answer arrives neither branch is rendered:
   // flashing a dev form at somebody who needs a real provider is worse than a blank moment.
@@ -61,20 +66,30 @@ export function SignIn() {
     <div className="flex h-full items-center justify-center bg-void p-6">
       <div className="w-full max-w-sm rounded-modal border border-edge bg-bg p-8 shadow-overlay">
         <JarokuGlyph size={26} />
-        <h1 className="mt-5 text-lg font-medium text-fg">Sign in to Jaroku</h1>
+        <h1 className="mt-5 text-lg font-medium text-ink">Sign in to Jaroku</h1>
+
+        {/* AN INVITATION SURVIVES THIS SCREEN, and saying so is the difference between a link that
+            works and a link that appears to have dropped somebody at a login form for no reason.
+            The token stays in the URL until there is a session to spend it with — see lib/invite.ts
+            — so nothing here has to carry it. */}
+        {invited && (
+          <p className="mt-3 rounded-control border border-edge bg-void px-3 py-2 text-[12px] text-muted">
+            You have been invited to a workspace. Sign in and it will be accepted for you.
+          </p>
+        )}
 
         {message && (
           // Why they are here, when they did not arrive by choice: a revoked membership, an
           // expired token, a server that stopped trusting this session.
-          <p className="mt-3 rounded-md border border-edge bg-void px-3 py-2 text-xs text-fg-dim">{message}</p>
+          <p className="mt-3 rounded-control border border-edge bg-void px-3 py-2 text-[12px] text-muted">{message}</p>
         )}
 
-        {!checked && <p className="mt-6 text-sm text-fg-dim">Checking how this server signs people in…</p>}
+        {!checked && <p className="mt-6 text-[13px] text-muted">Checking how this server signs people in…</p>}
 
         {checked && !localIssuer && (
-          <div className="mt-5 space-y-3 text-sm text-fg-dim">
+          <div className="mt-5 space-y-3 text-[13px] text-muted">
             <p>This server verifies tokens against an external identity provider.</p>
-            <p className="text-xs">
+            <p className="text-[11px]">
               Sign in there and this tab will pick the session up. The server has no sign-in form of its own —
               it never sees a password, only a token it can verify.
             </p>
@@ -83,13 +98,13 @@ export function SignIn() {
 
         {checked && localIssuer && (
           <form onSubmit={submit} className="mt-5 space-y-3">
-            <p className="text-xs leading-relaxed text-fg-dim">
+            <p className="text-[11px] leading-relaxed text-muted">
               This server is running its own local issuer. The token it mints is real and is verified exactly
               the way a provider&rsquo;s is — but there is no password, so anyone who can reach this port can
               sign in as anyone. Development only.
             </p>
             <label className="block">
-              <span className="text-xs text-fg-dim">Email</span>
+              <span className="text-[11px] text-muted">Email</span>
               <input
                 type="email"
                 required
@@ -97,22 +112,22 @@ export function SignIn() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="mt-1 w-full rounded-md border border-edge bg-void px-3 py-2 text-sm text-fg outline-none focus:border-fg-dim"
+                className="mt-1 w-full rounded-control border border-edge bg-void px-3 py-2 text-[13px] text-ink outline-none focus:border-chrome"
               />
             </label>
             <label className="block">
-              <span className="text-xs text-fg-dim">Name (optional)</span>
+              <span className="text-[11px] text-muted">Name (optional)</span>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="mt-1 w-full rounded-md border border-edge bg-void px-3 py-2 text-sm text-fg outline-none focus:border-fg-dim"
+                className="mt-1 w-full rounded-control border border-edge bg-void px-3 py-2 text-[13px] text-ink outline-none focus:border-chrome"
               />
             </label>
-            {error && <p className="text-xs text-red-400">{error}</p>}
+            {error && <p className="text-[11px] text-err">{error}</p>}
             <button
               type="submit"
               disabled={busy || email.trim().length === 0}
-              className="w-full rounded-md bg-fg px-3 py-2 text-sm font-medium text-void transition-opacity disabled:opacity-40"
+              className="w-full rounded-control bg-ink px-3 py-2 text-[13px] font-medium text-void transition-opacity disabled:opacity-40"
             >
               {busy ? "Signing in…" : "Sign in"}
             </button>

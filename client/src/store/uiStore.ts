@@ -17,6 +17,16 @@ import type { GithubAttachment } from "../types.ts";
  */
 export type NavDestination = "threads" | "agents" | "memory" | "activity";
 
+/**
+ * Which part of the workspace panel is showing, or null for closed.
+ *
+ * A SECTION RATHER THAN A BOOLEAN, because every section has a second door: Members is opened from
+ * the workspace switcher, and the sections beside it are opened from the surfaces that name the
+ * thing they change. A boolean would open the panel and leave the caller's actual intent to be
+ * re-navigated by hand.
+ */
+export type WorkspaceSection = "members";
+
 export type RightTab =
   | "secrets"
   | "github"
@@ -304,6 +314,34 @@ interface UiState {
   providerPanelOpen: boolean;
   setProviderPanel: (v: boolean) => void;
 
+  /**
+   * The workspace panel: who is in this workspace, and everything else true of the workspace
+   * itself rather than of an agent in it.
+   *
+   * Null is closed. It is view state and therefore here, and it deliberately survives nothing:
+   * unlike `navView`, a workspace switch should not leave a members list from the workspace you
+   * have just left on screen — the store behind it is reset, so the panel would render an empty
+   * one. `switchWorkspace` closes it.
+   */
+  workspaceSection: WorkspaceSection | null;
+  openWorkspacePanel: (section: WorkspaceSection) => void;
+  closeWorkspacePanel: () => void;
+
+  /**
+   * What happened to the invitation this tab was opened with, if it was opened with one.
+   *
+   * HERE RATHER THAN IN `memberStore`, and the reason is the one thing it has to survive: accepting
+   * an invitation switches workspace, and a switch empties every workspace store. The notice would
+   * be destroyed by the navigation it is reporting on. It is also not a fact about a workspace's
+   * membership — it is a fact about this browser's arrival — which is what this store is for.
+   *
+   * Nullable and dismissible rather than timed: "you have joined Acme as an admin" is worth
+   * keeping on screen until it has been read, and a failure ("that invitation has expired") is the
+   * only explanation the person will ever get for a link that did nothing.
+   */
+  inviteNotice: { ok: boolean; message: string } | null;
+  setInviteNotice: (notice: { ok: boolean; message: string } | null) => void;
+
   // First run. WHETHER it is over is `sessionStore.user.onboarded`, not here — see the note
   // above the reader. `onboardingStep` is only consulted while that is false, and exists so a
   // reload mid-flow resumes where the user was rather than starting them over at Welcome.
@@ -391,6 +429,15 @@ export const useUiStore = create<UiState>((set) => ({
 
   providerPanelOpen: false,
   setProviderPanel: (providerPanelOpen) => set({ providerPanelOpen }),
+
+  workspaceSection: null,
+  // The provider popover is closed on the way in: both are overlays anchored to the top bar's
+  // right-hand group, and two of them open at once is one covering the other.
+  openWorkspacePanel: (workspaceSection) => set({ workspaceSection, providerPanelOpen: false }),
+  closeWorkspacePanel: () => set({ workspaceSection: null }),
+
+  inviteNotice: null,
+  setInviteNotice: (inviteNotice) => set({ inviteNotice }),
 
   onboardingStep: onboarding.step,
   onboardingHintsShown: onboarding.hintsShown,
