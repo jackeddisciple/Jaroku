@@ -272,6 +272,29 @@ export class ThreadStore {
   }
 
   /**
+   * The same, for every row that just moved to one status.
+   *
+   * THE SNAPSHOT BUILDER'S WRITE-BACK, IN ONE STATEMENT PER STATUS instead of one per row awaited
+   * in series. There are five statuses, so a workspace with two hundred threads whose statuses all
+   * moved costs five round trips rather than two hundred — on the path a socket is waiting on.
+   *
+   * Batched for the same reason `retention` batches its deletes: a parameter list has a limit on
+   * both drivers, and a statement that works until the first workspace large enough to need it is
+   * worse than not having written it.
+   */
+  async setStatuses(ctx: TenantContext, ids: readonly string[], status: ThreadStatus): Promise<void> {
+    if (status === "archived" || ids.length === 0) return;
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200);
+      await this.q(ctx).run(
+        `UPDATE threads SET status = ?
+          WHERE workspace_id = ? AND archived_at IS NULL AND id IN (${chunk.map(() => "?").join(", ")})`,
+        [status, ctx.workspaceId, ...chunk],
+      );
+    }
+  }
+
+  /**
    * Point a thread at the agent it built, and snapshot the name in the same statement.
    *
    * ONE STATEMENT FOR BOTH, so the pair can never be written apart. A row with an `agent_id` and

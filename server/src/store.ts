@@ -194,25 +194,46 @@ export class TraceStore {
    */
   async runOutcomes(
     ctx: TenantContext,
+    /**
+     * The runs actually asked about — the ones some thread owns.
+     *
+     * NARROWED AT THE QUERY RATHER THAN AT THE READER. The derivation only ever looks up runs that
+     * appear in `thread_items`, and the caller has that list in hand already, so asking for every
+     * run in the workspace was a full-table read and a `GROUP BY` over every errored run's steps on
+     * every message, every run start and every thread command. An empty array means "none", which
+     * is a real answer for a workspace whose threads own nothing yet; omitting it keeps the old
+     * whole-workspace behaviour for callers that genuinely want it.
+     *
+     * Batched, because a parameter list has a limit on both drivers and a query that works until
+     * the first workspace large enough to need it is worse than no optimisation at all.
+     */
+    runIds?: readonly string[],
   ): Promise<Map<string, { status: string; failedSteps: number }>> {
-    const runs = await this.q(ctx).all<Record<string, unknown>>(
-      `SELECT id, status FROM runs WHERE workspace_id = ?`,
-      [ctx.workspaceId],
-    );
     const out = new Map<string, { status: string; failedSteps: number }>();
-    for (const r of runs) out.set(String(r["id"]), { status: String(r["status"]), failedSteps: 0 });
+    if (runIds && runIds.length === 0) return out;
 
-    const failed = await this.q(ctx).all<Record<string, unknown>>(
-      `SELECT s.run_id AS run_id, COUNT(*) AS failed
-         FROM runs r
-         JOIN steps s ON s.workspace_id = r.workspace_id AND s.run_id = r.id
-        WHERE r.workspace_id = ? AND r.status = 'error' AND s.error IS NOT NULL
-        GROUP BY s.run_id`,
-      [ctx.workspaceId],
-    );
-    for (const f of failed) {
-      const at = out.get(String(f["run_id"]));
-      if (at) at.failedSteps = asInt(f["failed"]);
+    const chunks: (readonly string[] | null)[] = runIds ? batches([...new Set(runIds)], 200) : [null];
+    for (const chunk of chunks) {
+      const filter = chunk ? ` AND id IN (${chunk.map(() => "?").join(", ")})` : "";
+      const runs = await this.q(ctx).all<Record<string, unknown>>(
+        `SELECT id, status FROM runs WHERE workspace_id = ?${filter}`,
+        [ctx.workspaceId, ...(chunk ?? [])],
+      );
+      for (const r of runs) out.set(String(r["id"]), { status: String(r["status"]), failedSteps: 0 });
+
+      const stepFilter = chunk ? ` AND r.id IN (${chunk.map(() => "?").join(", ")})` : "";
+      const failed = await this.q(ctx).all<Record<string, unknown>>(
+        `SELECT s.run_id AS run_id, COUNT(*) AS failed
+           FROM runs r
+           JOIN steps s ON s.workspace_id = r.workspace_id AND s.run_id = r.id
+          WHERE r.workspace_id = ? AND r.status = 'error' AND s.error IS NOT NULL${stepFilter}
+          GROUP BY s.run_id`,
+        [ctx.workspaceId, ...(chunk ?? [])],
+      );
+      for (const f of failed) {
+        const at = out.get(String(f["run_id"]));
+        if (at) at.failedSteps = asInt(f["failed"]);
+      }
     }
     return out;
   }
@@ -433,4 +454,11 @@ export class TraceStore {
   async close(): Promise<void> {
     await this.db.close();
   }
+}
+
+/** Split a list into chunks a parameter list can carry on both drivers. */
+function batches<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
 }

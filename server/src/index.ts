@@ -108,7 +108,13 @@ import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
 import { currentTraceparent, formatTraceparent, openTracer, parseTraceparent } from "./obs/trace.ts";
 import { metrics, routeLabel, statusClass } from "./obs/metrics.ts";
 import { McpStore } from "./mcpStore.ts";
-import { ThreadStore, type ThreadItemKind } from "./threadStore.ts";
+import {
+  ThreadStore,
+  type Thread,
+  type ThreadItem,
+  type ThreadItemKind,
+  type ThreadStatus,
+} from "./threadStore.ts";
 import { threadTitle } from "./threadTitle.ts";
 import { NO_FACTS, activePerAgent, deriveThreadStatus } from "./threadStatus.ts";
 import {
@@ -3115,7 +3121,7 @@ function noteThreadItem(
 ): void {
   void threadStore
     .addItem(ctx, threadId, item)
-    .then(() => broadcastThreads(ctx))
+    .then(() => scheduleThreadBroadcast(ctx))
     .catch((err) => {
       console.error(`[threads] could not record a ${item.kind}:`, (err as Error)?.message ?? err);
     });
@@ -3143,7 +3149,7 @@ function noteUserMessage(ctx: TenantContext, threadId: string, body: string): vo
     if ((await threadStore.messages(ctx, threadId)).length === 1) {
       await threadStore.autoTitle(ctx, threadId, threadTitle(text));
     }
-    await broadcastThreads(ctx);
+    scheduleThreadBroadcast(ctx);
   })().catch((err) => {
     console.error(`[threads] could not record a message:`, (err as Error)?.message ?? err);
   });
@@ -3162,11 +3168,30 @@ function noteUserMessage(ctx: TenantContext, threadId: string, body: string): vo
  * true rather than convenient — there is no diff left to apply — and it is why nothing here keeps a
  * durable "pending" flag that would go on asking somebody to apply what no longer exists.
  */
-async function threadFactsFor(ctx: TenantContext): Promise<Map<string, ThreadDerivation>> {
-  const [rows, items, runs, unfinishedEvals, deployedBySlug, agents] = await Promise.all([
-    threadStore.list(ctx),
-    threadStore.allItems(ctx),
-    store.runOutcomes(ctx),
+async function threadFactsFor(
+  ctx: TenantContext,
+  /**
+   * The rows and items the caller has already read.
+   *
+   * `threadSnapshot` needs both for its own loop, and this needed both for the derivation — so
+   * every snapshot listed the workspace's threads twice and read its entire `thread_items` table
+   * twice, on every message, run start, proposal and thread command. Passed in rather than cached,
+   * because the two must describe the same moment: a derivation over one read of the items and a
+   * render over another is two moments in one list, which is what §7.1's full snapshots exist to
+   * prevent.
+   */
+  loaded?: { rows: Thread[]; items: ThreadItem[] },
+): Promise<Map<string, ThreadDerivation>> {
+  const rows = loaded?.rows ?? (await threadStore.list(ctx));
+  const items = loaded?.items ?? (await threadStore.allItems(ctx));
+  const [runs, unfinishedEvals, deployedBySlug, agents] = await Promise.all([
+    // ONLY THE RUNS SOME THREAD OWNS. The derivation looks up nothing else, and the ids are right
+    // here in the items — so this is an indexed lookup rather than a scan of every run in the
+    // workspace plus a GROUP BY over every errored run's steps.
+    store.runOutcomes(
+      ctx,
+      items.filter((i) => i.kind === "run" && i.ref_id).map((i) => i.ref_id!),
+    ),
     evalStore.unfinishedEvalRuns(ctx),
     deployStore.currentByAgent(ctx),
     agentRepo.list(ctx),
@@ -3234,9 +3259,12 @@ async function threadFactsFor(ctx: TenantContext): Promise<Map<string, ThreadDer
  * read cost a write per row.
  */
 async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
-  const [rows, derived, spend, agents, deletedAgents] = await Promise.all([
-    threadStore.list(ctx),
-    threadFactsFor(ctx),
+  // ONE READ OF EACH, SHARED WITH THE DERIVATION. Both halves need the rows and the items, and
+  // both used to fetch their own copy — so a snapshot cost two full listings of the workspace's
+  // threads and two full reads of a table that only ever grows.
+  const [rows, items] = await Promise.all([threadStore.list(ctx), threadStore.allItems(ctx)]);
+  const [derived, spend, agents, deletedAgents] = await Promise.all([
+    threadFactsFor(ctx, { rows, items }),
     // Cumulative, never "this period" — §4.3's cost column is a fact about the session. See
     // `spendByThread`.
     billing.spendByThread(ctx),
@@ -3254,6 +3282,15 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
   const slugByUuid = new Map(agents.map((a) => [a.id, a.slug]));
   const views: ThreadView[] = [];
   const counts: ThreadCounts = { all: 0, needs_you: 0, running: 0, recent: 0, archived: 0 };
+  /**
+   * The rows whose cached status moved, grouped by what it moved TO.
+   *
+   * COLLECTED HERE AND WRITTEN ONCE BELOW, rather than one awaited UPDATE per row inside the loop.
+   * There are five statuses, so this is at most five statements however long the list is — where
+   * the sequential version made a workspace's first look at Threads after a busy afternoon a
+   * round trip per changed thread, in series, on the path a socket is waiting on.
+   */
+  const moved = new Map<ThreadStatus, string[]>();
 
   for (const row of rows) {
     const entry = derived.get(row.id);
@@ -3261,7 +3298,7 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
     const cost = spend.get(row.id);
     // Only when it moved. A read that wrote every row would turn opening the tab into one UPDATE
     // per thread, and `setStatus` refuses `archived` anyway — that one follows the timestamp.
-    if (status !== row.status) await threadStore.setStatus(ctx, row.id, status);
+    if (status !== row.status) moved.set(status, [...(moved.get(status) ?? []), row.id]);
 
     views.push({
       id: row.id,
@@ -3313,6 +3350,9 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
     else counts.recent++;
   }
 
+  // The cache catches up, in one statement per status that moved rather than one per row.
+  await Promise.all([...moved].map(([status, ids]) => threadStore.setStatuses(ctx, ids, status)));
+
   // §4.3.4'S COLLISION COUNT, IN A SECOND PASS, because it is a fact about an AGENT and the first pass
   // is per thread: how many of an agent's sessions are live cannot be known until every one of them has
   // been derived. Two threads mid-flight against the same `api_gateway` files is a guaranteed occurrence
@@ -3355,6 +3395,47 @@ async function broadcastThreads(ctx: TenantContext): Promise<void> {
   relay.broadcastThreads(ctx, { type: "threads", ...(await threadSnapshot(ctx)) });
 }
 
+/**
+ * How long a workspace's pending thread broadcast waits for company.
+ *
+ * Short enough to be invisible — a click and its result still land in the same eye-blink — and long
+ * enough to collapse the burst that one action really produces: an apply broadcasts, syncs the
+ * agents, refreshes the files and rebuilds the graph, and a run ending touches the list from three
+ * separate handlers within a millisecond of each other.
+ */
+const THREAD_BROADCAST_COALESCE_MS = 60;
+const pendingThreadBroadcasts = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * Refresh the thread list soon, once, however many times this is called.
+ *
+ * §7.1 FORBIDS A POLLING CHANNEL, NOT COALESCING. The rule is that a full snapshot goes out on a
+ * genuine state transition and never per cost tick; nothing in it asks that three transitions
+ * arriving in the same millisecond produce three scans of the workspace. And the snapshot is
+ * expensive by construction — it reads every thread, every item and every owned run — so a burst
+ * issued one broadcast per event is the shape that makes the list appear to freeze under load.
+ *
+ * The last call wins the context, which is correct because they are all the same workspace: the
+ * key IS the workspace id, so two tenants never share a timer.
+ *
+ * Callers that must be immediate — a thread command answering the socket that sent it — still call
+ * `broadcastThreads` directly. This is for the event-driven ones, which is most of them.
+ */
+function scheduleThreadBroadcast(ctx: TenantContext): void {
+  const existing = pendingThreadBroadcasts.get(ctx.workspaceId);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(() => {
+    pendingThreadBroadcasts.delete(ctx.workspaceId);
+    void broadcastThreads(ctx).catch((err) =>
+      console.error(`[threads] could not refresh the list:`, (err as Error)?.message ?? err),
+    );
+  }, THREAD_BROADCAST_COALESCE_MS);
+  // Never the reason a process stays alive: a pending list refresh is not work worth delaying an
+  // exit for, and the next boot's first snapshot is the same answer.
+  timer.unref?.();
+  pendingThreadBroadcasts.set(ctx.workspaceId, timer);
+}
+
 async function handleThreadCommand(ctx: TenantContext, cmd: ThreadCommand): Promise<void> {
   try {
     if (cmd.cmd === "createThread") {
@@ -3369,16 +3450,23 @@ async function handleThreadCommand(ctx: TenantContext, cmd: ThreadCommand): Prom
         title: typeof cmd.title === "string" ? cmd.title : undefined,
       });
       console.log(`[threads] opened ${thread.id}${agent ? ` on ${agent.slug}` : ""}`);
-      await broadcastThreads(ctx);
+      // ONE SNAPSHOT, READ TWICE. The broadcast is the list and the answer below is one row of the
+      // same list — building each from its own `threadSnapshot` meant a create cost two full scans
+      // of the workspace to produce two views that were required to agree.
+      const snapshot = await threadSnapshot(ctx);
+      relay.broadcastThreads(ctx, { type: "threads", ...snapshot });
       // And to the socket that asked, so it knows WHICH thread it just made. The broadcast is a
       // list; a client that had only that would have to guess its own new row by timestamp.
       // With its (empty) items, so the client can open it straight away rather than having to ask
       // again for a conversation it already knows is empty — see BUG-13's dead row.
-      relay.sendThreads(ctx, ctx.requestId, {
-        type: "thread",
-        thread: await threadView(ctx, thread.id),
-        items: await threadStore.itemsFor(ctx, thread.id),
-      });
+      const made = snapshot.threads.find((t) => t.id === thread.id);
+      if (made) {
+        relay.sendThreads(ctx, ctx.requestId, {
+          type: "thread",
+          thread: made,
+          items: await threadStore.itemsFor(ctx, thread.id),
+        });
+      }
       return;
     }
 
@@ -5847,7 +5935,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
           }
         }
         relay.broadcastAgents();
-        await broadcastThreads(genCtxNow);
+        scheduleThreadBroadcast(genCtxNow);
       })
       .catch((err) => console.error(`[threads] could not attach the agent:`, (err as Error)?.message ?? err));
     cleanup();
@@ -5862,7 +5950,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     // exist in this process and nowhere else. The THREAD is what is blocked, and the next
     // generation in it is what clears the mark.
     if (genThread) rejectedGenerations.add(genThread);
-    void broadcastThreads(contextForGen()).catch(() => {});
+    scheduleThreadBroadcast(contextForGen());
     cleanup();
   };
 
@@ -5927,7 +6015,7 @@ editor.on("applied", (e) => {
   // The proposal has left `openProposals`, so the thread is no longer blocked. Nothing is written —
   // the row that bound the proposal is still true — but the list has to be told, because the glyph
   // it is rendering has just stopped being amber.
-  void broadcastThreads(contextForEdit()).catch(() => {});
+  scheduleThreadBroadcast(contextForEdit());
   void syncAgents().then(() => relay.broadcastAgents());
   relay.broadcastAgentFiles(contextForEdit(), e.agentId);
   // An edit changed the version, and the graph cache is keyed by it — so there is nothing to
@@ -5947,7 +6035,7 @@ editor.on("undone", (e) => {
 editor.on("discarded", (e) => {
   editOut({ type: "discarded", ...e });
   // Same as `applied`: the diff is gone from the editor, so the row is no longer blocked.
-  void broadcastThreads(contextForEdit()).catch(() => {});
+  scheduleThreadBroadcast(contextForEdit());
 });
 
 editor.on("error", (e) => {
