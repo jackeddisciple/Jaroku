@@ -199,6 +199,15 @@ jobs:
           # changing the manifest. It lives with the MCP suites and belongs to this feature.
           npm run test:mcp-impact
 
+      # THE THREADS DESTINATION, in a step of its own from its first suite rather than appended to
+      # one above. The comment two steps up is about eleven suites that shipped and were never run
+      # by anything but the person who wrote them; the way that happens is a feature whose tests go
+      # wherever there is room. A reader looking for "what covers threads" should find it here.
+      - name: the threads destination
+        working-directory: server
+        run: |
+          npm run test:threads
+
       - name: cost, abuse and the data lifecycle
         working-directory: server
         run: |

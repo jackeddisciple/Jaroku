@@ -19,6 +19,7 @@
     "test:adversarial": "tsx src/db/adversarial.test.ts",
     "test:identity": "tsx src/db/repositories/identity.test.ts",
     "test:trace": "tsx src/store.test.ts",
+    "test:threads": "tsx src/threadStore.test.ts",
     "test:rls": "tsx src/db/rls.test.ts",
     "test:db-boundary": "tsx src/db/boundary.test.ts",
     "test:object-keys": "tsx src/storage/keys.test.ts",
