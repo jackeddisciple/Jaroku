@@ -103,6 +103,11 @@ const TENANT_CHANNELS = new Set([
   // write to, which is a map of somebody's private work.
   "github",
   "log",        // stderr lines and refusals, both of which quote the workspace's own work
+  // What every build session in the workspace is called, what it left unresolved and who opened
+  // it. The title is the first line of somebody's own prompt, the fragment says what is pending on
+  // it, and `created_by` names a person — so a snapshot delivered across the boundary would be one
+  // tenant's whole backlog, in their own words, under another tenant's name.
+  "threads",
 ]);
 
 /**
@@ -250,6 +255,7 @@ console.log("\nevery command reaches the handler its channel implies");
     providers: "PROVIDER_COMMAND_NAMES",
     connections: "CONNECTION_COMMAND_NAMES",
     members: "MEMBER_COMMAND_NAMES",
+    threads: "THREAD_COMMAND_NAMES",
   };
 
   /**
@@ -259,7 +265,13 @@ console.log("\nevery command reaches the handler its channel implies");
    * a feature handler would buy nothing. Listed by name so that adding a seventh is a decision
    * somebody makes here, rather than a command that silently stops arriving.
    */
-  const ANSWERED_BY_THE_RELAY = new Set(["listMcpServers", "listProviders", "listDeployments"]);
+  const ANSWERED_BY_THE_RELAY = new Set([
+    "listMcpServers", "listProviders", "listDeployments",
+    // §7.1 is explicit about these two: reads are answered locally to the requesting client, and
+    // mutations are forwarded. Both are snapshots of rows this process can already reach, with no
+    // third party and no refusal of their own to make.
+    "listThreads", "loadThread",
+  ]);
 
   for (const [channel, setName] of Object.entries(DISPATCH_SETS)) {
     const literal = new RegExp(`const ${setName} = new Set\\(\\[([\\s\\S]*?)\\]\\)`).exec(indexSource);
@@ -376,6 +388,7 @@ console.log("\nfired live, in A, and B receives none of it");
   relay.broadcastConnections(ctxA, { type: "notice", message: MARK });
   relay.broadcastBilling(ctxA, { type: "error", message: MARK });
   relay.broadcastGithub(ctxA, { type: "error", message: MARK });
+  relay.broadcastThreads(ctxA, { type: "error", message: MARK });
   relay.sendMembers(ctxA, ctxA.requestId, { type: "notice", message: MARK });
   relay.broadcastAgentFiles(ctxA, "agent_a");
   await relay.broadcastAgentGraph(ctxA, "agent_a");

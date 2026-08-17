@@ -36,6 +36,10 @@ import {
   type PlanAgentCommand,
   type MemberCommand,
   type ProviderCommand,
+  type ThreadCommand,
+  type ThreadCounts,
+  type ThreadSnapshot,
+  type ThreadView,
 } from "./wsRelay.ts";
 import { Router, forbidden, tooMany, unauthorized } from "./http/router.ts";
 import { securityHeaders } from "./http/security.ts";
@@ -101,6 +105,8 @@ import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
 import { currentTraceparent, formatTraceparent, openTracer, parseTraceparent } from "./obs/trace.ts";
 import { metrics, routeLabel, statusClass } from "./obs/metrics.ts";
 import { McpStore } from "./mcpStore.ts";
+import { ThreadStore, type Thread } from "./threadStore.ts";
+import { NO_FACTS, deriveThreadStatus, type ThreadFacts } from "./threadStatus.ts";
 import { McpRegistry } from "./mcpRegistry.ts";
 import { MCP_DISCOVER_CLASS, McpDiscoveryQueue } from "./mcpDiscovery.ts";
 import { WorkspaceExporter } from "./lifecycle/export.ts";
@@ -474,6 +480,11 @@ await evalStore.init();
 const credentials = fileCredentialWriter(join(RUNTIME_DIR, ".env"));
 
 const mcpStore = new McpStore(store.database());
+
+// Threads share the same file and connection for the same reason the two above do: an additive
+// control-plane table beside the frozen schema, one writer. A thread is not a trace event and
+// never becomes one.
+const threadStore = new ThreadStore(store.database());
 
 // TWO POOLS, SESSION 5. Before this, one pool reserved slot 0 for the interactive run and
 // lent the rest to the eval fan-out — a single, process-wide reservation, because there was
@@ -2186,6 +2197,11 @@ const relay = new WsRelay({
       ? agentGraph(ctx, agentId)
       : { agent_id: agentId, error: "no such agent in this workspace" },
   listMcpServers: (ctx) => mcpRegistry.list(ctx),
+  // The list and the counts together, so the chips and the nav badge are one number — §2.1.
+  listThreads: (ctx) => threadSnapshot(ctx),
+  // Scoped, so another workspace's thread id is indistinguishable from one that does not exist.
+  loadThread: async (ctx, threadId) =>
+    (await threadStore.get(ctx, threadId)) ? threadView(ctx, threadId) : undefined,
   // By name only, and per WORKSPACE. The client learns THAT a key is set, never what it is —
   // and learns it about its own workspace rather than about the machine.
   listProviders: (ctx) => providerSnapshot(ctx),
@@ -2233,6 +2249,7 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (PROVIDER_COMMAND_NAMES.has(cmd.cmd)) void handleProviderCommand(ctx, cmd as ProviderCommand);
     else if (CONNECTION_COMMAND_NAMES.has(cmd.cmd)) void handleConnectionCommand(ctx, cmd as ConnectionCommand);
     else if (MEMBER_COMMAND_NAMES.has(cmd.cmd)) void handleMemberCommand(ctx, cmd as MemberCommand);
+    else if (THREAD_COMMAND_NAMES.has(cmd.cmd)) void handleThreadCommand(ctx, cmd as ThreadCommand);
     else if (cmd.cmd === "loadUsage") void broadcastUsage(ctx);
     else void handleEvalCommand(ctx, cmd);
   }
@@ -2937,6 +2954,160 @@ async function broadcastUsage(ctx: TenantContext): Promise<void> {
     console.error(`[billing] loadUsage failed: ${message}`);
     relay.broadcastBilling(ctx, { type: "error", message: `could not load usage: ${message}` });
   }
+}
+
+// --- threads: the snapshot and the four mutations ---------------------------
+//
+// §7.1's convention, exactly as the eval, MCP and members channels follow it: the two reads are
+// answered by the relay from `threadSnapshot` below, and every mutation broadcasts the whole list
+// afterwards. There is deliberately no partial-update path — a client replaces, so it can never
+// hold a list assembled from two moments, and the counts the nav badge is drawn from can never be
+// one snapshot behind the rows beside them.
+
+const THREAD_COMMAND_NAMES = new Set([
+  "createThread", "renameThread", "archiveThread", "restoreThread",
+]);
+
+/**
+ * What is outstanding in one thread (§3.3's inputs).
+ *
+ * THE COLLECTOR IS EMPTY AT THIS COMMIT, AND SAYING SO IS THE POINT. The facts the derivation
+ * wants — an unapplied proposal, a run in flight, a failed step nobody retried, a plan awaiting
+ * confirm, an MCP confirmation halting a graph — are all attributed to an AGENT today, not to a
+ * session, and there is no way to tell which of an agent's three threads a pending diff belongs to
+ * until conversations are bound to threads. That binding is the next commit; this function is
+ * where it lands, and until then every active thread derives `idle`, which is what an unbound
+ * thread honestly is.
+ *
+ * A function rather than an inline `NO_FACTS` so the shape of the plumbing is already right: the
+ * snapshot below already calls it per thread and already renders whatever it says.
+ */
+function threadFacts(thread: Thread): ThreadFacts {
+  return { ...NO_FACTS, archivedAt: thread.archived_at };
+}
+
+/**
+ * The workspace's threads, as the list renders them.
+ *
+ * DERIVED HERE, WRITTEN BACK WHEN IT MOVED. §3.3's status is a function of live facts, so the
+ * stored column is a cache: this recomputes on every read and issues an UPDATE only for the rows
+ * whose answer changed. That is what keeps "the deriver is the only writer" true without making a
+ * read cost a write per row.
+ */
+async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
+  const rows = await threadStore.list(ctx);
+  const views: ThreadView[] = [];
+  const counts: ThreadCounts = { all: 0, needs_you: 0, running: 0, recent: 0, archived: 0 };
+
+  for (const row of rows) {
+    const { status, fragment } = deriveThreadStatus(threadFacts(row));
+    // Only when it moved. A read that wrote every row would turn opening the tab into one UPDATE
+    // per thread, and `setStatus` refuses `archived` anyway — that one follows the timestamp.
+    if (status !== row.status) await threadStore.setStatus(ctx, row.id, status);
+
+    views.push({
+      id: row.id,
+      agent_id: row.agent_id,
+      agent_name: row.agent_name_snapshot,
+      // The pair §4.3 renders three ways: a live name, `name (deleted)` dimmed, or `(no agent)`.
+      // A snapshot with no id is the middle case and the only way to tell it from the last.
+      agent_deleted: row.agent_id === null && row.agent_name_snapshot !== null,
+      title: row.title,
+      title_is_custom: row.title_is_custom,
+      created_by: row.created_by,
+      created_at: row.created_at,
+      last_activity_at: row.last_activity_at,
+      archived_at: row.archived_at,
+      status,
+      fragment,
+    });
+
+    if (status === "archived") counts.archived++;
+    // `needs_you` counts the SECTION, which §4.2 fills with both blocked statuses. One number,
+    // rendered on the chip and on the nav badge — see ThreadCounts.
+    else if (status === "needs_you" || status === "errored") counts.needs_you++;
+    else if (status === "running") counts.running++;
+    else counts.recent++;
+  }
+
+  // `all` is every active thread, not every row: the All chip and the Archived chip are two
+  // filters over one list, and a total that included archived rows would make All the only chip
+  // whose count did not match what clicking it shows.
+  counts.all = counts.needs_you + counts.running + counts.recent;
+  return { threads: views, counts };
+}
+
+async function broadcastThreads(ctx: TenantContext): Promise<void> {
+  relay.broadcastThreads(ctx, { type: "threads", ...(await threadSnapshot(ctx)) });
+}
+
+async function handleThreadCommand(ctx: TenantContext, cmd: ThreadCommand): Promise<void> {
+  try {
+    if (cmd.cmd === "createThread") {
+      const agentId = typeof cmd.agentId === "string" ? cmd.agentId : null;
+      // The name is snapshotted at creation (§3.2), so it has to be resolved now rather than at
+      // read time. A slug that names no agent in THIS workspace resolves to null and the thread is
+      // created without one, which is the same outcome as not naming an agent at all.
+      const agent = agentId ? await agentRepo.bySlug(ctx, agentId) : undefined;
+      const thread = await threadStore.create(ctx, {
+        agentId: agent?.id ?? null,
+        agentName: agent ? (agent.display_name ?? agent.slug) : null,
+        title: typeof cmd.title === "string" ? cmd.title : undefined,
+      });
+      console.log(`[threads] opened ${thread.id}${agent ? ` on ${agent.slug}` : ""}`);
+      await broadcastThreads(ctx);
+      // And to the socket that asked, so it knows WHICH thread it just made. The broadcast is a
+      // list; a client that had only that would have to guess its own new row by timestamp.
+      relay.sendThreads(ctx, ctx.requestId, { type: "thread", thread: await threadView(ctx, thread.id) });
+      return;
+    }
+
+    if (cmd.cmd === "renameThread") {
+      const title = String(cmd.title ?? "").trim();
+      if (!title) {
+        relay.broadcastThreads(ctx, {
+          type: "error",
+          threadId: cmd.threadId,
+          message: "a thread needs a name — Escape cancels the edit",
+        });
+        return;
+      }
+      await threadStore.rename(ctx, cmd.threadId, title);
+      await broadcastThreads(ctx);
+      return;
+    }
+
+    if (cmd.cmd === "archiveThread") {
+      await threadStore.archive(ctx, cmd.threadId);
+      await broadcastThreads(ctx);
+      return;
+    }
+
+    if (cmd.cmd === "restoreThread") {
+      await threadStore.restore(ctx, cmd.threadId);
+      await broadcastThreads(ctx);
+      return;
+    }
+  } catch (err) {
+    // On the threads channel, because that is where the list is waiting for an answer. A refusal
+    // in the status bar would leave the row showing the state it had before the click.
+    relay.broadcastThreads(ctx, {
+      type: "error",
+      message: `threads: ${(err as Error)?.message ?? String(err)}`,
+    });
+  }
+}
+
+/**
+ * One thread as the list renders it.
+ *
+ * Goes through `threadSnapshot` rather than building a view of its own, because a second builder is
+ * a second answer: the row a client is handed after a create and the row it gets in the next
+ * broadcast have to agree about the derived status, and two functions cannot be made to.
+ */
+async function threadView(ctx: TenantContext, threadId: string): Promise<ThreadView> {
+  const snapshot = await threadSnapshot(ctx);
+  return snapshot.threads.find((t) => t.id === threadId)!;
 }
 
 // --- membership: commands ---------------------------------------------------

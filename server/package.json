@@ -21,6 +21,7 @@
     "test:trace": "tsx src/store.test.ts",
     "test:threads": "tsx src/threadStore.test.ts",
     "test:thread-status": "tsx src/threadStatus.test.ts",
+    "test:thread-channel": "tsx src/threadChannel.test.ts",
     "test:rls": "tsx src/db/rls.test.ts",
     "test:db-boundary": "tsx src/db/boundary.test.ts",
     "test:object-keys": "tsx src/storage/keys.test.ts",

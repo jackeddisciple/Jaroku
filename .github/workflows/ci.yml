@@ -208,6 +208,7 @@ jobs:
         run: |
           npm run test:threads
           npm run test:thread-status
+          npm run test:thread-channel
 
       - name: cost, abuse and the data lifecycle
         working-directory: server

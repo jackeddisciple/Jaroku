@@ -7,6 +7,7 @@ import type { Socket } from "node:net";
 import { readFile } from "node:fs/promises";
 import { WebSocketServer, WebSocket } from "ws";
 import type { TraceStore } from "./store.ts";
+import type { ThreadStatus } from "./threadStore.ts";
 import type { TenantContext } from "./db/tenant.ts";
 import type { TraceEvent } from "./types.ts";
 import type { Router } from "./http/router.ts";
@@ -761,7 +762,10 @@ export type ClientCommand =
   | DeployChannelCommand
   | ListDeploymentsCommand
   | GithubCommand
-  | MemberCommand;
+  | MemberCommand
+  | ThreadCommand
+  | ListThreadsCommand
+  | LoadThreadCommand;
 
 /** Eval-channel commands, grouped so the forwarding switch stays readable. */
 export type EvalCommand =
@@ -811,6 +815,7 @@ export type ForwardedCommand =
   | DeployChannelCommand
   | GithubCommand
   | MemberCommand
+  | ThreadCommand
   | LoadUsageCommand;
 
 // Generation rides its own channel, deliberately parallel to "trace". It never enters the
@@ -1234,6 +1239,133 @@ export type GithubEvent =
   | { type: "error"; message: string; agentId?: string }
   | { type: "notice"; message: string; agentId?: string };
 
+// Threads ride their own channel, parallel to eval / mcp / deploy / github, and for the same
+// reason each of those is not a field on another: a build session is not a run, not an agent and
+// not a deployment, and every channel beside it is a full snapshot of something else.
+//
+// THE FROZEN SCHEMA IS UNTOUCHED. Nothing here is a trace event and nothing here changes one.
+// schema/events.md v1 stays as it is, exactly as pause/resume, the eval engine and MCP support all
+// did: new capability in new tables and a new channel BESIDE the timeline (§7).
+//
+// TWO READS ANSWERED HERE, FOUR MUTATIONS FORWARDED (§7.1). `listThreads` and `loadThread` are
+// pure snapshots of rows this process can already reach, so they go back to the socket that asked
+// and to nobody else — the same shape `listAgents` and `listMcpServers` take. Creating, renaming,
+// archiving and restoring are forwarded to the app, which answers by broadcasting the whole list.
+// A client therefore never merges a partial update into local state; it replaces.
+export type ListThreadsCommand = { cmd: "listThreads" };
+export type CreateThreadCommand = {
+  cmd: "createThread";
+  /** Optional: a thread legitimately exists before any agent does — §3.1's planning stage. */
+  agentId?: string | null;
+  /** Optional: a thread with nothing said in it is "Untitled thread" until the first message. */
+  title?: string;
+};
+export type RenameThreadCommand = { cmd: "renameThread"; threadId: string; title: string };
+export type ArchiveThreadCommand = { cmd: "archiveThread"; threadId: string };
+export type RestoreThreadCommand = { cmd: "restoreThread"; threadId: string };
+export type LoadThreadCommand = { cmd: "loadThread"; threadId: string };
+
+/** Thread-channel commands, grouped so the forwarding switch stays readable. */
+export type ThreadCommand =
+  | CreateThreadCommand
+  | RenameThreadCommand
+  | ArchiveThreadCommand
+  | RestoreThreadCommand;
+
+// The four that MUTATE. The two reads are not here because they are answered locally — see the
+// header above, and see `dispatch`, where each has a branch of its own.
+const THREAD_COMMANDS = new Set(["createThread", "renameThread", "archiveThread", "restoreThread"]);
+
+/**
+ * One thread, as a row is rendered (§4.3).
+ *
+ * DERIVED FIELDS TRAVEL WITH THE ROW, rather than being recomputed in the browser. §3.3's status
+ * is a function of pending diffs, in-flight runs, failed steps and awaiting plans — none of which
+ * a client can see — so a client that derived its own would be guessing from less. The same goes
+ * for the fragment beside it, which §4.3 defines as the same decision in words.
+ */
+export interface ThreadView {
+  id: string;
+  /** Null when there is no agent yet, and null again once one is deleted — see `agent_name`. */
+  agent_id: string | null;
+  /**
+   * What to render on the agent chip: the live name, the snapshot of a deleted one, or null.
+   *
+   * Null with a null `agent_id` is §4.3's `(no agent)`. A name with a null `agent_id` is
+   * `name (deleted)`, dimmed. The pair is what lets the row tell those two apart.
+   */
+  agent_name: string | null;
+  /** True when the name above is a snapshot of an agent that no longer exists. */
+  agent_deleted: boolean;
+  title: string;
+  title_is_custom: boolean;
+  /** The user id, for the Team-only author column. Never rendered in a Personal workspace. */
+  created_by: string | null;
+  created_at: string;
+  last_activity_at: string;
+  archived_at: string | null;
+  status: ThreadStatus;
+  /** §4.3's state fragment: one decision-relevant fact, or null when there is nothing to say. */
+  fragment: string | null;
+}
+
+/** The five §4.4 chips, counted once on the server and rendered twice (§2.1). */
+export interface ThreadCounts {
+  all: number;
+  /**
+   * The Needs You SECTION's size — `needs_you` plus `errored`, which is what §4.2 puts in it.
+   *
+   * ONE COUNT, because §2.1 requires the nav badge and this chip to be the same number: two
+   * independently-derived counts of "what is waiting on me" that disagree about whether a failure
+   * counts is precisely the trust-eroding mismatch the GitHub header/badge split was built to
+   * avoid, and it would be visible in two places at once.
+   */
+  needs_you: number;
+  running: number;
+  /** Everything else that is not archived. §4.2's third section. */
+  recent: number;
+  archived: number;
+}
+
+/** What `listThreads` answers with: the list and the counts, computed together. */
+export interface ThreadSnapshot {
+  threads: ThreadView[];
+  counts: ThreadCounts;
+}
+
+/**
+ * What a socket is told when nothing answers `listThreads`.
+ *
+ * An empty list with zeroed counts rather than no message at all, because §4.6 has three empty
+ * states and every one of them is a rendered surface. A client that received nothing could not
+ * tell "no threads" from "not answered yet", and the difference is a skeleton row versus a
+ * sentence naming the workspace.
+ */
+const EMPTY_THREADS: ThreadSnapshot = {
+  threads: [],
+  counts: { all: 0, needs_you: 0, running: 0, recent: 0, archived: 0 },
+};
+
+export type ThreadEvent =
+  /**
+   * The whole list for one workspace, with derived status and counts.
+   *
+   * A FULL SNAPSHOT ON EVERY MUTATION, the same discipline the eval, MCP, provider, deploy and
+   * members channels follow. There is deliberately no per-thread update message: a client that
+   * merged one would have to reconcile counts it did not compute against rows it did, and the
+   * counts are what the nav badge is drawn from.
+   */
+  | { type: "threads"; threads: ThreadView[]; counts: ThreadCounts }
+  /**
+   * One thread, opened into the three-pane view (§4.5).
+   *
+   * Answered to the asking socket only. It is the request "put me back where I was", which is a
+   * fact about one client's navigation and means nothing to the other tabs in the workspace.
+   */
+  | { type: "thread"; thread: ThreadView }
+  | { type: "error"; message: string; threadId?: string }
+  | { type: "notice"; message: string; threadId?: string };
+
 // The session channel: the only one that is about the CONNECTION rather than about the work.
 //
 // It exists because a WebSocket is the one thing in this system with no natural expiry. An
@@ -1339,6 +1471,12 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   loadUsage: "billing",
   listMembers: "members", inviteMember: "members", revokeInvite: "members",
   setMemberRole: "members", removeMember: "members",
+  // All six on `threads`, the reads included. The channel HAS an error shape, so unlike
+  // `loadAgentFiles` there is nowhere better for a refusal to go — and a refusal about a rename
+  // that landed in the status bar instead of the list would leave the row it was about still
+  // showing the old name with nothing saying why.
+  listThreads: "threads", loadThread: "threads", createThread: "threads",
+  renameThread: "threads", archiveThread: "threads", restoreThread: "threads",
   listDeployments: "deploy", planDeploy: "deploy", deploy: "deploy", cancelDeploy: "deploy",
   forgetDeployment: "deploy", loadDeployLogs: "deploy", setRailwayToken: "deploy",
   testRailwayToken: "deploy",
@@ -1502,6 +1640,22 @@ export interface RelayOptions {
   revalidate?: (session: SocketSession) => Promise<SessionVerdict>;
   /** How often to ask. Default 60s; a socket lives hours, so this is not a hot path. */
   revalidateMs?: number;
+  /**
+   * The workspace's threads, with §3.3's derived status and §4.4's counts.
+   *
+   * Answered locally, like `listAgents` and `listMcpServers`, because it is rows this process can
+   * already reach and no third party is involved. Forwarding it would put a read that the sidebar
+   * badge needs on frame one behind the app's dispatch chain for no benefit.
+   */
+  listThreads?: (ctx: TenantContext) => ThreadSnapshot | Promise<ThreadSnapshot>;
+  /**
+   * One thread, for the client that asked to open it (§4.5).
+   *
+   * Returns undefined for an id that is not this workspace's, which is what the scoped read
+   * produces for another tenant's thread — the refusal and the "no such thread" are deliberately
+   * the same answer, so a client learns nothing about what exists elsewhere.
+   */
+  loadThread?: (ctx: TenantContext, threadId: string) => Promise<ThreadView | undefined>;
   /** Every deployment, plus whether a Railway token is configured. Names only. */
   listDeployments?: (ctx: TenantContext) =>
     | { deployments: unknown[]; railwayConfigured: boolean }
@@ -1611,6 +1765,15 @@ export class WsRelay {
           railwayConfigured: false,
         };
         this.sendTo(ws, { channel: "deploy", type: "deployments", ...deploySnapshot });
+        // And what is waiting on somebody, so the sidebar's Threads badge (§2.1) is right on frame
+        // one rather than after a round trip. The badge's whole claim is that you never open the
+        // tab just to check; a client that had to ask first would render no badge for as long as
+        // that took, which is the moment a person decides there is nothing to look at.
+        this.sendTo(ws, {
+          channel: "threads",
+          type: "threads",
+          ...((await this.opts.listThreads?.(ctx)) ?? EMPTY_THREADS),
+        });
       })().catch((err) => console.error("[relay] initial snapshot failed:", (err as Error).message));
 
       ws.on("message", (data) => {
@@ -1847,6 +2010,32 @@ export class WsRelay {
               type: "servers",
               servers: (await this.opts.listMcpServers?.(ctx)) ?? [],
             }), live);
+          } else if (msg.cmd === "listThreads") {
+            void this.answer(ws, async (ctx) => ({
+              channel: "threads",
+              type: "threads",
+              ...((await this.opts.listThreads?.(ctx)) ?? EMPTY_THREADS),
+            }), live);
+          } else if (msg.cmd === "loadThread" && typeof msg.threadId === "string") {
+            // To the asking socket only. Opening a thread is one client's navigation, and
+            // broadcasting it would move everybody else's centre pane.
+            const threadId = msg.threadId;
+            void this.answer(ws, async (ctx) => {
+              const thread = await this.opts.loadThread?.(ctx, threadId);
+              return thread
+                ? { channel: "threads", type: "thread", thread }
+                : {
+                    channel: "threads",
+                    type: "error",
+                    threadId,
+                    // The same sentence for "gone" and "not yours", on purpose — see `loadThread`.
+                    message: "no such thread in this workspace",
+                  };
+            }, live);
+          } else if (THREAD_COMMANDS.has(msg.cmd)) {
+            // Shape-checked in the app, which owns the thread store and can answer with a precise
+            // error on the "threads" channel rather than dropping the message here.
+            void withContext((ctx) => this.onCommand?.(msg as ThreadCommand, ctx));
           } else if (msg.cmd === "listDeployments") {
             void this.answer(ws, async (ctx) => ({
               channel: "deploy",
@@ -2148,6 +2337,35 @@ export class WsRelay {
   /** Broadcast a membership event to the workspace it concerns. See MemberEvent. */
   broadcastMembers(ctx: TenantContext, event: MemberEvent): void {
     this.broadcastTo(ctx, { channel: "members", ...event });
+  }
+
+  /**
+   * Broadcast the thread list. Separate channel by design — see ThreadEvent.
+   *
+   * TO THE WHOLE WORKSPACE, not to the socket that asked, and that is §6's collaboration rule in
+   * one line: a Team workspace is fully collaborative, so a thread somebody else archived has to
+   * leave everybody's list rather than only theirs. The badge and the chips are drawn from the
+   * counts in this payload, so a client that missed it would sit showing a number that is no
+   * longer true.
+   */
+  broadcastThreads(ctx: TenantContext, event: ThreadEvent): void {
+    this.broadcastTo(ctx, { channel: "threads", ...event });
+  }
+
+  /**
+   * Answer ONE client about a thread — the socket whose request this is.
+   *
+   * Same mechanism as `sendMembers` and for a related reason: opening a thread (§4.5) is a fact
+   * about one client's navigation. Broadcasting it would collapse every other tab in the workspace
+   * out of its full-screen view and into somebody else's conversation.
+   */
+  sendThreads(ctx: TenantContext, requestId: string, event: ThreadEvent): void {
+    for (const [ws, session] of this.sessions) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (session.context.workspaceId !== ctx.workspaceId) continue;
+      if (session.context.requestId !== requestId) continue;
+      this.sendTo(ws, { channel: "threads", ...event });
+    }
   }
 
   /**

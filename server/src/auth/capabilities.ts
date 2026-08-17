@@ -203,6 +203,25 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   cancelRun: "run:execute",
   branchRun: "run:execute",
 
+  // threads
+  //
+  // `agent:read` / `agent:write` RATHER THAN A CAPABILITY OF THEIR OWN, and that is a decision
+  // about what a thread IS. A thread is the session a plan, a generation and an edit happen inside
+  // — the same work `agent:write` already names — so a separate `thread:write` would be a second
+  // gate in front of one activity, and the two could disagree: a member allowed to generate but not
+  // to open a thread to generate in is a role nobody meant to create.
+  //
+  // MEMBER-LEVEL, deliberately, because §6 is explicit that Team workspaces are fully
+  // collaborative: all members see all threads and any member may act on any thread. The author
+  // column exists to make that legible, not to restrict it — so archiving somebody else's thread is
+  // not a privileged act, and it is reversible in one click either way.
+  listThreads: "agent:read",
+  loadThread: "agent:read",
+  createThread: "agent:write",
+  renameThread: "agent:write",
+  archiveThread: "agent:write",
+  restoreThread: "agent:write",
+
   // eval
   listDatasets: "eval:read",
   loadDataset: "eval:read",
