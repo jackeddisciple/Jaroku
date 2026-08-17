@@ -830,8 +830,15 @@ export function sendSetMcpServerAuth(serverId: string, token: string | null): vo
  * "once" allows this call, "run" allows this tool for the rest of this run and nothing
  * beyond it, "deny" refuses — and a refusal becomes a red step, never silence.
  */
-export function sendResolveMcpConfirm(runId: string, nonce: string, verdict: McpConfirmVerdict): void {
-  send({ cmd: "resolveMcpConfirm", runId, nonce, verdict });
+/**
+ * Answer a blocking confirmation, and say whether the answer left the tab.
+ *
+ * THIS IS THE ONE COMMAND WHERE SILENCE DECIDES. The run is blocked on a timer, and mcp_bridge's
+ * own clock DENIES when it runs out — so a dropped `resolveMcpConfirm` is not a lost click, it is a
+ * denial the user believes they prevented. The modal refuses visibly instead.
+ */
+export function sendResolveMcpConfirm(runId: string, nonce: string, verdict: McpConfirmVerdict): boolean {
+  return send({ cmd: "resolveMcpConfirm", runId, nonce, verdict });
 }
 
 /** Override the impact classification for one tool. `null` restores the classifier's call. */

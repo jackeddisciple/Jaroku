@@ -2564,6 +2564,24 @@ export class WsRelay {
   }
 
   /**
+   * Answer ONE client on the MCP channel — the socket whose command this is.
+   *
+   * The same shape as `sendThreads` and `sendMembers`, for the refusal that most obviously needed
+   * it: "that confirmation is no longer waiting" is about one person's second click on a modal, and
+   * it went to every socket in the workspace. One member double-clicking Allow — or holding Escape,
+   * which repeats — put that sentence in front of every teammate, about a dialog they may never
+   * have seen.
+   */
+  sendMcpTo(ctx: TenantContext, requestId: string, event: McpEvent): void {
+    for (const [ws, session] of this.sessions) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (session.context.workspaceId !== ctx.workspaceId) continue;
+      if (session.context.requestId !== requestId) continue;
+      this.sendTo(ws, { channel: "mcp", ...event });
+    }
+  }
+
+  /**
    * Send a membership event to ONE socket.
    *
    * For `inviteLink`, which carries a credential. Broadcasting it would hand the link to every

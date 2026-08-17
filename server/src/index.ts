@@ -2733,7 +2733,12 @@ async function handleMcpCommand(ctx: TenantContext, cmd: McpCommand): Promise<vo
         if (!pending || pending.workspaceId !== ctx.workspaceId) {
           // Already answered, timed out, or the run died. Saying so beats silence: two
           // people clicking the same modal should not both think they decided it.
-          relay.broadcastMcp(ctx, {
+          //
+          // TO THE ASKER, NOT THE WORKSPACE. This was a broadcast, so one person's double-click —
+          // or a held Escape, which repeats — put "that confirmation is no longer waiting" in front
+          // of every teammate, about a dialog they may never have seen. Same class as the thread
+          // channel's refusals, different channel.
+          relay.sendMcpTo(ctx, ctx.requestId, {
             type: "error",
             message: "that confirmation is no longer waiting — the run moved on without it",
           });

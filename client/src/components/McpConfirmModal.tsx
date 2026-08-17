@@ -21,6 +21,7 @@
 
 import { useEffect, useState } from "react";
 import { useMcpStore } from "../store/mcpStore.ts";
+import { useTraceStore } from "../store/traceStore.ts";
 import { sendResolveMcpConfirm } from "../lib/socket.ts";
 import { ACCENT, ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { primaryBtn, quietBtn } from "./buttons.ts";
@@ -43,6 +44,20 @@ export function McpConfirmModal() {
   // independently, and a combined "approve all of these" prompt is a prompt nobody reads.
   const request = useMcpStore((s) => s.confirms[0]);
   const [remaining, setRemaining] = useState(0);
+  /**
+   * The nonce this modal has already answered, if any.
+   *
+   * IT HAD NO IN-FLIGHT STATE AT ALL, and stays mounted until the server's `confirmResolved`
+   * broadcast removes it — so a double-click sent `resolveMcpConfirm` twice, and holding Escape
+   * sent a burst of denials. The server handles the second correctly (it deletes the key before
+   * acting), but answers it with a workspace-wide error, which put "that confirmation is no longer
+   * waiting" in front of every teammate because one person clicked twice.
+   *
+   * Keyed by nonce rather than a boolean: several high-impact calls in one turn queue here, and a
+   * flag would carry an answer from the one just resolved into the one that replaces it.
+   */
+  const [answeredNonce, setAnsweredNonce] = useState<string | null>(null);
+  const connected = useTraceStore((s) => s.connection === "open");
 
   useEffect(() => {
     if (!request) return;
@@ -56,20 +71,35 @@ export function McpConfirmModal() {
   useEffect(() => {
     if (!request) return;
     const onKey = (e: KeyboardEvent) => {
-      // Escape denies. It does not dismiss — see the file header.
+      // Escape denies. It does not dismiss — see the file header. Guarded like the buttons: held
+      // down it repeats, and every repeat past the first was a workspace-wide error.
       if (e.key === "Escape") {
         e.preventDefault();
-        sendResolveMcpConfirm(request.runId, request.nonce, "deny");
+        answer("deny");
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [request]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request, answeredNonce, connected]);
 
   if (!request) return null;
 
-  const answer = (verdict: McpConfirmVerdict) =>
-    sendResolveMcpConfirm(request.runId, request.nonce, verdict);
+  const answered = answeredNonce === request.nonce;
+
+  /**
+   * Answer once, and only over a socket that can carry it.
+   *
+   * A CLOSED SOCKET MUST NOT ANSWER BY DEFAULT. `send` drops a command in silence when the socket
+   * is down, and this run is blocked on a timer — so somebody who watched themselves click Allow
+   * got a denial from `mcp_bridge`'s own clock instead. Refusing visibly is the honest version: the
+   * timeout still denies, but it stops being something the user was told they had prevented.
+   */
+  const answer = (verdict: McpConfirmVerdict): void => {
+    if (answered || !connected) return;
+    if (!sendResolveMcpConfirm(request.runId, request.nonce, verdict)) return;
+    setAnsweredNonce(request.nonce);
+  };
 
   const queued = useMcpStore.getState().confirms.length - 1;
   const mm = Math.floor(remaining / 60);
@@ -131,15 +161,23 @@ export function McpConfirmModal() {
             run {request.runId.slice(0, 8)}
             {queued > 0 && ` · ${queued} more waiting`}
           </span>
+          {/* STATE WHAT'S TRUE. Disabled buttons over a dead socket read as a broken dialog unless
+              something says why — and this is the one place in the product where saying nothing
+              means the run gets denied on a clock the user cannot see. */}
+          {!connected && (
+            <span className="text-[10px] text-muted">reconnecting — this cannot be answered yet</span>
+          )}
+          {connected && answered && <span className="text-[10px] text-muted">sent…</span>}
           <div className="ml-auto flex items-center gap-2">
             {/* Deny sits first and unstyled: refusing must be as reachable as allowing, and
                 the two allow buttons must not be the only things that look clickable. */}
-            <button className={quietBtn} onClick={() => answer("deny")} autoFocus>
+            <button className={quietBtn} onClick={() => answer("deny")} disabled={answered || !connected} autoFocus>
               Deny
             </button>
             <button
               className={primaryBtn}
               onClick={() => answer("once")}
+              disabled={answered || !connected}
               title="Allow this one call. The next call to this tool asks again."
             >
               Allow once
@@ -147,6 +185,7 @@ export function McpConfirmModal() {
             <button
               className={primaryBtn}
               onClick={() => answer("run")}
+              disabled={answered || !connected}
               title="Allow this tool for the rest of this run. Nothing carries past it."
             >
               Allow for this run
