@@ -24,7 +24,10 @@
 // platform does on a workspace's behalf, which is exactly what a push is.
 
 import { GithubApi, GITHUB_ENV_KEY, GithubError } from "./githubApi.ts";
-import type { GithubInstallation, GithubRepository } from "./db/repositories/github.ts";
+import { APP_GRANT, type GithubInstallation, type GithubRepository } from "./db/repositories/github.ts";
+import {
+  InstallationTokens, githubAppConfig, refreshUserToken, type GithubAppConfig,
+} from "./githubApp.ts";
 import type { TenantContext } from "./db/tenant.ts";
 import type { SecretStore } from "./secrets/secretStore.ts";
 
@@ -45,6 +48,17 @@ export interface GithubIdentityDeps {
   ) => Promise<{ ok: boolean; message: string | null }>;
   /** Forget it. Idempotent, like every delete on the store. */
   forget: (ctx: TenantContext, name: string) => Promise<void>;
+  /**
+   * The App this deployment is, or null.
+   *
+   * READ THROUGH A FUNCTION rather than captured at construction, because registration writes it
+   * into the live process (see `convertManifest`) and a value captured at boot would leave the
+   * server thinking it has no App until somebody restarts it — on the one request that just
+   * finished registering one.
+   */
+  app?: () => GithubAppConfig | null;
+  /** Minted installation tokens, cached against GitHub's own expiry. Injected so a test can drive it. */
+  tokens?: InstallationTokens;
   log?: (line: string) => void;
 }
 
@@ -56,9 +70,71 @@ export interface ConnectOutcome {
 
 export class GithubIdentity {
   private readonly log: (line: string) => void;
+  private readonly tokens: InstallationTokens;
+  private readonly app: () => GithubAppConfig | null;
 
   constructor(private deps: GithubIdentityDeps) {
     this.log = deps.log ?? ((line) => console.log(line));
+    this.tokens = deps.tokens ?? new InstallationTokens();
+    this.app = deps.app ?? (() => githubAppConfig());
+  }
+
+  /**
+   * Record a GitHub App installation as this workspace's grant.
+   *
+   * NO TOKEN IS STORED FOR THE INSTALLATION, and that is the whole point of the row's new shape:
+   * what is durable is GitHub's installation id, and the credential is minted per hour from the
+   * App's private key. A database dump of `github_installations` after this contains no
+   * repository credential at all.
+   *
+   * THE USER TOKEN IS STORED, because it cannot be minted — it is the product of a person having
+   * authorised, and the only way to get another is to send them back through GitHub. It goes into
+   * the SecretStore under a name, exactly as the PAT did, so the same "no plaintext-return path
+   * reachable from a request handler" rule covers it.
+   */
+  async installApp(
+    ctx: TenantContext,
+    input: {
+      installationId: string;
+      accountLogin: string;
+      accountType?: "user" | "org";
+      user?: { token: string; expiresAt: string | null; refreshToken: string | null } | null;
+    },
+  ): Promise<{ ok: boolean; message: string | null }> {
+    const userName = `${GITHUB_ENV_KEY}_USER`;
+    const refreshName = `${GITHUB_ENV_KEY}_REFRESH`;
+    if (input.user) {
+      const written = await this.deps.store(ctx, {
+        name: userName, value: input.user.token, provider: "github", actorUserId: ctx.actorUserId,
+      });
+      if (!written.ok) {
+        return { ok: false, message: written.message ?? "could not store the user token" };
+      }
+      if (input.user.refreshToken) {
+        await this.deps.store(ctx, {
+          name: refreshName, value: input.user.refreshToken, provider: "github",
+          actorUserId: ctx.actorUserId,
+        });
+      }
+    }
+
+    await this.deps.repo.linkAccount(ctx, {
+      accountLogin: input.accountLogin,
+      accountType: input.accountType ?? "user",
+      // See `APP_GRANT`: a sentence rather than a null, naming no secret because there is none.
+      tokenSecretName: APP_GRANT,
+      githubInstallationId: input.installationId,
+      ...(input.user
+        ? {
+            userTokenSecretName: userName,
+            userTokenExpiresAt: input.user.expiresAt,
+            ...(input.user.refreshToken ? { userRefreshSecretName: refreshName } : {}),
+          }
+        : {}),
+      scopes: [],
+    });
+    this.log(`[github] ${ctx.workspaceId} installed the app for @${input.accountLogin}`);
+    return { ok: true, message: null };
   }
 
   /**
@@ -148,6 +224,35 @@ export class GithubIdentity {
   async apiFor(ctx: TenantContext): Promise<{ api: GithubApi; installation: GithubInstallation } | null> {
     const installation = await this.current(ctx);
     if (!installation) return null;
+
+    // THE APP PATH. The grant is an installation id and the credential is minted from the
+    // deployment's private key, so there is nothing in the vault to read and nothing to revoke
+    // when a token dies — it dies on a clock and the next call mints another.
+    if (installation.github_installation_id) {
+      const app = this.app();
+      if (!app) {
+        // A row that names an installation on a server that has forgotten which App it is. Marked
+        // rather than left to 401 on whatever the user does next, and the reason says what to do.
+        await this.deps.repo.revokeAccount(ctx, installation.id, "this server has no GitHub App registered");
+        return null;
+      }
+      try {
+        const token = await this.tokens.get(app, installation.github_installation_id);
+        return { api: new GithubApi({ token, log: this.log }), installation };
+      } catch (err) {
+        // An installation somebody uninstalled on GitHub's side answers 404 here, which is the
+        // App-era shape of "your access was revoked". Believed, for the reason `markRevoked` gives.
+        this.tokens.forget(installation.github_installation_id);
+        await this.deps.repo.revokeAccount(
+          ctx, installation.id, `GitHub would not issue a token for this installation: ${(err as Error)?.message}`,
+        );
+        return null;
+      }
+    }
+
+    // THE PERSONAL-ACCESS-TOKEN PATH, unchanged and unreachable from the UI. It is what a
+    // GitHub Enterprise Server deployment and a self-hosted install with no callback URL use, and
+    // deleting it would be deleting the only answer for both — see the connect route's own note.
     const values = await this.deps.secrets.getForPlatformCall(ctx, [installation.token_secret_name]);
     const token = values[installation.token_secret_name];
     if (!token) {
@@ -158,6 +263,85 @@ export class GithubIdentity {
       return null;
     }
     return { api: new GithubApi({ token, log: this.log }), installation };
+  }
+
+  /**
+   * A client for the three calls an installation token is refused by — §2.2's whole connect screen.
+   *
+   * `GET /user`, `GET /user/repos` AND `POST /user/repos`. GitHub's documentation lists OAuth and
+   * personal access tokens for the last of those and not App installations, and the first two are
+   * the same class: they are about a PERSON, and an installation is about repositories. So the
+   * account line, the repository picker and "Create new repo" travel on a user-to-server token,
+   * and every call that touches a repository travels on the installation's.
+   *
+   * FALLS BACK TO `apiFor` ON THE PAT PATH, where one token does everything and the distinction
+   * this method exists for does not apply.
+   *
+   * REFRESHED IN PLACE WHEN IT HAS EXPIRED. A user token can be configured to last eight hours;
+   * the refresh token that comes with it is what keeps "Create new repo" working on hour nine, and
+   * a caller that got null instead would send somebody to reconnect an installation that is fine.
+   */
+  async userApiFor(ctx: TenantContext): Promise<{ api: GithubApi; installation: GithubInstallation } | null> {
+    const installation = await this.current(ctx);
+    if (!installation) return null;
+    if (!installation.github_installation_id) return await this.apiFor(ctx);
+    if (!installation.user_token_secret_name) return null;
+
+    const app = this.app();
+    if (!app) return null;
+    const fresh = await this.liveUserToken(ctx, installation, app);
+    if (!fresh) return null;
+    return { api: new GithubApi({ token: fresh, log: this.log }), installation };
+  }
+
+  /** The user token, refreshed first if GitHub's own expiry says it will not survive the call. */
+  private async liveUserToken(
+    ctx: TenantContext,
+    installation: GithubInstallation,
+    app: GithubAppConfig,
+  ): Promise<string | null> {
+    const names = [installation.user_token_secret_name!];
+    if (installation.user_refresh_secret_name) names.push(installation.user_refresh_secret_name);
+    const values = await this.deps.secrets.getForPlatformCall(ctx, names);
+    const token = values[installation.user_token_secret_name!];
+
+    // A MINUTE OF SKEW, the same allowance the installation cache makes and for the same reason: a
+    // token that expires between the check and the request is a 401 on the one screen where the
+    // user has just clicked something.
+    const alive = installation.user_token_expires_at === null
+      || Date.parse(installation.user_token_expires_at) - 60_000 > Date.now();
+    if (token && alive) return token;
+
+    const refresh = installation.user_refresh_secret_name
+      ? values[installation.user_refresh_secret_name]
+      : undefined;
+    if (!refresh) return token ?? null;
+    try {
+      const next = await refreshUserToken(app, refresh);
+      await this.deps.store(ctx, {
+        name: installation.user_token_secret_name!, value: next.token,
+        provider: "github", actorUserId: ctx.actorUserId,
+      });
+      if (next.refreshToken && installation.user_refresh_secret_name) {
+        await this.deps.store(ctx, {
+          name: installation.user_refresh_secret_name, value: next.refreshToken,
+          provider: "github", actorUserId: ctx.actorUserId,
+        });
+      }
+      await this.deps.repo.linkAccount(ctx, {
+        accountLogin: installation.account_login,
+        accountType: installation.account_type,
+        tokenSecretName: installation.token_secret_name,
+        githubInstallationId: installation.github_installation_id,
+        userTokenSecretName: installation.user_token_secret_name,
+        userTokenExpiresAt: next.expiresAt,
+        userRefreshSecretName: installation.user_refresh_secret_name,
+      });
+      return next.token;
+    } catch (err) {
+      this.log(`[github] could not refresh the user token: ${(err as Error)?.message}`);
+      return token ?? null;
+    }
   }
 
   /**

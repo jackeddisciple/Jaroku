@@ -31,13 +31,35 @@ export interface GithubInstallation {
   user_id: string | null;
   account_login: string;
   account_type: GithubAccountType;
-  /** A name in the SecretStore, never a value. */
+  /** A name in the SecretStore, never a value. `APP_GRANT` on an App row — see migration 042. */
   token_secret_name: string;
   scopes: string[];
   installed_at: string;
   revoked_at: string | null;
   revoke_reason: string | null;
+  /**
+   * GitHub's own id for the installation, or null on a personal-access-token row.
+   *
+   * THE FIELD THAT TELLS THE TWO PATHS APART, and the only one that needs to: an App grant stores
+   * an id and mints a token per call, a PAT grant stores a secret name and reads it. `apiFor` is
+   * the one place that branches on this.
+   */
+  github_installation_id: string | null;
+  /** SecretStore name for the user-to-server token — the three user-scoped calls. Never a value. */
+  user_token_secret_name: string | null;
+  /** When that token dies. Null means it does not expire, which is an App setting, not unknown. */
+  user_token_expires_at: string | null;
+  user_refresh_secret_name: string | null;
 }
+
+/**
+ * What `token_secret_name` holds on an App row.
+ *
+ * A SENTINEL RATHER THAN A NULL, because 034 made the column NOT NULL and because a person reading
+ * this table in a database console should get a sentence rather than a blank. It names no secret
+ * and nothing ever looks it up: an App grant's credential is minted, not stored.
+ */
+export const APP_GRANT = "__github_app_installation__";
 
 export interface GithubLink {
   id: string;
@@ -114,7 +136,9 @@ export interface LinkPatch {
 }
 
 const INSTALLATION_COLUMNS = `id, user_id, account_login, account_type, token_secret_name, scopes,
-                              installed_at, revoked_at, revoke_reason`;
+                              installed_at, revoked_at, revoke_reason, github_installation_id,
+                              user_token_secret_name, user_token_expires_at,
+                              user_refresh_secret_name`;
 
 const LINK_COLUMNS = `id, agent_id, installation_id, repo_full_name, branch, subdirectory,
                       include_artifacts, last_pushed_version_id, last_pushed_sha,
@@ -153,6 +177,10 @@ export class GithubRepository {
       installed_at: String(row["installed_at"]),
       revoked_at: (row["revoked_at"] as string | null) ?? null,
       revoke_reason: (row["revoke_reason"] as string | null) ?? null,
+      github_installation_id: (row["github_installation_id"] as string | null) ?? null,
+      user_token_secret_name: (row["user_token_secret_name"] as string | null) ?? null,
+      user_token_expires_at: (row["user_token_expires_at"] as string | null) ?? null,
+      user_refresh_secret_name: (row["user_refresh_secret_name"] as string | null) ?? null,
     };
   }
 
@@ -208,7 +236,17 @@ export class GithubRepository {
    */
   async linkAccount(
     ctx: TenantContext,
-    input: { accountLogin: string; accountType?: GithubAccountType; tokenSecretName: string; scopes?: string[] },
+    input: {
+      accountLogin: string;
+      accountType?: GithubAccountType;
+      tokenSecretName: string;
+      scopes?: string[];
+      /** Set on an App grant. Its presence is what makes this row an installation — see 042. */
+      githubInstallationId?: string | null;
+      userTokenSecretName?: string | null;
+      userTokenExpiresAt?: string | null;
+      userRefreshSecretName?: string | null;
+    },
   ): Promise<GithubInstallation> {
     const existing = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT ${INSTALLATION_COLUMNS} FROM github_installations
@@ -223,10 +261,14 @@ export class GithubRepository {
       await this.q(ctx).run(
         `UPDATE github_installations
             SET user_id = ?, account_type = ?, token_secret_name = ?, scopes = ?,
-                installed_at = ?, revoked_at = NULL, revoke_reason = NULL
+                installed_at = ?, revoked_at = NULL, revoke_reason = NULL,
+                github_installation_id = ?, user_token_secret_name = ?,
+                user_token_expires_at = ?, user_refresh_secret_name = ?
           WHERE workspace_id = ? AND id = ?`,
         [
           ctx.actorUserId, input.accountType ?? "user", input.tokenSecretName, scopes, now,
+          input.githubInstallationId ?? null, input.userTokenSecretName ?? null,
+          input.userTokenExpiresAt ?? null, input.userRefreshSecretName ?? null,
           ctx.workspaceId, String(existing["id"]),
         ],
       );
@@ -236,11 +278,15 @@ export class GithubRepository {
     const id = randomUUID();
     await this.q(ctx).run(
       `INSERT INTO github_installations
-         (id, workspace_id, user_id, account_login, account_type, token_secret_name, scopes, installed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, workspace_id, user_id, account_login, account_type, token_secret_name, scopes,
+          installed_at, github_installation_id, user_token_secret_name, user_token_expires_at,
+          user_refresh_secret_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id, ctx.workspaceId, ctx.actorUserId, input.accountLogin, input.accountType ?? "user",
         input.tokenSecretName, scopes, now,
+        input.githubInstallationId ?? null, input.userTokenSecretName ?? null,
+        input.userTokenExpiresAt ?? null, input.userRefreshSecretName ?? null,
       ],
     );
     return (await this.installation(ctx, id))!;

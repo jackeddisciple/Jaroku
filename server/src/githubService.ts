@@ -892,11 +892,21 @@ export class GithubService {
 
   // --- linking ----------------------------------------------------------------
 
-  /** §2.2's existing-repo search. Filtered client-side on a list the token can actually write to. */
+  /**
+   * §2.2's existing-repo search. Filtered client-side on a list the token can actually write to.
+   *
+   * TWO ENDPOINTS FOR ONE LIST, chosen by which kind of grant this workspace has. An App
+   * installation answers `/installation/repositories` — the set the person ticked while installing,
+   * which is exactly the set a push can succeed against. A personal access token answers
+   * `/user/repos`, filtered down to what it can write, because it can read a great deal it cannot
+   * push to. The panel above this cannot tell the difference and does not need to.
+   */
   async repos(ctx: TenantContext, query?: string): Promise<unknown[]> {
     const connection = await this.deps.identity.apiFor(ctx);
     if (!connection) return [];
-    const all = await connection.api.repos();
+    const all = connection.installation.github_installation_id
+      ? await connection.api.installationRepos()
+      : await connection.api.repos();
     const q = (query ?? "").trim().toLowerCase();
     return (q ? all.filter((r) => r.fullName.toLowerCase().includes(q)) : all).slice(0, 50);
   }
@@ -912,7 +922,11 @@ export class GithubService {
   async checkName(ctx: TenantContext, name: string): Promise<{ name: string; available: boolean }> {
     const clean = name.trim();
     if (!/^[A-Za-z0-9._-]{1,100}$/.test(clean)) return { name: clean, available: false };
-    const connection = await this.deps.identity.apiFor(ctx);
+    // ASKED AS THE PERSON, NOT AS THE INSTALLATION. An installation token answers 404 for every
+    // repository the App is not installed on, which is most of them — so "is this name free" would
+    // come back yes for names that are taken, and the create would fail on the far side. The
+    // account line and "Create new repo" travel on the same token for the same reason.
+    const connection = await this.deps.identity.userApiFor(ctx);
     if (!connection) return { name: clean, available: false };
     const owner = connection.installation.account_login;
     try {
@@ -954,12 +968,48 @@ export class GithubService {
     if (!repoFullName) {
       const name = input.createName?.trim() ?? "";
       if (!name) return { ok: false, message: "choose a repository, or name one to create" };
-      const created = await connection.api.createRepo(name, {
+      // CREATED AS THE PERSON. `POST /user/repos` makes a repository on somebody's own account, and
+      // GitHub does not let an installation token do that — an installation is a grant over
+      // repositories that exist, not a licence to make new ones under a user. This is the call the
+      // App requests user authorization for; without it §2.2's whole left-hand option disappears.
+      const asUser = await this.deps.identity.userApiFor(ctx);
+      if (!asUser) {
+        return {
+          ok: false,
+          message:
+            "creating a repository needs your authorisation as well as the installation — reconnect GitHub and approve the account step.",
+        };
+      }
+      const created = await asUser.api.createRepo(name, {
         private: input.createPrivate ?? true,
         description: `${agent.display_name ?? agent.slug} — agent source, pushed by Jaroku.`,
       });
       repoFullName = created.fullName;
       this.log(`[github] created ${repoFullName} for ${agent.slug}`);
+
+      // AND CAN THE INSTALLATION SEE IT? A repository created a second ago is inside an "All
+      // repositories" installation automatically and OUTSIDE a "Only select repositories" one —
+      // and there is no API to add it, because GitHub's add-a-repository endpoint takes a classic
+      // PAT and refuses an App's user token. So the push would 404 several screens later, which is
+      // the exact class of failure this whole migration was done to stop.
+      //
+      // ASKED AT THE MOMENT OF LINKING, where the answer is still actionable and the fix is one
+      // click on a URL this sentence contains.
+      if (connection.installation.github_installation_id) {
+        const asInstallation = await this.deps.identity.apiFor(ctx);
+        const visible = asInstallation
+          ? await asInstallation.api.repoExists(repoFullName).catch(() => false)
+          : false;
+        if (!visible) {
+          return {
+            ok: false,
+            message:
+              `${repoFullName} was created, but this Jaroku installation cannot see it — the installation is scoped to selected repositories. ` +
+              `Add it at https://github.com/settings/installations/${connection.installation.github_installation_id} and link again, ` +
+              `or re-install choosing "All repositories" so new ones are included automatically.`,
+          };
+        }
+      }
     }
 
     const link = await this.deps.repo.link(ctx, {

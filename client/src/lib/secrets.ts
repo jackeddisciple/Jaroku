@@ -307,7 +307,35 @@ export async function importSecrets(text: string): Promise<ImportResult> {
 // everything else GitHub does is about a repository rather than about a token.
 
 /**
+ * Where the browser should go to connect GitHub — §2.1's one button.
+ *
+ * TWO ANSWERS AND THE SERVER DECIDES WHICH. A deployment registers its GitHub App once and installs
+ * it once per workspace, so the first person on a fresh server sees one extra confirmation screen
+ * and nobody after them does. The client does not model that difference; it does what it is told.
+ *
+ * `manifest` IS ONLY PRESENT ON `register`, and it is a JSON string rather than an object because
+ * the browser has to put it in a form field — GitHub accepts a manifest as a POST body and in no
+ * other way.
+ */
+export async function startGithubApp(): Promise<{
+  action: "register" | "install";
+  url: string;
+  state: string;
+  manifest?: string;
+}> {
+  return await request<{ action: "register" | "install"; url: string; state: string; manifest?: string }>(
+    "GET",
+    "/v1/github/app/start",
+  );
+}
+
+/**
  * Hand a GitHub token to the server, once.
+ *
+ * NOT REACHABLE FROM THE UI ANY MORE, and kept deliberately. §2.1's connect screen is a GitHub App
+ * install and nothing else; this is the path a GitHub Enterprise Server deployment and a self-host
+ * with no public callback URL still need, and the server end of it is intact. Deleting it would be
+ * deleting the only answer for both, to save one unexported function.
  *
  * The value goes one way. What comes back is the account login GitHub reported, which is what
  * §2.2 renders as `✓ @username` — proof that the credential works, said in the only form that

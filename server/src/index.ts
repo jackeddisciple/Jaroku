@@ -85,6 +85,8 @@ import { filesFromDirectory, ProjectStore } from "./storage/projectStore.ts";
 import { objectRoutes } from "./http/objects.ts";
 import { billingRoutes } from "./http/billing.ts";
 import { githubWebhookRoutes } from "./http/githubWebhook.ts";
+import { githubAppRoutes } from "./http/githubApp.ts";
+import { APP_ENV, RoundTripStates, githubAppConfig } from "./githubApp.ts";
 import { stripeConfigFromEnv } from "./billing/stripe.ts";
 import { readAgentFiles, slugsOwnedElsewhere, type AgentFilesDeps } from "./agentFiles.ts";
 import {
@@ -1938,6 +1940,10 @@ const githubIdentity = new GithubIdentity({
       actorUserId: input.actorUserId,
     }),
   forget: (ctx, name) => secretsManager.revoke(ctx, name),
+  // READ PER CALL, NOT CAPTURED. Registration writes the App's credentials into this process as
+  // well as into runtime/.env, and a config captured at boot would leave the server believing it
+  // has no App on the very request that just finished creating one.
+  app: () => githubAppConfig(),
 });
 // The hole punched at the store's construction, filled now that there is something to fill it
 // with. A run that reads a credential records WHERE, not just when.
@@ -3407,9 +3413,50 @@ async function broadcastGithub(ctx: TenantContext, agentId?: string | null): Pro
 // WITHOUT `JAROKU_GITHUB_WEBHOOK_SECRET` SET, EVERY DELIVERY IS REFUSED. The route stays mounted
 // so a misconfiguration reads as 401s in GitHub's own delivery log — somewhere somebody will look
 // — rather than as 404s that look like a wrong URL.
+/**
+ * §2.1's "Connect GitHub", which is now a button and three redirects rather than a text field.
+ *
+ * THE STATES ARE SHARED ACROSS THE THREE ROUTES and live in this one object, because a
+ * registration hands off to an install and the second half has to know which workspace started the
+ * first. In memory and ten minutes, for the reason `RoundTripStates` gives: a state that outlives a
+ * restart is a state nobody is still waiting on.
+ */
+const githubRoundTrips = new RoundTripStates();
+
+for (const route of githubAppRoutes({
+  identity: githubIdentity,
+  // THE SAME RESOLVER THE SECRETS GROUP USES, so `/start` takes its workspace from the caller's own
+  // token and never from a query parameter. The two callbacks after it are redirect targets and
+  // have no token to take one from — the single-use state this route issues is what stands in.
+  callerFor: async (req) => {
+    const auth = await authenticate(req, tokenVerifier);
+    const session = await contextResolver.resolve(
+      auth, req.url.searchParams.get("workspace"), req.requestId, req.ip,
+    );
+    return { ctx: session.context };
+  },
+  // WHERE A BROWSER CAN REACH THIS SERVER, which is not always where the server thinks it is —
+  // behind a proxy or on a hosted domain it is neither localhost nor the listening port. Baked into
+  // the manifest at registration, so it is one variable to set before going to production and a
+  // sensible default for a laptop.
+  baseUrl: process.env["JAROKU_PUBLIC_URL"] || `http://localhost:${PORT}`,
+  envPath: join(RUNTIME_DIR, ".env"),
+  states: githubRoundTrips,
+  // The panel goes from the empty state to a linked account with no click, because the install
+  // finishes in a different tab from the one the user is watching.
+  notify: (ctx) => void broadcastGithub(ctx, null),
+})) {
+  router.get(route.path, route.handler);
+}
+
 for (const route of githubWebhookRoutes({
   repo: githubRepo,
-  secret: () => process.env["JAROKU_GITHUB_WEBHOOK_SECRET"] || undefined,
+  // THE APP'S OWN SECRET FIRST. A GitHub App carries a webhook secret GitHub generated at
+  // registration and hands back through the manifest conversion — so an App deployment is signed
+  // and verified with no configuration at all, which is the other thing a personal access token
+  // could never do. The standalone variable stays ahead of nothing and behind everything: it is
+  // what a PAT-era deployment set by hand, and it still works.
+  secret: () => githubAppConfig()?.webhookSecret || process.env[APP_ENV.webhookSecret] || undefined,
   // The panel updates itself with no click and no poll, which is the entire point of the hook:
   // a teammate's push reaches a tab nobody has touched. Through the same `broadcastGithub` a
   // command uses, so a webhook-driven refresh and a user-driven one are one code path.

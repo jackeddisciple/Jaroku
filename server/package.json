@@ -116,6 +116,7 @@
     "test:github-sync": "tsx src/githubSync.test.ts",
     "test:github-push": "tsx src/githubPush.test.ts",
     "test:github-first-push": "tsx src/githubFirstPush.test.ts",
+    "test:github-app": "tsx src/githubApp.test.ts",
     "test:github-checks-line": "tsx src/githubChecksLine.test.ts",
     "test:check-runner": "tsx src/checkRunner.test.ts",
     "test:github-trailers": "tsx src/githubTrailers.test.ts",

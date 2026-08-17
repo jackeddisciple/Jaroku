@@ -27,12 +27,11 @@ import {
   sendCheckGithubRepo, sendLinkGithub, sendListGithub, sendListGithubRepos, sendRefreshGithub,
   sendUnlinkGithub,
 } from "../lib/socket.ts";
-import { connectGithub, disconnectGithub, failureCode } from "../lib/secrets.ts";
+import { disconnectGithub, startGithubApp } from "../lib/secrets.ts";
 import { ICON, STATUS } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { readRegions, useGithubStore, viewFor, writeRegions, type RegionId } from "../store/githubStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
-import { useUiStore } from "../store/uiStore.ts";
 import { relTime } from "../lib/format.ts";
 import type { GithubVersionRow, GithubView } from "../types.ts";
 import { ActionRow } from "./ActionRow.tsx";
@@ -156,42 +155,48 @@ export function GitHubPanel() {
  * pitch is trust, what it is about to be allowed to do is part of the pitch — and a tooltip is a
  * place to put something you would rather people did not read.
  *
- * A PASTED TOKEN RATHER THAN AN OAUTH REDIRECT, and that is the honest shape today: the token goes
- * one way, over HTTPS, into the vault, and what comes back is the account login. An OAuth app would
- * be a nicer front door and would land on the identical storage, which is why the panel is written
- * against `connectGithub()` rather than against a flow.
+ * ONE BUTTON, AND NOTHING TO PASTE. This used to be a password field and two paragraphs explaining
+ * which permissions to tick on which kind of token — and the paragraphs were wrong in a way nobody
+ * could see: they recommended a fine-grained token scoped to selected repositories, which is the
+ * one configuration that CANNOT create a repository, which is the flow the button beside them
+ * leads to. A person following the instructions exactly got a 403 two screens later.
+ *
+ * Now the permissions are declared by a manifest in the server's own source and approved on
+ * GitHub's screens. What the user does here is press a button; what they approve, they approve
+ * where GitHub can tell them the truth about it.
  */
 function NotConnected() {
-  const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  // THE ONE REFUSAL THIS FORM CANNOT RESOLVE WHERE IT STANDS. `POST /v1/github/connect` is in the
-  // secrets group behind `guarded()`, so it needs an unlocked Secrets session — and the elevation
-  // token lives in memory in this tab and is only ever set by the Secrets tab's own unlock. A
-  // first-time user pasting a token here therefore got "this needs an unlocked Secrets session"
-  // and nothing else: a correct sentence, in a panel with no way to act on it, on the first step
-  // of the whole feature. §A.2's rule is that a reason is the way there, so this one is.
-  const [locked, setLocked] = useState(false);
-  const setRightTab = useUiStore((s) => s.setRightTab);
 
-  const submit = async (): Promise<void> => {
-    const value = token.trim();
-    if (!value || busy) return;
+  const connect = async (): Promise<void> => {
+    if (busy) return;
     setBusy(true);
     setProblem(null);
-    setLocked(false);
     try {
-      await connectGithub(value);
-      // Cleared the instant it leaves. The field is the only copy in this tab and it has served
-      // its purpose; leaving a credential sitting in a DOM node is a habit worth not having.
-      setToken("");
-      sendListGithub();
+      const next = await startGithubApp();
+      if (next.action === "install") {
+        // A TOP-LEVEL NAVIGATION, not a popup. GitHub's install screen refuses to be framed, popup
+        // blockers eat a window opened after an await, and the callback comes back to this origin
+        // anyway — so leaving and returning is both the simplest and the only reliable shape.
+        window.location.assign(next.url);
+        return;
+      }
+      // REGISTRATION IS A FORM POST, because that is the only way GitHub accepts a manifest: the
+      // JSON goes in a field and the browser navigates. Built and submitted rather than fetched,
+      // for the same reason — a person has to see the confirmation screen.
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = `${next.url}?state=${encodeURIComponent(next.state)}`;
+      const field = document.createElement("input");
+      field.type = "hidden";
+      field.name = "manifest";
+      field.value = next.manifest ?? "";
+      form.appendChild(field);
+      document.body.appendChild(form);
+      form.submit();
     } catch (err) {
-      // The token stays in the field for this one, deliberately — the credential was never the
-      // problem, and clearing it would make somebody paste it again after unlocking.
-      if (failureCode(err) === "elevation_required") setLocked(true);
-      else setProblem((err as Error)?.message ?? "GitHub refused that token");
-    } finally {
+      setProblem((err as Error)?.message ?? "could not start the GitHub connection");
       setBusy(false);
     }
   };
@@ -205,57 +210,31 @@ function NotConnected() {
         size="inline"
       />
       <div className="mx-auto mt-1 max-w-[42ch]">
-        <div className="flex items-center gap-2">
-          <input
-            type="password"
-            autoComplete="off"
-            className="min-w-0 flex-1 rounded-control bg-panel px-2 py-1.5 font-mono text-[11px] text-ink outline-none placeholder:text-faint"
-            placeholder="GitHub personal access token"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void submit();
-            }}
-          />
-          <button className={primaryBtn} disabled={!token.trim() || busy} onClick={() => void submit()}>
-            {busy ? "Checking…" : "Connect GitHub"}
+        <div className="flex justify-center">
+          <button className={primaryBtn} disabled={busy} onClick={() => void connect()}>
+            <GithubIcon size={ICON.xs} /> {busy ? "Opening GitHub…" : "Connect GitHub"}
           </button>
         </div>
-        {problem && (
-          <p className="mt-1.5 text-[11px] leading-[1.5] text-err">{problem}</p>
-        )}
-        {locked && (
-          <p className="mt-1.5 text-[11px] leading-[1.5] text-muted">
-            Storing a token writes to the vault, so the Secrets tab has to be unlocked first.{" "}
-            <button className="text-ink underline underline-offset-2" onClick={() => setRightTab("secrets")}>
-              Unlock Secrets
-            </button>{" "}
-            — your token stays in the field.
-          </p>
-        )}
+        {problem && <p className="mt-2 text-center text-[11px] leading-[1.5] text-err">{problem}</p>}
         {/* THE SCOPE OF ACCESS, STATED ACCURATELY — which it was not.
 
-            This said "`repo` scope — read and write to the repositories you select", and a classic
-            PAT with `repo` does not do that: there is no selection, it grants read and write to
-            EVERY repository the account can reach, public and private. The product's own commit
-            history says so out loud ("a GitHub token can read every private repo somebody owns"),
-            so the code knew the true blast radius while the one screen whose entire job is to be
-            honest about access stated a smaller one.
+            The old copy recommended a fine-grained token with `Contents: read and write`, scoped to
+            selected repositories. Every clause of that was defensible on its own and the
+            combination was unusable: a token scoped to repositories that already exist cannot
+            create a new one, and creating one is the left-hand option on the very next screen.
 
-            A fine-grained token is what actually has the property the old sentence claimed, so it
-            is what is recommended, with the classic PAT named as the wider fallback rather than
-            quietly assumed. */}
-        <p className="mt-2 text-[11px] leading-[1.55] text-faint">
-          Use a <span className="text-muted">fine-grained</span> token scoped to the repositories
-          you pick, with <span className="font-mono">Contents: read and write</span> — that way
-          Jaroku can reach those repositories and no others. A classic token with{" "}
-          <span className="font-mono">repo</span> scope also works, but it grants read and write to
-          every repository this account can reach, not just the ones you link here.
+            What replaces it is not a better instruction. It is no instruction: the permissions
+            below are the ones the server's manifest declares, GitHub shows them on the approval
+            screen in its own words, and there is nothing here for a person to get wrong. */}
+        <p className="mt-3 text-[11px] leading-[1.55] text-faint">
+          You pick the repositories on GitHub's own screen, and Jaroku gets{" "}
+          <span className="text-muted">code</span>, <span className="text-muted">pull requests</span>,{" "}
+          <span className="text-muted">checks</span> and <span className="text-muted">workflows</span>{" "}
+          on those and nothing else. Change or revoke it any time from GitHub settings.
         </p>
         <p className="mt-1.5 text-[11px] leading-[1.55] text-faint">
-          The token goes straight into Jaroku's vault behind the Secrets passcode, is never logged,
-          and never comes back to this page. Revoke it any time from GitHub settings, or disconnect
-          here.
+          Nothing is copied or pasted. Jaroku holds no long-lived key for your account — access is
+          issued for an hour at a time and renewed while the installation is live.
         </p>
       </div>
     </div>

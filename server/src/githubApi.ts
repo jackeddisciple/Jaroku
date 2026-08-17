@@ -361,6 +361,26 @@ export class GithubApi {
       .map((r) => this.hydrateRepo(r));
   }
 
+  /**
+   * The repositories an App INSTALLATION can reach — §2.2's "Use existing repo" list, under an App.
+   *
+   * A DIFFERENT ENDPOINT BECAUSE `/user/repos` IS ABOUT A PERSON. An installation access token is
+   * refused by it: the token is not a user and has no "your repositories". `/installation/repositories`
+   * is the same question asked the right way round, and its answer is better than the PAT one — it
+   * is exactly the set the person ticked while installing, so the picker cannot offer a repository
+   * the very next push would be refused on.
+   *
+   * NO WRITABILITY FILTER, unlike `repos()`. That filter exists because a PAT can read repositories
+   * it cannot write; an installation only holds the permissions the App declared, so every row here
+   * is one this App may push to by construction.
+   */
+  async installationRepos(limit = 100): Promise<GithubRepo[]> {
+    const data = await this.call<{ repositories?: Array<Record<string, unknown>> }>(
+      "installationRepos", "GET", `/installation/repositories?per_page=${Math.min(limit, 100)}`,
+    );
+    return (data.repositories ?? []).map((r) => this.hydrateRepo(r));
+  }
+
   async repo(fullName: string): Promise<GithubRepo> {
     return this.hydrateRepo(await this.call<Record<string, unknown>>("repo", "GET", `/repos/${fullName}`));
   }
