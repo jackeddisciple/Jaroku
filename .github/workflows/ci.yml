@@ -207,6 +207,7 @@ jobs:
         working-directory: server
         run: |
           npm run test:threads
+          npm run test:thread-status
 
       - name: cost, abuse and the data lifecycle
         working-directory: server
