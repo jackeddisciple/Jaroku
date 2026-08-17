@@ -1474,7 +1474,13 @@ export type ThreadEvent =
    * conversation is the user's own turns plus a stub per run, plan, generation, proposal and eval;
    * Jaroku's replies are deliberately not stored (migration 044) and do not come back.
    */
-  | { type: "thread"; thread: ThreadView; items: ThreadItemView[] }
+  //
+  // `reason` DISTINGUISHES THE TWO THINGS THAT ANSWER WITH ONE ROW, because the client does
+  // different things with them. `loaded` is the answer to `loadThread`, which the client sent
+  // BECAUSE it was already opening that thread. `created` is the row `createThread` just made, and
+  // nothing had opened it — the client showed the new row in the list and left it there, so `+ New
+  // thread` produced a permanently empty, permanently untitled row that no work could reach.
+  | { type: "thread"; thread: ThreadView; items: ThreadItemView[]; reason: "loaded" | "created" }
   | { type: "error"; message: string; threadId?: string }
   | { type: "notice"; message: string; threadId?: string };
 
@@ -2167,7 +2173,7 @@ export class WsRelay {
             void this.answer(ws, async (ctx) => {
               const loaded = await this.opts.loadThread?.(ctx, threadId);
               return loaded
-                ? { channel: "threads", type: "thread", thread: loaded.thread, items: loaded.items }
+                ? { channel: "threads", type: "thread", reason: "loaded", thread: loaded.thread, items: loaded.items }
                 : {
                     channel: "threads",
                     type: "error",

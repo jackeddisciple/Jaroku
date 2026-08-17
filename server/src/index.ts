@@ -3501,6 +3501,9 @@ async function handleThreadCommand(ctx: TenantContext, cmd: ThreadCommand): Prom
       if (made) {
         relay.sendThreads(ctx, ctx.requestId, {
           type: "thread",
+          // The client OPENS this one rather than merely filing it, which is what turns a new row
+          // from an inert entry in the list into the session the next thing typed lands in.
+          reason: "created",
           thread: made,
           items: await threadStore.itemsFor(ctx, thread.id),
         });

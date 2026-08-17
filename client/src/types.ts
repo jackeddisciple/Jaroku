@@ -809,7 +809,13 @@ export interface ThreadItemView {
 /** Threads. Full snapshots, plus the single row `loadThread` answers the asking client with. */
 export type ThreadMessage =
   | { channel: "threads"; type: "threads"; threads: ThreadView[]; counts: ThreadCounts }
-  | { channel: "threads"; type: "thread"; thread: ThreadView; items: ThreadItemView[] }
+  // `reason` says which of the two things that answer with one row this is: `loaded` answers a
+  // `loadThread` the client sent because it was already opening that thread, and `created` is a row
+  // `createThread` just made that nothing has opened yet — see the socket's handler.
+  | {
+      channel: "threads"; type: "thread"; thread: ThreadView; items: ThreadItemView[];
+      reason: "loaded" | "created";
+    }
   | { channel: "threads"; type: "error"; message: string; threadId?: string }
   | { channel: "threads"; type: "notice"; message: string; threadId?: string };
 

@@ -19,6 +19,10 @@ import { useMemberStore } from "../store/memberStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { resetWorkspaceStores } from "../store/reset.ts";
 import { INPUT_KEY_PREFIX, useUiStore } from "../store/uiStore.ts";
+// A thread this client just created is opened here, which is a navigation — see the `threads`
+// handler. `threadNav` imports this module for `sendLoadThread`; the cycle is fine because both
+// sides only reach each other from inside a function, never at module scope.
+import { openThread } from "./threadNav.ts";
 import {
   fetchSession, fetchTicket, socketUrl, storeToken, storeWorkspace, storedToken, storedWorkspace,
   type AuthFailure,
@@ -348,6 +352,12 @@ function dispatch(msg: ServerMessage): void {
         // is the only place it can come from — the turns live in `thread_items` server-side and
         // nowhere in this tab.
         useChatStore.getState().hydrate(msg.thread.id, msg.items);
+        // A THREAD THIS CLIENT JUST MADE IS OPENED, not merely filed. `+ New thread` used to leave
+        // the row sitting in the list — `setThread` deliberately selects nothing — so every press
+        // added a permanently empty, permanently untitled row that no work could ever land in.
+        // `loaded` is the other case and must not re-navigate: it answers a `loadThread` this
+        // client sent BECAUSE it was already opening that thread.
+        if (msg.reason === "created") openThread(msg.thread, { haveConversation: true });
       }
       else if (msg.type === "error") t.setError(msg.message);
       // A notice is not an error and must not render as one. Nothing on this channel sends one yet;

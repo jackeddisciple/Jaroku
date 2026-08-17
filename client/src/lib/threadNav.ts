@@ -28,13 +28,22 @@ import type { ThreadView } from "../types.ts";
  * card, two revisions and no Generate yet — and it belongs in the centre pane with the right panel
  * left exactly as it was.
  */
-export function openThread(thread: ThreadView): void {
+export function openThread(
+  thread: ThreadView,
+  /**
+   * The conversation is already in hand, so do not ask for it again.
+   *
+   * The one caller is the answer to `createThread`, which carries the row AND its (empty) items —
+   * asking for them a second time would be a round trip to be told the same nothing.
+   */
+  opts?: { haveConversation?: boolean },
+): void {
   useThreadStore.getState().selectThread(thread.id);
   // §4.5: the conversation opens at the first unresolved turn, not at the bottom. Requested here —
   // where opening happens — rather than in the pane, so every route in (a row, Enter, the palette)
   // resumes the same way and none of them can forget to.
   useThreadStore.getState().requestResume();
-  sendLoadThread(thread.id);
+  if (!opts?.haveConversation) sendLoadThread(thread.id);
   // `keepThread`, because the row that was just clicked IS the session — and `selectAgent`
   // otherwise resolves the agent's most recently active one, which for any agent with two threads
   // is usually not this one.
