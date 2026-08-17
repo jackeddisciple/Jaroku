@@ -156,8 +156,8 @@ const reset = (): void => useThreadStore.setState(useThreadStore.getInitialState
     counts({ all: 2, needs_you: 0, running: 1, recent: 1 }),
   );
 
-  state().addStepCost("run-1", 0.01);
-  state().addStepCost("run-2", 0.01);
+  state().addStepCost("run-1", 0.01, "s1");
+  state().addStepCost("run-2", 0.01, "s2");
   check("a step's cost lands on the thread that owns its run", state().liveCost["running"] === 0.02);
   check("...and the sum is what a row renders",
     threadSpend(state().threads[0]!, state().liveCost)?.toFixed(2) === "0.82");
@@ -167,13 +167,20 @@ const reset = (): void => useThreadStore.setState(useThreadStore.getInitialState
 
   // A run nothing claims: a shadow run a webhook started, or an eval job whose snapshot has not arrived
   // yet. Attributing it to the wrong session would put somebody else's spend on your row.
-  state().addStepCost("run-nobodys", 5);
+  state().addStepCost("run-nobodys", 5, "s3");
   check("a step from an unclaimed run is dropped rather than guessed at",
     Object.values(state().liveCost).reduce((a, b) => a + b, 0).toFixed(2) === "0.02");
 
+  // THE SAME STEP TWICE. Ingestion is at-least-once and dispatch can be duplicated (a second socket
+  // after a workspace switch mid-backoff used to do exactly that), and this was the one consumer of
+  // the trace channel that accumulated blindly — so a running thread's live figure inflated at
+  // double rate. `traceStore.applyEvent` has been keyed by step id from the start, for this reason.
+  state().addStepCost("run-1", 0.01, "s1");
+  check("the same step counted twice contributes once", state().liveCost["running"] === 0.02);
+
   // An unpriced step arrives as null and reaches this as 0. It must not create an entry — unknown is
   // not zero, and a zero entry is a claim that this thread has live spend of nothing.
-  state().addStepCost("run-1", 0);
+  state().addStepCost("run-1", 0, "s4");
   check("a zero contributes nothing and creates no entry", state().liveCost["running"] === 0.02);
 
   // THE SNAPSHOT IS THE AUTHORITY. Keeping a delta across one would eventually count it twice.
@@ -192,7 +199,7 @@ const reset = (): void => useThreadStore.setState(useThreadStore.getInitialState
   state().setThreads([thread({ id: "new", cost_usd: null, live_run_ids: ["r"] })], counts());
   check("a thread with nothing recorded and nothing live has no figure",
     threadSpend(state().threads[0]!, state().liveCost) === null);
-  state().addStepCost("r", 0.005);
+  state().addStepCost("r", 0.005, "s5");
   check("...and one with only live spend has one",
     threadSpend(state().threads[0]!, state().liveCost) === 0.005);
 }

@@ -45,6 +45,22 @@ let started = false;
 let stopped = false;
 /** Consecutive failed attempts. Reset by a socket that OPENS, not by one that was tried. */
 let attempt = 0;
+/**
+ * Which era of this tab's connection we are in. Bumped by every explicit stop.
+ *
+ * WHAT IT CLOSES. `scheduleReconnect` armed a bare `setTimeout` with no handle, and `stopSocket`'s
+ * only defence was `stopped = true` — which `startSocket` sets straight back to false, and
+ * `switchWorkspace` calls the two in exactly that order. So an orphaned timer armed before a
+ * workspace switch fired afterwards, sailed past `connect`'s one guard, and opened a SECOND socket
+ * beside the one the switch had just started. Both then dispatched every broadcast into the same
+ * stores, and when the loser eventually closed it nulled the shared `ws` — after which every
+ * command in the tab was silently dropped until the next reconnect.
+ *
+ * A generation is captured at the top of each `connect` and re-checked at every point it could
+ * have been superseded, which a boolean cannot express: "stopped" is a state that comes back, and
+ * "this attempt belongs to an era that has ended" does not.
+ */
+let generation = 0;
 
 function dispatch(msg: ServerMessage): void {
   const s = useTraceStore.getState();
@@ -59,7 +75,7 @@ function dispatch(msg: ServerMessage): void {
       // the run id, against the `live_run_ids` the last snapshot carried. Nothing about the trace knows
       // that threads exist, which is the whole arrangement §7 asks for.
       if (msg.event.kind === "step" && msg.event.step.cost != null) {
-        useThreadStore.getState().addStepCost(msg.event.step.run_id, msg.event.step.cost);
+        useThreadStore.getState().addStepCost(msg.event.step.run_id, msg.event.step.cost, msg.event.step.id);
       }
       break;
     case "runSteps":
@@ -401,6 +417,10 @@ function dispatch(msg: ServerMessage): void {
  */
 async function connect(): Promise<void> {
   if (stopped) return;
+  // The era this attempt belongs to. Everything below awaits — a session fetch and a ticket
+  // exchange — and a stop during either means this attempt is for a workspace the tab has left.
+  const era = generation;
+  const superseded = (): boolean => era !== generation;
   const session = useSessionStore.getState();
   useTraceStore.getState().setConnection("connecting");
 
@@ -444,9 +464,20 @@ async function connect(): Promise<void> {
     return;
   }
 
-  ws = new WebSocket(socketUrl(ticket));
+  // The ticket was fetched for a workspace this tab may since have left. Opening it now would put
+  // the previous workspace's socket beside the current one's — which is the leak `switchWorkspace`
+  // resets the stores to prevent, arriving by a different route.
+  if (superseded()) return;
+  const socket = new WebSocket(socketUrl(ticket));
+  ws = socket;
 
-  ws.onopen = () => {
+  socket.onopen = () => {
+    // A socket from an era that has ended is closed rather than adopted. It cannot happen after
+    // the check above unless a stop landed in the same tick, which is exactly the race.
+    if (superseded()) {
+      try { socket.close(); } catch { /* already closing */ }
+      return;
+    }
     // A connection that stayed open is what resets the backoff, not one that was merely
     // attempted — otherwise a server refusing every socket is retried at full speed forever.
     attempt = 0;
@@ -454,7 +485,10 @@ async function connect(): Promise<void> {
     useSessionStore.getState().setStatus("ready");
   };
 
-  ws.onmessage = (ev) => {
+  socket.onmessage = (ev) => {
+    // Dispatching from a superseded socket would apply another workspace's broadcasts to this
+    // one's stores, and would double every event a duplicate connection received.
+    if (superseded()) return;
     try {
       dispatch(JSON.parse(ev.data as string) as ServerMessage);
     } catch {
@@ -462,9 +496,12 @@ async function connect(): Promise<void> {
     }
   };
 
-  ws.onclose = (ev) => {
+  socket.onclose = (ev) => {
+    // AND IT ONLY NULLS ITS OWN. This used to clear the shared `ws` unconditionally, so an orphan
+    // closing took the LIVE socket's handle with it and every `send` afterwards was dropped.
+    if (ws === socket) ws = null;
+    if (superseded()) return;
     useTraceStore.getState().setConnection("closed");
-    ws = null;
     if (stopped) return;
     if (ev.code === CLOSE_UNAUTHORISED) {
       // The server told us why on the `session` channel a moment ago, and the code is here in
@@ -479,7 +516,7 @@ async function connect(): Promise<void> {
   };
 
   // On error the socket also fires close; let close drive reconnection.
-  ws.onerror = () => ws?.close();
+  socket.onerror = () => socket.close();
 }
 
 /**
@@ -496,7 +533,14 @@ function scheduleReconnect(): void {
   attempt++;
   // Jitter, or every client that dropped together comes back together.
   const delay = backoff * (0.7 + Math.random() * 0.6);
-  setTimeout(() => void connect(), delay);
+  // The era this reconnect belongs to, captured at arming time. `stopped` cannot serve here:
+  // `startSocket` clears it, and `switchWorkspace` calls stop-then-start, so by the time an
+  // orphaned timer fired the flag it was meant to be caught by had been reset for it.
+  const era = generation;
+  setTimeout(() => {
+    if (era !== generation) return;
+    void connect();
+  }, delay);
 }
 
 /** Start the singleton connection once (safe under React StrictMode double-invoke). */
@@ -555,6 +599,9 @@ export function stopSocket(): void {
   stopped = true;
   started = false;
   attempt = 0;
+  // Every reconnect armed before this moment, and every connect attempt mid-await, now belongs to
+  // an era that has ended. See `generation`.
+  generation++;
   const open = ws;
   ws = null;
   try {

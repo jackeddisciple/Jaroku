@@ -81,6 +81,13 @@ interface ThreadState {
    */
   liveEvalProgress: Record<string, { done: number; total: number }>;
   /**
+   * The steps already counted into `liveCost`, by step id.
+   *
+   * Cleared with the deltas on every snapshot, so it holds only what has arrived since the last
+   * one — the same lifetime as the numbers it guards, and therefore bounded by the same thing.
+   */
+  countedSteps: Record<string, true>;
+  /**
    * What was set aside by the last archive, when something was (§3.4).
    *
    * HELD HERE RATHER THAN IN THE VIEW because the row it describes is gone from the list by the time the
@@ -111,8 +118,14 @@ interface ThreadState {
    * Takes the RUN id rather than the thread id, because that is what a trace event carries — the frozen
    * event schema has no thread field and must not grow one (§7, §9). The lookup is against
    * `live_run_ids` on the rows this store already holds.
+   *
+   * AND THE STEP ID, SO COUNTING IS IDEMPOTENT. This was a bare accumulate, and it is the one
+   * consumer of the trace channel that was: `traceStore.applyEvent` is keyed by `step.id` precisely
+   * because ingestion is at-least-once and a redelivered batch must not become a second step. The
+   * same event reaching this twice — a duplicated dispatch, a replayed batch — inflated a running
+   * thread's live figure at double rate, and a cost is the one number on the row somebody acts on.
    */
-  addStepCost: (runId: string, usd: number) => void;
+  addStepCost: (runId: string, usd: number, stepId: string) => void;
   /**
    * An eval's spend since the last progress event, attributed to whichever thread owns the eval.
    *
@@ -145,6 +158,7 @@ export const useThreadStore = create<ThreadState>((set) => ({
   resumeNonce: 0,
   liveCost: {},
   liveEvalProgress: {},
+  countedSteps: {},
   archiveNotice: null,
 
   // A replace, with the counts that were computed beside these rows. Taking them as one argument
@@ -152,7 +166,10 @@ export const useThreadStore = create<ThreadState>((set) => ({
   // without counts is a store that can hold a count of something else.
   // A replace, and the live deltas go with it: see `liveCost` for why the snapshot is the authority.
   setThreads: (threads, counts) =>
-    set({ threads, counts, loaded: true, error: null, liveCost: {}, liveEvalProgress: {} }),
+    set({
+      threads, counts, loaded: true, error: null,
+      liveCost: {}, liveEvalProgress: {}, countedSteps: {},
+    }),
 
   /**
    * The one row `loadThread` answers with.
@@ -179,17 +196,22 @@ export const useThreadStore = create<ThreadState>((set) => ({
   },
   dismissArchiveNotice: () => set({ archiveNotice: null }),
 
-  addStepCost: (runId, usd) =>
+  addStepCost: (runId, usd, stepId) =>
     set((s) => {
       // An unpriced step arrives with a null cost, which the caller passes as 0 — and adding zero must
       // not create an entry, because an entry is what makes the row re-render.
       if (!Number.isFinite(usd) || usd <= 0) return {};
+      // Counted once, whatever delivers it. See `countedSteps`.
+      if (s.countedSteps[stepId]) return {};
       const owner = s.threads.find((t) => t.live_run_ids.includes(runId));
       // A step from a run no thread claims — a shadow run started by a webhook, an eval job whose
       // snapshot has not arrived yet. Dropped rather than guessed at: attributing it to the wrong
       // session would put somebody else's spend on your row.
       if (!owner) return {};
-      return { liveCost: { ...s.liveCost, [owner.id]: (s.liveCost[owner.id] ?? 0) + usd } };
+      return {
+        liveCost: { ...s.liveCost, [owner.id]: (s.liveCost[owner.id] ?? 0) + usd },
+        countedSteps: { ...s.countedSteps, [stepId]: true },
+      };
     }),
 
   addEvalCost: (evalId, usd) =>
