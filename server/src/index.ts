@@ -106,6 +106,7 @@ import { currentTraceparent, formatTraceparent, openTracer, parseTraceparent } f
 import { metrics, routeLabel, statusClass } from "./obs/metrics.ts";
 import { McpStore } from "./mcpStore.ts";
 import { ThreadStore, type ThreadItemKind } from "./threadStore.ts";
+import { threadTitle } from "./threadTitle.ts";
 import { NO_FACTS, deriveThreadStatus } from "./threadStatus.ts";
 import {
   collectThreadFacts, type EvalFact, type RunFact, type ThreadDerivation,
@@ -3068,7 +3069,21 @@ function noteThreadItem(
 function noteUserMessage(ctx: TenantContext, threadId: string, body: string): void {
   const text = body.trim();
   if (!text) return;
-  noteThreadItem(ctx, threadId, { kind: "message", role: "user", body: text });
+  void (async () => {
+    await threadStore.addItem(ctx, threadId, { kind: "message", role: "user", body: text });
+    // §5'S TITLE, FROM THE FIRST MESSAGE AND ONLY THE FIRST. The count is read back rather than
+    // inferred, because "is this the first thing said here" is a question about rows and this
+    // process is not the only writer of them — a second tab in a Team workspace is sending too.
+    //
+    // `autoTitle` is a no-op on a thread somebody has renamed; that guarantee lives in its UPDATE's
+    // own WHERE rather than in a branch here, so two clients racing cannot get past it.
+    if ((await threadStore.messages(ctx, threadId)).length === 1) {
+      await threadStore.autoTitle(ctx, threadId, threadTitle(text));
+    }
+    await broadcastThreads(ctx);
+  })().catch((err) => {
+    console.error(`[threads] could not record a message:`, (err as Error)?.message ?? err);
+  });
 }
 
 /**
