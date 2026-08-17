@@ -107,7 +107,7 @@ import { metrics, routeLabel, statusClass } from "./obs/metrics.ts";
 import { McpStore } from "./mcpStore.ts";
 import { ThreadStore, type ThreadItemKind } from "./threadStore.ts";
 import { threadTitle } from "./threadTitle.ts";
-import { NO_FACTS, deriveThreadStatus } from "./threadStatus.ts";
+import { NO_FACTS, activePerAgent, deriveThreadStatus } from "./threadStatus.ts";
 import {
   collectThreadFacts, type EvalFact, type RunFact, type ThreadDerivation,
 } from "./threadFacts.ts";
@@ -3249,6 +3249,8 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
       // stopped moving should show.
       live_run_ids: status === "running" ? (entry?.liveRunIds ?? []) : [],
       eval_progress: status === "running" ? (entry?.facts.evalProgress ?? null) : null,
+      // Filled in below, once every row's status is known — see the pass after this loop.
+      agent_active: 0,
     });
 
     if (status === "archived") counts.archived++;
@@ -3257,6 +3259,17 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
     else if (status === "needs_you" || status === "errored") counts.needs_you++;
     else if (status === "running") counts.running++;
     else counts.recent++;
+  }
+
+  // §4.3.4'S COLLISION COUNT, IN A SECOND PASS, because it is a fact about an AGENT and the first pass
+  // is per thread: how many of an agent's sessions are live cannot be known until every one of them has
+  // been derived. Two threads mid-flight against the same `api_gateway` files is a guaranteed occurrence
+  // in a Team workspace, where any member may act on any thread — and this is the thread-level version of
+  // the divergence Jaroku already detects for git branches. The panel's job is to surface it, not to
+  // resolve it: nothing here blocks, merges or locks anything.
+  const active = activePerAgent(views);
+  for (const v of views) {
+    v.agent_active = v.agent_id ? (active.get(v.agent_id) ?? 0) : 0;
   }
 
   // `all` is every active thread, not every row: the All chip and the Archived chip are two

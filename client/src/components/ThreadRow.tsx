@@ -28,6 +28,7 @@ import { useEffect, useRef, useState } from "react";
 import { relTime } from "../lib/format.ts";
 import { resumeHint } from "../lib/threadResume.ts";
 import { fmtRunningCost, fmtThreadCost } from "../lib/threadCost.ts";
+import { STATUS } from "../lib/tokens.ts";
 import { agentChipLabel, threadSpend, useThreadStore } from "../store/threadStore.ts";
 import { ThreadGlyph } from "./ThreadGlyph.tsx";
 import { useMemberStore } from "../store/memberStore.ts";
@@ -199,6 +200,27 @@ export function ThreadRow({
             {agentChipLabel(thread)}
           </Chip>
         </span>
+        {/* §4.3.4's collision marker, ON THE AGENT CHIP rather than on the row's status glyph: it is a
+            fact about the AGENT, not about this particular thread, so it belongs on the element that
+            already represents the agent.
+
+            INFORMATIONAL ONLY. It does not block opening either thread, does not merge them, and does
+            not lock one while the other is open — Jaroku has no file-locking model and this does not
+            introduce one. It exists so somebody opening one thread already knows another is live on the
+            same files, exactly as the GitHub tab's divergence badge exists so a person knows before they
+            act rather than to act for them.
+
+            Amber, because it is attention rather than failure — the marker says two sessions are moving,
+            which is a thing to know and not a thing that has gone wrong. */}
+        {thread.agent_active > 1 && (
+          <span
+            className="shrink-0 text-[10px] tabular-nums"
+            style={{ color: STATUS.pending }}
+            title={`${thread.agent_active} threads on this agent are blocked or running`}
+          >
+            ⚠ {thread.agent_active} active
+          </span>
+        )}
         {thread.fragment && (
           <>
             <span className="text-faint">·</span>

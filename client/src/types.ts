@@ -750,6 +750,14 @@ export interface ThreadView {
    * or an interactive run: §4.3.3 says show no projection at all rather than a guess.
    */
   eval_progress: { done: number; total: number } | null;
+  /**
+   * How many threads on this agent are blocked or running right now, including this one (§4.3.4).
+   *
+   * `2` means this session and one other are live against the same agent's files — which in a Team
+   * workspace, where any member may act on any thread, is a guaranteed occurrence rather than a
+   * hypothetical. Counting `needs_you` and `running` only: an idle thread on the same agent is history.
+   */
+  agent_active: number;
 }
 
 /** §4.4's five chips. Counted once on the server and rendered twice — see the nav badge, §2.1. */

@@ -35,6 +35,7 @@ const row = (status: ThreadStatus, fragment: string | null, archived = false): T
   preview: null,
   live_run_ids: [],
   eval_progress: null,
+  agent_active: 1,
 });
 
 // --- 1. the hint names the destination AND its shape ------------------------------------------

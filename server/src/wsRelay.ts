@@ -1370,6 +1370,20 @@ export interface ThreadView {
    * run: there is no denominator, so §4.3.3 says show no projection at all.
    */
   eval_progress: { done: number; total: number } | null;
+  /**
+   * How many threads on THIS agent are blocked or running right now (§4.3.4).
+   *
+   * ONE COUNTED FACT, NOT A FLAG, and it counts the thread it is on: `2` means this one and one other,
+   * which is what the marker renders as `⚠ 2 active`. A boolean would say that a collision exists and
+   * leave "how many" to a second query.
+   *
+   * `needs_you` AND `running` ONLY. An idle or archived thread on the same agent is not a collision, it
+   * is history — and counting it would put a warning on every agent anybody has ever used twice.
+   *
+   * It is on the ROW rather than in a per-agent map beside the list, because the row is where it renders
+   * and a map would be a second thing to keep in step with the statuses it was derived from.
+   */
+  agent_active: number;
 }
 
 /** The five §4.4 chips, counted once on the server and rendered twice (§2.1). */

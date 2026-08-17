@@ -13,7 +13,9 @@
 //
 //   npm run test:thread-status
 
-import { NO_FACTS, deriveThreadStatus, isBlocked, type ThreadFacts } from "./threadStatus.ts";
+import {
+  NO_FACTS, activePerAgent, deriveThreadStatus, isBlocked, type ThreadFacts,
+} from "./threadStatus.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -143,6 +145,32 @@ const derive = (over: Partial<ThreadFacts> = {}) => deriveThreadStatus(facts(ove
   check("the deriver does not touch what it was handed", JSON.stringify(input) === before);
   check("...and the same facts twice give the same answer",
     JSON.stringify(deriveThreadStatus(input)) === JSON.stringify(deriveThreadStatus(input)));
+}
+
+// --- 7. §4.3.4's collision count ------------------------------------------------------------
+{
+  const rows = [
+    { agent_id: "api_gateway", status: "needs_you" as const },
+    { agent_id: "api_gateway", status: "running" as const },
+    { agent_id: "api_gateway", status: "idle" as const },
+    { agent_id: "api_gateway", status: "archived" as const },
+    { agent_id: "auth_agent", status: "errored" as const },
+    { agent_id: null, status: "needs_you" as const },
+  ];
+  const active = activePerAgent(rows);
+
+  check("two live sessions on one agent count as two", active.get("api_gateway") === 2, String(active.get("api_gateway")));
+  check("...and the idle one on the same agent is history, not a collision",
+    active.get("api_gateway") !== 3);
+  check("a thread that stopped in error is live work somebody has to deal with",
+    active.get("auth_agent") === 1);
+  check("a thread with no agent cannot collide with anything", !active.has("null") && active.size === 2);
+
+  // The marker renders at 2 or more, so a single live thread on an agent must not produce one.
+  const alone = activePerAgent([{ agent_id: "docs_agent", status: "running" }]);
+  check("one live thread on an agent is not a collision", alone.get("docs_agent") === 1);
+  check("...and an agent with nothing live has no entry at all",
+    !activePerAgent([{ agent_id: "docs_agent", status: "idle" }]).has("docs_agent"));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

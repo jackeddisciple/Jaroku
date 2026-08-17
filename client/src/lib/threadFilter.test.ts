@@ -42,6 +42,7 @@ const t = (
   preview: null,
   live_run_ids: [],
   eval_progress: null,
+  agent_active: 1,
   ...over,
 });
 

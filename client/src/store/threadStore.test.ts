@@ -41,6 +41,7 @@ const thread = (over: Partial<ThreadView> = {}): ThreadView => ({
   preview: "add exponential backoff to the retry handler",
   live_run_ids: [],
   eval_progress: null,
+  agent_active: 1,
   ...over,
 });
 

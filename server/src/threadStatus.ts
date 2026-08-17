@@ -190,3 +190,30 @@ function blockedFragment(f: ThreadFacts): string {
   if (f.awaitingPlans > 0) return "plan awaiting";
   return `${f.failedSteps} failed step${f.failedSteps === 1 ? "" : "s"}`;
 }
+
+/**
+ * §4.3.4: how many of each agent's threads are blocked or running.
+ *
+ * A SECOND PASS OVER DERIVED STATUSES, and it has to be, because this is a fact about an AGENT: how many
+ * of its sessions are live cannot be known until every one of them has been derived. Here rather than in
+ * the snapshot builder so the rule — which statuses count — is stated once, beside the derivation it
+ * reads, and can be asserted without a database.
+ *
+ * `needs_you`, `errored` AND `running` COUNT. The first two are the Needs You section's own membership
+ * (§4.2) and the third is work in flight; an `idle` or `archived` thread on the same agent is not a
+ * collision, it is history, and counting it would put a warning on every agent anybody has used twice.
+ *
+ * The count INCLUDES the thread it will be rendered on, which is what makes `⚠ 2 active` read correctly:
+ * this one and one other.
+ */
+export function activePerAgent(
+  rows: readonly { agent_id: string | null; status: ThreadStatus }[],
+): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const row of rows) {
+    if (!row.agent_id) continue;
+    if (row.status !== "needs_you" && row.status !== "errored" && row.status !== "running") continue;
+    out.set(row.agent_id, (out.get(row.agent_id) ?? 0) + 1);
+  }
+  return out;
+}

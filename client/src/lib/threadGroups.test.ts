@@ -41,6 +41,7 @@ const t = (id: string, status: ThreadStatus, hoursAgo: number, archived = false)
   preview: null,
   live_run_ids: [],
   eval_progress: null,
+  agent_active: 1,
 });
 
 const ids = (list: ThreadView[]): string => list.map((x) => x.id).join(",");
