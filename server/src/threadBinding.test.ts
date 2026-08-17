@@ -324,7 +324,7 @@ async function statusesFor(
   await agents.syncFromDisk(ctx, [], {
     onRemoved: async (removedAgent) => {
       removed.push(removedAgent.slug);
-      await h.threads.detachAgent(ctx, removedAgent.id, removedAgent.display_name ?? removedAgent.slug);
+      await h.threads.noteAgentDeleted(ctx, removedAgent.id, removedAgent.display_name ?? removedAgent.slug);
     },
   });
 
@@ -334,9 +334,27 @@ async function statusesFor(
   const kept = await h.threads.list(ctx);
   check("both of its threads are still there", kept.length === 2);
   check("...with their titles", kept.map((t) => t.title).sort().join(" / ") === "retry logic / signature check");
-  check("...with no agent to point at", kept.every((t) => t.agent_id === null));
+  // STILL POINTING AT IT. The sweep is a soft delete and `upsertFromDisk` reverses it, so the link
+  // has to survive — `(deleted)` comes from the agents table, which can stop saying it.
+  check("...still linked to the agent, because the sweep can be undone",
+    kept.every((t) => t.agent_id === agent.id));
   check("...and the name they were linked to, so the row can say stripe_webhook (deleted)",
     kept.every((t) => t.agent_name_snapshot === "stripe_webhook"));
+  check("...and the agents table is what says it is deleted",
+    (await agents.deletedIds(ctx)).has(agent.id));
+
+  // THE REGRESSION. The directory comes back — a replica that had not materialised it, an ephemeral
+  // disk, a cleaned checkout — and the agent resurrects under the same uuid. Its sessions have to
+  // come back with it rather than sitting orphaned beside a duplicate.
+  await agents.upsertFromDisk(ctx, { slug: "stripe_webhook", display_name: "stripe_webhook" });
+  const back = (await agents.bySlug(ctx, "stripe_webhook"))!;
+  check("a resurrected agent keeps its uuid", back.id === agent.id);
+  check("...and is no longer deleted", !(await agents.deletedIds(ctx)).has(agent.id));
+  check("...with both of its sessions still attached",
+    (await h.threads.listForAgent(ctx, back.id)).length === 2);
+  check("...so no duplicate thread is minted for it",
+    (await h.threads.ensureForAgent(ctx, back.id, back.slug)) === a.id &&
+      (await h.threads.listForAgent(ctx, back.id)).length === 2);
   check("...and what was said in them is still readable",
     (await h.threads.messages(ctx, a.id))[0]?.body === "add exponential backoff");
 

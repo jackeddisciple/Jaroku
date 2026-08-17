@@ -174,19 +174,23 @@ async function seedAgent(db: SqliteDb, workspaceId: string, slug: string): Promi
   await store.create(ctx, { agentId: agent, agentName: "stripe_webhook", title: "retry logic" });
   await store.create(ctx, { agentId: agent, agentName: "stripe_webhook", title: "signature check" });
 
-  const kept = await store.detachAgent(ctx, agent, "stripe_webhook");
+  const kept = await store.noteAgentDeleted(ctx, agent, "stripe_webhook");
   check("both threads survived the agent", kept === 2, `${kept}`);
 
   const rows = await store.list(ctx);
-  check("...with no agent to point at", rows.every((t) => t.agent_id === null));
+  // KEPT, not nulled. The deletion is soft and reverses itself when the directory comes back, so
+  // the link has to survive it — `(deleted)` is derived from the agents table instead. Nulling it
+  // was permanent, and a briefly-missing directory detached a live agent's sessions forever.
+  check("...still pointing at the agent, because the deletion can be undone",
+    rows.every((t) => t.agent_id === agent));
   check("...and the name they were linked to intact",
     rows.every((t) => t.agent_name_snapshot === "stripe_webhook"));
   check("...so the row can say stripe_webhook (deleted) rather than (agent deleted)",
     rows.length === 2);
 
   // Idempotent: a second sweep is handed a null name and must not erase the one it already holds.
-  await store.detachAgent(ctx, agent, null);
-  check("a second detach does not erase the snapshot it already wrote",
+  await store.noteAgentDeleted(ctx, agent, null);
+  check("a second sweep does not erase the snapshot it already wrote",
     (await store.list(ctx)).every((t) => t.agent_name_snapshot === "stripe_webhook"));
 }
 

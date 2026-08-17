@@ -457,18 +457,26 @@ export class ThreadStore {
   /**
    * An agent is gone; its threads are not (§3.2).
    *
-   * NULLS THE FK AND KEEPS THE NAME, in one statement, and the `COALESCE` is what makes it safe to
-   * call twice: a thread already detached has a snapshot and no agent, and a second sweep must not
-   * overwrite the name with the null it is being handed. The row then renders as
-   * `stripe_webhook (deleted)`, dimmed, rather than as "(agent deleted)".
+   * KEEPS THE NAME AND KEEPS THE LINK. It used to null `agent_id` as well, and that was a one-way
+   * consequence of a reversible cause: an agent is SOFT-deleted, and `upsertFromDisk` clears
+   * `deleted_at` the moment its directory comes back. Nothing put the foreign key back, so a
+   * momentarily-absent directory — a second replica, an ephemeral disk, a cleaned checkout —
+   * permanently detached a live agent's sessions, and the next command on that agent opened a
+   * duplicate thread beside the orphan.
+   *
+   * So §3.2's rendering is a join now: the row is deleted when the AGENT is, which the agents table
+   * already knows and can un-know. The snapshot column keeps doing its real job — surviving a HARD
+   * delete, where the row cascades to `agent_id = NULL` and there is nowhere left to read the name.
+   *
+   * `COALESCE` still, and for the same reason: a second sweep must not overwrite a name it is
+   * being handed as null.
    *
    * Returns how many threads it kept, so the caller can say so rather than assume.
    */
-  async detachAgent(ctx: TenantContext, agentId: string, agentName: string | null): Promise<number> {
+  async noteAgentDeleted(ctx: TenantContext, agentId: string, agentName: string | null): Promise<number> {
     const res = await this.q(ctx).run(
       `UPDATE threads
-          SET agent_id = NULL,
-              agent_name_snapshot = COALESCE(agent_name_snapshot, ?)
+          SET agent_name_snapshot = COALESCE(agent_name_snapshot, ?)
         WHERE workspace_id = ? AND agent_id = ?`,
       [agentName, ctx.workspaceId, agentId],
     );

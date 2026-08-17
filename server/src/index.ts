@@ -1264,16 +1264,19 @@ async function syncAgents(): Promise<void> {
     {
       // §3.2. THE AGENT'S FILES AND RUNS GO; ITS THREADS DO NOT.
       //
-      // Nulling the foreign key and keeping the name is what makes the row read `stripe_webhook
-      // (deleted)`, dimmed, rather than "(agent deleted)" — and the snapshot column can only be
-      // filled from here, because after this moment there is nowhere left to read the name from.
+      // The link is KEPT, and the row reads `stripe_webhook (deleted)` because the agents table
+      // says the agent is deleted — see `noteAgentDeleted`. This used to null the foreign key, which
+      // made a reversible cause (a soft delete `upsertFromDisk` undoes) trigger an irreversible
+      // effect, so a directory that was briefly missing detached a live agent's sessions forever.
+      // The snapshot name is still written here, because a HARD delete cascades the link away and
+      // after that there is nowhere left to read the name from.
       //
       // This is the same discipline the rest of the product already holds to: a branch never mutates
       // its parent, an undo restores from a snapshot, an eval job persists before dispatch. Nothing
       // is destroyed as a side effect of something else being destroyed — a thread holds what was
       // thought, what was generated and what it cost, and that record outlives the artefact.
       onRemoved: async (agent) => {
-        const kept = await threadStore.detachAgent(
+        const kept = await threadStore.noteAgentDeleted(
           serverContext(),
           agent.id,
           agent.display_name ?? agent.slug,
@@ -3231,13 +3234,17 @@ async function threadFactsFor(ctx: TenantContext): Promise<Map<string, ThreadDer
  * read cost a write per row.
  */
 async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
-  const [rows, derived, spend, agents] = await Promise.all([
+  const [rows, derived, spend, agents, deletedAgents] = await Promise.all([
     threadStore.list(ctx),
     threadFactsFor(ctx),
     // Cumulative, never "this period" — §4.3's cost column is a fact about the session. See
     // `spendByThread`.
     billing.spendByThread(ctx),
     agentRepo.list(ctx),
+    // §3.2 is a JOIN, not a stored fact — see `noteAgentDeleted`. An agent's deletion is soft and
+    // reverses itself when its directory comes back, so the row has to be able to stop being
+    // `(deleted)` as easily as it started.
+    agentRepo.deletedIds(ctx),
   ]);
   // THE SLUG, NOT THE UUID, GOES OUT ON THE WIRE. Every other thing the client holds calls the slug
   // "the agent id" — `listAgents` maps it that way, the sidebar selects by it, the run rows carry it —
@@ -3262,10 +3269,16 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
       // link to nothing — and null for a slug the workspace no longer has, which is the same case.
       agent_id: row.agent_id ? (slugByUuid.get(row.agent_id) ?? null) : null,
       agent_name: row.agent_name_snapshot,
-      // The pair §4.3 renders three ways. `agent_id IS NULL` on the ROW is the deletion — not the
-      // slug lookup above, which can also come back empty for an agent this replica has not
-      // materialised, and calling that "deleted" would dim a live agent's name.
-      agent_deleted: row.agent_id === null && row.agent_name_snapshot !== null,
+      // The pair §4.3 renders three ways, and it is asked of the AGENTS table rather than of the
+      // thread. Two cases mean deleted: the agent row is soft-deleted (reversible — the row stops
+      // saying `(deleted)` the moment the agent comes back), or the link is gone entirely, which is
+      // the hard delete's cascade and is what the snapshot name exists for.
+      //
+      // Deliberately NOT the slug lookup above: that also comes back empty for an agent this
+      // replica has not materialised, and calling that "deleted" would dim a live agent's name.
+      agent_deleted:
+        (row.agent_id !== null && deletedAgents.has(row.agent_id)) ||
+        (row.agent_id === null && row.agent_name_snapshot !== null),
       title: row.title,
       title_is_custom: row.title_is_custom,
       created_by: row.created_by,

@@ -140,6 +140,25 @@ export class AgentRepository {
     return rows.map((r) => this.hydrate(r));
   }
 
+  /**
+   * The uuids of agents this workspace has soft-deleted.
+   *
+   * WHAT MAKES §3.2's `name (deleted)` A JOIN RATHER THAN A DESTRUCTIVE WRITE. A thread keeps
+   * pointing at its agent through the deletion, so the renderer needs to be told which agents are
+   * gone — and because the deletion is soft and `upsertFromDisk` reverses it, the answer changes
+   * back on its own when the agent returns. Nulling the thread's foreign key instead was permanent,
+   * which is the mismatch: an operation that can be undone triggering one that could not.
+   *
+   * Ids, not rows: every caller has the uuid in hand and wants a membership test.
+   */
+  async deletedIds(ctx: TenantContext): Promise<Set<string>> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT id FROM agents WHERE workspace_id = ? AND deleted_at IS NOT NULL`,
+      [ctx.workspaceId],
+    );
+    return new Set(rows.map((r) => String(r["id"])));
+  }
+
   async bySlug(ctx: TenantContext, slug: string): Promise<Agent | undefined> {
     const row = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT ${COLUMNS} FROM agents WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`,
