@@ -599,15 +599,30 @@ export function BuildPane({
   //
   // FALLS BACK TO THE BOTTOM when nothing is outstanding, which is the ordinary case and the ordinary
   // behaviour — a thread with nothing waiting in it has no better place to be than where it left off.
+  // SERVICED ONCE PER REQUEST, and the ref is what makes that true. `resumeNonce` only ever grows,
+  // so the guard on zero suppresses this effect exactly once — before the first thread of the
+  // session is opened — and `turns` in the deps re-ran it on every subsequent change to the
+  // conversation. Typing a follow-up into a thread with a pending diff therefore yanked the view
+  // back to the OLD diff on every streamed frame, for the rest of the session, in every thread.
+  //
+  // `turns` stays in the deps deliberately: the conversation for the thread being opened may not
+  // have arrived in the same frame the request did, so the effect has to be allowed to re-run —
+  // it just must not act twice for one request.
+  const servedResume = useRef(0);
   useEffect(() => {
-    if (resumeNonce === 0) return;
+    if (resumeNonce === 0 || servedResume.current === resumeNonce) return;
     const el = scrollRef.current;
     if (!el) return;
     const target = firstUnresolvedTurnId(turns);
     if (!target) {
+      // Nothing outstanding is a complete answer to "where should this open", so the request is
+      // spent. An empty conversation is not: the turns are still on their way, and a request marked
+      // served on the frame before they land is a resume that silently did nothing.
+      if (turns.length > 0) servedResume.current = resumeNonce;
       el.scrollTop = el.scrollHeight;
       return;
     }
+    servedResume.current = resumeNonce;
     // Queried rather than kept in a ref map: the turn cards are rendered by four different components
     // and a ref per card would be four places to forget one. The attribute is on the wrapper this file
     // renders, so there is exactly one thing to keep in step.
@@ -616,8 +631,6 @@ export function BuildPane({
     // and its buttons are, and centring a tall diff would open on the middle of a file.
     if (node) node.scrollIntoView({ block: "start", behavior: "auto" });
     else el.scrollTop = el.scrollHeight;
-    // `turns` is in the deps as well as the nonce, because the conversation for the thread being
-    // opened may not have arrived in the same frame the request did.
   }, [resumeNonce, turns]);
 
   const toggle = (id: string) =>
