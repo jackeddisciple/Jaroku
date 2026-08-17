@@ -471,7 +471,7 @@ const SCOPED_API: Record<string, string[]> = {
   GithubRepository: [
     "linkAccount", "installation", "installations", "revokeAccount",
     "link", "linkFor", "links", "patchLink", "unlink",
-    "record", "events",
+    "record", "events", "observeRemoteHead",
   ],
 };
 
@@ -1193,6 +1193,39 @@ async function githubIsolation(db: Db): Promise<void> {
   await github.record(B, { agentId: agentB.id, linkId: bLink.id, kind: "push", commitSha: "b1b1b1b" });
   check((await github.events(B, agentB.id)).length === 1, "B's push is in B's history");
   check((await github.events(A, agentB.id)).length === 0, "...and in nobody else's");
+
+  // A REDELIVERED WEBHOOK IS ONE ROW. GitHub retries anything it did not answer in time, and a
+  // retry can land after a restart or on another replica — where the in-process delivery log cannot
+  // help. The unique index migration 046 adds is what settles it; this asserts the behaviour.
+  for (let i = 0; i < 3; i++) {
+    await github.record(B, {
+      agentId: agentB.id, linkId: bLink.id, kind: "fetch", commitSha: "c2c2c2c", deliveryId: "delivery-1",
+    });
+  }
+  check(
+    (await github.events(B, agentB.id)).filter((e) => e.commit_sha === "c2c2c2c").length === 1,
+    "a delivery recorded three times is one History row",
+  );
+
+  // AND TWO PUSHES DELIVERED OUT OF ORDER LEAVE THE NEWER HEAD. `last_synced_at` records receipt
+  // time and therefore orders deliveries rather than commits, which is exactly the ordering that is
+  // wrong; `remote_seen_at` is the push's own clock.
+  check(
+    await github.observeRemoteHead(B, bLink.id, { headSha: "newer", seenAt: "2026-08-17T10:00:00.000Z" }),
+    "the first observation takes",
+  );
+  check(
+    !(await github.observeRemoteHead(B, bLink.id, { headSha: "older", seenAt: "2026-08-17T09:00:00.000Z" })),
+    "...and one from before it is refused rather than applied",
+  );
+  check(
+    (await github.linkFor(B, agentB.id))?.last_known_remote_sha === "newer",
+    "...leaving the watermark at the later commit",
+  );
+  check(
+    !(await github.observeRemoteHead(A, bLink.id, { headSha: "stolen", seenAt: "2027-01-01T00:00:00.000Z" })),
+    "...and A cannot move B's watermark by this route either",
+  );
 }
 
 // --- run it -------------------------------------------------------------------------------

@@ -107,6 +107,16 @@ export interface PushEvent {
   /** Message subjects, newest last. Enough to say WHAT moved without another API call. */
   commitSubjects: string[];
   senderLogin: string | null;
+  /**
+   * When the push HAPPENED, off the payload — not when we heard about it.
+   *
+   * WHAT ORDERS TWO DELIVERIES. GitHub does not guarantee delivery order, and the watermark this
+   * event writes was previously ordered by receipt time, so two pushes seconds apart arriving out
+   * of order left the link pointing at the earlier head. `head_commit.timestamp` is the commit's
+   * own clock; `repository.pushed_at` is the fallback, and a deletion has neither — that case
+   * carries null and the receiver falls back to receipt time, which is what it always had.
+   */
+  pushedAt: string | null;
 }
 
 /**
@@ -204,7 +214,32 @@ export function parseWebhookEvent(event: string, payload: Record<string, unknown
       })
       .filter((s) => s.length > 0),
     senderLogin: typeof sender["login"] === "string" ? sender["login"] : null,
+    pushedAt: pushedAtOf(payload, repo),
   };
+}
+
+/**
+ * The push's own timestamp, as an ISO string, or null when the payload carries none.
+ *
+ * `head_commit.timestamp` first because it is the commit's own clock and is what a force-push
+ * changes; `repository.pushed_at` second, which GitHub sends as epoch SECONDS on this event and as
+ * an ISO string on others — both shapes are accepted rather than one guessed at. A branch deletion
+ * has no head commit at all, and answering null for it is honest: the receiver falls back to
+ * receipt time, which is the ordering it has always had.
+ */
+function pushedAtOf(
+  payload: Record<string, unknown>,
+  repo: Record<string, unknown>,
+): string | null {
+  const head = (payload["head_commit"] ?? {}) as Record<string, unknown>;
+  const stamp = head["timestamp"];
+  if (typeof stamp === "string" && !Number.isNaN(Date.parse(stamp))) {
+    return new Date(stamp).toISOString();
+  }
+  const pushed = repo["pushed_at"];
+  if (typeof pushed === "number" && Number.isFinite(pushed)) return new Date(pushed * 1000).toISOString();
+  if (typeof pushed === "string" && !Number.isNaN(Date.parse(pushed))) return new Date(pushed).toISOString();
+  return null;
 }
 
 /**

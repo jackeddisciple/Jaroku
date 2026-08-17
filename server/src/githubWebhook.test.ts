@@ -163,5 +163,44 @@ console.log("\nredelivery");
   check(log.admit(undefined) && log.admit(undefined), "a delivery with no id is never deduped against another");
 }
 
+console.log("\nordering two deliveries");
+{
+  // The in-process log above catches a retry that reaches THIS process within its window. It cannot
+  // survive a restart and cannot help a second replica — and GitHub does not guarantee ORDER at all,
+  // which no dedup addresses. So the push carries its own clock, and the receiver refuses an older
+  // observation over a newer one rather than taking whatever arrived last.
+  const push = (over: Record<string, unknown>) =>
+    parseWebhookEvent("push", {
+      ref: "refs/heads/main",
+      repository: { full_name: "acme/weather", pushed_at: 1_760_000_000 },
+      after: "b".repeat(40),
+      before: "a".repeat(40),
+      commits: [],
+      sender: { login: "riya" },
+      ...over,
+    });
+
+  const withCommit = push({ head_commit: { timestamp: "2026-08-17T10:00:00Z" } });
+  check(
+    withCommit.kind === "push" && withCommit.pushedAt === "2026-08-17T10:00:00.000Z",
+    "the commit's own timestamp is what orders a push",
+    withCommit.kind === "push" ? String(withCommit.pushedAt) : withCommit.kind,
+  );
+
+  const noCommit = push({});
+  check(
+    noCommit.kind === "push" && noCommit.pushedAt === new Date(1_760_000_000_000).toISOString(),
+    "...falling back to the repository's pushed_at, which arrives as epoch seconds here",
+    noCommit.kind === "push" ? String(noCommit.pushedAt) : noCommit.kind,
+  );
+
+  const deleted = push({ after: "0".repeat(40), repository: { full_name: "acme/weather" } });
+  check(
+    deleted.kind === "push" && deleted.pushedAt === null,
+    "a branch deletion carries neither, and says so rather than inventing one",
+    deleted.kind === "push" ? String(deleted.pushedAt) : deleted.kind,
+  );
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

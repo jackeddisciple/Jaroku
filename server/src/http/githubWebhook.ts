@@ -124,7 +124,7 @@ function webhookHandler(deps: GithubWebhookDeps): Handler {
     }
 
     try {
-      const applied = await applyPush(deps, event, log);
+      const applied = await applyPush(deps, event, log, deliveryId ?? null);
       return { status: 200, body: { ok: true, applied } };
     } catch (err) {
       // ACKNOWLEDGED ANYWAY. See the header: a non-2xx is a retry, and a retry of a delivery that
@@ -146,6 +146,15 @@ async function applyPush(
   deps: GithubWebhookDeps,
   event: PushEvent,
   log: (line: string) => void,
+  /**
+   * GitHub's own delivery id, so a redelivery writes no second History row.
+   *
+   * `DeliveryLog` above catches a retry that reaches THIS process within its 500-entry window, and
+   * its own comment explains why it is not a table. That reasoning holds for a broadcast and not
+   * for a durable row: a retry after a restart, or one that lands on another replica, put the same
+   * push in the History list twice. The unique index migration 046 adds is what actually settles it.
+   */
+  deliveryId: string | null,
 ): Promise<number> {
   const owners: LinkOwner[] = await deps.repo.linksForRepo(event.repoFullName, event.branch);
   if (owners.length === 0) return 0;
@@ -155,14 +164,22 @@ async function applyPush(
     // in `actor_user_id` that did not do this. The push belongs to whoever GitHub says sent it,
     // and that is a login rather than a Jaroku account.
     const ctx = systemContextFor(workspaceId, newRequestId());
-    await deps.repo.patchLink(ctx, link.id, {
-      // WHAT WE HAVE SEEN, NEVER WHAT WE HAVE. `last_pushed_sha` is untouched on purpose: it is
-      // the commit Jaroku itself put there, it is what `syncVerdict` measures behind against, and
-      // a webhook writing it would tell the panel that somebody else's commit was ours — which is
-      // the shape of the bug that made `behind` unreachable in the first place.
-      lastKnownRemoteSha: event.headSha,
-      lastSyncedAt: new Date().toISOString(),
-    });
+    // WHAT WE HAVE SEEN, NEVER WHAT WE HAVE. `last_pushed_sha` is untouched on purpose: it is the
+    // commit Jaroku itself put there, it is what `syncVerdict` measures behind against, and a
+    // webhook writing it would tell the panel that somebody else's commit was ours — which is the
+    // shape of the bug that made `behind` unreachable in the first place.
+    //
+    // AND NEVER AN OLDER OBSERVATION OVER A NEWER ONE. GitHub does not guarantee delivery order,
+    // and this was a blind overwrite ordered by nothing — so two pushes seconds apart, delivered
+    // out of order, left the column at the earlier head and the panel's behind/ahead badge
+    // measuring against a commit that was no longer the tip. `pushedAt` is the push's own clock;
+    // a branch deletion carries none, and falls back to receipt time, which is what it always had.
+    const seenAt = event.pushedAt ?? new Date().toISOString();
+    const took = await deps.repo.observeRemoteHead(ctx, link.id, { headSha: event.headSha, seenAt });
+    if (!took) {
+      log(`[github] webhook ${event.repoFullName}:${event.branch} is older than what is stored — ignored`);
+      continue;
+    }
     // Recorded as a `fetch`, which is what it is: the remote was observed to have moved, and
     // nothing was pushed or pulled. The detail names the sender and the head, so the History row
     // answers "what moved and who moved it" without another call.
@@ -172,6 +189,7 @@ async function applyPush(
       kind: "fetch",
       commitSha: event.headSha,
       detail: describe(event),
+      deliveryId,
     });
     deps.notify?.(ctx, link.agent_id);
   }

@@ -492,19 +492,65 @@ export class GithubRepository {
       versionIds?: string[];
       commitSha?: string | null;
       detail?: string | null;
+      /**
+       * GitHub's own `X-GitHub-Delivery`, when this row is caused by a webhook.
+       *
+       * WHAT MAKES THE WRITE IDEMPOTENT. Delivery is at-least-once — GitHub retries anything it did
+       * not get a timely answer to, and a retry can land on another replica or after a restart —
+       * and this was an unconditional INSERT, so a redelivered push appeared in the History list
+       * twice. The module's own header claims the path is idempotent, which was true of `patchLink`
+       * and false of this. Absent for every row Jaroku causes itself, which is most of them; see
+       * migration 046 for why the unique index is partial.
+       */
+      deliveryId?: string | null;
     },
   ): Promise<void> {
     await this.q(ctx).run(
       `INSERT INTO github_events
          (id, workspace_id, agent_id, link_id, kind, outcome, actor_user_id, version_ids,
-          commit_sha, detail, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          commit_sha, detail, created_at, delivery_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT DO NOTHING`,
       [
         randomUUID(), ctx.workspaceId, entry.agentId ?? null, entry.linkId ?? null, entry.kind,
         entry.outcome ?? "ok", ctx.actorUserId, JSON.stringify(entry.versionIds ?? []),
         entry.commitSha ?? null, entry.detail ?? null, new Date().toISOString(),
+        entry.deliveryId ?? null,
       ],
     );
+  }
+
+  /**
+   * Record where a link's remote branch was observed to be, refusing an older observation.
+   *
+   * SEPARATE FROM `patchLink`, AND CONDITIONAL, because this is the one column a third party
+   * writes. `patchLink` builds a SET list from whatever it is handed and compares nothing, and
+   * GitHub does not guarantee delivery order — so two pushes seconds apart, delivered out of order,
+   * left `last_known_remote_sha` at the EARLIER head. The panel's behind/ahead badge is computed
+   * against that column, so it reported divergence from a commit that was no longer the tip.
+   *
+   * `last_synced_at` could not serve as the comparison: it is written as receipt time, so it orders
+   * deliveries rather than commits, which is exactly the ordering that is wrong. `seenAt` is the
+   * push's own timestamp off the payload.
+   *
+   * Returns whether it took, so the caller can say "this delivery was stale" rather than guess.
+   */
+  async observeRemoteHead(
+    ctx: TenantContext,
+    linkId: string,
+    observation: { headSha: string | null; seenAt: string },
+  ): Promise<boolean> {
+    const res = await this.q(ctx).run(
+      `UPDATE github_links
+          SET last_known_remote_sha = ?, remote_seen_at = ?, last_synced_at = ?
+        WHERE workspace_id = ? AND id = ?
+          AND (remote_seen_at IS NULL OR remote_seen_at <= ?)`,
+      [
+        observation.headSha, observation.seenAt, new Date().toISOString(),
+        ctx.workspaceId, linkId, observation.seenAt,
+      ],
+    );
+    return res.changes > 0;
   }
 
   /** What has happened to one agent, newest first. The History region's own read. */
