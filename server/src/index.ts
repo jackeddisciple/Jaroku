@@ -2235,6 +2235,10 @@ mountSecretsRoutes(router, {
     }
     return secretsManager.usage(caller.ctx, name);
   },
+  // WHEN THIS CREDENTIAL WAS REPLACED, AND WHY. Recorded on every rotation since the vault landed
+  // and read by nothing until now — see the route's own note. No value, and no scan: this is a
+  // straight read of rows the rotation path already wrote.
+  rotations: (caller, name) => secretRefs.rotations(caller.ctx, name),
   // ADR-035. The guard has already established that this request is elevated; this turns that into
   // the RECEIPT the vault demands, which is a value no request body can produce. A token that has
   // expired between the guard and here yields no receipt and therefore no credential.
@@ -4052,7 +4056,7 @@ const GITHUB_COMMAND_NAMES = new Set([
   "refreshGithub", "pushGithub", "pullGithub", "switchGithubBranch", "createGithubBranch",
   "openGithubPr", "commitGithub", "generateGithubMessage", "diagnoseFile",
   "shadowRunGithub", "listShadowRuns", "semanticDiffGithub", "resolveReviewComment",
-  "setAgentCiConfig",
+  "setAgentCiConfig", "listScanFindings",
 ]);
 
 const prComments = new PrCommentsRepository(db);
@@ -5053,6 +5057,21 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
           }
         }
         await broadcastGithub(ctx, agentId);
+        return;
+      }
+
+      case "listScanFindings": {
+        // §B.6's record, which was written and unreadable: every finding carries whether it was
+        // OVERRIDDEN and by whom, and nothing could ask. The live refusal has always reached the
+        // panel; this is the history behind it.
+        const agentId = String(cmd.agentId ?? "");
+        const agent = await agentRepo.bySlug(ctx, agentId);
+        if (!agent) return fail("no such agent in this workspace", agentId);
+        relay.broadcastGithub(ctx, {
+          type: "scanFindings",
+          agentId,
+          findings: await githubRepo.findings(ctx, agent.id),
+        });
         return;
       }
 

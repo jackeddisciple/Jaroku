@@ -665,6 +665,20 @@ export type ShadowRunGithubCommand = {
 export type ListShadowRunsCommand = { cmd: "listShadowRuns"; agentId: string };
 
 /**
+ * §B.6's findings, as a HISTORY rather than as the live refusal.
+ *
+ * THE LIVE REFUSAL ALREADY REACHES THE PANEL. What did not was the record: every finding is stored
+ * with whether it was OVERRIDDEN and by whom — the rows `auditGithubOverride` exists to make
+ * answerable — and `GithubRepository.findings` had no caller, so "has anybody pushed past a secret
+ * scan on this agent, and what did they push past" could only be asked in SQL.
+ *
+ * ON DEMAND rather than on the snapshot, unlike the check markers beside it: this is a question asked
+ * during a review, the answer is empty for almost every agent, and a row per push on every panel
+ * render would be a read nobody asked for.
+ */
+export type ListScanFindingsCommand = { cmd: "listScanFindings"; agentId: string };
+
+/**
  * §B.7's Agent diff: what changed about the agent, between the current version and a ref.
  *
  * COMPUTED ON DEMAND RATHER THAN CARRIED ON THE SNAPSHOT, because it costs a tree read from GitHub
@@ -740,6 +754,7 @@ export type GithubCommand =
   | ListShadowRunsCommand
   | SemanticDiffCommand
   | ResolveReviewCommentCommand
+  | ListScanFindingsCommand
   | SetAgentCiConfigCommand;
 
 const GITHUB_COMMANDS = new Set([
@@ -747,7 +762,7 @@ const GITHUB_COMMANDS = new Set([
   "refreshGithub", "pushGithub", "pullGithub", "switchGithubBranch", "createGithubBranch",
   "openGithubPr", "commitGithub", "generateGithubMessage", "diagnoseFile",
   "shadowRunGithub", "listShadowRuns", "semanticDiffGithub", "resolveReviewComment",
-  "setAgentCiConfig",
+  "setAgentCiConfig", "listScanFindings",
 ]);
 
 /** MCP-channel commands, grouped so the forwarding switch stays readable. */
@@ -1360,6 +1375,28 @@ export type GithubEvent =
       message: string;
       findings: { path: string; kind: string; rule: string; line: number | null; message: string }[];
     }
+  /**
+   * §B.6's HISTORY, as opposed to the refusal above it: which findings this agent has had, and which
+   * were pushed past anyway.
+   *
+   * A DIFFERENT SHAPE FROM THE REFUSAL'S, on purpose. A live finding carries the scanner's sentence
+   * about the line it just refused; a historical one carries `overridden` and when it was recorded,
+   * because the question asked of a record is "did somebody push past this, and when" rather than
+   * "what does this line look like". Neither carries a matched value — there is no field one would
+   * fit in, which is what lets either go to a browser at all.
+   */
+  | {
+      type: "scanFindings";
+      agentId: string;
+      findings: {
+        path: string;
+        kind: string;
+        rule: string;
+        line: number | null;
+        overridden: boolean;
+        created_at: string;
+      }[];
+    }
   | {
       type: "restackRefused";
       agentId: string;
@@ -1822,7 +1859,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   diagnoseFile: "github", shadowRunGithub: "github", listShadowRuns: "github",
   semanticDiffGithub: "github", resolveReviewComment: "github",
   // §B.1.2's opt-in. On `github` because what it configures happens on a pull request.
-  setAgentCiConfig: "github",
+  setAgentCiConfig: "github", listScanFindings: "github",
 };
 
 export function channelFor(cmd: string): string {

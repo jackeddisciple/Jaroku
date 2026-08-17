@@ -27,12 +27,14 @@ import { KeyIcon, EyeIcon, RefreshIcon, XIcon, PlugIcon, CheckIcon } from "./pan
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { ICON, STATUS } from "../lib/tokens.ts";
 import {
+  fetchRotations,
   fetchUsage,
   revealSecret,
   revokeSecret,
   rotateSecret,
   testSecret,
   type SecretSummary,
+  type RotationRecord,
   type UsageSite,
 } from "../lib/secrets.ts";
 import { groupSecrets, holdForElevation, useSecretsStore, visibleTo } from "../store/secretsStore.ts";
@@ -220,6 +222,43 @@ function RevokeForm({
  * can act on: a static hit is a guess about code that may never run, and a runtime read is a fact
  * about code that did. "Three references" means something different when two of them are guesses.
  */
+/**
+ * When this credential was replaced, and why — GAP-13's unreadable record.
+ *
+ * EVERY ROTATION HAS BEEN RECORDED SINCE THE VAULT LANDED, with its reason and a millisecond-safe
+ * tie-break ordering, and `rotations()` had no caller anywhere: this panel could rotate a credential
+ * and could not show that it ever had. "When did we last replace this, and did we replace it because
+ * it leaked" is an incident question, and it was answerable only in SQL.
+ *
+ * NO VALUE APPEARS HERE, and there is none to appear: the row carries a masked hint, a reason, a
+ * timestamp and who did it. Same promise as the list above it.
+ */
+function RotationHistory({ rotations }: { rotations: RotationRecord[] }) {
+  if (!rotations.length) {
+    return (
+      <p className="pt-1 text-[11px] text-faint">
+        Never rotated. The first rotation is recorded here, with whatever reason is given for it.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-1 pt-1 text-[11px]">
+      {rotations.map((r) => (
+        <div key={r.rotated_at} className="flex items-start gap-2">
+          <span className="shrink-0 text-faint">{new Date(r.rotated_at).toLocaleString()}</span>
+          <span className="min-w-0 flex-1 text-muted">
+            {r.reason ?? "no reason recorded"}
+            {r.rotated_by ? <span className="text-faint"> · {r.rotated_by}</span> : null}
+          </span>
+          {r.masked_hint ? (
+            <span className="shrink-0 font-mono text-faint">{r.masked_hint}</span>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function UsageView({ sites }: { sites: UsageSite[] }) {
   const staticHits = sites.filter((s) => s.source === "static_scan");
   const runtime = sites.filter((s) => s.source === "runtime_read");
@@ -265,10 +304,11 @@ function UsageView({ sites }: { sites: UsageSite[] }) {
   );
 }
 
-type RowMode = "idle" | "rotate" | "revoke" | "revealed" | "usage";
+type RowMode = "idle" | "rotate" | "revoke" | "revealed" | "usage" | "history";
 
 function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: () => void }) {
   const [mode, setMode] = useState<RowMode>("idle");
+  const [rotations, setRotations] = useState<RotationRecord[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [revealed, setRevealed] = useState<string | null>(null);
   const [usage, setUsage] = useState<UsageSite[] | null>(null);
@@ -356,6 +396,28 @@ function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: ()
           }}
         >
           Usage
+        </button>
+      ) : null}
+      {/* WHEN IT WAS LAST REPLACED. Offered only for a credential that HAS a value: a name with
+          nothing stored under it has no rotation to have had, and a button that always answered
+          "never rotated" would be a control that means nothing on half the rows. */}
+      {secret.configured ? (
+        <button
+          className={quietBtn}
+          disabled={busy}
+          title="When this was replaced, and why"
+          onClick={() => {
+            if (mode === "history") {
+              setMode("idle");
+              return;
+            }
+            void run(async () => {
+              setRotations(await fetchRotations(secret.name));
+              setMode("history");
+            });
+          }}
+        >
+          History
         </button>
       ) : null}
       {secret.configured ? (
@@ -457,6 +519,7 @@ function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: ()
         />
       ) : null}
       {mode === "usage" && usage !== null ? <UsageView sites={usage} /> : null}
+      {mode === "history" && rotations !== null ? <RotationHistory rotations={rotations} /> : null}
       {mode === "revealed" && revealed !== null ? (
         <ValueOnce
           value={revealed}

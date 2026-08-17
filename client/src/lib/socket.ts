@@ -321,6 +321,10 @@ function dispatch(msg: ServerMessage): void {
         });
       } else if (msg.type === "shadowRuns") {
         g.setShadowRuns(msg.agentId, msg.runs);
+      } else if (msg.type === "scanFindings") {
+        // §B.6's history, answered on demand. Its own field rather than the refusal's: one is the
+        // card about the push that just happened, the other is the record behind it.
+        g.setScanFindings(msg.agentId, msg.findings);
       } else if (msg.type === "scanRefused") {
         // §B.6.1. Its own field, for the third time on this channel and the third time for the same
         // reason: the card names files and rules and offers two actions, and nothing about it is an
@@ -1322,6 +1326,16 @@ export function sendSemanticDiffGithub(agentId: string, ref?: string): void {
 }
 
 /** §B.2.2's transient list. Its own read, because it is deliberately not the run history. */
+/**
+ * §B.6's finding history for one agent — what has been refused here, and what was pushed anyway.
+ *
+ * The rows have always been written, with `overridden` and who did it, and nothing could read them:
+ * "has anybody pushed past a secret scan on this agent" was a question only SQL could answer.
+ */
+export function sendListScanFindings(agentId: string): void {
+  send({ cmd: "listScanFindings", agentId });
+}
+
 export function sendListShadowRuns(agentId: string): void {
   send({ cmd: "listShadowRuns", agentId });
 }

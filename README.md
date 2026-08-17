@@ -1806,7 +1806,7 @@ thread set: `listThreads` · `loadThread` ·
 `refreshGithub` · `pushGithub` · `pullGithub` · `switchGithubBranch` · `createGithubBranch` ·
 `openGithubPr` · `commitGithub` · `generateGithubMessage` · `diagnoseFile` ·
 `shadowRunGithub` · `listShadowRuns` · `semanticDiffGithub` · `resolveReviewComment` ·
-`setAgentCiConfig`
+`setAgentCiConfig` · `listScanFindings`
 
 Accepting an invitation is deliberately **not** a command: the accepter is not a member yet, so
 there is no socket scoped to the workspace they are joining. It is `POST /v1/invites/accept`.
@@ -1856,6 +1856,7 @@ to happen because a browser cannot put a header on a WebSocket:
 | `POST /v1/ws-ticket` | A single-use, 30-second, workspace-scoped ticket for one socket |
 | `POST /v1/invites/accept` | Redeem an invitation |
 | `POST /v1/workspaces` | Create a workspace, owned by the caller. `{name, kind}`, both required |
+| `GET /v1/secrets/:name/rotations` | When a credential was replaced, and why. A masked hint and a reason — never a value |
 | `POST /v1/billing/checkout` | Start a checkout for a plan. `{plan, workspaceId}`; answers a URL the browser navigates to |
 | `POST /v1/workspace/export` | Ask for a copy of everything. 202 with an id; a worker writes the archive |
 | `GET /v1/workspace/export/:id` | Whether that archive is ready, and a presigned link with a stated expiry |

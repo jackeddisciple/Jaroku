@@ -75,6 +75,15 @@ there. What is new is that the product's own surface reaches them.
   order, with each provider's display name resolved server-side — which also removed the two
   disagreeing copies of that mapping in the browser, the reason one provider was "Gemini" where you
   picked it and `google` where you configured it. `test:pricing` asserts what keeps it safe.
+- **Two written-and-unreadable histories became readable.** Every credential rotation has been
+  recorded since the vault landed — with its reason, its masked hint and a millisecond-safe tie-break
+  ordering — and `rotations()` had no caller: the Secrets panel could rotate a credential and could
+  not show that it ever had, so "when did we last replace this, and was it because it leaked" was a
+  SQL question during an incident. It is a **History** control on the row now, carrying no value, like
+  everything else that surface answers. And `secret_scan_findings` stores every finding with whether
+  it was **overridden** and by whom — the record `auditGithubOverride` exists to make answerable —
+  with nothing able to read it; `listScanFindings` is a **Secret scan** region in the GitHub panel,
+  asked for on open because the answer is empty for almost every agent.
 - **Lists can be paged.** Every list read is `ORDER BY <time> DESC LIMIT 50` and nothing could ask
   past it, so the 51st-newest run was unreachable — `loadRun` needs an id, and the only source of ids
   was that list — while retention keeps traces for up to a year. The eval strip was worse: two

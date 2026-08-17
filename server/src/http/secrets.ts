@@ -180,6 +180,18 @@ export interface SecretsRouteDeps {
    */
   usage?: (caller: SecretsCaller, name: string) => Promise<UsageSite[]>;
   /**
+   * When this credential was replaced, and why. Newest first.
+   *
+   * NO VALUE, EVER — a masked hint, a reason, a timestamp and who did it, which is the same promise
+   * the list itself makes. The rows have been written since the vault landed and nothing read them:
+   * the panel could rotate a credential and could not show that it ever had, so "when did we last
+   * replace this, and was it because it leaked" was a question only SQL could answer.
+   */
+  rotations?: (
+    caller: SecretsCaller,
+    name: string,
+  ) => Promise<{ name: string; rotated_by: string | null; masked_hint: string | null; reason: string | null; rotated_at: string }[]>;
+  /**
    * Link or unlink the workspace's GitHub account.
    *
    * OPTIONAL, and absent means both routes 404 — the same knob `reveal` has, for the same reason:
@@ -660,6 +672,21 @@ export function secretsRoutes(deps: SecretsRouteDeps): SecretsRoute[] {
       prefix: true,
       handler: guarded(deps, { elevation: "read", capability: "secret:read" }, async (req, caller) => {
         const { name, action } = readTail(req.path);
+        // WHEN THIS CREDENTIAL WAS LAST REPLACED, AND WHY — the other half of a rotation.
+        //
+        // Every rotation has been recorded since the vault landed, with its reason and a
+        // millisecond-safe tie-break ordering, and `rotations()` had no caller: the panel could
+        // rotate a credential and nothing could show that it ever had. "When did we last replace
+        // this, and did we replace it because it leaked" is the question asked during an incident,
+        // and it was answerable only by SQL.
+        //
+        // `read` rather than `mutate`, beside `usage`, and it carries NO VALUE — a masked hint, a
+        // reason, a timestamp and who did it. The same promise the list itself makes.
+        if (action === "rotations") {
+          if (!deps.rotations) throw notFound("this deployment does not record rotations");
+          const rotations = await deps.rotations(caller, name);
+          return { headers: { "cache-control": "no-store" }, body: { name, rotations } };
+        }
         if (action !== "usage") throw notFound(`nothing at ${req.path}`);
         if (!deps.usage) throw notFound("this deployment does not record credential usage");
         const sites = await deps.usage(caller, name);

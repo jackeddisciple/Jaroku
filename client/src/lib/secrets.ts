@@ -253,6 +253,30 @@ export async function fetchUsage(name: string): Promise<UsageSite[]> {
   return (await request<{ usage: UsageSite[] }>("GET", `/v1/secrets/${encodeURIComponent(name)}/usage`)).usage;
 }
 
+export interface RotationRecord {
+  name: string;
+  /** Who replaced it, when the server knows. Never required. */
+  rotated_by: string | null;
+  /** The last few characters of the NEW value, which is all a mask ever is. */
+  masked_hint: string | null;
+  reason: string | null;
+  rotated_at: string;
+}
+
+/**
+ * When this credential was replaced, and why. Newest first.
+ *
+ * NO VALUE COMES BACK — a masked hint, a reason, a timestamp and who did it. The rows have been
+ * written on every rotation since the vault landed and nothing read them: the panel could rotate a
+ * credential and could not show that it ever had, so "when did we last replace this, and was it
+ * because it leaked" was a question only SQL could answer.
+ */
+export async function fetchRotations(name: string): Promise<RotationRecord[]> {
+  return (
+    await request<{ rotations: RotationRecord[] }>("GET", `/v1/secrets/${encodeURIComponent(name)}/rotations`)
+  ).rotations;
+}
+
 export interface ImportResult {
   format: string;
   imported: string[];

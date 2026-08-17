@@ -44,7 +44,7 @@ import { RestackRegion, StagingRegion } from "./GitHubStaging.tsx";
 import { ShadowRunsRegion } from "./ShadowRuns.tsx";
 import { SemanticDiffRegion } from "./SemanticDiff.tsx";
 import { ReviewRegion } from "./ReviewRegion.tsx";
-import { ChecksRegion } from "./GitHubChecks.tsx";
+import { ChecksRegion, ScanHistoryRegion } from "./GitHubChecks.tsx";
 import { GraphCanvas } from "./GraphCanvas.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
@@ -571,6 +571,9 @@ function Linked({ view }: { view: GithubView }) {
           with checks off, which is the default. */}
       <CollapsibleRegion label="Checks" open={regions.checks} onToggle={toggle("checks")}>
         <ChecksRegion view={view} />
+        {/* §B.6's record, in the same region as the checks: both are things that happen to a push
+            rather than to the code, and both are read after the fact rather than acted on. */}
+        <ScanHistoryRegion view={view} />
       </CollapsibleRegion>
 
       <CollapsibleRegion

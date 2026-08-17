@@ -17,8 +17,8 @@
 
 import { create } from "zustand";
 import type {
-  GithubLinkRow, GithubRefusal, GithubRepoRow, GithubRestackRefusal, GithubScanRefusal,
-  GithubSemanticDiff, GithubShadowRun,
+  GithubLinkRow, GithubRefusal, GithubRepoRow, GithubRestackRefusal, GithubScanFinding,
+  GithubScanRefusal, GithubSemanticDiff, GithubShadowRun,
   GithubView,
 } from "../types.ts";
 
@@ -133,6 +133,15 @@ interface GithubState {
    */
   scanRefusals: Record<string, GithubScanRefusal>;
   /**
+   * §B.6's finding HISTORY, by agent slug — what has been refused here, and what was pushed anyway.
+   *
+   * SEPARATE FROM `scanRefusals`, which is the live card about the push that just happened. This is
+   * the record behind it, asked for on demand: every finding has always been stored with whether it
+   * was OVERRIDDEN and by whom — the rows the audit trail exists to make answerable — and nothing
+   * could read them, so "has anybody pushed past a secret scan on this agent" was a SQL question.
+   */
+  scanFindings: Record<string, GithubScanFinding[]>;
+  /**
    * agent slug -> §B.2.2's transient list.
    *
    * ITS OWN FIELD, NOT PART OF `views`, and that is §B.2.2's requirement rather than a preference:
@@ -184,6 +193,7 @@ interface GithubState {
   setRestackRefusal: (refusal: GithubRestackRefusal) => void;
   clearRestackRefusal: (agentId: string) => void;
   setScanRefusal: (refusal: GithubScanRefusal) => void;
+  setScanFindings: (agentId: string, findings: GithubScanFinding[]) => void;
   clearScanRefusal: (agentId: string) => void;
   setShadowRuns: (agentId: string, runs: GithubShadowRun[]) => void;
   setSemanticDiff: (diff: GithubSemanticDiff) => void;
@@ -201,6 +211,7 @@ export const useGithubStore = create<GithubState>((set) => ({
   refusals: {},
   restackRefusals: {},
   scanRefusals: {},
+  scanFindings: {},
   shadowRuns: {},
   semanticDiffs: {},
   repos: [],
@@ -301,6 +312,8 @@ export const useGithubStore = create<GithubState>((set) => ({
   setScanRefusal: (refusal) =>
     set((s) => ({ scanRefusals: { ...s.scanRefusals, [refusal.agentId]: refusal } })),
   clearScanRefusal: (agentId) => set((s) => ({ scanRefusals: withoutKey(s.scanRefusals, agentId) })),
+  setScanFindings: (agentId, findings) =>
+    set((s) => ({ scanFindings: { ...s.scanFindings, [agentId]: findings } })),
 
   setShadowRuns: (agentId, runs) => set((s) => ({ shadowRuns: { ...s.shadowRuns, [agentId]: runs } })),
 

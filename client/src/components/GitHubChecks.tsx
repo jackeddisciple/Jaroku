@@ -18,8 +18,9 @@
 
 import { useEffect, useState } from "react";
 import { useEvalStore } from "../store/evalStore.ts";
+import { useGithubStore } from "../store/githubStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
-import { sendListDatasets, sendSetAgentCiConfig } from "../lib/socket.ts";
+import { sendListDatasets, sendListScanFindings, sendSetAgentCiConfig } from "../lib/socket.ts";
 import { fmtPercent, relTime } from "../lib/format.ts";
 import { ICON } from "../lib/tokens.ts";
 import { RegionLabel } from "./GitHubSync.tsx";
@@ -36,6 +37,75 @@ const POLICIES: { id: GithubProviderPolicy; label: string; what: string }[] = [
   },
   { id: "always_paid", label: "Anybody", what: "Any pull request may spend this workspace's provider balance." },
 ];
+
+/**
+ * §B.6's finding history — what this agent's pushes have been refused for, and what went anyway.
+ *
+ * THE RECORD, NOT THE REFUSAL. The live refusal has always reached the panel; what could not be
+ * reached was `secret_scan_findings`, where every finding is stored with whether it was OVERRIDDEN
+ * and by whom — the rows `auditGithubOverride` exists to make answerable. Nothing called the reader,
+ * so "has anybody pushed past a secret scan on this agent" was a SQL question.
+ *
+ * ASKED FOR ON OPEN, not carried on the snapshot: the answer is empty for almost every agent, and a
+ * row per push on every panel render is a read nobody asked for.
+ */
+export function ScanHistoryRegion({ view }: { view: GithubView }) {
+  const findings = useGithubStore((s) => s.scanFindings[view.agentId]);
+  const connected = useTraceStore((s) => s.connection === "open");
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (open && connected) sendListScanFindings(view.agentId);
+  }, [open, connected, view.agentId]);
+
+  const overridden = (findings ?? []).filter((f) => f.overridden).length;
+
+  return (
+    <div className="mt-4">
+      <RegionLabel>
+        <button className="flex w-full items-center gap-2 text-left" onClick={() => setOpen((v) => !v)}>
+          <span>Secret scan</span>
+          {/* THE COUNT THAT MATTERS IS THE OVERRIDES, and only when there are some. A workspace with
+              refusals and no overrides is a workspace where the guard worked; one with overrides is
+              the case somebody comes looking for later. */}
+          {overridden > 0 && <span className="text-[11px] text-err">{overridden} overridden</span>}
+          <span className="ml-auto text-faint">{open ? "−" : "+"}</span>
+        </button>
+      </RegionLabel>
+
+      {open && (
+        <div className="mt-1.5 space-y-1">
+          {findings === undefined ? (
+            <p className="text-[11px] text-faint">Reading…</p>
+          ) : findings.length === 0 ? (
+            <p className="text-[11px] leading-[1.55] text-faint">
+              Nothing has ever been refused on this agent. A scan runs between tree-build and
+              commit-create on every push, so an empty record means every push was clean.
+            </p>
+          ) : (
+            findings.map((f) => (
+              <div key={`${f.created_at} ${f.path} ${f.rule}`} className="flex items-start gap-2 text-[11px]">
+                <span className={`mt-[2px] shrink-0 ${f.overridden ? "text-err" : "text-muted"}`}>
+                  <XIcon size={10} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-mono text-muted">
+                    {f.path}{f.line === null ? "" : `:${f.line}`}
+                  </span>
+                  <span className="text-faint">
+                    {f.rule}
+                    {f.overridden ? " · pushed anyway" : " · refused"}
+                  </span>
+                </span>
+                <span className="shrink-0 text-faint">{relTime(f.created_at)}</span>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function ChecksRegion({ view }: { view: GithubView }) {
   const datasets = useEvalStore((s) => s.datasets);

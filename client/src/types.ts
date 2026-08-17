@@ -1225,6 +1225,23 @@ export interface GithubScanFinding {
   message: string;
 }
 
+/**
+ * One recorded secret-scan finding — §B.6's HISTORY rather than the live refusal.
+ *
+ * A DIFFERENT SHAPE FROM A LIVE FINDING, on purpose: this one carries whether it was OVERRIDDEN and
+ * when it was recorded, because the question asked of a record is "did somebody push past this" —
+ * where a live finding carries the scanner's sentence about the line it just refused. Neither
+ * carries a matched value; there is no field one would fit in.
+ */
+export interface GithubScanFinding {
+  path: string;
+  kind: string;
+  rule: string;
+  line: number | null;
+  overridden: boolean;
+  created_at: string;
+}
+
 export interface GithubScanRefusal {
   agentId: string;
   message: string;
@@ -1366,6 +1383,7 @@ export type GithubMessage =
   | { channel: "github"; type: "message"; agentId: string; message: string }
   | ({ channel: "github"; type: "refused" } & GithubRefusal)
   | ({ channel: "github"; type: "scanRefused" } & GithubScanRefusal)
+  | { channel: "github"; type: "scanFindings"; agentId: string; findings: GithubScanFinding[] }
   | { channel: "github"; type: "shadowRuns"; agentId: string; runs: GithubShadowRun[] }
   | ({ channel: "github"; type: "semanticDiff" } & GithubSemanticDiff)
   | ({ channel: "github"; type: "restackRefused" } & GithubRestackRefusal)
@@ -1657,6 +1675,13 @@ export type ClientCommand =
    */
   | { cmd: "shadowRunGithub"; agentId: string; ref: string; input?: string; provider?: string; model?: string }
   | { cmd: "listShadowRuns"; agentId: string }
+  /**
+   * §B.6's findings as a history: what has been refused on this agent, and what was pushed anyway.
+   *
+   * On demand rather than on the snapshot — the answer is empty for almost every agent, and it is a
+   * question asked during a review rather than a fact the panel needs on every render.
+   */
+  | { cmd: "listScanFindings"; agentId: string }
   /**
    * §B.7's Agent diff. On demand rather than on the snapshot: it costs a tree read from GitHub and
    * a parse of both sides, and a toggle is a click where a snapshot is a render.

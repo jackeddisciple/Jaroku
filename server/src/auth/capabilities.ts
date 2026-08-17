@@ -395,6 +395,9 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // to something outside itself" in the table, and it is the same authority as choosing which
   // repository the code goes to.
   setAgentCiConfig: "github:manage",
+  // §B.6's findings history. `github:read`, beside the other reads: it names paths and rule ids in
+  // this workspace's own source and carries no value — the same posture the live refusal already has.
+  listScanFindings: "github:read",
 
   // An export is deliberately NOT here, and its absence is the decision rather than an omission:
   // it is an HTTP route, not a socket command — see http/lifecycle.ts. A copy of everything the
