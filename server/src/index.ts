@@ -3297,6 +3297,10 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
   // and the row's agent chip could not select the agent it names. The uuid stays in the database,
   // where the foreign key is.
   const slugByUuid = new Map(agents.map((a) => [a.id, a.slug]));
+  // And the name it goes by NOW, for the chip — see `agent_name` below. Only live agents are in
+  // this list, so a miss is either a deleted agent or one this replica has not materialised, and
+  // both fall back to the snapshot, which is the name the thread was linked to.
+  const nameByUuid = new Map(agents.map((a) => [a.id, a.display_name ?? a.slug]));
   const views: ThreadView[] = [];
   const counts: ThreadCounts = { all: 0, needs_you: 0, running: 0, recent: 0, archived: 0 };
   /**
@@ -3322,7 +3326,15 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
       // Null for a deleted agent, which is what makes the chip render `name (deleted)` rather than a
       // link to nothing — and null for a slug the workspace no longer has, which is the same case.
       agent_id: row.agent_id ? (slugByUuid.get(row.agent_id) ?? null) : null,
-      agent_name: row.agent_name_snapshot,
+      // THE LIVE NAME WHILE THE AGENT IS ALIVE, the snapshot only once it is not.
+      //
+      // §3.2 specifies the snapshot for a DELETED agent, and §4.3 says a live one shows "Agent
+      // name" — but this rendered the snapshot unconditionally, and the snapshot is written once at
+      // create/attach and never refreshed. `upsertFromDisk` rewrites `display_name` on every sync,
+      // so renaming an agent left every thread row showing the old name while the sidebar two
+      // panels over showed the new one.
+      agent_name:
+        (row.agent_id ? (nameByUuid.get(row.agent_id) ?? null) : null) ?? row.agent_name_snapshot,
       // The pair §4.3 renders three ways, and it is asked of the AGENTS table rather than of the
       // thread. Two cases mean deleted: the agent row is soft-deleted (reversible — the row stops
       // saying `(deleted)` the moment the agent comes back), or the link is gone entirely, which is
