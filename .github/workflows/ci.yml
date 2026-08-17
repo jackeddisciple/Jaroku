@@ -211,6 +211,7 @@ jobs:
           npm run test:thread-channel
           npm run test:thread-binding
           npm run test:thread-title
+          npm run test:thread-archive
 
       - name: cost, abuse and the data lifecycle
         working-directory: server
