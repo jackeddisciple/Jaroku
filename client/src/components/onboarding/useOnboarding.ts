@@ -12,6 +12,7 @@ import { useEffect, useRef } from "react";
 import { useBuildStore } from "../../store/buildStore.ts";
 import { useChatStore } from "../../store/chatStore.ts";
 import { useSessionStore } from "../../store/sessionStore.ts";
+import { useThreadStore } from "../../store/threadStore.ts";
 import { useTraceStore } from "../../store/traceStore.ts";
 import { useUiStore } from "../../store/uiStore.ts";
 
@@ -127,7 +128,13 @@ export function useOnboarding(): Onboarding {
   // beside a composer reads as broken rather than as a feature not yet reached, so it arrives
   // when files start streaming (or, on the free path, when a run does) — and after a reload
   // mid-flow, whenever the agent it would describe already exists.
-  const agentHasThread = Boolean(activeAgentId && (threads[activeAgentId]?.length ?? 0) > 0);
+  // Keyed by session now (§3.1), so "this agent has been talked to" is asked of the sessions on it.
+  const agentThreadIds = useThreadStore((s) => s.threads)
+    .filter((t) => t.agent_id === activeAgentId)
+    .map((t) => t.id);
+  const agentHasThread = Boolean(
+    activeAgentId && agentThreadIds.some((id) => (threads[id]?.length ?? 0) > 0),
+  );
   const mountRightPanel =
     phase === "complete" ||
     (phase === "run" &&

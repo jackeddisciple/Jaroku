@@ -5,11 +5,23 @@
 // Turns are appended by *server* events (gen/edit "started"), not by the submit click, so
 // every connected client sees the same conversation and nothing double-appends.
 //
-// In-memory only this week: a reload clears the conversation (the applied edits themselves
-// are on disk and remain undoable via the agent's history).
+// KEYED BY THREAD, NOT BY AGENT (§3.1). One agent carries several independent sessions — that is
+// the whole premise of the feature — and while these were keyed by agent id, two threads on one
+// agent rendered the SAME conversation, work started in one landed in whichever was touched last,
+// and opening a thread after a reload showed nothing at all. The key has to be the thing the spec
+// says is independent. Every event on the gen / edit / reply channels now carries the session it
+// belongs to, so a tab that did not send the command can still file the turns where the sender
+// meant them — which is what keeps the conversation shared rather than local to one browser.
+//
+// `pending` IS FOR TURNS THAT BELONG TO NO SESSION — a refusal answered to whoever asked is the one
+// thing on these channels with no thread on it. Everything else has one.
+//
+// A reload no longer clears the conversation entirely: `hydrate` rebuilds one from the
+// `thread_items` rows the server keeps, so reopening a thread shows what somebody said and what it
+// caused. Jaroku's own prose is deliberately not stored (migration 044) and does not come back.
 
 import { create } from "zustand";
-import type { AgentPlan, FileDiff, GenUsage } from "../types.ts";
+import type { AgentPlan, FileDiff, GenUsage, ThreadItemView } from "../types.ts";
 
 let nextId = 0;
 const turnId = () => `t${++nextId}`;
@@ -117,45 +129,75 @@ export interface ReplyTurn {
 
 export type ChatTurn = UserTurn | PlanTurn | GenTurn | ProposalTurn | InfoTurn | ReplyTurn;
 
+/**
+ * Which session a message belongs to, as the envelope carried it.
+ *
+ * `undefined` means the server attached none — a refusal, which belongs to nobody's session and
+ * goes to `pending`. It is deliberately not "the thread that happens to be open": filing another
+ * tab's refusal into whatever this one is looking at is how a conversation acquires turns that
+ * were never part of it.
+ */
+type In = { threadId?: string };
+
 interface ChatState {
-  /** Conversation per agent. */
+  /** Conversation per THREAD. See the header for why this is not per agent. */
   threads: Record<string, ChatTurn[]>;
-  /** Generation turns before the agent id exists; moved into threads on gen done. */
+  /** Turns belonging to no session: refusals, and anything a server sent without one. */
   pending: ChatTurn[];
   /** Agent whose edit is currently streaming (file events carry no agentId). */
   streamingAgentId: string | null;
+  /** And which session it is streaming into, since file events carry no thread either. */
+  streamingThreadId: string | null;
 
-  planStarted: (input: string, revision: number) => void;
-  planDelta: (text: string) => void;
-  planReady: (p: {
+  /** Rebuild a thread's conversation from what the server kept about it (§4.5). */
+  hydrate: (threadId: string, items: ThreadItemView[]) => void;
+
+  planStarted: (e: In & { input: string; revision: number }) => void;
+  planDelta: (e: In & { text: string }) => void;
+  planReady: (p: In & {
     planId: string; prompt: string; plan: AgentPlan; warnings: string[]; usage: GenUsage;
     revision: number;
   }) => void;
-  planDiscarded: (planId: string) => void;
-  planStale: (stale: boolean) => void;
-  planError: (message: string) => void;
+  planDiscarded: (e: In & { planId: string }) => void;
+  /** Called by the composer, not by the socket, so it names the thread it is looking at. */
+  planStale: (threadId: string | null, stale: boolean) => void;
+  planError: (e: In & { message: string }) => void;
 
-  genStarted: (prompt: string) => void;
-  genDone: (agentId: string, files: string[], usage: GenUsage, planUsage: GenUsage) => void;
-  genError: (message: string, problems?: string[]) => void;
+  genStarted: (e: In & { prompt: string }) => void;
+  genDone: (e: In & { agentId: string; files: string[]; usage: GenUsage; planUsage: GenUsage }) => void;
+  genError: (e: In & { message: string; problems?: string[] }) => void;
 
-  editStarted: (agentId: string, instruction: string) => void;
+  editStarted: (e: In & { agentId: string; instruction: string }) => void;
   editFileStart: (path: string) => void;
   editFileDelta: (path: string, bytes: number) => void;
   editFileEnd: (path: string) => void;
-  proposal: (p: {
+  proposal: (p: In & {
     proposalId: string; agentId: string; summary: string; files: FileDiff[]; usage: GenUsage;
   }) => void;
-  applied: (proposalId: string, agentId: string, version: number) => void;
-  undone: (agentId: string, version: number, summary: string) => void;
-  discarded: (proposalId: string, agentId: string) => void;
-  editError: (e: { message: string; problems?: string[]; agentId?: string; proposalId?: string }) => void;
+  applied: (e: In & { proposalId: string; agentId: string; version: number }) => void;
+  undone: (e: In & { agentId: string; version: number; summary: string }) => void;
+  discarded: (e: In & { proposalId: string; agentId: string }) => void;
+  editError: (e: In & { message: string; problems?: string[]; agentId?: string; proposalId?: string }) => void;
 
   // --- explain (unified composer): a streaming prose reply, no code change ---
-  replyStarted: (agentId: string, question: string) => void;
-  replyDelta: (agentId: string, text: string) => void;
-  replyDone: (agentId: string) => void;
-  replyError: (agentId: string, message: string) => void;
+  replyStarted: (e: In & { agentId: string; question: string }) => void;
+  replyDelta: (e: In & { agentId: string; text: string }) => void;
+  replyDone: (e: In & { agentId: string }) => void;
+  replyError: (e: In & { agentId: string; message: string }) => void;
+}
+
+/** The turns a message belongs to. A message with no session reads and writes `pending`. */
+function turnsIn(s: { threads: Record<string, ChatTurn[]>; pending: ChatTurn[] }, threadId?: string): ChatTurn[] {
+  return threadId ? (s.threads[threadId] ?? []) : s.pending;
+}
+
+/** …and putting them back, which is the same decision and so belongs beside it. */
+function putTurns(
+  s: { threads: Record<string, ChatTurn[]> },
+  threadId: string | undefined,
+  turns: ChatTurn[],
+): Partial<ChatState> {
+  return threadId ? { threads: { ...s.threads, [threadId]: turns } } : { pending: turns };
 }
 
 function lastGenTurn(turns: ChatTurn[]): GenTurn | undefined {
@@ -175,62 +217,87 @@ export const useChatStore = create<ChatState>((set) => ({
   threads: {},
   pending: [],
   streamingAgentId: null,
+  streamingThreadId: null,
+
+  /**
+   * The conversation as the server remembers it, replacing whatever this tab had (§4.5).
+   *
+   * A REPLACE, LIKE EVERY OTHER SNAPSHOT IN THIS CODEBASE. The rows are the durable record and
+   * this tab's copy is not; merging would let a thread hold one turn from the record and one from
+   * a socket that has since reconnected.
+   *
+   * What comes back is the user's turns plus a stub per run, plan, generation, proposal and eval —
+   * Jaroku's replies were never stored (migration 044). A stub says what happened rather than
+   * pretending to be the card it was, because a diff card with no diff behind it would offer an
+   * Apply button for a proposal that has not existed since the process restarted.
+   */
+  hydrate: (threadId, items) =>
+    set((s) => ({
+      threads: {
+        ...s.threads,
+        [threadId]: items.map((it): ChatTurn =>
+          it.kind === "message" && it.role === "user"
+            ? { id: turnId(), role: "user", text: it.body ?? "" }
+            : { id: turnId(), role: "jaroku", kind: "info", tone: "muted", text: stubText(it) },
+        ),
+      },
+    })),
 
   // --- planning (the pre-generation gate) --------------------------------
-  // Plan turns live in `pending` like generation turns: there is no agent id yet, and on a
-  // confirmed plan genDone moves the whole pending thread into the new agent's own thread —
-  // so an agent's conversation opens with the plan that authorised it.
+  // A plan and the generation it authorises are the same session, so both write to the same
+  // thread — the server resolves the generation's thread from the plan's own id — and a thread's
+  // conversation therefore opens with the plan that authorised its agent.
 
-  planStarted: (input, revision) =>
+  planStarted: ({ threadId, input, revision }) =>
     set((s) => {
       // Starting a plan consumes any plan still awaiting a decision — a revision takes its
       // predecessor's slot server-side. Marking it superseded is what stops the old card
       // sitting there with a Generate button whose id can now only be refused.
-      const previous = livePlan(s.pending);
+      const turns = turnsIn(s, threadId);
+      const previous = livePlan(turns);
       const base = previous
-        ? replaceTurn(s.pending, previous.id, { ...previous, status: "superseded" as const })
-        : s.pending;
-      return {
-      pending: [
+        ? replaceTurn(turns, previous.id, { ...previous, status: "superseded" as const })
+        : turns;
+      return putTurns(s, threadId, [
         ...base,
         { id: turnId(), role: "user", text: input },
         {
           id: turnId(), role: "jaroku", kind: "plan", status: "streaming",
           planId: null, revision, prompt: input, raw: "", plan: null, warnings: [], usage: null,
         },
-      ],
-      };
+      ]);
     }),
 
-  planDelta: (text) =>
+  planDelta: ({ threadId, text }) =>
     set((s) => {
-      const open = openPlan(s.pending);
+      const turns = turnsIn(s, threadId);
+      const open = openPlan(turns);
       if (!open) return {};
-      return { pending: replaceTurn(s.pending, open.id, { ...open, raw: open.raw + text }) };
+      return putTurns(s, threadId, replaceTurn(turns, open.id, { ...open, raw: open.raw + text }));
     }),
 
-  planReady: ({ planId, prompt, plan, warnings, usage, revision }) =>
+  planReady: ({ threadId, planId, prompt, plan, warnings, usage, revision }) =>
     set((s) => {
-      const open = openPlan(s.pending);
+      const turns = turnsIn(s, threadId);
+      const open = openPlan(turns);
       const settled: PlanTurn = {
         id: open?.id ?? turnId(),
         role: "jaroku", kind: "plan", status: "pending",
         planId, revision, prompt, raw: plan.raw, plan, warnings, usage,
       };
-      return {
-        pending: open ? replaceTurn(s.pending, open.id, settled) : [...s.pending, settled],
-      };
+      return putTurns(s, threadId, open ? replaceTurn(turns, open.id, settled) : [...turns, settled]);
     }),
 
-  planDiscarded: (planId) =>
+  planDiscarded: ({ threadId, planId }) =>
     set((s) => {
-      const turn = s.pending.find(
+      const turns = turnsIn(s, threadId);
+      const turn = turns.find(
         (t): t is PlanTurn => t.role === "jaroku" && t.kind === "plan" && t.planId === planId,
       );
       // Only a plan still awaiting a decision can be discarded — never rewrite the history of
       // one already accepted.
       if (!turn || (turn.status !== "pending" && turn.status !== "stale")) return {};
-      return { pending: replaceTurn(s.pending, turn.id, { ...turn, status: "discarded" }) };
+      return putTurns(s, threadId, replaceTurn(turns, turn.id, { ...turn, status: "discarded" }));
     }),
 
   // The connector selection changed after the plan was written, so it no longer describes
@@ -243,95 +310,91 @@ export const useChatStore = create<ChatState>((set) => ({
   // marked the plan stale forever, so putting a mis-clicked connector back left the plan
   // unusable and the only way out was paying for another one. Ticking Slack and unticking it
   // is not a decision the user should have to buy their way out of.
-  planStale: (stale) =>
+  planStale: (threadId, stale) =>
     set((s) => {
-      const turn = livePlan(s.pending);
+      const key = threadId ?? undefined;
+      const turns = turnsIn(s, key);
+      const turn = livePlan(turns);
       if (!turn) return {};
       const next = stale ? "stale" : "pending";
       // Only these two statuses convert into each other. A plan that was generated, discarded or
       // superseded is finished, and the connector selection has no opinion about it any more.
       if (turn.status !== "pending" && turn.status !== "stale") return {};
       if (turn.status === next) return {};
-      return { pending: replaceTurn(s.pending, turn.id, { ...turn, status: next }) };
+      return putTurns(s, key, replaceTurn(turns, turn.id, { ...turn, status: next }));
     }),
 
-  planError: (message) =>
+  planError: ({ threadId, message }) =>
     set((s) => {
-      const open = openPlan(s.pending);
+      const turns = turnsIn(s, threadId);
+      const open = openPlan(turns);
       if (open) {
-        return {
-          pending: replaceTurn(s.pending, open.id, {
-            ...open, status: "error" as const, error: message,
-          }),
-        };
+        return putTurns(s, threadId, replaceTurn(turns, open.id, {
+          ...open, status: "error" as const, error: message,
+        }));
       }
       // No plan was streaming — a refused confirm, or a stale card in another tab. It belongs
       // in the conversation as a note, not as a failed generation.
       const note: InfoTurn = { id: turnId(), role: "jaroku", kind: "info", tone: "error", text: message };
-      return { pending: [...s.pending, note] };
+      return putTurns(s, threadId, [...turns, note]);
     }),
 
   // --- generation --------------------------------------------------------
 
-  genStarted: (prompt) =>
+  genStarted: ({ threadId, prompt }) =>
     set((s) => {
       // A confirmed plan already put the user's request in the conversation and is the thing
       // that authorised this generation — mark it accepted and don't echo the prompt again.
-      const plan = livePlan(s.pending);
+      const turns = turnsIn(s, threadId);
+      const plan = livePlan(turns);
       const base = plan
-        ? replaceTurn(s.pending, plan.id, { ...plan, status: "accepted" as const })
-        : [...s.pending, { id: turnId(), role: "user" as const, text: prompt }];
-      return {
-        pending: [
-          ...base,
-          {
-            id: turnId(), role: "jaroku", kind: "gen", status: "generating",
-            agentId: null, files: [], usage: null, planUsage: null,
-          },
-        ],
-      };
+        ? replaceTurn(turns, plan.id, { ...plan, status: "accepted" as const })
+        : [...turns, { id: turnId(), role: "user" as const, text: prompt }];
+      return putTurns(s, threadId, [
+        ...base,
+        {
+          id: turnId(), role: "jaroku", kind: "gen", status: "generating",
+          agentId: null, files: [], usage: null, planUsage: null,
+        },
+      ]);
     }),
 
-  genDone: (agentId, files, usage, planUsage) =>
+  // No more moving a pending conversation into the agent it produced: the plan, the generation and
+  // everything after it were already in the same session, which is what a thread is.
+  genDone: ({ threadId, agentId, files, usage, planUsage }) =>
     set((s) => {
-      const gen = lastGenTurn(s.pending);
-      const finished = s.pending.map((t) =>
-        gen && t.id === gen.id ? { ...gen, status: "done" as const, agentId, files, usage, planUsage } : t,
-      );
-      // The new agent's conversation begins with its own creation.
-      return {
-        pending: [],
-        threads: { ...s.threads, [agentId]: [...(s.threads[agentId] ?? []), ...finished] },
-      };
-    }),
-
-  genError: (message, problems) =>
-    set((s) => {
-      const gen = lastGenTurn(s.pending);
+      const turns = turnsIn(s, threadId);
+      const gen = lastGenTurn(turns);
       if (!gen) return {};
-      return {
-        pending: replaceTurn(s.pending, gen.id, {
-          ...gen, status: "error", error: message, problems,
-        }),
-      };
+      return putTurns(s, threadId, replaceTurn(turns, gen.id, {
+        ...gen, status: "done" as const, agentId, files, usage, planUsage,
+      }));
+    }),
+
+  genError: ({ threadId, message, problems }) =>
+    set((s) => {
+      const turns = turnsIn(s, threadId);
+      const gen = lastGenTurn(turns);
+      if (!gen) return {};
+      return putTurns(s, threadId, replaceTurn(turns, gen.id, {
+        ...gen, status: "error", error: message, problems,
+      }));
     }),
 
   // --- editing -----------------------------------------------------------
 
-  editStarted: (agentId, instruction) =>
+  editStarted: ({ threadId, agentId, instruction }) =>
     set((s) => ({
       streamingAgentId: agentId,
-      threads: {
-        ...s.threads,
-        [agentId]: [
-          ...(s.threads[agentId] ?? []),
-          { id: turnId(), role: "user", text: instruction },
-          {
-            id: turnId(), role: "jaroku", kind: "proposal", status: "streaming",
-            agentId, proposalId: null, summary: null, files: [], streaming: [], usage: null,
-          },
-        ],
-      },
+      streamingThreadId: threadId ?? null,
+      ...putTurns(s, threadId, [
+        ...turnsIn(s, threadId),
+        { id: turnId(), role: "user", text: instruction },
+        {
+          id: turnId(), role: "jaroku", kind: "proposal", status: "streaming",
+          agentId, proposalId: null, summary: null, files: [], streaming: [], usage: null,
+        },
+      ]),
     })),
 
   editFileStart: (path) => set((s) => touchStreaming(s, path, (f) => f ?? { path, bytes: 0, done: false })),
@@ -340,9 +403,9 @@ export const useChatStore = create<ChatState>((set) => ({
   editFileEnd: (path) =>
     set((s) => touchStreaming(s, path, (f) => (f ? { ...f, done: true } : { path, bytes: 0, done: true }))),
 
-  proposal: ({ proposalId, agentId, summary, files, usage }) =>
+  proposal: ({ threadId, proposalId, agentId, summary, files, usage }) =>
     set((s) => {
-      const turns = s.threads[agentId] ?? [];
+      const turns = turnsIn(s, threadId);
       const open = findStreaming(turns, agentId);
       const done: ProposalTurn = {
         id: open?.id ?? turnId(),
@@ -358,28 +421,24 @@ export const useChatStore = create<ChatState>((set) => ({
       };
       return {
         streamingAgentId: null,
-        threads: {
-          ...s.threads,
-          [agentId]: open ? replaceTurn(turns, open.id, done) : [...turns, done],
-        },
+        streamingThreadId: null,
+        ...putTurns(s, threadId, open ? replaceTurn(turns, open.id, done) : [...turns, done]),
       };
     }),
 
-  applied: (proposalId, agentId, version) =>
+  applied: ({ threadId, proposalId, version }) =>
     set((s) => {
-      const turns = s.threads[agentId] ?? [];
+      const turns = turnsIn(s, threadId);
       const turn = turns.find(
         (t): t is ProposalTurn => t.role === "jaroku" && t.kind === "proposal" && t.proposalId === proposalId,
       );
       if (!turn) return {};
-      return {
-        threads: { ...s.threads, [agentId]: replaceTurn(turns, turn.id, { ...turn, status: "applied", version }) },
-      };
+      return putTurns(s, threadId, replaceTurn(turns, turn.id, { ...turn, status: "applied", version }));
     }),
 
-  undone: (agentId, version, summary) =>
+  undone: ({ threadId, version, summary }) =>
     set((s) => {
-      const turns = s.threads[agentId] ?? [];
+      const turns = turnsIn(s, threadId);
       const turn = turns.find(
         (t): t is ProposalTurn =>
           t.role === "jaroku" && t.kind === "proposal" && t.status === "applied" && t.version === version,
@@ -390,98 +449,114 @@ export const useChatStore = create<ChatState>((set) => ({
         id: turnId(), role: "jaroku", kind: "info", tone: "muted",
         text: `Reverted edit v${version} — ${summary}`,
       };
-      return { threads: { ...s.threads, [agentId]: [...updated, note] } };
+      return putTurns(s, threadId, [...updated, note]);
     }),
 
-  discarded: (proposalId, agentId) =>
+  discarded: ({ threadId, proposalId }) =>
     set((s) => {
-      const turns = s.threads[agentId] ?? [];
+      const turns = turnsIn(s, threadId);
       const turn = turns.find(
         (t): t is ProposalTurn => t.role === "jaroku" && t.kind === "proposal" && t.proposalId === proposalId,
       );
       if (!turn || turn.status !== "pending") return {};
-      return {
-        threads: { ...s.threads, [agentId]: replaceTurn(turns, turn.id, { ...turn, status: "discarded" }) },
-      };
+      return putTurns(s, threadId, replaceTurn(turns, turn.id, { ...turn, status: "discarded" }));
     }),
 
-  editError: ({ message, problems, agentId, proposalId }) =>
+  editError: ({ threadId, message, problems, agentId, proposalId }) =>
     set((s) => {
+      // A refusal carries no session (see `In`), so it falls back to the one the edit was
+      // streaming into — which is the session the refusal is actually about.
+      const key = threadId ?? s.streamingThreadId ?? undefined;
       const owner = agentId ?? s.streamingAgentId;
-      if (owner) {
-        const turns = s.threads[owner] ?? [];
-        const open =
-          findStreaming(turns, owner) ??
+      const turns = turnsIn(s, key);
+      const open = owner
+        ? findStreaming(turns, owner) ??
           (proposalId
             ? turns.find(
                 (t): t is ProposalTurn =>
                   t.role === "jaroku" && t.kind === "proposal" && t.proposalId === proposalId,
               )
-            : undefined);
-        if (open) {
-          return {
-            streamingAgentId: null,
-            threads: {
-              ...s.threads,
-              [owner]: replaceTurn(turns, open.id, {
-                ...open, status: "error", error: message, problems, streaming: [],
-              }),
-            },
-          };
-        }
-        const note: InfoTurn = { id: turnId(), role: "jaroku", kind: "info", tone: "error", text: message };
-        return { streamingAgentId: null, threads: { ...s.threads, [owner]: [...turns, note] } };
+            : undefined)
+        : undefined;
+      if (open) {
+        return {
+          streamingAgentId: null,
+          streamingThreadId: null,
+          ...putTurns(s, key, replaceTurn(turns, open.id, {
+            ...open, status: "error", error: message, problems, streaming: [],
+          })),
+        };
       }
       const note: InfoTurn = { id: turnId(), role: "jaroku", kind: "info", tone: "error", text: message };
-      return { streamingAgentId: null, pending: [...s.pending, note] };
+      return { streamingAgentId: null, streamingThreadId: null, ...putTurns(s, key, [...turns, note]) };
     }),
 
   // --- explain (streaming prose reply, no code change) -------------------
 
-  replyStarted: (agentId, question) =>
+  replyStarted: ({ threadId, agentId, question }) =>
     set((s) => ({
       streamingAgentId: agentId,
-      threads: {
-        ...s.threads,
-        [agentId]: [
-          ...(s.threads[agentId] ?? []),
-          { id: turnId(), role: "user", text: question },
-          { id: turnId(), role: "jaroku", kind: "reply", status: "streaming", agentId, text: "" },
-        ],
-      },
+      streamingThreadId: threadId ?? null,
+      ...putTurns(s, threadId, [
+        ...turnsIn(s, threadId),
+        { id: turnId(), role: "user", text: question },
+        { id: turnId(), role: "jaroku", kind: "reply", status: "streaming", agentId, text: "" },
+      ]),
     })),
 
-  replyDelta: (agentId, text) =>
+  replyDelta: ({ threadId, agentId, text }) =>
     set((s) => {
-      const turns = s.threads[agentId] ?? [];
+      const turns = turnsIn(s, threadId);
       const open = findReply(turns, agentId);
       if (!open) return {};
-      return {
-        threads: { ...s.threads, [agentId]: replaceTurn(turns, open.id, { ...open, text: open.text + text }) },
-      };
+      return putTurns(s, threadId, replaceTurn(turns, open.id, { ...open, text: open.text + text }));
     }),
 
-  replyDone: (agentId) =>
+  replyDone: ({ threadId, agentId }) =>
     set((s) => {
-      const turns = s.threads[agentId] ?? [];
+      const turns = turnsIn(s, threadId);
       const open = findReply(turns, agentId);
-      if (!open) return { streamingAgentId: null };
+      if (!open) return { streamingAgentId: null, streamingThreadId: null };
       return {
         streamingAgentId: null,
-        threads: { ...s.threads, [agentId]: replaceTurn(turns, open.id, { ...open, status: "done" }) },
+        streamingThreadId: null,
+        ...putTurns(s, threadId, replaceTurn(turns, open.id, { ...open, status: "done" })),
       };
     }),
 
-  replyError: (agentId, message) =>
+  replyError: ({ threadId, agentId, message }) =>
     set((s) => {
-      const turns = s.threads[agentId] ?? [];
+      const key = threadId ?? s.streamingThreadId ?? undefined;
+      const turns = turnsIn(s, key);
       const open = findReply(turns, agentId);
       const next = open
         ? replaceTurn(turns, open.id, { ...open, status: "error" as const, text: open.text || message })
         : [...turns, { id: turnId(), role: "jaroku" as const, kind: "info" as const, tone: "error" as const, text: message }];
-      return { streamingAgentId: null, threads: { ...s.threads, [agentId]: next } };
+      return { streamingAgentId: null, streamingThreadId: null, ...putTurns(s, key, next) };
     }),
 }));
+
+/**
+ * What a rehydrated non-message item says (§4.5).
+ *
+ * A SENTENCE, NOT A REVIVED CARD. `thread_items` records that a run, plan, generation, proposal or
+ * eval happened in this session — the thing itself lives in its own table or, for a proposal, only
+ * in the process that made it. Rendering a diff card from a row like this would offer an Apply
+ * button for a proposal that no longer exists anywhere, which is exactly the "sending them to a
+ * button that can only refuse" the derivation goes out of its way to avoid.
+ */
+function stubText(item: ThreadItemView): string {
+  switch (item.kind) {
+    case "run": return "Ran the agent.";
+    case "eval": return "Started an eval.";
+    case "plan": return "Wrote a plan.";
+    case "generation": return "Generated the agent.";
+    case "proposal": return "Proposed an edit.";
+    // A message with no `user` role, which nothing writes today. Its body is still the truest
+    // thing available about it, so it is shown rather than replaced with a category.
+    default: return item.body ?? "";
+  }
+}
 
 /** The plan turn currently streaming, if any. */
 function openPlan(turns: ChatTurn[]): PlanTurn | undefined {
@@ -505,17 +580,18 @@ function livePlan(turns: ChatTurn[]): PlanTurn | undefined {
 
 /** True while a plan is streaming. Folded into the composer's `busy` so the disabled Send
  *  button — the affordance already in place for a generation or an edit — also gates a second
- *  plan, rather than relying on a server refusal the user only sees after clicking. */
-export function isPlanning(state: { pending: ChatTurn[] }): boolean {
-  return state.pending.some(
-    (t) => t.role === "jaroku" && t.kind === "plan" && t.status === "streaming",
-  );
+ *  plan, rather than relying on a server refusal the user only sees after clicking.
+ *
+ *  Over the turns of ONE session, since that is what the composer is looking at: a plan streaming
+ *  in another thread is not something this composer's Send button should be waiting on. */
+export function isPlanning(turns: ChatTurn[]): boolean {
+  return turns.some((t) => t.role === "jaroku" && t.kind === "plan" && t.status === "streaming");
 }
 
-/** The id of the plan awaiting a decision. The composer reads this to route a typed message
- *  as a revision rather than a fresh plan, and to invalidate on a connector change. */
-export function pendingPlanId(state: { pending: ChatTurn[] }): string | null {
-  return livePlan(state.pending)?.planId ?? null;
+/** The id of the plan awaiting a decision in this session. The composer reads this to route a typed
+ *  message as a revision rather than a fresh plan, and to invalidate on a connector change. */
+export function pendingPlanId(turns: ChatTurn[]): string | null {
+  return livePlan(turns)?.planId ?? null;
 }
 
 /** The streaming reply turn currently open on an agent's thread, if any. */
@@ -539,34 +615,46 @@ function findStreaming(turns: ChatTurn[], agentId: string): ProposalTurn | undef
   return undefined;
 }
 
-/** Update (or insert) one streaming-file row on the currently streaming proposal turn. */
+/**
+ * Update (or insert) one streaming-file row on the currently streaming proposal turn.
+ *
+ * A file event carries neither an agent nor a session, so both come from what the `started` event
+ * recorded. Two edits cannot be in flight at once — the editor is single-slot — so one slot each is
+ * the whole of the state this needs.
+ */
 function touchStreaming(
-  s: { threads: Record<string, ChatTurn[]>; streamingAgentId: string | null },
+  s: {
+    threads: Record<string, ChatTurn[]>;
+    pending: ChatTurn[];
+    streamingAgentId: string | null;
+    streamingThreadId: string | null;
+  },
   path: string,
   update: (f: { path: string; bytes: number; done: boolean } | undefined) => { path: string; bytes: number; done: boolean },
 ): Partial<ChatState> {
   const agentId = s.streamingAgentId;
   if (!agentId) return {};
-  const turns = s.threads[agentId] ?? [];
+  const key = s.streamingThreadId ?? undefined;
+  const turns = turnsIn(s, key);
   const open = findStreaming(turns, agentId);
   if (!open) return {};
   const existing = open.streaming.find((f) => f.path === path);
   const streaming = existing
     ? open.streaming.map((f) => (f.path === path ? update(f) : f))
     : [...open.streaming, update(undefined)];
-  return {
-    threads: {
-      ...s.threads,
-      [agentId]: replaceTurn(turns, open.id, { ...open, streaming }),
-    },
-  };
+  return putTurns(s, key, replaceTurn(turns, open.id, { ...open, streaming }));
 }
 
-/** The turns to render for the current selection. */
+/**
+ * The turns to render for the current selection — one THREAD's conversation (§3.1, §4.5).
+ *
+ * Takes the thread rather than the agent, which is the whole of BUG-03: two sessions on one agent
+ * used to resolve to the same array here, so opening either showed the other's work.
+ */
 export function threadFor(
   state: { threads: Record<string, ChatTurn[]>; pending: ChatTurn[] },
-  agentId: string | null,
+  threadId: string | null,
 ): ChatTurn[] {
-  if (agentId) return state.threads[agentId] ?? [];
+  if (threadId) return state.threads[threadId] ?? [];
   return state.pending;
 }

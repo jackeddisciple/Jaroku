@@ -524,14 +524,18 @@ export function BuildPane({
   const threads = useChatStore((s) => s.threads);
   const pendingThread = useChatStore((s) => s.pending);
   const streamingAgentId = useChatStore((s) => s.streamingAgentId);
+  // WHICH SESSION THIS COMPOSER IS IN (§3.1). The conversation is keyed by it, and so is everything
+  // derived from the conversation below — a plan awaiting a decision in another thread is not this
+  // composer's business, and a message typed here is filed here.
+  const activeThreadId = useThreadStore((s) => s.activeThreadId);
 
   const agent = agents.find((a) => a.agent_id === activeAgentId);
   const mode: "generate" | "edit" = activeAgentId ? "edit" : "generate";
+  const turns = threadFor({ threads, pending: pendingThread }, activeThreadId);
   // A plan on screen awaiting a decision. It routes a typed message to a revision and, when
   // the connector selection changes, is what gets invalidated.
-  const planId = pendingPlanId({ pending: pendingThread });
-  const busy = genStatus === "generating" || streamingAgentId !== null || isPlanning({ pending: pendingThread });
-  const turns = threadFor({ threads, pending: pendingThread }, activeAgentId);
+  const planId = pendingPlanId(turns);
+  const busy = genStatus === "generating" || streamingAgentId !== null || isPlanning(turns);
 
   // Unified-composer context: what the user last selected. A graph node takes precedence for
   // "explain"; otherwise the selected trace step is the context.
@@ -642,9 +646,9 @@ export function BuildPane({
   const planStale = useChatStore((s) => s.planStale);
   useEffect(() => {
     if (plannedConnectors.current === null) return;
-    planStale(connectorKey !== plannedConnectors.current);
+    planStale(activeThreadId, connectorKey !== plannedConnectors.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectorKey]);
+  }, [connectorKey, activeThreadId]);
 
   // --- Test mode (runs) + voice, folded in from the old run-bar ------------------
   const canRun = connected && Boolean(activeAgentId) && (agent?.runnable ?? false);
@@ -946,7 +950,7 @@ export function BuildPane({
     mode: composerMode,
     canRun,
     agentName: agent?.name ?? null,
-    planning: isPlanning({ pending: pendingThread }),
+    planning: isPlanning(turns),
     generating: genStatus === "generating",
     answering: streamingAgentId !== null,
     planPending: openPlan?.status === "pending",

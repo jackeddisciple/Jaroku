@@ -79,21 +79,24 @@ function dispatch(msg: ServerMessage): void {
       // streaming itself stays in buildStore only.
       const b = useBuildStore.getState();
       const c = useChatStore.getState();
+      // Every one of these is handed the whole message, so the session on the envelope reaches the
+      // store that files the turn. A tab that did not send the command learns which thread the work
+      // belongs to from here and nowhere else.
       switch (msg.type) {
-        case "started": b.startGeneration(msg.prompt); c.genStarted(msg.prompt); break;
+        case "started": b.startGeneration(msg.prompt); c.genStarted(msg); break;
         case "file_start": b.fileStart(msg.path); break;
         case "file_delta": b.fileDelta(msg.path, msg.text); break;
         case "file_end": b.fileEnd(msg.path); break;
-        case "done": b.finish(msg.agentId, msg.usage); c.genDone(msg.agentId, msg.files, msg.usage, msg.planUsage); break;
-        case "error": b.fail(msg.message, msg.problems); c.genError(msg.message, msg.problems); break;
+        case "done": b.finish(msg.agentId, msg.usage); c.genDone(msg); break;
+        case "error": b.fail(msg.message, msg.problems); c.genError(msg); break;
         // The pre-generation gate. NOTE that none of these touch buildStore: a plan writes no
         // files, so the build pane has nothing to show and — crucially — nothing to mark as
         // failed. plan_error goes to the conversation, never to b.fail().
-        case "plan_started": c.planStarted(msg.input, msg.revision); break;
-        case "plan_delta": c.planDelta(msg.text); break;
+        case "plan_started": c.planStarted(msg); break;
+        case "plan_delta": c.planDelta(msg); break;
         case "plan": c.planReady(msg); break;
-        case "plan_discarded": c.planDiscarded(msg.planId); break;
-        case "plan_error": c.planError(msg.message); break;
+        case "plan_discarded": c.planDiscarded(msg); break;
+        case "plan_error": c.planError(msg); break;
         default:
           // This switch used to drop anything it didn't know silently, so a server running
           // ahead of the client showed nothing at all rather than saying so.
@@ -106,14 +109,14 @@ function dispatch(msg: ServerMessage): void {
       // (the post-apply file refresh arrives separately on "agentFiles").
       const c = useChatStore.getState();
       switch (msg.type) {
-        case "started": c.editStarted(msg.agentId, msg.instruction); break;
+        case "started": c.editStarted(msg); break;
         case "file_start": c.editFileStart(msg.path); break;
         case "file_delta": c.editFileDelta(msg.path, msg.text.length); break;
         case "file_end": c.editFileEnd(msg.path); break;
         case "proposal": c.proposal(msg); break;
-        case "applied": c.applied(msg.proposalId, msg.agentId, msg.version); break;
-        case "undone": c.undone(msg.agentId, msg.version, msg.summary); break;
-        case "discarded": c.discarded(msg.proposalId, msg.agentId); break;
+        case "applied": c.applied(msg); break;
+        case "undone": c.undone(msg); break;
+        case "discarded": c.discarded(msg); break;
         case "error": c.editError(msg); break;
       }
       break;
@@ -339,7 +342,13 @@ function dispatch(msg: ServerMessage): void {
       // client because it asked to open it. Nothing merges: see threadStore's own header.
       const t = useThreadStore.getState();
       if (msg.type === "threads") t.setThreads(msg.threads, msg.counts);
-      else if (msg.type === "thread") t.setThread(msg.thread);
+      else if (msg.type === "thread") {
+        t.setThread(msg.thread);
+        // §4.5: opening a thread has to show that thread's conversation, and after a reload this
+        // is the only place it can come from — the turns live in `thread_items` server-side and
+        // nowhere in this tab.
+        useChatStore.getState().hydrate(msg.thread.id, msg.items);
+      }
       else if (msg.type === "error") t.setError(msg.message);
       // A notice is not an error and must not render as one. Nothing on this channel sends one yet;
       // it is handled rather than dropped so a server running ahead of the client is visible.
@@ -349,10 +358,10 @@ function dispatch(msg: ServerMessage): void {
     case "reply": {
       // Unified composer "explain": a streaming prose answer in the conversation (chatStore).
       const c = useChatStore.getState();
-      if (msg.type === "started") c.replyStarted(msg.agentId, msg.question);
-      else if (msg.type === "delta") c.replyDelta(msg.agentId, msg.text);
-      else if (msg.type === "done") c.replyDone(msg.agentId);
-      else if (msg.type === "error") c.replyError(msg.agentId, msg.message);
+      if (msg.type === "started") c.replyStarted(msg);
+      else if (msg.type === "delta") c.replyDelta(msg);
+      else if (msg.type === "done") c.replyDone(msg);
+      else if (msg.type === "error") c.replyError(msg);
       break;
     }
   }
@@ -570,6 +579,22 @@ function send(cmd: ClientCommand): void {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(cmd));
 }
 
+/**
+ * The session new work belongs to (§3.1), for the six commands the relay accepts a `threadId` on.
+ *
+ * READ HERE RATHER THAN PASSED BY EVERY CALLER. "Which thread am I in" is a fact about the app's
+ * navigation, not an argument a composer or an eval bar knows — and every one of them forgetting it
+ * is exactly what happened: the server accepted and validated the field from the first day, no
+ * sender ever set it, and every command fell through to `ensureForAgent`. Two threads on one agent
+ * then filed their work into whichever was touched last, which is the one thing §3.1 exists to stop.
+ *
+ * Undefined when nothing is open, which is a real state — the composer before anything has been
+ * said — and the server's own resolution applies to it exactly as before.
+ */
+function activeThread(): string | undefined {
+  return useThreadStore.getState().activeThreadId ?? undefined;
+}
+
 export function sendRun(
   input?: string,
   provider?: string,
@@ -578,7 +603,7 @@ export function sendRun(
 ): void {
   // `model` is forwarded now — the relay and index.ts always accepted it, but this client
   // was dropping it, so a real-provider run silently used the agent's default model.
-  send({ cmd: "run", input: input || undefined, provider, model, agentId });
+  send({ cmd: "run", input: input || undefined, provider, model, agentId, threadId: activeThread() });
 }
 
 export function sendLoadRun(runId: string): void {
@@ -593,7 +618,7 @@ export function sendGenerate(
   name?: string,
   planId?: string,
 ): void {
-  send({ cmd: "generate", prompt, connectors, name, planId });
+  send({ cmd: "generate", prompt, connectors, name, planId, threadId: activeThread() });
 }
 
 /** Ask for a plan. With `revisePlanId`, `prompt` is feedback on that plan, not a fresh brief. */
@@ -605,7 +630,7 @@ export function sendPlanAgent(
   /** Scoped MCP tools, as `"server/tool"` refs — per tool, never per server. */
   mcpTools?: string[],
 ): void {
-  send({ cmd: "planAgent", prompt, connectors, mcpTools, name, revisePlanId });
+  send({ cmd: "planAgent", prompt, connectors, mcpTools, name, revisePlanId, threadId: activeThread() });
 }
 
 export function sendDiscardPlan(planId: string): void {
@@ -645,7 +670,7 @@ export function sendListAgents(): void {
 // --- fix loop -------------------------------------------------------------
 
 export function sendEdit(agentId: string, instruction: string): void {
-  send({ cmd: "edit", agentId, instruction });
+  send({ cmd: "edit", agentId, instruction, threadId: activeThread() });
 }
 
 export function sendApplyEdit(proposalId: string): void {
@@ -696,7 +721,7 @@ export function sendExplain(
   /** §7's attachments. References, resolved server-side at send time — never content. */
   github?: GithubAttachment[],
 ): void {
-  send({ cmd: "explain", agentId, question, subject, ...(github?.length ? { github } : {}) });
+  send({ cmd: "explain", agentId, question, subject, threadId: activeThread(), ...(github?.length ? { github } : {}) });
 }
 
 // --- MCP: server registry --------------------------------------------------
@@ -904,7 +929,7 @@ export function sendStartEval(
   targets: EvalTarget[],
   budgetUsd?: number | null,
 ): void {
-  send({ cmd: "startEval", datasetId, agentId, targets, budgetUsd });
+  send({ cmd: "startEval", datasetId, agentId, targets, budgetUsd, threadId: activeThread() });
 }
 export function sendCancelEval(evalId: string): void {
   send({ cmd: "cancelEval", evalId });

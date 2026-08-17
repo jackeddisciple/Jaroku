@@ -35,7 +35,10 @@ export function openThread(thread: ThreadView): void {
   // resumes the same way and none of them can forget to.
   useThreadStore.getState().requestResume();
   sendLoadThread(thread.id);
-  if (thread.agent_id) selectAgent(thread.agent_id);
+  // `keepThread`, because the row that was just clicked IS the session — and `selectAgent`
+  // otherwise resolves the agent's most recently active one, which for any agent with two threads
+  // is usually not this one.
+  if (thread.agent_id) selectAgent(thread.agent_id, { keepThread: true });
   else useUiStore.getState().closeNav();
 }
 

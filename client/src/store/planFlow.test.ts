@@ -8,13 +8,13 @@
 // either strands the user (their correction starts a fresh plan and loses the old one) or
 // silently re-plans when they meant to start over.
 //
-// Second, TURN LIFECYCLE. Plan turns and generation turns share the `pending` thread, and the
-// handoff between them is where a double-echoed prompt or an orphaned card would show up.
+// Second, TURN LIFECYCLE. A plan turn and the generation turn it authorises share one SESSION,
+// and the handoff between them is where a double-echoed prompt or an orphaned card shows up.
 //
 //   npm run test:plan-flow
 
 import { classifyIntent, routeLabel } from "../lib/intent.ts";
-import { isPlanning, pendingPlanId, useChatStore, type PlanTurn } from "./chatStore.ts";
+import { isPlanning, pendingPlanId, threadFor, useChatStore, type PlanTurn } from "./chatStore.ts";
 import type { AgentPlan, GenUsage } from "../types.ts";
 
 let fail = 0;
@@ -45,10 +45,15 @@ const PLAN_USAGE: GenUsage = {
   cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0.0038,
 };
 
+/** The one session everything below happens in. Conversations are keyed by thread, not agent. */
+const T = "th-1";
+
 const store = () => useChatStore.getState();
-const reset = () => useChatStore.setState({ threads: {}, pending: [], streamingAgentId: null });
-const planTurns = () => store().pending.filter((t): t is PlanTurn => t.role === "jaroku" && t.kind === "plan");
-const userTexts = () => store().pending.filter((t) => t.role === "user").map((t) => (t as { text: string }).text);
+const reset = () =>
+  useChatStore.setState({ threads: {}, pending: [], streamingAgentId: null, streamingThreadId: null });
+const turns = () => threadFor(store(), T);
+const planTurns = () => turns().filter((t): t is PlanTurn => t.role === "jaroku" && t.kind === "plan");
+const userTexts = () => turns().filter((t) => t.role === "user").map((t) => (t as { text: string }).text);
 
 // --- routing --------------------------------------------------------------------------
 
@@ -91,74 +96,106 @@ const userTexts = () => store().pending.filter((t) => t.role === "user").map((t)
 }
 
 // --- turn lifecycle -------------------------------------------------------------------
+//
+// Every one of these runs inside ONE session, because that is what a conversation is now (§3.1):
+// the plan, the generation it authorises and everything after it share a thread id, and the store
+// files them by that rather than by the agent the generation happens to produce.
 
 // 5 — a plan streams, settles, and is takeable.
 {
   reset();
-  store().planStarted("a support agent that looks up orders", 1);
+  store().planStarted({ threadId: T, input: "a support agent that looks up orders", revision: 1 });
   check("planStarted appends the user's message", userTexts().join("|") === "a support agent that looks up orders", userTexts());
   check("planStarted opens a streaming plan turn", planTurns()[0]?.status === "streaming");
-  check("isPlanning true while streaming", isPlanning({ pending: store().pending }) === true);
-  check("no plan id to act on yet", pendingPlanId({ pending: store().pending }) === null);
+  check("isPlanning true while streaming", isPlanning(turns()) === true);
+  check("no plan id to act on yet", pendingPlanId(turns()) === null);
 
-  store().planDelta("<<<PLAN sec");
-  store().planDelta("tion=\"tools\">>>");
+  store().planDelta({ threadId: T, text: "<<<PLAN sec" });
+  store().planDelta({ threadId: T, text: "tion=\"tools\">>>" });
   check("deltas accumulate for live display", planTurns()[0]?.raw === "<<<PLAN section=\"tools\">>>", planTurns()[0]?.raw);
 
-  store().planReady({ planId: "p1", prompt: "a support agent that looks up orders", plan: PLAN, warnings: ["postgres is selected but unused"], usage: USAGE, revision: 1 });
+  store().planReady({ threadId: T, planId: "p1", prompt: "a support agent that looks up orders", plan: PLAN, warnings: ["postgres is selected but unused"], usage: USAGE, revision: 1 });
   check("settles in place — one plan turn, not two", planTurns().length === 1, planTurns().length);
   check("settled status is pending", planTurns()[0]?.status === "pending");
-  check("isPlanning false once settled", isPlanning({ pending: store().pending }) === false);
-  check("plan id now available to the composer", pendingPlanId({ pending: store().pending }) === "p1");
+  check("isPlanning false once settled", isPlanning(turns()) === false);
+  check("plan id now available to the composer", pendingPlanId(turns()) === "p1");
   check("warnings kept", planTurns()[0]?.warnings.length === 1);
   check("raw replaced by the settled plan", planTurns()[0]?.raw === PLAN.raw);
 }
 
 // 6 — confirming: the generation must not echo the user's prompt a second time.
 {
-  store().genStarted("a support agent that looks up orders");
+  store().genStarted({ threadId: T, prompt: "a support agent that looks up orders" });
   check("no duplicate user turn on confirm", userTexts().length === 1, userTexts());
   check("plan marked accepted, not left pending", planTurns()[0]?.status === "accepted");
-  check("accepted plan is no longer actionable", pendingPlanId({ pending: store().pending }) === null);
-  check("a generation turn was appended", store().pending.some((t) => t.role === "jaroku" && t.kind === "gen"));
+  check("accepted plan is no longer actionable", pendingPlanId(turns()) === null);
+  check("a generation turn was appended", turns().some((t) => t.role === "jaroku" && t.kind === "gen"));
 }
 
-// 7 — the plan travels with the agent: genDone moves the whole pending thread, so the new
-//     agent's conversation opens with the plan that authorised it.
+// 7 — the plan and the agent it produced are the SAME session, so nothing has to be moved anywhere
+//     on genDone. The server resolves a planned generation's thread from the plan's own id, which
+//     is what makes that true on the wire as well as here.
 {
-  store().genDone("support_bot", ["agent.py"], USAGE, PLAN_USAGE);
-  check("pending thread drained", store().pending.length === 0);
-  const gen = (store().threads["support_bot"] ?? []).find(
-    (t) => t.role === "jaroku" && t.kind === "gen",
-  ) as { usage: GenUsage | null; planUsage: GenUsage | null } | undefined;
+  store().genDone({ threadId: T, agentId: "support_bot", files: ["agent.py"], usage: USAGE, planUsage: PLAN_USAGE });
+  check("nothing was filed under no session", store().pending.length === 0);
+  const gen = turns().find((t) => t.role === "jaroku" && t.kind === "gen") as
+    { usage: GenUsage | null; planUsage: GenUsage | null; agentId: string | null } | undefined;
   check("both halves of the cost survive on the turn",
     gen?.usage?.cost_usd === USAGE.cost_usd && gen?.planUsage?.cost_usd === PLAN_USAGE.cost_usd,
     { usage: gen?.usage?.cost_usd, plan: gen?.planUsage?.cost_usd });
-  const thread = store().threads["support_bot"] ?? [];
-  check("plan landed in the agent's thread", thread.some((t) => t.role === "jaroku" && t.kind === "plan"), thread.map((t) => (t.role === "user" ? "user" : t.kind)));
+  check("the turn learns which agent it built", gen?.agentId === "support_bot");
+  check("plan and generation are in one session",
+    turns().some((t) => t.role === "jaroku" && t.kind === "plan"),
+    turns().map((t) => (t.role === "user" ? "user" : t.kind)));
+  check("and nowhere else", store().threads["support_bot"] === undefined);
+}
+
+// 7b — THE POINT OF THE RE-KEY: two sessions on one agent are two conversations. Keyed by agent id
+//      these were the same array, so opening either showed the other's work.
+{
+  reset();
+  store().editStarted({ threadId: "th-a", agentId: "support_bot", instruction: "rate limiting" });
+  store().editStarted({ threadId: "th-b", agentId: "support_bot", instruction: "oauth flow" });
+  const a = threadFor(store(), "th-a").filter((t) => t.role === "user").map((t) => (t as { text: string }).text);
+  const b = threadFor(store(), "th-b").filter((t) => t.role === "user").map((t) => (t as { text: string }).text);
+  check("each session holds only its own instruction",
+    a.join("|") === "rate limiting" && b.join("|") === "oauth flow", { a, b });
+}
+
+// 7c — reopening a thread rebuilds it from what the server kept (§4.5).
+{
+  reset();
+  store().hydrate(T, [
+    { kind: "message", role: "user", body: "why is it 401ing?", ref_id: null, created_at: "2026-08-17T00:00:00.000Z" },
+    { kind: "proposal", role: null, body: null, ref_id: "prop-1", created_at: "2026-08-17T00:00:01.000Z" },
+  ]);
+  const texts = turns().map((t) => (t.role === "user" ? t.text : (t as { text?: string }).text));
+  check("the user's own turn comes back", texts[0] === "why is it 401ing?", texts);
+  check("and what it caused, as a note rather than a revived card", texts[1] === "Proposed an edit.", texts);
+  check("a hydrate is a replace", turns().length === 2, turns().length);
 }
 
 // 8 — an UNPLANNED generation still appends its own user turn (the pre-gate behaviour, which
 //     the fixtures and any direct client still rely on).
 {
   reset();
-  store().genStarted("built without a plan");
+  store().genStarted({ threadId: T, prompt: "built without a plan" });
   check("unplanned generation still echoes the prompt", userTexts().join("|") === "built without a plan", userTexts());
 }
 
 // 9 — discard: only a plan still awaiting a decision can be discarded.
 {
   reset();
-  store().planStarted("x", 1);
-  store().planReady({ planId: "p1", prompt: "x", plan: PLAN, warnings: [], usage: USAGE, revision: 1 });
-  store().planDiscarded("p1");
+  store().planStarted({ threadId: T, input: "x", revision: 1 });
+  store().planReady({ threadId: T, planId: "p1", prompt: "x", plan: PLAN, warnings: [], usage: USAGE, revision: 1 });
+  store().planDiscarded({ threadId: T, planId: "p1" });
   check("discarded plan is marked, not removed", planTurns()[0]?.status === "discarded");
-  check("discarded plan is not actionable", pendingPlanId({ pending: store().pending }) === null);
+  check("discarded plan is not actionable", pendingPlanId(turns()) === null);
 
-  store().planStarted("y", 1);
-  store().planReady({ planId: "p2", prompt: "y", plan: PLAN, warnings: [], usage: USAGE, revision: 1 });
-  store().genStarted("y");
-  store().planDiscarded("p2");
+  store().planStarted({ threadId: T, input: "y", revision: 1 });
+  store().planReady({ threadId: T, planId: "p2", prompt: "y", plan: PLAN, warnings: [], usage: USAGE, revision: 1 });
+  store().genStarted({ threadId: T, prompt: "y" });
+  store().planDiscarded({ threadId: T, planId: "p2" });
   check("an accepted plan cannot be un-accepted by a late discard", planTurns()[1]?.status === "accepted", planTurns()[1]?.status);
 }
 
@@ -167,14 +204,14 @@ const userTexts = () => store().pending.filter((t) => t.role === "user").map((t)
 //      Found in the browser: the old card sat there looking perfectly clickable.
 {
   reset();
-  store().planStarted("a support agent", 1);
-  store().planReady({ planId: "p1", prompt: "a support agent", plan: PLAN, warnings: [], usage: USAGE, revision: 1 });
-  store().planStarted("drop the summariser", 2);
+  store().planStarted({ threadId: T, input: "a support agent", revision: 1 });
+  store().planReady({ threadId: T, planId: "p1", prompt: "a support agent", plan: PLAN, warnings: [], usage: USAGE, revision: 1 });
+  store().planStarted({ threadId: T, input: "drop the summariser", revision: 2 });
   check("predecessor marked superseded", planTurns()[0]?.status === "superseded", planTurns()[0]?.status);
-  check("superseded plan is not actionable", pendingPlanId({ pending: store().pending }) === null);
+  check("superseded plan is not actionable", pendingPlanId(turns()) === null);
 
-  store().planReady({ planId: "p2", prompt: "a support agent", plan: PLAN, warnings: [], usage: USAGE, revision: 2 });
-  check("only the revision is actionable", pendingPlanId({ pending: store().pending }) === "p2");
+  store().planReady({ threadId: T, planId: "p2", prompt: "a support agent", plan: PLAN, warnings: [], usage: USAGE, revision: 2 });
+  check("only the revision is actionable", pendingPlanId(turns()) === "p2");
   check("revision number carried", planTurns()[1]?.revision === 2);
 }
 
@@ -182,40 +219,39 @@ const userTexts = () => store().pending.filter((t) => t.role === "user").map((t)
 //      a plan is prose the user may be mid-read, so it stays legible and only loses Generate.
 {
   reset();
-  store().planStarted("x", 1);
-  store().planReady({ planId: "p1", prompt: "x", plan: PLAN, warnings: [], usage: USAGE, revision: 1 });
-  store().planStale(true);
+  store().planStarted({ threadId: T, input: "x", revision: 1 });
+  store().planReady({ threadId: T, planId: "p1", prompt: "x", plan: PLAN, warnings: [], usage: USAGE, revision: 1 });
+  store().planStale(T, true);
   check("stale status set", planTurns()[0]?.status === "stale");
   check("stale plan keeps its content", planTurns()[0]?.plan?.tools.length === 1);
-  check("stale plan still resolves an id (so it can be re-planned)", pendingPlanId({ pending: store().pending }) === "p1");
+  check("stale plan still resolves an id (so it can be re-planned)", pendingPlanId(turns()) === "p1");
 
   // Putting the selection back must undo it. Staleness is a comparison, not a latch: the fix for
   // a mis-clicked connector must not cost another plan.
-  store().planStale(false);
+  store().planStale(T, false);
   check("restoring the selection un-stales the plan", planTurns()[0]?.status === "pending");
   check("un-staled plan keeps its content", planTurns()[0]?.plan?.tools.length === 1);
-
-  // A decided plan is finished; the connector selection has no opinion about it any more.
-
 }
 
 // 11 — a plan error lands on the streaming turn, not as a generation failure.
 {
   reset();
-  store().planStarted("x", 1);
-  store().planError("the model produced no plan");
+  store().planStarted({ threadId: T, input: "x", revision: 1 });
+  store().planError({ threadId: T, message: "the model produced no plan" });
   check("error attaches to the open plan turn", planTurns()[0]?.status === "error");
   check("error message kept", planTurns()[0]?.error === "the model produced no plan");
 }
 
 // 12 — a plan error with nothing streaming (a refused confirm, a stale card in another tab)
-//      becomes a conversation note rather than a silent drop.
+//      becomes a conversation note rather than a silent drop. A refusal carries no session, so it
+//      lands in `pending`: filing another tab's refusal into whatever this one has open is how a
+//      conversation acquires turns that were never part of it.
 {
   reset();
-  store().planError("that plan is no longer available — describe the agent again");
+  store().planError({ message: "that plan is no longer available — describe the agent again" });
   const note = store().pending.find((t) => t.role === "jaroku" && t.kind === "info");
   check("orphan plan error becomes an info turn", Boolean(note), store().pending);
-  check("no phantom plan turn invented", planTurns().length === 0);
+  check("it belongs to no session", threadFor(store(), T).length === 0);
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

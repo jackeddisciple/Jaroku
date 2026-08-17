@@ -21,7 +21,26 @@
 
 import { useBuildStore } from "../store/buildStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
+import { useThreadStore } from "../store/threadStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
+
+/**
+ * The session selecting this agent should open: its most recently active, unarchived thread.
+ *
+ * THE SAME RULE THE SERVER USES (`ThreadStore.ensureForAgent`), and it has to be the same one. A
+ * command with no `threadId` on it is resolved that way server-side, so a client that opened a
+ * different session would light up a row the user was not looking at. Null when the agent has no
+ * session yet — the next command opens one, and the snapshot names it.
+ */
+function latestThreadFor(agentId: string): string | null {
+  const rows = useThreadStore
+    .getState()
+    .threads.filter((t) => t.agent_id === agentId && t.archived_at === null);
+  if (!rows.length) return null;
+  let best = rows[0]!;
+  for (const t of rows) if (t.last_activity_at > best.last_activity_at) best = t;
+  return best.id;
+}
 
 /**
  * Select an agent, dropping a run/step selection that belongs to a different one.
@@ -35,11 +54,29 @@ import { useUiStore } from "../store/uiStore.ts";
  * changes, and §2 says the sidebar is the single source of navigation. A view that closed itself from
  * its own row would be a second one.
  */
-export function selectAgent(agentId: string | null): void {
+export function selectAgent(
+  agentId: string | null,
+  /**
+   * Leave the thread selection alone, for a caller that has just made one.
+   *
+   * `openThread` picks the row and then follows it to its agent, and without this the agent
+   * would immediately repoint the session at whichever of its threads was touched last — which
+   * for any agent with two threads is usually not the one that was just clicked.
+   */
+  opts?: { keepThread?: boolean },
+): void {
   useUiStore.getState().closeNav();
   const build = useBuildStore.getState();
   if (build.activeAgentId === agentId) return;
   build.selectAgent(agentId);
+
+  // AND THE SESSION FOLLOWS THE AGENT, the way the run already does. The composer files work into
+  // `activeThreadId`, so leaving it pointing at the previous agent's thread would send this
+  // agent's next instruction to a session about something else. Null for "no agent selected",
+  // which is §3.1's planning stage and a real state.
+  if (!opts?.keepThread) {
+    useThreadStore.getState().selectThread(agentId ? latestThreadFor(agentId) : null);
+  }
 
   const trace = useTraceStore.getState();
   const activeRun = trace.activeRunId ? trace.runs[trace.activeRunId] : undefined;

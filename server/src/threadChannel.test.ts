@@ -103,8 +103,13 @@ const relay = new WsRelay({
   clientHtmlPath: "/dev/null",
   contextFor: () => (connections++ === 0 ? ctxA : ctxB),
   listThreads: (ctx) => snapshot(ctx),
-  loadThread: async (ctx, id) =>
-    (await threads.get(ctx, id)) ? (await snapshot(ctx)).threads.find((t) => t.id === id) : undefined,
+  loadThread: async (ctx, id) => {
+    if (!(await threads.get(ctx, id))) return undefined;
+    const thread = (await snapshot(ctx)).threads.find((t) => t.id === id);
+    // The conversation rides with the row, so opening a thread renders its own turns rather than
+    // whatever the agent's happened to be — §4.5, and the reason `items` is on the event.
+    return thread ? { thread, items: await threads.itemsFor(ctx, id) } : undefined;
+  },
   onCommand: (cmd: ForwardedCommand, ctx: TenantContext) => {
     void (async () => {
       if (cmd.cmd === "createThread") await threads.create(ctx, { title: cmd.title });

@@ -1437,6 +1437,21 @@ const EMPTY_THREADS: ThreadSnapshot = {
   counts: { all: 0, needs_you: 0, running: 0, recent: 0, archived: 0 },
 };
 
+/**
+ * One row of what a thread owns, as the client rehydrates it (§4.5).
+ *
+ * The store's own `ThreadItem` minus `thread_id`, which the client already knows because it asked
+ * for this thread. Structural rather than imported so the wire shape is stated where every other
+ * wire shape is, and so a column added to `thread_items` is a deliberate decision to send.
+ */
+export interface ThreadItemView {
+  kind: "run" | "eval" | "plan" | "generation" | "proposal" | "message";
+  ref_id: string | null;
+  role: "user" | null;
+  body: string | null;
+  created_at: string;
+}
+
 export type ThreadEvent =
   /**
    * The whole list for one workspace, with derived status and counts.
@@ -1448,12 +1463,18 @@ export type ThreadEvent =
    */
   | { type: "threads"; threads: ThreadView[]; counts: ThreadCounts }
   /**
-   * One thread, opened into the three-pane view (§4.5).
+   * One thread, opened into the three-pane view (§4.5), with what happened in it.
    *
    * Answered to the asking socket only. It is the request "put me back where I was", which is a
    * fact about one client's navigation and means nothing to the other tabs in the workspace.
+   *
+   * `items` IS WHAT MAKES OPENING A THREAD SHOW ANYTHING. Without it the row could be selected and
+   * the centre pane still rendered whatever the agent's conversation happened to be — so two
+   * threads on one agent showed the same turns and a reopened thread showed none. The rehydrated
+   * conversation is the user's own turns plus a stub per run, plan, generation, proposal and eval;
+   * Jaroku's replies are deliberately not stored (migration 044) and do not come back.
    */
-  | { type: "thread"; thread: ThreadView }
+  | { type: "thread"; thread: ThreadView; items: ThreadItemView[] }
   | { type: "error"; message: string; threadId?: string }
   | { type: "notice"; message: string; threadId?: string };
 
@@ -1746,7 +1767,10 @@ export interface RelayOptions {
    * produces for another tenant's thread — the refusal and the "no such thread" are deliberately
    * the same answer, so a client learns nothing about what exists elsewhere.
    */
-  loadThread?: (ctx: TenantContext, threadId: string) => Promise<ThreadView | undefined>;
+  loadThread?: (
+    ctx: TenantContext,
+    threadId: string,
+  ) => Promise<{ thread: ThreadView; items: ThreadItemView[] } | undefined>;
   /** Every deployment, plus whether a Railway token is configured. Names only. */
   listDeployments?: (ctx: TenantContext) =>
     | { deployments: unknown[]; railwayConfigured: boolean }
@@ -2112,9 +2136,9 @@ export class WsRelay {
             // broadcasting it would move everybody else's centre pane.
             const threadId = msg.threadId;
             void this.answer(ws, async (ctx) => {
-              const thread = await this.opts.loadThread?.(ctx, threadId);
-              return thread
-                ? { channel: "threads", type: "thread", thread }
+              const loaded = await this.opts.loadThread?.(ctx, threadId);
+              return loaded
+                ? { channel: "threads", type: "thread", thread: loaded.thread, items: loaded.items }
                 : {
                     channel: "threads",
                     type: "error",
@@ -2375,14 +2399,25 @@ export class WsRelay {
     this.broadcastTo(ctx, { channel: "log", level, text });
   }
 
-  // Broadcast a generation event. Separate channel from "trace" by design.
-  broadcastGen(ctx: TenantContext, event: GenEvent): void {
-    this.broadcastTo(ctx, { channel: "gen", ...event });
+  /**
+   * Broadcast a generation event. Separate channel from "trace" by design.
+   *
+   * `threadId` RIDES THE ENVELOPE RATHER THAN EACH MEMBER, because it answers the same question for
+   * all of them — which session this belongs to — and putting it on ten event shapes would be ten
+   * places to forget it. Every client in the workspace receives these, and without it none of them
+   * can file the turns under the right thread: the sender knows which thread it asked from, the
+   * other tabs do not, and a conversation only the originating tab could place is not a shared one.
+   *
+   * Omitted for a refusal answered to whoever asked — that belongs to no session.
+   */
+  broadcastGen(ctx: TenantContext, event: GenEvent, threadId?: string | null): void {
+    this.broadcastTo(ctx, { channel: "gen", ...event, ...(threadId ? { threadId } : {}) });
   }
 
   // Broadcast an edit-flow event. Separate channel from "trace" and "gen" by design.
-  broadcastEdit(ctx: TenantContext, event: EditEvent): void {
-    this.broadcastTo(ctx, { channel: "edit", ...event });
+  // `threadId` as above: which session the diff and its instruction belong to.
+  broadcastEdit(ctx: TenantContext, event: EditEvent, threadId?: string | null): void {
+    this.broadcastTo(ctx, { channel: "edit", ...event, ...(threadId ? { threadId } : {}) });
   }
 
   // Broadcast a debug-depth control event (pause/resume/boundary/branched). Separate channel by
@@ -2393,8 +2428,9 @@ export class WsRelay {
 
   // Broadcast an "explain" reply event (unified composer). Separate channel by design — it never
   // enters the trace store or the frozen event schema.
-  broadcastReply(ctx: TenantContext, event: ReplyEvent): void {
-    this.broadcastTo(ctx, { channel: "reply", ...event });
+  // `threadId` as on broadcastGen: an explanation is a turn in a session like any other.
+  broadcastReply(ctx: TenantContext, event: ReplyEvent, threadId?: string | null): void {
+    this.broadcastTo(ctx, { channel: "reply", ...event, ...(threadId ? { threadId } : {}) });
   }
 
   // Broadcast an eval-channel event (datasets, and later eval progress/results). Separate

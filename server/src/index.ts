@@ -40,6 +40,9 @@ import {
   type ThreadCounts,
   type ThreadSnapshot,
   type ThreadView,
+  type EditEvent,
+  type GenEvent,
+  type ReplyEvent,
 } from "./wsRelay.ts";
 import { Router, forbidden, tooMany, unauthorized } from "./http/router.ts";
 import { securityHeaders } from "./http/security.ts";
@@ -806,6 +809,22 @@ const contextForGen = (): TenantContext => genContext ?? serverContext();
 const contextForEdit = (): TenantContext => editContext ?? serverContext();
 const contextForReply = (): TenantContext => replyContext ?? serverContext();
 const contextForDeploy = (): TenantContext => deployContext ?? serverContext();
+
+// Every event a piece of work emits goes out with the SESSION it belongs to as well as the
+// workspace, which is what lets a client file the turns under the right thread (§3.1, §4.5).
+//
+// Four wrappers rather than a `threadId` argument at forty call sites, and function declarations
+// rather than consts because the listeners below are registered above where `planThread` and its
+// siblings are declared. Each pairs the scope with the session that scope's work is filed under, so
+// the two can never be given from different operations — which is the same reason each subsystem
+// has its own context in the first place.
+//
+// A refusal answered to whoever asked still calls `relay.broadcast*` directly with their own ctx
+// and no session: it belongs to no thread, and attaching one would file somebody else's error in it.
+function genOut(e: GenEvent): void { relay.broadcastGen(contextForGen(), e, genThread); }
+function planOut(e: GenEvent): void { relay.broadcastGen(contextForPlan(), e, planThread); }
+function editOut(e: EditEvent): void { relay.broadcastEdit(contextForEdit(), e, editThread); }
+function replyOut(e: ReplyEvent): void { relay.broadcastReply(contextForReply(), e, replyThread); }
 
 // The orchestrator. Constructed after the relay exists (it broadcasts progress), so it's
 // declared here and assigned below.
@@ -2234,8 +2253,12 @@ const relay = new WsRelay({
   // The list and the counts together, so the chips and the nav badge are one number — §2.1.
   listThreads: (ctx) => threadSnapshot(ctx),
   // Scoped, so another workspace's thread id is indistinguishable from one that does not exist.
+  // The items come back with the row, because opening a thread that renders somebody else's
+  // conversation is the failure §4.5 exists to prevent — see ThreadEvent's `thread` member.
   loadThread: async (ctx, threadId) =>
-    (await threadStore.get(ctx, threadId)) ? threadView(ctx, threadId) : undefined,
+    (await threadStore.get(ctx, threadId))
+      ? { thread: await threadView(ctx, threadId), items: await threadStore.itemsFor(ctx, threadId) }
+      : undefined,
   // By name only, and per WORKSPACE. The client learns THAT a key is set, never what it is —
   // and learns it about its own workspace rather than about the machine.
   listProviders: (ctx) => providerSnapshot(ctx),
@@ -2268,7 +2291,7 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (cmd.cmd === "generate") generateAgent(ctx, cmd);
     else if (cmd.cmd === "planAgent") planAgent(ctx, cmd);
     else if (cmd.cmd === "discardPlan") planner.discard(ctx.workspaceId, cmd.planId);
-    else if (cmd.cmd === "edit") editAgent(ctx, cmd.agentId, cmd.instruction, cmd.threadId);
+    else if (cmd.cmd === "edit") void editAgent(ctx, cmd.agentId, cmd.instruction, cmd.threadId);
     else if (cmd.cmd === "applyEdit") void editor.apply(ctx, cmd.proposalId);
     else if (cmd.cmd === "undoEdit") void editor.undo(ctx, cmd.agentId);
     else if (cmd.cmd === "discardEdit") void editor.discard(ctx, cmd.proposalId);
@@ -3336,7 +3359,13 @@ async function handleThreadCommand(ctx: TenantContext, cmd: ThreadCommand): Prom
       await broadcastThreads(ctx);
       // And to the socket that asked, so it knows WHICH thread it just made. The broadcast is a
       // list; a client that had only that would have to guess its own new row by timestamp.
-      relay.sendThreads(ctx, ctx.requestId, { type: "thread", thread: await threadView(ctx, thread.id) });
+      // With its (empty) items, so the client can open it straight away rather than having to ask
+      // again for a conversation it already knows is empty — see BUG-13's dead row.
+      relay.sendThreads(ctx, ctx.requestId, {
+        type: "thread",
+        thread: await threadView(ctx, thread.id),
+        items: await threadStore.itemsFor(ctx, thread.id),
+      });
       return;
     }
 
@@ -5532,9 +5561,9 @@ onBothPools("exit", ({ runId, code, signal, timedOut, elapsedMs }) => {
 // Every failure here goes out as plan_error, never as the gen channel's plain "error". That
 // one is wired to buildStore.fail() on the client and paints the build pane as a failed
 // generation — which, at plan time, would be reporting a failure that never happened.
-planner.on("started", (e) => relay.broadcastGen(contextForPlan(), { type: "plan_started", ...e }));
-planner.on("delta", (e) => relay.broadcastGen(contextForPlan(), { type: "plan_delta", ...e }));
-planner.on("discarded", (e) => relay.broadcastGen(contextForPlan(), { type: "plan_discarded", ...e }));
+planner.on("started", (e) => planOut({ type: "plan_started", ...e }));
+planner.on("delta", (e) => planOut({ type: "plan_delta", ...e }));
+planner.on("discarded", (e) => planOut({ type: "plan_discarded", ...e }));
 
 planner.on("plan", (e) => {
   const usage = e.usage as { cost_usd?: number; output_tokens?: number };
@@ -5550,7 +5579,7 @@ planner.on("plan", (e) => {
   meterPlatformCall(contextForPlan(), "llm.plan", {
     model: GENERATION_MODEL, ...tokensOf(e.usage), payer: planPayer, threadId: planThread,
   });
-  relay.broadcastGen(contextForPlan(), { type: "plan", ...e });
+  planOut({ type: "plan", ...e });
   // The plan is now awaiting a decision, which is §3.3's `needs_you`. The item is what lets the
   // derivation find it: liveness comes from the planner's own slot, ownership from here.
   if (planThread) noteThreadItem(contextForPlan(), planThread, { kind: "plan", refId: e.planId });
@@ -5558,7 +5587,7 @@ planner.on("plan", (e) => {
 
 planner.on("error", (e) => {
   console.error(`[plan] failed: ${e.message}`);
-  relay.broadcastGen(contextForPlan(), { type: "plan_error", message: e.message });
+  planOut({ type: "plan_error", message: e.message });
 });
 
 async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<void> {
@@ -5674,7 +5703,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
       // plan; quietly building something they never reviewed is the exact failure this gate
       // exists to prevent.
       generating = false;
-      relay.broadcastGen(contextForGen(), {
+      genOut({
         type: "plan_error",
         message: "that plan is no longer available — describe the agent again",
       });
@@ -5690,7 +5719,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     const missing = (rec.connectors ?? []).filter((id) => !known.has(id));
     if (missing.length) {
       generating = false;
-      relay.broadcastGen(contextForGen(), {
+      genOut({
         type: "plan_error",
         message:
           `the plan uses ${missing.join(", ")}, which ${missing.length > 1 ? "are" : "is"} no ` +
@@ -5710,7 +5739,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     const goneMcp = approvedRefs.filter((r) => !stillThere.has(r));
     if (goneMcp.length) {
       generating = false;
-      relay.broadcastGen(contextForGen(), {
+      genOut({
         type: "plan_error",
         message:
           `the plan uses the MCP tool${goneMcp.length > 1 ? "s" : ""} ${goneMcp.join(", ")}, which ` +
@@ -5746,11 +5775,11 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   rejectedGenerations.delete(genThread);
   noteThreadItem(ctx, genThread, { kind: "generation", refId: generationId });
   console.log(`[gen] generating${plan ? " from an approved plan" : ""} — "${prompt.slice(0, 80)}"`);
-  relay.broadcastGen(contextForGen(), { type: "started", prompt });
+  genOut({ type: "started", prompt });
 
-  const onStart = (e: { path: string }) => relay.broadcastGen(contextForGen(), { type: "file_start", ...e });
-  const onDelta = (e: { path: string; text: string }) => relay.broadcastGen(contextForGen(), { type: "file_delta", ...e });
-  const onEnd = (e: { path: string }) => relay.broadcastGen(contextForGen(), { type: "file_end", ...e });
+  const onStart = (e: { path: string }) => genOut({ type: "file_start", ...e });
+  const onDelta = (e: { path: string; text: string }) => genOut({ type: "file_delta", ...e });
+  const onEnd = (e: { path: string }) => genOut({ type: "file_end", ...e });
 
   const cleanup = () => {
     generating = false;
@@ -5780,7 +5809,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     meterPlatformCall(contextForGen(), "llm.generation", {
       model: GENERATION_MODEL, ...tokensOf(e.usage), payer: genPayer, threadId: genThread,
     });
-    relay.broadcastGen(contextForGen(), { type: "done", ...e });
+    genOut({ type: "done", ...e });
     // THE SESSION LEARNS WHICH AGENT IT BUILT, and the name is snapshotted in the same statement
     // (§3.2) — after this, deleting that agent nulls the link and leaves the row saying
     // `name (deleted)` rather than losing what it was. `syncAgents` first, because the uuid this
@@ -5805,7 +5834,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   const onError = (e: { message: string; problems?: string[] }) => {
     console.error(`[gen] failed: ${e.message}`);
     for (const p of e.problems ?? []) console.error(`  - ${p}`);
-    relay.broadcastGen(contextForGen(), { type: "error", ...e });
+    genOut({ type: "error", ...e });
     // §3.3's "rejected generation": the thread is blocked on a person deciding what to do about it.
     // Marked rather than stored, for the reason `openProposals` is read live — the refused files
     // exist in this process and nowhere else. The THREAD is what is blocked, and the next
@@ -5841,7 +5870,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     });
   } catch (err) {
     console.error(`[gen] could not start: ${(err as Error)?.message ?? err}`);
-    relay.broadcastGen(contextForGen(), { type: "error", message: "could not start the generation" });
+    genOut({ type: "error", message: "could not start the generation" });
     cleanup();
   }
 }
@@ -5849,9 +5878,9 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
 // --- editing (fix loop) -----------------------------------------------------
 // Streams into the "edit" channel. Like generation, nothing here touches the trace store
 // or the frozen event schema. Listeners are permanent — every event carries its ids.
-editor.on("file_start", (e) => relay.broadcastEdit(contextForEdit(), { type: "file_start", ...e }));
-editor.on("file_delta", (e) => relay.broadcastEdit(contextForEdit(), { type: "file_delta", ...e }));
-editor.on("file_end", (e) => relay.broadcastEdit(contextForEdit(), { type: "file_end", ...e }));
+editor.on("file_start", (e) => editOut({ type: "file_start", ...e }));
+editor.on("file_delta", (e) => editOut({ type: "file_delta", ...e }));
+editor.on("file_end", (e) => editOut({ type: "file_end", ...e }));
 
 editor.on("proposal", (e) => {
   console.log(
@@ -5863,7 +5892,7 @@ editor.on("proposal", (e) => {
   meterPlatformCall(contextForEdit(), "llm.edit", {
     model: GENERATION_MODEL, ...tokensOf(e.usage), payer: editPayer, threadId: editThread,
   });
-  relay.broadcastEdit(contextForEdit(), { type: "proposal", ...e });
+  editOut({ type: "proposal", ...e });
   // An unapplied diff is the most common thing a thread is blocked on, and this row is how the
   // derivation finds which thread. Whether it is still pending stays the editor's answer —
   // `openProposals` — so applying or discarding needs no row of its own here.
@@ -5872,7 +5901,7 @@ editor.on("proposal", (e) => {
 
 editor.on("applied", (e) => {
   console.log(`[edit] applied v${e.version} to ${e.agentId}: ${e.summary}`);
-  relay.broadcastEdit(contextForEdit(), { type: "applied", ...e });
+  editOut({ type: "applied", ...e });
   // The proposal has left `openProposals`, so the thread is no longer blocked. Nothing is written —
   // the row that bound the proposal is still true — but the list has to be told, because the glyph
   // it is rendering has just stopped being amber.
@@ -5886,7 +5915,7 @@ editor.on("applied", (e) => {
 
 editor.on("undone", (e) => {
   console.log(`[edit] undid v${e.version} on ${e.agentId}`);
-  relay.broadcastEdit(contextForEdit(), { type: "undone", ...e });
+  editOut({ type: "undone", ...e });
   void syncAgents().then(() => relay.broadcastAgents());
   relay.broadcastAgentFiles(contextForEdit(), e.agentId);
   // Same as apply: the pointer moved, so the cache key did too.
@@ -5894,7 +5923,7 @@ editor.on("undone", (e) => {
 });
 
 editor.on("discarded", (e) => {
-  relay.broadcastEdit(contextForEdit(), { type: "discarded", ...e });
+  editOut({ type: "discarded", ...e });
   // Same as `applied`: the diff is gone from the editor, so the row is no longer blocked.
   void broadcastThreads(contextForEdit()).catch(() => {});
 });
@@ -5902,10 +5931,10 @@ editor.on("discarded", (e) => {
 editor.on("error", (e) => {
   console.error(`[edit] failed: ${e.message}`);
   for (const p of e.problems ?? []) console.error(`  - ${p}`);
-  relay.broadcastEdit(contextForEdit(), { type: "error", ...e });
+  editOut({ type: "error", ...e });
 });
 
-function editAgent(ctx: TenantContext, agentId: string, instruction: string, threadId?: string): void {
+async function editAgent(ctx: TenantContext, agentId: string, instruction: string, threadId?: string): Promise<void> {
   // Refused here rather than inside `propose`, so the refusal is answered to the asker and the
   // edit scope is left pointing at the workspace whose edit is actually running. The editor
   // refuses a second edit either way; what this adds is that a refused one cannot redirect the
@@ -5920,16 +5949,22 @@ function editAgent(ctx: TenantContext, agentId: string, instruction: string, thr
   }
   editContext = ctx;
   console.log(`[edit] ${agentId} — "${instruction.slice(0, 80)}"`);
-  relay.broadcastEdit(contextForEdit(), { type: "started", agentId, instruction });
+  // BOUND BEFORE THE FIRST EVENT GOES OUT, not alongside it. Every edit event now names the session
+  // it belongs to, and `started` is the one that opens the turn — resolved in a floating `.then()`,
+  // it went out carrying the PREVIOUS edit's thread, and the instruction would have opened a
+  // conversation in a session it had nothing to do with.
+  //
   // Claimed after the guard, like `editContext` immediately above it and for the same reason: a
   // refused edit that had already repointed this would file the running edit's proposal under
   // whoever asked second. The instruction is what the user said, so it is the thread's message.
-  void threadForWork(ctx, threadId, agentId)
-    .then((thread) => {
-      editThread = thread;
-      noteUserMessage(ctx, thread, instruction);
-    })
-    .catch((err) => console.error(`[threads] could not bind the edit:`, (err as Error)?.message ?? err));
+  try {
+    editThread = await threadForWork(ctx, threadId, agentId);
+    noteUserMessage(ctx, editThread, instruction);
+  } catch (err) {
+    console.error(`[threads] could not bind the edit:`, (err as Error)?.message ?? err);
+    editThread = null;
+  }
+  editOut({ type: "started", agentId, instruction });
   void providerKeys
     .platformKey(ctx)
     .then((apiKey) => {
@@ -6502,7 +6537,7 @@ async function explainAgent(ctx: TenantContext, cmd: ExplainCommand): Promise<vo
   // the line that makes a session recognisable a week later.
   replyThread = await threadForWork(ctx, cmd.threadId, cmd.agentId);
   noteUserMessage(ctx, replyThread, cmd.question);
-  relay.broadcastReply(contextForReply(), { type: "started", agentId: cmd.agentId, question: cmd.question });
+  replyOut({ type: "started", agentId: cmd.agentId, question: cmd.question });
   let context = await buildExplainContext(ctx, cmd);
   // §7's attachments, resolved at SEND TIME rather than at attach time — a chip made five minutes
   // ago should ground the answer in the repository as it is now. Appended rather than prepended so
@@ -6517,7 +6552,7 @@ ${attached}`;
   }
   const explainKey = await providerKeys.platformKey(ctx);
   void streamExplain(context, cmd.question, {
-    onDelta: (text) => relay.broadcastReply(contextForReply(), { type: "delta", agentId: cmd.agentId, text }),
+    onDelta: (text) => replyOut({ type: "delta", agentId: cmd.agentId, text }),
     // Only fires when a model was actually asked. The no-key path streams the raw context and
     // completes without a call, and a workspace must not be billed for the fallback.
     onUsage: (u) =>
@@ -6530,8 +6565,8 @@ ${attached}`;
         payer: explainKey ? "workspace" : "platform",
         threadId: replyThread,
       }),
-    onDone: () => { explaining = false; relay.broadcastReply(contextForReply(), { type: "done", agentId: cmd.agentId }); },
-    onError: (message) => { explaining = false; relay.broadcastReply(contextForReply(), { type: "error", agentId: cmd.agentId, message }); },
+    onDone: () => { explaining = false; replyOut({ type: "done", agentId: cmd.agentId }); },
+    onError: (message) => { explaining = false; replyOut({ type: "error", agentId: cmd.agentId, message }); },
   }, explainKey);
 }
 

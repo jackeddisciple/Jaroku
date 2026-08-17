@@ -131,8 +131,21 @@ export interface AgentPlan {
   complete: boolean;
 }
 
-export type GenMessage =
-  | { channel: "gen"; type: "started"; prompt: string }
+/**
+ * Which build session an event on the gen / edit / reply channels belongs to (§3.1).
+ *
+ * ON THE ENVELOPE, ONCE, rather than on each member: it answers the same question for all of them,
+ * and the server attaches it in one place for the same reason. Absent on a refusal answered to
+ * whoever asked, which belongs to no session — so `undefined` here means "file this nowhere", not
+ * "file it in whatever is open".
+ *
+ * It is what makes a conversation shared rather than local: the tab that sent the command knows
+ * which thread it was in, and every OTHER tab in the workspace only learns it from here.
+ */
+export type InThread = { threadId?: string };
+
+export type GenMessage = InThread &
+  ( | { channel: "gen"; type: "started"; prompt: string }
   | { channel: "gen"; type: "file_start"; path: string }
   | { channel: "gen"; type: "file_delta"; path: string; text: string }
   | { channel: "gen"; type: "file_end"; path: string }
@@ -159,7 +172,7 @@ export type GenMessage =
       revision: number;
     }
   | { channel: "gen"; type: "plan_discarded"; planId: string }
-  | { channel: "gen"; type: "plan_error"; message: string };
+  | { channel: "gen"; type: "plan_error"; message: string });
 
 // --- editing (fix loop) ---
 // Like generation: its own channel, never part of the frozen event schema.
@@ -211,8 +224,8 @@ export interface AgentGraph {
   error?: string;
 }
 
-export type EditMessage =
-  | { channel: "edit"; type: "started"; agentId: string; instruction: string }
+export type EditMessage = InThread &
+  ( | { channel: "edit"; type: "started"; agentId: string; instruction: string }
   | { channel: "edit"; type: "file_start"; path: string }
   | { channel: "edit"; type: "file_delta"; path: string; text: string }
   | { channel: "edit"; type: "file_end"; path: string }
@@ -220,7 +233,7 @@ export type EditMessage =
   | { channel: "edit"; type: "applied"; proposalId: string; agentId: string; version: number; summary: string }
   | { channel: "edit"; type: "undone"; agentId: string; version: number; summary: string }
   | { channel: "edit"; type: "discarded"; proposalId: string; agentId: string }
-  | { channel: "edit"; type: "error"; message: string; problems?: string[]; agentId?: string; proposalId?: string };
+  | { channel: "edit"; type: "error"; message: string; problems?: string[]; agentId?: string; proposalId?: string });
 
 // --- eval ---
 // Its own channel, like gen/edit/debug — never part of the frozen event schema. An eval's
@@ -778,10 +791,25 @@ export interface ThreadCounts {
   archived: number;
 }
 
+/**
+ * One row of what a thread owns, as `loadThread` answers with (§4.5).
+ *
+ * The user's own turns plus a stub per run, plan, generation, proposal and eval. Jaroku's replies
+ * are deliberately not stored server-side, so a reopened thread shows what somebody said and what
+ * it caused — never a transcript of the answers.
+ */
+export interface ThreadItemView {
+  kind: "run" | "eval" | "plan" | "generation" | "proposal" | "message";
+  ref_id: string | null;
+  role: "user" | null;
+  body: string | null;
+  created_at: string;
+}
+
 /** Threads. Full snapshots, plus the single row `loadThread` answers the asking client with. */
 export type ThreadMessage =
   | { channel: "threads"; type: "threads"; threads: ThreadView[]; counts: ThreadCounts }
-  | { channel: "threads"; type: "thread"; thread: ThreadView }
+  | { channel: "threads"; type: "thread"; thread: ThreadView; items: ThreadItemView[] }
   | { channel: "threads"; type: "error"; message: string; threadId?: string }
   | { channel: "threads"; type: "notice"; message: string; threadId?: string };
 
@@ -1213,10 +1241,10 @@ export type ServerMessage =
   | { channel: "debug"; type: "boundary"; runId: string; seq: number; next: string[] }
   | { channel: "debug"; type: "branched"; parentRunId: string; branchId: string; fromSeq: number }
   | { channel: "debug"; type: "error"; runId?: string; message: string }
-  | { channel: "reply"; type: "started"; agentId: string; question: string }
-  | { channel: "reply"; type: "delta"; agentId: string; text: string }
-  | { channel: "reply"; type: "done"; agentId: string }
-  | { channel: "reply"; type: "error"; agentId: string; message: string }
+  | (InThread & { channel: "reply"; type: "started"; agentId: string; question: string })
+  | (InThread & { channel: "reply"; type: "delta"; agentId: string; text: string })
+  | (InThread & { channel: "reply"; type: "done"; agentId: string })
+  | (InThread & { channel: "reply"; type: "error"; agentId: string; message: string })
   | GenMessage
   | BillingMessage
   | EditMessage

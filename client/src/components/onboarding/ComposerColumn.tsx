@@ -27,6 +27,7 @@ import { useEffect, useRef } from "react";
 import { useBuildStore } from "../../store/buildStore.ts";
 import { threadFor, useChatStore } from "../../store/chatStore.ts";
 import { canBuild, useProviderStore } from "../../store/providerStore.ts";
+import { useThreadStore } from "../../store/threadStore.ts";
 import { useTraceStore } from "../../store/traceStore.ts";
 import { inputKey, useUiStore } from "../../store/uiStore.ts";
 import { selectAgent } from "../../lib/selection.ts";
@@ -167,8 +168,9 @@ export function ComposerColumn({ phase }: { phase: OnboardingPhase }) {
   const providers = useProviderStore((s) => s.providers);
   const loaded = useProviderStore((s) => s.loaded);
   const agents = useBuildStore((s) => s.agents);
-  const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const threads = useChatStore((s) => s.threads);
+  // The conversation is keyed by session, not by agent (§3.1) — see chatStore's header.
+  const activeThreadId = useThreadStore((s) => s.activeThreadId);
   const pending = useChatStore((s) => s.pending);
   const connected = useTraceStore((s) => s.connection === "open");
 
@@ -207,7 +209,7 @@ export function ComposerColumn({ phase }: { phase: OnboardingPhase }) {
   // The examples are for an empty screen. Once there is a plan, a diff or a trace to read they
   // are just something else on the page — and BuildPane only renders this slot while the thread
   // is empty, so that happens on its own.
-  const turns = threadFor({ threads, pending }, activeAgentId);
+  const turns = threadFor({ threads, pending }, activeThreadId);
   const onboarding = phase === "prompt" || phase === "run";
   const showBand = phase === "prompt" && turns.length === 0;
 

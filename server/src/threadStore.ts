@@ -378,6 +378,34 @@ export class ThreadStore {
   }
 
   /**
+   * One thread's items, oldest first — what §4.5 rehydrates a conversation from.
+   *
+   * SEPARATE FROM `allItems` RATHER THAN A FILTER OVER IT, because the two answer different
+   * questions at different sizes: the snapshot needs every thread's items and reads them in one
+   * query, and opening one thread needs one thread's and must not pay for the workspace's.
+   *
+   * What comes back is the user's own turns plus a stub per run, eval, plan, generation and
+   * proposal. Jaroku's prose is deliberately not in this table (migration 044), so a reopened
+   * thread shows what somebody said and what it caused, not a transcript of the replies.
+   */
+  async itemsFor(ctx: TenantContext, threadId: string): Promise<ThreadItem[]> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT thread_id, kind, ref_id, role, body, created_at FROM thread_items
+        WHERE workspace_id = ? AND thread_id = ?
+        ORDER BY created_at ASC`,
+      [ctx.workspaceId, threadId],
+    );
+    return rows.map((r) => ({
+      thread_id: String(r["thread_id"]),
+      kind: r["kind"] as ThreadItemKind,
+      ref_id: (r["ref_id"] as string | null) ?? null,
+      role: (r["role"] as "user" | null) ?? null,
+      body: (r["body"] as string | null) ?? null,
+      created_at: String(r["created_at"]),
+    }));
+  }
+
+  /**
    * Which thread owns this run / eval / plan / proposal, if any.
    *
    * Returns undefined rather than throwing for something that was never bound. Plenty of work
