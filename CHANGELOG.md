@@ -8,6 +8,30 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.3.0 : Every Built Capability Gets a Door
+
+v0.2.17 fixed thirty-one defects and, in the same passes, counted nineteen findings that were not
+defects at all: whole subsystems that were built, tested, documented — and unreachable. A user
+could not stop a run, create a workspace, invite anybody, see who was in one, change a plan, set a
+ceiling, edit the judge's rubric, switch on pull-request checks, export or delete a workspace,
+answer an enforcement, read the audit log, page past the fiftieth row, or delete, archive or rename
+an agent. Every one of those had a repository method, most had a command, several had their own
+migrations and passing suites, and none had an entry point.
+
+This release is the entry points. Nothing here is a new capability; the capabilities were already
+there. What is new is that the product's own surface reaches them.
+
+### Added
+
+- **Stop, beside Pause and Resume.** `cancelRun` was implemented, routed, typed and
+  capability-checked on the server, and was the one command in the matrix the client could never
+  send. The interactive slot is process-wide, so a wedged run blocked every other run, branch,
+  resume and apply until it timed out — while two of the server's own refusals instructed the user
+  to stop it first. Confirmed in place rather than in a modal: it destroys nothing that was
+  written, and it cannot be undone.
+
+---
+
 ## v0.2.17 : Threads, Documented — and Thirty-One Defects an Adversarial Read Found
 
 v0.2.16's release was shipped on a green suite and then pointed at real GitHub, and nine defects

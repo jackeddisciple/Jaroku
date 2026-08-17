@@ -284,6 +284,17 @@ export function PauseIcon(p: P) {
 }
 
 /**
+ * lucide:square — stop the run for good.
+ *
+ * A FILLED SQUARE RATHER THAN TWO BARS, beside the pause it sits next to: the two actions differ
+ * in whether anything survives them, and a mark that only differed in bar count would make an
+ * irreversible action look like a variant of a reversible one.
+ */
+export function StopIcon(p: P) {
+  return svg(p, <rect x="5" y="5" width="14" height="14" rx="2" />);
+}
+
+/**
  * lucide:loader-circle — work in flight.
  *
  * The one state the four StatusBadge glyphs could not say. A clock is "waiting on a decision",

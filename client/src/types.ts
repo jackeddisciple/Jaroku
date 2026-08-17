@@ -1259,6 +1259,11 @@ export type ServerMessage =
   | { channel: "debug"; type: "resumed"; runId: string; seqOffset: number }
   | { channel: "debug"; type: "boundary"; runId: string; seq: number; next: string[] }
   | { channel: "debug"; type: "branched"; parentRunId: string; branchId: string; fromSeq: number }
+  // A cancelled run is stored as `error` with "cancelled by user" against it — there is no
+  // fifth RunStatus, because a cancellation is an ending and the store already has one for
+  // "stopped before it finished". The event exists so the row stops saying `running` in the
+  // frame the button was pressed, rather than whenever the next history snapshot lands.
+  | { channel: "debug"; type: "cancelled"; runId: string }
   | { channel: "debug"; type: "error"; runId?: string; message: string }
   | (InThread & { channel: "reply"; type: "started"; agentId: string; question: string })
   | (InThread & { channel: "reply"; type: "delta"; agentId: string; text: string })
@@ -1311,6 +1316,11 @@ export type ClientCommand =
   | { cmd: "loadAgentGraph"; agentId: string }
   | { cmd: "pauseRun"; runId: string }
   | { cmd: "resumeRun"; runId: string }
+  // Stop, and there is nothing to resume from afterwards — which is why it is a third command
+  // rather than a flag on `pauseRun`. The server's own refusals ("stop it before resuming this
+  // one", "stop it before branching") are instructions to send this, so a client that could not
+  // send it left the user reading advice they had no way to take.
+  | { cmd: "cancelRun"; runId: string }
   | { cmd: "branchRun"; fromRunId: string; atSeq: number; editNode?: string; editedState?: Record<string, unknown> }
   | { cmd: "explain"; agentId: string; question: string; subject: ExplainSubject; github?: GithubAttachment[]; threadId?: string }
   // Eval: dataset CRUD. Every mutation is answered with a fresh snapshot on the "eval"

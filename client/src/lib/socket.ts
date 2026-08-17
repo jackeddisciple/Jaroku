@@ -150,6 +150,12 @@ function dispatch(msg: ServerMessage): void {
         // The new branch run is in the refreshed history; focus it and load its (copied) prefix.
         s.selectRun(msg.branchId);
         sendLoadRun(msg.branchId);
+      } else if (msg.type === "cancelled") {
+        // The row stops saying `running` now rather than when the next history snapshot lands.
+        // `error` is the status the server stores for it ("cancelled by user" is the reason on the
+        // row), so this agrees with what a reload would show rather than inventing a fifth state.
+        s.setRunStatus(msg.runId, "error");
+        s.addLog({ level: "stderr", text: "debug: run cancelled" });
       } else if (msg.type === "error") s.addLog({ level: "stderr", text: `debug: ${msg.message}` });
       break;
     }
@@ -779,6 +785,16 @@ export function sendPauseRun(runId: string): void {
 }
 export function sendResumeRun(runId: string): void {
   send({ cmd: "resumeRun", runId });
+}
+/**
+ * Stop a run outright. Nothing is left to resume from — that is the difference from a pause.
+ *
+ * The slot a stuck run holds is process-wide: while it is in flight nothing else can start, be
+ * branched, be resumed, or have an edit applied, and two of the server's own refusals tell the
+ * user to stop it first. So this is not a nicety beside Pause; it is the way out of that state.
+ */
+export function sendCancelRun(runId: string): void {
+  send({ cmd: "cancelRun", runId });
 }
 // Fork a new run from `fromRunId` at step `atSeq` (its node boundary), optionally applying a
 // validated domain-field edit (editedState) attributed to editNode before continuing.

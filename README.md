@@ -841,8 +841,17 @@ The control plane is entirely off the frozen stdout stream:
 | **Pause** | The live run halts at its next node boundary. Its status becomes `paused` (a store-only status, never an emitted event). |
 | **Resume** | A fresh subprocess continues the **same run id**, its `seq` starting where the paused segment left off. No `run_start`, no re-run of completed nodes. |
 | **Branch** | Forks a **new run** from a parent's checkpoint at a step's node boundary, optionally with a validated domain-field edit applied to the state first. The parent's step rows are copied verbatim into the branch and its checkpoint DB is *physically copied* — the parent is never mutated, and both stay fully inspectable. |
+| **Stop** | Ends the run. The control file is cleared, the row is closed as `error` with `cancelled by user` against it, and the ordinary exit teardown releases the slot. Nothing is left to resume from — that is the whole difference from a pause. |
 
 Branching is always at a whole-node boundary, never mid-node.
+
+**Stop is the way out of a wedged run, not a nicety beside Pause.** The interactive slot is
+process-wide: while a run is in flight nothing else can start, be branched, be resumed, or have an
+edit applied — and two of the server's own refusals say so in as many words ("stop it before
+resuming this one", "stop it before branching"). It sits next to Pause while a run moves and next
+to Resume once it has stopped moving, and it asks once before it fires: a cancellation destroys
+nothing that was written, but it cannot be undone, and a mis-click on the control beside Pause
+should not read as a pause that silently killed the run.
 
 ---
 
