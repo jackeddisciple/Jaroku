@@ -1708,7 +1708,7 @@ frozen event schema, and everything added since rides beside it.
 `listMcpServers` · `addMcpServer` · `removeMcpServer` · `rediscoverMcpServer` ·
 `setMcpServerAuth` · `setMcpToolImpact` · `resolveMcpConfirm` · and the provider set:
 `listProviders` · `setProviderKey` · `testProviderKey` · `setOwnKeyForPlatform` · and
-`loadUsage` · and the deploy set: `listDeployments` · `planDeploy` ·
+`loadUsage` · `setSpendCeiling` · and the deploy set: `listDeployments` · `planDeploy` ·
 `deploy` · `cancelDeploy` · `forgetDeployment` · `loadDeployLogs` · `setRailwayToken` ·
 `testRailwayToken` · and the membership set: `listMembers` · `inviteMember` · `revokeInvite` ·
 `setMemberRole` · `removeMember` · and the thread set: `listThreads` · `loadThread` ·
@@ -2933,6 +2933,16 @@ money and throw away the result, which is the rule the eval budget has followed 
 engine landed. The consequence is stated rather than hidden: a final total can exceed the ceiling
 by at most the cost of what was already in flight. A fan-out is checked on every pump rather than
 once at the button, because five hundred jobs are five hundred things being started.
+
+**The ceiling in force is the workspace's own, else its plan's** — and a workspace can now set its
+own from the meter it is drawn on. Three states, all reachable, because the column has three: a
+number is a limit of this workspace's own, `0` means start nothing (which is what an abuse response
+applies), and clearing it goes back to the plan's — offered as its own button, because emptying an
+input is not a statement. It is `billing:manage`, the owner's, while *reading* spend stays every
+member's: somebody whose run was refused for budget has to be able to see the number it was refused
+against. `limit_overrides` is deliberately **not** settable here: seats, concurrency, retention and
+the platform-key ceiling are a negotiated exception to a plan, and a workspace raising its own
+retention or its own platform-key ceiling would be editing what we pay for.
 
 **A hold, because checking a balance first is not a check.** Ten runs each read the same balance,
 each conclude there is room, and all ten start — no care at the call site closes that, because

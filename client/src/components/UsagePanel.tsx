@@ -23,7 +23,7 @@ import type { UsageBreakdown, UsageSnapshot } from "../types.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
-import { sendLoadUsage, sendLoadRun } from "../lib/socket.ts";
+import { sendLoadUsage, sendLoadRun, sendSetSpendCeiling } from "../lib/socket.ts";
 import { startCheckout } from "../lib/workspaceApi.ts";
 import { fmtCost, fmtTokens } from "../lib/format.ts";
 import { ICON, STATUS, TEXT } from "../lib/tokens.ts";
@@ -73,6 +73,87 @@ function Cost({ row }: { row: UsageBreakdown }) {
 }
 
 /**
+ * The workspace's own ceiling, as a control rather than a figure.
+ *
+ * WHY IT IS ON THE METER AND NOT IN A SETTINGS PANEL. `BudgetGate.status` already prefers the
+ * workspace's own ceiling over its plan's, and this panel already renders the result — so the number
+ * was visible, was the thing runs are refused against, and could only be changed with SQL. A budget
+ * you can see and cannot set is a dashboard.
+ *
+ * THREE STATES, ALL REACHABLE, because the repository's contract has three and a control that could
+ * only send a number would be a one-way door: `null` goes back to the plan's ceiling, `0` means
+ * start nothing, and anything else is a limit of this workspace's own. "Use the plan's" is offered
+ * as its own button rather than as an empty field, because clearing an input is not a statement.
+ */
+function CeilingControl({ ceilingUsd, planCeilingUsd }: { ceilingUsd: number | null; planCeilingUsd: number | null }) {
+  const role = useSessionStore((s) => s.role());
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  if (role !== "owner") return null;
+
+  const commit = (): void => {
+    const trimmed = draft.trim();
+    const value = Number(trimmed);
+    // A blank field is not a decision, so it closes rather than sending anything. `null` has its
+    // own button; that is what makes the difference between the two sayable.
+    if (trimmed !== "" && Number.isFinite(value) && value >= 0) sendSetSpendCeiling(value);
+    setEditing(false);
+    setDraft("");
+  };
+
+  if (!editing) {
+    return (
+      <button
+        className={quietBtn}
+        onClick={() => {
+          setDraft(ceilingUsd === null ? "" : String(ceilingUsd));
+          setEditing(true);
+        }}
+        title="Set this workspace's own ceiling, whatever its plan says"
+      >
+        {ceilingUsd === null ? "Set a limit" : "Change"}
+      </button>
+    );
+  }
+
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="text-[11px] text-faint">$</span>
+      <input
+        autoFocus
+        inputMode="decimal"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") setEditing(false);
+        }}
+        className="w-20 rounded-control border border-hair bg-void px-1.5 py-0.5 font-mono text-[11px] text-ink outline-none focus:border-edge"
+      />
+      <button className={quietBtn} onClick={commit}>Save</button>
+      {/* Only when there IS one to clear. Offering "use the plan's" while already on the plan's
+          would be a button whose effect is nothing. */}
+      {ceilingUsd !== null && (
+        <button
+          className={quietBtn}
+          title={
+            planCeilingUsd === null
+              ? "Back to the plan's, which sets no ceiling of its own"
+              : `Back to the plan's ${fmtCost(planCeilingUsd)}`
+          }
+          onClick={() => {
+            sendSetSpendCeiling(null);
+            setEditing(false);
+          }}
+        >
+          Use the plan&rsquo;s
+        </button>
+      )}
+    </span>
+  );
+}
+
+/**
  * One meter: a figure, its limit, and how much of it is gone.
  *
  * The bar is clamped at 100% and turns red past it, because a bar that overflows its track reads
@@ -80,13 +161,15 @@ function Cost({ row }: { row: UsageBreakdown }) {
  * panel most needs to communicate unambiguously.
  */
 function Meter({
-  label, spentUsd, ceilingUsd, costKnown, note,
+  label, spentUsd, ceilingUsd, costKnown, note, control,
 }: {
   label: string;
   spentUsd: number;
   ceilingUsd: number | null;
   costKnown: boolean;
   note?: string;
+  /** A control that changes the limit this meter is drawn against, for the one meter that has one. */
+  control?: React.ReactNode;
 }) {
   const over = ceilingUsd !== null && spentUsd >= ceilingUsd;
   const pct = ceilingUsd === null || ceilingUsd === 0
@@ -103,6 +186,7 @@ function Meter({
           <span className="text-[12px] text-faint">
             {ceilingUsd === null ? "of no limit" : `of ${fmtCost(ceilingUsd)}`}
           </span>
+          {control}
         </span>
       </div>
       {ceilingUsd !== null && (
@@ -285,6 +369,15 @@ export function UsagePanel() {
           spentUsd={usage.spentUsd}
           ceilingUsd={usage.ceilingUsd}
           costKnown={usage.costKnown}
+          // THE ONE METER WITH A CONTROL. The platform-key meter below it is OUR ceiling on what we
+          // will spend on this workspace's behalf, which is not the customer's to set — and the
+          // credit block is a balance rather than a limit.
+          control={
+            <CeilingControl
+              ceilingUsd={usage.ceilingUsd}
+              planCeilingUsd={usage.plans.find((p) => p.current)?.budgetCeilingUsd ?? null}
+            />
+          }
           note={
             usage.overCeiling
               ? "over the limit — new runs are refused until it resets, or an owner raises it. Runs already going finish."

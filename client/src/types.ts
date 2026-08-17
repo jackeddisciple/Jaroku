@@ -1391,6 +1391,14 @@ export type ClientCommand =
   // two commands beside it.
   | { cmd: "setOwnKeyForPlatform"; on: boolean }
   | { cmd: "loadUsage" }
+  /**
+   * The workspace's OWN spend ceiling — not its plan's.
+   *
+   * Three meanings, which is why `usd` is nullable: `null` uses the plan's number, `0` means start
+   * nothing, and a positive number is a limit of its own. A control that could not send `null`
+   * would make setting a ceiling a one-way door.
+   */
+  | { cmd: "setSpendCeiling"; usd: number | null }
   // Connections. THE ONE SET IN THIS UNION THAT CARRIES NO SECRET IN EITHER DIRECTION: a
   // credential for a connected account is minted by the provider and collected at the callback,
   // so the browser never holds one and never sends one. `returnTo` is a PATH — the server

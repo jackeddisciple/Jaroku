@@ -2352,6 +2352,7 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (MEMBER_COMMAND_NAMES.has(cmd.cmd)) void handleMemberCommand(ctx, cmd as MemberCommand);
     else if (THREAD_COMMAND_NAMES.has(cmd.cmd)) void handleThreadCommand(ctx, cmd as ThreadCommand);
     else if (cmd.cmd === "loadUsage") void broadcastUsage(ctx);
+    else if (cmd.cmd === "setSpendCeiling") void setSpendCeiling(ctx, cmd.usd);
     else void handleEvalCommand(ctx, cmd);
   }
 }
@@ -3106,6 +3107,47 @@ async function broadcastUsage(ctx: TenantContext): Promise<void> {
     const message = (err as Error)?.message ?? String(err);
     console.error(`[billing] loadUsage failed: ${message}`);
     relay.broadcastBilling(ctx, { type: "error", message: `could not load usage: ${message}` });
+  }
+}
+
+/**
+ * Set the workspace's own spend ceiling, or clear it back to the plan's.
+ *
+ * THE THREE-STATE CONTRACT IS THE FEATURE, and it is the repository's own: `null` means "use the
+ * plan's number", `0` means "this workspace may start nothing", and a positive number is a limit of
+ * its own. All three are reachable from here, because a control that could not send `null` would be
+ * a one-way door — a workspace that once set a ceiling could never go back to its plan's.
+ *
+ * WHAT IT DOES NOT SET is `limit_overrides`. Those are a negotiated exception to a plan — seats,
+ * concurrency, retention, the platform-key ceiling — agreed with somebody and applied by an
+ * operator, and a workspace that could raise its own retention or its own platform-key ceiling
+ * would be editing what we pay for. That one stays SQL on purpose; this is the number that is the
+ * customer's own to choose.
+ *
+ * Answered by re-broadcasting the whole usage snapshot, like every other mutation in this codebase:
+ * the ceiling appears in three places on that panel (the meter's limit, its bar, and whether the
+ * workspace is over), and a partial update is how those three come to disagree.
+ */
+async function setSpendCeiling(ctx: TenantContext, usd: number | null): Promise<void> {
+  // A NUMBER OR NOTHING, checked here because the relay forwards this shape-unchecked. `NaN` is a
+  // number as far as `typeof` is concerned and would be written straight into the column, where it
+  // would compare false against every spend figure — a ceiling that silently stops bounding
+  // anything, which is the worst available failure for this particular column.
+  if (usd !== null && (typeof usd !== "number" || !Number.isFinite(usd) || usd < 0)) {
+    relay.broadcastBilling(ctx, {
+      type: "error",
+      message: "a spend ceiling is a positive number of dollars, 0 to start nothing, or none to use the plan's",
+    });
+    return;
+  }
+  try {
+    await billing.setCeiling(ctx, usd);
+    console.log(`[billing] ${ctx.workspaceId} ceiling set to ${usd === null ? "the plan's" : `$${usd}`}`);
+    await broadcastUsage(ctx);
+  } catch (err) {
+    const message = (err as Error)?.message ?? String(err);
+    console.error(`[billing] setSpendCeiling failed: ${message}`);
+    relay.broadcastBilling(ctx, { type: "error", message: `could not set the ceiling: ${message}` });
   }
 }
 

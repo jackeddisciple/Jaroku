@@ -298,6 +298,23 @@ export type SetOwnKeyForPlatformCommand = { cmd: "setOwnKeyForPlatform"; on: boo
  */
 export type LoadUsageCommand = { cmd: "loadUsage" };
 
+/**
+ * The workspace's OWN spend ceiling, which is not the same thing as its plan's.
+ *
+ * THREE MEANINGFUL VALUES, and that is why `usd` is `number | null` rather than a number:
+ *
+ *   `null`  use the plan's ceiling. The default, and the way back from having set one.
+ *   `0`     start nothing. A real state — it is what an abuse response applies — and one a
+ *           signature that treated 0 as "unset" could not express.
+ *   `n`     start at most `n` this period.
+ *
+ * It bounds what may be STARTED, never what is spent: a run already in flight finishes, which is
+ * the rule every ceiling in this codebase follows.
+ */
+export type SetSpendCeilingCommand = { cmd: "setSpendCeiling"; usd: number | null };
+
+export type BillingCommand = LoadUsageCommand | SetSpendCeilingCommand;
+
 /** The billing channel. A full snapshot, like every other channel here — never a merge. */
 export type BillingEvent =
   | { type: "usage"; usage: unknown }
@@ -314,7 +331,7 @@ const PROVIDER_COMMANDS = new Set(["setOwnKeyForPlatform"]);
  * is a balance, a plan, a period rollup and a ceiling, which is four dependencies for one read;
  * the app already owns all four and answers on the `billing` channel.
  */
-const BILLING_COMMANDS = new Set(["loadUsage"]);
+const BILLING_COMMANDS = new Set(["loadUsage", "setSpendCeiling"]);
 
 // Deploy. Everything below rides beside the frozen schema in a new channel, exactly as
 // pause/resume, the eval engine and the MCP registry did — a deploy is not an agent run and
@@ -782,7 +799,7 @@ export type ClientCommand =
   | ProviderCommand
   | ListProvidersCommand
   | ConnectionCommand
-  | LoadUsageCommand
+  | BillingCommand
   | DeployChannelCommand
   | ListDeploymentsCommand
   | GithubCommand
@@ -840,7 +857,7 @@ export type ForwardedCommand =
   | GithubCommand
   | MemberCommand
   | ThreadCommand
-  | LoadUsageCommand;
+  | BillingCommand;
 
 // Generation rides its own channel, deliberately parallel to "trace". It never enters the
 // trace store or the event schema — schema/events.md v1 stays frozen.
@@ -1619,7 +1636,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   setMcpServerAuth: "mcp", setMcpToolImpact: "mcp", resolveMcpConfirm: "mcp",
   listProviders: "providers", setOwnKeyForPlatform: "providers",
   listConnections: "connections", connectConnector: "connections", disconnectConnector: "connections",
-  loadUsage: "billing",
+  loadUsage: "billing", setSpendCeiling: "billing",
   listMembers: "members", inviteMember: "members", revokeInvite: "members",
   setMemberRole: "members", removeMember: "members",
   // All six on `threads`, the reads included. The channel HAS an error shape, so unlike
@@ -2238,7 +2255,7 @@ export class WsRelay {
             void withContext((ctx) => this.onCommand?.(msg as DeployChannelCommand, ctx));
           } else if (BILLING_COMMANDS.has(msg.cmd)) {
             // Forwarded like a mutation even though it is a read — see BILLING_COMMANDS.
-            void withContext((ctx) => this.onCommand?.(msg as LoadUsageCommand, ctx));
+            void withContext((ctx) => this.onCommand?.(msg as BillingCommand, ctx));
           } else if (PROVIDER_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the credential writer and can answer with a
             // precise error on the "providers" channel rather than dropping the message here.

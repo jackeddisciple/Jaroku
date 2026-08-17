@@ -274,6 +274,11 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
 
   // membership
   loadUsage: "billing:read",
+  // `billing:manage`, which is the owner's, and the split is the one `billing:read`'s own comment
+  // states: spend is not a secret from the people generating it, and changing what MAY be spent is
+  // a decision about the workspace's money. A member whose run is refused for budget can see the
+  // number; raising it is not theirs.
+  setSpendCeiling: "billing:manage",
 
   listMembers: "member:read",
   inviteMember: "member:manage",

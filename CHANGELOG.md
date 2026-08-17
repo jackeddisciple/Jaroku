@@ -58,6 +58,14 @@ there. What is new is that the product's own surface reaches them.
   list is the server's (`purchasable` and the price id are columns; the limits come from the code
   that enforces them), a deployment with no Stripe keys shows nothing rather than a refusing
   control, and choosing is `billing:manage` while reading spend stays a member's.
+- **A workspace can set its own spend ceiling.** `BudgetGate.status` has always preferred the
+  workspace's own ceiling over its plan's, and the Usage panel has always rendered the result — so
+  the number was visible, was what runs are refused against, and could only be changed with SQL. A
+  budget you can see and cannot set is a dashboard. `setSpendCeiling` is on the billing channel at
+  `billing:manage`, and all three states the column has are reachable: a number, `0` for "start
+  nothing", and clearing it back to the plan's. `limit_overrides` stays SQL on purpose — seats,
+  concurrency, retention and the platform-key ceiling are a negotiated exception, and a workspace
+  raising its own platform-key ceiling would be editing what we pay for.
 - **`lib/http.ts`**, one place where a non-socket request gets the bearer token and this tab's
   `?workspace=`. It was inside the Secrets module, which is where it had to be while the Secrets
   group was the only such surface; forgetting the scoping on an EXPORT would mean handing somebody

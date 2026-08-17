@@ -752,6 +752,17 @@ export function sendLoadUsage(): void {
   send({ cmd: "loadUsage" });
 }
 
+/**
+ * Set this workspace's own spend ceiling, or clear it back to the plan's with `null`.
+ *
+ * A budget you can see and cannot set is a dashboard rather than a control, and until now the only
+ * reachable number was whatever the plan said. The server answers with a fresh usage snapshot, so
+ * the meter, its bar and the over-ceiling state all move from one computation.
+ */
+export function sendSetSpendCeiling(usd: number | null): void {
+  send({ cmd: "setSpendCeiling", usd });
+}
+
 export function sendListAgents(): void {
   send({ cmd: "listAgents" });
 }
