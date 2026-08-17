@@ -185,14 +185,18 @@ export class ThreadStore {
    * an Archived count from an older moment than the one beside it — and the counts are what the
    * nav badge is sourced from (§2.1), which makes a mismatch visible in two places.
    *
-   * `archived_at DESC` before the activity sort so the active rows come first on both drivers:
-   * NULLs sort differently between them, and the section grouping happens above this anyway.
+   * `archived_at IS NULL DESC` FIRST, so the active rows come first on BOTH drivers. This comment
+   * claimed that ordering and the query did not have it: SQLite sorts NULLs low and Postgres sorts
+   * them high, so "active rows first" was true on one driver and false on the other. It is harmless
+   * today only because the client regroups and re-sorts (`threadGroups.ts`) — which makes it a
+   * guarantee a future reader would rely on and not get. Written as a boolean expression rather than
+   * `archived_at DESC NULLS LAST`, which SQLite does not accept.
    */
   async list(ctx: TenantContext): Promise<Thread[]> {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT ${COLUMNS} FROM threads
         WHERE workspace_id = ?
-        ORDER BY last_activity_at DESC`,
+        ORDER BY (archived_at IS NULL) DESC, last_activity_at DESC`,
       [ctx.workspaceId],
     );
     return rows.map(ThreadStore.hydrate);
