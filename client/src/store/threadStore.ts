@@ -18,6 +18,7 @@
 // reopening Threads starts at All, so that lives in the view.
 
 import { create } from "zustand";
+import { archiveNotice } from "../lib/threadArchive.ts";
 import type { ThreadCounts, ThreadView } from "../types.ts";
 
 /** What a socket knows before the first snapshot lands. §4.6's three empty states need this apart
@@ -71,6 +72,15 @@ interface ThreadState {
    * keeping the delta and hoping — is a number that only ever grows too large.
    */
   liveCost: Record<string, number>;
+  /**
+   * What was set aside by the last archive, when something was (§3.4).
+   *
+   * HELD HERE RATHER THAN IN THE VIEW because the row it describes is gone from the list by the time the
+   * notice renders — that is the whole reason the notice exists — so the text has to be captured at the
+   * moment of the archive and outlive the row. One slot, not a queue: archiving two threads in a row is
+   * two decisions and the second notice is the one still true.
+   */
+  archiveNotice: { threadId: string; text: string } | null;
 
   setThreads: (threads: ThreadView[], counts: ThreadCounts) => void;
   /** One row, from `loadThread`. Replaces that row and nothing else — see `setThread`. */
@@ -78,6 +88,15 @@ interface ThreadState {
   selectThread: (id: string | null) => void;
   /** Ask the centre pane to resume at the first unresolved turn rather than at the bottom. */
   requestResume: () => void;
+  /**
+   * Remember what an about-to-be-archived thread had outstanding, for the notice.
+   *
+   * TAKES THE ROW AS IT IS NOW, before the archive lands, because afterwards `archived_at` is set and the
+   * fragment has been recomputed for an archived row. Does nothing for a thread with nothing outstanding
+   * — an idle archive gets no notice (§3.4).
+   */
+  noteArchived: (thread: ThreadView) => void;
+  dismissArchiveNotice: () => void;
   /**
    * A step's cost, arriving on the trace channel, attributed to whichever thread owns its run.
    *
@@ -97,6 +116,7 @@ export const useThreadStore = create<ThreadState>((set) => ({
   error: null,
   resumeNonce: 0,
   liveCost: {},
+  archiveNotice: null,
 
   // A replace, with the counts that were computed beside these rows. Taking them as one argument
   // rather than two calls is deliberate: they are one snapshot, and a store that could be given rows
@@ -121,6 +141,13 @@ export const useThreadStore = create<ThreadState>((set) => ({
 
   selectThread: (activeThreadId) => set({ activeThreadId }),
   requestResume: () => set((s) => ({ resumeNonce: s.resumeNonce + 1 })),
+
+  noteArchived: (thread) => {
+    const text = archiveNotice(thread);
+    if (!text) return;
+    set({ archiveNotice: { threadId: thread.id, text } });
+  },
+  dismissArchiveNotice: () => set({ archiveNotice: null }),
 
   addStepCost: (runId, usd) =>
     set((s) => {

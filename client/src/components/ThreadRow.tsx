@@ -72,6 +72,8 @@ export function ThreadRow({
   onOpen,
   onOpenAgent,
   onRename,
+  onArchive,
+  onRestore,
 }: {
   thread: ThreadView;
   /** The keyboard's cursor (§4.7's J/K). Distinct from "the thread the centre pane holds". */
@@ -80,6 +82,10 @@ export function ThreadRow({
   /** §4.3: clicking the chip navigates to that AGENT, not into the thread. */
   onOpenAgent: (agentId: string) => void;
   onRename: (title: string) => void;
+  /** §3.4's `E`, reachable with a mouse too. Absent on an already-archived row. */
+  onArchive: () => void;
+  /** §3.4: restore is one click. The only control an archived row has. */
+  onRestore: () => void;
 }) {
   const author = useAuthorLabel(thread.created_by);
   const hint = resumeHint(thread);
@@ -259,6 +265,29 @@ export function ThreadRow({
             <span>{author}</span>
           </>
         )}
+
+        {/* §3.4's two lifecycle actions, on hover, at the end of the line rather than in a menu.
+            Archive is `E` for anybody using the keyboard; this is the same action for anybody not.
+            There is no third one: a thread cannot be deleted, so there is nothing else to offer. */}
+        <span className="ml-auto hidden shrink-0 items-center gap-1 group-hover:flex">
+          {thread.archived_at === null ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); onArchive(); }}
+              title="Archive this thread (E)"
+              className="rounded-control px-1.5 py-0.5 text-[10px] text-faint transition-colors hover:bg-active hover:text-ink"
+            >
+              Archive
+            </button>
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); onRestore(); }}
+              title="Put this thread back in the list"
+              className="rounded-control px-1.5 py-0.5 text-[10px] text-faint transition-colors hover:bg-active hover:text-ink"
+            >
+              Restore
+            </button>
+          )}
+        </span>
       </div>
 
       {/* line 3: the last thing the USER said. Their intent is what makes a thread recognisable;

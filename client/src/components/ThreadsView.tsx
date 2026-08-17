@@ -16,15 +16,17 @@ import { useThreadStore } from "../store/threadStore.ts";
 import { groupThreads } from "../lib/threadGroups.ts";
 import { filterThreads, FILTER_LABEL, type ThreadFilter } from "../lib/threadFilter.ts";
 import { openThread, openThreadAgent } from "../lib/threadNav.ts";
-import { sendCreateThread, sendRenameThread } from "../lib/socket.ts";
-import { TYPE } from "../lib/tokens.ts";
+import {
+  sendArchiveThread, sendCreateThread, sendRenameThread, sendRestoreThread,
+} from "../lib/socket.ts";
+import { ICON, TYPE } from "../lib/tokens.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { ThreadFilterBar } from "./ThreadFilterBar.tsx";
 import { ThreadRow } from "./ThreadRow.tsx";
 import { useThreadKeys } from "./useThreadKeys.ts";
-import { PlusIcon, SearchIcon } from "./panelIcons.tsx";
+import { PlusIcon, SearchIcon, XIcon } from "./panelIcons.tsx";
 
 /**
  * §4.6's first empty state, which is an ENTRY POINT rather than a notice.
@@ -73,6 +75,50 @@ function FirstThreadStart({ workspaceName }: { workspaceName: string | null }) {
           <span className="shrink-0 text-[10px] text-faint">↵</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * §3.4's notice: what archiving just set aside, and one click to put it back.
+ *
+ * NON-BLOCKING AND DISMISSIBLE, and it appears AFTER the archive rather than in front of it. Nothing here
+ * is a confirmation: `E` has already archived the thread by the time this renders, which is exactly the
+ * posture §3.4 asks for — state what happened, and do not ask permission for something already reversible.
+ *
+ * UNDO IS `restoreThread`, THE COMMAND THAT ALREADY EXISTS. No new mutation path, no special-case
+ * "unarchive", and therefore nothing that can leave a thread in a state the ordinary Archived filter
+ * cannot explain.
+ *
+ * A BAR RATHER THAN A FLOATING TOAST, in the flow directly under the filter bar. A floating card would
+ * cover the top of the list — which is where the Needs You section is, and where somebody archiving
+ * things is looking.
+ */
+function ArchiveNotice() {
+  const notice = useThreadStore((s) => s.archiveNotice);
+  const dismiss = useThreadStore((s) => s.dismissArchiveNotice);
+  if (!notice) return null;
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-b border-hair bg-active/40 px-5 py-1.5 text-[11px] text-muted">
+      <span className="text-ink">Archived</span>
+      <span className="text-faint">·</span>
+      <span>{notice.text}</span>
+      <button
+        onClick={() => {
+          sendRestoreThread(notice.threadId);
+          dismiss();
+        }}
+        className="ml-auto rounded-control px-2 py-0.5 text-[11px] text-muted transition-colors hover:bg-active hover:text-ink"
+      >
+        Undo
+      </button>
+      <button
+        onClick={dismiss}
+        title="Dismiss"
+        className="shrink-0 text-faint transition-colors hover:text-ink"
+      >
+        <XIcon size={ICON.xs} />
+      </button>
     </div>
   );
 }
@@ -153,6 +199,8 @@ export function ThreadsView() {
         <div className="shrink-0 border-b border-hair px-5 py-2 text-[11px] text-err">{error}</div>
       )}
 
+      <ArchiveNotice />
+
       <div className="min-h-0 flex-1 overflow-auto">
         {!loaded ? (
           // NOT A SPINNER (§9). Three skeleton rows at the row's own geometry, so the list does not
@@ -208,6 +256,13 @@ export function ThreadsView() {
                     onOpen={() => openThread(t)}
                     onOpenAgent={openThreadAgent}
                     onRename={(title) => sendRenameThread(t.id, title)}
+                    onArchive={() => {
+                      // The same two calls `E` makes, in the same order and for the same reason: the
+                      // notice has to be captured while the row still describes what was outstanding.
+                      useThreadStore.getState().noteArchived(t);
+                      sendArchiveThread(t.id);
+                    }}
+                    onRestore={() => sendRestoreThread(t.id)}
                   />
                 ))}
               </section>

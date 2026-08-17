@@ -271,6 +271,7 @@ jobs:
           npm run test:thread-groups
           npm run test:thread-filter
           npm run test:thread-resume
+          npm run test:thread-archive
           npm run test:secrets-store
           npm run test:auth
           npm run test:plan-flow

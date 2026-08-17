@@ -17,6 +17,7 @@ import { useEffect } from "react";
 import { THREAD_FILTERS, type ThreadFilter } from "../lib/threadFilter.ts";
 import { openThread } from "../lib/threadNav.ts";
 import { sendArchiveThread, sendCreateThread } from "../lib/socket.ts";
+import { useThreadStore } from "../store/threadStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import type { ThreadView } from "../types.ts";
 
@@ -85,11 +86,15 @@ export function useThreadKeys({ rows, cursor, setCursor, setFilter, focusFilter 
         }
         case "e":
         case "E": {
-          // §3.4: archiving is immediate, with no modal in between. The toast that names what was set
-          // aside is a notice about what happened, not a gate — see the commit that adds it.
+          // §3.4: archiving is immediate, with no modal in between. The notice below names what was set
+          // aside AFTER the fact — it is a statement about what happened, not a gate to clear first.
           const row = rows[at];
           if (!row || row.archived_at !== null) return;
           e.preventDefault();
+          // What was outstanding, captured BEFORE the archive: afterwards the row is gone from the list
+          // and its fragment has been recomputed for an archived thread. A thread with nothing
+          // outstanding produces no notice at all (§3.4).
+          useThreadStore.getState().noteArchived(row);
           // The cursor moves to the neighbour BEFORE the row leaves, so the next J/K continues from
           // where the eye is rather than from a row that is no longer in the list.
           setCursor(rows[at + 1]?.id ?? rows[at - 1]?.id ?? null);
