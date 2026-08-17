@@ -120,6 +120,15 @@ export function ThreadRow({
   const [draft, setDraft] = useState(thread.title);
   const input = useRef<HTMLInputElement>(null);
 
+  /**
+   * Escape has cancelled this edit, so the blur it causes must not save it.
+   *
+   * Removing a focused input fires a blur, and `onBlur` is `commit` — which mattered little while
+   * commit skipped an unchanged title and matters now that it does not: Escape after typing would
+   * otherwise save the text it was pressed to discard.
+   */
+  const cancelled = useRef(false);
+
   const stopEditing = (): void => {
     setLocallyEditing(false);
     onRenamingEnd?.();
@@ -127,6 +136,7 @@ export function ThreadRow({
 
   useEffect(() => {
     if (editing) {
+      cancelled.current = false;
       setDraft(thread.title);
       input.current?.focus();
       input.current?.select();
@@ -137,10 +147,16 @@ export function ThreadRow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
 
+  // SENT EVEN WHEN THE TEXT DID NOT CHANGE, and that is §5 rather than a redundant write. Saving
+  // sets `title_is_custom`, and somebody who opened the editor, decided the auto-title was right and
+  // pressed Enter has CHOSEN that title — skipping the send left the flag at 0, so the next message
+  // ran `autoTitle` over it and silently reverted their decision. The server's UPDATE is idempotent,
+  // so an unchanged title costs one statement and settles the flag.
   const commit = (): void => {
     stopEditing();
+    if (cancelled.current) return;
     const next = draft.trim();
-    if (next && next !== thread.title) onRename(next);
+    if (next) onRename(next);
   };
 
   return (
@@ -168,7 +184,7 @@ export function ThreadRow({
             onKeyDown={(e) => {
               e.stopPropagation();
               if (e.key === "Enter") commit();
-              else if (e.key === "Escape") stopEditing();
+              else if (e.key === "Escape") { cancelled.current = true; stopEditing(); }
             }}
             className="min-w-0 flex-1 rounded-control bg-void px-1.5 py-0.5 text-[13px] text-ink outline-none ring-1 ring-edge"
           />
