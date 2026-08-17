@@ -42,6 +42,7 @@ of the repo and run yourself.
 - [Cost accounting](#cost-accounting)
 - [Connectors](#connectors)
 - [MCP servers](#mcp-servers)
+- [GitHub](#github)
 - [Deploying an agent](#deploying-an-agent)
 - [The React client](#the-react-client)
 - [WebSocket protocol](#websocket-protocol)
@@ -1234,6 +1235,110 @@ attempt, a self-reported error, and one tool that never answers at all.
 
 ---
 
+## GitHub
+
+Jaroku already has a version lineage: `agent_versions`, a monotonic number per agent, with the
+pointer in `agents.current_version`. Git has one too. This feature is **not "git inside Jaroku"** —
+it is the place where the relationship between the two is legible at every moment, and every screen
+in it answers one question: *what does GitHub have that I do not, and what do I have that GitHub
+does not?*
+
+### Connecting
+
+Press **Connect GitHub**. You are sent to GitHub, you choose which repositories Jaroku may reach,
+and you come back. There is nothing to paste — not a token, and not the deployment's own key.
+
+The first person to connect on a fresh deployment sees one extra screen: GitHub asking them to
+create the App from a manifest this repository ships. That manifest declares the permissions, so
+what you approve is described by GitHub in its own words rather than by instructions you follow.
+GitHub then hands the App's private key straight back to a callback on this server, which stores it
+in `runtime/.env`. Nobody sees it, including you.
+
+Seven permissions, and each is there for named calls:
+
+| Permission | For |
+|---|---|
+| `contents: write` | the push — blobs, trees, commits, refs — and the pull's tree read |
+| `workflows: write` | `.github/workflows/jaroku-build.yml`, which `contents` alone cannot write |
+| `administration: write` | creating a repository, and reading collaborator permission for the eval check's provider boundary |
+| `pull_requests: write` | opening the PR, reading review comments, posting the threaded reply |
+| `checks: write` | posting the eval check. **Write access to checks is available only to GitHub Apps** — this is why the connection is an App and not a token |
+| `statuses: write` | reading the combined status as the second half of the PR's verdict |
+| `metadata: read` | mandatory on every App |
+
+Two tokens come out of one install, because GitHub has two kinds. An **installation token**, minted
+per hour from the private key, carries everything that touches a repository. A **user token** from
+the same round trip carries the three calls that are about a *person* — the account line, the
+name-availability check, and creating a repository — because `POST /user/repos` refuses an
+installation token. `apiFor()` is the one place either is resolved.
+
+> **Choose "All repositories" when installing** unless you have a reason not to. A repository
+> created a moment ago is *outside* a "selected repositories" installation, and GitHub offers no
+> API to add one — so Jaroku checks after creating and tells you at link time rather than failing a
+> push later.
+
+**GitHub Enterprise Server**, or a deployment with no callback URL a browser can reach, uses a
+personal access token instead: `POST /v1/github/connect` is intact and takes one. It is not
+reachable from the UI, and it cannot post check runs — see [ADR-036](adr/ADR-036-github-app-installation-as-the-connection.md).
+
+### The branch model
+
+Jaroku owns `jaroku/<agent-slug>` and **never writes to your default branch** as part of
+reconciling the two lineages. You edit `main` exactly as you normally would. Reconciliation is
+always a pull request, never a silent auto-merge.
+
+```
+main            ●──●──────────●────────●
+                    ╲                 ╱
+jaroku/weather       ●──●──●──●──●───●   ← Jaroku pushes here
+                     v11 12 13 14 15   PR
+```
+
+The one exception is the generated build workflow, and it is an exception because GitHub only runs
+workflows that exist on the default branch — a build check written to `jaroku/<slug>` would never
+run on the pull requests it exists to gate. It is written once, and a workflow you have since
+edited is surfaced rather than overwritten.
+
+### Push, pull, and what refuses
+
+- **A push is one commit per version**, through the Git Data API. `PUT /contents` writes one file
+  per commit, so a version touching three files would become three commits and two intermediate
+  states that never existed. Squash is opt-in per push and never a stored preference.
+- **A pull is held to the identical bar as generated code** — the remote tree is staged as a
+  candidate version and put through the same parse · import · contract validation every generation
+  passes. A failure is a refusal: the candidate is discarded, the pointer never moves, and the card
+  names the file and the check.
+- **A secret scan sits between tree-build and commit-create**, where blobs and trees are
+  content-addressed and invisible until a ref points at them — so a refusal costs a garbage
+  collection and leaves the branch where it was.
+- **Protected paths** — reviewed connector templates, the MCP bridge and its manifest — are refused
+  from a pull as well as from the edit loop. A pull is the one route into them from outside the
+  product entirely.
+- **A rewritten remote is `diverged`, never `behind`.** Zero commits between two heads reads as in
+  sync and is the one case where a pull destroys work.
+
+### The first push into an empty repository
+
+Worth knowing because it is not obvious from the outside: GitHub's Git Data API refuses **every**
+write against a repository with no commits (`409 Git Repository is empty`), and a repository Jaroku
+creates for you deliberately has none. So the initial commit goes through the Contents API — the
+one endpoint GitHub accepts there — onto your repository's own default branch, and `jaroku/<slug>`
+is then rooted on it. A branch with no parent has no merge base, which means no pull request and no
+comparison, so rooting it is what makes every reconciliation surface work at all.
+
+### Developing without a GitHub account
+
+`npm run mock:github` starts a fixture that implements the App surface — manifest conversion,
+installation tokens, the OAuth exchange, `/installation/repositories` — **and GitHub's two browser
+screens**. Point both hosts at it and the entire connect-and-push flow runs on a laptop:
+
+```bash
+npm run mock:github     # prints its URL
+JAROKU_GITHUB_API=http://127.0.0.1:8936 JAROKU_GITHUB_WEB=http://127.0.0.1:8936 npm run dev
+```
+
+---
+
 ## Deploying an agent
 
 An agent you trust is an agent you want reachable. Deploy packages it, ships it to **your own
@@ -1634,6 +1739,12 @@ to happen because a browser cannot put a header on a WebSocket:
 | `STRIPE_WEBHOOK_SECRET` | — | Verifies the webhook signature, which is that endpoint's whole authentication |
 | `STRIPE_SUCCESS_URL` / `STRIPE_CANCEL_URL` | — | Where a checkout returns the browser |
 | `STRIPE_API_BASE` | `https://api.stripe.com` | Overridable to point at a fixture rather than at Stripe |
+| `JAROKU_PUBLIC_URL` | `http://localhost:<port>` | Where a **browser** can reach this server. Baked into the GitHub App's manifest at registration — the webhook URL and both callbacks are built from it — so it is one variable to set before registering in production, and re-registering is what changes it afterwards |
+| `JAROKU_GITHUB_APP_ID` / `_SLUG` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_PRIVATE_KEY_B64` | — | The GitHub App this deployment is. **Written by the registration callback, never by hand** — GitHub hands them back through the manifest conversion and the server stores them. The private key is base64 because a PEM is nothing but newlines and the `.env` format has no escape for one |
+| `JAROKU_GITHUB_WEBHOOK_SECRET` | — | Verifies a delivery's signature, which is that endpoint's whole authentication. An App supplies its own at registration; this is what a personal-access-token deployment sets by hand |
+| `JAROKU_GITHUB_API` | `https://api.github.com` | GitHub's API host. Overridable for GitHub Enterprise Server, or to point at the fixture (`npm run mock:github`) |
+| `JAROKU_GITHUB_WEB` | `https://github.com` | GitHub's **web** host — the App install screens and the OAuth token exchange, which do not live on the API host. Overridable for the same two reasons |
+| `JAROKU_GITHUB_TIMEOUT_MS` | `20000` | Per-request ceiling on a GitHub API call |
 | `RAILWAY_API_TOKEN` | — | Your Railway **account** token. Written by the deploy panel, never by hand |
 | `JAROKU_RAILWAY_API` | `https://backboard.railway.com/graphql/v2` | Railway's GraphQL endpoint |
 | `JAROKU_RAILWAY_CLI` | `railway` | The CLI binary used to upload a project |
@@ -1883,6 +1994,27 @@ npm run test:mcp-hardening # a server's own advertisement, bounded at the point 
 npm run test:deploy-artifacts # the image's deps, and that no artifact carries a secret
 npm run test:deploy-secrets   # names out, values never; the log scrubber's hard cases
 npm run test:deploy-store     # deploy status transitions, restart reconciliation, Railway failure kinds
+
+# the two lineages — see "GitHub"
+npm run test:github-app       # the App's seven permissions, the JWT, the token cache, the state
+npm run test:github-app-flow  # register → install → mint → post a check run that IS a check run
+npm run test:github-sync      # six sync states, including the three you cannot produce by hand
+npm run test:github-push      # versions → commits: deletions, subdirectories, squash, trailers
+npm run test:github-first-push # the empty repository, the orphan branch, and 403 ≠ 401
+npm run test:github-checks-line # check runs AND statuses; "unreadable" is not "none reported"
+npm run test:check-runner     # one pull request opens exactly one check run
+npm run test:github-webhook   # signature over raw bytes, delivery dedup, a tag that is not a branch
+npm run test:github-staging   # hunk-level staging, and what a partial selection makes a push
+npm run test:github-trailers  # §B.8.1's receipt, and the fields it omits rather than guesses
+npm run test:github-workflow  # the generated build check, and a customised one left alone
+npm run test:hunks            # whole-file vs partial selection
+npm run test:unpushed-stack   # reorder, squash, drop — and the intermediate state that refuses
+npm run test:secret-scan      # four surfaces, and no finding that carries a matched value
+npm run test:live-diagnostics # the cheap half of the validator, on an unsaved buffer
+npm run test:semantic-diff    # the agent's level, not the text's; the MCP grant line leads
+npm run test:trace-diff       # two traces, per step; and the shadow-run sweep
+npm run test:eval-check       # the check's title and summary, and null-not-zero deltas
+npm run test:check-policy     # §B.1.3's provider boundary: whose money a stranger's PR spends
 ```
 
 ```bash
@@ -1897,6 +2029,9 @@ npm run test:export      # CSV/JSON export preserves every caveat
 npm run test:csv         # RFC-4180 quoting
 npm run test:auth        # retry vs stop: the one decision the socket layer must not get wrong
 npm run test:reset       # NO store retains a row across a workspace switch
+npm run test:secrets-store # the credential list's own state, and what elevation does to it
+npm run test:truncate-path # a filename survives the width; the middle of the path gives way
+npm run test:composer-triggers # #, @ and ! fire only where they are triggers
 ```
 
 The client's test scripts invoke `../server/node_modules/.bin/tsx`, so install the server's
@@ -1919,6 +2054,21 @@ replayable at zero cost, chunked and paced so the UI behaves exactly as it would
 MCP has a fixture too, but a live one rather than a recording — see
 [Testing without a real server](#testing-without-a-real-server). `npm run mock:mcp` starts a
 server that speaks real MCP, so the whole path is exercisable with no third party and no spend.
+
+`npm run mock:github` is the same idea for [GitHub](#github), and it is a real object store rather
+than a response table: blobs, trees, commits and refs are content-addressed the way git does it, so
+a push that "succeeds" against a repository that never changed is a failure the fixture can show
+you. It also implements the App surface **and GitHub's two browser screens**, so registering,
+installing, pushing, opening a pull request and reading a check back all run with no GitHub account:
+
+```bash
+npm run mock:github     # prints its URL
+JAROKU_GITHUB_API=http://127.0.0.1:8936 JAROKU_GITHUB_WEB=http://127.0.0.1:8936 npm run dev
+```
+
+Its control plane scripts the states that are almost impossible to produce by hand against a real
+repository — a colleague's push, a force-push that produces `diverged`, a branch deleted under a
+live link, a revoked grant, a token that may not read checks, and a Checks API that is App-only.
 
 Point one at a path that **does not exist** to *record* a fresh fixture from a real call.
 

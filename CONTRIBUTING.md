@@ -88,6 +88,13 @@ The shortest list, with the tests that defend them:
 | One trace spans four tiers, and every span carries the run id | `test:tracing` |
 | Every alert names a metric something actually emits | `test:metrics` |
 | A migration cannot break the version currently serving | `test:migration-gate`, `migrate:check` |
+| The GitHub App asks for exactly seven permissions, and `checks` is **write** — read-only would let the panel see a check run and never post one | `test:github-app` |
+| A GitHub App install stores no repository credential: an installation id, and a token minted per hour against GitHub's own expiry | `test:github-app`, `test:github-app-flow` |
+| A registration or install callback takes its workspace from a single-use state, never from a query string | `test:github-app` |
+| A 401 from GitHub revokes the grant; a 403 does not — a token refused on one repository is not a dead token | `test:github-first-push` |
+| A push into an empty repository writes the initial commit to the DEFAULT branch, and `jaroku/<slug>` is rooted on it — an orphan branch has no merge base, so no pull request and no comparison | `test:github-first-push` |
+| The PR's checks line reads check runs AND commit statuses, and "could not read" is not "none reported" | `test:github-checks-line` |
+| One pull request opens exactly one check run, under the name it was posted with | `test:check-runner` |
 
 ## Commits
 

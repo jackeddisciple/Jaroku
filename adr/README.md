@@ -110,6 +110,7 @@ and refused.
 | [ADR-033](ADR-033-a-secret-store-with-no-way-to-read-one.md) | Give the secret store no method that returns a plaintext value |
 | [ADR-034](ADR-034-checkpoints-in-their-own-schema-keyed-by-workspace.md) | Keep LangGraph's checkpoints in their own schema, isolated by the thread id |
 | [ADR-035](ADR-035-a-reveal-path-gated-by-elevation.md) | Add one way to read a stored credential, behind an unforgeable elevation receipt |
+| [ADR-036](ADR-036-github-app-installation-as-the-connection.md) | Connect GitHub as an App installation, and mint the credential per hour |
 
 ### Interface and delivery
 
@@ -140,6 +141,10 @@ do it without spending money.
 **Working on storage — files, credentials or checkpoints.** ADR-031 through ADR-035, then
 ADR-018 for the scope they all rest on and ADR-026 for the credential rule ADR-033 turns into a
 type.
+
+**Working on the GitHub integration.** ADR-036 first — it decides what the credential is and
+therefore what every call in that feature travels on — then ADR-026 for the rule it satisfies by
+storing no credential at all, and ADR-027 for the same principle applied to hosting.
 
 **Working on tenancy, authentication or anything in `server/src/auth/`.** ADR-018 and ADR-019
 first, then ADR-020, ADR-021 and ADR-022. Read

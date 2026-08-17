@@ -8,6 +8,155 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.2.16 : The GitHub App, and the Integration's First Contact With Real GitHub
+
+The GitHub feature was written against a fixture and merged on a green suite. This release is what
+happened when it was pointed at github.com: a repository created through the panel, pushed to,
+opened as a pull request, and watched through a build check. Nine of the defects below were found
+that way, in the order a user would have hit them, and each one is a case where the fixture was
+more permissive than the thing it stood in for.
+
+The headline change follows from the same exercise. `POST /check-runs` answers 403 "You must
+authenticate via a GitHub App." to every personal access token — classic or fine-grained, scope
+ticked or not — so §B.1's eval check could not be posted at all under the credential model v0.2.15
+shipped. Connecting GitHub is now a GitHub App installation. There is nothing to paste, including
+for the deployment's own key.
+
+### Added
+
+- **Connect GitHub as an App installation**, registered through GitHub's app manifest flow. The
+  server serves a manifest; the browser POSTs it; a person presses Create on GitHub's own screen;
+  GitHub redirects back with a one-time code that is traded for the App's id, client secret,
+  webhook secret and private key. The key is written to `runtime/.env` base64-encoded — `setEnvVar`
+  refuses a newline and a PEM is nothing but newlines — and into the live process, so the next
+  request can use it without a restart. **Nobody ever sees it.** Registering an App by hand ends in
+  downloading a `.pem` and putting it somewhere, which is the copy-paste this release deletes,
+  moved up one level.
+- **Seven permissions, declared in source and asserted in a suite**: `contents`, `workflows`,
+  `administration`, `pull_requests`, `checks`, `statuses` write, `metadata` read. `checks` is
+  **write**, which is the whole point — a read-only checks permission leaves the panel able to see
+  check runs and unable to publish one. `test:github-app` asserts each by name and that there are
+  exactly seven, so an eighth cannot appear without an argument.
+- **Two tokens, because GitHub has two.** An installation access token can do everything to a
+  repository and nothing about a user: `GET /user`, `GET /user/repos` and `POST /user/repos` all
+  refuse it, and the last is "Create new repo". The App requests user authorization at install, and
+  exactly three calls — the account line, the availability check, repository creation — travel on
+  the resulting user-to-server token. `apiFor()` is still the one place a token is resolved, and
+  `githubApi.ts` did not change: it takes a token string and stays a transport.
+- **Installation tokens minted per hour and cached against GitHub's own expiry**, with sixty
+  seconds of skew. Nothing long-lived is stored: on the App path `github_installations` holds an
+  installation id and the sentinel `__github_app_installation__`, so a database dump contains no
+  repository credential at all.
+- **The fixture speaks the App protocol**, including GitHub's two browser screens — manifest
+  conversion with a real generated RSA key, token minting with GitHub's one-hour expiry,
+  `/installation/repositories`, the OAuth exchange, and the create and install pages. The whole
+  connect flow runs on a laptop with no GitHub account. `JAROKU_GITHUB_WEB` joins
+  `JAROKU_GITHUB_API`, because GitHub has a web host as well as an API host and the token exchange
+  lives on the first.
+- Suites: `test:github-app`, `test:github-app-flow`, `test:github-first-push`,
+  `test:github-checks-line`, `test:check-runner`.
+- ADR-036 records the decision, the two alternatives, and what it costs.
+
+### Changed
+
+- **The connect screen is one button.** The password field is gone, and so are the two paragraphs
+  telling people which token to make. Those paragraphs recommended a fine-grained token scoped to
+  selected repositories — the one configuration that cannot create a repository, which is the
+  option immediately beside them. The permissions are now declared by a manifest under review and
+  described by GitHub on its own approval screen.
+- **The personal access token path is retained and disconnected from the UI.** It is the only
+  answer for GitHub Enterprise Server and for a self-hosted deployment with no callback URL a
+  browser can reach. `POST /v1/github/connect` and `connectGithub()` are intact and documented as
+  such; nothing the user can click reaches them.
+- **Starting an install needs no elevation.** Storing a pasted token wrote a credential and
+  therefore required an unlocked Secrets session, which meant the first thing a new user saw after
+  pressing Connect was "this needs an unlocked Secrets session". An install writes nothing — the
+  credentials arrive later, from GitHub, on a callback — so the capability check is the gate.
+- **CI runs the GitHub suites.** `package.json` had a script for every one of Addendum B's twelve
+  and the workflow listed three, so the secret scanner, the provider boundary, the restack and the
+  eleven live rules merged on whoever last ran them by hand. All of them now run, plus
+  `test:mcp-impact`, which the Agent diff reads directly.
+
+### Fixed
+
+- **The first push into a repository Jaroku had just created could not work.** GitHub's Git Data
+  API answers 409 "Git Repository is empty" to blobs, trees and commits against a repository with
+  no commits, and `createRepo` asks for one with `auto_init: false`. The initial commit is now
+  written through the Contents API — the one endpoint GitHub accepts there — to the repository's
+  own default branch, never to `jaroku/<slug>`, because seeding Jaroku's branch in an empty
+  repository makes it the default branch.
+- **A first push wrote a commit with no parents**, which is an orphan branch. GitHub refuses to
+  open a pull request between one and `main` (422, no merge base) and refuses to compare them
+  (404) — so §3.9's PR card, §3.7's divergence detection and the entire reconciliation path §3.1
+  calls the only one were unreachable, while every screen still read as though they worked. The
+  branch is now rooted on the default branch's head.
+- **"✓ checks passing" read an endpoint that cannot see checks.** The combined-status API returns
+  commit statuses; GitHub Actions and §B.1 both write *check runs*. Measured against this
+  repository's own latest commit: statuses `total_count: 0`, check-runs 2, both failing. Both
+  mechanisms are read now, and failure outranks pending outranks success.
+- **A token that may not *read* checks is not a repository without any.** A 403 from the check-runs
+  endpoint rendered as "no checks reported" — word for word what a repository with no CI shows —
+  over a build that had just gone red. It says so, and names the permission.
+- **Every pull request got a second check run stuck at `queued`.** The GitHub id was read off the
+  row object before `attachGithubId` wrote it, so the in-progress update created rather than
+  patched. On a repository where the check is required, that is a merge button that never unlocks.
+- **Cancelling a superseded check renamed it.** A PATCH carrying a `name` renames the run, and the
+  cancel path sent a generic one because `check_runs` stores an id rather than a title. It sends
+  none, and GitHub keeps the name.
+- **One repository refusing a write revoked the workspace's whole GitHub grant.** 403 and 401 shared
+  a failure kind, so a fine-grained token scoped elsewhere — a credential working perfectly
+  everywhere else — tripped `markRevoked`. The panel dropped to "Connect GitHub" and took every
+  other agent's link with it. A 401 means the credential is gone; a 403 means it is not allowed
+  *here*.
+- **"Include Dockerfile & pyproject" pushed no Dockerfile.** It was a filter over files the deploy
+  path only synthesises when a deploy is prepared, so an agent nobody had deployed pushed nothing
+  extra — and the workflow §B.6.2 generates then ran `docker build` against a Dockerfile that was
+  not there. The first pull request the feature ever opened went red for that reason. The artifacts
+  are rendered at push time into the tree, never into `agent_versions`.
+- **The build check was never written for the repositories it exists for.** `link()` writes the
+  workflow to the default branch, and a repository created a moment earlier has none — so it
+  correctly declined and nothing followed up. It is now ensured after the first push, idempotently.
+- **`036` and `037` could not apply on Postgres.** `ci_dataset_id` and `eval_run_id` were declared
+  `uuid` against `datasets.id` and `eval_runs.id`, which are `text` from migration 002 — a foreign
+  key with no equality operator between its sides, which Postgres refuses as "cannot be
+  implemented" without naming which column it means. This failed the entire server job, which is
+  why every commit since had a red cross.
+- **The workspace export was missing Addendum B's five tables.** `agent_ci_config`, `check_runs`,
+  `shadow_runs`, `pr_comments` and `secret_scan_findings` are the measurement history, the
+  provenance of a run, a review, and the only record that anybody ever pushed over a credential.
+- **`diagnosticsStore` was not emptied on a workspace switch.** Its keys are `agentId\0path` — a
+  path out of another tenant's project — and the agent uuid in one can never be asked for again, so
+  nothing would ever overwrite it.
+- **Two suites skipped on the wrong question.** They tested for `runtime/pyproject.toml`, which is
+  in every checkout including one with no Python, and the analysis they need fails *silently* by
+  design. They now ask by running it.
+- **`history()` had no order.** Replacing an enforcement rung lifts the previous row with the new
+  row's timestamp, so two rows share `applied_at` whenever the ladder moves — and the reader that
+  asks "what is this workspace under" got the lifted one about half the time. Visible as one suite
+  failing on one driver and passing on the other inside a single CI run.
+
+### Migrations
+
+- `042_github_app_installation` — `github_installation_id` and three columns for the user-to-server
+  token on `github_installations`. `token_secret_name` stays `NOT NULL` so the token path is
+  untouched; an App row writes a sentinel rather than a null, because a person reading this table
+  in a console should get a sentence.
+- `036` and `037` are corrected in place rather than superseded. Neither had ever applied
+  successfully on Postgres — the CI job died on the first of them — so no database anywhere holds a
+  checksum for the old text.
+
+### Verification
+
+- The whole flow was exercised against github.com: a repository created through the panel, an
+  initial commit, a branch rooted on it, a push carrying §B.8.1's trailer block, the generated
+  workflow written to `main`, a pull request opened from the panel, and a build check observed
+  going from red to green once the artifacts fix landed.
+- The App flow was exercised end to end against the fixture — register, install, mint, and post a
+  check run that is a check run rather than the commit-status fallback.
+- CI is green, and runs nineteen GitHub suites where it previously ran three.
+
+---
+
 ## v0.2.15 : GitHub Integration
 
 Jaroku already had a version lineage. Git has one too. This release is not "git inside Jaroku" —
