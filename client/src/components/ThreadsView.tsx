@@ -1,21 +1,28 @@
 // The full-screen Threads list (§4).
 //
-// WHAT IS HERE NOW: the header, the three sections of §4.2, the rows, and the transition out. The
-// filter bar of §4.4 and the keyboard of §4.7 are the commits that follow.
+// WHAT IS HERE NOW: the header, the filter bar of §4.4, the three sections of §4.2, and the transition
+// out. The keyboard of §4.7 is the commit that follows.
 //
-// THE SECTIONS COME FROM `lib/threadGroups.ts` RATHER THAN FROM THIS FILE, because the interesting
-// half is an ordering — Needs You oldest-first, everything else newest-first — and an ordering is
-// exactly what looks right in a screenshot and is wrong in the case nobody had that day. It is a pure
-// function with a suite; this renders what it returns.
+// THE SECTIONS AND THE FILTER ARE PURE FUNCTIONS IN THEIR OWN MODULES, not code in this file, because
+// the interesting halves are an ordering and a match rule — and both are exactly what looks right in a
+// screenshot and is wrong in the case nobody had that day. This file renders what they return.
+//
+// FILTER STATE IS LOCAL, WHICH IS THE REQUIREMENT RATHER THAN A SHORTCUT. §4.4: filter state is per
+// session and reopening Threads starts at All. Local state does that by construction — the view
+// unmounts when you leave it — where a store would have to be remembered to be cleared.
 
+import { useRef, useState } from "react";
 import { useThreadStore } from "../store/threadStore.ts";
 import { groupThreads } from "../lib/threadGroups.ts";
+import { filterThreads, FILTER_LABEL, type ThreadFilter } from "../lib/threadFilter.ts";
 import { openThread, openThreadAgent } from "../lib/threadNav.ts";
 import { sendCreateThread, sendRenameThread } from "../lib/socket.ts";
 import { TYPE } from "../lib/tokens.ts";
+import { useSessionStore } from "../store/sessionStore.ts";
 import { EmptyState } from "./EmptyState.tsx";
+import { ThreadFilterBar } from "./ThreadFilterBar.tsx";
 import { ThreadRow } from "./ThreadRow.tsx";
-import { PlusIcon } from "./panelIcons.tsx";
+import { PlusIcon, SearchIcon } from "./panelIcons.tsx";
 
 export function ThreadsView() {
   const threads = useThreadStore((s) => s.threads);
@@ -23,6 +30,19 @@ export function ThreadsView() {
   const loaded = useThreadStore((s) => s.loaded);
   const activeThreadId = useThreadStore((s) => s.activeThreadId);
   const error = useThreadStore((s) => s.error);
+  const workspaceName = useSessionStore((s) => s.workspaces.find((w) => w.id === s.workspaceId)?.name ?? null);
+
+  const [filter, setFilter] = useState<ThreadFilter>("all");
+  const [query, setQuery] = useState("");
+  const filterInput = useRef<HTMLInputElement | null>(null);
+
+  const visible = filterThreads(threads, filter, query);
+  // The Archived chip renders a FLAT list, not sections. §4.2's three sections are about what is
+  // outstanding, and nothing in an archived thread is outstanding — grouping them under NEEDS YOU
+  // would be asking for attention the archive was meant to stop asking for.
+  const sections = filter === "archived"
+    ? [{ id: "archived" as const, label: "ARCHIVED", threads: visible }]
+    : groupThreads(visible);
 
   return (
     <div className="flex h-full flex-col bg-bg">
@@ -38,6 +58,15 @@ export function ThreadsView() {
           <PlusIcon size={12} /> New thread
         </button>
       </div>
+
+      <ThreadFilterBar
+        filter={filter}
+        onFilter={setFilter}
+        query={query}
+        onQuery={setQuery}
+        counts={counts}
+        inputRef={filterInput}
+      />
 
       {/* A refusal is shown rather than swallowed, and it is dismissed by the next snapshot rather
           than by a close button — the list being right again is what makes it stale. */}
@@ -62,13 +91,29 @@ export function ThreadsView() {
             ))}
           </div>
         ) : threads.length === 0 ? (
+          // §4.6's first and third empty states. The workspace is NAMED when it can be, so an empty
+          // list after a switch reads as an empty scope rather than as lost data.
           <EmptyState
-            title="No threads yet"
+            title={workspaceName ? `No threads in ${workspaceName} yet` : "No threads yet"}
             hint="Describe an agent in the composer and the first one opens itself."
+          />
+        ) : visible.length === 0 ? (
+          // §4.6's second: never a blank region. It names what was typed, or which chip is empty when
+          // nothing was — "no archived threads" is a different sentence from "nothing matches".
+          <EmptyState
+            icon={SearchIcon}
+            title={query.trim() ? `No threads match ${query.trim()}` : `Nothing under ${FILTER_LABEL[filter]}`}
+            hint={
+              query.trim() ? (
+                <button onClick={() => setQuery("")} className="text-muted underline decoration-dotted hover:text-ink">
+                  Clear the filter
+                </button>
+              ) : undefined
+            }
           />
         ) : (
           <div className="py-1">
-            {groupThreads(threads).map((section) => (
+            {sections.map((section) => (
               <section key={section.id}>
                 {/* The header carries the count and a rule out to the right edge, as §4.1's wireframe
                     draws it. An empty section is not here at all — `groupThreads` does not return one

@@ -269,6 +269,7 @@ jobs:
           npm run test:thread-store
           npm run test:thread-cost
           npm run test:thread-groups
+          npm run test:thread-filter
           npm run test:secrets-store
           npm run test:auth
           npm run test:plan-flow
