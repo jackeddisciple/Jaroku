@@ -2268,6 +2268,18 @@ const relay = new WsRelay({
     (await threadStore.get(ctx, threadId))
       ? { thread: await threadView(ctx, threadId), items: await threadStore.itemsFor(ctx, threadId) }
       : undefined,
+  // §4.3's author column needs names, and nothing ever asked for them — see the relay's own note
+  // at the initial snapshot. Answered only for a Team workspace: in a personal one the column does
+  // not exist, so the list would be a payload on every connection that nothing renders.
+  listMembers: async (ctx) => {
+    const ws = await bootIdentity.workspaceById(ctx, ctx.workspaceId);
+    if (ws?.kind !== "team") return undefined;
+    const [members, invites] = await Promise.all([
+      identityRepo.listMembers(ctx),
+      identityRepo.listInvites(ctx),
+    ]);
+    return { members, invites };
+  },
   // By name only, and per WORKSPACE. The client learns THAT a key is set, never what it is —
   // and learns it about its own workspace rather than about the machine.
   listProviders: (ctx) => providerSnapshot(ctx),

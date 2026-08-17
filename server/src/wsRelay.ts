@@ -1771,6 +1771,20 @@ export interface RelayOptions {
     ctx: TenantContext,
     threadId: string,
   ) => Promise<{ thread: ThreadView; items: ThreadItemView[] } | undefined>;
+  /**
+   * Who is in this workspace, for the initial snapshot.
+   *
+   * `undefined` MEANS "DO NOT SEND IT", which is how a personal workspace answers: there is one
+   * member, §4.3's author column does not exist there, and a list nothing renders is a payload on
+   * every connection for nothing. The membership commands still answer it on request either way.
+   *
+   * `member:read` is a MEMBER capability, so every socket that reaches this point is entitled to
+   * what it returns — the invite LINK, which is the one credential this channel ever carries, goes
+   * through `sendMembers` to the socket that asked and never through here.
+   */
+  listMembers?: (
+    ctx: TenantContext,
+  ) => Promise<{ members: unknown[]; invites: unknown[] } | undefined>;
   /** Every deployment, plus whether a Railway token is configured. Names only. */
   listDeployments?: (ctx: TenantContext) =>
     | { deployments: unknown[]; railwayConfigured: boolean }
@@ -1889,6 +1903,21 @@ export class WsRelay {
           type: "threads",
           ...((await this.opts.listThreads?.(ctx)) ?? EMPTY_THREADS),
         });
+        // And WHO IS IN THE WORKSPACE, for the same reason and only where it means something.
+        //
+        // §4.3's author column exists so a Team workspace can tell whose session a row is, and it
+        // resolves a name out of this list — which nothing ever asked for. `sendListMembers` was
+        // exported and never called, `setMembers` had one caller (a broadcast that only fires after
+        // somebody MUTATES membership), and the list was therefore empty for the whole life of a
+        // tab. Teammates' rows rendered no author at all, which is precisely the case the column
+        // was built for.
+        //
+        // Here rather than in the client, matching the badge's argument directly above: a column
+        // that appears one round trip late is a column somebody has already decided is empty.
+        // Undefined for a personal workspace, where the caller declines to answer because the
+        // column does not exist there — see the option's own doc.
+        const members = await this.opts.listMembers?.(ctx);
+        if (members) this.sendTo(ws, { channel: "members", type: "members", ...members });
       })().catch((err) => console.error("[relay] initial snapshot failed:", (err as Error).message));
 
       ws.on("message", (data) => {
