@@ -254,20 +254,36 @@ export class AgentRepository {
    * one after its runtime directory was cleaned, and every agent in the workspace was
    * soft-deleted on startup while its versions sat intact in the store. A row with no version
    * behind it is still swept, because that one really is nothing but a mirror of a directory.
+   *
+   * `onRemoved` IS CALLED FOR EACH AGENT THIS ACTUALLY SWEPT, and it is a callback rather than a
+   * dependency for one reason: the thing that needs to know is the thread store (§3.2 — an agent's
+   * deletion must leave its threads standing, named), and a repository that imported another
+   * feature's store to tell it so would be this table reaching into that one. The caller wires the
+   * two together; this only reports what it did.
+   *
+   * The report is per row ACTUALLY changed rather than per candidate. The UPDATE above refuses to
+   * sweep an agent with published versions, so a naive "call it for everything not on disk" would
+   * tell the caller an agent was deleted while it is still there — and the caller's response is to
+   * null its threads' foreign key, which would detach a live agent's sessions from it.
    */
-  async syncFromDisk(ctx: TenantContext, onDisk: AgentOnDisk[]): Promise<Agent[]> {
+  async syncFromDisk(
+    ctx: TenantContext,
+    onDisk: AgentOnDisk[],
+    opts?: { onRemoved?: (agent: Agent) => Promise<void> },
+  ): Promise<Agent[]> {
     for (const a of onDisk) {
       if (SAFE_SLUG.test(a.slug)) await this.upsertFromDisk(ctx, a);
     }
     const seen = new Set(onDisk.map((a) => a.slug));
     for (const existing of await this.list(ctx)) {
       if (!seen.has(existing.slug)) {
-        await this.q(ctx).run(
+        const res = await this.q(ctx).run(
           `UPDATE agents SET deleted_at = ?
             WHERE workspace_id = ? AND slug = ?
               AND NOT EXISTS (SELECT 1 FROM agent_versions v WHERE v.agent_id = agents.id)`,
           [new Date().toISOString(), ctx.workspaceId, existing.slug],
         );
+        if (res.changes > 0) await opts?.onRemoved?.(existing);
       }
     }
     return this.list(ctx);

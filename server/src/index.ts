@@ -1242,6 +1242,28 @@ async function syncAgents(): Promise<void> {
       hand_written: a.hand_written,
       created_at: a.created_at,
     })),
+    {
+      // §3.2. THE AGENT'S FILES AND RUNS GO; ITS THREADS DO NOT.
+      //
+      // Nulling the foreign key and keeping the name is what makes the row read `stripe_webhook
+      // (deleted)`, dimmed, rather than "(agent deleted)" — and the snapshot column can only be
+      // filled from here, because after this moment there is nowhere left to read the name from.
+      //
+      // This is the same discipline the rest of the product already holds to: a branch never mutates
+      // its parent, an undo restores from a snapshot, an eval job persists before dispatch. Nothing
+      // is destroyed as a side effect of something else being destroyed — a thread holds what was
+      // thought, what was generated and what it cost, and that record outlives the artefact.
+      onRemoved: async (agent) => {
+        const kept = await threadStore.detachAgent(
+          serverContext(),
+          agent.id,
+          agent.display_name ?? agent.slug,
+        );
+        if (kept > 0) {
+          console.log(`[threads] kept ${kept} thread(s) of the removed agent ${agent.slug}`);
+        }
+      },
+    },
   );
 }
 await syncAgents();

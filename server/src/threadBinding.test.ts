@@ -22,6 +22,7 @@ import { randomUUID } from "node:crypto";
 import { openTestSqlite, testContext } from "./db/testDb.ts";
 import { BillingRepository } from "./db/repositories/billing.ts";
 import { TraceStore } from "./store.ts";
+import { AgentRepository } from "./db/repositories/agents.ts";
 import { ThreadStore } from "./threadStore.ts";
 import { collectThreadFacts, type EvalFact, type RunFact } from "./threadFacts.ts";
 import { deriveThreadStatus } from "./threadStatus.ts";
@@ -302,6 +303,54 @@ async function statusesFor(
   check("...owning the run it did", (await h.threads.threadForRef(ctx, "run", oldRun)) === backfilled);
   check("...so nothing that already happened is orphaned",
     (await h.threads.allItems(ctx)).length === 1);
+}
+
+// --- 9. an agent's deletion, through the path that actually deletes one (§3.2) --------------
+{
+  // NOT `detachAgent` CALLED DIRECTLY — `test:threads` already does that. This goes through
+  // `syncFromDisk`, which is the only thing in this product that removes an agent, so what is under
+  // test is the wiring: that the sweep reports what it swept and that the report reaches the threads.
+  const h = await harness();
+  const agents = new AgentRepository(h.db);
+  await agents.upsertFromDisk(ctx, { slug: "stripe_webhook", display_name: "stripe_webhook" });
+  const agent = (await agents.bySlug(ctx, "stripe_webhook"))!;
+
+  const a = await h.threads.create(ctx, { agentId: agent.id, agentName: "stripe_webhook", title: "retry logic" });
+  const b = await h.threads.create(ctx, { agentId: agent.id, agentName: "stripe_webhook", title: "signature check" });
+  await h.threads.addItem(ctx, a.id, { kind: "message", role: "user", body: "add exponential backoff" });
+
+  // The directory is gone, so the reconciliation sweeps the row — and tells whoever asked.
+  const removed: string[] = [];
+  await agents.syncFromDisk(ctx, [], {
+    onRemoved: async (removedAgent) => {
+      removed.push(removedAgent.slug);
+      await h.threads.detachAgent(ctx, removedAgent.id, removedAgent.display_name ?? removedAgent.slug);
+    },
+  });
+
+  check("the sweep reports the agent it removed", removed.join(",") === "stripe_webhook");
+  check("the agent is gone from the list", (await agents.bySlug(ctx, "stripe_webhook")) === undefined);
+
+  const kept = await h.threads.list(ctx);
+  check("both of its threads are still there", kept.length === 2);
+  check("...with their titles", kept.map((t) => t.title).sort().join(" / ") === "retry logic / signature check");
+  check("...with no agent to point at", kept.every((t) => t.agent_id === null));
+  check("...and the name they were linked to, so the row can say stripe_webhook (deleted)",
+    kept.every((t) => t.agent_name_snapshot === "stripe_webhook"));
+  check("...and what was said in them is still readable",
+    (await h.threads.messages(ctx, a.id))[0]?.body === "add exponential backoff");
+
+  // The other direction, and the reason the callback fires per row CHANGED rather than per candidate:
+  // an agent with published versions is not swept, so its threads must stay attached to it.
+  const published = await agents.upsertFromDisk(ctx, { slug: "docs_agent", display_name: "docs_agent" });
+  await agents.addVersion(ctx, published.id, {});
+  const live = await h.threads.create(ctx, { agentId: published.id, agentName: "docs_agent", title: "kept" });
+  const alsoRemoved: string[] = [];
+  await agents.syncFromDisk(ctx, [], { onRemoved: async (r) => { alsoRemoved.push(r.slug); } });
+  check("an agent with published versions is not swept by an empty directory",
+    !alsoRemoved.includes("docs_agent"), alsoRemoved.join(","));
+  check("...so its thread is still attached to it",
+    (await h.threads.get(ctx, live.id))?.agent_id === published.id);
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
