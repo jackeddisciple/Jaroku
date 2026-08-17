@@ -3385,6 +3385,7 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
       // increment and nothing to extrapolate from — which is exactly what a thread whose cost has
       // stopped moving should show.
       live_run_ids: status === "running" ? (entry?.liveRunIds ?? []) : [],
+      live_eval_ids: status === "running" ? (entry?.liveEvalIds ?? []) : [],
       eval_progress: status === "running" ? (entry?.facts.evalProgress ?? null) : null,
       // Both filled in below: the first needs every row's status, the second needs the period total.
       agent_active: 0,

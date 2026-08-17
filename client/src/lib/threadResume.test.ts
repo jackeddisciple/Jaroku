@@ -34,6 +34,7 @@ const row = (status: ThreadStatus, fragment: string | null, archived = false): T
   cost_known: true,
   preview: null,
   live_run_ids: [],
+  live_eval_ids: [],
   eval_progress: null,
   agent_active: 1,
   cost_share_high: false,

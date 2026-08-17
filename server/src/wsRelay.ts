@@ -922,7 +922,14 @@ export type EvalEvent =
       total: number;
       targets: { provider: string; model: string }[];
     }
-  | { type: "evalProgress"; evalId: string; total: number; done: number; running: number; queued: number; failed: number }
+  // `spentDeltaUsd` is §4.3.3's live figure for an eval, and it is the only cost this channel
+  // carries. Eval runs are kept off `trace` on purpose, so this is the one route a running eval's
+  // spend has to a client — see EvalProgress. It rides an event already broadcast per job
+  // completion, so §7.1's "no polling channel" rule is untouched.
+  | {
+      type: "evalProgress"; evalId: string; total: number; done: number; running: number;
+      queued: number; failed: number; spentDeltaUsd: number;
+    }
   | { type: "evalFinished"; evalId: string; status: string; error?: string }
   | { type: "rubric"; datasetId: string; rubric: unknown; isDefault: boolean }
   // Scoring runs after the runs finish, so quality lands after the rest of the row. A null
@@ -1360,6 +1367,18 @@ export interface ThreadView {
    * Empty for anything not running: a finished run's cost is in `cost_usd` already.
    */
   live_run_ids: string[];
+  /**
+   * The evals of this thread that are in flight, by eval id.
+   *
+   * THE SAME JOB `live_run_ids` DOES, for the channel that carries an eval's cost. A step arriving
+   * on `trace` names its run; a progress event arriving on `eval` names its EVAL, and without this
+   * the client had no way to decide which session's figure to move — which is half of why a running
+   * eval's cost sat still. Eval runs are deliberately kept off `trace`, so their ids in
+   * `live_run_ids` never receive a step and cannot serve this.
+   *
+   * Empty for anything not running, for the same reason as above.
+   */
+  live_eval_ids: string[];
   /**
    * How far a running eval has got, when one is attributed to this thread.
    *

@@ -86,6 +86,7 @@ async function snapshot(ctx: TenantContext): Promise<{ threads: ThreadView[]; co
       cost_known: true,
       preview: null,
       live_run_ids: [],
+      live_eval_ids: [],
       eval_progress: null,
       agent_active: 1,
       cost_share_high: false,

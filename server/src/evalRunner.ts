@@ -106,6 +106,22 @@ export interface EvalProgress {
   running: number;
   queued: number;
   failed: number;
+  /**
+   * What this eval has spent SINCE the last progress event (§4.3.3).
+   *
+   * THE ONE THING THIS CHANNEL DID NOT CARRY, and the reason §4.3.3's worked example was
+   * unreachable. An eval's jobs are ordinary runs, so their step costs exist — but eval runs are
+   * deliberately kept off the `trace` channel (a running eval must not steal the timeline's focus),
+   * which is the only channel the client increments a live figure from. So a thread running an eval
+   * showed a frozen cost and, because `done` never moved either, no projection at all: the two
+   * halves of §4.3.3 were mutually exclusive in the shipped product.
+   *
+   * A DELTA, NOT A TOTAL, because the client adds it to the ledger's figure exactly as it adds a
+   * step's cost from `trace` — one accumulation rule, not two. §7.1 still holds: this rides an event
+   * that is already broadcast per job completion and carries no payload, so nothing polls and no new
+   * message type exists.
+   */
+  spentDeltaUsd: number;
 }
 
 export interface EvalRunnerDeps {
@@ -751,8 +767,27 @@ export class EvalRunner {
     };
   }
 
+  /**
+   * What each live eval had spent when its last progress event went out.
+   *
+   * The delta is computed here rather than by the client, because `trueSpend` is the authority on
+   * what an eval has cost — every attempt plus the judge — and a client subtracting two totals it
+   * was sent would be a second implementation of that. Removed when the eval finishes, so this is
+   * bounded by "evals running right now" exactly as `live` is.
+   */
+  private reportedSpend = new Map<string, number>();
+
   private async reportProgress(evalId: string): Promise<void> {
-    this.deps.onProgress({ evalId, ...(await this.counts(evalId)) });
+    const spent = await this.deps.evalStore.trueSpend(this.deps.context(), evalId).catch(() => 0);
+    const before = this.reportedSpend.get(evalId) ?? 0;
+    this.reportedSpend.set(evalId, spent);
+    this.deps.onProgress({
+      evalId,
+      ...(await this.counts(evalId)),
+      // Clamped at zero: `trueSpend` only grows, and a negative delta would be a client subtracting
+      // money from a figure the ledger already justified.
+      spentDeltaUsd: Math.max(0, spent - before),
+    });
   }
 
   private async finishIfDone(evalId: string): Promise<void> {
@@ -763,6 +798,7 @@ export class EvalRunner {
 
     if (live.retryTimer) { clearTimeout(live.retryTimer); live.retryTimer = null; }
     this.live.delete(evalId);
+    this.reportedSpend.delete(evalId);
     // A budget abort already recorded its own status and reason; don't overwrite it with
     // the generic "cancelled", which would lose why the eval stopped.
     const current = (await this.deps.evalStore.getEvalRun(this.deps.context(), evalId))?.status;

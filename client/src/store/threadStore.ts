@@ -73,6 +73,14 @@ interface ThreadState {
    */
   liveCost: Record<string, number>;
   /**
+   * Where each running eval has got to, by eval id, as its progress events land (§4.3.3).
+   *
+   * BESIDE `liveCost` AND FOR THE SAME REASON. The snapshot's `eval_progress` is the authority and
+   * is taken at a moment; this is what has arrived since, and it is what makes `done` move. Cleared
+   * on every snapshot, like the cost delta, because the snapshot is the authority.
+   */
+  liveEvalProgress: Record<string, { done: number; total: number }>;
+  /**
    * What was set aside by the last archive, when something was (§3.4).
    *
    * HELD HERE RATHER THAN IN THE VIEW because the row it describes is gone from the list by the time the
@@ -105,6 +113,26 @@ interface ThreadState {
    * `live_run_ids` on the rows this store already holds.
    */
   addStepCost: (runId: string, usd: number) => void;
+  /**
+   * An eval's spend since the last progress event, attributed to whichever thread owns the eval.
+   *
+   * THE OTHER HALF OF §4.3.3, and the reason the spec's own worked example was unreachable. An
+   * eval's runs are deliberately kept off the `trace` channel — a running eval must not steal the
+   * timeline's focus — so `addStepCost` above is never called for one, and a thread running an eval
+   * showed a frozen figure for the whole sweep. Takes the EVAL id, because that is what the eval
+   * channel carries; the lookup is against `live_eval_ids` on the rows this store already holds.
+   */
+  addEvalCost: (evalId: string, usd: number) => void;
+  /**
+   * How far a running eval has got, from the event rather than from the next snapshot.
+   *
+   * §4.3.3's projection needs a `done` that MOVES: the snapshot is taken when the eval starts, when
+   * `done` is 0, and `projectCost` returns null at zero — so the arrow and the `~` figure were
+   * suppressed for the entire run. §7.1's protocol note names this exact remedy: derive it
+   * client-side from the progress event the eval channel already broadcasts, rather than pushing a
+   * snapshot per tick, which is the polling channel it refuses.
+   */
+  noteEvalProgress: (evalId: string, progress: { done: number; total: number }) => void;
   setError: (message: string | null) => void;
 }
 
@@ -116,13 +144,15 @@ export const useThreadStore = create<ThreadState>((set) => ({
   error: null,
   resumeNonce: 0,
   liveCost: {},
+  liveEvalProgress: {},
   archiveNotice: null,
 
   // A replace, with the counts that were computed beside these rows. Taking them as one argument
   // rather than two calls is deliberate: they are one snapshot, and a store that could be given rows
   // without counts is a store that can hold a count of something else.
   // A replace, and the live deltas go with it: see `liveCost` for why the snapshot is the authority.
-  setThreads: (threads, counts) => set({ threads, counts, loaded: true, error: null, liveCost: {} }),
+  setThreads: (threads, counts) =>
+    set({ threads, counts, loaded: true, error: null, liveCost: {}, liveEvalProgress: {} }),
 
   /**
    * The one row `loadThread` answers with.
@@ -161,6 +191,23 @@ export const useThreadStore = create<ThreadState>((set) => ({
       if (!owner) return {};
       return { liveCost: { ...s.liveCost, [owner.id]: (s.liveCost[owner.id] ?? 0) + usd } };
     }),
+
+  addEvalCost: (evalId, usd) =>
+    set((s) => {
+      // Same three guards as `addStepCost`, and the same reasons: adding nothing must not create an
+      // entry (an entry is what re-renders the row), and a delta for an eval no thread claims is
+      // dropped rather than guessed at.
+      if (!Number.isFinite(usd) || usd <= 0) return {};
+      const owner = s.threads.find((t) => t.live_eval_ids.includes(evalId));
+      if (!owner) return {};
+      return { liveCost: { ...s.liveCost, [owner.id]: (s.liveCost[owner.id] ?? 0) + usd } };
+    }),
+
+  // A REPLACE, NOT AN ACCUMULATE. The event carries where the eval IS, not how far it moved — so
+  // this is the newest answer to a question, and a duplicate delivery is harmless.
+  noteEvalProgress: (evalId, progress) =>
+    set((s) => ({ liveEvalProgress: { ...s.liveEvalProgress, [evalId]: progress } })),
+
   setError: (error) => set({ error }),
 }));
 
@@ -178,6 +225,27 @@ export function threadSpend(thread: ThreadView, liveCost: Record<string, number>
   const live = liveCost[thread.id] ?? 0;
   if (thread.cost_usd === null) return live > 0 ? live : null;
   return thread.cost_usd + live;
+}
+
+/**
+ * How far this thread's running eval has got: the newest answer, whoever gave it (§4.3.3).
+ *
+ * A SELECTOR, LIKE `threadSpend`, so there is one definition of "where is this eval" and no
+ * component combines the snapshot and the live events differently. The snapshot's figure is taken
+ * at the moment the eval STARTS — when `done` is 0 and `projectCost` correctly refuses to
+ * extrapolate — so without the live half the projection never appeared at all.
+ */
+export function threadEvalProgress(
+  thread: ThreadView,
+  live: Record<string, { done: number; total: number }>,
+): { done: number; total: number } | null {
+  for (const evalId of thread.live_eval_ids) {
+    const seen = live[evalId];
+    // The LAST live eval wins if there are two, matching the server's own rule: a row has one
+    // fragment and one projection, and the newest is the one whose numbers are still moving.
+    if (seen) return seen;
+  }
+  return thread.eval_progress;
 }
 
 /** One thread by id, or undefined. */

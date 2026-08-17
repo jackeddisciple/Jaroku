@@ -14,7 +14,10 @@
 //
 //   npm run test:thread-store
 
-import { agentChipLabel, threadById, threadSpend, useThreadStore } from "./threadStore.ts";
+import {
+  agentChipLabel, threadById, threadEvalProgress, threadSpend, useThreadStore,
+} from "./threadStore.ts";
+import { fmtRunningCost } from "../lib/threadCost.ts";
 import type { ThreadCounts, ThreadView } from "../types.ts";
 
 let fail = 0;
@@ -40,6 +43,7 @@ const thread = (over: Partial<ThreadView> = {}): ThreadView => ({
   cost_known: true,
   preview: "add exponential backoff to the retry handler",
   live_run_ids: [],
+  live_eval_ids: [],
   eval_progress: null,
   agent_active: 1,
   cost_share_high: false,
@@ -191,6 +195,50 @@ const reset = (): void => useThreadStore.setState(useThreadStore.getInitialState
   state().addStepCost("r", 0.005);
   check("...and one with only live spend has one",
     threadSpend(state().threads[0]!, state().liveCost) === 0.005);
+}
+
+// --- 9. an EVAL's live cost and moving denominator (§4.3.3's worked example) ------------------
+{
+  // An eval's runs are deliberately kept off the `trace` channel — a running eval must not steal the
+  // timeline's focus — so `addStepCost` is never called for one. Without the eval channel carrying a
+  // cost, the row showed a frozen figure; and because the only snapshot is taken when the eval
+  // STARTS, `done` was 0 and `projectCost` correctly refused to extrapolate, so the projection never
+  // appeared either. The two halves of §4.3.3 were mutually exclusive in the shipped product.
+  reset();
+  state().setThreads(
+    [thread({
+      id: "sweep", status: "running", cost_usd: 0.5,
+      live_run_ids: ["job-1"], live_eval_ids: ["ev-1"],
+      eval_progress: { done: 0, total: 120 },
+    })],
+    counts({ all: 1, needs_you: 0, running: 1, recent: 0 }),
+  );
+  const row = () => state().threads[0]!;
+
+  check("at eval start there is no denominator to project from",
+    fmtRunningCost(threadSpend(row(), state().liveCost), true,
+      threadEvalProgress(row(), state().liveEvalProgress)) === "$0.50");
+
+  state().addEvalCost("ev-1", 0.32);
+  state().noteEvalProgress("ev-1", { done: 34, total: 120 });
+  check("an eval's spend lands on the thread that owns the eval", state().liveCost["sweep"] === 0.32);
+  check("...and the denominator moves with it",
+    threadEvalProgress(row(), state().liveEvalProgress)?.done === 34);
+  check("...which is the spec's own worked example",
+    fmtRunningCost(threadSpend(row(), state().liveCost), true,
+      threadEvalProgress(row(), state().liveEvalProgress)) === "$0.82 → ~$2.89",
+    fmtRunningCost(threadSpend(row(), state().liveCost), true,
+      threadEvalProgress(row(), state().liveEvalProgress)) ?? "null");
+
+  state().addEvalCost("ev-nobodys", 9);
+  check("a delta for an eval no thread claims is dropped rather than guessed at",
+    state().liveCost["sweep"] === 0.32);
+
+  // Progress is a REPLACE, not an accumulate: the event says where the eval is, so a duplicate
+  // delivery is harmless.
+  state().noteEvalProgress("ev-1", { done: 34, total: 120 });
+  check("a repeated progress event does not advance anything",
+    threadEvalProgress(row(), state().liveEvalProgress)?.done === 34);
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

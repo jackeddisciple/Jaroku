@@ -89,6 +89,14 @@ export interface ThreadDerivation {
    */
   liveRunIds: string[];
   /**
+   * The evals of this thread that are in flight, by EVAL id.
+   *
+   * The same job `liveRunIds` does, for the channel that carries an eval's cost. An eval's per-job
+   * progress event names the eval, not a run, and eval runs are deliberately kept off the trace
+   * channel — so the run ids above never receive a step and cannot attribute one.
+   */
+  liveEvalIds: string[];
+  /**
    * §4.3's preview: the last USER message, never Jaroku's reply.
    *
    * Null for a thread nobody has spoken in yet — a row created a moment ago, or one whose work was
@@ -123,6 +131,7 @@ export function collectThreadFacts(input: FactsInput): Map<string, ThreadDerivat
       preview: null,
       firstMessage: null,
       liveRunIds: [],
+      liveEvalIds: [],
     });
   }
 
@@ -175,6 +184,7 @@ export function collectThreadFacts(input: FactsInput): Map<string, ThreadDerivat
           // and one projection, and the newest is the one whose numbers are still moving.
           f.evalProgress = { done: ev.done, total: ev.total };
           entry.liveRunIds.push(...ev.liveRunIds);
+          entry.liveEvalIds.push(item.ref_id!);
         }
         break;
       }

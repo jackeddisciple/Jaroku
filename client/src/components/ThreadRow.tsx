@@ -29,7 +29,7 @@ import { relTime } from "../lib/format.ts";
 import { resumeHint } from "../lib/threadResume.ts";
 import { fmtRunningCost, fmtThreadCost } from "../lib/threadCost.ts";
 import { STATUS } from "../lib/tokens.ts";
-import { agentChipLabel, threadSpend, useThreadStore } from "../store/threadStore.ts";
+import { agentChipLabel, threadEvalProgress, threadSpend, useThreadStore } from "../store/threadStore.ts";
 import { ThreadGlyph } from "./ThreadGlyph.tsx";
 import { useMemberStore } from "../store/memberStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
@@ -110,8 +110,13 @@ export function ThreadRow({
    */
   const live = useThreadStore((s) => s.liveCost[thread.id] ?? 0);
   const spend = threadSpend(thread, { [thread.id]: live });
+  // §4.3.3's denominator, from the eval channel rather than from the snapshot. The snapshot is taken
+  // when the eval STARTS, when done is 0 — and projectCost correctly refuses to extrapolate from
+  // nothing — so a row read from it alone showed `eval 0/120` and no projection for the whole sweep.
+  const liveProgress = useThreadStore((s) => s.liveEvalProgress);
+  const progress = threadEvalProgress(thread, liveProgress);
   const cost = thread.status === "running"
-    ? fmtRunningCost(spend, thread.cost_known, thread.eval_progress)
+    ? fmtRunningCost(spend, thread.cost_known, progress)
     : fmtThreadCost(spend, thread.cost_known);
   // Started here by a double-click, or by the view when `⌘Enter` names this row. Either way the
   // ending is the row's, so `stopEditing` is the single exit both routes go through.

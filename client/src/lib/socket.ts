@@ -149,7 +149,17 @@ function dispatch(msg: ServerMessage): void {
       else if (msg.type === "evalStarted") {
         e.setProgress({ evalId: msg.evalId, total: msg.total, done: 0, running: 0, queued: msg.total, failed: 0 });
         e.selectEval(msg.evalId);
-      } else if (msg.type === "evalProgress") e.setProgress({ ...msg });
+      } else if (msg.type === "evalProgress") {
+        e.setProgress({ ...msg });
+        // §4.3.3, the eval half. An eval's runs are kept off the `trace` channel on purpose, so
+        // this is the only route its spend has to a thread row — and the progress numbers are what
+        // give `projectCost` a denominator that moves. Both go to `threadStore` rather than being
+        // read out of `evalStore` by the row, because the row's question is "what has THIS SESSION
+        // spent", which is a fact about a thread and not about the eval panel's selection.
+        const t = useThreadStore.getState();
+        t.addEvalCost(msg.evalId, msg.spentDeltaUsd);
+        t.noteEvalProgress(msg.evalId, { done: msg.done, total: msg.total });
+      }
       else if (msg.type === "evalFinished") {
         // Runs are done; scoring may still be in flight, so the panel says so rather than
         // showing a quality column that's about to fill in.

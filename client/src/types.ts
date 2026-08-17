@@ -400,7 +400,12 @@ export type EvalMessage =
   | { channel: "eval"; type: "datasetDeleted"; datasetId: string }
   | { channel: "eval"; type: "promoted"; datasetId: string; datasetName: string; duplicate: boolean }
   | { channel: "eval"; type: "evalStarted"; evalId: string; datasetId: string; agentId: string; total: number; targets: EvalTarget[] }
-  | { channel: "eval"; type: "evalProgress"; evalId: string; total: number; done: number; running: number; queued: number; failed: number }
+  // `spentDeltaUsd` is §4.3.3's live figure for an eval — the only cost this channel carries, and the
+  // only route a running eval's spend has to a client, since its runs are kept off `trace`.
+  | {
+      channel: "eval"; type: "evalProgress"; evalId: string; total: number; done: number;
+      running: number; queued: number; failed: number; spentDeltaUsd: number;
+    }
   | { channel: "eval"; type: "evalFinished"; evalId: string; status: string; error?: string }
   | { channel: "eval"; type: "scored"; evalId: string; jobId: string; score: number | null; error?: string | null }
   | { channel: "eval"; type: "scoringFinished"; evalId: string; scored: number; unscored: number }
@@ -755,6 +760,14 @@ export interface ThreadView {
    * session. Empty for anything not running — a finished run's cost is in `cost_usd`.
    */
   live_run_ids: string[];
+  /**
+   * The evals of this thread that are in flight, by EVAL id (§4.3.3).
+   *
+   * The same job `live_run_ids` does, for the channel an eval's cost arrives on. A step on `trace`
+   * names its run; a progress event on `eval` names its eval — and eval runs are deliberately kept
+   * off `trace`, so the run ids above never receive a step and cannot attribute one.
+   */
+  live_eval_ids: string[];
   /**
    * How far a running eval has got. The denominator §4.3.3's projection needs.
    *
