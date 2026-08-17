@@ -138,4 +138,6 @@ const reset = (): void => useThreadStore.setState(useThreadStore.getInitialState
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
-process.exit(fail === 0 ? 0 : 1);
+// `globalThis.process` rather than `process`: the client tsconfig has no node types, which is
+// correct — nothing in the app may reach for one. Same spelling as lib/title.test.ts.
+(globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

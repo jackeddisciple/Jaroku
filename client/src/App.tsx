@@ -8,6 +8,7 @@ import { TopBar } from "./components/TopBar.tsx";
 import { CodeOverlay } from "./components/CodeOverlay.tsx";
 import { SignIn } from "./components/SignIn.tsx";
 import { McpConfirmModal } from "./components/McpConfirmModal.tsx";
+import { FullScreenView } from "./components/FullScreenView.tsx";
 import { ComposerColumn } from "./components/onboarding/ComposerColumn.tsx";
 import { WelcomeStep } from "./components/onboarding/WelcomeStep.tsx";
 import { useOnboarding } from "./components/onboarding/useOnboarding.ts";
@@ -15,11 +16,14 @@ import { sendLoadAgentFiles, startSocket } from "./lib/socket.ts";
 import { useBuildStore } from "./store/buildStore.ts";
 import { useSessionStore } from "./store/sessionStore.ts";
 import { useTraceStore } from "./store/traceStore.ts";
+import { useUiStore } from "./store/uiStore.ts";
 
 export function App() {
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const connected = useTraceStore((s) => s.connection === "open");
   const sessionStatus = useSessionStore((s) => s.status);
+  // §2's whole mechanism, as one nullable field. Null is the ordinary three panes.
+  const navView = useUiStore((s) => s.navView);
 
   // First run. Everything below is the normal app once `phase` is "complete", which it is for
   // every session after the first — see components/onboarding/useOnboarding.ts.
@@ -60,12 +64,18 @@ export function App() {
         {/* top bar */}
         <TopBar />
 
-        {/* three-column body (doc §4): agents+runs · build · trace/code
-            Steps 3 and 4 are this same layout with columns not yet mounted, not a different
-            screen. ONE PanelGroup for the whole session: completion is only "both flags become
-            true", so there is no remount, no reload and no jump at the moment step 5 promises
-            the user lands exactly where they already were. */}
-        <PanelGroup direction="horizontal" autoSaveId="jaroku-layout-v3" className="flex-1 min-h-0">
+        {/* TWO NESTED GROUPS RATHER THAN ONE, WHICH IS WHAT §2 COSTS.
+            The outer group is [sidebar | everything else], and the inner one inside it is the
+            centre/right split that used to be part of the outer. That split is the whole
+            mechanism: a full-screen view replaces the contents of the SECOND outer panel, so the
+            sidebar's own width is not part of the swap and cannot move when one opens — which is
+            §2's first promise, made structural rather than remembered.
+
+            `jaroku-layout-v4`, because the outer group's panels are not the ones v3 saved sizes
+            for. Reusing the id would restore a two-panel layout into a two-panel group whose
+            second panel is now a container, and the composer/right split would come back at
+            whatever width the trace panel used to have. */}
+        <PanelGroup direction="horizontal" autoSaveId="jaroku-layout-v4" className="flex-1 min-h-0">
           {mountSidebar && (
             <>
               <Panel defaultSize={20} minSize={14} maxSize={34} order={1}>
@@ -76,21 +86,44 @@ export function App() {
               <PanelResizeHandle className="w-[3px] bg-hair transition-colors duration-fast hover:bg-[#3a3a3f]" />
             </>
           )}
-          <Panel defaultSize={36} minSize={24} order={2}>
-            {/* The composer, alone during step 3 and still the centre of the screen through
-                step 4. Wrapped rather than swapped, so BuildPane is never torn down. */}
-            <ComposerColumn phase={phase} />
-          </Panel>
-          {mountRightPanel && (
-            <>
-              <PanelResizeHandle className="w-[3px] bg-hair transition-colors duration-fast hover:bg-[#3a3a3f]" />
-              <Panel defaultSize={44} minSize={26} order={3}>
-                <div className="h-full animate-panel-in motion-reduce:animate-none">
-                  <RightPanel />
+          <Panel order={2}>
+            {/* THE THREE PANES STAY MOUNTED WHILE A FULL-SCREEN VIEW IS UP, and that is the second
+                promise §2 makes: clicking the active agent in the sidebar "returns you to the
+                three-pane view exactly where you left it". Unmounting would lose a half-typed
+                message, the conversation's scroll position and the trace's selected step — and
+                "exactly where you left it" would then mean "at the top, with an empty composer".
+
+                `invisible` rather than `hidden`: the inner group keeps its real dimensions, so its
+                resize observer is never handed a zero-width container and its saved sizes survive
+                the round trip. It also drops out of the tab order, which is what stops the keyboard
+                reaching a composer nobody can see. */}
+            <div className="relative h-full">
+              <div className={`absolute inset-0 ${navView ? "invisible" : ""}`}>
+                <PanelGroup direction="horizontal" autoSaveId="jaroku-panes-v1" className="h-full">
+                  <Panel defaultSize={45} minSize={30} order={1}>
+                    {/* The composer, alone during step 3 and still the centre of the screen through
+                        step 4. Wrapped rather than swapped, so BuildPane is never torn down. */}
+                    <ComposerColumn phase={phase} />
+                  </Panel>
+                  {mountRightPanel && (
+                    <>
+                      <PanelResizeHandle className="w-[3px] bg-hair transition-colors duration-fast hover:bg-[#3a3a3f]" />
+                      <Panel defaultSize={55} minSize={32} order={2}>
+                        <div className="h-full animate-panel-in motion-reduce:animate-none">
+                          <RightPanel />
+                        </div>
+                      </Panel>
+                    </>
+                  )}
+                </PanelGroup>
+              </div>
+              {navView && (
+                <div className="absolute inset-0 animate-panel-in motion-reduce:animate-none">
+                  <FullScreenView destination={navView} />
                 </div>
-              </Panel>
-            </>
-          )}
+              )}
+            </div>
+          </Panel>
         </PanelGroup>
 
         {/* the run control now lives inside the single composer (BuildPane) via its Chat/Test toggle */}

@@ -21,9 +21,22 @@
 
 import { useBuildStore } from "../store/buildStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
+import { useUiStore } from "../store/uiStore.ts";
 
-/** Select an agent, dropping a run/step selection that belongs to a different one. */
+/**
+ * Select an agent, dropping a run/step selection that belongs to a different one.
+ *
+ * AND CLOSE ANY FULL-SCREEN VIEW, which is §2's "going back without picking anything": you click the
+ * currently-active agent in the sidebar and land back on the three panes exactly where you left them.
+ * That is why the close happens BEFORE the early return below — clicking the agent that is already
+ * selected changes no selection at all, and it is precisely the click the spec names.
+ *
+ * Here rather than in the sidebar's own handler because this function is the one place selection
+ * changes, and §2 says the sidebar is the single source of navigation. A view that closed itself from
+ * its own row would be a second one.
+ */
 export function selectAgent(agentId: string | null): void {
+  useUiStore.getState().closeNav();
   const build = useBuildStore.getState();
   if (build.activeAgentId === agentId) return;
   build.selectAgent(agentId);
@@ -35,8 +48,9 @@ export function selectAgent(agentId: string | null): void {
   trace.clearRunSelection();
 }
 
-/** Select a run, following it to the agent that made it. */
+/** Select a run, following it to the agent that made it — and back out of a full-screen view. */
 export function selectRun(runId: string): void {
+  useUiStore.getState().closeNav();
   const trace = useTraceStore.getState();
   trace.selectRun(runId);
 

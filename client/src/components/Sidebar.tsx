@@ -13,16 +13,29 @@ import { ProviderMark, ConnectorDot } from "../lib/icons.tsx";
 import { selectAgent, selectRun } from "../lib/selection.ts";
 import { sendLoadRun } from "../lib/socket.ts";
 import { ICON, STATUS, TYPE } from "../lib/tokens.ts";
-import { useUiStore } from "../store/uiStore.ts";
+import { useUiStore, type NavDestination } from "../store/uiStore.ts";
 import { useGithubStore } from "../store/githubStore.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import {
-  ActivityIcon, ChevronRightIcon, GitForkIcon, GithubIcon, GlobeIcon, LoaderIcon, PauseIcon,
-  PlusIcon, SearchIcon, SettingsIcon, SparklesIcon, XIcon,
+  ActivityIcon, ChevronRightIcon, DatabaseIcon, GitForkIcon, GithubIcon, GlobeIcon, HashIcon,
+  LoaderIcon, PauseIcon, PlusIcon, SearchIcon, SettingsIcon, SparklesIcon, XIcon,
 } from "./panelIcons.tsx";
+
+/**
+ * §2's nav buttons, in the order the spec lists them.
+ *
+ * DATA RATHER THAN FOUR COPIES OF THE SAME MARKUP, so the badge that lands on one of them later is a
+ * field here rather than a special case in one of four branches.
+ */
+const NAV_DESTINATIONS: { id: NavDestination; label: string; icon: (p: { size?: number }) => React.ReactElement }[] = [
+  { id: "threads", label: "Threads", icon: HashIcon },
+  { id: "agents", label: "Agents", icon: SparklesIcon },
+  { id: "memory", label: "Memory", icon: DatabaseIcon },
+  { id: "activity", label: "Activity", icon: ActivityIcon },
+];
 
 type Filter = "all" | "running" | "deployed" | "synced" | "drafts";
 
@@ -186,6 +199,43 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
   );
 }
 
+/**
+ * The four top-level destinations (§2).
+ *
+ * ONE BUTTON PER DESTINATION AND NOTHING ELSE IN THE ROW YET. The Threads badge (§2.1) is a later
+ * commit and lands on this button; the shape is left room for it rather than being rebuilt around it.
+ *
+ * The active one wears the same left accent and `bg-active` an agent row does when selected, because
+ * it is the same fact — this is what the panel to the right is showing. A second visual vocabulary for
+ * "current" in one column would make the two compete.
+ */
+function NavButtons() {
+  const navView = useUiStore((s) => s.navView);
+  const openNav = useUiStore((s) => s.openNav);
+
+  return (
+    <div className="shrink-0 px-3 pt-3">
+      {NAV_DESTINATIONS.map(({ id, label, icon: Icon }) => {
+        const active = navView === id;
+        return (
+          <button
+            key={id}
+            onClick={() => openNav(id)}
+            className={`relative flex w-full items-center gap-2 rounded-control px-3 py-1.5 text-left text-[13px] transition-colors ${
+              active ? "bg-active text-ink" : "text-muted hover:bg-active/50 hover:text-ink"
+            }`}
+          >
+            {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-ink" />}
+            <Icon size={ICON.sm} />
+            {label}
+          </button>
+        );
+      })}
+      <div className="mt-2 border-t border-hair" />
+    </div>
+  );
+}
+
 export function Sidebar() {
   const runs = useTraceStore((s) => s.runs);
   const agents = useBuildStore((s) => s.agents);
@@ -237,6 +287,12 @@ export function Sidebar() {
 
   return (
     <div className="flex h-full flex-col bg-bg">
+      {/* §2's four destinations, above everything else the sidebar holds.
+          The sidebar itself never collapses and never hides: clicking one of these replaces the
+          centre pane and the right panel with one full-width view and leaves this column exactly as
+          it is, selection included. */}
+      <NavButtons />
+
       {/* New Agent */}
       <div className="px-3 pt-3 shrink-0">
         <button

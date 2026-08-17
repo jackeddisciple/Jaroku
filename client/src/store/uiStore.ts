@@ -7,6 +7,16 @@ import { create } from "zustand";
 import { useSessionStore } from "./sessionStore.ts";
 import type { GithubAttachment } from "../types.ts";
 
+/**
+ * The sidebar's four top-level destinations (§2).
+ *
+ * All four are named now even though only Threads is built here, because the shell is generic on
+ * purpose: the other three are specified separately and plug into the same mechanism. Naming them in
+ * the type rather than adding them later is what makes "the shell is generic" checkable — a
+ * destination the shell cannot render is a compile error, not a blank screen.
+ */
+export type NavDestination = "threads" | "agents" | "memory" | "activity";
+
 export type RightTab =
   | "secrets"
   | "github"
@@ -131,6 +141,24 @@ interface UiState {
   paletteOpen: boolean;
   setPaletteOpen: (v: boolean) => void;
 
+  /**
+   * Which full-screen destination is showing, or null for the ordinary three panes (§2).
+   *
+   * ONE NULLABLE FIELD IS THE WHOLE MECHANISM, and the deliberate omissions are why it stays one
+   * field. There is no Escape-to-close, no back button, no breadcrumb and no "last active" fallback
+   * to remember — the sidebar is the single source of navigation and is already displaying what you
+   * would fall back to, so the app never has to store an answer to "where was I". That is the Claude
+   * desktop model, and it removes an entire category of state management rather than hiding it.
+   *
+   * IT LIVES IN `uiStore` BECAUSE IT IS VIEW STATE, which is also why it survives a workspace switch:
+   * §6 says switching keeps the user on the Threads tab and re-fetches for the new scope. A store
+   * that was reset would drop them back into a conversation belonging to the workspace they just
+   * left.
+   */
+  navView: NavDestination | null;
+  openNav: (destination: NavDestination) => void;
+  closeNav: () => void;
+
   // The right panel's active tab, lifted here so the palette / shortcuts can switch it while
   // RightPanel's own auto-follow (generation → code, new run → trace) still writes the same field.
   rightTab: RightTab;
@@ -245,6 +273,13 @@ const onboarding = DEFAULT_PROGRESS;
 export const useUiStore = create<UiState>((set) => ({
   paletteOpen: false,
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
+
+  navView: null,
+  openNav: (navView) => set({ navView }),
+  // Called by the sidebar's own selections as well as by picking a row inside a view: selecting IS
+  // the transition (§2), so there is nothing here that asks first and nothing that remembers where
+  // it came from.
+  closeNav: () => set({ navView: null }),
 
   rightTab: "trace",
   setRightTab: (rightTab) => set({ rightTab }),
