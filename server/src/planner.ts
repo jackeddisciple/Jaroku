@@ -111,12 +111,29 @@ export interface PlannerEvents {
       revision: number;
     },
   ];
-  discarded: [{ planId: string }];
+  // `workspaceId` so the listener can route it to the plan's OWN tenant rather than to whichever
+  // one the planner's scope happens to point at — see `discard`.
+  discarded: [{ planId: string; workspaceId: string }];
   error: [{ message: string }];
 }
 
 export class Planner extends EventEmitter<PlannerEvents> {
-  private pending: PendingPlan | null = null;
+  /**
+   * The plan each workspace has awaiting a decision, by workspace id.
+   *
+   * ONE SLOT PER TENANT, NOT ONE FOR THE PROCESS. It was one, and `plan()` cleared whatever was in
+   * it before writing its own — so workspace B asking for a plan silently destroyed workspace A's,
+   * A's Generate button answered "that plan is no longer available" with no explanation, and the
+   * `discarded` event naming A's plan id was delivered to B, who had never seen it.
+   *
+   * Superseding is a real rule and it is kept, scoped to the asker: a workspace's second plan
+   * replaces its own first, because the card that first one belongs to has visibly been replaced
+   * on screen. That argument was always about ONE session and never about two tenants.
+   *
+   * Bounded by "workspaces with an unspent plan", and each entry is replaced by that workspace's
+   * next plan or removed by its Generate — the same lifetime the single slot had.
+   */
+  private pending = new Map<string, PendingPlan>();
   private busy = false;
   /**
    * The slot won by a caller that has not reached `plan()` yet.
@@ -129,7 +146,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
 
   /** This workspace's plan awaiting confirmation, if any. Read-only — use take() to consume it. */
   peek(workspaceId: string): PendingPlan | null {
-    return this.pending?.workspaceId === workspaceId ? this.pending : null;
+    return this.pending.get(workspaceId) ?? null;
   }
 
   /**
@@ -167,16 +184,25 @@ export class Planner extends EventEmitter<PlannerEvents> {
    * building something unreviewed instead is the exact failure this gate exists to prevent.
    */
   take(workspaceId: string, planId: string): PendingPlan | null {
-    if (!this.pending || this.pending.planId !== planId || this.pending.workspaceId !== workspaceId) return null;
-    const rec = this.pending;
-    this.pending = null;
+    const rec = this.pending.get(workspaceId);
+    if (!rec || rec.planId !== planId) return null;
+    this.pending.delete(workspaceId);
     return rec;
   }
 
+  /**
+   * Throw a plan away, and say whose it was.
+   *
+   * `workspaceId` RIDES THE EVENT because the listener has to route it, and the only thing it had
+   * to route by was the planner's current scope — which, when one workspace's new plan superseded
+   * another's, belonged to the wrong tenant. A workspace whose plan died was told nothing, and one
+   * that had never seen it was handed its id.
+   */
   discard(workspaceId: string, planId: string): void {
-    if (!this.pending || this.pending.planId !== planId || this.pending.workspaceId !== workspaceId) return;
-    this.pending = null;
-    this.emit("discarded", { planId });
+    const rec = this.pending.get(workspaceId);
+    if (!rec || rec.planId !== planId) return;
+    this.pending.delete(workspaceId);
+    this.emit("discarded", { planId, workspaceId });
   }
 
   async plan(opts: PlanOptions): Promise<void> {
@@ -203,10 +229,13 @@ export class Planner extends EventEmitter<PlannerEvents> {
       }
       const revision = (previous?.revision ?? 0) + 1;
 
-      // Any other pending plan is superseded the moment a new one starts streaming: the card
-      // it belongs to has already been replaced on screen, and leaving it takeable would let a
-      // stale tab generate from a plan the user has visibly moved on from.
-      if (this.pending) this.discard(this.pending.workspaceId, this.pending.planId);
+      // THIS WORKSPACE's other pending plan is superseded the moment a new one starts streaming:
+      // the card it belongs to has already been replaced on screen, and leaving it takeable would
+      // let a stale tab generate from a plan the user has visibly moved on from. Scoped to the
+      // asker, because that argument is about one session — across tenants it superseded a card
+      // nobody had replaced and refused a Generate nobody could explain.
+      const mine = this.pending.get(opts.workspaceId);
+      if (mine) this.discard(opts.workspaceId, mine.planId);
 
       // A revision keeps the ORIGINAL brief; feedback is a correction to part of the plan, not
       // a replacement for what the user asked for.
@@ -271,7 +300,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
         revision,
         createdAt: Date.now(),
       };
-      this.pending = rec;
+      this.pending.set(opts.workspaceId, rec);
       this.emit("plan", { ...rec });
     } catch (err) {
       this.emit("error", { message: (err as Error).message });

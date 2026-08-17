@@ -86,6 +86,30 @@ console.log("\nrevising");
   );
 }
 
+console.log("\nanother workspace planning beside yours");
+{
+  // The slot used to be one per PROCESS, and `plan()` cleared whatever was in it. So B asking for a
+  // plan destroyed A's — A's Generate answered "that plan is no longer available" with no
+  // explanation, and the `discarded` event naming A's plan id went out on B's scope.
+  const mine = await planFor(planner, A);
+  const discards: { planId: string; workspaceId: string }[] = [];
+  planner.on("discarded", (e) => discards.push(e));
+
+  const theirs = await planFor(planner, B);
+  check(planner.peek(A)?.planId === mine, "B planning leaves A's card alone", planner.peek(A)?.planId ?? "gone");
+  check(planner.peek(B)?.planId === theirs, "...and B has its own");
+  check(discards.length === 0, "nothing was discarded to make room", JSON.stringify(discards));
+
+  // Superseding is still real — scoped to the asker, which is the only session the argument for it
+  // was ever about.
+  const second = await planFor(planner, A);
+  check(planner.peek(A)?.planId === second, "A's second plan replaces A's first");
+  check(discards.length === 1 && discards[0]?.planId === mine, "...and the first was discarded");
+  check(discards[0]?.workspaceId === A, "...with its OWN workspace on the event, not the planner's scope",
+    discards[0]?.workspaceId);
+  check(planner.peek(B)?.planId === theirs, "...while B's is untouched throughout");
+}
+
 delete process.env.JAROKU_PLAN_FIXTURE;
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

@@ -5576,7 +5576,16 @@ onBothPools("exit", ({ runId, code, signal, timedOut, elapsedMs }) => {
 // generation — which, at plan time, would be reporting a failure that never happened.
 planner.on("started", (e) => planOut({ type: "plan_started", ...e }));
 planner.on("delta", (e) => planOut({ type: "plan_delta", ...e }));
-planner.on("discarded", (e) => planOut({ type: "plan_discarded", ...e }));
+// ROUTED TO THE PLAN'S OWN WORKSPACE, not to the planner's current scope. A supersede fires while
+// the scope belongs to whoever asked for the NEW plan — so the tenant whose card just died was told
+// nothing, and the tenant who caused it received a plan id it had never seen. The event carries its
+// owner for exactly this, and the thread on it is meaningless to anybody but that owner.
+planner.on("discarded", ({ planId, workspaceId }) => {
+  const ctx = workspaceId === contextForPlan().workspaceId
+    ? contextForPlan()
+    : systemContextFor(workspaceId, newRequestId());
+  relay.broadcastGen(ctx, { type: "plan_discarded", planId }, ctx === planContext ? planThread : null);
+});
 
 planner.on("plan", (e) => {
   const usage = e.usage as { cost_usd?: number; output_tokens?: number };
