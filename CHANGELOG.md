@@ -58,6 +58,14 @@ there. What is new is that the product's own surface reaches them.
   list is the server's (`purchasable` and the price id are columns; the limits come from the code
   that enforces them), a deployment with no Stripe keys shows nothing rather than a refusing
   control, and choosing is `billing:manage` while reading spend stays a member's.
+- **The selectable model catalogue comes from `pricing.json`.** It was a hardcoded array in the
+  client and it had drifted four models behind the price sheet that calls itself the single source of
+  truth — so `claude-opus-5`, the newest priced entry, could not be chosen for a run, added as an
+  eval leg, or deployed with, and a model added to the priced table silently changed nothing a user
+  could do. The catalogue now rides the providers snapshot, grouped by provider in the file's own
+  order, with each provider's display name resolved server-side — which also removed the two
+  disagreeing copies of that mapping in the browser, the reason one provider was "Gemini" where you
+  picked it and `google` where you configured it. `test:pricing` asserts what keeps it safe.
 - **Pull-request checks can be switched on.** Four modules, two migrations, a webhook branch and
   four passing suites sat behind one row in `agent_ci_config` that nothing in the product could
   write: `setConfig` had no caller, so `ci_dataset_id` was always null and every delivery logged "no

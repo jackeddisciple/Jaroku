@@ -13,11 +13,11 @@
 // only thing between a user and a large bill, so the confirm step requires a ceiling and
 // the server aborts on true spend regardless of what was predicted.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useBuildStore } from "../store/buildStore.ts";
 import { examplesOf, useEvalStore } from "../store/evalStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
-import { RUN_PROVIDERS } from "../store/uiStore.ts";
+import { runProviders, useProviderStore } from "../store/providerStore.ts";
 import { sendCancelEval, sendEstimateEval, sendStartEval } from "../lib/socket.ts";
 import { fmtCost } from "../lib/format.ts";
 import { SURFACE, TEXT } from "../lib/tokens.ts";
@@ -43,6 +43,10 @@ export function EvalRunBar() {
   const progress = useEvalStore((s) => s.progress);
   const estimate = useEvalStore((s) => s.estimate);
   const setEstimate = useEvalStore((s) => s.setEstimate);
+  // The legs somebody can compare are every model the price sheet knows — see providerStore. It was
+  // a constant in the client, four models behind, so a priced model could not be added as a leg.
+  const providerModels = useProviderStore((s) => s.models);
+  const catalogue = useMemo(() => runProviders(providerModels), [providerModels]);
 
   const [targets, setTargets] = useState<EvalTarget[]>([FREE]);
   const [confirming, setConfirming] = useState(false);
@@ -95,7 +99,7 @@ export function EvalRunBar() {
     <div className="px-4 py-3 shrink-0 space-y-2">
       {/* provider selection */}
       <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
-        {RUN_PROVIDERS.flatMap((p) =>
+        {catalogue.flatMap((p) =>
           p.models.map((m) => {
             const t: EvalTarget = { provider: p.id, model: m };
             const on = targets.some((x) => key(x) === key(t));

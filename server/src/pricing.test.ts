@@ -16,7 +16,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import { costFor, isPriced, priceFor, PRICING_PATH } from "./pricing.ts";
+import { allPrices, costFor, isPriced, priceFor, PRICING_PATH } from "./pricing.ts";
+import { PROVIDER_LABEL } from "./providers.ts";
 
 const RUNTIME_DIR = join(resolve(dirname(fileURLToPath(import.meta.url)), "..", ".."), "runtime");
 
@@ -156,6 +157,50 @@ CASES.forEach((c, i) => {
   const ok = read < uncached && write > uncached;
   if (!ok) { fail++; console.log(`  FAIL cache rates not applied: uncached=${uncached} read=${read} write=${write}`); }
   else console.log(`  ok   cache read (${read}) < uncached (${uncached}) < cache write (${write})`);
+}
+
+// --- the SELECTABLE CATALOGUE is this file, and cannot drift from it -------------------------
+//
+// WHAT THIS REPLACES. The client held its own list of selectable models, and it had fallen four
+// models behind this table — including `claude-opus-5`, the newest priced entry — so a model the
+// product knew how to price, run and meter could not be chosen for a run, added as an eval leg, or
+// deployed with. Nothing failed, because nothing compared the two lists: `test:pricing` asserted the
+// table parses and prices correctly, and nothing asserted that what the table prices is what the
+// product offers. The catalogue is built from `allPrices()` and shipped on the providers snapshot
+// now, so the drift is not expressible — and these are the properties that make that safe.
+{
+  const table = allPrices();
+  if (table.length === 0) { fail++; console.log("  FAIL the price sheet is empty, so the catalogue would be too"); }
+  else console.log(`  ok   the catalogue has something in it (${table.length} models)`);
+
+  // EVERY MODEL NAMES A PROVIDER. The catalogue groups by this field, and a blank one would produce
+  // an unnamed group in every model selector in the product.
+  const unnamed = table.filter((p) => !p.provider);
+  if (unnamed.length) { fail++; console.log(`  FAIL models with no provider: ${unnamed.map((p) => p.id).join(", ")}`); }
+  else console.log("  ok   every priced model names its provider");
+
+  // EVERY PROVIDER HAS A LABEL. It travels with the model so the browser keeps no copy of this
+  // mapping; a provider missing here renders as its raw id, which is how one provider came to be
+  // called two different things in two surfaces.
+  const providers = [...new Set(table.map((p) => p.provider))];
+  const unlabelled = providers.filter((id) => !(id in PROVIDER_LABEL));
+  if (unlabelled.length) { fail++; console.log(`  FAIL providers with no display name: ${unlabelled.join(", ")}`); }
+  else console.log(`  ok   every provider in the price sheet has a display name (${providers.join(", ")})`);
+
+  // THE DRY-RUN PATH IS IN THE TABLE, marked free. It is the default provider and model of every
+  // fresh tab, and it is the client's one pre-snapshot fallback — if it left the price sheet, that
+  // fallback would name a model the server does not offer.
+  const dry = table.find((p) => p.id === "fake-dry-run");
+  if (!dry || !dry.free || dry.provider !== "fake") {
+    fail++;
+    console.log(`  FAIL the free dry-run model is missing or not marked free (${JSON.stringify(dry)})`);
+  } else console.log("  ok   the dry-run model is in the table and marked free");
+
+  // AND EVERY MODEL RESOLVES THROUGH THE FUNCTION THAT WILL BE ASKED ABOUT IT. A row this file
+  // parsed but `priceFor` cannot resolve would be selectable and would meter as unknown cost.
+  const unresolvable = table.filter((p) => !isPriced(p.id));
+  if (unresolvable.length) { fail++; console.log(`  FAIL selectable but unpriced: ${unresolvable.map((p) => p.id).join(", ")}`); }
+  else console.log("  ok   every model the catalogue offers resolves to a price");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

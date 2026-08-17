@@ -971,6 +971,17 @@ interceptor computing per-step cost as a run executes, and the TypeScript server
 pre-run estimates and eval aggregates. Two copies of a pricing table drift, and a drifted
 table means the dashboard and the estimate disagree about the same run.
 
+**It is also the catalogue.** Which models a user can actually pick — for a run, as an eval leg, in
+the deploy configuration, from the command palette — comes from this file, delivered on the
+`providers` snapshot with each provider's display name. It used to be a hardcoded array in the
+client, and that array had fallen four models behind the price sheet: `claude-opus-5`, the newest
+priced entry, could not be selected anywhere, and nothing failed because nothing compared the two
+lists. That is the drift this file's own header warns about, one level up — not two copies of the
+prices, but a second, hidden copy of the *catalogue* that the priced one could not correct.
+`test:pricing` now asserts the properties that keep it safe: every model names a provider, every
+provider has a display name, the free dry-run entry is present, and every model the catalogue offers
+resolves through the same `priceFor` that will be asked about it later.
+
 Prices are USD **per million tokens** so they're auditable against a published price sheet.
 Three rules, implemented identically on both sides:
 
@@ -1729,7 +1740,7 @@ frozen event schema, and everything added since rides beside it.
 | `members` | Who is in the workspace, who has been invited, and the one-shot invite link |
 | `audit` | The workspace's own record of what has been done to it, newest first. Answered to the socket that asked and never broadcast — the rows name who revealed which credential and who removed whom |
 | `enforcement` | Which rung of the abuse ladder is in force, its own sentence, the history, and the workspace's appeal. Broadcast, because a rung refuses every member's work |
-| `providers` | Which provider keys are set (`configured: true/false`, by name), test results, and whether the workspace's own key pays for platform calls |
+| `providers` | Which provider keys are set (`configured: true/false`, by name), test results, whether the workspace's own key pays for platform calls, and **the selectable model catalogue** — read from `runtime/pricing.json`, so what the product offers cannot drift from what it can price |
 | `connections` | Which third-party accounts this workspace has authorised, their status and granted scopes, and the URL a consent flow must be started at. Never a token |
 | `billing` | What this workspace has spent this period, against which ceilings — see [cost metering](#cost-metering-budgets-and-billing) |
 | `reply` | Streaming "explain" answers |

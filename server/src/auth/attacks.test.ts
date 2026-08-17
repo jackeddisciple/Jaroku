@@ -449,7 +449,7 @@ async function buildStack(db: Db, keyDir: string): Promise<Stack> {
     },
     listAgents: async () => [],
     listMcpServers: async () => [],
-    listProviders: () => ({ providers: [], ownKeyForPlatform: false }),
+    listProviders: () => ({ providers: [], ownKeyForPlatform: false, models: [] }),
     listDeployments: async () => ({ deployments: [], railwayConfigured: false }),
     onCommand: (cmd: ForwardedCommand, ctx: TenantContext) => {
       commands.push({ cmd: cmd.cmd, workspaceId: ctx.workspaceId });

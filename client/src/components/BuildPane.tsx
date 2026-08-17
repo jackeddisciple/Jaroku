@@ -15,8 +15,8 @@ import {
   type ChatTurn, type GenTurn, type PlanTurn, type ProposalTurn, type ReplyTurn,
 } from "../store/chatStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
-import { inputKey, RUN_PROVIDERS, useUiStore } from "../store/uiStore.ts";
-import { useProviderStore } from "../store/providerStore.ts";
+import { inputKey, useUiStore } from "../store/uiStore.ts";
+import { runProviders, useProviderStore } from "../store/providerStore.ts";
 import {
   sendApplyEdit, sendBranchRun, sendDiscardEdit, sendDiscardPlan, sendEdit, sendExplain,
   sendGenerate, sendPlanAgent, sendPromoteTestInput, sendRun,
@@ -269,6 +269,11 @@ function ModelSelector({
   // key, which is the thing this product is rightly proud of. The rest need one in THIS workspace,
   // which `providerStore` already knows from the providers channel.
   const providers = useProviderStore((s) => s.providers);
+  // THE CATALOGUE COMES FROM THE SERVER'S PRICE SHEET, not from a constant in this client — see
+  // providerStore. Memoised against the snapshot's own array, so the grouping runs when the
+  // catalogue changes rather than on every keystroke in the composer beside it.
+  const models = useProviderStore((s) => s.models);
+  const catalogue = useMemo(() => runProviders(models), [models]);
   const usableProviders = new Set<string>([
     "fake",
     ...providers.filter((p) => p.configured).map((p) => p.id),
@@ -303,7 +308,7 @@ function ModelSelector({
       </Chip>
       {open && (
         <div className="absolute bottom-full mb-2 left-0 z-30 min-w-[190px] rounded-card bg-panel border border-edge shadow-floating p-1">
-          {RUN_PROVIDERS.map((p) => (
+          {catalogue.map((p) => (
             <div key={p.id} className="mt-1 first:mt-0">
               {/* The provider's own mark on its group, so the menu is scanned by logo the way
                   the chip that opened it is read by logo. */}

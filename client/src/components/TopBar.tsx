@@ -12,7 +12,7 @@
 import { useEffect, useRef } from "react";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.tsx";
 import { useBuildStore } from "../store/buildStore.ts";
-import { useProviderStore } from "../store/providerStore.ts";
+import { providerLabelOf, useProviderStore } from "../store/providerStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { useDeployStore } from "../store/deployStore.ts";
@@ -39,11 +39,10 @@ function StatusDot({ status }: { status: string }) {
   );
 }
 
-const PROVIDER_LABEL: Record<string, string> = {
-  anthropic: "Claude",
-  openai: "OpenAI",
-  fake: "Dry run",
-};
+// THE LABELS USED TO BE HERE, as a three-entry record with no `google` key that fell back to the
+// raw id — so a provider the product fully supports was "Gemini" in the composer's model selector,
+// which had its own copy, and `google` in this menu, which is where you go to configure it. They come
+// from the server's own table now, beside the models they belong to: see providerStore.
 
 /**
  * Which providers this workspace has a key for — and the one door to changing that.
@@ -66,6 +65,7 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
   const setOpen = useUiStore((s) => s.setProviderPanel);
   const setRightTab = useUiStore((s) => s.setRightTab);
   const providers = useProviderStore((s) => s.providers);
+  const models = useProviderStore((s) => s.models);
   const ownKeyForPlatform = useProviderStore((s) => s.ownKeyForPlatform);
   // The one provider this preference can spend: planning, generation, the fix loop, explain and
   // the judge are Anthropic-only, so an OpenAI key opted in would buy the workspace nothing.
@@ -93,7 +93,7 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
       <button type="button" onClick={() => setOpen(!open)} title="Provider keys">
         {/* provider chip — brand color only because it's the chosen provider */}
         <Chip size="lg" tone="ink" selected={open} icon={<ProviderMark provider={provider} />}>
-          {PROVIDER_LABEL[provider] ?? provider}
+          {providerLabelOf(models, provider)}
           {/* A model id is an identifier; the provider's name is prose. */}
           {provider !== "fake" && <span className="font-mono text-faint">{model}</span>}
         </Chip>
@@ -109,7 +109,7 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
             {providers.map((p) => (
               <div key={p.id} className="flex items-center gap-2">
                 <ProviderMark provider={p.id} size={12} />
-                <span className="text-[12px] text-ink">{PROVIDER_LABEL[p.id] ?? p.id}</span>
+                <span className="text-[12px] text-ink">{providerLabelOf(models, p.id)}</span>
                 {p.configured ? (
                   <StatusBadge state="ok" variant="outline" label="connected" icon={KeyIcon} />
                 ) : (

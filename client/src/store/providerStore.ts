@@ -13,7 +13,7 @@
 // which is the whole of what the browser is ever told.
 
 import { create } from "zustand";
-import type { ProviderId, ProviderStatus } from "../types.ts";
+import type { ProviderId, ProviderModel, ProviderStatus } from "../types.ts";
 
 /** The answer to one "Test connection" press. Transient — it describes a moment, not state. */
 export interface ProviderTestResult {
@@ -24,6 +24,19 @@ export interface ProviderTestResult {
 
 interface ProviderState {
   providers: ProviderStatus[];
+  /**
+   * Every model a run may be started on, from the server's price sheet.
+   *
+   * THE CATALOGUE USED TO BE A CONSTANT IN THIS CLIENT, and it had drifted four models behind
+   * `runtime/pricing.json` — which declares itself the single source of truth for models and is read
+   * by the Node estimator and the Python interceptor. So a model added to the priced table could not
+   * be selected for a run, added as an eval leg, or deployed with, and nothing failed: the drift was
+   * invisible because the two lists had no reason to be compared.
+   *
+   * It is the same channel `configured` arrives on, because the two are asked together — every model
+   * selector renders a provider's models and whether that provider has a key.
+   */
+  models: ProviderModel[];
   /**
    * Whether the first snapshot has landed.
    *
@@ -47,7 +60,7 @@ interface ProviderState {
   error: string | null;
   notice: string | null;
 
-  setProviders: (providers: ProviderStatus[], ownKeyForPlatform: boolean) => void;
+  setProviders: (providers: ProviderStatus[], ownKeyForPlatform: boolean, models: ProviderModel[]) => void;
   startTest: (provider: string) => void;
   setTestResult: (result: ProviderTestResult) => void;
   clearTestResult: () => void;
@@ -57,6 +70,7 @@ interface ProviderState {
 
 export const useProviderStore = create<ProviderState>((set) => ({
   providers: [],
+  models: [],
   loaded: false,
   ownKeyForPlatform: false,
   testing: {},
@@ -67,8 +81,8 @@ export const useProviderStore = create<ProviderState>((set) => ({
   // A snapshot settles every question a test could still be waiting on, so in-flight state is
   // cleared wholesale rather than by key — a failure we did not anticipate cannot leave a
   // spinner running forever. Same reasoning as mcpStore.setServers.
-  setProviders: (providers, ownKeyForPlatform) =>
-    set({ providers, ownKeyForPlatform, loaded: true, testing: {} }),
+  setProviders: (providers, ownKeyForPlatform, models) =>
+    set({ providers, ownKeyForPlatform, models, loaded: true, testing: {} }),
 
   startTest: (provider) =>
     set((s) => ({ testing: { ...s.testing, [provider]: true }, testResult: null, error: null })),
@@ -102,4 +116,61 @@ export function isConfigured(providers: ProviderStatus[], id: ProviderId): boole
  */
 export function canBuild(providers: ProviderStatus[]): boolean {
   return providers.some((p) => p.powers_jaroku && p.configured);
+}
+
+/** A provider and the models a run may be started on with it. What every model selector renders. */
+export interface RunProvider {
+  id: string;
+  label: string;
+  models: string[];
+}
+
+/**
+ * The dry-run path, for the moment before the first snapshot lands.
+ *
+ * NOT A FALLBACK CATALOGUE — one entry, and the one the app already defaults to. A selector with
+ * nothing in it reads as "this product supports no models", and a hardcoded copy of the real
+ * catalogue is exactly what this change exists to remove. `fake-dry-run` is guaranteed: it is in the
+ * price sheet, it is `uiStore`'s default provider and model, and it costs nothing.
+ */
+const DRY_RUN: RunProvider[] = [{ id: "fake", label: "Dry run (free)", models: ["fake-dry-run"] }];
+
+/**
+ * The catalogue, grouped by provider, in the price sheet's own order.
+ *
+ * ORDER IS THE FILE'S. `pricing.json` is a curated list with the newest models first, and re-sorting
+ * here would put a client's opinion in front of the one the price sheet already expresses.
+ *
+ * Pure, and takes the list rather than reading the store, so a component can memoise it against the
+ * snapshot's array identity instead of rebuilding a catalogue on every unrelated render.
+ */
+export function runProviders(models: ProviderModel[]): RunProvider[] {
+  if (models.length === 0) return DRY_RUN;
+  const out: RunProvider[] = [];
+  for (const m of models) {
+    const existing = out.find((p) => p.id === m.provider);
+    if (existing) existing.models.push(m.id);
+    else out.push({ id: m.provider, label: m.label, models: [m.id] });
+  }
+  return out;
+}
+
+/** The model a provider defaults to: its first in the catalogue. Empty for one nothing offers. */
+export function defaultModelFor(models: ProviderModel[], provider: string): string {
+  return runProviders(models).find((p) => p.id === provider)?.models[0] ?? "";
+}
+
+/**
+ * What a provider is CALLED, from the server's own table.
+ *
+ * THIS REPLACED TWO HARDCODED COPIES that disagreed. The composer's selector had one with four
+ * entries; the top bar's provider menu had another with three and no `google` key, so it fell back to
+ * the raw id — the same provider was "Gemini" where you picked it and `google` where you configured
+ * it. The label now arrives beside the models it belongs to.
+ *
+ * Falls back to the id, which is what an unnamed provider should read as: a name nobody chose is
+ * better than a name this client invented.
+ */
+export function providerLabelOf(models: ProviderModel[], provider: string): string {
+  return models.find((m) => m.provider === provider)?.label ?? provider;
 }

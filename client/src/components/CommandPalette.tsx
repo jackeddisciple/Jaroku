@@ -6,11 +6,12 @@
 //   Cmd+P  file switcher      Enter   expand selected step
 //   Cmd+/  focus chat         R       re-run (owned by RunTrigger)
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Command } from "cmdk";
 import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
-import { RUN_PROVIDERS, useUiStore } from "../store/uiStore.ts";
+import { useUiStore } from "../store/uiStore.ts";
+import { runProviders, useProviderStore } from "../store/providerStore.ts";
 import { inputKey } from "../store/uiStore.ts";
 import { Truncate } from "./Truncate.tsx";
 import { sendCreateThread, sendRun } from "../lib/socket.ts";
@@ -56,6 +57,11 @@ export function CommandPalette() {
   const setRightTab = useUiStore((s) => s.setRightTab);
   const setProvider = useUiStore((s) => s.setProvider);
   const focusChat = useUiStore((s) => s.focusChat);
+  // Which providers exist is the server's answer, off the same price sheet the composer's picker
+  // reads — see providerStore. Memoised against the snapshot's array rather than regrouped on every
+  // keystroke in the palette's own filter box.
+  const providerModels = useProviderStore((s) => s.models);
+  const catalogue = useMemo(() => runProviders(providerModels), [providerModels]);
 
   // Files for the "Jump to file" switcher come straight from the loaded project.
   const fileOrder = useBuildStore((s) => s.fileOrder);
@@ -164,7 +170,7 @@ export function CommandPalette() {
               </Command.Group>
 
               <Command.Group heading="Provider" className="mb-1">
-                {RUN_PROVIDERS.map((p) => (
+                {catalogue.map((p) => (
                   <Item key={p.id} onSelect={run(() => setProvider(p.id))}>
                     Switch to {p.label}
                   </Item>

@@ -5,6 +5,7 @@
 
 import { create } from "zustand";
 import { useSessionStore } from "./sessionStore.ts";
+import { defaultModelFor, useProviderStore } from "./providerStore.ts";
 import type { GithubAttachment } from "../types.ts";
 
 /**
@@ -179,12 +180,16 @@ function writeProgress(userId: string | null, state: OnboardingProgress): void {
 /** Whoever is signed in, or null before the session lands. Read at call time, never captured. */
 const currentUserId = (): string | null => useSessionStore.getState().user?.id ?? null;
 
-export const RUN_PROVIDERS = [
-  { id: "fake", label: "Dry run (free)", models: ["fake-dry-run"] },
-  { id: "anthropic", label: "Claude", models: ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8"] },
-  { id: "openai", label: "OpenAI", models: ["gpt-4o-mini", "gpt-4o"] },
-  { id: "google", label: "Gemini", models: ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro"] },
-] as const;
+// THE SELECTABLE CATALOGUE USED TO BE HERE, as a hardcoded array, and it was the source for every
+// model selector in the product: the composer's run picker, the palette's provider switch, the eval
+// target matrix and the deploy configuration. It had drifted four models behind
+// `runtime/pricing.json` — whose own header calls itself the single source of truth and warns about
+// exactly this — so `claude-opus-5`, the newest priced model, could not be selected for a run, added
+// as an eval leg, or deployed with, and nothing anywhere failed.
+//
+// It comes from the server now, off the same price sheet the estimator and the Python interceptor
+// read: see `providerStore.runProviders`. What is left here is which provider and model THIS TAB has
+// chosen, which is view state and belongs in this store.
 
 interface UiState {
   paletteOpen: boolean;
@@ -417,10 +422,13 @@ export const useUiStore = create<UiState>((set) => ({
 
   provider: "fake",
   model: "fake-dry-run",
+  // The provider's first model in the catalogue, read at call time rather than captured: the
+  // catalogue arrives on the providers snapshot, so a module-level copy would be empty on the one
+  // render that matters — the first — and a default chosen from it would be blank forever after.
   setProvider: (id) =>
     set({
       provider: id,
-      model: RUN_PROVIDERS.find((p) => p.id === id)?.models[0] ?? "",
+      model: defaultModelFor(useProviderStore.getState().models, id),
     }),
   setModel: (model) => set({ model }),
 

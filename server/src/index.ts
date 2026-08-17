@@ -171,9 +171,10 @@ import { PlatformKeyGate } from "./billing/platformKey.ts";
 import { GENERATION_MODEL } from "./claude.ts";
 import { isSecretName } from "./secrets/secretStore.ts";
 import {
-  PROVIDER_ENV_KEY, isProviderId, isRealProvider, providerStatus, verifyProviderKey,
+  PROVIDER_ENV_KEY, isProviderId, isRealProvider, providerLabel, providerStatus, verifyProviderKey,
   type ProviderId,
 } from "./providers.ts";
+import { allPrices } from "./pricing.ts";
 import { DeployStore } from "./deployStore.ts";
 import { DeployManager, planDeploy, type DeployManagerDeps } from "./deployManager.ts";
 import { RailwayApi, RailwayError, RAILWAY_ENV_KEY } from "./railwayApi.ts";
@@ -2976,6 +2977,21 @@ async function providerSnapshot(ctx: TenantContext): Promise<ProviderSnapshot> {
     // because the server does.
     providers: providerStatus(await providerKeys.configuredNames(ctx)),
     ownKeyForPlatform: await providerKeys.ownKeyForPlatform(ctx),
+    // THE SELECTABLE CATALOGUE, FROM THE PRICE SHEET. `runtime/pricing.json` declares itself the
+    // single source of truth for models and is read by both this process and the Python
+    // interceptor; the client used to hold a second, hidden copy of the CATALOGUE, which had
+    // drifted four models behind it — so a model added to the priced table could not be chosen for
+    // a run, added as an eval leg, or deployed with. There is nothing to keep in step now.
+    //
+    // ORDER IS THE FILE'S ORDER, deliberately: it is a curated list with the newest entries first,
+    // and re-sorting it here would put a client's opinion in front of the one the price sheet
+    // already expresses.
+    models: allPrices().map((p) => ({
+      id: p.id,
+      provider: p.provider,
+      label: providerLabel(p.provider),
+      free: p.free,
+    })),
   };
 }
 

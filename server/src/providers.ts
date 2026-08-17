@@ -41,6 +41,30 @@ export const PROVIDER_ENV_KEY = {
 
 export type ProviderId = keyof typeof PROVIDER_ENV_KEY;
 
+/**
+ * What each provider is CALLED, where a person reads it.
+ *
+ * HERE RATHER THAN IN THE CLIENT, and that is what this table is for: the browser had two hardcoded
+ * copies of it — one in the composer's model selector, one in the top bar's provider menu — and they
+ * disagreed. The menu's was a three-entry record with no `google` key that fell back to the raw id,
+ * so the same provider was "Gemini" where you picked it and `google` where you configured it.
+ *
+ * `fake` IS IN IT even though it is not a provider you connect: it is the free dry-run path, it
+ * appears in every model selector in the product, and a catalogue that named every provider except
+ * the default one would need a special case in each of them.
+ */
+export const PROVIDER_LABEL: Record<string, string> = {
+  fake: "Dry run (free)",
+  anthropic: "Claude",
+  openai: "OpenAI",
+  google: "Gemini",
+};
+
+/** The label to show for a provider id, falling back to the id for one nothing has named. */
+export function providerLabel(id: string): string {
+  return PROVIDER_LABEL[id] ?? id;
+}
+
 /** `fake` is not a provider you connect — it is the free dry-run path, and needs no key. */
 export const PROVIDER_IDS = Object.keys(PROVIDER_ENV_KEY) as ProviderId[];
 

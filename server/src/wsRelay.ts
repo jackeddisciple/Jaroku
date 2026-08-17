@@ -1104,6 +1104,20 @@ export type McpEvent =
 export interface ProviderSnapshot {
   providers: unknown[];
   ownKeyForPlatform: boolean;
+  /**
+   * Every model a run may be started on, grouped by provider — the SELECTABLE CATALOGUE.
+   *
+   * ON THE SNAPSHOT BECAUSE THE ALTERNATIVE DRIFTED. The client held the catalogue as a hardcoded
+   * array, and `runtime/pricing.json` — which declares itself the single source of truth for models
+   * and is read by both the Node estimator and the Python interceptor — had moved on without it:
+   * four priced models, including the newest Anthropic one, could not be selected for a run, added
+   * as an eval leg, or deployed with. A model added to the price sheet (the deliberate, reviewed,
+   * auditable step) silently changed nothing a user could do.
+   *
+   * So it comes from the same file the prices do. `free` is what makes the dry-run path
+   * identifiable without a second list of which providers cost money.
+   */
+  models: { id: string; provider: string; label: string; free: boolean }[];
 }
 
 export type ProviderEvent =
@@ -2023,7 +2037,7 @@ export class WsRelay {
         this.sendTo(ws, {
           channel: "providers",
           type: "providers",
-          ...((await this.opts.listProviders?.(ctx)) ?? { providers: [], ownKeyForPlatform: false }),
+          ...((await this.opts.listProviders?.(ctx)) ?? { providers: [], ownKeyForPlatform: false, models: [] }),
         });
         // And what is deployed, so the sidebar's Deployed filter is right on frame one rather
         // than after a round trip.
@@ -2329,7 +2343,7 @@ export class WsRelay {
               this.sendTo(ws, {
                 channel: "providers",
                 type: "providers",
-                ...((await this.opts.listProviders?.(ctx)) ?? { providers: [], ownKeyForPlatform: false }),
+                ...((await this.opts.listProviders?.(ctx)) ?? { providers: [], ownKeyForPlatform: false, models: [] }),
               }));
           } else if (DEPLOY_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the deploy manager and can answer with a

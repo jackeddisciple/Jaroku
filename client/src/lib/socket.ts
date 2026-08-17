@@ -222,7 +222,7 @@ function dispatch(msg: ServerMessage): void {
       // snapshot and this is a replace, never a merge — and nothing on it carries a key, so
       // there is nothing here to be careful with beyond not inventing state the server owns.
       const p = useProviderStore.getState();
-      if (msg.type === "providers") p.setProviders(msg.providers, msg.ownKeyForPlatform);
+      if (msg.type === "providers") p.setProviders(msg.providers, msg.ownKeyForPlatform, msg.models);
       else if (msg.type === "testResult") p.setTestResult({ provider: msg.provider, ok: msg.ok, message: msg.message });
       else if (msg.type === "error") p.setError(msg.message);
       else if (msg.type === "notice") p.setNotice(msg.message);

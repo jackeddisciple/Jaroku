@@ -30,7 +30,7 @@ import { ACCENT, ICON, STATUS, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
 import { fmtDuration } from "../lib/format.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useDeployStore, selectedDeployment } from "../store/deployStore.ts";
-import { RUN_PROVIDERS } from "../store/uiStore.ts";
+import { runProviders, useProviderStore } from "../store/providerStore.ts";
 import type { Deployment, DeployLogLine, DeployStatus } from "../types.ts";
 import { isDeployInFlight } from "../types.ts";
 import { ActionRow, type ActionState } from "./ActionRow.tsx";
@@ -235,6 +235,11 @@ function DeployForm({
   const [provider, setProvider] = useState("anthropic");
   const [model, setModel] = useState("claude-haiku-4-5");
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
+  // Which models a deploy may be configured with is the server's price sheet — see providerStore.
+  // A hardcoded list here meant a priced model could not be deployed with, which is the same drift
+  // in the one place it costs a running service rather than a run.
+  const providerModels = useProviderStore((s) => s.models);
+  const catalogue = useMemo(() => runProviders(providerModels), [providerModels]);
   const [allowMissing, setAllowMissing] = useState(false);
   const [publicEndpoint, setPublicEndpoint] = useState(false);
 
@@ -244,8 +249,7 @@ function DeployForm({
     sendPlanDeploy(agentId, provider, model);
   }, [agentId, provider, model, railwayConfigured, allowMissing]);
 
-  const models: readonly string[] =
-    RUN_PROVIDERS.find((p) => p.id === provider)?.models ?? [];
+  const models: readonly string[] = catalogue.find((p) => p.id === provider)?.models ?? [];
   const secrets = plan?.secrets ?? [];
   const chosen = secrets.filter((s) => !excluded.has(s.name)).map((s) => s.name);
   // A required credential the user has unticked leaves the container in exactly the state a
@@ -264,7 +268,7 @@ function DeployForm({
       <div>
         <div className={TYPE.sectionLabel}>Runs on</div>
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
-          {RUN_PROVIDERS.filter((p) => p.id !== "fake").map((p) => (
+          {catalogue.filter((p) => p.id !== "fake").map((p) => (
             <Chip
               key={p.id}
               size="md"

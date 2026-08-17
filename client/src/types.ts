@@ -504,6 +504,26 @@ export type McpMessage =
 
 export type ProviderId = "anthropic" | "openai";
 
+/**
+ * One selectable model, as the server offers it.
+ *
+ * FROM `runtime/pricing.json`, WHICH IS THE POINT. The client used to hold the catalogue as a
+ * constant, and it had drifted four models behind the price sheet — including the newest Anthropic
+ * one — so a model the product knew how to price, run and meter could not be chosen anywhere. A
+ * catalogue that is the price sheet cannot drift from it.
+ *
+ * `label` is the PROVIDER's display name, resolved server-side: the browser used to hold two
+ * hardcoded copies of that mapping and they disagreed, so one provider was "Gemini" where you picked
+ * it and `google` where you configured it.
+ */
+export interface ProviderModel {
+  id: string;
+  provider: string;
+  label: string;
+  /** Whether running on it costs anybody anything. What identifies the dry-run path. */
+  free: boolean;
+}
+
 export interface ProviderStatus {
   id: ProviderId;
   /** The NAME of the variable holding this provider's key. Never a value. */
@@ -525,7 +545,14 @@ export type ProviderMessage =
   // judge. It rides this snapshot because it is meaningless without the list of what is connected.
   // It was missing from this type while the server was already sending it, so it was parsed off
   // the wire and thrown away.
-  | { channel: "providers"; type: "providers"; providers: ProviderStatus[]; ownKeyForPlatform: boolean }
+  | {
+      channel: "providers";
+      type: "providers";
+      providers: ProviderStatus[];
+      ownKeyForPlatform: boolean;
+      /** Every model a run may be started on, from the server's price sheet. See ProviderModel. */
+      models: ProviderModel[];
+    }
   | { channel: "providers"; type: "testResult"; provider: string; ok: boolean; message: string | null }
   | { channel: "providers"; type: "error"; message: string; provider?: string }
   | { channel: "providers"; type: "notice"; message: string; provider?: string };
