@@ -268,6 +268,7 @@ jobs:
           npm run test:reset
           npm run test:thread-store
           npm run test:thread-cost
+          npm run test:thread-groups
           npm run test:secrets-store
           npm run test:auth
           npm run test:plan-flow

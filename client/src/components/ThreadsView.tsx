@@ -1,15 +1,15 @@
 // The full-screen Threads list (§4).
 //
-// WHAT IS HERE NOW: the header, the rows, and the transition out. The grouping of §4.2, the filter bar
-// of §4.4 and the keyboard of §4.7 are the commits that follow, and each replaces a piece of this
-// rather than sitting beside it — the flat list below is where the three sections land.
+// WHAT IS HERE NOW: the header, the three sections of §4.2, the rows, and the transition out. The
+// filter bar of §4.4 and the keyboard of §4.7 are the commits that follow.
 //
-// THE ROWS COME FROM THE SNAPSHOT AND ARE RENDERED IN THE ORDER IT SENT THEM, which is
-// `last_activity_at` descending. That is already the right order for two of the three sections, and
-// deliberately not for the third: §4.2's Needs You sorts oldest-first, and that exception arrives with
-// the grouping it belongs to rather than being half-applied here.
+// THE SECTIONS COME FROM `lib/threadGroups.ts` RATHER THAN FROM THIS FILE, because the interesting
+// half is an ordering — Needs You oldest-first, everything else newest-first — and an ordering is
+// exactly what looks right in a screenshot and is wrong in the case nobody had that day. It is a pure
+// function with a suite; this renders what it returns.
 
 import { useThreadStore } from "../store/threadStore.ts";
+import { groupThreads } from "../lib/threadGroups.ts";
 import { openThread, openThreadAgent } from "../lib/threadNav.ts";
 import { sendCreateThread, sendRenameThread } from "../lib/socket.ts";
 import { TYPE } from "../lib/tokens.ts";
@@ -68,17 +68,29 @@ export function ThreadsView() {
           />
         ) : (
           <div className="py-1">
-            {threads.map((t) => (
-              <ThreadRow
-                key={t.id}
-                thread={t}
-                // The row the CENTRE PANE is holding, until §4.7's J/K cursor arrives and takes this
-                // over. Two different ideas of "selected" that happen to coincide today.
-                selected={t.id === activeThreadId}
-                onOpen={() => openThread(t)}
-                onOpenAgent={openThreadAgent}
-                onRename={(title) => sendRenameThread(t.id, title)}
-              />
+            {groupThreads(threads).map((section) => (
+              <section key={section.id}>
+                {/* The header carries the count and a rule out to the right edge, as §4.1's wireframe
+                    draws it. An empty section is not here at all — `groupThreads` does not return one
+                    — so there is no "0 items" to render and no placeholder to decide the shape of. */}
+                <div className="flex items-center gap-3 px-5 pt-3 pb-1">
+                  <span className="text-[10px] font-medium tracking-wider text-faint">{section.label}</span>
+                  <span className="h-px flex-1 bg-hair" />
+                  <span className="text-[10px] text-faint tabular-nums">{section.threads.length}</span>
+                </div>
+                {section.threads.map((t) => (
+                  <ThreadRow
+                    key={t.id}
+                    thread={t}
+                    // The row the CENTRE PANE is holding, until §4.7's J/K cursor arrives and takes
+                    // this over. Two different ideas of "selected" that happen to coincide today.
+                    selected={t.id === activeThreadId}
+                    onOpen={() => openThread(t)}
+                    onOpenAgent={openThreadAgent}
+                    onRename={(title) => sendRenameThread(t.id, title)}
+                  />
+                ))}
+              </section>
             ))}
           </div>
         )}
