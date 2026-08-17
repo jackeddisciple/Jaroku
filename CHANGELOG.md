@@ -8,6 +8,166 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.2.17 : Threads, Documented — and Thirty-One Defects an Adversarial Read Found
+
+v0.2.16's release was shipped on a green suite and then pointed at real GitHub, and nine defects
+fell out in the order a user would hit them. This release is the same exercise run against source
+rather than against a server: four adversarial passes over the whole repository, deepest on the
+newest surface, with every finding anchored to a file and a line and three of them reproduced with
+runnable scripts.
+
+The pattern the passes kept finding is not "this function is wrong". Every unit under review had a
+suite and passed it. What failed was the wiring between units: a guard separated from the flag it
+reads by an `await`, a client that never sent a field the server had accepted from the first day, a
+broadcast wired to the events that *start* work and to almost nothing that ends it, three
+subsystems that assert idempotency in a comment and do not have it in the code. Sixteen suites were
+extended to hold each of those down, several of them structurally — over the source rather than over
+a function — because a green test about an unwired thing is worse than no test.
+
+Threads also stops being undocumented, which was itself one of the findings: a sidebar destination,
+a full-screen view, two tables, a channel and six commands, invisible to anybody reading the docs.
+
+### Added
+
+- **A `## Threads` section in the README**, between the fix loop and Debug depth: what a build
+  session is, §3.3's five statuses and their precedence, why ownership and liveness come from
+  different places, why a thread is archived and never deleted, and how a per-session cost is
+  attributed and made to move while work does.
+- **The `threads` and `github` channels in the WebSocket protocol reference**, with their six and
+  eighteen commands. Both were missing — the table listed nineteen channels where the relay defines
+  twenty-one — and the GitHub omission was a release older than the Threads one.
+- **The twelve thread suites in the tests index**, six server and six client, each with the line
+  that says what it is for.
+- **`live_eval_ids` on a thread row and `spentDeltaUsd` on `evalProgress`**, which is what makes
+  §4.3.3's own worked example reachable — see below.
+- **Migration 045**: one live check run per `(workspace, agent, pull request, commit)`, as a
+  partial unique index.
+- **Migration 046**: `github_events.delivery_id` with a partial unique index, and
+  `github_links.remote_seen_at`.
+- **A schema-driven completeness audit for retention**, the one `export.test.ts` already had: every
+  workspace-scoped table is swept or explicitly exempted with a stated reason, and the suite reads
+  the schema rather than a list somebody maintains by remembering.
+- **A structural audit that every §3.3 transition refreshes the thread list**, by handler rather
+  than by counting call sites — and that eval progress does *not*, which would make a full-snapshot
+  channel a polling one.
+
+### Fixed
+
+**Cross-tenant state.**
+
+- **Single-slot guards were TOCTOU checks.** `editAgent`, `planAgent` and the planned half of
+  `generateAgent` read `editor.inFlight` / `planner.inFlight` / `generating` and then awaited a
+  provider-key lookup before anything set them — so two workspaces both passed, and the second
+  repointed the scope the first was still streaming source files and proposal diffs into. The slot
+  is taken in the same synchronous statement as the guard, every refusal hands it back, and
+  `test:channels` now fails on an `await` between the two rather than only on their ordering.
+- **One pending plan for the whole process.** `plan()` cleared the slot regardless of owner, so
+  workspace B describing an agent silently destroyed A's plan card — A's Generate answered "that
+  plan is no longer available" with nothing to explain it, and the `discarded` event carrying A's
+  plan id was routed by the planner's current scope, which by then was B's. One slot per workspace;
+  superseding scoped to the asker; the event names its own tenant.
+- **A run's trace was attributed by envelope and trusted by body.** The pool attributes every line
+  to the slot that produced it, and nothing compared that against the ids *inside* the event —
+  `insertStep` binds `step.run_id` verbatim and `upsertRun`'s `ON CONFLICT` is scoped only by
+  workspace. A sandbox holding its own valid run token could flip another run in the same workspace
+  to `completed`, restate its cost, or inject steps into it. The two are reconciled at both ingest
+  boundaries, and `isTraceEvent` checks the payload it used to accept as a bare `kind`.
+
+**Threads, which was half-wired.**
+
+- **Two threads on one agent showed one conversation.** The relay defined `threadId` on six
+  commands and the server honoured it; no client sender ever set one, `chatStore` keyed
+  conversations by agent id, and `loadThread` answered a row with no turns. So work landed in
+  whichever session was touched last, and reopening a thread after a reload showed nothing. Every
+  event on the gen / edit / reply channels now names its session on the envelope, the conversation
+  is keyed by it, `loadThread` carries the thread's items, and selecting an agent resolves the same
+  session `ensureForAgent` would.
+- **A refused generation blocked its thread forever.** The mark was keyed by generation id, and the
+  only id in hand when a generation starts is the one just minted — so the clearing `delete` was a
+  guaranteed no-op and the §2.1 badge only ever counted up. Keyed by thread instead.
+- **A momentarily-absent agent directory detached its threads permanently.** The sweep is a *soft*
+  delete that `upsertFromDisk` reverses; nulling `threads.agent_id` was not, so a replica that had
+  not materialised the directory left a live agent's sessions reading `(deleted)` forever and
+  opened a duplicate beside each. §3.2 is a join now.
+- **A failed run left its thread reading `● running` indefinitely.** `noteThreadItem` was the only
+  broadcast point and an item is written when work *begins*; fourteen of the transitions §3.3
+  derives from pushed nothing at all. Run end, exit, spawn error, both MCP-confirm edges, plan
+  discard, eval finish and deploy settle all refresh now, coalesced on a short timer.
+- **§4.3.3's live and projected cost was structurally unreachable for an eval.** Eval runs are kept
+  off `trace` so a sweep cannot steal the timeline's focus, and `trace` is the only channel the
+  client incremented from; `evalProgress` carried counts and no cost; and the sole snapshot is taken
+  at eval start, where `done` is 0 and `projectCost` correctly refuses to extrapolate. The two
+  halves were mutually exclusive in the shipped product.
+- **Opening Threads scanned the workspace twice.** The snapshot builder and the fact collector each
+  listed every thread and read the whole `thread_items` table, and `runOutcomes` read every run plus
+  a `GROUP BY` over every errored run's steps to answer about the handful a thread owns. One read of
+  each, shared; the run query narrowed to the ids already in hand; the status write-back batched per
+  status instead of awaited per row.
+- **`thread_items` had no retention path**, which made it the one table in the schema that only ever
+  grew — and it is read in full on every snapshot. Rows outlived the runs they named, and §3.3 gives
+  up on a run it cannot find, so a thread that ended in error quietly became `idle` the day its run
+  expired.
+- **Auto-titling lost a race into no title at all.** It read the message count back and fired only
+  on exactly one, so two first messages landing before either read left the row `Untitled thread`
+  permanently, unfindable by §4.4's text filter. It titles from the first message row instead, which
+  is idempotent.
+- **A rename that kept the auto-title was discarded.** Somebody who opened the editor, agreed with
+  the title and pressed Enter left `title_is_custom` at 0, and the next message re-ran `autoTitle`
+  over a title they had chosen.
+- **§5's `⌘Enter` rename was never implemented**, leaving renaming mouse-only in the one view whose
+  §4.7 rule is that it must not be.
+- **`+ New thread` created a row nothing could be filed into.** The server already answers the
+  asking socket with the row it just made; the client only filed it, so every press added a
+  permanently empty, permanently untitled thread.
+- **"Go to thread…" listed archived rows**, which is the one place §3.4 says they must not appear.
+- **The Team author column had no names.** `sendListMembers` was exported and never called, and
+  `setMembers`' only caller is the broadcast that fires after a membership *mutation* — so the list
+  was empty for the life of a tab and §4.3's author rendered nothing in exactly the case §6 built it
+  for. The initial snapshot carries it for a Team workspace.
+- **Thread refusals were broadcast to the whole workspace**, carrying raw driver text: one member's
+  malformed command painted a red strip across every teammate's view. They go to the asking socket,
+  with a fixed sentence and the real one in the log.
+- **A disconnected user was told a thread was archived that was not.** `send` dropped writes with no
+  signal and §3.4's notice was written *before* it.
+- **The resume scroll re-ran on every change to the conversation**, so typing a follow-up into a
+  thread with a pending diff yanked the view back to the old diff on every streamed frame.
+- **The agent chip went stale on rename**, showing the old name beside a sidebar showing the new one.
+- **A thread title had no length bound**, and a non-string rename was coerced into `"[object
+  Object]"`.
+- **`ThreadStore.list`'s comment promised a driver-parity ordering the query did not have.**
+- **The collision marker counts `errored` and its own wire documentation said it did not.** Both
+  deviations from the spec's letter are now stated where they are read.
+
+**Idempotency that was claimed rather than enforced.**
+
+- **Double-clicking Apply published two versions from one proposal.** The pending record was deleted
+  after two awaits, so both clicks read the same `current_version`, both passed the staleness guard
+  directly above them, and both published — `current_version` jumped by two and Undo had to be
+  pressed twice. It is claimed synchronously now, and the diff card disables its own buttons.
+- **A redelivered `pull_request` webhook opened a rival check and a second paid eval.** Superseding
+  excludes the same head sha by construction, and the only dedup was a per-process `Set` no restart
+  or second replica survives.
+- **A redelivered push appeared twice in History**, and two delivered out of order left the earlier
+  head — with the panel's behind/ahead badge measuring against it.
+- **The MCP confirmation modal had no in-flight state**, so a second click (or a held Escape, which
+  repeats) put "that confirmation is no longer waiting" in front of every teammate. A closed socket
+  also dropped the answer in silence, and `mcp_bridge`'s clock denied the call somebody watched
+  themselves allow.
+- **A reconnect timer armed before a workspace switch opened a second socket.** Both dispatched every
+  broadcast into the same stores, and the orphan's close nulled the shared handle, silently dropping
+  every command after it. `addStepCost` also carries the step id now, so duplicate delivery from any
+  cause counts once — it was the one consumer of `trace` that accumulated blindly.
+- **`invoice.payment_failed` read an invoice's metadata as a subscription's**, writing
+  `plan_id = 'free'` over the paid plan and nulling the period end with it.
+
+### Removed
+
+- **`hoursOutstanding` and `STALE_HOURS`**, which existed for §4.2's "exact age past a day" and had
+  exactly one reader: their own test. The refinement is served without them — `relTime` renders
+  `4d ago` whatever the age — and a green suite over something nothing imports is worse than none.
+
+---
+
 ## v0.2.16 : The GitHub App, and the Integration's First Contact With Real GitHub
 
 The GitHub feature was written against a fixture and merged on a green suite. This release is what

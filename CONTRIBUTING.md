@@ -95,6 +95,17 @@ The shortest list, with the tests that defend them:
 | A push into an empty repository writes the initial commit to the DEFAULT branch, and `jaroku/<slug>` is rooted on it — an orphan branch has no merge base, so no pull request and no comparison | `test:github-first-push` |
 | The PR's checks line reads check runs AND commit statuses, and "could not read" is not "none reported" | `test:github-checks-line` |
 | One pull request opens exactly one check run, under the name it was posted with | `test:check-runner` |
+| A redelivered pull-request webhook joins the check already open rather than opening a rival and dispatching a second paid eval | `test:check-runner` |
+| A redelivered push is one History row, and an out-of-order delivery never moves the watermark backwards | `test:github-webhook`, `test:tenancy` |
+| A thread is archived, never deleted — no command, no store method, no statement anywhere | `test:thread-archive` |
+| One agent carries several independent threads, each with its own conversation and cost | `test:threads`, `test:thread-binding`, `test:thread-store` |
+| A thread's status is DERIVED: ownership from `thread_items`, liveness from whoever owns the live thing | `test:thread-status`, `test:thread-binding` |
+| Every transition §3.3 derives from refreshes the list — and eval progress does not, which would make a snapshot channel a polling one | `test:channels` |
+| A guard on a single-flight slot takes it in the same statement, with no `await` in between | `test:channels` |
+| One proposal publishes one version, however many times Apply is pressed | `test:edit-versions` |
+| A trace event's own run id must match the slot that produced it | `test:control-plane-routes` |
+| Retention sweeps every workspace-scoped table or exempts it with a stated reason | `test:retention` |
+| An invoice event patches the subscription's status and nothing it does not carry | `test:stripe` |
 
 ## Commits
 

@@ -37,6 +37,7 @@ of the repo and run yourself.
 - [The Node server](#the-node-server)
 - [The build pipeline: plan → generate → validate](#the-build-pipeline-plan--generate--validate)
 - [The fix loop: propose → apply → undo](#the-fix-loop-propose--apply--undo)
+- [Threads](#threads)
 - [Debug depth: pause, resume, branch](#debug-depth-pause-resume-branch)
 - [The eval engine](#the-eval-engine)
 - [Cost accounting](#cost-accounting)
@@ -755,6 +756,62 @@ instruction ──▶ staged copy of the project + the model's files
 - **A no-op is a valid outcome.** If the model declines and explains why, or re-emits files
   byte-identical to what is already there, you get a proposal with zero files and the
   summary explaining it — not a fake diff.
+
+---
+
+## Threads
+
+A **thread** is one build session: what somebody asked for, what it produced, what it cost, and
+whether anything in it is still waiting on a person. It is the answer to a question the sidebar
+could not answer — *which of the things I started need me?* — and it is a full-screen destination
+rather than a fourth list in a panel, because triage is what you open it to do.
+
+**One agent carries several independent threads.** `api_gateway` can have a rate-limiting session
+with an unapplied diff, an OAuth session mid-run, and a finished one from Tuesday, and they do not
+share a conversation, a cost, or a state. Every command that starts work carries the thread it
+belongs to; a command that carries none falls back to the agent's most recently active session,
+which is what keeps a client that has not been updated working.
+
+**Status is derived, never stored as an input.** The `threads.status` column is a cache; the
+authority is `threadStatus.ts`, a pure function over facts the server already holds:
+
+| Status | Means | Fragment on the row |
+|---|---|---|
+| `✕ errored` | The thread's last operation ended in error and nothing was retried after it | `3 failed steps` |
+| `◆ needs_you` | An unapplied diff, a plan awaiting a decision, a refused generation, a high-impact MCP call halting a graph, or a failed step nobody retried | `diff pending +42−11` |
+| `● running` | A run, generation or eval is in flight | `eval 34/120` |
+| `○ idle` | Nothing outstanding | `deployed`, or nothing |
+| `⊘ archived` | Set aside. Leaves the default list, keeps every byte | — |
+
+Precedence is that order, and each step is a decision: `needs_you` beats `running` because a run
+ends by itself and an unapplied diff does not, which is exactly what the sidebar's Threads badge
+counts. **Ownership comes from `thread_items`; liveness comes from whoever owns the live thing** —
+`runs.status`, `eval_runs.status`, the editor's proposal map, the planner's slot, the MCP confirm
+queue. A proposal does not survive a restart, so after one no thread claims a pending diff and the
+list says idle, which is true: there is no diff left to apply.
+
+**A thread is archived, never deleted.** There is no `deleteThread` command, no method on the
+store, and `test:thread-archive` audits every server source file to keep it that way. A thread
+holds what was thought and what it cost, and that record outlives the artefact — the same reason
+a dataset is soft-deleted and an agent is soft-deleted. Retention sweeps the join rows that point
+at runs it has already removed, and nothing else.
+
+**Cost is per session, and it moves while work does.** `usage_events` gains a `thread_id` for the
+platform's own calls (plan, generation, edit, explain); everything else attributes through its run.
+A running thread's figure is the ledger's total plus the per-step costs that have arrived since —
+off the `trace` channel for an interactive run, off the `eval` channel's progress events for an
+eval, which are kept off `trace` so a sweep cannot steal the timeline's focus. An eval also knows
+its denominator, so its row projects: `$0.82 → ~$2.90`, with the tilde because an estimate must
+never be shown with the confidence of a final figure.
+
+**An agent's deletion leaves its threads standing.** They keep pointing at it and the row renders
+`stripe_webhook (deleted)`, dimmed, because the deletion is soft and reverses itself when the
+directory comes back. `agent_name_snapshot` is what survives a *hard* delete, where the link
+cascades away and there is nowhere left to read the name from.
+
+Two tables, both additive: `threads` (migration 043) and `thread_items` (044). Nothing about the
+frozen event schema moves for any of it — a run does not gain a field, and no thread appears in a
+trace.
 
 ---
 
@@ -1627,6 +1684,8 @@ frozen event schema, and everything added since rides beside it.
 | `connections` | Which third-party accounts this workspace has authorised, their status and granted scopes, and the URL a consent flow must be started at. Never a token |
 | `billing` | What this workspace has spent this period, against which ceilings — see [cost metering](#cost-metering-budgets-and-billing) |
 | `reply` | Streaming "explain" answers |
+| `threads` | The workspace's build sessions with §3.3's derived status and the filter counts, one thread's conversation when it is opened, and refusals answered to the socket that earned them — see [Threads](#threads) |
+| `github` | Link state, sync verdicts, push and pull outcomes, staged hunks, secret-scan refusals, and pull-request check results — see [GitHub](#github) |
 | `log` | stderr lines and parse errors, for visibility |
 
 **Client → server**
@@ -1643,7 +1702,12 @@ frozen event schema, and everything added since rides beside it.
 `loadUsage` · and the deploy set: `listDeployments` · `planDeploy` ·
 `deploy` · `cancelDeploy` · `forgetDeployment` · `loadDeployLogs` · `setRailwayToken` ·
 `testRailwayToken` · and the membership set: `listMembers` · `inviteMember` · `revokeInvite` ·
-`setMemberRole` · `removeMember`
+`setMemberRole` · `removeMember` · and the thread set: `listThreads` · `loadThread` ·
+`createThread` · `renameThread` · `archiveThread` · `restoreThread` · and the GitHub set:
+`listGithub` · `listGithubRepos` · `checkGithubRepo` · `linkGithub` · `unlinkGithub` ·
+`refreshGithub` · `pushGithub` · `pullGithub` · `switchGithubBranch` · `createGithubBranch` ·
+`openGithubPr` · `commitGithub` · `generateGithubMessage` · `diagnoseFile` ·
+`shadowRunGithub` · `listShadowRuns` · `semanticDiffGithub` · `resolveReviewComment`
 
 Accepting an invitation is deliberately **not** a command: the accepter is not a member yet, so
 there is no socket scoped to the workspace they are joining. It is `POST /v1/invites/accept`.
@@ -2015,6 +2079,14 @@ npm run test:semantic-diff    # the agent's level, not the text's; the MCP grant
 npm run test:trace-diff       # two traces, per step; and the shadow-run sweep
 npm run test:eval-check       # the check's title and summary, and null-not-zero deltas
 npm run test:check-policy     # §B.1.3's provider boundary: whose money a stranger's PR spends
+
+# build sessions — see "Threads"
+npm run test:threads         # what a row promises: one agent, many sessions, and no delete path
+npm run test:thread-status   # §3.3's precedence, one fixture per rung, and the collision count
+npm run test:thread-channel   # two sockets in two workspaces; a read answers one, a write tells all
+npm run test:thread-binding   # ownership from the items, liveness from the owner, through the app
+npm run test:thread-title     # the cut: one line, at a word boundary, saying it was cut
+npm run test:thread-archive   # the ABSENCE: 208 source files audited for a path that deletes one
 ```
 
 ```bash
@@ -2032,6 +2104,12 @@ npm run test:reset       # NO store retains a row across a workspace switch
 npm run test:secrets-store # the credential list's own state, and what elevation does to it
 npm run test:truncate-path # a filename survives the width; the middle of the path gives way
 npm run test:composer-triggers # #, @ and ! fire only where they are triggers
+npm run test:thread-store    # a snapshot replaces; one row navigates nothing; the live cost delta
+npm run test:thread-cost     # three states, and a projection that refuses to extrapolate from zero
+npm run test:thread-groups   # §4.2's two sorting rules, and the input it must not reorder
+npm run test:thread-filter   # the five chips and the text match, over one list
+npm run test:thread-resume   # which turn §4.5 opens at, and the hint the row shows for it
+npm run test:thread-archive  # what §3.4's notice names, and the archive that gets none
 ```
 
 The client's test scripts invoke `../server/node_modules/.bin/tsx`, so install the server's
