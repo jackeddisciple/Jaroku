@@ -74,6 +74,8 @@ export function ThreadRow({
   onRename,
   onArchive,
   onRestore,
+  renaming = false,
+  onRenamingEnd,
 }: {
   thread: ThreadView;
   /** The keyboard's cursor (§4.7's J/K). Distinct from "the thread the centre pane holds". */
@@ -82,6 +84,16 @@ export function ThreadRow({
   /** §4.3: clicking the chip navigates to that AGENT, not into the thread. */
   onOpenAgent: (agentId: string) => void;
   onRename: (title: string) => void;
+  /**
+   * §5's other way in: `⌘Enter` on the cursor row (§4.7 — every action without a mouse).
+   *
+   * The row cannot own the whole of `editing` any more, because the keyboard hook is mounted on the
+   * VIEW and has no handle on a row. So the view says which row is being renamed and the row still
+   * decides when that ends — a double-click starts one locally, and `onRenamingEnd` tells the view
+   * so the two never disagree about whether an editor is open.
+   */
+  renaming?: boolean;
+  onRenamingEnd?: () => void;
   /** §3.4's `E`, reachable with a mouse too. Absent on an already-archived row. */
   onArchive: () => void;
   /** §3.4: restore is one click. The only control an archived row has. */
@@ -101,9 +113,17 @@ export function ThreadRow({
   const cost = thread.status === "running"
     ? fmtRunningCost(spend, thread.cost_known, thread.eval_progress)
     : fmtThreadCost(spend, thread.cost_known);
-  const [editing, setEditing] = useState(false);
+  // Started here by a double-click, or by the view when `⌘Enter` names this row. Either way the
+  // ending is the row's, so `stopEditing` is the single exit both routes go through.
+  const [locallyEditing, setLocallyEditing] = useState(false);
+  const editing = locallyEditing || renaming;
   const [draft, setDraft] = useState(thread.title);
   const input = useRef<HTMLInputElement>(null);
+
+  const stopEditing = (): void => {
+    setLocallyEditing(false);
+    onRenamingEnd?.();
+  };
 
   useEffect(() => {
     if (editing) {
@@ -118,7 +138,7 @@ export function ThreadRow({
   }, [editing]);
 
   const commit = (): void => {
-    setEditing(false);
+    stopEditing();
     const next = draft.trim();
     if (next && next !== thread.title) onRename(next);
   };
@@ -148,7 +168,7 @@ export function ThreadRow({
             onKeyDown={(e) => {
               e.stopPropagation();
               if (e.key === "Enter") commit();
-              else if (e.key === "Escape") setEditing(false);
+              else if (e.key === "Escape") stopEditing();
             }}
             className="min-w-0 flex-1 rounded-control bg-void px-1.5 py-0.5 text-[13px] text-ink outline-none ring-1 ring-edge"
           />
@@ -158,7 +178,7 @@ export function ThreadRow({
           // element would leave it measuring nothing and fading every title.
           <span
             className="min-w-0 flex-1"
-            onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
+            onDoubleClick={(e) => { e.stopPropagation(); setLocallyEditing(true); }}
           >
             <Truncate
               className={`text-[13px] ${thread.archived_at ? "text-muted" : "text-ink"}`}

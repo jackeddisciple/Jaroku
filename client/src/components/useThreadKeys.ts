@@ -36,9 +36,20 @@ export interface ThreadKeyHandlers {
   setFilter: (f: ThreadFilter) => void;
   /** `/` — focus the text filter. */
   focusFilter: () => void;
+  /**
+   * §5's `⌘Enter` — start renaming the cursor row in place.
+   *
+   * The view owns which row is being renamed, because this hook is mounted on the view and has no
+   * handle on a row. Without it §5's second binding was simply absent: `useThreadKeys` returned on
+   * every chord but `⌘N`, `ThreadRow` entered edit mode only from `onDoubleClick`, and renaming — in
+   * a view whose §4.7 rule is "every action must be reachable without a mouse" — was mouse-only.
+   */
+  startRename: (id: string) => void;
 }
 
-export function useThreadKeys({ rows, cursor, setCursor, setFilter, focusFilter }: ThreadKeyHandlers): void {
+export function useThreadKeys({
+  rows, cursor, setCursor, setFilter, focusFilter, startRename,
+}: ThreadKeyHandlers): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const mod = e.metaKey || e.ctrlKey;
@@ -48,6 +59,17 @@ export function useThreadKeys({ rows, cursor, setCursor, setFilter, focusFilter 
       if (mod && e.key.toLowerCase() === "n") {
         e.preventDefault();
         sendCreateThread();
+        return;
+      }
+
+      // ⌘Enter — §5's other way into a rename, beside the double-click. Also before the typing
+      // guard: the only typing target that can hold focus here is the filter field, and a chord
+      // aimed at the cursor row is still aimed at the cursor row.
+      if (mod && e.key === "Enter") {
+        const row = cursor ? rows.find((r) => r.id === cursor) : undefined;
+        if (!row) return;
+        e.preventDefault();
+        startRename(row.id);
         return;
       }
 
@@ -129,5 +151,5 @@ export function useThreadKeys({ rows, cursor, setCursor, setFilter, focusFilter 
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [rows, cursor, setCursor, setFilter, focusFilter]);
+  }, [rows, cursor, setCursor, setFilter, focusFilter, startRename]);
 }

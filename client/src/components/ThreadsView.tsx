@@ -11,7 +11,7 @@
 // session and reopening Threads starts at All. Local state does that by construction — the view
 // unmounts when you leave it — where a store would have to be remembered to be cleared.
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useThreadStore } from "../store/threadStore.ts";
 import { groupThreads } from "../lib/threadGroups.ts";
 import { filterThreads, FILTER_LABEL, type ThreadFilter } from "../lib/threadFilter.ts";
@@ -142,6 +142,16 @@ export function ThreadsView() {
    * Enter is what makes the two the same again.
    */
   const [cursor, setCursor] = useState<string | null>(activeThreadId);
+  /**
+   * §5's rename, when it was started from the keyboard rather than from a double-click.
+   *
+   * HELD BY THE VIEW BECAUSE THE KEYBOARD IS. `useThreadKeys` is mounted here and has no handle on a
+   * row, so `⌘Enter` had nothing to reach — §5 specifies the binding and it was simply not
+   * implemented, leaving renaming mouse-only in the one view whose §4.7 rule is that it must not be.
+   * The row still owns ending an edit; this only says which one begins.
+   */
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const startRename = useCallback((id: string) => setRenamingId(id), []);
 
   const visible = filterThreads(threads, filter, query);
   // The Archived chip renders a FLAT list, not sections. §4.2's three sections are about what is
@@ -160,6 +170,7 @@ export function ThreadsView() {
     setCursor,
     setFilter,
     focusFilter: () => filterInput.current?.focus(),
+    startRename,
   });
 
   // A cursor on a row that is no longer rendered — filtered out, archived, or removed by somebody
@@ -255,6 +266,8 @@ export function ThreadsView() {
                     selected={t.id === (cursor ?? activeThreadId)}
                     onOpen={() => openThread(t)}
                     onOpenAgent={openThreadAgent}
+                    renaming={renamingId === t.id}
+                    onRenamingEnd={() => setRenamingId((id) => (id === t.id ? null : id))}
                     onRename={(title) => sendRenameThread(t.id, title)}
                     onArchive={() => {
                       // The same two calls `E` makes, in the same order and for the same reason: the
