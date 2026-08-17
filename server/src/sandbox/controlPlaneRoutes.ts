@@ -13,7 +13,7 @@
 // message means".
 
 import { badRequest, forbidden, notFound, unauthorized, type HttpRequest, type Router } from "../http/router.ts";
-import { isTraceEvent, type TraceEvent } from "../types.ts";
+import { isTraceEvent, runIdOf, type TraceEvent } from "../types.ts";
 import { BackpressureTracker, describeViolation } from "./backpressure.ts";
 import { RunEventBus } from "./eventBus.ts";
 import { verifyRunToken, type RunTokenRevocationList } from "./runTokens.ts";
@@ -136,13 +136,22 @@ async function handleTrace(req: HttpRequest, runId: string, deps: ControlPlaneDe
   let accepted = 0;
   let dropped = 0;
   for (const [i, candidate] of body.events.entries()) {
-    if (isTraceEvent(candidate)) {
-      deps.bus.pushTrace(runId, candidate as TraceEvent);
+    // THE ROUTE IS SCOPED TO ONE RUN AND SO IS EVERY EVENT ON IT. The header of this file promises
+    // "all scoped by a run token to exactly the run it names", and that was true of the envelope
+    // and false of the body: `insertStep` binds `step.run_id` verbatim and `upsertRun` is scoped
+    // only by workspace, so a sandbox holding its own valid token could name another run in the
+    // same workspace and rewrite its trace. Refused here as well as at ingest, because this is the
+    // trust boundary and a caller sending one deserves to be told it was dropped.
+    if (isTraceEvent(candidate) && runIdOf(candidate) === runId) {
+      deps.bus.pushTrace(runId, candidate);
       accepted++;
     } else {
       const line = serialised[i]!.slice(0, 300);
-      deps.bus.pushParseError(runId, { line, error: "not a recognized trace event" });
-      deps.metrics?.recordDropped({ runId, reason: `not a recognized trace event: ${line}` });
+      const why = isTraceEvent(candidate)
+        ? `event names run ${runIdOf(candidate)}, not ${runId}`
+        : "not a recognized trace event";
+      deps.bus.pushParseError(runId, { line, error: why });
+      deps.metrics?.recordDropped({ runId, reason: `${why}: ${line}` });
       dropped++;
     }
   }

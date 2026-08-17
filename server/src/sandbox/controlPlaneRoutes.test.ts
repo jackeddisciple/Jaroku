@@ -177,6 +177,36 @@ const token1 = mintRunToken(signingKey, "run-1", "ws-1", 3600);
   check("a run under the cap is accepted normally", r.status === 200 && (r.json as { accepted: number })?.accepted === 1);
 }
 {
+  // THE ENVELOPE IS SCOPED AND THE BODY HAS TO AGREE. This route's own header promises "all scoped
+  // by a run token to exactly the run it names" — which was true of the path and the token and
+  // false of the ids inside the events: `insertStep` binds `step.run_id` verbatim and `upsertRun`
+  // is scoped only by workspace, so a run holding its own valid token could name another run in
+  // the same workspace and rewrite its trace, flip a failure to completed, or restate its cost.
+  bus.register("run-victim");
+  const cleanToken = mintRunToken(signingKey, "run-clean", "ws-1", 3600);
+  const r = await call("POST", "/v1/runs/run-clean/trace", cleanToken, {
+    events: [
+      { kind: "step", schema_version: 1, step: { id: "s-1", run_id: "run-victim", seq: 0 } },
+      { kind: "run_end", schema_version: 1, run: { id: "run-victim", status: "completed" } },
+      { kind: "step", schema_version: 1, step: { id: "s-2", run_id: "run-clean", seq: 1 } },
+    ],
+  });
+  const counted = r.json as { accepted: number; dropped: number };
+  check("an event naming another run is dropped, not written",
+    r.status === 200 && counted?.dropped === 2, JSON.stringify(counted));
+  check("...and the run's own event in the same batch still lands", counted?.accepted === 1);
+}
+{
+  // The other half of the shape check: `{"kind":"step"}` with no step at all used to reach
+  // `insertStep` and throw into a catch that only logs.
+  const cleanToken = mintRunToken(signingKey, "run-clean", "ws-1", 3600);
+  const r = await call("POST", "/v1/runs/run-clean/trace", cleanToken, {
+    events: [{ kind: "step", schema_version: 1 }, { kind: "run_end", schema_version: 1 }],
+  });
+  check("an event with the right kind and no payload is refused",
+    r.status === 200 && (r.json as { dropped: number })?.dropped === 2, JSON.stringify(r.json));
+}
+{
   // THE RATE CAP, ON THIS TRANSPORT TOO. backpressure.ts names three caps and says the same
   // limiter serves both transports; this route used to call recordBytes and never recordLine, so
   // lines-per-second was enforced on a local subprocess's stdout and on nothing at all here. A

@@ -16,6 +16,9 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { RunPool, type RunPoolEvents } from "./runPool.ts";
 import { TraceStore } from "./store.ts";
+// The one answer to "which run does this event claim to be about" — see the ingest boundary's
+// reconciliation of the body's id against the slot that produced it.
+import { runIdOf } from "./types.ts";
 import { migrate } from "./db/migrate.ts";
 import { describePartitions, ensurePartitions } from "./lifecycle/partitions.ts";
 import { RetentionSweeper, describeSweep } from "./lifecycle/retention.ts";
@@ -5476,6 +5479,28 @@ function onBothPools<K extends keyof RunPoolEvents>(
 }
 
 onBothPools("event", ({ runId, event }) => {
+  // THE ENVELOPE DECIDES WHOSE RUN THIS IS, AND THE BODY HAS TO AGREE.
+  //
+  // The pool attributes every line to the slot that produced it, which is what makes `runId`
+  // trustworthy — but nothing downstream compared it against the ids INSIDE the event, and those
+  // are what get written: `insertStep` binds `step.run_id` directly, and `upsertRun`'s
+  // `ON CONFLICT(id) DO UPDATE SET status=…, cost=…, error=…` is scoped only by workspace. So a
+  // sandbox holding its own valid run token could name another run in the same workspace and
+  // rewrite its trace — flip a failed run to completed, restate its cost, inject steps into it —
+  // against the record ADR-001 calls foundational and `billing/usage.ts` says a charge must be
+  // defensible against.
+  //
+  // This is the same reconciliation the CONTROL path already does, and the comment that made it
+  // asserted the event path "has always been safe" because of slot attribution. Slot attribution
+  // makes the envelope safe and says nothing about the body. A legitimate event always matches:
+  // a resume and a branch both run under the id the slot was started with.
+  const claimed = runIdOf(event);
+  if (claimed !== runId) {
+    console.error(
+      `[trace] dropped a ${event.kind} claiming run ${claimed} from the slot running ${runId}`,
+    );
+    return;
+  }
   // Read synchronously: this flag gates whether a NEW run may start, and deferring it would
   // leave a window in which the finished run still looks active.
   if (runId === activeRunId && event.kind === "run_end") runActive = false;
