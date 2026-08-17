@@ -17,18 +17,22 @@
 // first and zero in the second, which is the clearest possible statement of what BYOK bought
 // them.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useBillingStore } from "../store/billingStore.ts";
-import type { UsageBreakdown } from "../types.ts";
+import type { UsageBreakdown, UsageSnapshot } from "../types.ts";
+import { useSessionStore } from "../store/sessionStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { sendLoadUsage, sendLoadRun } from "../lib/socket.ts";
+import { startCheckout } from "../lib/workspaceApi.ts";
 import { fmtCost, fmtTokens } from "../lib/format.ts";
 import { ICON, STATUS, TEXT } from "../lib/tokens.ts";
 import { EmptyState } from "./EmptyState.tsx";
-import { quietBtn } from "./buttons.ts";
+import { quietBtn, secondaryBtn } from "./buttons.ts";
 import { download, usageStem, usageToCsv } from "../lib/evalExport.ts";
-import { AlertTriangleIcon, DatabaseIcon, InfoIcon } from "./panelIcons.tsx";
+import {
+  AlertTriangleIcon, ChevronDownIcon, ChevronRightIcon, DatabaseIcon, InfoIcon,
+} from "./panelIcons.tsx";
 
 /** A date somebody reads, from an ISO timestamp. Never the time — a period boundary is a day. */
 function day(iso: string): string {
@@ -122,6 +126,111 @@ function Meter({
   );
 }
 
+/**
+ * What this workspace is on, and what else it could be on.
+ *
+ * WHY IT IS HERE AND NOT IN A SETTINGS SCREEN. The panel already names the plan and draws the
+ * ceiling that plan sets; "how do I raise this" is the question the meter above it provokes, and the
+ * answer belongs where the question is asked. Every layer of this existed — a checkout route that
+ * validates the plan against the table and never against a client-supplied price, the full
+ * subscription webhook state machine, credit granted on `invoice.paid`, three suites — and no
+ * button. A deployment with Stripe configured had a paid tier nobody could buy.
+ *
+ * COLLAPSED UNTIL ASKED. The plans are a list of five facts each; expanded by default they would
+ * out-weigh the spend figures that are the reason somebody opened this tab.
+ */
+function PlanChoice({ usage }: { usage: UsageSnapshot }) {
+  const workspaceId = useSessionStore((s) => s.workspaceId);
+  const role = useSessionStore((s) => s.role());
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // `billing:manage`, which is the owner's. Reading spend is a member's — a member whose run was
+  // refused for budget has to be able to see the number it was refused against — and CHANGING what
+  // may be spent is not.
+  const canBuy = role === "owner";
+  const buyable = usage.plans.filter((p) => p.purchasable && !p.current);
+  // Nothing to offer: no payments on this deployment, or already on the top tier. Saying nothing is
+  // right for the first (the local path is not a degraded state) and for the second.
+  if (!usage.paymentsConfigured || buyable.length === 0) return null;
+
+  const go = async (plan: string): Promise<void> => {
+    if (!workspaceId || busy) return;
+    setBusy(plan);
+    setError(null);
+    try {
+      const { url } = await startCheckout(plan, workspaceId);
+      // THE BROWSER HAS TO GO THERE. A payment form is a page a person reads, and `assign` rather
+      // than `replace` so Back returns to the app rather than skipping past it — the same choice
+      // the connector consent flow makes for the same reason.
+      window.location.assign(url);
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="mt-3 rounded-control border border-hair px-3 py-2.5">
+      <button
+        className="flex w-full items-center gap-2 text-left"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="text-[12px] text-muted">Plans</span>
+        <span className="text-[11px] text-faint">
+          {buyable.length === 1 ? `${buyable[0]!.label} is available` : `${buyable.length} others available`}
+        </span>
+        <span className="ml-auto text-faint">
+          {open ? <ChevronDownIcon size={ICON.xs} /> : <ChevronRightIcon size={ICON.xs} />}
+        </span>
+      </button>
+
+      {open && (
+        <div className="mt-2 space-y-1.5">
+          {usage.plans.map((p) => (
+            <div key={p.id} className="flex items-start gap-3 border-t border-hair pt-1.5 first:border-t-0 first:pt-0">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] text-ink">{p.label}</span>
+                  {p.current && <span className="text-[10px] uppercase tracking-wider text-faint">current</span>}
+                </div>
+                {/* THE FACTS A CHOICE ACTUALLY TURNS ON, in the units the rest of the panel uses:
+                    what it grants, what it lets you start, how long a trace survives, how many
+                    people may be here. Not a marketing line — this panel's whole job is to be
+                    believed. */}
+                <div className="text-[11px] leading-[1.55] text-faint">
+                  {fmtCost(p.monthlyCreditsUsd)} credit each period ·{" "}
+                  {p.budgetCeilingUsd === null ? "no plan ceiling" : `up to ${fmtCost(p.budgetCeilingUsd)} started`} ·{" "}
+                  {p.retentionDays}-day traces · {p.seats === null ? "unlimited seats" : `${p.seats} seats`}
+                  {p.deploy ? " · deploys" : " · no deploys"}
+                </div>
+              </div>
+              {!p.current && p.purchasable && (
+                <button
+                  className={secondaryBtn}
+                  disabled={!canBuy || busy !== null}
+                  title={canBuy ? `Change to ${p.label}` : "Only an owner can change the plan"}
+                  onClick={() => void go(p.id)}
+                >
+                  {busy === p.id ? "Opening…" : "Choose"}
+                </button>
+              )}
+            </div>
+          ))}
+          {!canBuy && (
+            <p className="text-[11px] text-faint">
+              Only an owner can change the plan — spend is everybody&rsquo;s to see, and what may be
+              spent is theirs to set.
+            </p>
+          )}
+          {error && <p className="text-[11px] text-err">{error}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function UsagePanel() {
   const usage = useBillingStore((s) => s.usage);
   const loaded = useBillingStore((s) => s.loaded);
@@ -197,6 +306,8 @@ export function UsagePanel() {
             }
           />
         )}
+        {/* Inside the meters block, directly under the ceiling it is about. "How do I raise this"
+            is the question the bar above provokes. */}
         {usage.balanceUsd > 0 && (
           <div className="rounded-control border border-hair px-3 py-2.5">
             <div className="flex items-baseline justify-between gap-3">
@@ -211,6 +322,8 @@ export function UsagePanel() {
           </div>
         )}
       </div>
+
+      <PlanChoice usage={usage} />
 
       <Section title="By agent" empty="Nothing has spent anything this period.">
         {usage.byAgent.map((a) => (

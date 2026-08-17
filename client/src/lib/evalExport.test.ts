@@ -100,6 +100,16 @@ check("and a fully-priced-or-unpriced cell does not claim to be a floor",
     ],
     byRun: [{ runId: "r1", label: "support_bot", usd: 1.4, tokens: 20_000, costKnown: true }],
     byKind: [{ kind: "llm.provider", payer: "workspace", usd: 3.1, tokens: 40_000, costKnown: true }],
+    // The catalogue the panel offers a change from. Deliberately not exported to CSV: a plan is
+    // what the workspace could be on, and this file is about what it spent.
+    plans: [
+      {
+        id: "free", label: "Free", purchasable: false, current: true,
+        monthlyCreditsUsd: 5, budgetCeilingUsd: 5, platformKeyCeilingUsd: 2,
+        retentionDays: 14, seats: 3, deploy: false,
+      },
+    ],
+    paymentsConfigured: false,
   };
   const lines = usageToCsv(usage).split(CRLF);
   const find = (k: string) => lines.find((l) => l.startsWith(`${k},`))?.split(",")[1];

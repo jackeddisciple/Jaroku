@@ -1750,6 +1750,7 @@ to happen because a browser cannot put a header on a WebSocket:
 | `POST /v1/ws-ticket` | A single-use, 30-second, workspace-scoped ticket for one socket |
 | `POST /v1/invites/accept` | Redeem an invitation |
 | `POST /v1/workspaces` | Create a workspace, owned by the caller. `{name, kind}`, both required |
+| `POST /v1/billing/checkout` | Start a checkout for a plan. `{plan, workspaceId}`; answers a URL the browser navigates to |
 | `POST /v1/workspace/export` | Ask for a copy of everything. 202 with an id; a worker writes the archive |
 | `GET /v1/workspace/export/:id` | Whether that archive is ready, and a presigned link with a stated expiry |
 | `POST /v1/workspace/delete` | Destroy the workspace. `{confirm: "<its id>"}`, and the answer is a receipt |
@@ -3084,6 +3085,18 @@ writing it twice records one charge twice, and a webhook is idempotent because *
 applies a state transition twice — a plan change reapplied after a later one superseded it, a
 cancellation undone by its own retry. An event that fails mid-transition is left unprocessed on
 purpose, because that is the queue an operator replays.
+
+**And a plan can be bought from inside the product.** Every layer of that existed for a release
+before the button did: the checkout route validating the plan against the `plans` table and never
+against a client-supplied price, the customer reuse so a second upgrade is not a second customer,
+the webhook state machine, the credit grant, three suites — and no control anywhere, so a
+deployment with Stripe configured had a paid tier nobody could buy. The Usage tab now carries the
+catalogue directly under the ceiling meter, which is where "how do I raise this" gets asked. The
+list comes from the server: `purchasable` and the price id are columns on the `plans` table, and
+each plan's limits come from the code that enforces them, so the panel cannot advertise a ceiling
+the budget gate would not apply. A deployment with no Stripe keys shows nothing rather than a
+control that refuses — the local path is not a degraded state — and changing the plan is
+`billing:manage`, which is the owner's, while *reading* spend stays every member's.
 
 ### The dashboard, and the export
 

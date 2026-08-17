@@ -50,6 +50,14 @@ there. What is new is that the product's own surface reaches them.
   workspace's id because that is what the route requires, with the id shown beside the box. The two
   are in one section deliberately — offering deletion without export makes leaving cost you your
   history.
+- **A plan can be bought.** `POST /v1/billing/checkout` validated the plan against the `plans`
+  table, reused the Stripe customer, passed an idempotency key, and had the whole subscription
+  webhook state machine behind it — including the dunning notice that tells a user about a payment
+  problem on a subscription they had no way to start. Nothing called it. The Usage tab now carries
+  the catalogue under the ceiling meter it is about, with each plan's real limits beside it: the
+  list is the server's (`purchasable` and the price id are columns; the limits come from the code
+  that enforces them), a deployment with no Stripe keys shows nothing rather than a refusing
+  control, and choosing is `billing:manage` while reading spend stays a member's.
 - **`lib/http.ts`**, one place where a non-socket request gets the bearer token and this tab's
   `?workspace=`. It was inside the Secrets module, which is where it had to be while the Secrets
   group was the only such surface; forgetting the scoping on an EXPORT would mean handing somebody

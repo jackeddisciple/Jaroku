@@ -606,6 +606,35 @@ export interface UsageSnapshot {
   byAgent: (UsageBreakdown & { agentId: string | null; label: string; runs: number })[];
   byRun: (UsageBreakdown & { runId: string; label: string | null })[];
   byKind: (UsageBreakdown & { kind: string; payer: string })[];
+  /**
+   * What this deployment offers, so the panel that names your plan can offer another.
+   *
+   * FROM THE SERVER RATHER THAN A CONSTANT HERE. The `plans` table is where deployment-specific
+   * configuration lives — `purchasable` and the price id are its columns — and the limits beside
+   * each plan come from the code that enforces them, so this list cannot advertise a ceiling the
+   * budget gate would not apply.
+   */
+  plans: {
+    id: string;
+    label: string;
+    /** Purchasable AND priced. A plan with no configured price cannot be bought, and says so. */
+    purchasable: boolean;
+    current: boolean;
+    monthlyCreditsUsd: number;
+    budgetCeilingUsd: number | null;
+    platformKeyCeilingUsd: number | null;
+    retentionDays: number;
+    seats: number | null;
+    deploy: boolean;
+  }[];
+  /**
+   * Whether this deployment can take a payment at all.
+   *
+   * The local path has no Stripe keys and that is not an error state, so the Upgrade control is
+   * absent there rather than present and refusing — the same signal the checkout route answers
+   * "payments are not configured on this deployment" from.
+   */
+  paymentsConfigured: boolean;
 }
 
 export type BillingMessage =

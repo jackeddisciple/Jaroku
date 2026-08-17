@@ -71,3 +71,22 @@ export interface DeletionReceipt {
 export async function deleteWorkspace(confirm: string): Promise<DeletionReceipt> {
   return apiRequest<DeletionReceipt>("POST", "/v1/workspace/delete", { confirm });
 }
+
+/**
+ * Start a checkout for a plan, and answer with the URL the browser has to go to.
+ *
+ * NOT A SOCKET COMMAND, and the server says why: the answer is a redirect target for a third-party
+ * payment form, and putting it on the trace channel would mean the client had to hold "am I
+ * mid-checkout" across a reconnect.
+ *
+ * THE WORKSPACE GOES IN THE BODY, not only on the query string, because this route resolves its
+ * tenant from the body — through the same membership resolver `/v1/ws-ticket` uses, which for a
+ * route that starts a PAYMENT matters more than for one that opens a socket. `apiRequest` adds the
+ * query parameter as well; the route ignores it, and sending both is cheaper than a second helper.
+ *
+ * The PRICE is never sent. It comes from the `plans` table server-side — a price id in a request
+ * body would let somebody subscribe to whatever they could name.
+ */
+export async function startCheckout(plan: string, workspaceId: string): Promise<{ url: string }> {
+  return apiRequest<{ url: string }>("POST", "/v1/billing/checkout", { plan, workspaceId });
+}

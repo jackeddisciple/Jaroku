@@ -97,7 +97,7 @@ import { billingRoutes } from "./http/billing.ts";
 import { githubWebhookRoutes } from "./http/githubWebhook.ts";
 import { githubAppRoutes } from "./http/githubApp.ts";
 import { APP_ENV, RoundTripStates, githubAppConfig } from "./githubApp.ts";
-import { stripeConfigFromEnv } from "./billing/stripe.ts";
+import { paymentsConfigured, stripeConfigFromEnv } from "./billing/stripe.ts";
 import { readAgentFiles, slugsOwnedElsewhere, type AgentFilesDeps } from "./agentFiles.ts";
 import {
   CHECKPOINT_SCHEMA, checkpointThreadId, checkpointerKindFromEnv,
@@ -161,7 +161,7 @@ import { connectorRunEnv } from "./oauth/injection.ts";
 import { ConnectorSecrets } from "./connectorSecrets.ts";
 import { buildEgressPolicy, EgressPolicyError, type EgressPolicy } from "./sandbox/egressPolicy.ts";
 import { BillingRepository } from "./db/repositories/billing.ts";
-import { assertPlanRegistry } from "./billing/plans.ts";
+import { assertPlanRegistry, planFor } from "./billing/plans.ts";
 import { UsageMeter, usageKey, type Payer } from "./billing/usage.ts";
 import { SAMPLE_INTERVAL_MS, sampleStorage } from "./billing/storage.ts";
 import { Balances } from "./billing/balances.ts";
@@ -3025,12 +3025,17 @@ async function broadcastUsage(ctx: TenantContext): Promise<void> {
   try {
     const status = await budgetGate.status(ctx);
     const period = status.periodStart;
-    const [byAgent, byRun, byKind, platform, agents] = await Promise.all([
+    const [byAgent, byRun, byKind, platform, agents, planRows] = await Promise.all([
       billing.spendByAgent(ctx, period),
       billing.spendByRun(ctx, period),
       billing.spendByKind(ctx, period),
       billing.platformSpendSince(ctx, period),
       agentRepo.list(ctx),
+      // WHAT THIS DEPLOYMENT OFFERS, from the `plans` table rather than from `PLANS` — the table is
+      // where deployment-specific configuration lives, and `purchasable` and `external_price_id` are
+      // its columns. The limits beside each one come from `PLANS`, which is the code that enforces
+      // them, so the panel cannot advertise a ceiling the gate would not apply.
+      billing.listPlans(ctx),
     ]);
     // Slugs, because an agent uuid means nothing to a person reading a bill. Resolved here
     // rather than joined in SQL so the query stays about money.
@@ -3068,6 +3073,33 @@ async function broadcastUsage(ctx: TenantContext): Promise<void> {
           usd: r.usd, tokens: r.tokens, costKnown: r.costKnown,
         })),
         byKind,
+        // THE CATALOGUE, so the panel that names your plan can offer another one. Every field a
+        // choice depends on travels: what it costs to run on (`monthlyCreditsUsd`), what it lets you
+        // start (`budgetCeilingUsd`), how long a trace survives (`retentionDays`), how many people
+        // may be in the workspace (`seats`), and whether it can deploy at all.
+        plans: planRows.map((row) => {
+          const limits = planFor(row.id);
+          return {
+            id: row.id,
+            // The TABLE's name, not the code's: a deployment that renamed a tier in its own
+            // configuration should see its own word in its own product.
+            label: row.display_name,
+            // `purchasable` alone is not enough — a plan marked purchasable with no price id
+            // configured cannot be bought, and the checkout route refuses it in those words.
+            purchasable: row.purchasable && row.external_price_id !== null,
+            current: row.id === status.plan.id,
+            monthlyCreditsUsd: limits.monthlyCreditsUsd,
+            budgetCeilingUsd: limits.budgetCeilingUsd,
+            platformKeyCeilingUsd: limits.platformKeyCeilingUsd,
+            retentionDays: limits.retentionDays,
+            seats: limits.seats,
+            deploy: limits.features.deploy,
+          };
+        }),
+        // WHETHER THIS DEPLOYMENT CAN SELL ANYTHING AT ALL, from the one signal the checkout route
+        // already answers on. The local path has no Stripe keys and is not an error state, so the
+        // Upgrade control is absent there rather than present and refusing.
+        paymentsConfigured: paymentsConfigured(stripeConfigFromEnv()),
       },
     });
   } catch (err) {
