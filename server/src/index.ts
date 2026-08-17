@@ -3524,7 +3524,14 @@ async function handleThreadCommand(ctx: TenantContext, cmd: ThreadCommand): Prom
     }
 
     if (cmd.cmd === "renameThread") {
-      const title = String(cmd.title ?? "").trim();
+      // REFUSED RATHER THAN COERCED. `String(cmd.title)` turned a non-string into `"[object
+      // Object]"` and stored it as somebody's chosen title — a coercion is the shape of accepting
+      // input nobody sent. The length bound lives in the store, where both entry points meet it.
+      if (typeof cmd.title !== "string") {
+        refuseThread(ctx, "a thread needs a name — Escape cancels the edit", cmd.threadId);
+        return;
+      }
+      const title = cmd.title.trim();
       if (!title) {
         refuseThread(ctx, "a thread needs a name — Escape cancels the edit", cmd.threadId);
         return;

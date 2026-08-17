@@ -15,7 +15,7 @@ import { randomUUID } from "node:crypto";
 
 import { openTestSqlite, testContext } from "./db/testDb.ts";
 import { newRequestId, systemContextFor } from "./db/tenant.ts";
-import { ThreadStore, UNTITLED, isThreadStatus } from "./threadStore.ts";
+import { ThreadStore, TITLE_MAX, UNTITLED, isThreadStatus } from "./threadStore.ts";
 import type { SqliteDb } from "./db/sqlite.ts";
 
 let fail = 0;
@@ -117,6 +117,16 @@ async function seedAgent(db: SqliteDb, workspaceId: string, slug: string): Promi
   await store.rename(ctx, t.id, "   ");
   check("a blank rename changes nothing rather than blanking the row",
     (await store.get(ctx, t.id))?.title === "Stripe webhook retry logic");
+
+  // A column with no bound is a column somebody eventually fills, and this one is read back into
+  // every snapshot and broadcast to every socket in the workspace on every state transition.
+  await store.rename(ctx, t.id, "x".repeat(TITLE_MAX * 4));
+  check("a title is capped rather than stored at whatever length arrived",
+    (await store.get(ctx, t.id))?.title.length === TITLE_MAX,
+    String((await store.get(ctx, t.id))?.title.length));
+
+  const long = await store.create(ctx, { title: "y".repeat(TITLE_MAX * 2) });
+  check("...at creation as well as at rename", long.title.length === TITLE_MAX, String(long.title.length));
 }
 
 // --- 3b. two first messages at once still title the thread (§5) -----------------------------

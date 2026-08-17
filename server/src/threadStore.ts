@@ -107,6 +107,28 @@ export interface NewThread {
  */
 export const UNTITLED = "Untitled thread";
 
+/**
+ * The longest title this table will store.
+ *
+ * FOUR TIMES `threadTitle`'s OWN CAP, deliberately generous rather than equal to it. Auto-titling
+ * cuts at sixty because that is where a first line stops being a label; a person naming their own
+ * session may reasonably want more, and refusing at sixty would make the two entry points disagree
+ * about what a title IS in the other direction.
+ *
+ * What it exists to stop is that there was no bound at all: `createThread` accepted any string and
+ * `renameThread` coerced with `String(...)`, so a megabyte of text — or `"[object Object]"` from a
+ * non-string — was stored verbatim, read back into every snapshot, and broadcast to every socket in
+ * the workspace on every state transition. Bounded by the socket's `maxPayload` and rendered inside
+ * a `Truncate`, so this is hygiene rather than a live risk; a column with no bound is still a column
+ * somebody eventually fills.
+ */
+export const TITLE_MAX = 240;
+
+/** Trim, and cut at `TITLE_MAX`. The one definition of "a storable title". */
+function capTitle(title: string): string {
+  return title.trim().slice(0, TITLE_MAX).trim();
+}
+
 const nowIso = (): string => new Date().toISOString();
 
 // Explicit rather than `SELECT *`: `workspace_id` is on every row and belongs on none of the
@@ -157,7 +179,7 @@ export class ThreadStore {
         ctx.workspaceId,
         t.agentId ?? null,
         t.agentName ?? null,
-        t.title?.trim() || UNTITLED,
+        (t.title ? capTitle(t.title) : "") || UNTITLED,
         // `actorUserId` rather than a required argument: every caller already has a context, and
         // a second place to pass the person is a second place to pass the wrong one.
         t.createdBy ?? ctx.actorUserId ?? null,
@@ -224,7 +246,7 @@ export class ThreadStore {
    * when work last happened, and typing a better name is not work happening.
    */
   async rename(ctx: TenantContext, id: string, title: string): Promise<void> {
-    const trimmed = title.trim();
+    const trimmed = capTitle(title);
     if (!trimmed) return;
     await this.q(ctx).run(
       `UPDATE threads SET title = ?, title_is_custom = 1 WHERE workspace_id = ? AND id = ?`,
@@ -241,7 +263,7 @@ export class ThreadStore {
    * bug this codebase already fixed once is what that looks like when it happens.
    */
   async autoTitle(ctx: TenantContext, id: string, title: string): Promise<void> {
-    const trimmed = title.trim();
+    const trimmed = capTitle(title);
     if (!trimmed) return;
     await this.q(ctx).run(
       `UPDATE threads SET title = ?
