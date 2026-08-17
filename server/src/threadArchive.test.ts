@@ -122,16 +122,38 @@ const billing = new BillingRepository(db);
   walk(HERE);
   check(`read the server's own source (${sources.length} files)`, sources.length > 100);
 
-  // A DELETE naming either table, anywhere. `lifecycle/deletion.ts` deletes a whole workspace by
+  // A DELETE naming the THREAD table, anywhere. `lifecycle/deletion.ts` deletes a whole workspace by
   // iterating a table list, so it contains no such statement and needs no exception here — which is
   // the right shape: deleting a workspace is deleting everything, and there is no path that reaches
   // one thread.
-  const deleters = sources.filter((f) =>
-    /DELETE\s+FROM\s+threads\b/i.test(f.text) || /DELETE\s+FROM\s+thread_items\b/i.test(f.text));
+  const deleters = sources.filter((f) => /DELETE\s+FROM\s+threads\b/i.test(f.text));
   check(
-    "no statement anywhere deletes a thread or its items",
+    "no statement anywhere deletes a thread",
     deleters.length === 0,
     deleters.map((f) => f.path).join(", "),
+  );
+
+  // THE ITEMS ARE A DIFFERENT PROMISE, and this is the one exemption. §3.4 is about the SESSION —
+  // what was asked for, what it was called, what it cost — and none of that is in `thread_items`,
+  // which is a join table naming rows in `runs` and `eval_runs` by a plain text ref with no foreign
+  // key. When retention takes the run, the row it points at is gone and the row itself is an orphan
+  // that nothing can render: left in place it made this the one table in the schema that only ever
+  // grows, read in full on every thread snapshot. So exactly one file may sweep it, and only
+  // alongside the runs and evals that orphaned the rows.
+  const itemDeleters = sources
+    .filter((f) => /DELETE\s+FROM\s+thread_items\b/i.test(f.text))
+    .map((f) => f.path);
+  check(
+    "only the retention sweeper removes items, and only ones whose run or eval is gone",
+    itemDeleters.length === 1 && itemDeleters[0] === "lifecycle/retention.ts",
+    itemDeleters.join(", "),
+  );
+  const retention = sources.find((f) => f.path === "lifecycle/retention.ts")?.text ?? "";
+  check(
+    "...never a message, a plan, a generation or a proposal",
+    // Both statements are scoped to a kind, so a `message` — the one prose a thread stores, and the
+    // one §4.3's preview and §5's title are read from — can never be caught by either.
+    (retention.match(/DELETE\s+FROM\s+thread_items[\s\S]{0,200}?kind\s*=\s*'(run|eval)'/gi) ?? []).length === 2,
   );
 
   // And no command a client could send. The relay's channel table is the whole command surface, so a

@@ -23,7 +23,9 @@ import { FsObjectStore } from "../storage/fsObjectStore.ts";
 import { exportKey, agentStagingKey, workspacePrefix } from "../storage/keys.ts";
 import { FileCheckpointStore } from "../checkpoints/store.ts";
 import { PLANS } from "../billing/plans.ts";
-import { RetentionSweeper, STAGING_MAX_AGE_MS, describeSweep } from "./retention.ts";
+import {
+  RETENTION_KEPT_TABLES, RETENTION_SWEPT_TABLES, RetentionSweeper, STAGING_MAX_AGE_MS, describeSweep,
+} from "./retention.ts";
 
 let failures = 0;
 const check = (ok: boolean, msg: string): void => {
@@ -125,6 +127,26 @@ age(staleExport, 30 * 86_400_000);
 age(freshExport, 2 * 86_400_000);
 age(staleStaging, STAGING_MAX_AGE_MS + 3_600_000);
 
+// A thread owning both a fresh run and an expired one, plus a proposal item (whose ref is not a
+// run at all) and an eval item pointing at an eval that no longer exists. Migration 044's `ref_id`
+// is a plain text column with no foreign key, so nothing about any of these cascades.
+const threadId = randomUUID();
+await db.run(
+  `INSERT INTO threads (id, workspace_id, title, title_is_custom, created_at, last_activity_at, status)
+   VALUES (?, ?, 'retention', 0, ?, ?, 'idle')`,
+  [threadId, free.workspaceId, daysAgo(40), daysAgo(1)],
+);
+for (const [kind, ref] of [
+  ["run", freshFree], ["run", staleFree], ["run", edgeInside], ["run", edgeOutside],
+  ["proposal", "prop-1"], ["eval", "ev-gone"],
+] as const) {
+  await db.run(
+    `INSERT INTO thread_items (id, workspace_id, thread_id, kind, ref_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [randomUUID(), free.workspaceId, threadId, kind, ref, daysAgo(2)],
+  );
+}
+
 const sweeper = new RetentionSweeper({
   db,
   workspaces: async () => [
@@ -199,6 +221,31 @@ console.log("\nreporting");
   check(report.partitionsDropped.length === 0, "no partitions are dropped on SQLite, which has none");
 }
 
+console.log("\nthe join table does not outlive what it points at");
+{
+  // `thread_items.ref_id` is a plain text column with no foreign key — one column six kinds share —
+  // so nothing cascaded when a run was swept. Two costs, and the second is the worse one: the table
+  // became the one in the schema that only ever grows, and it is read IN FULL on every thread
+  // snapshot; and §3.3's derivation gives up on a run it cannot find, so a thread that ended in
+  // ERROR quietly became `idle` the day its run passed the retention window.
+  const rows = await db.all<{ ref_id: string; kind: string }>(
+    `SELECT ref_id, kind FROM thread_items WHERE workspace_id = ?`,
+    [free.workspaceId],
+  );
+  const refs = rows.map((r) => r.ref_id);
+  check(!refs.includes(staleFree), "an item naming a swept run is gone with it");
+  check(!refs.includes(edgeOutside), "...including the one just past the boundary");
+  check(refs.includes(freshFree), "an item naming a run still inside retention stays");
+  check(refs.includes(edgeInside), "...including the one just inside the boundary");
+  check(refs.includes("prop-1"), "a proposal item is not this sweep's to remove, whatever its id");
+  check(!refs.includes("ev-gone"), "an eval item whose eval no longer exists is swept");
+  check(
+    (await db.all(`SELECT id FROM threads WHERE workspace_id = ?`, [free.workspaceId])).length === 1,
+    "...and the thread itself is untouched, which §3.4 requires and test:thread-archive audits for",
+  );
+  check(freeSweep.threadItemsDeleted === 3, "the report says how many it took");
+}
+
 console.log("\nnothing crosses a workspace");
 {
   // The free workspace's sweep ran first and deleted two runs. If any statement had been
@@ -206,6 +253,35 @@ console.log("\nnothing crosses a workspace");
   check((await store.listRuns(scale, 100)).length === 1, "the other workspace's rows are exactly as they were");
   const keys = (await objects.list(workspacePrefix(scale.workspaceId))).map((o) => o.key);
   check(keys.every((k) => k.startsWith(`ws/${scale.workspaceId}/`)), "...and so are its objects");
+}
+
+console.log("\nevery workspace-scoped table is swept or explicitly kept");
+{
+  // THE AUDIT export.test.ts ALREADY HAS, and the one whose absence let `thread_items` be added by
+  // migration 044 and touched by nothing here. Forgetting is the failure mode; a list maintained by
+  // remembering is a list that is already wrong.
+  const tables = await db.all<{ name: string }>(
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`,
+  );
+  const scoped: string[] = [];
+  for (const t of tables) {
+    const cols = await db.all<{ name: string }>(`PRAGMA table_info(${t.name})`);
+    if (cols.some((c) => c.name === "workspace_id")) scoped.push(t.name);
+  }
+  const known = new Set([...RETENTION_SWEPT_TABLES, ...Object.keys(RETENTION_KEPT_TABLES)]);
+  const forgotten = scoped.filter((t) => !known.has(t));
+  check(
+    forgotten.length === 0,
+    `every workspace-scoped table is swept or explicitly kept${forgotten.length ? ` — missing: ${forgotten.join(", ")}` : ""}`,
+  );
+  check(
+    Object.values(RETENTION_KEPT_TABLES).every((reason) => reason.length > 20),
+    "...and every exemption says why, because an unexplained one is an oversight nobody can tell from a decision",
+  );
+  check(
+    RETENTION_SWEPT_TABLES.includes("thread_items"),
+    "...and the join table added by 044 is on the swept side of it",
+  );
 }
 
 await db.close();

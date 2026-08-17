@@ -27,6 +27,20 @@
 //   that outlives the trace it was made from would be the retention promise defeated by a
 //   download button.
 //
+//   THREAD ITEMS THAT POINT AT SWEPT RUNS AND EVALS. Migration 044's join table names a run or an
+//   eval by a plain `text` ref with no foreign key — deliberately, because it is one column six
+//   kinds share — so nothing cascades when the run goes and the row is left pointing at nothing.
+//   Two consequences, and the second is the worse one: `thread_items` becomes the one table in the
+//   schema that only ever grows, and it is read IN FULL on every thread snapshot; and §3.3's
+//   derivation, which looks a run up and gives up when it is missing, silently drops the thread's
+//   `failedSteps` and `lastEndedInError` — so a thread that ended in error becomes `idle` the day
+//   its run passes the retention window. Swept in the same batch as the runs that orphan them.
+//
+//   THREADS THEMSELVES ARE NEVER SWEPT. §3.4 is explicit and `test:thread-archive` audits the
+//   whole server for a delete path; a retention sweep of `threads` would be exactly the one it is
+//   looking for. A thread holds what was thought and what it cost, and its cost survives anyway —
+//   `spendByThread` joins through `usage_events`, which retention does not touch.
+//
 // THE PARTITION DROP IS AN OPTIMISATION OVER THE DELETE, NOT A REPLACEMENT FOR IT, and the
 // reason is worth stating because it is the one thing about this design that surprises people: a
 // partition is a MONTH, and a month contains every workspace's steps. It can only be dropped
@@ -73,6 +87,8 @@ export interface WorkspaceSweep {
   checkpointsSwept: number;
   exportsDeleted: number;
   stagingDeleted: number;
+  /** Rows in migration 044's join table left pointing at a run or eval this sweep removed. */
+  threadItemsDeleted: number;
 }
 
 export interface RetentionReport {
@@ -80,6 +96,70 @@ export interface RetentionReport {
   /** Whole months removed from the catalogue. Empty on SQLite, and empty most days. */
   partitionsDropped: string[];
 }
+
+/**
+ * Every workspace-scoped table, and what this sweeper does about it.
+ *
+ * A LIST THAT EXISTS TO BE AUDITED, exactly as `export.ts`'s does, and for the reason its suite
+ * states: forgetting is the failure mode, and a list maintained by remembering is a list that is
+ * already wrong. `retention.test.ts` reads the schema and fails on any workspace-scoped table that
+ * appears in neither half of this — which is how `thread_items` should have been caught. It was
+ * added by migration 044, nothing here touched it, and the result was the one table in the schema
+ * that only ever grew, read in full on every thread snapshot, holding rows that pointed at runs
+ * this sweeper had already deleted.
+ *
+ * `swept` names the tables this removes rows from. `kept` names the rest, each with the reason it
+ * is not retention's to take — because an unexplained absence is an oversight nobody can tell from
+ * a decision.
+ */
+export const RETENTION_SWEPT_TABLES: readonly string[] = [
+  "runs",
+  "steps",
+  "thread_items",
+];
+
+export const RETENTION_KEPT_TABLES: Record<string, string> = {
+  workspace_members: "membership is not data that ages out — a member is current or removed",
+  workspace_invites: "invitations expire on their own clock, in their own column",
+  workspace_secrets: "a credential is current or revoked; an agent still using one does not care how old it is",
+  workspace_data_keys: "the per-workspace encryption key. Sweeping it would make every ciphertext unreadable",
+  workspace_balances: "money. A balance is a running total, not an event with an age",
+  workspace_enforcements: "the abuse ladder's own record, which has to outlive the behaviour it describes",
+  abuse_signals: "the evidence an enforcement rests on. Removing it would leave a rung nobody can justify",
+  ws_tickets: "single-use socket tickets, which expire in seconds by construction rather than in days",
+  secret_refs: "which agent needs which credential. A fact about the agent, not an event",
+  secret_usages: "which credential an agent actually reached for, read long after the run that did it",
+  secret_rotations: "why a credential changed, which is the question asked long afterwards",
+  secret_elevations: "an elevation has an absolute TTL of its own; a swept one would be a grant with no record",
+  user_secret_passcodes: "the verifier a person set. Current or replaced, never old",
+  secret_scan_findings: "whether somebody pushed over a credential warning — an audit answer, not a trace",
+  audit_log: "the record of who did what. Sweeping an audit log is the one thing an audit log must not do",
+  agents: "an agent is the product. It leaves when it is deleted, never because it is old",
+  agent_ci_config: "a choice somebody made about this agent, with no age",
+  datasets: "a dataset is authored, not emitted",
+  dataset_examples: "authored beside the dataset, and removed with it rather than on a clock",
+  eval_runs: "swept by evalCleanup.ts on the eval's own terms, which knows about its jobs and artifacts",
+  eval_jobs: "an eval's parts go with the eval, not with a calendar — evalCleanup.ts again",
+  eval_scores: "a judge verdict belongs to its job, and leaves when the job does",
+  rubrics: "authored, like the dataset it belongs to",
+  usage_events: "the ledger. A bill stays defensible for longer than a trace does, and §4.3's per-thread cost joins through it",
+  billing_holds: "settled or expired by the billing layer, which is the only thing that knows which",
+  billing_webhook_events: "the provider's own delivery record, and the queue an operator replays",
+  subscriptions: "the current plan. There is one, and it is not an event",
+  deployments: "what is live, and what was live. Forgetting one is a user action with its own command",
+  deployment_logs: "read beside the deployment they belong to, and removed with it",
+  mcp_servers: "a connected server is current or removed",
+  mcp_tools: "a server's advertised tools, which are current or gone with the server",
+  oauth_connections: "an OAuth grant is held or handed back, never aged out from under a live agent",
+  oauth_states: "short-lived by construction, and swept on their own expiry rather than a plan's",
+  github_links: "where an agent's code goes. A link is current or unlinked",
+  github_events: "the sync history a panel renders. Bounded by its own list limit rather than by a clock",
+  github_installations: "the App installation. Current or uninstalled",
+  check_runs: "the measurement history per commit — the only place those numbers survive their eval jobs",
+  shadow_runs: "what a run WAS. Without the row, neither the run nor its cost can be attributed to anything",
+  pr_comments: "a mirror of a review — other people's words, like steps and audit_log",
+  threads: "§3.4: a thread is archived, never deleted. test:thread-archive audits the whole server for a delete path, and this would be it",
+};
 
 export class RetentionSweeper {
   private log: (line: string) => void;
@@ -127,6 +207,7 @@ export class RetentionSweeper {
       checkpointsSwept: 0,
       exportsDeleted: 0,
       stagingDeleted: 0,
+      threadItemsDeleted: 0,
     };
 
     // WHICH RUNS ARE PAST IT — read before anything is deleted, because they are also the list
@@ -159,6 +240,22 @@ export class RetentionSweeper {
     const swept = await this.deps.checkpoints.sweepRuns(ctx, runIds).catch(() => ({ removed: 0, bytesFreed: 0, failed: 0 }));
     out.checkpointsSwept = swept.removed;
 
+    // The thread items that name those runs, in the same batches and BEFORE the run rows go — so
+    // there is no window in which the join table points at a run that has already been deleted.
+    // `kind = 'run'` only: an item's `ref_id` is one column shared by six kinds, and a proposal id
+    // that happened to collide with a run id is not this sweep's to remove.
+    for (const chunk of batches(runIds, 200)) {
+      const placeholders = chunk.map(() => "?").join(", ");
+      const res = await this.deps.db.scoped(ctx.workspaceId, async (tx) =>
+        tx.run(
+          `DELETE FROM thread_items
+            WHERE workspace_id = ? AND kind = 'run' AND ref_id IN (${placeholders})`,
+          [ctx.workspaceId, ...chunk],
+        ),
+      );
+      out.threadItemsDeleted += res.changes;
+    }
+
     for (const chunk of batches(runIds, 200)) {
       const placeholders = chunk.map(() => "?").join(", ");
       const res = await this.deps.db.scoped(ctx.workspaceId, async (tx) =>
@@ -166,6 +263,24 @@ export class RetentionSweeper {
       );
       out.runsDeleted += res.changes;
     }
+
+    // AND THE EVAL ITEMS WHOSE EVAL IS GONE. An eval run is removed by `evalCleanup`, not here, so
+    // these are not swept alongside a batch of ids — they are the rows left over from every earlier
+    // removal, and a single anti-join finds them. `NOT EXISTS` rather than `NOT IN`, because
+    // `NOT IN` against a set containing a NULL matches nothing at all on both drivers.
+    out.threadItemsDeleted += (
+      await this.deps.db.scoped(ctx.workspaceId, async (tx) =>
+        tx.run(
+          `DELETE FROM thread_items
+            WHERE workspace_id = ? AND kind = 'eval' AND ref_id IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM eval_runs e
+                 WHERE e.workspace_id = thread_items.workspace_id AND e.id = thread_items.ref_id
+              )`,
+          [ctx.workspaceId],
+        ),
+      )
+    ).changes;
 
     const objects = await this.sweepObjects(ctx, cutoff);
     return { ...out, ...objects };
@@ -239,9 +354,13 @@ export function describeSweep(report: RetentionReport, _ctx?: AnyContext): strin
   const steps = report.workspaces.reduce((n, w) => n + w.stepsDeleted, 0);
   const objects = report.workspaces.reduce((n, w) => n + w.exportsDeleted + w.stagingDeleted, 0);
   const checkpoints = report.workspaces.reduce((n, w) => n + w.checkpointsSwept, 0);
-  if (!runs && !steps && !objects && !checkpoints && report.partitionsDropped.length === 0) return null;
+  const items = report.workspaces.reduce((n, w) => n + w.threadItemsDeleted, 0);
+  if (!runs && !steps && !objects && !checkpoints && !items && report.partitionsDropped.length === 0) return null;
   return (
     `[retention] ${runs} run(s), ${steps} step(s), ${checkpoints} checkpoint(s), ${objects} object(s)` +
+    // Said rather than silent: a sweep that quietly removed rows from the thread list's own join
+    // table would be a list that got shorter for a reason nothing in the log explains.
+    (items ? `, ${items} thread item(s)` : "") +
     (report.partitionsDropped.length ? `, ${report.partitionsDropped.length} partition(s)` : "")
   );
 }
