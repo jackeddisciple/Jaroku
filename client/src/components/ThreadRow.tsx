@@ -26,6 +26,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { relTime } from "../lib/format.ts";
+import { resumeHint } from "../lib/threadResume.ts";
 import { fmtThreadCost } from "../lib/threadCost.ts";
 import { STATUS } from "../lib/tokens.ts";
 import { agentChipLabel } from "../store/threadStore.ts";
@@ -157,6 +158,7 @@ export function ThreadRow({
   onRename: (title: string) => void;
 }) {
   const author = useAuthorLabel(thread.created_by);
+  const hint = resumeHint(thread);
   const cost = fmtThreadCost(thread.cost_usd, thread.cost_known);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(thread.title);
@@ -225,7 +227,21 @@ export function ThreadRow({
             </Truncate>
           </span>
         )}
-        <span className="ml-auto shrink-0 text-[11px] text-faint tabular-nums">
+        {/* §4.5's affordance: on hover the timestamp gives way to where Enter will land, with the
+            shape of the destination and not only its kind. It REPLACES the time rather than sitting
+            beside it, because both belong at the right edge and a row that grew a second right-hand
+            element on hover would reflow under the cursor.
+
+            Nothing outstanding means no hint (`resumeHint` returns null) and the time simply stays —
+            the click already means "open", and four words saying so on every idle row is noise. */}
+        {hint ? (
+          <span className="ml-auto hidden shrink-0 items-center gap-1 rounded-control bg-void px-1.5 py-0.5 text-[10px] text-muted group-hover:flex">
+            {hint}
+          </span>
+        ) : null}
+        <span
+          className={`ml-auto shrink-0 text-[11px] text-faint tabular-nums ${hint ? "group-hover:hidden" : ""}`}
+        >
           {relTime(thread.last_activity_at)}
         </span>
       </div>

@@ -23,6 +23,7 @@
     "test:thread-cost": "tsx src/lib/threadCost.test.ts",
     "test:thread-groups": "tsx src/lib/threadGroups.test.ts",
     "test:thread-filter": "tsx src/lib/threadFilter.test.ts",
+    "test:thread-resume": "tsx src/lib/threadResume.test.ts",
     "test:secrets-store": "tsx src/store/secretsStore.test.ts"
   },
   "dependencies": {

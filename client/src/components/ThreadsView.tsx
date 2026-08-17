@@ -19,11 +19,63 @@ import { openThread, openThreadAgent } from "../lib/threadNav.ts";
 import { sendCreateThread, sendRenameThread } from "../lib/socket.ts";
 import { TYPE } from "../lib/tokens.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
+import { useUiStore } from "../store/uiStore.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { ThreadFilterBar } from "./ThreadFilterBar.tsx";
 import { ThreadRow } from "./ThreadRow.tsx";
 import { useThreadKeys } from "./useThreadKeys.ts";
 import { PlusIcon, SearchIcon } from "./panelIcons.tsx";
+
+/**
+ * §4.6's first empty state, which is an ENTRY POINT rather than a notice.
+ *
+ * "The empty state is the entry point — no illustration, no marketing copy." So this is a composer
+ * input: type a description, press Enter, and the three-pane view opens with what was typed already in
+ * the real composer. It does not send anything itself — there is one composer in this product and one
+ * place a brief is submitted from, and a second sender here would be a second set of promises about
+ * what happens next (the plan gate, the connector selection, the provider).
+ *
+ * THE WORKSPACE IS NAMED when it can be, which is the third empty state folded into the first: after a
+ * switch, "No threads in Acme Corp yet" reads as an empty scope, where a bare "No threads yet" reads
+ * as data that has gone missing.
+ */
+function FirstThreadStart({ workspaceName }: { workspaceName: string | null }) {
+  const [draft, setDraft] = useState("");
+  const start = (): void => {
+    const text = draft.trim();
+    if (!text) return;
+    // Hand it to the composer and go there. `prefillChat` is the same one-shot intent the GitHub
+    // panel's Fix in Jaroku uses, and `closeNav` is §2's ordinary way back to the three panes.
+    useUiStore.getState().prefillChat(text);
+    useUiStore.getState().closeNav();
+    useUiStore.getState().focusChat();
+  };
+
+  return (
+    <div className="flex h-full flex-col items-center justify-center px-6">
+      <div className="w-[min(560px,90%)]">
+        <div className="text-center text-[13px] text-ink">
+          {workspaceName ? `No threads in ${workspaceName} yet` : "No threads yet"}
+        </div>
+        <div className="mt-3 flex items-center gap-2 rounded-control border border-edge bg-panel px-3 py-2">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter starts it; nothing else here is a shortcut, and the view's own J/K must not fire
+              // from inside a field somebody is typing a sentence into.
+              e.stopPropagation();
+              if (e.key === "Enter") start();
+            }}
+            placeholder="Describe an agent to start your first thread."
+            className="min-w-0 flex-1 bg-transparent text-[13px] text-ink placeholder:text-faint outline-none"
+          />
+          <span className="shrink-0 text-[10px] text-faint">↵</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function ThreadsView() {
   const threads = useThreadStore((s) => s.threads);
@@ -118,12 +170,7 @@ export function ThreadsView() {
             ))}
           </div>
         ) : threads.length === 0 ? (
-          // §4.6's first and third empty states. The workspace is NAMED when it can be, so an empty
-          // list after a switch reads as an empty scope rather than as lost data.
-          <EmptyState
-            title={workspaceName ? `No threads in ${workspaceName} yet` : "No threads yet"}
-            hint="Describe an agent in the composer and the first one opens itself."
-          />
+          <FirstThreadStart workspaceName={workspaceName} />
         ) : visible.length === 0 ? (
           // §4.6's second: never a blank region. It names what was typed, or which chip is empty when
           // nothing was — "no archived threads" is a different sentence from "nothing matches".

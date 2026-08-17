@@ -30,6 +30,10 @@ import type { ThreadView } from "../types.ts";
  */
 export function openThread(thread: ThreadView): void {
   useThreadStore.getState().selectThread(thread.id);
+  // §4.5: the conversation opens at the first unresolved turn, not at the bottom. Requested here —
+  // where opening happens — rather than in the pane, so every route in (a row, Enter, the palette)
+  // resumes the same way and none of them can forget to.
+  useThreadStore.getState().requestResume();
   sendLoadThread(thread.id);
   if (thread.agent_id) selectAgent(thread.agent_id);
   else useUiStore.getState().closeNav();

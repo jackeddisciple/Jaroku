@@ -45,6 +45,8 @@ import {
   WrenchIcon, XIcon, ZapIcon,
 } from "./panelIcons.tsx";
 import { useMcpStore, allMcpTools } from "../store/mcpStore.ts";
+import { useThreadStore } from "../store/threadStore.ts";
+import { firstUnresolvedTurnId } from "../lib/threadResume.ts";
 import { ACCENT, ICON, STATUS, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
 import { JarokuGlyph, ProviderMark } from "../lib/icons.tsx";
 import { displayTitle, fullTitle } from "../lib/title.ts";
@@ -562,6 +564,9 @@ export function BuildPane({
   // How many files generation has started writing. Subscribed to purely so the scroll effect
   // below has something that changes while they stream — see there for why.
   const genFileCount = useBuildStore((s) => s.fileOrder.length);
+  // §4.5's request, bumped by `openThread`. Zero means nobody has opened a thread on this tab yet, so
+  // the conversation keeps its ordinary terminal behaviour.
+  const resumeNonce = useThreadStore((s) => s.resumeNonce);
   // The agent's own file list, for §A.6's `@` picker. The same array `genFileCount` measures —
   // subscribed to directly rather than derived, so the picker offers a file the moment generation
   // writes it.
@@ -579,6 +584,37 @@ export function BuildPane({
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [turns, genStatus, genFileCount]);
+
+  // §4.5: OPENING A THREAD RESUMES AT ITS FIRST UNRESOLVED TURN, not at the bottom.
+  //
+  // A separate effect from the one above, and deliberately after it: the terminal scroll runs on every
+  // change to the conversation and this runs only when somebody has just opened a thread, so ordering
+  // them this way means the resume wins the frame it is asked for and the bottom-scroll owns every
+  // other one. Merging the two would put "did the user just navigate" inside the effect that fires
+  // while files stream.
+  //
+  // FALLS BACK TO THE BOTTOM when nothing is outstanding, which is the ordinary case and the ordinary
+  // behaviour — a thread with nothing waiting in it has no better place to be than where it left off.
+  useEffect(() => {
+    if (resumeNonce === 0) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const target = firstUnresolvedTurnId(turns);
+    if (!target) {
+      el.scrollTop = el.scrollHeight;
+      return;
+    }
+    // Queried rather than kept in a ref map: the turn cards are rendered by four different components
+    // and a ref per card would be four places to forget one. The attribute is on the wrapper this file
+    // renders, so there is exactly one thing to keep in step.
+    const node = el.querySelector(`[data-turn-id="${target}"]`);
+    // `block: "start"` rather than `center`: the unresolved card's own top edge is where its heading
+    // and its buttons are, and centring a tall diff would open on the middle of a file.
+    if (node) node.scrollIntoView({ block: "start", behavior: "auto" });
+    else el.scrollTop = el.scrollHeight;
+    // `turns` is in the deps as well as the nonce, because the conversation for the thread being
+    // opened may not have arrived in the same frame the request did.
+  }, [resumeNonce, turns]);
 
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
@@ -980,7 +1016,11 @@ export function BuildPane({
             />
           ))}
         {turns.map((t) => (
-          <Turn key={t.id} turn={t} isLastGen={t.id === lastGenId} />
+          // The id on the wrapper is what §4.5's resume scrolls to. One place, rather than a ref
+          // inside each of the four card components.
+          <div key={t.id} data-turn-id={t.id}>
+            <Turn turn={t} isLastGen={t.id === lastGenId} />
+          </div>
         ))}
       </div>
 

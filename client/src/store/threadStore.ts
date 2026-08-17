@@ -45,11 +45,23 @@ interface ThreadState {
   activeThreadId: string | null;
   /** The last refusal on this channel, shown as a dismissible strip rather than swallowed. */
   error: string | null;
+  /**
+   * Bumped when a thread is opened, so the conversation resumes at its first unresolved turn (§4.5).
+   *
+   * A NONCE RATHER THAN A FLAG, and rather than a turn id. A flag would fire an effect only for the
+   * first open, so re-opening the same thread — the most common way somebody comes back to a pending
+   * diff — would land at the bottom. And a turn id would put the CONVERSATION's business in this
+   * store: which turn is unresolved is a question about chatStore's own contents, so the request is
+   * "resume" and the answer is found where the turns are.
+   */
+  resumeNonce: number;
 
   setThreads: (threads: ThreadView[], counts: ThreadCounts) => void;
   /** One row, from `loadThread`. Replaces that row and nothing else — see `setThread`. */
   setThread: (thread: ThreadView) => void;
   selectThread: (id: string | null) => void;
+  /** Ask the centre pane to resume at the first unresolved turn rather than at the bottom. */
+  requestResume: () => void;
   setError: (message: string | null) => void;
 }
 
@@ -59,6 +71,7 @@ export const useThreadStore = create<ThreadState>((set) => ({
   loaded: false,
   activeThreadId: null,
   error: null,
+  resumeNonce: 0,
 
   // A replace, with the counts that were computed beside these rows. Taking them as one argument
   // rather than two calls is deliberate: they are one snapshot, and a store that could be given rows
@@ -81,6 +94,7 @@ export const useThreadStore = create<ThreadState>((set) => ({
     })),
 
   selectThread: (activeThreadId) => set({ activeThreadId }),
+  requestResume: () => set((s) => ({ resumeNonce: s.resumeNonce + 1 })),
   setError: (error) => set({ error }),
 }));
 
