@@ -502,7 +502,15 @@ export type McpMessage =
 // client learns is `configured: true`, meaning a NAMED VARIABLE IS SET, exactly as it does for
 // an MCP server's credential.
 
-export type ProviderId = "anthropic" | "openai";
+/**
+ * A provider a key can be connected for. Mirrors the server's `keyof typeof PROVIDER_ENV_KEY`.
+ *
+ * IT WAS TWO-VALUED WHILE THE PRODUCT SHIPPED THREE. Nothing broke — every render path keys off
+ * `string` — but the client's own type system could not express a provider the server has supported
+ * since Gemini landed, so `google` was invisible to every exhaustiveness check in this file. `fake`
+ * is deliberately absent: it is the free dry-run path and there is no key to connect for it.
+ */
+export type ProviderId = "anthropic" | "openai" | "google";
 
 /**
  * One selectable model, as the server offers it.

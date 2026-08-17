@@ -58,6 +58,15 @@ there. What is new is that the product's own surface reaches them.
   list is the server's (`purchasable` and the price id are columns; the limits come from the code
   that enforces them), a deployment with no Stripe keys shows nothing rather than a refusing
   control, and choosing is `billing:manage` while reading spend stays a member's.
+- **Gemini is documented, named and marked.** It has been a complete provider for a release —
+  priced in `pricing.json`, built by `models.py`, offered in `RUN_PROVIDERS`, with a working key-entry
+  path — and `GOOGLE_API_KEY` appeared **zero times** in the README, whose only documented Google
+  credential was the Gmail connector's OAuth app: a user searching the docs for "Google" found a
+  credential that will not run a model. It is in the Quick start template and the Models table now,
+  each cross-referencing the other so the two cannot be confused, the repository layout stops
+  describing `models.py` as `fake / anthropic / openai`, the provider has its brand colour and mark
+  instead of a hollow dot between two branded rows, and the client's `ProviderId` can finally express
+  a provider the product ships.
 - **The selectable model catalogue comes from `pricing.json`.** It was a hardcoded array in the
   client and it had drifted four models behind the price sheet that calls itself the single source of
   truth — so `claude-opus-5`, the newest priced entry, could not be chosen for a run, added as an

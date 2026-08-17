@@ -163,6 +163,11 @@ ANTHROPIC_API_KEY=sk-ant-...
 # Only needed to run agents on the OpenAI provider.
 OPENAI_API_KEY=sk-...
 
+# Only needed to run agents on Gemini. GOOGLE_API_KEY and not GEMINI_API_KEY, because that is
+# the name langchain_google_genai reads — and it is NOT the Gmail connector's OAuth app, which
+# is JAROKU_OAUTH_GOOGLE_CLIENT_ID / _SECRET below and will not run a model.
+GOOGLE_API_KEY=...
+
 # Only needed by the connectors you actually select.
 GMAIL_CLIENT_ID=
 GMAIL_CLIENT_SECRET=
@@ -307,7 +312,7 @@ jaroku/
 │   │   ├── __main__.py        # the entrypoint the server spawns
 │   │   ├── contract.py        # loads an agent module and proves it is runnable
 │   │   ├── guard.py           # the stdout guard (dup2 fd 1 → stderr)
-│   │   ├── models.py          # provider selection (fake / anthropic / openai)
+│   │   ├── models.py          # provider selection (fake / anthropic / openai / google)
 │   │   ├── fake.py            # schema-driven dry-run model — free, deterministic
 │   │   ├── debug.py           # checkpointed driver: pause / resume / branch
 │   │   └── graph.py           # static topology introspection for the Graph view
@@ -1834,7 +1839,7 @@ to happen because a browser cannot put a header on a WebSocket:
 | `JAROKU_OBJECT_SIGNING_KEY` | generated into `server/.objectkey` | Signs presigned object URLs. **Required in production**: a per-replica key produces URLs that verify on one replica and nowhere else |
 | `JAROKU_SECRET_STORE` | `dotenv` | `dotenv` \| `kms`. `dotenv` is `runtime/.env` and refuses `NODE_ENV=production`, because one file has no workspace in it |
 | `JAROKU_MASTER_KEY` | — | Wraps each workspace's data key when `JAROKU_SECRET_STORE=kms`. No generated fallback: a regenerated master key would make every stored credential permanently unreadable |
-| `JAROKU_OAUTH_GOOGLE_CLIENT_ID` / `_SECRET` | — | The Google OAuth app the Gmail connector is granted through. Unset means the connector is listed as unavailable, which is the local default and not an error |
+| `JAROKU_OAUTH_GOOGLE_CLIENT_ID` / `_SECRET` | — | The Google OAuth app the Gmail connector is granted through. **Not** the Gemini credential — that is `GOOGLE_API_KEY` under [Models](#models), and setting one will not do the other's job. Unset means the connector is listed as unavailable, which is the local default and not an error |
 | `JAROKU_OAUTH_SLACK_CLIENT_ID` / `_SECRET` | — | The same, for Slack |
 | `JAROKU_OAUTH_REDIRECT_BASE` | `http://localhost:<port>` | Where a provider sends the browser back. `{base}/v1/oauth/{provider}/callback` must be registered as an authorised redirect URI |
 | `JAROKU_APP_URL` | `http://localhost:5173` | Where the browser is sent once a flow finishes. A `returnTo` is a PATH joined to this and never a URL of its own — see [the flow](#the-flow-and-the-two-things-that-defend-it) |
@@ -1887,7 +1892,9 @@ to happen because a browser cannot put a header on a WebSocket:
 
 | Variable | Default | Used by |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Planning, generation, editing, explain, judging |
+| `ANTHROPIC_API_KEY` | — | Planning, generation, editing, explain, judging — **and** running an agent on Claude |
+| `OPENAI_API_KEY` | — | Running an agent on OpenAI. Nothing Jaroku itself does uses it |
+| `GOOGLE_API_KEY` | — | Running an agent on Gemini. Nothing Jaroku itself does uses it. Not the Gmail connector's credential — that is `JAROKU_OAUTH_GOOGLE_CLIENT_ID` / `_SECRET`, which will not run a model |
 | `JAROKU_GEN_MODEL` | `claude-haiku-4-5` | Generation |
 | `JAROKU_PLAN_MODEL` | falls through to `JAROKU_GEN_MODEL` | Planning |
 | `JAROKU_EDIT_MODEL` | `claude-haiku-4-5` | The fix loop |
