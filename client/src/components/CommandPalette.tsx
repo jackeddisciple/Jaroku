@@ -65,7 +65,11 @@ export function CommandPalette() {
   const [mode, setMode] = useState<"root" | "files" | "threads">("root");
   // §4.7: reaching a thread never requires opening the tab at all. The list is the store's own
   // snapshot, so what the palette offers and what the tab shows can never be two different lists.
-  const threads = useThreadStore((s) => s.threads);
+  // ACTIVE ROWS ONLY. The snapshot deliberately carries archived threads so the Archived chip has
+  // something to show, and everywhere else in the view they are excluded by `archived_at === null`.
+  // §3.4 is explicit that an archived thread "leaves the default list" — and "Go to thread…" is a
+  // default list, so an archived row appearing here undoes the one thing archiving is for.
+  const threads = useThreadStore((s) => s.threads).filter((t) => t.archived_at === null);
 
   // Global shortcuts. Registered once; reads live store state so no stale closures.
   useEffect(() => {
