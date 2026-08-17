@@ -105,8 +105,11 @@ import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
 import { currentTraceparent, formatTraceparent, openTracer, parseTraceparent } from "./obs/trace.ts";
 import { metrics, routeLabel, statusClass } from "./obs/metrics.ts";
 import { McpStore } from "./mcpStore.ts";
-import { ThreadStore, type Thread } from "./threadStore.ts";
-import { NO_FACTS, deriveThreadStatus, type ThreadFacts } from "./threadStatus.ts";
+import { ThreadStore, type ThreadItemKind } from "./threadStore.ts";
+import { NO_FACTS, deriveThreadStatus } from "./threadStatus.ts";
+import {
+  collectThreadFacts, type EvalFact, type RunFact, type ThreadDerivation,
+} from "./threadFacts.ts";
 import { McpRegistry } from "./mcpRegistry.ts";
 import { MCP_DISCOVER_CLASS, McpDiscoveryQueue } from "./mcpDiscovery.ts";
 import { WorkspaceExporter } from "./lifecycle/export.ts";
@@ -358,6 +361,14 @@ function meterPlatformCall(
     idempotencyKey?: string;
     /** `workspace` when the call went out on the workspace's own key. Defaults to us. */
     payer?: Payer;
+    /**
+     * The build session that caused the call, for §4.3's per-thread cost.
+     *
+     * All four kinds this function meters — plan, generation, edit, explain — carry no run id, so
+     * without this they are money a thread spent that no per-thread total can find. Every other
+     * kind attributes through its run; see migration 044.
+     */
+    threadId?: string | null;
   },
 ): void {
   void meter.meterModelCall(ctx, kind, call).catch((err) => {
@@ -2230,11 +2241,11 @@ const relay = new WsRelay({
 async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promise<void> {
   if (!(await admitCommand(ctx, cmd))) return;
   {
-    if (cmd.cmd === "run") void runAgent(ctx, cmd.input, cmd.provider, cmd.model, cmd.agentId);
+    if (cmd.cmd === "run") void runAgent(ctx, cmd.input, cmd.provider, cmd.model, cmd.agentId, undefined, cmd.threadId);
     else if (cmd.cmd === "generate") generateAgent(ctx, cmd);
     else if (cmd.cmd === "planAgent") planAgent(ctx, cmd);
     else if (cmd.cmd === "discardPlan") planner.discard(ctx.workspaceId, cmd.planId);
-    else if (cmd.cmd === "edit") editAgent(ctx, cmd.agentId, cmd.instruction);
+    else if (cmd.cmd === "edit") editAgent(ctx, cmd.agentId, cmd.instruction, cmd.threadId);
     else if (cmd.cmd === "applyEdit") void editor.apply(ctx, cmd.proposalId);
     else if (cmd.cmd === "undoEdit") void editor.undo(ctx, cmd.agentId);
     else if (cmd.cmd === "discardEdit") void editor.discard(ctx, cmd.proposalId);
@@ -2969,21 +2980,168 @@ const THREAD_COMMAND_NAMES = new Set([
 ]);
 
 /**
- * What is outstanding in one thread (§3.3's inputs).
+ * Which thread the one in-flight plan / generation / edit / explanation belongs to.
  *
- * THE COLLECTOR IS EMPTY AT THIS COMMIT, AND SAYING SO IS THE POINT. The facts the derivation
- * wants — an unapplied proposal, a run in flight, a failed step nobody retried, a plan awaiting
- * confirm, an MCP confirmation halting a graph — are all attributed to an AGENT today, not to a
- * session, and there is no way to tell which of an agent's three threads a pending diff belongs to
- * until conversations are bound to threads. That binding is the next commit; this function is
- * where it lands, and until then every active thread derives `idle`, which is what an unbound
- * thread honestly is.
- *
- * A function rather than an inline `NO_FACTS` so the shape of the plumbing is already right: the
- * snapshot below already calls it per thread and already renders whatever it says.
+ * MODULE STATE BESIDE `planContext`, `genContext`, `editContext` AND `replyContext`, and safe for
+ * exactly the reason those are: each of the four subsystems is single-slot and refuses a second
+ * while one is running. It is claimed after the guard that can refuse, for the same reason those
+ * are — a refused request that repointed this would file the in-flight work's plan under the
+ * refused caller's session.
  */
-function threadFacts(thread: Thread): ThreadFacts {
-  return { ...NO_FACTS, archivedAt: thread.archived_at };
+let planThread: string | null = null;
+let genThread: string | null = null;
+let editThread: string | null = null;
+let replyThread: string | null = null;
+
+/**
+ * Generations the validator refused, by the id their `thread_items` row carries.
+ *
+ * IN MEMORY, LIKE THE PROPOSAL AND THE PLAN IT SITS BESIDE. §3.3 counts a rejected generation as
+ * work waiting on a person, and what it is waiting for is a retry in this process — the refused
+ * files were never published anywhere. A restart clears this, and the thread reads as idle, which
+ * is true: there is nothing left to retry, only something to ask for again.
+ *
+ * Cleared when the same thread generates again, so "rejected" describes the last attempt rather
+ * than accumulating one entry per failure for the life of the process.
+ */
+const rejectedGenerations = new Set<string>();
+
+/**
+ * The thread a piece of work belongs to, resolving the three cases §3.1 allows.
+ *
+ * A NAMED THREAD, THE AGENT'S CURRENT ONE, OR A NEW ONE, in that order. The first is a client that
+ * knows which session it is in. The second is the continuity migration 044's backfill established —
+ * work on an agent joins the session already open on it, rather than littering the list with one row
+ * per command. The third is §3.1's planning stage: somebody describing an agent that does not exist
+ * yet is in a real session with real cost and nothing to attach it to.
+ *
+ * A `threadId` naming another workspace's thread resolves to `undefined` from the scoped read and
+ * falls through to the same place as no id at all — the work is bound to this workspace's own
+ * session rather than refused, because a caller learning "that id exists elsewhere" is the one
+ * outcome worth avoiding.
+ */
+async function threadForWork(
+  ctx: TenantContext,
+  threadId: string | undefined,
+  agentSlug?: string | null,
+): Promise<string> {
+  if (threadId && (await threadStore.get(ctx, threadId))) return threadId;
+  if (agentSlug) {
+    const agent = await agentRepo.bySlug(ctx, agentSlug);
+    if (agent) return threadStore.ensureForAgent(ctx, agent.id, agent.display_name ?? agent.slug);
+  }
+  return (await threadStore.create(ctx)).id;
+}
+
+/**
+ * Record something in a thread and tell the workspace.
+ *
+ * THE BROADCAST IS HERE RATHER THAN AT EVERY CALL SITE, because an item is exactly what §7.1 calls
+ * a genuine state transition: a proposal appearing turns a row amber, a run starting turns it
+ * ●, a message changes the preview. What must NOT be here is a per-cost-tick broadcast — that would
+ * turn a full-snapshot channel into a polling one, which is the thing §7.1's protocol note refuses.
+ *
+ * Floating and caught, like `meterPlatformCall`: every call site is on a path somebody is watching,
+ * and a generation must not fail because a list could not be refreshed.
+ */
+function noteThreadItem(
+  ctx: TenantContext,
+  threadId: string,
+  item: { kind: ThreadItemKind; refId?: string | null; role?: "user" | null; body?: string | null },
+): void {
+  void threadStore
+    .addItem(ctx, threadId, item)
+    .then(() => broadcastThreads(ctx))
+    .catch((err) => {
+      console.error(`[threads] could not record a ${item.kind}:`, (err as Error)?.message ?? err);
+    });
+}
+
+/**
+ * What the user said, as the thread's own record.
+ *
+ * THE ONLY PROSE A THREAD STORES, and §4.3 is the reason: the preview line is "the last user
+ * message, not Jaroku's reply", because the user's own intent is what makes a session recognisable.
+ * Jaroku's half of the conversation is streamed on the gen / edit / reply channels and rebuilt from
+ * them, so a second copy here would be a transcript nothing reads.
+ */
+function noteUserMessage(ctx: TenantContext, threadId: string, body: string): void {
+  const text = body.trim();
+  if (!text) return;
+  noteThreadItem(ctx, threadId, { kind: "message", role: "user", body: text });
+}
+
+/**
+ * What is outstanding in every thread, gathered from the places that know.
+ *
+ * SIX SOURCES, ONE PASS. Ownership comes from `thread_items`; liveness comes from whoever owns the
+ * live thing — the editor's proposal map, the planner's slot, the confirm queue, `runs.status`,
+ * `eval_runs.status`, the deploy store. `collectThreadFacts` is pure and takes all of it as data,
+ * which is why the interesting half of §3.3 is testable without standing this process up.
+ *
+ * WHAT A RESTART DOES TO THIS, on purpose: a proposal and a plan live in memory, so after a restart
+ * neither map has anything in it, no thread claims a pending diff, and the list says idle. That is
+ * true rather than convenient — there is no diff left to apply — and it is why nothing here keeps a
+ * durable "pending" flag that would go on asking somebody to apply what no longer exists.
+ */
+async function threadFactsFor(ctx: TenantContext): Promise<Map<string, ThreadDerivation>> {
+  const [rows, items, runs, unfinishedEvals, deployedBySlug, agents] = await Promise.all([
+    threadStore.list(ctx),
+    threadStore.allItems(ctx),
+    store.runOutcomes(ctx),
+    evalStore.unfinishedEvalRuns(ctx),
+    deployStore.currentByAgent(ctx),
+    agentRepo.list(ctx),
+  ]);
+
+  // The deploy store is keyed by SLUG and a thread holds the agent's uuid, so the two are joined
+  // here rather than in the collector — which should not have to know that `agents` has two names.
+  const uuidBySlug = new Map(agents.map((a) => [a.slug, a.id]));
+  const deployedAgents = new Set<string>();
+  for (const [slug, d] of deployedBySlug) {
+    const uuid = uuidBySlug.get(slug);
+    if (uuid && d.status === "live") deployedAgents.add(uuid);
+  }
+
+  // Progress per unfinished eval. One query per eval rather than one for all of them, because
+  // "unfinished" is a handful by construction — a workspace with a hundred live evals has a
+  // different problem than a slow list.
+  const evals = new Map<string, EvalFact>();
+  for (const ev of unfinishedEvals) {
+    const jobs = await evalStore.jobsForEval(ctx, ev.id);
+    evals.set(ev.id, {
+      running: true,
+      done: jobs.filter((j) => j.status !== "queued" && j.status !== "running").length,
+      total: jobs.length,
+    });
+  }
+
+  // Which runs are blocked on a person, counted per run — the queue is per run because a node can
+  // fire several high-impact calls in one turn and each blocks independently.
+  const confirms = new Map<string, number>();
+  for (const p of pendingConfirms.values()) {
+    if (p.workspaceId !== ctx.workspaceId) continue;
+    confirms.set(p.runId, (confirms.get(p.runId) ?? 0) + 1);
+  }
+
+  const plans = new Set<string>();
+  const pendingPlan = planner.peek(ctx.workspaceId);
+  if (pendingPlan) plans.add(pendingPlan.planId);
+
+  const proposals = new Map<string, { added: number; removed: number }>();
+  for (const [id, p] of editor.openProposals(ctx)) proposals.set(id, { added: p.added, removed: p.removed });
+
+  return collectThreadFacts({
+    threads: rows,
+    items,
+    runs: runs as Map<string, RunFact>,
+    evals,
+    proposals,
+    plans,
+    rejectedGenerations,
+    confirms,
+    deployedAgents,
+  });
 }
 
 /**
@@ -2995,12 +3153,20 @@ function threadFacts(thread: Thread): ThreadFacts {
  * read cost a write per row.
  */
 async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
-  const rows = await threadStore.list(ctx);
+  const [rows, derived, spend] = await Promise.all([
+    threadStore.list(ctx),
+    threadFactsFor(ctx),
+    // Cumulative, never "this period" — §4.3's cost column is a fact about the session. See
+    // `spendByThread`.
+    billing.spendByThread(ctx),
+  ]);
   const views: ThreadView[] = [];
   const counts: ThreadCounts = { all: 0, needs_you: 0, running: 0, recent: 0, archived: 0 };
 
   for (const row of rows) {
-    const { status, fragment } = deriveThreadStatus(threadFacts(row));
+    const entry = derived.get(row.id);
+    const { status, fragment } = deriveThreadStatus(entry?.facts ?? { ...NO_FACTS, archivedAt: row.archived_at });
+    const cost = spend.get(row.id);
     // Only when it moved. A read that wrote every row would turn opening the tab into one UPDATE
     // per thread, and `setStatus` refuses `archived` anyway — that one follows the timestamp.
     if (status !== row.status) await threadStore.setStatus(ctx, row.id, status);
@@ -3020,6 +3186,14 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
       archived_at: row.archived_at,
       status,
       fragment,
+      // UNKNOWN IS NOT ZERO, and a thread nothing has been spent in is a third case again. Null
+      // means "nothing has cost anything yet" — a thread opened a minute ago — and `cost_known:
+      // false` means the figure is a floor because something in it ran on an unpriced model. §4.3
+      // renders those as nothing, `$0.04` and `$0.04+` respectively, which are three different
+      // sentences.
+      cost_usd: cost ? cost.usd : null,
+      cost_known: cost ? cost.costKnown : true,
+      preview: entry?.preview ?? null,
     });
 
     if (status === "archived") counts.archived++;
@@ -4812,6 +4986,17 @@ async function handleEvalCommand(ctx: TenantContext, cmd: ForwardedCommand): Pro
         // once `start` has returned — which is why the hold was taken against no subject and is
         // attributed here.
         if (verdict.holdId) evalHolds.set(started.evalId, verdict.holdId);
+        // The session the sweep was started from. §4.2 puts a running eval in the Running section
+        // with its live cost ticking, and this row is what tells the derivation whose row that is —
+        // "Nightly eval sweep · api_gateway · eval 34/120" is a thread, not a stray job list.
+        //
+        // The eval's own RUNS are deliberately not bound one by one. A hundred jobs would be a
+        // hundred rows saying what this single row already says, and the derivation reads progress
+        // off `eval_jobs`, which is where it is.
+        noteThreadItem(ctx, await threadForWork(ctx, cmd.threadId, cmd.agentId), {
+          kind: "eval",
+          refId: started.evalId,
+        });
         return;
       }
       case "cancelEval": {
@@ -5259,9 +5444,12 @@ planner.on("plan", (e) => {
   // — once, at the moment it happened. The generation that follows meters itself; it must not
   // also meter `planUsage`, which is the same call reported a second time for display.
   meterPlatformCall(contextForPlan(), "llm.plan", {
-    model: GENERATION_MODEL, ...tokensOf(e.usage), payer: planPayer,
+    model: GENERATION_MODEL, ...tokensOf(e.usage), payer: planPayer, threadId: planThread,
   });
   relay.broadcastGen(contextForPlan(), { type: "plan", ...e });
+  // The plan is now awaiting a decision, which is §3.3's `needs_you`. The item is what lets the
+  // derivation find it: liveness comes from the planner's own slot, ownership from here.
+  if (planThread) noteThreadItem(contextForPlan(), planThread, { kind: "plan", refId: e.planId });
 });
 
 planner.on("error", (e) => {
@@ -5285,6 +5473,17 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
     return;
   }
   planContext = ctx;
+  // A REVISION STAYS IN THE SESSION THE PLAN IT REVISES WAS WRITTEN IN, which is why this looks up
+  // the thread by the plan's own id before falling back. Three revisions of one brief are one build
+  // session (§1.1) — filing each in a thread of its own would put three rows in a list whose whole
+  // job is to be scannable, and the two of them nobody clicked would sit there with a plan awaiting
+  // confirm forever.
+  planThread =
+    (cmd.revisePlanId ? await threadStore.threadForRef(ctx, "plan", cmd.revisePlanId) : undefined) ??
+    (await threadForWork(ctx, cmd.threadId));
+  // The brief, or the feedback on a revision — which is what the user actually typed this turn and
+  // therefore what §4.3's preview should show.
+  noteUserMessage(ctx, planThread, cmd.prompt);
   console.log(
     `[plan] planning${cmd.revisePlanId ? " (revision)" : ""} — "${cmd.prompt.slice(0, 80)}"`,
   );
@@ -5403,6 +5602,23 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   }
 
   generating = true;
+  // THE PLAN'S OWN SESSION WHEN THERE WAS A PLAN. `cmd.planId` was just spent, so the lookup is
+  // against the row written when the plan arrived rather than against the planner — and it means a
+  // generation lands in the thread the brief was written in rather than opening a second one beside
+  // it. Without a plan, the ordinary resolution applies.
+  const generationId = randomUUID();
+  genThread =
+    (cmd.planId ? await threadStore.threadForRef(ctx, "plan", cmd.planId) : undefined) ??
+    (await threadForWork(ctx, cmd.threadId));
+  // An unplanned generation is somebody typing a brief straight into the composer, and that brief is
+  // the thread's first message. A planned one already recorded it when the plan was asked for, and
+  // recording it twice would make the preview echo a brief the user has since revised.
+  if (!cmd.planId) noteUserMessage(ctx, genThread, prompt);
+  // A generation whose validator refuses it is §3.3's "rejected generation" — work waiting on a
+  // person. `rejectedGenerations` is what marks this id, and clearing it here is what makes
+  // "rejected" describe the latest attempt rather than every attempt this process has seen.
+  rejectedGenerations.delete(generationId);
+  noteThreadItem(ctx, genThread, { kind: "generation", refId: generationId });
   console.log(`[gen] generating${plan ? " from an approved plan" : ""} — "${prompt.slice(0, 80)}"`);
   relay.broadcastGen(contextForGen(), { type: "started", prompt });
 
@@ -5436,10 +5652,27 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     // it again here would bill every planned generation for its plan twice, and the second
     // charge would look exactly like the first.
     meterPlatformCall(contextForGen(), "llm.generation", {
-      model: GENERATION_MODEL, ...tokensOf(e.usage), payer: genPayer,
+      model: GENERATION_MODEL, ...tokensOf(e.usage), payer: genPayer, threadId: genThread,
     });
     relay.broadcastGen(contextForGen(), { type: "done", ...e });
-    void syncAgents().then(() => relay.broadcastAgents());
+    // THE SESSION LEARNS WHICH AGENT IT BUILT, and the name is snapshotted in the same statement
+    // (§3.2) — after this, deleting that agent nulls the link and leaves the row saying
+    // `name (deleted)` rather than losing what it was. `syncAgents` first, because the uuid this
+    // needs is the row's and the row is written by that sync.
+    const boundThread = genThread;
+    const genCtxNow = contextForGen();
+    void syncAgents()
+      .then(async () => {
+        if (boundThread) {
+          const agent = await agentRepo.bySlug(genCtxNow, e.agentId);
+          if (agent) {
+            await threadStore.attachAgent(genCtxNow, boundThread, agent.id, agent.display_name ?? agent.slug);
+          }
+        }
+        relay.broadcastAgents();
+        await broadcastThreads(genCtxNow);
+      })
+      .catch((err) => console.error(`[threads] could not attach the agent:`, (err as Error)?.message ?? err));
     cleanup();
   };
 
@@ -5447,6 +5680,11 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     console.error(`[gen] failed: ${e.message}`);
     for (const p of e.problems ?? []) console.error(`  - ${p}`);
     relay.broadcastGen(contextForGen(), { type: "error", ...e });
+    // §3.3's "rejected generation": the thread is blocked on a person deciding what to do about it.
+    // Marked rather than stored, for the reason `openProposals` is read live — the refused files
+    // exist in this process and nowhere else.
+    rejectedGenerations.add(generationId);
+    void broadcastThreads(contextForGen()).catch(() => {});
     cleanup();
   };
 
@@ -5486,14 +5724,22 @@ editor.on("proposal", (e) => {
   // proposal is a version pointer moving, and undoing one is the same pointer moving back.
   // Billing on apply would mean a rejected proposal was free, which it was not.
   meterPlatformCall(contextForEdit(), "llm.edit", {
-    model: GENERATION_MODEL, ...tokensOf(e.usage), payer: editPayer,
+    model: GENERATION_MODEL, ...tokensOf(e.usage), payer: editPayer, threadId: editThread,
   });
   relay.broadcastEdit(contextForEdit(), { type: "proposal", ...e });
+  // An unapplied diff is the most common thing a thread is blocked on, and this row is how the
+  // derivation finds which thread. Whether it is still pending stays the editor's answer —
+  // `openProposals` — so applying or discarding needs no row of its own here.
+  if (editThread) noteThreadItem(contextForEdit(), editThread, { kind: "proposal", refId: e.proposalId });
 });
 
 editor.on("applied", (e) => {
   console.log(`[edit] applied v${e.version} to ${e.agentId}: ${e.summary}`);
   relay.broadcastEdit(contextForEdit(), { type: "applied", ...e });
+  // The proposal has left `openProposals`, so the thread is no longer blocked. Nothing is written —
+  // the row that bound the proposal is still true — but the list has to be told, because the glyph
+  // it is rendering has just stopped being amber.
+  void broadcastThreads(contextForEdit()).catch(() => {});
   void syncAgents().then(() => relay.broadcastAgents());
   relay.broadcastAgentFiles(contextForEdit(), e.agentId);
   // An edit changed the version, and the graph cache is keyed by it — so there is nothing to
@@ -5510,7 +5756,11 @@ editor.on("undone", (e) => {
   void relay.broadcastAgentGraph(contextForEdit(), e.agentId);
 });
 
-editor.on("discarded", (e) => relay.broadcastEdit(contextForEdit(), { type: "discarded", ...e }));
+editor.on("discarded", (e) => {
+  relay.broadcastEdit(contextForEdit(), { type: "discarded", ...e });
+  // Same as `applied`: the diff is gone from the editor, so the row is no longer blocked.
+  void broadcastThreads(contextForEdit()).catch(() => {});
+});
 
 editor.on("error", (e) => {
   console.error(`[edit] failed: ${e.message}`);
@@ -5518,7 +5768,7 @@ editor.on("error", (e) => {
   relay.broadcastEdit(contextForEdit(), { type: "error", ...e });
 });
 
-function editAgent(ctx: TenantContext, agentId: string, instruction: string): void {
+function editAgent(ctx: TenantContext, agentId: string, instruction: string, threadId?: string): void {
   // Refused here rather than inside `propose`, so the refusal is answered to the asker and the
   // edit scope is left pointing at the workspace whose edit is actually running. The editor
   // refuses a second edit either way; what this adds is that a refused one cannot redirect the
@@ -5530,6 +5780,15 @@ function editAgent(ctx: TenantContext, agentId: string, instruction: string): vo
   editContext = ctx;
   console.log(`[edit] ${agentId} — "${instruction.slice(0, 80)}"`);
   relay.broadcastEdit(contextForEdit(), { type: "started", agentId, instruction });
+  // Claimed after the guard, like `editContext` immediately above it and for the same reason: a
+  // refused edit that had already repointed this would file the running edit's proposal under
+  // whoever asked second. The instruction is what the user said, so it is the thread's message.
+  void threadForWork(ctx, threadId, agentId)
+    .then((thread) => {
+      editThread = thread;
+      noteUserMessage(ctx, thread, instruction);
+    })
+    .catch((err) => console.error(`[threads] could not bind the edit:`, (err as Error)?.message ?? err));
   void providerKeys
     .platformKey(ctx)
     .then((apiKey) => {
@@ -5564,6 +5823,14 @@ async function runAgent(
    * has to learn what a shadow run is.
    */
   shadow?: { projectDir: string; shadowRunId: string },
+  /**
+   * The build session this run belongs to, when there is one.
+   *
+   * Last, and optional, because plenty of runs have no session: the boot autorun, a shadow run a
+   * webhook started, an eval job. Those are bound by whoever started them if they are bound at all —
+   * see `handleEvalCommand` for the eval side.
+   */
+  threadId?: string,
 ): Promise<void> {
   if (interactivePool.busy) {
     console.log("[manager] agent already running; ignoring run request");
@@ -5821,6 +6088,20 @@ async function runAgent(
   // would then look `running` forever. The row already exists and already says `staging`, which is
   // the honest state for a run that never got one.
   if (shadow) await shadowRepo.attachRun(ctx, shadow.shadowRunId, runId);
+  // AFTER THE START, for the same reason and a second one: a run that never got a slot must not turn
+  // a thread ● running, and a refused run should not be the thing that opens a session at all.
+  //
+  // A SHADOW RUN IS DELIBERATELY NOT BOUND. It is started by a webhook against a git ref, with
+  // nobody watching and no session behind it — §B.2's own framing — so filing it under whichever
+  // thread happens to be open on that agent would attribute a stranger's pull request to somebody's
+  // afternoon of work, including its cost.
+  //
+  // The run's INPUT is not recorded as a message either. Test-mode input is what the agent is fed,
+  // not what its author said, and §4.3's preview is explicit that the line is the user's own intent.
+  if (!shadow) {
+    const runThread = await threadForWork(ctx, threadId, agentId);
+    noteThreadItem(ctx, runThread, { kind: "run", refId: runId });
+  }
 }
 
 // Pause the live run at its next node boundary (the runner honours the control file there).
@@ -6072,6 +6353,11 @@ async function explainAgent(ctx: TenantContext, cmd: ExplainCommand): Promise<vo
   }
   replyContext = ctx;
   explaining = true;
+  // After the guard, like `replyContext`. A question is something the user said, so it becomes the
+  // thread's message and therefore §4.3's preview — asking "why is it 401ing on refresh?" is exactly
+  // the line that makes a session recognisable a week later.
+  replyThread = await threadForWork(ctx, cmd.threadId, cmd.agentId);
+  noteUserMessage(ctx, replyThread, cmd.question);
   relay.broadcastReply(contextForReply(), { type: "started", agentId: cmd.agentId, question: cmd.question });
   let context = await buildExplainContext(ctx, cmd);
   // §7's attachments, resolved at SEND TIME rather than at attach time — a chip made five minutes
@@ -6098,6 +6384,7 @@ ${attached}`;
         cacheReadTokens: u.cacheRead,
         cacheWriteTokens: u.cacheWrite,
         payer: explainKey ? "workspace" : "platform",
+        threadId: replyThread,
       }),
     onDone: () => { explaining = false; relay.broadcastReply(contextForReply(), { type: "done", agentId: cmd.agentId }); },
     onError: (message) => { explaining = false; relay.broadcastReply(contextForReply(), { type: "error", agentId: cmd.agentId, message }); },

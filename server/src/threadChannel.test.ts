@@ -79,6 +79,12 @@ async function snapshot(ctx: TenantContext): Promise<{ threads: ThreadView[]; co
       archived_at: row.archived_at,
       status,
       fragment,
+      // The harness stands in for the app, and the app's own snapshot reads these three from the
+      // billing ledger and the thread's messages. Nothing in this suite is about either, so they are
+      // the honest empty answers: no spend recorded, nothing unpriced, nothing said.
+      cost_usd: null,
+      cost_known: true,
+      preview: null,
     } satisfies ThreadView;
   });
   counts.all = counts.needs_you + counts.running + counts.recent;

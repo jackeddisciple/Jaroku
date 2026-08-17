@@ -65,6 +65,30 @@ export interface Thread {
   status: ThreadStatus;
 }
 
+/**
+ * The six kinds of thing a thread can own (migration 044).
+ *
+ * `message` is the only one with prose of its own; the other five are pointers at rows or at
+ * in-memory state that already exists somewhere else.
+ */
+export type ThreadItemKind = "message" | "plan" | "generation" | "proposal" | "run" | "eval";
+
+export interface ThreadItem {
+  thread_id: string;
+  kind: ThreadItemKind;
+  /** The id in the owning table. Null on a message, which owns itself. */
+  ref_id: string | null;
+  role: "user" | null;
+  body: string | null;
+  created_at: string;
+}
+
+/** One of the user's own turns. The only prose this table holds — see migration 044. */
+export interface ThreadMessage {
+  body: string;
+  created_at: string;
+}
+
 /** What `create` needs. Everything else about a new thread is a default with a reason. */
 export interface NewThread {
   agentId?: string | null;
@@ -285,6 +309,121 @@ export class ThreadStore {
         WHERE workspace_id = ? AND id = ? AND archived_at IS NOT NULL`,
       [ctx.workspaceId, id],
     );
+  }
+
+  // --- what a thread owns (migration 044) ------------------------------------
+  //
+  // A JOIN, NOT A TRANSCRIPT. `ref_id` names something that lives in its own table — a run in
+  // `runs`, an eval in `eval_runs`, a proposal in the editor's own memory — and a row here is only
+  // the statement that it happened inside this session. Nothing about whether it is still LIVE is
+  // stored, because the owner already knows and two answers would eventually differ.
+
+  /**
+   * Record that something happened in this thread, and move its activity clock.
+   *
+   * ONE STATEMENT PLUS A TOUCH, rather than leaving the caller to remember the second: the whole
+   * reason `last_activity_at` exists is that §4.2 sorts two of its three sections by it, and an
+   * item written without it would be work that happened to a thread that does not know it did.
+   */
+  async addItem(
+    ctx: TenantContext,
+    threadId: string,
+    item: { kind: ThreadItemKind; refId?: string | null; role?: "user" | null; body?: string | null },
+  ): Promise<void> {
+    const now = nowIso();
+    await this.q(ctx).run(
+      `INSERT INTO thread_items (id, workspace_id, thread_id, kind, ref_id, role, body, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        randomUUID(), ctx.workspaceId, threadId, item.kind,
+        item.refId ?? null, item.role ?? null, item.body ?? null, now,
+      ],
+    );
+    await this.touch(ctx, threadId, now);
+  }
+
+  /** What somebody said, in order. §4.3's preview is the last of these; §5's title is the first. */
+  async messages(ctx: TenantContext, threadId: string): Promise<ThreadMessage[]> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT body, created_at FROM thread_items
+        WHERE workspace_id = ? AND thread_id = ? AND kind = 'message' AND role = 'user'
+        ORDER BY created_at ASC`,
+      [ctx.workspaceId, threadId],
+    );
+    return rows.map((r) => ({ body: String(r["body"] ?? ""), created_at: String(r["created_at"]) }));
+  }
+
+  /**
+   * The whole workspace's items, in one query.
+   *
+   * ONE QUERY FOR EVERY THREAD, not one per thread. The snapshot renders every row at once, and a
+   * per-thread read would be N round trips to build one list — which is the same reason
+   * `listAgents` reads its deploy states and edit counts in one go rather than per agent.
+   */
+  async allItems(ctx: TenantContext): Promise<ThreadItem[]> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT thread_id, kind, ref_id, role, body, created_at FROM thread_items
+        WHERE workspace_id = ?
+        ORDER BY created_at ASC`,
+      [ctx.workspaceId],
+    );
+    return rows.map((r) => ({
+      thread_id: String(r["thread_id"]),
+      kind: r["kind"] as ThreadItemKind,
+      ref_id: (r["ref_id"] as string | null) ?? null,
+      role: (r["role"] as "user" | null) ?? null,
+      body: (r["body"] as string | null) ?? null,
+      created_at: String(r["created_at"]),
+    }));
+  }
+
+  /**
+   * Which thread owns this run / eval / plan / proposal, if any.
+   *
+   * Returns undefined rather than throwing for something that was never bound. Plenty of work
+   * predates this table or happens outside a session — a startup reconciliation, a webhook-driven
+   * check run — and "no thread" is a real answer rather than a failure.
+   */
+  async threadForRef(
+    ctx: TenantContext,
+    kind: ThreadItemKind,
+    refId: string,
+  ): Promise<string | undefined> {
+    const row = await this.q(ctx).get<Record<string, unknown>>(
+      `SELECT thread_id FROM thread_items
+        WHERE workspace_id = ? AND kind = ? AND ref_id = ?
+        ORDER BY created_at ASC LIMIT 1`,
+      [ctx.workspaceId, kind, refId],
+    );
+    return row ? String(row["thread_id"]) : undefined;
+  }
+
+  /**
+   * The thread work on this agent belongs to, opening one if there is none.
+   *
+   * WHAT MAKES THE BINDING WORK BEFORE ANY CLIENT KNOWS ABOUT THREADS. Every command that starts
+   * work may carry a `threadId`; until a client sends one, this is the fallback, and it is the same
+   * continuity migration 044's backfill established — one session per agent, reused. The
+   * alternative, a fresh thread per command, would turn one afternoon's work on one agent into
+   * fifteen rows in a list whose whole job is to be scannable.
+   *
+   * The MOST RECENTLY ACTIVE one rather than the oldest: if somebody has three threads on an agent,
+   * the one they are working in is the one they touched last, and putting a new message into a
+   * six-week-old session would be a worse guess than any.
+   */
+  async ensureForAgent(
+    ctx: TenantContext,
+    agentId: string,
+    agentName: string,
+  ): Promise<string> {
+    const row = await this.q(ctx).get<Record<string, unknown>>(
+      `SELECT id FROM threads
+        WHERE workspace_id = ? AND agent_id = ? AND archived_at IS NULL
+        ORDER BY last_activity_at DESC LIMIT 1`,
+      [ctx.workspaceId, agentId],
+    );
+    if (row) return String(row["id"]);
+    return (await this.create(ctx, { agentId, agentName, title: agentName })).id;
   }
 
   /**

@@ -55,6 +55,15 @@ export interface UsageEventInput {
   /** What makes at-least-once ingestion safe here. See billing/usage.ts's `usageKey`. */
   idempotencyKey: string;
   runId?: string | null;
+  /**
+   * The build session this call belongs to, for a row that has no run to attribute through.
+   *
+   * The platform's own thinking — a plan, a generation, an edit, an explanation — happens inside a
+   * thread and inside nothing else, so `run_id` is null on all four and §4.3's per-thread cost
+   * would silently omit them. Every other kind still attributes through its run, which is why this
+   * is optional rather than required — see migration 044.
+   */
+  threadId?: string | null;
   provider?: string | null;
   model?: string | null;
   inputTokens?: number | null;
@@ -329,14 +338,15 @@ export class BillingRepository {
   async record(ctx: TenantContext, e: UsageEventInput): Promise<boolean> {
     const known = e.costUsd !== null && e.costUsd !== undefined;
     const res = await this.q(ctx).run(
-      `INSERT INTO usage_events (workspace_id, run_id, kind, provider, model, input_tokens,
+      `INSERT INTO usage_events (workspace_id, run_id, thread_id, kind, provider, model, input_tokens,
          output_tokens, cached_input_tokens, total_tokens, quantity, unit, payer, cost_usd,
          cost_known, occurred_at, idempotency_key)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (idempotency_key) DO NOTHING`,
       [
         ctx.workspaceId,
         e.runId ?? null,
+        e.threadId ?? null,
         e.kind,
         e.provider ?? null,
         e.model ?? null,
@@ -478,6 +488,67 @@ export class BillingRepository {
         runs: asInt(r["runs"]),
       }))
       .sort((a, b) => b.usd - a.usd);
+  }
+
+  /**
+   * What each build session has spent, all of it, ever.
+   *
+   * NO `since`, unlike every other aggregate here, and that is §4.3's cost column rather than an
+   * omission: the row shows "cumulative spend attributed to this thread", which is a fact about the
+   * session and not about the billing period. A thread somebody comes back to after five weeks has
+   * to show what it actually cost, not what it cost since the first of the month.
+   *
+   * TWO QUERIES, BECAUSE THERE ARE TWO WAYS A ROW BELONGS TO A THREAD (migration 044). An agent's
+   * own model calls carry `run_id`, and the run is joined to its session through `thread_items`. The
+   * platform's own thinking — plan, generation, edit, explain — carries no run at all and names the
+   * thread directly. Summing only one of the two would produce a figure that is confidently short,
+   * which is the same failure mode as a silent zero.
+   *
+   * THE UNPRICED COUNT TRAVELS WITH THE SUM, exactly as `spendSince` makes it. An unpriced model
+   * contributes null, SUM skips nulls, and a thread with one such call would otherwise render a
+   * total that is a floor as though it were the answer — which §4.3 spells out as the difference
+   * between `$0.04+` and `$0.04`.
+   */
+  async spendByThread(
+    ctx: TenantContext,
+  ): Promise<Map<string, { usd: number; costKnown: boolean }>> {
+    const totals = new Map<string, { usd: number; unpriced: number }>();
+    const add = (threadId: string, usd: number, unpriced: number): void => {
+      const at = totals.get(threadId) ?? { usd: 0, unpriced: 0 };
+      at.usd += usd;
+      at.unpriced += unpriced;
+      totals.set(threadId, at);
+    };
+
+    // Through the run that produced them.
+    const viaRun = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT ti.thread_id AS thread_id,
+              COALESCE(SUM(u.cost_usd), 0) AS usd,
+              COUNT(CASE WHEN u.cost_usd IS NULL THEN 1 END) AS unpriced
+         FROM usage_events u
+         JOIN thread_items ti ON ti.workspace_id = u.workspace_id
+                             AND ti.kind = 'run' AND ti.ref_id = u.run_id
+        WHERE u.workspace_id = ? AND u.run_id IS NOT NULL
+        GROUP BY ti.thread_id`,
+      [ctx.workspaceId],
+    );
+    for (const r of viaRun) add(String(r["thread_id"]), Number(r["usd"] ?? 0), asInt(r["unpriced"]));
+
+    // And the platform's own calls, which name the thread themselves.
+    const direct = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT thread_id,
+              COALESCE(SUM(cost_usd), 0) AS usd,
+              COUNT(CASE WHEN cost_usd IS NULL THEN 1 END) AS unpriced
+         FROM usage_events
+        WHERE workspace_id = ? AND thread_id IS NOT NULL AND run_id IS NULL
+        GROUP BY thread_id`,
+      [ctx.workspaceId],
+    );
+    for (const r of direct) add(String(r["thread_id"]), Number(r["usd"] ?? 0), asInt(r["unpriced"]));
+
+    return new Map(
+      [...totals].map(([threadId, t]) => [threadId, { usd: t.usd, costKnown: t.unpriced === 0 }]),
+    );
   }
 
   /** The most expensive runs this period. The row a per-run drill-down opens from. */

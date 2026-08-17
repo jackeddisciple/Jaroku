@@ -146,6 +146,11 @@ export const EXPORTED_TABLES = [
   // simultaneous build sessions either belonged to. An export without it is a copy of the work
   // with every question of "why" removed.
   "threads",
+  // AND WHAT EACH ONE OWNED. `thread_items` is the join that says which of an agent's sessions a
+  // given run, eval, plan or proposal happened in, plus the user's own messages — which is to say
+  // the questions somebody asked, in their own words. Exporting `threads` without it would hand over
+  // a list of session titles with no way to tell what any of them did.
+  "thread_items",
 ] as const;
 
 /**

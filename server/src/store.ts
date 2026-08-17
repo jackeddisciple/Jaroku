@@ -178,6 +178,45 @@ export class TraceStore {
     return rows.map((r) => ({ ...r, step_count: asInt(r["step_count"]) })) as unknown as RunSummary[];
   }
 
+  /**
+   * How every run in this workspace went, for §3.3's derivation.
+   *
+   * TWO QUERIES RATHER THAN ONE, and the second one's shape is the point. Every run's status is a
+   * cheap read off `runs`. The count of FAILED STEPS is not: `steps` is the table this codebase
+   * partitioned because it gets huge, and `error IS NOT NULL` is not indexed — so the second query
+   * is driven from `runs.status = 'error'`, which is selective, and reaches `steps` through the
+   * (workspace_id, run_id) index it already has. A query written the other way round would be a
+   * scan of every step in the workspace every time somebody opens the Threads tab.
+   *
+   * Counted only for runs that ENDED in error, which is also what §3.3 means by "was not retried":
+   * a run that recorded a failed step and then completed retried it, and surfacing that as blocked
+   * work would put an amber ◆ on a thread whose problem solved itself.
+   */
+  async runOutcomes(
+    ctx: TenantContext,
+  ): Promise<Map<string, { status: string; failedSteps: number }>> {
+    const runs = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT id, status FROM runs WHERE workspace_id = ?`,
+      [ctx.workspaceId],
+    );
+    const out = new Map<string, { status: string; failedSteps: number }>();
+    for (const r of runs) out.set(String(r["id"]), { status: String(r["status"]), failedSteps: 0 });
+
+    const failed = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT s.run_id AS run_id, COUNT(*) AS failed
+         FROM runs r
+         JOIN steps s ON s.workspace_id = r.workspace_id AND s.run_id = r.id
+        WHERE r.workspace_id = ? AND r.status = 'error' AND s.error IS NOT NULL
+        GROUP BY s.run_id`,
+      [ctx.workspaceId],
+    );
+    for (const f of failed) {
+      const at = out.get(String(f["run_id"]));
+      if (at) at.failedSteps = asInt(f["failed"]);
+    }
+    return out;
+  }
+
   async getRun(ctx: TenantContext, runId: string): Promise<Run | undefined> {
     return (await this.q(ctx).get<Record<string, unknown>>(
       `SELECT ${cols(RUN_COLUMNS)} FROM runs WHERE id = ? AND workspace_id = ?`,

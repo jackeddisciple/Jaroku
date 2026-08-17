@@ -162,6 +162,37 @@ export class Editor extends EventEmitter<EditorEvents> {
     return this.busy;
   }
 
+  /**
+   * The proposals still awaiting Apply or Discard, by id, with how big each one is.
+   *
+   * §3.3's most common blocked state, read from the only place that knows it. A pending proposal
+   * lives in this map and nowhere else — it does not survive a restart — which is exactly why the
+   * thread list asks the editor rather than keeping a durable "diff pending" flag of its own: after
+   * a restart there is no diff to apply, and a row still asking somebody to apply one would be
+   * sending them to a button that can only refuse.
+   *
+   * The sizes are summed from the diff the user is looking at, so §4.3's `+42−11` is the same
+   * arithmetic as the diff card's own header rather than a second count of the same lines.
+   */
+  openProposals(ctx: TenantContext): Map<string, { agentId: string; added: number; removed: number }> {
+    const out = new Map<string, { agentId: string; added: number; removed: number }>();
+    for (const [proposalId, rec] of this.pending) {
+      // Scoped, like every other read in this codebase, even though the ids are unguessable and the
+      // caller matches them against rows it already scoped. Two workspaces can hold a proposal each
+      // — the busy flag is per process, and `discard` does not clear the other's — and a map handed
+      // out unscoped is one refactor away from being iterated instead of looked up.
+      if (rec.ctx.workspaceId !== ctx.workspaceId) continue;
+      let added = 0;
+      let removed = 0;
+      for (const f of rec.files) {
+        added += f.additions;
+        removed += f.deletions;
+      }
+      out.set(proposalId, { agentId: rec.agentId, added, removed });
+    }
+    return out;
+  }
+
   private fail(e: EditorEvents["error"][0]): void {
     this.emit("error", e);
   }

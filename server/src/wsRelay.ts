@@ -26,11 +26,23 @@ export type RunCommand = {
   provider?: string;
   model?: string;
   agentId?: string;
+  /**
+   * The build session this work belongs to (§7.1, migration 044).
+   *
+   * OPTIONAL ON EVERY COMMAND THAT CARRIES IT, and that is deliberate rather than transitional. A
+   * client that does not name a thread gets the agent's most recently active one, which is the
+   * continuity the backfill established — and a run started by something with no session at all,
+   * like a CI check reacting to a webhook, has no thread to name and should not be made to invent
+   * one.
+   */
+  threadId?: string;
 };
 export type LoadRunCommand = { cmd: "loadRun"; runId: string };
 export type GenerateCommand = {
   cmd: "generate";
   prompt: string;
+  /** The session this build happens in. See RunCommand.threadId. */
+  threadId?: string;
   connectors?: string[];
   /**
    * The MCP tools this agent is scoped to, as `"server/tool"` refs.
@@ -50,6 +62,8 @@ export type GenerateCommand = {
 export type PlanAgentCommand = {
   cmd: "planAgent";
   prompt: string;
+  /** The session this plan happens in. See RunCommand.threadId. */
+  threadId?: string;
   connectors?: string[];
   /** Scoped MCP tools, as `"server/tool"` refs. See GenerateCommand.mcpTools. */
   mcpTools?: string[];
@@ -59,7 +73,13 @@ export type PlanAgentCommand = {
 export type DiscardPlanCommand = { cmd: "discardPlan"; planId: string };
 export type ListAgentsCommand = { cmd: "listAgents" };
 // The fix loop (doc §8 Week 4): every mutation is proposal -> explicit apply/undo.
-export type EditCommand = { cmd: "edit"; agentId: string; instruction: string };
+export type EditCommand = {
+  cmd: "edit";
+  agentId: string;
+  instruction: string;
+  /** The session this edit happens in. See RunCommand.threadId. */
+  threadId?: string;
+};
 export type ApplyEditCommand = { cmd: "applyEdit"; proposalId: string };
 export type UndoEditCommand = { cmd: "undoEdit"; agentId: string };
 export type DiscardEditCommand = { cmd: "discardEdit"; proposalId: string };
@@ -129,6 +149,8 @@ export type StartEvalCommand = {
   agentId: string;
   targets: { provider: string; model: string }[];
   budgetUsd?: number | null;
+  /** The session this sweep was started from. See RunCommand.threadId. */
+  threadId?: string;
 };
 export type CancelEvalCommand = { cmd: "cancelEval"; evalId: string };
 // The rubric is product surface, not a constant — "correct" for a refund bot is not
@@ -733,6 +755,8 @@ export type ExplainCommand = {
   question: string;
   subject: ExplainSubject;
   github?: GithubAttachment[];
+  /** The session this question was asked in. See RunCommand.threadId. */
+  threadId?: string;
 };
 export type ClientCommand =
   | RunCommand
@@ -1307,6 +1331,23 @@ export interface ThreadView {
   status: ThreadStatus;
   /** §4.3's state fragment: one decision-relevant fact, or null when there is nothing to say. */
   fragment: string | null;
+  /**
+   * Cumulative spend attributed to this thread, or null when nothing has cost anything yet.
+   *
+   * THREE STATES, NOT TWO, because §4.3 and §9 both insist on it: null is "nothing spent",
+   * `cost_known: false` beside a figure is "this is a floor" (§4.3's `$0.04+`), and a figure with
+   * `cost_known: true` is the answer. A zero would claim the third about the first.
+   */
+  cost_usd: number | null;
+  /** False when something in this thread ran on an unpriced model. See `cost_usd`. */
+  cost_known: boolean;
+  /**
+   * §4.3's preview: the last thing the USER said, never Jaroku's reply.
+   *
+   * "The user's own intent is what makes a thread recognisable; the assistant's response is not" —
+   * which is also why only the user's turns are stored at all (migration 044).
+   */
+  preview: string | null;
 }
 
 /** The five §4.4 chips, counted once on the server and rendered twice (§2.1). */
