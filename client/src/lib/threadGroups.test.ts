@@ -39,6 +39,8 @@ const t = (id: string, status: ThreadStatus, hoursAgo: number, archived = false)
   cost_usd: null,
   cost_known: true,
   preview: null,
+  live_run_ids: [],
+  eval_progress: null,
 });
 
 const ids = (list: ThreadView[]): string => list.map((x) => x.id).join(",");

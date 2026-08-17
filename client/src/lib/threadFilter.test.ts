@@ -40,6 +40,8 @@ const t = (
   cost_usd: null,
   cost_known: true,
   preview: null,
+  live_run_ids: [],
+  eval_progress: null,
   ...over,
 });
 

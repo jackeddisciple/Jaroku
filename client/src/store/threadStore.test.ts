@@ -14,7 +14,7 @@
 //
 //   npm run test:thread-store
 
-import { agentChipLabel, threadById, useThreadStore } from "./threadStore.ts";
+import { agentChipLabel, threadById, threadSpend, useThreadStore } from "./threadStore.ts";
 import type { ThreadCounts, ThreadView } from "../types.ts";
 
 let fail = 0;
@@ -39,6 +39,8 @@ const thread = (over: Partial<ThreadView> = {}): ThreadView => ({
   cost_usd: 0.04,
   cost_known: true,
   preview: "add exponential backoff to the retry handler",
+  live_run_ids: [],
+  eval_progress: null,
   ...over,
 });
 
@@ -135,6 +137,58 @@ const reset = (): void => useThreadStore.setState(useThreadStore.getInitialState
   check("a thread can be found by id", threadById(state().threads, "t1")?.id === "t1");
   check("...an unknown id is undefined, not a guess", threadById(state().threads, "nope") === undefined);
   check("...and no id at all is undefined too", threadById(state().threads, null) === undefined);
+}
+
+// --- 8. the live cost delta (§4.3.3) ---------------------------------------------------------
+{
+  reset();
+  state().setThreads(
+    [
+      thread({ id: "running", status: "running", cost_usd: 0.8, live_run_ids: ["run-1", "run-2"] }),
+      thread({ id: "quiet", status: "idle", cost_usd: 0.04, live_run_ids: [] }),
+    ],
+    counts({ all: 2, needs_you: 0, running: 1, recent: 1 }),
+  );
+
+  state().addStepCost("run-1", 0.01);
+  state().addStepCost("run-2", 0.01);
+  check("a step's cost lands on the thread that owns its run", state().liveCost["running"] === 0.02);
+  check("...and the sum is what a row renders",
+    threadSpend(state().threads[0]!, state().liveCost)?.toFixed(2) === "0.82");
+  check("a thread with no live run gets nothing", state().liveCost["quiet"] === undefined);
+  check("...and renders the ledger's figure alone",
+    threadSpend(state().threads[1]!, state().liveCost) === 0.04);
+
+  // A run nothing claims: a shadow run a webhook started, or an eval job whose snapshot has not arrived
+  // yet. Attributing it to the wrong session would put somebody else's spend on your row.
+  state().addStepCost("run-nobodys", 5);
+  check("a step from an unclaimed run is dropped rather than guessed at",
+    Object.values(state().liveCost).reduce((a, b) => a + b, 0).toFixed(2) === "0.02");
+
+  // An unpriced step arrives as null and reaches this as 0. It must not create an entry — unknown is
+  // not zero, and a zero entry is a claim that this thread has live spend of nothing.
+  state().addStepCost("run-1", 0);
+  check("a zero contributes nothing and creates no entry", state().liveCost["running"] === 0.02);
+
+  // THE SNAPSHOT IS THE AUTHORITY. Keeping a delta across one would eventually count it twice.
+  state().setThreads(
+    [thread({ id: "running", status: "running", cost_usd: 0.82, live_run_ids: ["run-1"] })],
+    counts({ all: 1, needs_you: 0, running: 1, recent: 0 }),
+  );
+  check("a fresh snapshot clears the deltas it has caught up with",
+    Object.keys(state().liveCost).length === 0);
+  check("...and the figure is now the ledger's alone",
+    threadSpend(state().threads[0]!, state().liveCost) === 0.82);
+
+  // And a thread with no ledger figure at all: live spend alone is still a figure, and no spend at all is
+  // still null rather than zero.
+  reset();
+  state().setThreads([thread({ id: "new", cost_usd: null, live_run_ids: ["r"] })], counts());
+  check("a thread with nothing recorded and nothing live has no figure",
+    threadSpend(state().threads[0]!, state().liveCost) === null);
+  state().addStepCost("r", 0.005);
+  check("...and one with only live spend has one",
+    threadSpend(state().threads[0]!, state().liveCost) === 0.005);
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

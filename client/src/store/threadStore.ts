@@ -55,6 +55,22 @@ interface ThreadState {
    * "resume" and the answer is found where the turns are.
    */
   resumeNonce: number;
+  /**
+   * What a running thread has spent SINCE the snapshot that described it (§4.3.3).
+   *
+   * WHY A DELTA AND NOT A TOTAL. The snapshot's `cost_usd` is the ledger's answer and is authoritative;
+   * this is the per-step cost that has arrived on the trace channel since, which the ledger has not
+   * caught up with yet (metering is deliberately floating and asynchronous — a generation must never
+   * fail because a usage row could not be written). Displayed as the sum of the two, so the figure moves
+   * while a run does rather than sitting still beside a progress count that visibly changes, which
+   * §4.3.3 calls the most literal violation of the no-spinners rule available to fix.
+   *
+   * CLEARED ON EVERY SNAPSHOT, because the snapshot is the authority and a delta kept across one would
+   * eventually be counted twice. The cost of that reset is honest and small: for the moment between a
+   * state transition and the ledger catching up, the figure can dip by a step or two. The alternative —
+   * keeping the delta and hoping — is a number that only ever grows too large.
+   */
+  liveCost: Record<string, number>;
 
   setThreads: (threads: ThreadView[], counts: ThreadCounts) => void;
   /** One row, from `loadThread`. Replaces that row and nothing else — see `setThread`. */
@@ -62,6 +78,14 @@ interface ThreadState {
   selectThread: (id: string | null) => void;
   /** Ask the centre pane to resume at the first unresolved turn rather than at the bottom. */
   requestResume: () => void;
+  /**
+   * A step's cost, arriving on the trace channel, attributed to whichever thread owns its run.
+   *
+   * Takes the RUN id rather than the thread id, because that is what a trace event carries — the frozen
+   * event schema has no thread field and must not grow one (§7, §9). The lookup is against
+   * `live_run_ids` on the rows this store already holds.
+   */
+  addStepCost: (runId: string, usd: number) => void;
   setError: (message: string | null) => void;
 }
 
@@ -72,11 +96,13 @@ export const useThreadStore = create<ThreadState>((set) => ({
   activeThreadId: null,
   error: null,
   resumeNonce: 0,
+  liveCost: {},
 
   // A replace, with the counts that were computed beside these rows. Taking them as one argument
   // rather than two calls is deliberate: they are one snapshot, and a store that could be given rows
   // without counts is a store that can hold a count of something else.
-  setThreads: (threads, counts) => set({ threads, counts, loaded: true, error: null }),
+  // A replace, and the live deltas go with it: see `liveCost` for why the snapshot is the authority.
+  setThreads: (threads, counts) => set({ threads, counts, loaded: true, error: null, liveCost: {} }),
 
   /**
    * The one row `loadThread` answers with.
@@ -95,11 +121,37 @@ export const useThreadStore = create<ThreadState>((set) => ({
 
   selectThread: (activeThreadId) => set({ activeThreadId }),
   requestResume: () => set((s) => ({ resumeNonce: s.resumeNonce + 1 })),
+
+  addStepCost: (runId, usd) =>
+    set((s) => {
+      // An unpriced step arrives with a null cost, which the caller passes as 0 — and adding zero must
+      // not create an entry, because an entry is what makes the row re-render.
+      if (!Number.isFinite(usd) || usd <= 0) return {};
+      const owner = s.threads.find((t) => t.live_run_ids.includes(runId));
+      // A step from a run no thread claims — a shadow run started by a webhook, an eval job whose
+      // snapshot has not arrived yet. Dropped rather than guessed at: attributing it to the wrong
+      // session would put somebody else's spend on your row.
+      if (!owner) return {};
+      return { liveCost: { ...s.liveCost, [owner.id]: (s.liveCost[owner.id] ?? 0) + usd } };
+    }),
   setError: (error) => set({ error }),
 }));
 
 // --- selectors ---------------------------------------------------------------
 // Exported as pure functions so no component re-derives them differently.
+
+/**
+ * What a row should render as its cost: the ledger's figure plus what has arrived since (§4.3.3).
+ *
+ * A SELECTOR RATHER THAN A FIELD, so there is exactly one definition of "what this thread has spent" and
+ * no component can add the two halves differently. Null stays null — a thread that has spent nothing and
+ * has no live steps has no cost cell at all, which is not the same as zero.
+ */
+export function threadSpend(thread: ThreadView, liveCost: Record<string, number>): number | null {
+  const live = liveCost[thread.id] ?? 0;
+  if (thread.cost_usd === null) return live > 0 ? live : null;
+  return thread.cost_usd + live;
+}
 
 /** One thread by id, or undefined. */
 export function threadById(threads: ThreadView[], id: string | null): ThreadView | undefined {

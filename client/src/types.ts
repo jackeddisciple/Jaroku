@@ -734,6 +734,22 @@ export interface ThreadView {
   cost_known: boolean;
   /** The last thing the USER said. Their own intent is what makes a session recognisable (§4.3). */
   preview: string | null;
+  /**
+   * The runs of this thread that are in flight (§4.3.3).
+   *
+   * Not a message type of its own: a running thread's cost increments from the per-step cost events the
+   * trace and eval channels already carry, and these ids are how one of those is attributed to a
+   * session. Empty for anything not running — a finished run's cost is in `cost_usd`.
+   */
+  live_run_ids: string[];
+  /**
+   * How far a running eval has got. The denominator §4.3.3's projection needs.
+   *
+   * The NUMBERS rather than the `eval 34/120` string, so nothing here parses a display string back out
+   * to do arithmetic on. Null when there is no denominator, which is the honest answer for a generation
+   * or an interactive run: §4.3.3 says show no projection at all rather than a guess.
+   */
+  eval_progress: { done: number; total: number } | null;
 }
 
 /** §4.4's five chips. Counted once on the server and rendered twice — see the nav badge, §2.1. */

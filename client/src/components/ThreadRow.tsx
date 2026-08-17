@@ -27,8 +27,8 @@
 import { useEffect, useRef, useState } from "react";
 import { relTime } from "../lib/format.ts";
 import { resumeHint } from "../lib/threadResume.ts";
-import { fmtThreadCost } from "../lib/threadCost.ts";
-import { agentChipLabel } from "../store/threadStore.ts";
+import { fmtRunningCost, fmtThreadCost } from "../lib/threadCost.ts";
+import { agentChipLabel, threadSpend, useThreadStore } from "../store/threadStore.ts";
 import { ThreadGlyph } from "./ThreadGlyph.tsx";
 import { useMemberStore } from "../store/memberStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
@@ -82,7 +82,18 @@ export function ThreadRow({
 }) {
   const author = useAuthorLabel(thread.created_by);
   const hint = resumeHint(thread);
-  const cost = fmtThreadCost(thread.cost_usd, thread.cost_known);
+  /**
+   * §4.3.3. A running thread's figure MOVES, and shows where it is heading when there is a denominator.
+   *
+   * Subscribed per row rather than per view, so a step landing on one thread re-renders that row and not
+   * the whole list — a hundred rows re-rendering per step of one eval is the sort of thing that makes a
+   * live figure worse than a still one.
+   */
+  const live = useThreadStore((s) => s.liveCost[thread.id] ?? 0);
+  const spend = threadSpend(thread, { [thread.id]: live });
+  const cost = thread.status === "running"
+    ? fmtRunningCost(spend, thread.cost_known, thread.eval_progress)
+    : fmtThreadCost(spend, thread.cost_known);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(thread.title);
   const input = useRef<HTMLInputElement>(null);
@@ -197,7 +208,16 @@ export function ThreadRow({
         {cost && (
           <>
             <span className="text-faint">·</span>
-            <span className="tabular-nums" title={thread.cost_known ? undefined : "a floor — something here ran on an unpriced model"}>
+            <span
+              className="tabular-nums"
+              title={
+                thread.cost_known
+                  ? thread.eval_progress
+                    ? "spent so far, and a linear projection over the remaining steps"
+                    : undefined
+                  : "a floor — something here ran on an unpriced model"
+              }
+            >
               {cost}
             </span>
           </>

@@ -1348,6 +1348,28 @@ export interface ThreadView {
    * which is also why only the user's turns are stored at all (migration 044).
    */
   preview: string | null;
+  /**
+   * The runs of this thread that are in flight (§4.3.3).
+   *
+   * NOT A SEVENTH MESSAGE TYPE, which is the point §7.1's protocol note makes: a running thread's cost
+   * increments from the per-step cost events the trace and eval channels already carry, and these ids
+   * are what let a client attribute one of those to a session. The snapshot itself is still broadcast
+   * only on genuine state transitions — sending it per cost tick would turn a full-snapshot channel
+   * into a polling one wearing a different hat.
+   *
+   * Empty for anything not running: a finished run's cost is in `cost_usd` already.
+   */
+  live_run_ids: string[];
+  /**
+   * How far a running eval has got, when one is attributed to this thread.
+   *
+   * THE NUMBERS, NOT THE STRING. `fragment` renders `eval 34/120` for a person to read; a client that
+   * parsed that back out in order to project a total would be reading a display string as an API, and
+   * the first change to the wording would silently stop the projection. Null when no eval is running
+   * here, which is also the honest answer to "what will this cost" for a generation or an interactive
+   * run: there is no denominator, so §4.3.3 says show no projection at all.
+   */
+  eval_progress: { done: number; total: number } | null;
 }
 
 /** The five §4.4 chips, counted once on the server and rendered twice (§2.1). */

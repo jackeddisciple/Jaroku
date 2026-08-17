@@ -50,6 +50,13 @@ function dispatch(msg: ServerMessage): void {
       break;
     case "trace":
       s.applyEvent(msg.event);
+      // §4.3.3: a running thread's cost figure moves with the steps it is paying for. The event is the
+      // frozen schema's own `step`, unchanged and unextended — the thread it belongs to is resolved from
+      // the run id, against the `live_run_ids` the last snapshot carried. Nothing about the trace knows
+      // that threads exist, which is the whole arrangement §7 asks for.
+      if (msg.event.kind === "step" && msg.event.step.cost != null) {
+        useThreadStore.getState().addStepCost(msg.event.step.run_id, msg.event.step.cost);
+      }
       break;
     case "runSteps":
       s.applyRunSteps(msg.runId, msg.steps);

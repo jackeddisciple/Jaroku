@@ -3150,6 +3150,9 @@ async function threadFactsFor(ctx: TenantContext): Promise<Map<string, ThreadDer
       running: true,
       done: jobs.filter((j) => j.status !== "queued" && j.status !== "running").length,
       total: jobs.length,
+      // The runs actually executing, so §4.3.3's live figure can attribute their step costs. A queued
+      // job has no run yet and a finished one's cost is already in the ledger.
+      liveRunIds: jobs.filter((j) => j.status === "running" && j.run_id).map((j) => j.run_id!),
     });
   }
 
@@ -3241,6 +3244,11 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
       cost_usd: cost ? cost.usd : null,
       cost_known: cost ? cost.costKnown : true,
       preview: entry?.preview ?? null,
+      // §4.3.3. Empty and null respectively for anything not running, so a client has nothing to
+      // increment and nothing to extrapolate from — which is exactly what a thread whose cost has
+      // stopped moving should show.
+      live_run_ids: status === "running" ? (entry?.liveRunIds ?? []) : [],
+      eval_progress: status === "running" ? (entry?.facts.evalProgress ?? null) : null,
     });
 
     if (status === "archived") counts.archived++;

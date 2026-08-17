@@ -36,6 +36,14 @@ export interface EvalFact {
   running: boolean;
   done: number;
   total: number;
+  /**
+   * The eval's jobs that are executing right now, by run id.
+   *
+   * An eval is a batch of ORDINARY runs (ADR-011), so its cost arrives as per-step events on those
+   * runs like any other. A thread showing `eval 34/120` therefore needs their ids to increment its own
+   * figure — the eval row itself emits nothing per step.
+   */
+  liveRunIds: string[];
 }
 
 /** Everything the collector reads, gathered by the caller. */
@@ -61,6 +69,18 @@ export interface FactsInput {
 
 export interface ThreadDerivation {
   facts: ThreadFacts;
+  /**
+   * The runs of this thread that are in flight, by id (§4.3.3).
+   *
+   * ON THE SNAPSHOT RATHER THAN ON A NEW MESSAGE TYPE, which is what §7.1's protocol note requires: a
+   * running thread's cost increments from the per-step cost events the trace and eval channels ALREADY
+   * broadcast, and a client can only attribute one of those to a session if it knows which runs the
+   * session owns. Sending the ids once, on a state transition, is what makes the live figure derivable
+   * client-side without turning a full-snapshot channel into a polling one.
+   *
+   * Empty for anything not running. A finished run's cost is in the figure already.
+   */
+  liveRunIds: string[];
   /**
    * §4.3's preview: the last USER message, never Jaroku's reply.
    *
@@ -91,6 +111,7 @@ export function collectThreadFacts(input: FactsInput): Map<string, ThreadDerivat
       },
       preview: null,
       firstMessage: null,
+      liveRunIds: [],
     });
   }
 
@@ -122,7 +143,10 @@ export function collectThreadFacts(input: FactsInput): Map<string, ThreadDerivat
       case "run": {
         const run = item.ref_id ? input.runs.get(item.ref_id) : undefined;
         if (!run) break;
-        if (run.status === "running") f.liveRuns++;
+        if (run.status === "running") {
+          f.liveRuns++;
+          entry.liveRunIds.push(item.ref_id!);
+        }
         f.failedSteps += run.failedSteps;
         // A halted graph is waiting on a person, not on a machine. Counted per run because the queue
         // is per run — a node can fire several high-impact calls in one turn and each blocks alone.
@@ -139,6 +163,7 @@ export function collectThreadFacts(input: FactsInput): Map<string, ThreadDerivat
           // The LAST running eval wins if there are two, which there can be. A row has one fragment
           // and one projection, and the newest is the one whose numbers are still moving.
           f.evalProgress = { done: ev.done, total: ev.total };
+          entry.liveRunIds.push(...ev.liveRunIds);
         }
         break;
       }

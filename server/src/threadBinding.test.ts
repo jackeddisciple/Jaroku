@@ -205,7 +205,7 @@ async function statusesFor(
   await h.threads.addItem(ctx, halted.id, { kind: "run", refId: haltedRun });
 
   const statuses = await statusesFor(h, {
-    evals: new Map([["eval-1", { running: true, done: 34, total: 120 }]]),
+    evals: new Map([["eval-1", { running: true, done: 34, total: 120, liveRunIds: [] }]]),
     confirms: new Map([[haltedRun, 1]]),
   });
   check("a running eval puts its thread in Running", statuses.get(sweep.id)?.status === "running");
