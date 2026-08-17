@@ -113,6 +113,13 @@ const DELETION_ORDER = [
   "github_events",
   "github_links",
   "github_installations",
+  // Before `agents`, and that ordering is the one place this list disagrees with the rest of the
+  // schema on purpose. Everywhere else a child is deleted first because its cascade would take it
+  // anyway; a thread's foreign key is ON DELETE SET NULL, so deleting `agents` first would leave
+  // every thread in the workspace standing with a nulled agent and a snapshot — rows that are then
+  // deleted a line later, having been pointlessly rewritten first. Deleting threads before the
+  // agents they point at is one statement instead of two, and the receipt's count is the same.
+  "threads",
   "agent_versions",
   "agents",
   "usage_events",

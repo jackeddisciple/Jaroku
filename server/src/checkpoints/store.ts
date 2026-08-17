@@ -230,14 +230,21 @@ export class PgCheckpointStore implements CheckpointStore {
   async sweepRuns(ctx: TenantContext, runIds: string[]): Promise<SweepResult> {
     const out: SweepResult = { removed: 0, bytesFreed: 0, failed: 0 };
     if (!runIds.length || !(await this.columnsOf("checkpoints")).length) return out;
-    const threads = runIds.map((id) => this.thread(ctx, id));
-    const holes = threads.map(() => "?").join(", ");
+    // `threadIds`, not `threads`, and the rename is load-bearing rather than stylistic. These are
+    // LANGGRAPH thread ids — `ws:<workspace>:run:<run>` strings in the checkpointer's own schema — and
+    // `threads` is now also a table in the application schema, with a tenant policy on it. The boundary
+    // audit reads the ARGUMENTS of every unscoped `db.run` looking for a policied table name, so a
+    // variable called `threads` sitting in the parameter list made this statement look like an unscoped
+    // write to that table. Adding an exemption would have put a hole with a comment on it in the one map
+    // whose own header says not to; naming the variable for what it holds removes the ambiguity instead.
+    const threadIds = runIds.map((id) => this.thread(ctx, id));
+    const holes = threadIds.map(() => "?").join(", ");
     for (const table of CHECKPOINT_TABLES) {
       if (!(await this.columnsOf(table)).length) continue;
       try {
         const result = await this.db.run(
           `DELETE FROM ${CHECKPOINT_SCHEMA}.${table} WHERE thread_id IN (${holes})`,
-          threads,
+          threadIds,
         );
         out.removed += result.changes;
       } catch {

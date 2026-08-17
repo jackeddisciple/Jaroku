@@ -139,6 +139,13 @@ export const EXPORTED_TABLES = [
   "shadow_runs",
   "pr_comments",
   "secret_scan_findings",
+  // WHAT WAS ASKED FOR AND WHAT IT LEFT BEHIND. A thread holds the title somebody gave a session,
+  // when it last did anything, and which agent it was pointed at — including, after that agent is
+  // deleted, the name it had. It is the only place the SESSION exists: `runs` says what executed
+  // and `usage_events` says what it cost, and neither can say which of an agent's three
+  // simultaneous build sessions either belonged to. An export without it is a copy of the work
+  // with every question of "why" removed.
+  "threads",
 ] as const;
 
 /**
