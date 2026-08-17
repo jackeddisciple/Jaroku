@@ -53,11 +53,23 @@ function fakeChecks(config: AgentCiConfig | undefined, stale: CheckRunRow[] = []
         latency_p50_ms: null, pass_rate_delta: null, cost_delta: null, latency_delta: null,
         baseline_check_id: null, created_at: new Date().toISOString(), completed_at: null,
       } as CheckRunRow;
+      // Migration 045's constraint, in miniature: one LIVE check per (agent, pr, commit). A second
+      // delivery for a commit already being checked reads the winner rather than opening a rival.
+      const live = [...rows.values()].find(
+        (r) => r.agent_id === input.agentId && r.pr_number === input.prNumber
+          && r.head_sha === input.headSha && r.status !== "completed",
+      );
+      if (live) return { row: { ...live }, created: false };
       rows.set(row.id, row);
       // A COPY, exactly as the real repository's `byId` re-read returns: the caller's object is not
       // the store's, so a later UPDATE to the column is invisible to whoever is holding it.
-      return { ...row };
+      return { row: { ...row }, created: true };
     },
+    liveForSha: async (_ctx: TenantContext, agentId: string, prNumber: number, headSha: string) =>
+      [...rows.values()].find(
+        (r) => r.agent_id === agentId && r.pr_number === prNumber && r.head_sha === headSha
+          && r.status !== "completed",
+      ),
     byId: async (_ctx: TenantContext, id: string) => rows.get(id),
     attachGithubId: async (_ctx: TenantContext, id: string, githubId: string) => {
       const row = rows.get(id);
@@ -155,6 +167,46 @@ try {
     const cancelled = posted.check_runs.find((c) => String(c.id) === old.id);
     check(cancelled?.conclusion === "cancelled", "the older check is cancelled");
     check(cancelled?.name === "Jaroku eval · weather-suite", "…keeping its own name", cancelled?.name);
+  }
+
+  console.log("\na redelivered pull_request does not open a rival or spend a second time");
+  {
+    // GitHub retries anything it did not answer in time, a retry can land on another replica or
+    // after a restart, and `reopened` carries the same head sha as the `opened` before it. Meanwhile
+    // `supersede` excludes the same sha by construction, so it cancels nothing — the whole reason a
+    // redelivery used to produce a second check run on the pull request and a second PAID eval
+    // fan-out for one commit.
+    const checks = fakeChecks({
+      agent_id: "agent-3", ci_dataset_id: "dataset-1",
+      provider_policy: "collaborators_paid", updated_at: new Date().toISOString(),
+    });
+    let dispatches = 0;
+    const runner = new CheckRunner({
+      checks: checks as never,
+      repo: {} as never,
+      startEval: async () => `eval-${++dispatches}`,
+      log: () => {},
+    });
+    const twice = { ...event, number: 77 };
+    const first = await runner.onPullRequest(ctx, {
+      api, agentUuid: "agent-3", agentSlug: "weather-agent", linkId: "link-1",
+      repoFullName: repo, event: twice, configuredTargets: [{ provider: "fake", model: "" }],
+      datasetName: "weather-suite",
+    });
+    // The same delivery again — the reopen, the retry, the second replica.
+    const second = await runner.onPullRequest(ctx, {
+      api, agentUuid: "agent-3", agentSlug: "weather-agent", linkId: "link-1",
+      repoFullName: repo, event: { ...twice, action: "reopened" },
+      configuredTargets: [{ provider: "fake", model: "" }], datasetName: "weather-suite",
+    });
+
+    check(second.checkRunId === first.checkRunId, "the redelivery answers with the check already open");
+    check(second.reason === "this commit is already being checked", "…saying so", second.reason);
+    check(dispatches === 1, "…and the workspace's balance is spent once, not twice", String(dispatches));
+    check(
+      [...checks.rows.values()].filter((r) => r.pr_number === 77).length === 1,
+      "…with one row for the commit rather than two rivals",
+    );
   }
 
   console.log("\nno dataset is no check, and no request either");

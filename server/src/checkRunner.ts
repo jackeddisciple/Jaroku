@@ -118,13 +118,23 @@ export class CheckRunner {
     const mode = providerModeFor(facts);
 
     // 5. THE CHECK FIRST, THE EVAL SECOND.
-    const row = await this.deps.checks.open(ctx, {
+    const { row, created } = await this.deps.checks.open(ctx, {
       agentId: input.agentUuid,
       linkId: input.linkId,
       prNumber: event.number,
       headSha: event.headSha,
       providerMode: mode,
     });
+    // A DELIVERY FOR A COMMIT ALREADY BEING CHECKED IS NOT A SECOND CHECK. GitHub retries anything
+    // it did not get a timely answer to, a retry can land on another replica or after a restart,
+    // and `reopened` carries the same head sha as the `opened` before it — while `supersede` above
+    // excludes the same sha by construction and therefore cancels nothing. Returning here is what
+    // stops a second check run appearing on the pull request and, more expensively, a second eval
+    // fan-out spending the workspace's provider balance on a commit already being measured.
+    if (!created) {
+      this.log(`[checks] ${input.agentSlug}#${event.number} at ${event.headSha.slice(0, 7)}: already checking`);
+      return { checkRunId: row.id, reason: "this commit is already being checked" };
+    }
 
     const name = titleFor(input.datasetName ?? null);
     // GITHUB'S OWN ID FOR THE CHECK, HELD HERE RATHER THAN RE-READ OFF `row`. `open` returns the

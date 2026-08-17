@@ -198,18 +198,55 @@ export class ChecksRepository {
       headSha: string;
       providerMode: ProviderMode;
     },
-  ): Promise<CheckRunRow> {
+  ): Promise<{ row: CheckRunRow; created: boolean }> {
     const id = randomUUID();
+    // ON CONFLICT AGAINST MIGRATION 045'S PARTIAL UNIQUE INDEX — one live check per
+    // (workspace, agent, pull request, commit). A redelivered `pull_request` webhook used to open a
+    // rival here: `supersededBy` excludes the same sha by construction, so it cancels nothing, and
+    // the only dedup on the path is a per-process `Set` that cannot survive a restart or help a
+    // second replica. The result was two check runs with one name on one pull request and the
+    // workspace's provider balance spent twice on the same commit.
+    //
+    // A read-then-insert would not have closed it: that is a TOCTOU across exactly the window two
+    // concurrent deliveries occupy, and they can be on two machines. The database decides.
     await this.q(ctx).run(
       `INSERT INTO check_runs
          (id, workspace_id, agent_id, link_id, pr_number, head_sha, status, provider_mode, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+       ON CONFLICT DO NOTHING`,
       [
         id, ctx.workspaceId, input.agentId, input.linkId ?? null, input.prNumber, input.headSha,
         input.providerMode, new Date().toISOString(),
       ],
     );
-    return (await this.byId(ctx, id))!;
+    const mine = await this.byId(ctx, id);
+    if (mine) return { row: mine, created: true };
+    // Somebody else's insert won. Theirs is the check for this commit, and the caller's job is to
+    // leave it alone rather than to post a second one to GitHub and dispatch a second eval.
+    return { row: (await this.liveForSha(ctx, input.agentId, input.prNumber, input.headSha))!, created: false };
+  }
+
+  /**
+   * The live check for one commit on one pull request, if there is one.
+   *
+   * The read side of 045's constraint: exactly the rows that index refuses a second of. Used to
+   * recover the winner after a losing insert, and readable on its own so a caller can ask before
+   * doing anything expensive.
+   */
+  async liveForSha(
+    ctx: TenantContext,
+    agentId: string,
+    prNumber: number,
+    headSha: string,
+  ): Promise<CheckRunRow | undefined> {
+    const row = await this.q(ctx).get<Record<string, unknown>>(
+      `SELECT ${CHECK_COLUMNS} FROM check_runs
+        WHERE workspace_id = ? AND agent_id = ? AND pr_number = ? AND head_sha = ?
+          AND status <> 'completed'
+        ORDER BY created_at DESC, id DESC LIMIT 1`,
+      [ctx.workspaceId, agentId, prNumber, headSha],
+    );
+    return row ? this.hydrate(row) : undefined;
   }
 
   async byId(ctx: TenantContext, id: string): Promise<CheckRunRow | undefined> {
