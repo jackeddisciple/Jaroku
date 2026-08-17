@@ -1377,8 +1377,16 @@ export interface ThreadView {
    * which is what the marker renders as `⚠ 2 active`. A boolean would say that a collision exists and
    * leave "how many" to a second query.
    *
-   * `needs_you` AND `running` ONLY. An idle or archived thread on the same agent is not a collision, it
-   * is history — and counting it would put a warning on every agent anybody has ever used twice.
+   * `needs_you`, `errored` AND `running`. An idle or archived thread on the same agent is not a
+   * collision, it is history — and counting it would put a warning on every agent anybody has ever
+   * used twice.
+   *
+   * A DELIBERATE DEVIATION FROM §4.3.4's LETTER, which says "counts only `needs_you` and `running`",
+   * and this said the same for a while and was already untrue of `activePerAgent`. An `errored`
+   * thread is in the Needs You section (§4.2) and is unresolved work against the same files — a
+   * failed run somebody has not dealt with is exactly the other session it is dangerous not to know
+   * about. Stated here rather than left as a disagreement between the implementation and its own
+   * type documentation.
    *
    * It is on the ROW rather than in a per-agent map beside the list, because the row is where it renders
    * and a map would be a second thing to keep in step with the statuses it was derived from.
@@ -1410,6 +1418,12 @@ export interface ThreadCounts {
    * independently-derived counts of "what is waiting on me" that disagree about whether a failure
    * counts is precisely the trust-eroding mismatch the GitHub header/badge split was built to
    * avoid, and it would be visible in two places at once.
+   *
+   * WHICH MEANS THE BADGE COUNTS `errored` TOO, and §2.1's letter is "the `needs_you` count only".
+   * The deviation is deliberate and is recorded here because two surfaces compare this number: the
+   * badge exists so nobody opens the tab to check whether anything is blocked, and a run that ended
+   * in error is blocked in every sense a person cares about. Making the badge smaller than the
+   * section it points at would be the same mismatch by a different route.
    */
   needs_you: number;
   running: number;
