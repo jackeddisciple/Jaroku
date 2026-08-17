@@ -3448,8 +3448,29 @@ function scheduleThreadBroadcast(ctx: TenantContext): void {
   pendingThreadBroadcasts.set(ctx.workspaceId, timer);
 }
 
+/**
+ * A refusal on the threads channel, to the socket that earned it and nobody else.
+ *
+ * BROADCAST WAS THE WRONG PRIMITIVE HERE. A refusal is about one command from one client — one
+ * member's mistyped rename painted a red strip across every teammate's Threads view, telling
+ * somebody who had done nothing that "a thread needs a name — Escape cancels the edit" with no edit
+ * open. `sendThreads` is the shape `createThread`'s answer already uses, and for the same reason.
+ */
+function refuseThread(ctx: TenantContext, message: string, threadId?: string): void {
+  relay.sendThreads(ctx, ctx.requestId, { type: "error", message, ...(threadId ? { threadId } : {}) });
+}
+
 async function handleThreadCommand(ctx: TenantContext, cmd: ThreadCommand): Promise<void> {
   try {
+    // SHAPE-CHECKED BEFORE THE DRIVER SEES IT. The relay forwards any member of THREAD_COMMANDS
+    // without checking its fields — deliberately, so the refusal can be written here — and
+    // `{"cmd":"archiveThread"}` with no id therefore reached `threadStore.archive(ctx, undefined)`
+    // and let whatever the driver threw become a workspace-wide message.
+    if (cmd.cmd !== "createThread" && typeof cmd.threadId !== "string") {
+      refuseThread(ctx, "that command needs a thread");
+      return;
+    }
+
     if (cmd.cmd === "createThread") {
       const agentId = typeof cmd.agentId === "string" ? cmd.agentId : null;
       // The name is snapshotted at creation (§3.2), so it has to be resolved now rather than at
@@ -3485,11 +3506,7 @@ async function handleThreadCommand(ctx: TenantContext, cmd: ThreadCommand): Prom
     if (cmd.cmd === "renameThread") {
       const title = String(cmd.title ?? "").trim();
       if (!title) {
-        relay.broadcastThreads(ctx, {
-          type: "error",
-          threadId: cmd.threadId,
-          message: "a thread needs a name — Escape cancels the edit",
-        });
+        refuseThread(ctx, "a thread needs a name — Escape cancels the edit", cmd.threadId);
         return;
       }
       await threadStore.rename(ctx, cmd.threadId, title);
@@ -3511,10 +3528,14 @@ async function handleThreadCommand(ctx: TenantContext, cmd: ThreadCommand): Prom
   } catch (err) {
     // On the threads channel, because that is where the list is waiting for an answer. A refusal
     // in the status bar would leave the row showing the state it had before the click.
-    relay.broadcastThreads(ctx, {
-      type: "error",
-      message: `threads: ${(err as Error)?.message ?? String(err)}`,
-    });
+    //
+    // A FIXED SENTENCE, AND THE REAL ONE IN THE LOG. What was interpolated here is whatever threw —
+    // which on this path is usually a database driver, and the relay's own rule is that everything
+    // reaching a client "was written in this codebase for a person to read, never a driver's". It
+    // went to every socket in the workspace as well, so one member's malformed frame disclosed
+    // internal error text to everybody with the tab open.
+    console.error(`[threads] ${cmd.cmd} failed:`, (err as Error)?.message ?? err);
+    refuseThread(ctx, "that did not work — the list is unchanged");
   }
 }
 
