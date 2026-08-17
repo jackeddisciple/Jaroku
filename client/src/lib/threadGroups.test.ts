@@ -13,7 +13,7 @@
 //
 //   npm run test:thread-groups
 
-import { groupThreads, hoursOutstanding, isBlockedThread, STALE_HOURS } from "./threadGroups.ts";
+import { groupThreads, isBlockedThread } from "./threadGroups.ts";
 import type { ThreadStatus, ThreadView } from "../types.ts";
 
 let fail = 0;
@@ -128,17 +128,12 @@ const ids = (list: ThreadView[]): string => list.map((x) => x.id).join(",");
     groupThreads([t("a", "archived", 1, true)]).length === 0);
 }
 
-// --- 7. the staleness threshold -------------------------------------------------------------
-{
-  const now = Date.UTC(2026, 7, 17, 12);
-  check("an hour-old thread is an hour old", Math.round(hoursOutstanding(t("a", "needs_you", 1), now)) === 1);
-  check("a four-day-old one is past the threshold",
-    hoursOutstanding(t("b", "needs_you", 96), now) > STALE_HOURS);
-  check("...and an eighteen-minute-old one is not",
-    hoursOutstanding(t("c", "needs_you", 0.3), now) < STALE_HOURS);
-  check("an unparseable timestamp is zero rather than a negative age",
-    hoursOutstanding({ ...t("d", "needs_you", 1), last_activity_at: "not a date" }, now) === 0);
-}
+// --- 7. (was the staleness threshold) --------------------------------------------------------
+//
+// `hoursOutstanding` and `STALE_HOURS` were asserted here and read by nothing else in the product.
+// §4.2's refinement is served by `relTime`, which renders `4d ago` regardless of threshold, and by
+// the ordering asserted above — Needs You oldest first, so the longest-forgotten row is at the top.
+// The exports are gone; a suite green over something unwired is worse than no suite.
 
 // --- 8. the input is not mutated -------------------------------------------------------------
 {

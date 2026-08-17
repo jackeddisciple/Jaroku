@@ -86,19 +86,15 @@ export function groupThreads(threads: ThreadView[]): ThreadSection[] {
   return sections.filter((s) => s.threads.length > 0);
 }
 
-/**
- * How long a blocked thread has been waiting, in whole hours.
- *
- * §4.2's refinement asks for the exact age on anything outstanding for more than a day, and the
- * existing relative-time formatter already renders `4d` — so this exists only to answer the
- * threshold question, and returns hours rather than a formatted string precisely so it cannot become
- * a second formatter.
- */
-export function hoursOutstanding(t: ThreadView, now = Date.now()): number {
-  const at = Date.parse(t.last_activity_at);
-  if (Number.isNaN(at)) return 0;
-  return Math.max(0, (now - at) / 3_600_000);
-}
-
-/** More than a day. The point at which §4.2 says the age is worth rendering exactly. */
-export const STALE_HOURS = 24;
+// WHAT IS DELIBERATELY NOT HERE: `hoursOutstanding` and `STALE_HOURS`.
+//
+// They existed to answer §4.2's "render the exact age on anything outstanding more than a day", and
+// nothing ever asked them — no component imported either, and their only reader was their own test,
+// which passed. §4.2's refinement is met without them: `relTime` already renders `4d ago` on every
+// row whatever its age, and the spec's own note on that refinement is "no new formatting logic
+// required". A threshold nothing crosses and an age nothing reads are not a feature waiting to be
+// wired, and a green suite over them was the misleading part — so both are gone rather than given a
+// caller invented for their benefit.
+//
+// The ORDERING is what actually serves the refinement, and it is asserted above: Needs You sorts
+// oldest first, so the longest-forgotten row is the one at the top of the section.
