@@ -30,7 +30,22 @@
 
 import { createSign, randomUUID, timingSafeEqual, createHmac } from "node:crypto";
 
+import { githubApiBase } from "./githubApi.ts";
 import { setEnvVar } from "./envWriter.ts";
+
+/**
+ * GitHub's WEB host, as distinct from its API host.
+ *
+ * TWO HOSTS BECAUSE GITHUB HAS TWO. `api.github.com` answers the REST calls; `github.com` is where
+ * a person is sent to create an App, choose repositories and authorise — and where the OAuth token
+ * exchange lives, which is the one credential endpoint that is not on the API host. `githubApi.ts`
+ * has had `JAROKU_GITHUB_API` since it was written, "overridable so the test fixtures and any
+ * GitHub Enterprise host can be pointed at"; this is that same sentence for the other half, and it
+ * is what lets the whole install flow be driven against the fixture with no GitHub account.
+ */
+export function githubWebBase(): string {
+  return process.env["JAROKU_GITHUB_WEB"] || "https://github.com";
+}
 
 /**
  * Where the App's own credentials live: `runtime/.env`, beside the Anthropic key and the Stripe
@@ -161,7 +176,7 @@ export async function convertManifest(
   code: string,
   opts: { apiBase?: string; envPath: string },
 ): Promise<{ ok: true; slug: string } | { ok: false; message: string }> {
-  const base = opts.apiBase ?? "https://api.github.com";
+  const base = opts.apiBase ?? githubApiBase();
   const response = await fetch(`${base}/app-manifests/${encodeURIComponent(code)}/conversions`, {
     method: "POST",
     headers: {
@@ -256,7 +271,7 @@ export async function mintInstallationToken(
   installationId: string,
   opts: { apiBase?: string } = {},
 ): Promise<MintedToken> {
-  const base = opts.apiBase ?? "https://api.github.com";
+  const base = opts.apiBase ?? githubApiBase();
   const response = await fetch(`${base}/app/installations/${encodeURIComponent(installationId)}/access_tokens`, {
     method: "POST",
     headers: {
@@ -285,7 +300,7 @@ export async function readInstallation(
   installationId: string,
   opts: { apiBase?: string } = {},
 ): Promise<{ login: string; type: "user" | "org" }> {
-  const base = opts.apiBase ?? "https://api.github.com";
+  const base = opts.apiBase ?? githubApiBase();
   const response = await fetch(`${base}/app/installations/${encodeURIComponent(installationId)}`, {
     headers: {
       Authorization: `Bearer ${appJwt(config.appId, config.privateKey)}`,
@@ -388,7 +403,7 @@ async function postToken(
   authBase: string | undefined,
   body: Record<string, string>,
 ): Promise<UserToken> {
-  const base = authBase ?? "https://github.com";
+  const base = authBase ?? githubWebBase();
   const response = await fetch(`${base}/login/oauth/access_token`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "jaroku" },

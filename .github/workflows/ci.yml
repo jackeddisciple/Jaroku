@@ -179,6 +179,7 @@ jobs:
           npm run test:github-push
           npm run test:github-first-push
           npm run test:github-app
+          npm run test:github-app-flow
           npm run test:github-checks-line
           npm run test:check-runner
           npm run test:github-webhook

@@ -31,7 +31,7 @@
 import { badRequest, unauthorized, type Handler, type HttpRequest, type HttpResponse } from "./router.ts";
 import {
   APP_ENV, RoundTripStates, buildManifest, convertManifest, exchangeUserCode, githubAppConfig,
-  readInstallation,
+  githubWebBase, readInstallation,
 } from "../githubApp.ts";
 import type { GithubIdentity } from "../githubIdentity.ts";
 import { requireCapability } from "../auth/capabilities.ts";
@@ -109,7 +109,7 @@ export function githubAppRoutes(
           action: "register",
           // POSTED AS A FORM BY THE BROWSER, not fetched by us: GitHub renders a confirmation
           // screen at this URL and only a top-level navigation can show it to a person.
-          url: "https://github.com/settings/apps/new",
+          url: `${githubWebBase()}/settings/apps/new`,
           state,
           manifest: JSON.stringify(buildManifest({ baseUrl: deps.baseUrl })),
         },
@@ -119,7 +119,7 @@ export function githubAppRoutes(
       status: 200,
       body: {
         action: "install",
-        url: `https://github.com/apps/${encodeURIComponent(app.slug)}/installations/new?state=${encodeURIComponent(state)}`,
+        url: `${githubWebBase()}/apps/${encodeURIComponent(app.slug)}/installations/new?state=${encodeURIComponent(state)}`,
         state,
       },
     };
@@ -150,7 +150,7 @@ export function githubAppRoutes(
     return {
       status: 302,
       headers: {
-        location: `https://github.com/apps/${encodeURIComponent(outcome.slug)}/installations/new?state=${encodeURIComponent(next)}`,
+        location: `${githubWebBase()}/apps/${encodeURIComponent(outcome.slug)}/installations/new?state=${encodeURIComponent(next)}`,
       },
     };
   };
@@ -174,9 +174,7 @@ export function githubAppRoutes(
     const ctx = systemContextFor(workspaceId, newRequestId());
     let account: { login: string; type: "user" | "org" };
     try {
-      account = await readInstallation(app, installationId, {
-        ...(process.env["JAROKU_GITHUB_API"] ? { apiBase: process.env["JAROKU_GITHUB_API"] } : {}),
-      });
+      account = await readInstallation(app, installationId);
     } catch (err) {
       log(`[github] could not read installation ${installationId}: ${(err as Error)?.message}`);
       return done("Could not finish connecting", "GitHub would not confirm that installation.", false);
