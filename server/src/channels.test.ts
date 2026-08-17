@@ -242,6 +242,60 @@ console.log("\nan in-flight operation's channel scope belongs to it alone");
 }
 
 // ---------------------------------------------------------------------------------------------
+// 3c. Every §3.3 liveness transition tells the thread list, not only the ones that start work.
+// ---------------------------------------------------------------------------------------------
+//
+// `noteThreadItem` was the only broadcast point, and an item is written when work STARTS —
+// ownership does not change when it ends, because liveness is read from the owner. So the list
+// refreshed for a run beginning and for nothing that ended one: a run that FAILED left its thread
+// rendering `● running` indefinitely, never joined Needs You, and never raised the §2.1 badge,
+// which is the precise failure that badge exists to prevent. It corrected itself only once
+// something unrelated happened in the workspace.
+//
+// Enumerated by handler rather than by counting call sites, because the number of broadcasts is not
+// the invariant — "each of these transitions pushes one" is. A handler that stops doing so fails
+// here rather than being noticed by somebody watching a row that never turns red.
+
+console.log("\nevery transition §3.3 derives from refreshes the list");
+{
+  /** A handler's body, located by a unique opening line and bounded by the next top-level one. */
+  const bodyFrom = (start: string, chars = 4000): string => {
+    const at = indexSource.indexOf(start);
+    return at === -1 ? "" : indexSource.slice(at, at + chars);
+  };
+
+  const transitions: { fact: string; start: string; chars?: number }[] = [
+    { fact: "a run ending (liveRuns down, lastEndedInError)", start: 'onBothPools("event"', chars: 6000 },
+    { fact: "a run crashing or being killed", start: 'onBothPools("exit"', chars: 6000 },
+    { fact: "a run that never started", start: 'onBothPools("spawnError"' },
+    { fact: "an MCP confirmation opening", start: 'ctrl.ctrl === "tool_confirm"' },
+    { fact: "an MCP confirmation being cleared", start: "function clearConfirms" },
+    { fact: "an MCP confirmation being answered", start: 'case "resolveMcpConfirm"' },
+    { fact: "a plan being discarded", start: 'planner.on("discarded"' },
+    { fact: "an eval finishing", start: "onFinished: (e) => {", chars: 3000 },
+    { fact: "a deployment settling", start: "onFinished: (d) => {" },
+  ];
+
+  for (const { fact, start, chars } of transitions) {
+    const body = bodyFrom(start, chars);
+    check(
+      body.length > 0 && /scheduleThreadBroadcast\(|broadcastThreads\(/.test(body),
+      `${fact} refreshes the thread list`,
+      body.length === 0 ? `handler not found: ${start}` : "no thread broadcast in the handler",
+    );
+  }
+
+  // AND NOT PER PROGRESS TICK. §7.1's protocol note refuses turning a full-snapshot channel into a
+  // polling one, and an eval's per-job progress is exactly the shape that would do it — the moving
+  // figure is fed from the eval channel's own cost delta instead.
+  const onProgress = indexSource.slice(indexSource.indexOf("onProgress: (p) =>"), indexSource.indexOf("onProgress: (p) =>") + 300);
+  check(
+    !/scheduleThreadBroadcast\(|broadcastThreads\(/.test(onProgress),
+    "...but eval progress does not, which would make the channel a polling one",
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
 // 3b. A command that answers on a feature's channel reaches that feature's handler.
 // ---------------------------------------------------------------------------------------------
 //

@@ -1330,14 +1330,19 @@ const deployDeps: DeployManagerDeps = {
   onStage: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "stage", ...e }),
   onLog: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "log", ...e }),
   onServeToken: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "serveToken", ...e }),
-  onFinished: (d) =>
+  onFinished: (d) => {
     relay.broadcastDeploy(contextForDeploy(), {
       type: "finished",
       deploymentId: d.id,
       status: d.status,
       url: d.url,
       error: d.error,
-    }),
+    });
+    // §4.3's `deployed` fragment is derived from the deploy store, so a deployment going live (or
+    // stopping) changes what an idle thread on that agent says about itself — and nothing was
+    // pushing a snapshot for it.
+    scheduleThreadBroadcast(contextForDeploy());
+  },
   onChanged: () => {
     broadcastDeployments();
     // An agent's row in the sidebar carries its deployment, so the agent list is stale too.
@@ -2541,6 +2546,12 @@ evalRunner = new EvalRunner({
     void relay.broadcastHistory();
     // No more jobs are coming: the judge reports done once its own queue drains.
     judge.seal(e.evalId);
+    // §3.3'S `evalProgress` COMES OFF `eval_runs.status`, so an eval finishing is a state
+    // transition and nothing was pushing one. A thread whose eval had ended sat under RUNNING with
+    // `eval 34/120` frozen until something unrelated happened in the workspace. Deliberately not
+    // per job — that is the polling channel §7.1 refuses; see the eval-progress cost delta for how
+    // the moving figure is fed instead.
+    scheduleThreadBroadcast(contextForEval(e.evalId));
 
     // Sweep the resumable-checkpoint blobs these runs left behind. The traces stay —
     // only the pause/resume machinery goes, and nobody resumes a finished eval job.
@@ -2612,8 +2623,10 @@ function writeApproval(runId: string, nonce: string, verdict: string): void {
  * would write an approval file nobody will ever read.
  */
 function clearConfirms(runId: string, reason: string, nonce?: string): void {
+  let cleared = 0;
   for (const [key, p] of [...pendingConfirms]) {
     if (p.runId !== runId) continue;
+    cleared++;
     // Scoped to one ask when the caller knows which one. A graph node can fire several tool
     // calls in a turn and each high-impact one blocks independently (the client keeps them as
     // a queue), so one of them timing out must not close the modals for the others — those
@@ -2623,6 +2636,10 @@ function clearConfirms(runId: string, reason: string, nonce?: string): void {
     rmSync(approvalFile(p.runId, p.nonce), { force: true });
     relay.broadcastMcp(contextForRun(p.runId), { type: "confirmResolved", runId: p.runId, nonce: p.nonce, verdict: reason });
   }
+  // §3.3 counts a pending confirmation as blocked work, so one going away is a genuine state
+  // transition and the list has to be told. Only when something actually cleared: this runs on
+  // every run's teardown and most runs never asked anything.
+  if (cleared > 0) scheduleThreadBroadcast(contextForRun(runId));
 }
 
 function broadcastMcpServers(): void {
@@ -2728,6 +2745,9 @@ async function handleMcpCommand(ctx: TenantContext, cmd: McpCommand): Promise<vo
         runEventBus.resolveMcpConfirm(cmd.runId, cmd.nonce, verdict);
         console.log(`[mcp] ${pending.server}/${pending.tool} — ${verdict}`);
         relay.broadcastMcp(ctx, { type: "confirmResolved", runId: cmd.runId, nonce: cmd.nonce, verdict });
+        // The thread stops being blocked the moment this is answered, and §3.3 reads the confirm
+        // queue live — so the fact changes here and the list has to hear about it.
+        scheduleThreadBroadcast(ctx);
         return;
       }
 
@@ -5514,6 +5534,18 @@ onBothPools("event", ({ runId, event }) => {
       console.error("[store] failed to persist event:", (err as Error).message);
     }
     if (!isEvalRun(runId)) relay.broadcastTrace(runCtx, event);
+    // §3.3'S DERIVATION READS `runs.status`, SO A RUN ENDING IS A GENUINE STATE TRANSITION.
+    //
+    // `noteThreadItem` was the only broadcast point, and an item is written when work STARTS —
+    // ownership does not change when it ends, because liveness is read from the owner. That design
+    // is right; what was missing is that the owner changing liveness also has to say so. Without
+    // this a run that failed left its thread rendering `● running` indefinitely: never `✕ errored`,
+    // never in Needs You, never counted by the badge — the precise failure §2.1 exists to prevent.
+    // It corrected itself only when something unrelated happened to the workspace.
+    //
+    // Coalesced (see `scheduleThreadBroadcast`), because the snapshot is expensive and a run ending
+    // touches the list from three handlers within a millisecond of each other.
+    if (event.kind === "run_end") scheduleThreadBroadcast(runCtx);
   });
 });
 
@@ -5601,6 +5633,10 @@ onBothPools("control", ({ runId: slotRunId, ctrl }) => {
         timeoutS: typeof ctrl.timeout_s === "number" ? ctrl.timeout_s : 120,
         requestedAt: new Date().toISOString(),
       });
+      // A halted graph waiting on a person is §3.3's `needs_you`, and the derivation reads
+      // `pendingConfirms` live — so the fact is already true and nothing was telling the list.
+      // The row turns amber while the run is blocked, and back when `clearConfirms` fires.
+      scheduleThreadBroadcast(runCtx);
     } else if (ctrl.ctrl === "tool_confirm_closed") {
       // The runner gave up waiting (or was denied) and has moved on. Close the ask so a
       // modal cannot linger over a question nobody is listening for any more.
@@ -5618,6 +5654,10 @@ onBothPools("spawnError", ({ runId, error }) => {
     activeRunId = null;
   }
   void releaseInteractiveSlot(contextForRun(runId).workspaceId, runId);
+  // A run that never started is a run that ended, as far as §3.3 is concerned — its thread stops
+  // being `running` and nothing else would say so. See the `run_end` broadcast for the whole
+  // argument; this is the case where there is no `run_end` at all.
+  scheduleThreadBroadcast(contextForRun(runId));
   console.error(`[manager] spawn error (run ${runId}):`, error.message);
 });
 
@@ -5679,6 +5719,10 @@ onBothPools("exit", ({ runId, code, signal, timedOut, elapsedMs }) => {
   // that crashed while blocked would leave a modal asking about a process that no longer
   // exists, and answering it would write a file nobody will ever read.
   clearConfirms(runId, "run ended");
+  // AND THE LIST LEARNS THE RUN IS OVER, including the crash that never emitted a `run_end`. The
+  // ingest chain's own broadcast covers the ordinary ending; this covers a killed or crashed
+  // process, which is exactly the case §3.3 turns red and the badge should count.
+  scheduleThreadBroadcast(billedCtx);
   traceBackpressure.release(runId);
   // A no-op for an eval run — it never acquired one. A paused run's process genuinely exits
   // (see debug depth §S3), so this releases the reservation across the pause too; resumeRun
@@ -5733,6 +5777,10 @@ planner.on("discarded", ({ planId, workspaceId }) => {
     ? contextForPlan()
     : systemContextFor(workspaceId, newRequestId());
   relay.broadcastGen(ctx, { type: "plan_discarded", planId }, ctx === planContext ? planThread : null);
+  // §3.3 counts a plan awaiting a decision as blocked work, read live off the planner's slot — so a
+  // discard un-blocks the thread and nothing was saying so. The row went on reading `plan awaiting`
+  // until something else in the workspace forced a snapshot.
+  scheduleThreadBroadcast(ctx);
 });
 
 planner.on("plan", (e) => {
