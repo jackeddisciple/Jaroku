@@ -384,5 +384,30 @@ async function statusesFor(
     Math.abs(spend.get(expensive.id)!.usd + spend.get(cheap.id)!.usd - period.usd) < 1e-9);
 }
 
+// --- a refused generation describes the LATEST attempt, not every attempt --------------------
+//
+// The mark used to be a generation id, and the only id in hand when a generation starts is the one
+// just minted — so "clear the previous rejection" deleted a uuid nothing had ever added, and one
+// refusal left the session amber through every later success while §2.1's badge counted it forever.
+{
+  const h = await harness();
+  await seedAgent(h.db, "support_bot");
+  const t = await h.threads.create(ctx, { title: "Rate limiting" });
+
+  await h.threads.addItem(ctx, t.id, { kind: "generation", refId: randomUUID() });
+  const refused = new Set([t.id]);
+  check("a refused generation blocks its thread",
+    (await statusesFor(h, { rejectedGenerations: refused }))?.get(t.id)?.status === "needs_you");
+  check("...and says which kind of blocked it is",
+    (await statusesFor(h, { rejectedGenerations: refused }))?.get(t.id)?.fragment === "generation rejected");
+
+  // The retry: a second generation in the same thread, which is what index.ts clears the mark on.
+  refused.delete(t.id);
+  await h.threads.addItem(ctx, t.id, { kind: "generation", refId: randomUUID() });
+  const after = await statusesFor(h, { rejectedGenerations: refused });
+  check("a successful regeneration clears it", after.get(t.id)?.status === "idle", after.get(t.id)?.status);
+  check("...leaving nothing for the badge to count", after.get(t.id)?.fragment === null);
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);

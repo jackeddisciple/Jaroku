@@ -3028,15 +3028,19 @@ let editThread: string | null = null;
 let replyThread: string | null = null;
 
 /**
- * Generations the validator refused, by the id their `thread_items` row carries.
+ * THREADS whose latest generation the validator refused.
  *
  * IN MEMORY, LIKE THE PROPOSAL AND THE PLAN IT SITS BESIDE. §3.3 counts a rejected generation as
  * work waiting on a person, and what it is waiting for is a retry in this process — the refused
  * files were never published anywhere. A restart clears this, and the thread reads as idle, which
  * is true: there is nothing left to retry, only something to ask for again.
  *
- * Cleared when the same thread generates again, so "rejected" describes the last attempt rather
- * than accumulating one entry per failure for the life of the process.
+ * KEYED BY THREAD, NOT BY GENERATION, and that is what makes "cleared when the same thread generates
+ * again" true rather than merely intended. Keyed by generation it could not be cleared at all: the
+ * only id in hand at the start of a generation is the one just minted, and deleting a uuid nothing
+ * has ever added is a no-op — so one refusal left a session amber through every later success, and
+ * the §2.1 badge counted it forever. One entry per thread also bounds what was previously one entry
+ * per failed attempt for the life of the process.
  */
 const rejectedGenerations = new Set<string>();
 
@@ -5736,9 +5740,10 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   // recording it twice would make the preview echo a brief the user has since revised.
   if (!cmd.planId) noteUserMessage(ctx, genThread, prompt);
   // A generation whose validator refuses it is §3.3's "rejected generation" — work waiting on a
-  // person. `rejectedGenerations` is what marks this id, and clearing it here is what makes
-  // "rejected" describe the latest attempt rather than every attempt this process has seen.
-  rejectedGenerations.delete(generationId);
+  // person. Clearing the THREAD is what makes "rejected" describe the latest attempt rather than
+  // every attempt this process has seen: this generation is the retry, so whatever the last one
+  // was refused for is no longer what the session is blocked on.
+  rejectedGenerations.delete(genThread);
   noteThreadItem(ctx, genThread, { kind: "generation", refId: generationId });
   console.log(`[gen] generating${plan ? " from an approved plan" : ""} — "${prompt.slice(0, 80)}"`);
   relay.broadcastGen(contextForGen(), { type: "started", prompt });
@@ -5803,8 +5808,9 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     relay.broadcastGen(contextForGen(), { type: "error", ...e });
     // §3.3's "rejected generation": the thread is blocked on a person deciding what to do about it.
     // Marked rather than stored, for the reason `openProposals` is read live — the refused files
-    // exist in this process and nowhere else.
-    rejectedGenerations.add(generationId);
+    // exist in this process and nowhere else. The THREAD is what is blocked, and the next
+    // generation in it is what clears the mark.
+    if (genThread) rejectedGenerations.add(genThread);
     void broadcastThreads(contextForGen()).catch(() => {});
     cleanup();
   };

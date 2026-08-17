@@ -59,7 +59,14 @@ export interface FactsInput {
   proposals: Map<string, PendingDiff>;
   /** Plan ids awaiting a Generate or a revision. */
   plans: Set<string>;
-  /** Generation ids the validator refused and nobody has retried. */
+  /**
+   * THREAD ids whose latest generation the validator refused and nobody has retried.
+   *
+   * Keyed by thread rather than by generation id, because that is the only question asked of it —
+   * "does this session have a refused generation" — and because the per-generation keying could not
+   * be cleared: the caller minted a fresh uuid and deleted THAT, which is a guaranteed no-op, so a
+   * thread that was ever refused once stayed blocked through every later success.
+   */
   rejectedGenerations: Set<string>;
   /** runId -> high-impact MCP calls halting that run, waiting on a person. */
   confirms: Map<string, number>;
@@ -108,6 +115,10 @@ export function collectThreadFacts(input: FactsInput): Map<string, ThreadDerivat
         ...NO_FACTS,
         archivedAt: t.archived_at,
         deployed: t.agent_id !== null && input.deployedAgents.has(t.agent_id),
+        // Read off the thread rather than counted per item: the fact is "this session's latest
+        // generation was refused", which is one thing about the session and not a tally of every
+        // attempt it has ever made. `isBlocked` and the fragment only ever ask whether it is > 0.
+        rejectedGenerations: input.rejectedGenerations.has(t.id) ? 1 : 0,
       },
       preview: null,
       firstMessage: null,
@@ -183,8 +194,9 @@ export function collectThreadFacts(input: FactsInput): Map<string, ThreadDerivat
         if (item.ref_id && input.plans.has(item.ref_id)) f.awaitingPlans++;
         break;
 
+      // A generation item establishes ownership and nothing else; whether the latest one was
+      // refused is the thread's own fact, read once above.
       case "generation":
-        if (item.ref_id && input.rejectedGenerations.has(item.ref_id)) f.rejectedGenerations++;
         break;
     }
   }
