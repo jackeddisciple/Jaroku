@@ -3190,13 +3190,20 @@ async function threadFactsFor(ctx: TenantContext): Promise<Map<string, ThreadDer
  * read cost a write per row.
  */
 async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
-  const [rows, derived, spend] = await Promise.all([
+  const [rows, derived, spend, agents] = await Promise.all([
     threadStore.list(ctx),
     threadFactsFor(ctx),
     // Cumulative, never "this period" — §4.3's cost column is a fact about the session. See
     // `spendByThread`.
     billing.spendByThread(ctx),
+    agentRepo.list(ctx),
   ]);
+  // THE SLUG, NOT THE UUID, GOES OUT ON THE WIRE. Every other thing the client holds calls the slug
+  // "the agent id" — `listAgents` maps it that way, the sidebar selects by it, the run rows carry it —
+  // so sending the uuid here would make this the one place where an agent id means something else,
+  // and the row's agent chip could not select the agent it names. The uuid stays in the database,
+  // where the foreign key is.
+  const slugByUuid = new Map(agents.map((a) => [a.id, a.slug]));
   const views: ThreadView[] = [];
   const counts: ThreadCounts = { all: 0, needs_you: 0, running: 0, recent: 0, archived: 0 };
 
@@ -3210,10 +3217,13 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
 
     views.push({
       id: row.id,
-      agent_id: row.agent_id,
+      // Null for a deleted agent, which is what makes the chip render `name (deleted)` rather than a
+      // link to nothing — and null for a slug the workspace no longer has, which is the same case.
+      agent_id: row.agent_id ? (slugByUuid.get(row.agent_id) ?? null) : null,
       agent_name: row.agent_name_snapshot,
-      // The pair §4.3 renders three ways: a live name, `name (deleted)` dimmed, or `(no agent)`.
-      // A snapshot with no id is the middle case and the only way to tell it from the last.
+      // The pair §4.3 renders three ways. `agent_id IS NULL` on the ROW is the deletion — not the
+      // slug lookup above, which can also come back empty for an agent this replica has not
+      // materialised, and calling that "deleted" would dim a live agent's name.
       agent_deleted: row.agent_id === null && row.agent_name_snapshot !== null,
       title: row.title,
       title_is_custom: row.title_is_custom,
