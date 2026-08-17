@@ -13,7 +13,10 @@ import { useBuildStore } from "../store/buildStore.ts";
 import { RUN_PROVIDERS, useUiStore } from "../store/uiStore.ts";
 import { inputKey } from "../store/uiStore.ts";
 import { Truncate } from "./Truncate.tsx";
-import { sendRun } from "../lib/socket.ts";
+import { sendCreateThread, sendRun } from "../lib/socket.ts";
+import { useThreadStore } from "../store/threadStore.ts";
+import { openThread } from "../lib/threadNav.ts";
+import { relTime } from "../lib/format.ts";
 
 function isTypingTarget(el: EventTarget | null): boolean {
   const t = el as HTMLElement | null;
@@ -59,7 +62,10 @@ export function CommandPalette() {
   const openInCode = useBuildStore((s) => s.openInCode);
   const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === s.activeAgentId));
 
-  const [mode, setMode] = useState<"root" | "files">("root");
+  const [mode, setMode] = useState<"root" | "files" | "threads">("root");
+  // §4.7: reaching a thread never requires opening the tab at all. The list is the store's own
+  // snapshot, so what the palette offers and what the tab shows can never be two different lists.
+  const threads = useThreadStore((s) => s.threads);
 
   // Global shortcuts. Registered once; reads live store state so no stale closures.
   useEffect(() => {
@@ -83,6 +89,12 @@ export function CommandPalette() {
         return;
       }
       // Non-modified keys are trace navigation — but never while typing or in the palette.
+      //
+      // AND NEVER WHILE A FULL-SCREEN VIEW IS UP. J/K move a thread row there exactly as they move a
+      // trace step here, which is deliberate (§4.7: "same binding as trace-step navigation") — and it
+      // only works if one surface at a time is listening. The view that owns the screen owns the bare
+      // keys; the chords above stay the app's, because ⌘K and ⌘P are not about what is on screen.
+      if (useUiStore.getState().navView !== null) return;
       if (useUiStore.getState().paletteOpen || isTypingTarget(e.target)) return;
       if (e.key === "j" || e.key === "J") { e.preventDefault(); moveStep(1); }
       else if (e.key === "k" || e.key === "K") { e.preventDefault(); moveStep(-1); }
@@ -109,13 +121,27 @@ export function CommandPalette() {
       <Command loop>
         <Command.Input
           autoFocus
-          placeholder={mode === "files" ? "Jump to file…" : "Type a command or search…"}
+          placeholder={
+            mode === "files" ? "Jump to file…" : mode === "threads" ? "Go to thread…" : "Type a command or search…"
+          }
           className="w-full bg-transparent text-ink placeholder:text-faint px-4 py-3 outline-none text-[13px] border-b border-hair"
         />
         <Command.List className="max-h-[52vh] overflow-auto p-2">
           <Command.Empty className="px-3 py-6 text-center text-muted text-[12px]">No results.</Command.Empty>
 
-          {mode === "files" ? (
+          {mode === "threads" ? (
+            <Command.Group heading="Threads" className="mb-1">
+              {threads.map((t) => (
+                // The row's own vocabulary, in one line: what it is called, and the one fact §4.3 puts
+                // beside it. A palette entry that showed only the title would make a person open two
+                // threads to find the one with the pending diff.
+                <Item key={t.id} onSelect={run(() => openThread(t))} kbd={relTime(t.last_activity_at)}>
+                  <Truncate>{t.title}</Truncate>
+                  {t.fragment && <span className="shrink-0 text-faint text-[11px]">{t.fragment}</span>}
+                </Item>
+              ))}
+            </Command.Group>
+          ) : mode === "files" ? (
             <Command.Group heading="Files" className="mb-1">
               {fileOrder.map((path) => (
                 <Item key={path} onSelect={run(() => openInCode(path))}>
@@ -151,6 +177,11 @@ export function CommandPalette() {
                     key to collide with while the composer has focus. */}
                 <Item onSelect={run(() => setRightTab("secrets"))}>Open Secrets</Item>
                 <Item onSelect={run(() => { setMode("files"); })} kbd="⌘P">Jump to file…</Item>
+                {/* Switching mode rather than closing: `run` would dismiss the dialog, and the whole
+                    point of this entry is the list that comes next. */}
+                <Item onSelect={() => setMode("threads")}>Go to thread…</Item>
+                <Item onSelect={run(() => useUiStore.getState().openNav("threads"))}>Open Threads</Item>
+                <Item onSelect={run(() => sendCreateThread())} kbd="⌘N">New thread</Item>
                 <Item onSelect={run(focusChat)} kbd="⌘/">Focus chat</Item>
               </Command.Group>
             </>

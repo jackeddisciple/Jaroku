@@ -11,7 +11,7 @@
 // session and reopening Threads starts at All. Local state does that by construction — the view
 // unmounts when you leave it — where a store would have to be remembered to be cleared.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useThreadStore } from "../store/threadStore.ts";
 import { groupThreads } from "../lib/threadGroups.ts";
 import { filterThreads, FILTER_LABEL, type ThreadFilter } from "../lib/threadFilter.ts";
@@ -22,6 +22,7 @@ import { useSessionStore } from "../store/sessionStore.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { ThreadFilterBar } from "./ThreadFilterBar.tsx";
 import { ThreadRow } from "./ThreadRow.tsx";
+import { useThreadKeys } from "./useThreadKeys.ts";
 import { PlusIcon, SearchIcon } from "./panelIcons.tsx";
 
 export function ThreadsView() {
@@ -35,6 +36,14 @@ export function ThreadsView() {
   const [filter, setFilter] = useState<ThreadFilter>("all");
   const [query, setQuery] = useState("");
   const filterInput = useRef<HTMLInputElement | null>(null);
+  /**
+   * §4.7's cursor: where J/K is, which is NOT the same as which thread the centre pane holds.
+   *
+   * It starts on the open thread when there is one, because somebody who came back to this list is
+   * most likely looking for where they were — but it moves independently from then on, and pressing
+   * Enter is what makes the two the same again.
+   */
+  const [cursor, setCursor] = useState<string | null>(activeThreadId);
 
   const visible = filterThreads(threads, filter, query);
   // The Archived chip renders a FLAT list, not sections. §4.2's three sections are about what is
@@ -43,6 +52,24 @@ export function ThreadsView() {
   const sections = filter === "archived"
     ? [{ id: "archived" as const, label: "ARCHIVED", threads: visible }]
     : groupThreads(visible);
+  // The rows in the order they RENDER, which is what J/K has to walk — the sections reorder them, so a
+  // cursor moving through the store's array would jump around the screen.
+  const ordered = sections.flatMap((s) => s.threads);
+
+  useThreadKeys({
+    rows: ordered,
+    cursor,
+    setCursor,
+    setFilter,
+    focusFilter: () => filterInput.current?.focus(),
+  });
+
+  // A cursor on a row that is no longer rendered — filtered out, archived, or removed by somebody
+  // else's snapshot — is a cursor nobody can see moving. It falls back to the first row rather than to
+  // nothing, so the next keystroke does something.
+  useEffect(() => {
+    if (cursor && !ordered.some((t) => t.id === cursor)) setCursor(ordered[0]?.id ?? null);
+  }, [cursor, ordered]);
 
   return (
     <div className="flex h-full flex-col bg-bg">
@@ -127,9 +154,10 @@ export function ThreadsView() {
                   <ThreadRow
                     key={t.id}
                     thread={t}
-                    // The row the CENTRE PANE is holding, until §4.7's J/K cursor arrives and takes
-                    // this over. Two different ideas of "selected" that happen to coincide today.
-                    selected={t.id === activeThreadId}
+                    // §4.7's cursor, which is where the keyboard is. The thread the centre pane holds
+                    // is a different fact and is not marked here: this list's job is to be navigated,
+                    // and two highlights in one column would compete for the same meaning.
+                    selected={t.id === (cursor ?? activeThreadId)}
                     onOpen={() => openThread(t)}
                     onOpenAgent={openThreadAgent}
                     onRename={(title) => sendRenameThread(t.id, title)}

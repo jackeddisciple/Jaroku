@@ -50,6 +50,45 @@ export const inputKey = (agentId: string | null): string => {
 /** The prefix every remembered test input shares, for the sweep on sign-out. */
 export const INPUT_KEY_PREFIX = "jaroku.input.";
 
+// --- pinned agents (§2, §4.7's P) -----------------------------------------------------------
+//
+// The sidebar holds pinned agents above the active ones, and `P` on a selected thread pins or unpins
+// THAT THREAD'S AGENT — so pinning is a fact about an agent, and a fact one person holds rather than
+// the workspace. Two people sharing a Team workspace pin different things for different reasons, and a
+// shared pin list would be one of them rearranging the other's sidebar.
+//
+// SO IT IS `localStorage`, NOT A TABLE AND NOT A CHANNEL. It is a per-person view preference about
+// which rows sit at the top of one column: nothing else reads it, nothing depends on it being durable
+// across machines, and a round trip per pin would be a round trip for a bookmark.
+//
+// KEYED BY WORKSPACE, for the reason `inputKey` is: agent slugs are unique per workspace, not
+// globally, so one key per workspace is what stops a `support_bot` pinned in one appearing pinned in
+// another. Read at call time so every call site is scoped by construction.
+export const PINNED_KEY_PREFIX = "jaroku.pinned.";
+
+const pinnedKey = (): string => `${PINNED_KEY_PREFIX}${useSessionStore.getState().workspaceId ?? "_"}`;
+
+function readPinned(): string[] {
+  try {
+    const raw = localStorage.getItem(pinnedKey());
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
+  } catch {
+    // Storage can be unavailable (private mode, a locked-down browser). No pins is a perfectly good
+    // sidebar; refusing to render one would not be.
+    return [];
+  }
+}
+
+function writePinned(slugs: string[]): void {
+  try {
+    localStorage.setItem(pinnedKey(), JSON.stringify(slugs));
+  } catch {
+    /* see readPinned — an unwritable store must not break the column it decorates */
+  }
+}
+
 // --- first-run onboarding ----------------------------------------------------------------
 //
 // WHETHER somebody has onboarded is NOT here. It is `sessionStore.user.onboarded`, from the
@@ -158,6 +197,18 @@ interface UiState {
   navView: NavDestination | null;
   openNav: (destination: NavDestination) => void;
   closeNav: () => void;
+
+  /**
+   * Agent slugs this person has pinned, in the order they pinned them (§2's PINNED section).
+   *
+   * In the store as well as in `localStorage` because the sidebar re-renders from it; storage is where
+   * it survives a reload, and this is what a component subscribes to.
+   */
+  pinnedAgents: string[];
+  /** Re-read the pins for the workspace this tab is in. Called when the session lands. */
+  loadPinnedAgents: () => void;
+  /** §4.7's `P`, on the selected thread's agent. */
+  togglePinnedAgent: (agentId: string) => void;
 
   // The right panel's active tab, lifted here so the palette / shortcuts can switch it while
   // RightPanel's own auto-follow (generation → code, new run → trace) still writes the same field.
@@ -280,6 +331,19 @@ export const useUiStore = create<UiState>((set) => ({
   // the transition (§2), so there is nothing here that asks first and nothing that remembers where
   // it came from.
   closeNav: () => set({ navView: null }),
+
+  // Empty at module load, for the reason onboarding progress is: there is no session yet, so there is
+  // no workspace to read the pins OF. `loadPinnedAgents` runs once one lands.
+  pinnedAgents: [],
+  loadPinnedAgents: () => set({ pinnedAgents: readPinned() }),
+  togglePinnedAgent: (agentId) =>
+    set((s) => {
+      const pinnedAgents = s.pinnedAgents.includes(agentId)
+        ? s.pinnedAgents.filter((a) => a !== agentId)
+        : [...s.pinnedAgents, agentId];
+      writePinned(pinnedAgents);
+      return { pinnedAgents };
+    }),
 
   rightTab: "trace",
   setRightTab: (rightTab) => set({ rightTab }),

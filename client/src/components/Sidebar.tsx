@@ -246,6 +246,9 @@ export function Sidebar() {
   // repositories, and one repo per workspace would break the monorepo case the subdirectory field
   // exists for.
   const githubViews = useGithubStore((s) => s.views);
+  // §2: pinned agents, then the active/recent ones. The pins are this person's own, from localStorage
+  // keyed by workspace — see uiStore.
+  const pinnedIds = useUiStore((s) => s.pinnedAgents);
 
   const counts = { running: 0, deployed: 0, synced: 0, drafts: 0 };
   for (const a of agents) {
@@ -274,6 +277,13 @@ export function Sidebar() {
     // agent is, and a deploy in flight is the most interesting answer that question has.
     return st === "deployed" || st === "deploying";
   });
+
+  // In the order they were pinned, and only the ones that still exist: a pin outlives the agent it
+  // names (an agent can be deleted while a pin sits in localStorage), and rendering a row for one that
+  // is gone would be a sidebar entry that cannot be selected.
+  const pinned = pinnedIds
+    .map((id) => agents.find((a) => a.agent_id === id))
+    .filter((a): a is AgentSummary => a !== undefined);
 
   const runList = orderedRuns(runs);
   const tab = (id: Filter, label: string, count?: number) => (
@@ -327,6 +337,21 @@ export function Sidebar() {
         {tab("synced", "Synced", counts.synced)}
         {tab("drafts", "Drafts", counts.drafts)}
       </div>
+
+      {/* PINNED, above the rest of the list — §2's order for this column.
+          Only when there is something pinned: an empty PINNED heading is the same noise as an empty
+          section in the Threads view, and the same rule applies. Pinning is `P` on a selected thread,
+          which pins that thread's AGENT — see uiStore's pins for why it is per person and not shared. */}
+      {pinned.length > 0 && (
+        <div className="shrink-0">
+          <div className="flex items-center px-4 pt-2 pb-1">
+            <span className={TYPE.panelLabel}>Pinned</span>
+            <span className="ml-auto text-faint text-[11px]">{pinned.length}</span>
+          </div>
+          {pinned.map((a) => <AgentRow key={`pinned-${a.agent_id}`} agent={a} />)}
+          <div className="mt-1 border-t border-hair" />
+        </div>
+      )}
 
       {/* agent list */}
       <div className="max-h-[38%] overflow-auto shrink-0">

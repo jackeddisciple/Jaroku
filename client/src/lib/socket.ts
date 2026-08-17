@@ -18,7 +18,7 @@ import { useSessionStore } from "../store/sessionStore.ts";
 import { useMemberStore } from "../store/memberStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { resetWorkspaceStores } from "../store/reset.ts";
-import { INPUT_KEY_PREFIX } from "../store/uiStore.ts";
+import { INPUT_KEY_PREFIX, useUiStore } from "../store/uiStore.ts";
 import {
   fetchSession, fetchTicket, socketUrl, storeToken, storeWorkspace, storedToken, storedWorkspace,
   type AuthFailure,
@@ -390,6 +390,9 @@ async function connect(): Promise<void> {
     const issued = await fetchTicket(token, target);
     useSessionStore.getState().applySession(view, issued.workspaceId);
     storeWorkspace(issued.workspaceId);
+    // The pins belong to this WORKSPACE and are read from localStorage by its id, so they can only be
+    // read once there is one. Same shape as onboarding progress being re-read when the user lands.
+    useUiStore.getState().loadPinnedAgents();
     ticket = issued.ticket;
   } catch (err) {
     const failure = err as AuthFailure;
