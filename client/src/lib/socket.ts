@@ -595,8 +595,19 @@ export function switchWorkspace(workspaceId: string): void {
   startSocket();
 }
 
-function send(cmd: ClientCommand): void {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(cmd));
+/**
+ * Put a command on the wire, and say whether it went.
+ *
+ * IT USED TO RETURN NOTHING, and a closed socket therefore dropped writes in silence. That is fine
+ * for a read whose answer is a fresh snapshot nobody is waiting on, and it is not fine for a
+ * mutation: §3.4's archive wrote "Archived · discarded a pending diff (+42−11)" into the UI and
+ * then sent an `archiveThread` that never left the tab, so the notice named something that had not
+ * happened and Undo did nothing either. A caller that cares can now ask.
+ */
+function send(cmd: ClientCommand): boolean {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  ws.send(JSON.stringify(cmd));
+  return true;
 }
 
 /**
@@ -993,21 +1004,25 @@ export function sendLoadThread(threadId: string): void {
  * `agentId` is omitted for §3.1's planning stage: a thread legitimately exists before any agent does,
  * and that is the state somebody is in when they start describing one.
  */
-export function sendCreateThread(agentId?: string | null, title?: string): void {
-  send({ cmd: "createThread", agentId, title });
+// THE FOUR MUTATIONS REPORT WHETHER THEY LEFT. Everything about this channel is answered as a full
+// snapshot, so a client never patches its own state — which makes a dropped write invisible unless
+// the sender says so. The view uses this to write §3.4's notice only about an archive that actually
+// happened, rather than about one it hoped for.
+export function sendCreateThread(agentId?: string | null, title?: string): boolean {
+  return send({ cmd: "createThread", agentId, title });
 }
 
-export function sendRenameThread(threadId: string, title: string): void {
-  send({ cmd: "renameThread", threadId, title });
+export function sendRenameThread(threadId: string, title: string): boolean {
+  return send({ cmd: "renameThread", threadId, title });
 }
 
 /** §3.4. Sets a timestamp; there is no delete command, because there is no delete path. */
-export function sendArchiveThread(threadId: string): void {
-  send({ cmd: "archiveThread", threadId });
+export function sendArchiveThread(threadId: string): boolean {
+  return send({ cmd: "archiveThread", threadId });
 }
 
-export function sendRestoreThread(threadId: string): void {
-  send({ cmd: "restoreThread", threadId });
+export function sendRestoreThread(threadId: string): boolean {
+  return send({ cmd: "restoreThread", threadId });
 }
 
 // --- github ----------------------------------------------------------------

@@ -21,6 +21,7 @@ import {
 } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
+import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { ThreadFilterBar } from "./ThreadFilterBar.tsx";
@@ -130,6 +131,9 @@ export function ThreadsView() {
   const activeThreadId = useThreadStore((s) => s.activeThreadId);
   const error = useThreadStore((s) => s.error);
   const workspaceName = useSessionStore((s) => s.workspaces.find((w) => w.id === s.workspaceId)?.name ?? null);
+  // Whether this view's four mutations can actually leave the tab. The composer has read the same
+  // thing since it was written; the newest surface did not, and a dropped write is invisible.
+  const connected = useTraceStore((s) => s.connection === "open");
 
   const [filter, setFilter] = useState<ThreadFilter>("all");
   const [query, setQuery] = useState("");
@@ -186,10 +190,21 @@ export function ThreadsView() {
       <div className="flex shrink-0 items-center gap-3 border-b border-hair px-5 py-3">
         <span className={TYPE.panelLabel}>Threads</span>
         <span className="text-faint text-[11px] tabular-nums">{counts.all}</span>
+        {/* STATE WHAT'S TRUE, which is this product's own disabled-state rule and the one this view
+            did not follow. Every mutation here goes over a transport that drops writes in silence,
+            so while the socket is down `E`, Archive, Restore, rename and New thread all did nothing
+            with nothing said. The composer has gated on `connected` since it was written; this is
+            the same gate, and the strip is what stops a disabled button reading as a broken one. */}
+        {!connected && (
+          <span className="text-[11px] text-muted" title="Changes here need a connection">
+            reconnecting…
+          </span>
+        )}
         <button
           onClick={() => sendCreateThread()}
-          className="ml-auto flex items-center gap-1.5 rounded-control px-2.5 py-1.5 text-[12px] text-muted transition-colors hover:bg-active hover:text-ink"
-          title="New thread"
+          disabled={!connected}
+          className="ml-auto flex items-center gap-1.5 rounded-control px-2.5 py-1.5 text-[12px] text-muted transition-colors hover:bg-active hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+          title={connected ? "New thread" : "Reconnecting — a new thread needs a connection"}
         >
           <PlusIcon size={12} /> New thread
         </button>
@@ -264,6 +279,7 @@ export function ThreadsView() {
                     // is a different fact and is not marked here: this list's job is to be navigated,
                     // and two highlights in one column would compete for the same meaning.
                     selected={t.id === (cursor ?? activeThreadId)}
+                    connected={connected}
                     onOpen={() => openThread(t)}
                     onOpenAgent={openThreadAgent}
                     renaming={renamingId === t.id}
@@ -271,9 +287,9 @@ export function ThreadsView() {
                     onRename={(title) => sendRenameThread(t.id, title)}
                     onArchive={() => {
                       // The same two calls `E` makes, in the same order and for the same reason: the
-                      // notice has to be captured while the row still describes what was outstanding.
-                      useThreadStore.getState().noteArchived(t);
-                      sendArchiveThread(t.id);
+                      // notice describes what was outstanding on the row as it is now, and is only
+                      // shown once the mutation has actually left the tab.
+                      if (sendArchiveThread(t.id)) useThreadStore.getState().noteArchived(t);
                     }}
                     onRestore={() => sendRestoreThread(t.id)}
                   />

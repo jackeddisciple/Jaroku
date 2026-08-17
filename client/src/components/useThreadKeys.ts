@@ -113,14 +113,18 @@ export function useThreadKeys({
           const row = rows[at];
           if (!row || row.archived_at !== null) return;
           e.preventDefault();
-          // What was outstanding, captured BEFORE the archive: afterwards the row is gone from the list
-          // and its fragment has been recomputed for an archived thread. A thread with nothing
-          // outstanding produces no notice at all (§3.4).
-          useThreadStore.getState().noteArchived(row);
+          // THE NOTICE FOLLOWS THE SEND, and the fragment is read before it. Both halves matter: the
+          // text has to be captured while the row still describes what was outstanding (afterwards
+          // it is gone from the list and its fragment has been recomputed for an archived thread),
+          // and it must only be shown if the mutation actually left the tab. Written first, it
+          // claimed "Archived · discarded a pending diff (+42−11)" over a socket that had silently
+          // dropped the command. A thread with nothing outstanding produces no notice at all (§3.4).
+          const outstanding = row;
+          if (!sendArchiveThread(row.id)) return;
+          useThreadStore.getState().noteArchived(outstanding);
           // The cursor moves to the neighbour BEFORE the row leaves, so the next J/K continues from
           // where the eye is rather than from a row that is no longer in the list.
           setCursor(rows[at + 1]?.id ?? rows[at - 1]?.id ?? null);
-          sendArchiveThread(row.id);
           return;
         }
         case "p":

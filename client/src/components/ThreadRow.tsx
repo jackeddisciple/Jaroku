@@ -76,6 +76,7 @@ export function ThreadRow({
   onRestore,
   renaming = false,
   onRenamingEnd,
+  connected = true,
 }: {
   thread: ThreadView;
   /** The keyboard's cursor (§4.7's J/K). Distinct from "the thread the centre pane holds". */
@@ -98,6 +99,15 @@ export function ThreadRow({
   onArchive: () => void;
   /** §3.4: restore is one click. The only control an archived row has. */
   onRestore: () => void;
+  /**
+   * Whether this row's mutations can reach the server at all.
+   *
+   * STATE WHAT'S TRUE, which is the product's own disabled-state rule. The transport drops writes in
+   * silence while the socket is down, so an Archive that did nothing looked identical to one that
+   * worked — and §3.4's notice said the thread had been archived either way. Defaulted to true so a
+   * caller that has no opinion gets the old behaviour rather than a dead row.
+   */
+  connected?: boolean;
 }) {
   const author = useAuthorLabel(thread.created_by);
   const hint = resumeHint(thread);
@@ -199,7 +209,9 @@ export function ThreadRow({
           // element would leave it measuring nothing and fading every title.
           <span
             className="min-w-0 flex-1"
-            onDoubleClick={(e) => { e.stopPropagation(); setLocallyEditing(true); }}
+            // A rename needs the socket too, and an editor that opened over a dead one would take
+            // what somebody typed and drop it.
+            onDoubleClick={(e) => { e.stopPropagation(); if (connected) setLocallyEditing(true); }}
           >
             <Truncate
               className={`text-[13px] ${thread.archived_at ? "text-muted" : "text-ink"}`}
@@ -314,16 +326,18 @@ export function ThreadRow({
           {thread.archived_at === null ? (
             <button
               onClick={(e) => { e.stopPropagation(); onArchive(); }}
-              title="Archive this thread (E)"
-              className="rounded-control px-1.5 py-0.5 text-[10px] text-faint transition-colors hover:bg-active hover:text-ink"
+              disabled={!connected}
+              title={connected ? "Archive this thread (E)" : "Reconnecting — this needs a connection"}
+              className="rounded-control px-1.5 py-0.5 text-[10px] text-faint transition-colors hover:bg-active hover:text-ink disabled:pointer-events-none disabled:opacity-40"
             >
               Archive
             </button>
           ) : (
             <button
               onClick={(e) => { e.stopPropagation(); onRestore(); }}
-              title="Put this thread back in the list"
-              className="rounded-control px-1.5 py-0.5 text-[10px] text-faint transition-colors hover:bg-active hover:text-ink"
+              disabled={!connected}
+              title={connected ? "Put this thread back in the list" : "Reconnecting — this needs a connection"}
+              className="rounded-control px-1.5 py-0.5 text-[10px] text-faint transition-colors hover:bg-active hover:text-ink disabled:pointer-events-none disabled:opacity-40"
             >
               Restore
             </button>
