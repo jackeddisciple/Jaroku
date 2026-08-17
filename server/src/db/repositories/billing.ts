@@ -793,38 +793,60 @@ export class BillingRepository {
   async upsertSubscription(
     ctx: TenantContext,
     s: {
-      planId: string;
+      /**
+       * The plan this subscription is for, or omitted by a caller that does not know.
+       *
+       * OMITTED IS NOT `free`. An INVOICE event carries no plan — `metadata.plan_id` is set on the
+       * checkout session and on the subscription, never on an invoice — so `invoice.payment_failed`
+       * read one that was not there, defaulted it, and wrote `plan_id = 'free'` over the paid plan
+       * a workspace was still on. The row survives only because `planForStatus` returns null for
+       * `past_due` and so `workspaces.plan` never moved; the stored subscription itself was wrong,
+       * which is what a support query, an invoice screen or anybody debugging a dunning case reads.
+       */
+      planId?: string | null;
       status: string;
       externalCustomerId?: string | null;
       externalSubscriptionId: string;
+      /** Omitted keeps what is stored, for the same reason. An invoice carries no period. */
       currentPeriodEnd?: string | null;
+      /** Omitted keeps what is stored. An invoice says nothing about a pending cancellation. */
       cancelAtPeriodEnd?: boolean;
     },
   ): Promise<SubscriptionRow> {
     const now = nowIso();
+    const cancelling = s.cancelAtPeriodEnd === undefined ? null : s.cancelAtPeriodEnd ? 1 : 0;
     await this.q(ctx).run(
+      // COALESCE ON EVERY FIELD A CALLER MAY NOT KNOW, which is the shape `external_customer_id`
+      // already had and the other three needed for the same reason: an event that carries a status
+      // and nothing else must patch the status and nothing else. The DO UPDATE binds its own
+      // parameters rather than reading `excluded`, because the insert side has to supply a
+      // non-null plan and would otherwise hide the caller's "I do not know" behind that default.
       `INSERT INTO subscriptions (id, workspace_id, plan_id, status, external_customer_id,
          external_subscription_id, current_period_end, cancel_at_period_end, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, COALESCE(?, 'free'), ?, ?, ?, ?, COALESCE(?, 0), ?, ?)
        ON CONFLICT (external_subscription_id) DO UPDATE SET
-         plan_id = excluded.plan_id,
+         plan_id = COALESCE(?, subscriptions.plan_id),
          status = excluded.status,
          external_customer_id = COALESCE(excluded.external_customer_id, subscriptions.external_customer_id),
-         current_period_end = excluded.current_period_end,
-         cancel_at_period_end = excluded.cancel_at_period_end,
+         current_period_end = COALESCE(?, subscriptions.current_period_end),
+         cancel_at_period_end = COALESCE(?, subscriptions.cancel_at_period_end),
          updated_at = excluded.updated_at
        WHERE subscriptions.workspace_id = ?`,
       [
         randomUUID(),
         ctx.workspaceId,
-        s.planId,
+        s.planId ?? null,
         s.status,
         s.externalCustomerId ?? null,
         s.externalSubscriptionId,
         s.currentPeriodEnd ?? null,
-        s.cancelAtPeriodEnd ? 1 : 0,
+        cancelling,
         now,
         now,
+        // The DO UPDATE's own three, in the order they appear above.
+        s.planId ?? null,
+        s.currentPeriodEnd ?? null,
+        cancelling,
         ctx.workspaceId,
       ],
     );

@@ -179,6 +179,19 @@ async function workspace(): Promise<TenantContext> {
   check(r.attention, "and flags it for a person");
   check((await billing.liveSubscription(ctx))?.status === "past_due", "while the subscription records the truth");
 
+  // WHAT AN INVOICE EVENT KNOWS, WHICH IS THE STATUS AND NOTHING ELSE. `invoice.payment_failed`
+  // carries no plan — `metadata.plan_id` is set on the checkout session and on the subscription,
+  // never on an invoice — so reading one defaulted it to `free` and wrote that over the paid plan
+  // the workspace was still on, nulling the period end and resetting the cancellation flag with it.
+  await billing.upsertSubscription(ctx, { status: "past_due", externalSubscriptionId: sub });
+  const patched = await billing.liveSubscription(ctx);
+  check(patched?.status === "past_due", "an invoice event patches the status");
+  check(patched?.plan_id === "pro", "...and leaves the plan it does not know about alone");
+  check(
+    patched?.current_period_end === "2026-09-01T00:00:00.000Z",
+    "...and the period end it does not carry",
+  );
+
   r = await applySubscription(ctx, billing, identity, {
     planId: "pro", status: "canceled", externalSubscriptionId: sub,
   });

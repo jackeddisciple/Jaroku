@@ -228,8 +228,15 @@ async function handleEvent(
     case "invoice.payment_failed": {
       const subscriptionId = str(object, "subscription");
       if (subscriptionId) {
+        // THE STATUS, AND NOTHING ELSE. `object` here is an INVOICE, and an invoice carries no
+        // plan: `createCheckoutSession` sets `metadata.plan_id` on the session and on the
+        // subscription, never on an invoice. So `planFrom(object)` fell through to its `"free"`
+        // default and wrote it over the paid plan the workspace was still on — and because the two
+        // optional fields were omitted, `current_period_end` was nulled and `cancel_at_period_end`
+        // reset with them. The workspace's actual plan was safe only because `planForStatus`
+        // returns null for `past_due`; the stored subscription was not, and it is the row a support
+        // query, an invoice screen or anybody debugging a dunning case reads.
         await deps.billing.upsertSubscription(ctx, {
-          planId: planFrom(object),
           status: "past_due",
           externalSubscriptionId: subscriptionId,
           externalCustomerId: str(object, "customer"),
