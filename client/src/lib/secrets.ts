@@ -22,16 +22,12 @@
 // elevation outlives it, and a reloaded tab rejoins the session's existing elevation through
 // `joinElevation()` rather than asking for the passcode again.
 
-import { AuthFailure, storedToken, storedWorkspace } from "./auth.ts";
+import { apiRequest, failureCode } from "./http.ts";
 
-function viteEnv(name: string): string | undefined {
-  const env = (import.meta as { env?: Record<string, string | undefined> }).env;
-  return env?.[name];
-}
-
-const BASE =
-  viteEnv("VITE_JAROKU_API") ??
-  (viteEnv("VITE_JAROKU_WS") ?? "ws://localhost:4317").replace(/^ws/, "http").replace(/\/+$/, "");
+// Re-exported because half the client asks the question through this module: a caller holding a
+// refused secrets request wants to know whether it was refused for elevation, and that is the same
+// `error.code` every other route reports.
+export { failureCode };
 
 /** The header the server reads an elevation from. Must match `secrets/elevation.ts`. */
 export const ELEVATION_HEADER = "x-jaroku-elevation";
@@ -102,6 +98,10 @@ export interface ElevationState {
 /**
  * One request, with whatever credentials it needs.
  *
+ * The transport is `lib/http.ts` — one place attaches the bearer token and scopes the request to
+ * this tab's workspace, for every non-socket surface. What stays HERE is the elevation, because the
+ * token is this module's and lives only in the module variable above.
+ *
  * The elevation header is attached WHENEVER this tab holds a token, rather than per call site.
  * Deciding per call which routes need it would mean a list to keep in step with the server's, and
  * the failure mode of forgetting one is a lock screen appearing during an operation the user is
@@ -113,52 +113,19 @@ async function request<T>(
   body?: unknown,
   opts: { elevate?: boolean } = {},
 ): Promise<T> {
-  const token = storedToken();
-  const workspace = storedWorkspace();
-  const url = `${BASE}${path}${workspace ? `${path.includes("?") ? "&" : "?"}workspace=${encodeURIComponent(workspace)}` : ""}`;
-  let res: Response;
   try {
-    res = await fetch(url, {
-      method,
-      headers: {
-        ...(body === undefined ? {} : { "content-type": "application/json" }),
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-        ...(opts.elevate !== false && elevationToken ? { [ELEVATION_HEADER]: elevationToken } : {}),
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    return await apiRequest<T>(method, path, body, {
+      headers:
+        opts.elevate !== false && elevationToken ? { [ELEVATION_HEADER]: elevationToken } : {},
     });
   } catch (err) {
-    // Same shape as auth.ts's failure, so the app's existing retry-versus-stop handling applies
-    // unchanged: status 0 and retryable means "could not reach the server".
-    throw new AuthFailure((err as Error).message || "could not reach the server", 0, true);
+    // AN EXPIRED ELEVATION IS NOT A SIGN-OUT. The session is fine; what ran out is the ten minutes.
+    // Dropping the local token here means the very next render shows the lock screen rather than
+    // retrying with a token the server has already refused.
+    const code = failureCode(err);
+    if (code === "elevation_required" || code === "step_up_required") forgetElevation();
+    throw err;
   }
-  if (res.status === 204) return undefined as T;
-  const text = await res.text();
-  if (res.ok) return (text ? JSON.parse(text) : undefined) as T;
-
-  let message = text.slice(0, 300);
-  let code = "";
-  try {
-    const parsed = JSON.parse(text) as { error?: { message?: string; code?: string } };
-    message = parsed?.error?.message ?? message;
-    code = parsed?.error?.code ?? "";
-  } catch {
-    /* a body that is not our envelope; the status line says enough */
-  }
-  // AN EXPIRED ELEVATION IS NOT A SIGN-OUT. The session is fine; what ran out is the ten minutes.
-  // Dropping the local token here means the very next render shows the lock screen rather than
-  // retrying with a token the server has already refused.
-  if (code === "elevation_required" || code === "step_up_required") {
-    forgetElevation();
-  }
-  const failure = new AuthFailure(message || res.statusText, res.status, res.status >= 500 || res.status === 429);
-  (failure as AuthFailure & { code?: string }).code = code;
-  throw failure;
-}
-
-/** The error code the server sent, when it sent one. Lets a caller branch without parsing text. */
-export function failureCode(err: unknown): string {
-  return (err as { code?: string })?.code ?? "";
 }
 
 // --- the gate ---------------------------------------------------------------------------------

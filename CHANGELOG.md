@@ -42,6 +42,19 @@ there. What is new is that the product's own surface reaches them.
   that reads like forgery. `kind` is required on creation and cannot be defaulted: it decides
   whether the workspace has a members list, roles and a Threads author column at all.
 
+- **Export and delete, in the product rather than in `curl`.** Three routes existed —
+  capability-checked, audited, with a table-completeness suite behind the exporter and a receipt
+  naming what could not be revoked behind the deleter — and no client code called any of them. They
+  are the workspace panel's **Data** section now: the export is polled from the browser (there is
+  nothing to push, and whether the archive exists is a HEAD on one key), and the delete asks for the
+  workspace's id because that is what the route requires, with the id shown beside the box. The two
+  are in one section deliberately — offering deletion without export makes leaving cost you your
+  history.
+- **`lib/http.ts`**, one place where a non-socket request gets the bearer token and this tab's
+  `?workspace=`. It was inside the Secrets module, which is where it had to be while the Secrets
+  group was the only such surface; forgetting the scoping on an EXPORT would mean handing somebody
+  an archive of whichever workspace the server picked as their default.
+
 ### Changed
 
 - **`JAROKU_DEV_WORKSPACE` says what it does.** The README described it as naming which workspace

@@ -25,7 +25,7 @@ export type NavDestination = "threads" | "agents" | "memory" | "activity";
  * thing they change. A boolean would open the panel and leave the caller's actual intent to be
  * re-navigated by hand.
  */
-export type WorkspaceSection = "members";
+export type WorkspaceSection = "members" | "data";
 
 export type RightTab =
   | "secrets"

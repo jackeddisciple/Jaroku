@@ -20,6 +20,10 @@ import {
   sendInviteMember, sendListMembers, sendRemoveMember, sendRevokeInvite, sendSetMemberRole,
 } from "../lib/socket.ts";
 import { inviteUrl } from "../lib/invite.ts";
+import {
+  deleteWorkspace, startWorkspaceExport, workspaceExportStatus,
+  type DeletionReceipt, type ExportStatus,
+} from "../lib/workspaceApi.ts";
 import { useMemberStore, type Invite, type Member } from "../store/memberStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore, type WorkspaceSection } from "../store/uiStore.ts";
@@ -31,7 +35,11 @@ import { EmptyState } from "./EmptyState.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { AlertTriangleIcon, CheckIcon, UserCircleIcon, XIcon } from "./panelIcons.tsx";
 
-const SECTIONS: { id: WorkspaceSection; label: string }[] = [{ id: "members", label: "Members" }];
+const SECTIONS: { id: WorkspaceSection; label: string }[] = [
+  { id: "members", label: "Members" },
+  // Last, and deliberately: it is the section with the irreversible button in it.
+  { id: "data", label: "Data" },
+];
 
 /**
  * The three roles, with what each one actually decides.
@@ -306,6 +314,171 @@ function MembersSection() {
   );
 }
 
+/**
+ * Asking for everything you have, and asking for it to be destroyed.
+ *
+ * BOTH IN ONE SECTION, and that pairing is the point: the two questions a person asks about their
+ * own data are "can I take it with me" and "can I get rid of it", and an interface that offers the
+ * second without the first is one where leaving costs you your history. The export is offered
+ * first, and the delete says in as many words that the export is the thing to do beforehand.
+ *
+ * THE EXPORT IS POLLED because there is nothing to push: the archive is written by a worker at a key
+ * derived from the export id, and whether it exists is a HEAD on that key. See lib/workspaceApi.ts.
+ */
+function DataSection() {
+  const workspaceId = useSessionStore((s) => s.workspaceId);
+  const workspaces = useSessionStore((s) => s.workspaces);
+  const workspace = workspaces.find((w) => w.id === workspaceId);
+  // `workspace:manage`, which is the owner's. Disabled with a stated reason rather than hidden —
+  // the same discipline the composer's model rows follow: a control that vanishes reads as one the
+  // product does not have.
+  const canManage = workspace?.role === "owner";
+
+  const [exportState, setExportState] = useState<ExportStatus | { status: "starting" } | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [receipt, setReceipt] = useState<DeletionReceipt | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Polls only while an export is pending, and stops on the first `ready` — an interval that
+  // outlived the answer would be a HEAD request every few seconds for the life of the tab.
+  useEffect(() => {
+    if (!exportState || exportState.status !== "pending") return;
+    const id = exportState.exportId;
+    let live = true;
+    const tick = async (): Promise<void> => {
+      try {
+        const next = await workspaceExportStatus(id);
+        if (live) setExportState(next);
+      } catch (err) {
+        if (live) setExportError((err as Error).message);
+      }
+    };
+    const timer = setInterval(() => void tick(), 3000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [exportState]);
+
+  const start = async (): Promise<void> => {
+    setExportError(null);
+    setExportState({ status: "starting" });
+    try {
+      const started = await startWorkspaceExport();
+      setExportState({ exportId: started.exportId, status: "pending" });
+    } catch (err) {
+      setExportState(null);
+      setExportError((err as Error).message);
+    }
+  };
+
+  const destroy = async (): Promise<void> => {
+    if (!workspaceId || deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      setReceipt(await deleteWorkspace(workspaceId));
+    } catch (err) {
+      setDeleteError((err as Error).message);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <div className={TYPE.sectionLabel}>Export everything</div>
+        <p className="mt-1 text-[11px] leading-[1.55] text-muted">
+          Every table this workspace owns as NDJSON, plus each agent&rsquo;s current source, in one
+          archive. It is written by a worker and can take minutes; the link it produces expires.
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button className={primaryBtn} onClick={() => void start()} disabled={!canManage || exportState?.status === "pending" || exportState?.status === "starting"}>
+            {exportState?.status === "pending" || exportState?.status === "starting" ? "Preparing…" : "Export everything"}
+          </button>
+          {!canManage && (
+            <span className="text-[11px] text-faint">Only an owner can export a workspace</span>
+          )}
+          {exportState?.status === "pending" && (
+            <span className="text-[11px] text-faint">
+              Reading every run, step and trace payload. This stays true if you close the panel.
+            </span>
+          )}
+          {exportState?.status === "ready" && (
+            <>
+              {/* A REAL LINK rather than a scripted download: the URL is presigned and the browser
+                  is the thing that should fetch it. `rel=noreferrer` so the signature does not ride
+                  a Referer header to wherever the object store logs. */}
+              <a
+                href={exportState.url}
+                rel="noreferrer"
+                className={secondaryBtn}
+                onClick={() => setExportError(null)}
+              >
+                Download {(exportState.bytes / 1_000_000).toFixed(1)} MB
+              </a>
+              <span className="text-[11px] text-faint">link expires {fmtUntil(exportState.expiresAt)}</span>
+            </>
+          )}
+        </div>
+        {exportError && (
+          <p className="mt-1.5 text-[11px] text-err">{exportError}</p>
+        )}
+      </div>
+
+      <div className="border-t border-hair pt-4">
+        <div className={TYPE.sectionLabel}>Delete this workspace</div>
+        {receipt ? (
+          // THE RECEIPT IS THE ANSWER, not a redirect. Somebody asked for their data to be
+          // destroyed and is entitled to the count of what was — including whatever could not be
+          // revoked at a third party, which is the half a silent success would hide.
+          <div className="mt-2 rounded-control border border-edge bg-void px-2.5 py-2">
+            <p className="text-[12px] text-ink">This workspace is gone. What was destroyed:</p>
+            <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px] text-muted">
+              {JSON.stringify(receipt, null, 2)}
+            </pre>
+          </div>
+        ) : (
+          <>
+            <p className="mt-1 text-[11px] leading-[1.55] text-muted">
+              Rows, objects, checkpoints, queued work, and the grants at the third parties this
+              workspace connected. It cannot be undone — export first if you want any of it.
+            </p>
+            {/* THE TYPED CONFIRMATION IS THE SERVER'S REQUIREMENT, not decoration this screen
+                invented: the route refuses a body whose `confirm` is not the workspace's own id. The
+                id is rendered beside the box because asking somebody to type an identifier you have
+                not shown them is a puzzle rather than a confirmation. */}
+            <p className="mt-2 break-all font-mono text-[11px] text-faint select-all">{workspaceId}</p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <input
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                disabled={!canManage}
+                placeholder="Type the id above to confirm"
+                className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 font-mono text-[11px] text-ink placeholder:font-sans placeholder:text-faint outline-none focus:border-edge disabled:opacity-40"
+              />
+              <button
+                onClick={() => void destroy()}
+                disabled={!canManage || deleting || confirm.trim() !== workspaceId}
+                className="rounded-control border border-err/40 bg-err/10 px-3 py-1.5 text-[12px] text-err transition-colors hover:bg-err/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {deleting ? "Deleting…" : "Delete permanently"}
+              </button>
+            </div>
+            {!canManage && (
+              <p className="mt-1.5 text-[11px] text-faint">Only an owner can delete a workspace</p>
+            )}
+            {deleteError && <p className="mt-1.5 text-[11px] text-err">{deleteError}</p>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function WorkspacePanel() {
   const section = useUiStore((s) => s.workspaceSection);
   const open = useUiStore((s) => s.openWorkspacePanel);
@@ -360,7 +533,7 @@ export function WorkspacePanel() {
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3.5">
-          <MembersSection />
+          {section === "data" ? <DataSection /> : <MembersSection />}
         </div>
       </div>
     </div>

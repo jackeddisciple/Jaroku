@@ -1750,6 +1750,9 @@ to happen because a browser cannot put a header on a WebSocket:
 | `POST /v1/ws-ticket` | A single-use, 30-second, workspace-scoped ticket for one socket |
 | `POST /v1/invites/accept` | Redeem an invitation |
 | `POST /v1/workspaces` | Create a workspace, owned by the caller. `{name, kind}`, both required |
+| `POST /v1/workspace/export` | Ask for a copy of everything. 202 with an id; a worker writes the archive |
+| `GET /v1/workspace/export/:id` | Whether that archive is ready, and a presigned link with a stated expiry |
+| `POST /v1/workspace/delete` | Destroy the workspace. `{confirm: "<its id>"}`, and the answer is a receipt |
 | `GET /v1/auth/jwks.json` | The **local issuer's** public key. Absent in provider mode |
 | `POST /v1/auth/dev-login` | Mint a local token. Absent in provider mode |
 
@@ -3616,6 +3619,15 @@ clean-looking deletion with a standing grant is the dishonest outcome.
 
 Deleting an *account* takes their personal workspace and any where they were the last owner, and
 leaves a team's alone. A shared workspace is not one member's to take on the way out.
+
+**Both are in the product**, in the workspace panel's **Data** section, and they are together on
+purpose: the two questions somebody asks about their own data are "can I take it with me" and "can I
+get rid of it", and offering the second without the first makes leaving cost you your history. The
+export is polled from the browser, because there is nothing to push — no row changes state, and
+whether the archive exists is a HEAD on one object key. The delete asks you to type the workspace's
+**id**, which is the server's own requirement rather than a flourish this screen added, and the id is
+rendered beside the box because asking somebody to type an identifier you have not shown them is a
+puzzle instead of a confirmation. The answer is the receipt, printed as it arrived.
 
 ### Nothing a credential can reach
 
