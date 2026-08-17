@@ -246,6 +246,30 @@ export class ThreadStore {
     );
   }
 
+  /**
+   * The FIRST thing anybody said in this thread, which is what §5 titles from.
+   *
+   * REPLACES A COUNT, AND THAT IS THE FIX. The caller used to insert the message, read the message
+   * count back and title only when it was exactly one — so two first messages whose inserts both
+   * landed before either read both saw two, NEITHER titled, and the count can only grow afterwards:
+   * the row stayed `Untitled thread` permanently and §4.4's text filter could never find it. A
+   * double-submit, two members of a Team workspace, or a `planAgent` immediately followed by an
+   * `edit` are all enough.
+   *
+   * Asking for the first message instead is idempotent: both racers read the same row and derive the
+   * same title, so whichever writes last writes the same thing. It is also cheaper — `LIMIT 1`
+   * rather than every body in the thread selected in order to take `.length`.
+   */
+  async firstMessage(ctx: TenantContext, threadId: string): Promise<string | null> {
+    const row = await this.q(ctx).get<Record<string, unknown>>(
+      `SELECT body FROM thread_items
+        WHERE workspace_id = ? AND thread_id = ? AND kind = 'message' AND role = 'user'
+        ORDER BY created_at ASC LIMIT 1`,
+      [ctx.workspaceId, threadId],
+    );
+    return row ? String(row["body"] ?? "") : null;
+  }
+
   /** Something happened in this thread. The sort key for Running and Recent (§4.2). */
   async touch(ctx: TenantContext, id: string, at = nowIso()): Promise<void> {
     await this.q(ctx).run(

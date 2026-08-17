@@ -3152,15 +3152,20 @@ function noteUserMessage(ctx: TenantContext, threadId: string, body: string): vo
   if (!text) return;
   void (async () => {
     await threadStore.addItem(ctx, threadId, { kind: "message", role: "user", body: text });
-    // §5'S TITLE, FROM THE FIRST MESSAGE AND ONLY THE FIRST. The count is read back rather than
-    // inferred, because "is this the first thing said here" is a question about rows and this
-    // process is not the only writer of them — a second tab in a Team workspace is sending too.
+    // §5'S TITLE, FROM THE FIRST MESSAGE — THE ROW, NOT THE COUNT. This used to read the message
+    // count back and title only when it was exactly one, which turned a race into no title at all:
+    // two first messages whose inserts both landed before either read both saw two, so neither
+    // titled, and the count only grows afterwards. A double-submit, two members of a Team workspace,
+    // or a `planAgent` followed straight away by an `edit` all reach it, and the row then stayed
+    // `Untitled thread` forever with §4.4's text filter unable to find it.
     //
-    // `autoTitle` is a no-op on a thread somebody has renamed; that guarantee lives in its UPDATE's
-    // own WHERE rather than in a branch here, so two clients racing cannot get past it.
-    if ((await threadStore.messages(ctx, threadId)).length === 1) {
-      await threadStore.autoTitle(ctx, threadId, threadTitle(text));
-    }
+    // Reading the FIRST message instead is idempotent: both racers see the same row and derive the
+    // same title, so whichever writes last writes the same thing. Titling from every message would
+    // be wrong for a different reason — §5 says the first — and `autoTitle` is a no-op on a thread
+    // somebody has renamed, a guarantee that lives in its UPDATE's own WHERE rather than in a branch
+    // here, so two clients racing cannot get past it either.
+    const first = await threadStore.firstMessage(ctx, threadId);
+    if (first) await threadStore.autoTitle(ctx, threadId, threadTitle(first));
     scheduleThreadBroadcast(ctx);
   })().catch((err) => {
     console.error(`[threads] could not record a message:`, (err as Error)?.message ?? err);

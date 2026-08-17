@@ -119,6 +119,33 @@ async function seedAgent(db: SqliteDb, workspaceId: string, slug: string): Promi
     (await store.get(ctx, t.id))?.title === "Stripe webhook retry logic");
 }
 
+// --- 3b. two first messages at once still title the thread (§5) -----------------------------
+{
+  // The caller used to insert the message, read the message COUNT back and title only when it was
+  // exactly one — so two messages whose inserts both landed before either read both saw two,
+  // NEITHER titled, and the count only grows afterwards: the row stayed `Untitled thread` for good.
+  // A double-submit, two members of a Team workspace, or a plan followed straight away by an edit
+  // all reach it. Titling from the first MESSAGE is idempotent, so both racers agree.
+  const db = await freshDb();
+  const store = new ThreadStore(db);
+  const t = await store.create(ctx);
+
+  await store.addItem(ctx, t.id, { kind: "message", role: "user", body: "add exponential backoff" });
+  await store.addItem(ctx, t.id, { kind: "message", role: "user", body: "and cap it at five" });
+
+  // Both writers now do what noteUserMessage does, in the order the race produces: read the first
+  // message and title from it. Neither is "the message that made the count one".
+  const first = await store.firstMessage(ctx, t.id);
+  check("the first message is the one titling reads", first === "add exponential backoff", first ?? "null");
+  await store.autoTitle(ctx, t.id, first!);
+  await store.autoTitle(ctx, t.id, (await store.firstMessage(ctx, t.id))!);
+  check("a thread with two near-simultaneous first messages is still titled",
+    (await store.get(ctx, t.id))?.title === "add exponential backoff",
+    (await store.get(ctx, t.id))?.title);
+  check("...and the second writer agreed rather than fighting",
+    (await store.get(ctx, t.id))?.title_is_custom === false);
+}
+
 // --- 4. a rename is not activity ----------------------------------------------------------
 {
   const db = await freshDb();
