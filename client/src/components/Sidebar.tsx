@@ -15,9 +15,11 @@ import { sendLoadRun } from "../lib/socket.ts";
 import { ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { useUiStore, type NavDestination } from "../store/uiStore.ts";
 import { useGithubStore } from "../store/githubStore.ts";
+import { useThreadStore } from "../store/threadStore.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
+import { ThreadGlyph } from "./ThreadGlyph.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import {
   ActivityIcon, ChevronRightIcon, DatabaseIcon, GitForkIcon, GithubIcon, GlobeIcon, HashIcon,
@@ -200,10 +202,18 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
 }
 
 /**
- * The four top-level destinations (§2).
+ * The four top-level destinations (§2), with §2.1's live badge on Threads.
  *
- * ONE BUTTON PER DESTINATION AND NOTHING ELSE IN THE ROW YET. The Threads badge (§2.1) is a later
- * commit and lands on this button; the shape is left room for it rather than being rebuilt around it.
+ * THE BADGE IS THE COUNT OF WHAT IS BLOCKED, AND NOTHING ELSE. Never `running`: a run is cost accruing,
+ * not something waiting on a person, and a badge that added the two would answer two different
+ * questions at once — which is exactly the ambiguity the GitHub tab's badge vocabulary was designed to
+ * avoid. Zero renders NO badge at all, matching the empty-sections discipline: a badge showing 0 is
+ * noise, not information.
+ *
+ * IT IS THE SAME NUMBER THE `Needs you` CHIP SHOWS, from the same snapshot field — one count, computed
+ * once on the server, rendered twice. Two independently-derived counts of "what is waiting on me" that
+ * disagreed would be visible in two places a person compares, which is the trust-eroding mismatch §2.1
+ * names.
  *
  * The active one wears the same left accent and `bg-active` an agent row does when selected, because
  * it is the same fact — this is what the panel to the right is showing. A second visual vocabulary for
@@ -212,6 +222,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
 function NavButtons() {
   const navView = useUiStore((s) => s.navView);
   const openNav = useUiStore((s) => s.openNav);
+  const needsYou = useThreadStore((s) => s.counts.needs_you);
 
   return (
     <div className="shrink-0 px-3 pt-3">
@@ -228,6 +239,19 @@ function NavButtons() {
             {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-ink" />}
             <Icon size={ICON.sm} />
             {label}
+            {/* The same amber ◆ the rows use, so the badge needs no vocabulary of its own. Present only
+                when there is something to say — and `tabular-nums` so a count going from 9 to 10 does
+                not shift the glyph beside it. */}
+            {id === "threads" && needsYou > 0 && (
+              <span
+                className="ml-auto flex shrink-0 items-center gap-1 text-[10px] tabular-nums"
+                style={{ color: STATUS.pending }}
+                title={`${needsYou} thread${needsYou === 1 ? "" : "s"} waiting on you`}
+              >
+                <ThreadGlyph status="needs_you" />
+                {needsYou}
+              </span>
+            )}
           </button>
         );
       })}
