@@ -67,6 +67,16 @@ export interface SessionWorkspace {
   name: string;
   kind: string;
   role: string;
+  /**
+   * Which plan this workspace is on, and the label to render.
+   *
+   * THE LABEL IS THE SERVER'S. `planFor` is the same function the budget gate resolves limits
+   * through, so the plan named in the sidebar and the plan named in the Usage panel are one
+   * computation — a client that mapped ids to names itself would be a second copy of the plan
+   * table, and a paid workspace reading "Free" in one place and "Pro" in the other is worse than
+   * showing nothing at all.
+   */
+  plan: { id: string; label: string };
 }
 
 export interface SessionView {

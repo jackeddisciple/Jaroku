@@ -58,6 +58,14 @@ there. What is new is that the product's own surface reaches them.
   list is the server's (`purchasable` and the price id are columns; the limits come from the code
   that enforces them), a deployment with no Stripe keys shows nothing rather than a refusing
   control, and choosing is `billing:manage` while reading spend stays a member's.
+- **The sidebar footer names the person signed in and the plan they are on.** It was three
+  literals — the avatar letter `J`, the name `jaroku`, and a `Free` chip — shown to every user
+  whatever their account and whatever their plan, while the product held a correct copy of both
+  facts two panels away. That is the anti-pattern the Threads spec argues against for the nav badge,
+  in its worst form: a paid workspace reading `Free` in the sidebar and `Pro` in the Usage panel.
+  The session now carries each workspace's plan with its LABEL resolved by `planFor` — the same
+  function the budget gate resolves limits through — so nothing is mapped in the browser, and the
+  chip is absent rather than invented when the session has not landed.
 - **An enforcement can be appealed.** The ladder is one-sided by construction — a score rises, a
   rung is applied, work is refused — and `appeal_note` is the column that makes it two-sided.
   `EnforcementRepository.appeal` was written, audited, and had no caller, so the note could only be

@@ -21,6 +21,7 @@
 import { badRequest, forbidden, tooMany, unauthorized, type Handler, type HttpRequest } from "../http/router.ts";
 import { newRequestId, systemContext } from "../db/tenant.ts";
 import { IdentityConflictError, defaultWorkspace, type IdentityRepository } from "../db/repositories/identity.ts";
+import { planFor } from "../billing/plans.ts";
 import { AuthError, TokenVerifier, type AuthContext } from "./verifier.ts";
 import type { LocalIssuer } from "./localIssuer.ts";
 import type { AuthConfig } from "./config.ts";
@@ -88,7 +89,24 @@ export interface SessionView {
      */
     onboarded: boolean;
   };
-  workspaces: { id: string; slug: string; name: string; kind: string; role: string }[];
+  workspaces: {
+    id: string;
+    slug: string;
+    name: string;
+    kind: string;
+    role: string;
+    /**
+     * Which plan the workspace is on, with the label a person reads.
+     *
+     * BOTH FIELDS, AND THE LABEL COMES FROM HERE rather than being mapped in the browser. The
+     * sidebar renders the plan on every screen and the Usage panel renders it again from
+     * `BudgetGate.status`; a client that mapped ids to names itself would be a second copy of the
+     * plan table, and the failure mode is a paid workspace reading "Free" in one place and "Pro" in
+     * the other — which is worse than showing nothing. `planFor` is the same function the gate
+     * resolves limits through, so the two cannot disagree.
+     */
+    plan: { id: string; label: string };
+  }[];
   /** Where a client with no stored preference should start. Always one it belongs to. */
   defaultWorkspaceId: string;
   /** Unix seconds. The client refreshes before this; the server revalidates against it. */
@@ -171,6 +189,7 @@ function sessionHandler(deps: SessionDeps): Handler {
         name: w.name,
         kind: w.kind,
         role: w.role,
+        plan: { id: planFor(w.plan).id, label: planFor(w.plan).label },
       })),
       defaultWorkspaceId: preferred.id,
       expiresAt: auth.expiresAt,
@@ -327,6 +346,7 @@ function acceptInviteHandler(deps: SessionDeps): Handler {
           name: w.name,
           kind: w.kind,
           role: w.role,
+          plan: { id: planFor(w.plan).id, label: planFor(w.plan).label },
         })),
       },
     };
@@ -425,6 +445,7 @@ function createWorkspaceHandler(deps: SessionDeps): Handler {
           name: w.name,
           kind: w.kind,
           role: w.role,
+          plan: { id: planFor(w.plan).id, label: planFor(w.plan).label },
         })),
       },
     };

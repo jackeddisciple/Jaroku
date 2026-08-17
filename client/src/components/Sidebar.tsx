@@ -16,6 +16,7 @@ import { ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { useUiStore, type NavDestination } from "../store/uiStore.ts";
 import { useGithubStore } from "../store/githubStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
+import { useSessionStore } from "../store/sessionStore.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
@@ -260,6 +261,55 @@ function NavButtons() {
   );
 }
 
+/**
+ * Who is signed in, and what this workspace is paying.
+ *
+ * THREE LITERALS USED TO LIVE HERE: the avatar letter `J`, the name `jaroku`, and a `Free` chip.
+ * Every signed-in user saw all three, whatever their account and whatever their plan — and the
+ * product holds a correct copy of both facts elsewhere, which makes this the exact anti-pattern the
+ * Threads spec argues against for the nav badge: one quantity, rendered twice, derived twice. A paid
+ * workspace reading `Free` in the sidebar while the Usage panel reads `Pro` is worse than showing
+ * nothing.
+ *
+ * SO BOTH COME FROM THE SESSION, and the plan's LABEL comes from the server — `planFor`, the same
+ * function the budget gate resolves limits through. Nothing is mapped here; a plan-id-to-name table
+ * in the client would be the second copy all over again.
+ *
+ * It is also the door to the workspace panel, because that is what somebody clicking their own name
+ * is reaching for.
+ */
+function AccountRow() {
+  const user = useSessionStore((s) => s.user);
+  const workspaces = useSessionStore((s) => s.workspaces);
+  const workspaceId = useSessionStore((s) => s.workspaceId);
+  const openWorkspacePanel = useUiStore((s) => s.openWorkspacePanel);
+  const workspace = workspaces.find((w) => w.id === workspaceId);
+  const name = user?.displayName || user?.email;
+
+  // Before the session lands there is no account to name. An empty row is quieter than a
+  // placeholder that flashes into somebody else's initial.
+  if (!user) return <div className="h-8" />;
+
+  return (
+    <button
+      onClick={() => openWorkspacePanel("members")}
+      title={`${user.email}${workspace ? ` — ${workspace.role} of ${workspace.name}` : ""}`}
+      className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-active"
+    >
+      {/* The first letter of whoever is actually here, uppercased. */}
+      <span className="flex h-5 w-5 items-center justify-center rounded-control bg-active text-[11px] text-ink">
+        {(name ?? "?").trim().charAt(0).toUpperCase()}
+      </span>
+      <Truncate className="text-[12px] text-ink" title={name}>{name}</Truncate>
+      {/* Only when the session carries one. A chip is a claim about what the workspace is paying,
+          and inventing a default for it is how the hardcoded `Free` got there in the first place. */}
+      {workspace?.plan?.label && (
+        <Chip caps size="sm" tone="faint" className="ml-auto">{workspace.plan.label}</Chip>
+      )}
+    </button>
+  );
+}
+
 export function Sidebar() {
   const runs = useTraceStore((s) => s.runs);
   const agents = useBuildStore((s) => s.agents);
@@ -420,11 +470,7 @@ export function Sidebar() {
           <SettingsIcon size={ICON.sm} /> Settings
           <span className="ml-auto text-faint"><ChevronRightIcon size={ICON.xs} /></span>
         </button>
-        <div className="flex items-center gap-2 px-2 py-1.5">
-          <span className="w-5 h-5 rounded-control bg-active text-ink text-[11px] flex items-center justify-center">J</span>
-          <span className="text-[12px] text-ink">jaroku</span>
-          <Chip caps size="sm" tone="faint" className="ml-auto">Free</Chip>
-        </div>
+        <AccountRow />
       </div>
     </div>
   );
