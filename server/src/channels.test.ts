@@ -274,8 +274,12 @@ console.log("\nevery transition §3.3 derives from refreshes the list");
   };
 
   const transitions: { fact: string; start: string; chars?: number }[] = [
-    { fact: "a run ending (liveRuns down, lastEndedInError)", start: 'onBothPools("event"', chars: 6000 },
-    { fact: "a run crashing or being killed", start: 'onBothPools("exit"', chars: 6000 },
+    // 8000 RATHER THAN 6000, and the change is worth a line. The refresh sits 5,975 characters into
+    // this handler, so the old window cleared it by five characters — a window that tight is not a
+    // structural rule, it is a coincidence, and the next comment added above the call would have
+    // failed a suite about broadcasts for a reason that has nothing to do with broadcasting.
+    { fact: "a run ending (liveRuns down, lastEndedInError)", start: 'onBothPools("event"', chars: 8000 },
+    { fact: "a run crashing or being killed", start: 'onBothPools("exit"', chars: 8000 },
     { fact: "a run that never started", start: 'onBothPools("spawnError"' },
     { fact: "an MCP confirmation opening", start: 'ctrl.ctrl === "tool_confirm"' },
     { fact: "an MCP confirmation being cleared", start: "function clearConfirms" },
@@ -288,9 +292,9 @@ console.log("\nevery transition §3.3 derives from refreshes the list");
   for (const { fact, start, chars } of transitions) {
     const body = bodyFrom(start, chars);
     check(
-      body.length > 0 && /scheduleThreadBroadcast\(|broadcastThreads\(/.test(body),
-      `${fact} refreshes the thread list`,
-      body.length === 0 ? `handler not found: ${start}` : "no thread broadcast in the handler",
+      body.length > 0 && /scheduleListRefresh\(|broadcastThreads\(/.test(body),
+      `${fact} refreshes the thread list and the agents grid`,
+      body.length === 0 ? `handler not found: ${start}` : "no list refresh in the handler",
     );
   }
 
@@ -299,7 +303,7 @@ console.log("\nevery transition §3.3 derives from refreshes the list");
   // figure is fed from the eval channel's own cost delta instead.
   const onProgress = indexSource.slice(indexSource.indexOf("onProgress: (p) =>"), indexSource.indexOf("onProgress: (p) =>") + 300);
   check(
-    !/scheduleThreadBroadcast\(|broadcastThreads\(/.test(onProgress),
+    !/scheduleListRefresh\(|broadcastThreads\(/.test(onProgress),
     "...but eval progress does not, which would make the channel a polling one",
   );
 }

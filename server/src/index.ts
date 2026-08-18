@@ -40,6 +40,11 @@ import {
   type PlanAgentCommand,
   type MemberCommand,
   type ProviderCommand,
+  type AgentCardView,
+  type AgentCommand,
+  type AgentDetailView,
+  type AgentFileView,
+  type AgentGridSnapshot,
   type ThreadCommand,
   type ThreadCounts,
   type ThreadSnapshot,
@@ -71,13 +76,20 @@ import { Generator, type UsageSummary } from "./generator.ts";
 import { Planner } from "./planner.ts";
 import { Editor } from "./editor.ts";
 import { scanAgentDirectory } from "./agents.ts";
-import { AgentRepository } from "./db/repositories/agents.ts";
+import { AgentRepository, SAFE_SLUG } from "./db/repositories/agents.ts";
+// The Agents grid's derivations, in their own module because every one of them is a rule that looks
+// obviously right in a screenshot and is wrong in the case nobody had that day — see agentHealth.ts.
+import {
+  OUTCOME_WINDOW, activityOf, driftOf, healthOf, missingCredentials, percentiles, runtimeOf,
+} from "./agentHealth.ts";
 import { IdentityRepository } from "./db/repositories/identity.ts";
 import { isMemberRole } from "./db/tenant.ts";
 import { resolveDevTenancy, type DevTenancy } from "./devTenancy.ts";
 import { loadConnectors, templatesDir } from "./connectors.ts";
 import { buildArtifacts } from "./dockerfile.ts";
-import { isSafeAgentId, listProjectFiles, readOnlyPaths, type ProjectFile } from "./projectFs.ts";
+import {
+  isSafeAgentId, listProjectFiles, readOnlyPaths, readOnlyReason, type ProjectFile,
+} from "./projectFs.ts";
 import { validateProject } from "./validator.ts";
 import { liveDiagnostics } from "./liveDiagnostics.ts";
 import { resolveSecretValues } from "./deploySecrets.ts";
@@ -177,7 +189,7 @@ import {
   type ProviderId,
 } from "./providers.ts";
 import { allPrices } from "./pricing.ts";
-import { DeployStore } from "./deployStore.ts";
+import { DeployStore, isInFlight as isDeployInFlight } from "./deployStore.ts";
 import { DeployManager, planDeploy, type DeployManagerDeps } from "./deployManager.ts";
 import { RailwayApi, RailwayError, RAILWAY_ENV_KEY } from "./railwayApi.ts";
 import { sandboxKind } from "./sandbox/runSandbox.ts";
@@ -1356,16 +1368,20 @@ async function setAgentArchived(ctx: TenantContext, agentId: string, archived: b
   // it is the read every other command uses and it must keep meaning "a live agent".
   const agent = (await agentRepo.list(ctx, { includeArchived: true })).find((a) => a.slug === slug);
   if (!agent) {
-    relay.broadcastLog(ctx, "stderr", `agents: no agent called ${slug} in this workspace`);
+    // ON THE `agents` CHANNEL, TO THE SOCKET THAT ASKED, and both halves changed with the Agents
+    // tab. It was `broadcastLog`, which put a refusal about one person's click into the status bar
+    // of every tab in the workspace — and left the surface that asked (the sidebar row, and now the
+    // grid) waiting on an answer that had gone somewhere else entirely.
+    refuseAgent(ctx, `no agent called ${slug} in this workspace`, slug);
     return;
   }
   if (archived) {
     const live = (await deployStore.currentByAgent(ctx)).get(agent.slug);
     if (live && live.status === "live") {
-      relay.broadcastLog(
+      refuseAgent(
         ctx,
-        "stderr",
-        `agents: ${slug} is still serving at ${live.url ?? "a public URL"} — forget or cancel the deployment first`,
+        `${slug} is still serving at ${live.url ?? "a public URL"} — forget or cancel the deployment first`,
+        slug,
       );
       return;
     }
@@ -1374,13 +1390,15 @@ async function setAgentArchived(ctx: TenantContext, agentId: string, archived: b
     // The row was already in the state that was asked for. Not an error — two tabs, or a second
     // click — and saying nothing is right, because the snapshot below already says the truth.
     await relay.broadcastAgents();
+    await relay.broadcastAgentGrid();
     return;
   }
   console.log(`[agents] ${slug} ${archived ? "archived" : "restored"}`);
   await relay.broadcastAgents();
+  await relay.broadcastAgentGrid();
   // The threads of this agent render its name and its chip, so their snapshot is stale the moment
   // this changes. Coalesced on the same timer every other thread-affecting transition uses.
-  scheduleThreadBroadcast(ctx);
+  scheduleListRefresh(ctx);
 }
 
 /**
@@ -1398,20 +1416,21 @@ async function renameAgent(ctx: TenantContext, agentId: string, name: unknown): 
   const slug = String(agentId ?? "");
   const next = typeof name === "string" ? name.trim().slice(0, TITLE_MAX).trim() : "";
   if (!next) {
-    relay.broadcastLog(ctx, "stderr", "agents: an agent needs a name — Escape cancels the edit");
+    refuseAgent(ctx, "an agent needs a name — Escape cancels the edit", slug);
     return;
   }
   const agent = (await agentRepo.list(ctx, { includeArchived: true })).find((a) => a.slug === slug);
   if (!agent) {
-    relay.broadcastLog(ctx, "stderr", `agents: no agent called ${slug} in this workspace`);
+    refuseAgent(ctx, `no agent called ${slug} in this workspace`, slug);
     return;
   }
   await agentRepo.rename(ctx, agent.id, next);
   console.log(`[agents] ${slug} renamed to "${next}"`);
   await relay.broadcastAgents();
+  await relay.broadcastAgentGrid();
   // Every thread of this agent renders the name. BUG-17 was exactly this going stale: a rename left
   // every thread row showing the old name beside a sidebar showing the new one.
-  scheduleThreadBroadcast(ctx);
+  scheduleListRefresh(ctx);
 }
 
 await syncAgents();
@@ -1461,7 +1480,7 @@ const deployDeps: DeployManagerDeps = {
     // §4.3's `deployed` fragment is derived from the deploy store, so a deployment going live (or
     // stopping) changes what an idle thread on that agent says about itself — and nothing was
     // pushing a snapshot for it.
-    scheduleThreadBroadcast(contextForDeploy());
+    scheduleListRefresh(contextForDeploy());
   },
   onChanged: () => {
     broadcastDeployments();
@@ -2408,6 +2427,12 @@ const relay = new WsRelay({
       ? agentGraph(ctx, agentId)
       : { agent_id: agentId, error: "no such agent in this workspace" },
   listMcpServers: (ctx) => mcpRegistry.list(ctx),
+  // §4's grid, with every card's tags already derived — see `agentGridSnapshot` for why deriving
+  // them here rather than in the browser is a correctness requirement and not an optimisation.
+  listAgentGrid: (ctx) => agentGridSnapshot(ctx),
+  // Scoped, so another workspace's agent id is indistinguishable from one that does not exist (§7.3).
+  loadAgentDetail: (ctx, agentId) => agentDetail(ctx, agentId),
+  loadAgentVersion: (ctx, agentId, version) => agentVersionFiles(ctx, agentId, version),
   // The list and the counts together, so the chips and the nav badge are one number — §2.1.
   listThreads: (ctx) => threadSnapshot(ctx),
   // Scoped, so another workspace's thread id is indistinguishable from one that does not exist.
@@ -2470,9 +2495,7 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (cmd.cmd === "cancelRun") void cancelRun(ctx, cmd.runId);
     else if (cmd.cmd === "branchRun") void branchRun(ctx, cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState);
     else if (cmd.cmd === "explain") explainAgent(ctx, cmd);
-    else if (cmd.cmd === "archiveAgent") void setAgentArchived(ctx, cmd.agentId, true);
-    else if (cmd.cmd === "restoreAgent") void setAgentArchived(ctx, cmd.agentId, false);
-    else if (cmd.cmd === "renameAgent") void renameAgent(ctx, cmd.agentId, cmd.name);
+    else if (AGENT_COMMAND_NAMES.has(cmd.cmd)) void handleAgentCommand(ctx, cmd as AgentCommand);
     else if (MCP_COMMAND_NAMES.has(cmd.cmd)) void handleMcpCommand(ctx, cmd as McpCommand);
     else if (DEPLOY_COMMAND_NAMES.has(cmd.cmd)) void handleDeployCommand(ctx, cmd as DeployChannelCommand);
     else if (GITHUB_COMMAND_NAMES.has(cmd.cmd)) void handleGithubCommand(ctx, cmd as GithubCommand);
@@ -2702,7 +2725,7 @@ evalRunner = new EvalRunner({
     // `eval 34/120` frozen until something unrelated happened in the workspace. Deliberately not
     // per job — that is the polling channel §7.1 refuses; see the eval-progress cost delta for how
     // the moving figure is fed instead.
-    scheduleThreadBroadcast(contextForEval(e.evalId));
+    scheduleListRefresh(contextForEval(e.evalId));
 
     // Sweep the resumable-checkpoint blobs these runs left behind. The traces stay —
     // only the pause/resume machinery goes, and nobody resumes a finished eval job.
@@ -2790,7 +2813,7 @@ function clearConfirms(runId: string, reason: string, nonce?: string): void {
   // §3.3 counts a pending confirmation as blocked work, so one going away is a genuine state
   // transition and the list has to be told. Only when something actually cleared: this runs on
   // every run's teardown and most runs never asked anything.
-  if (cleared > 0) scheduleThreadBroadcast(contextForRun(runId));
+  if (cleared > 0) scheduleListRefresh(contextForRun(runId));
 }
 
 function broadcastMcpServers(): void {
@@ -2903,7 +2926,7 @@ async function handleMcpCommand(ctx: TenantContext, cmd: McpCommand): Promise<vo
         relay.broadcastMcp(ctx, { type: "confirmResolved", runId: cmd.runId, nonce: cmd.nonce, verdict });
         // The thread stops being blocked the moment this is answered, and §3.3 reads the confirm
         // queue live — so the fact changes here and the list has to hear about it.
-        scheduleThreadBroadcast(ctx);
+        scheduleListRefresh(ctx);
         return;
       }
 
@@ -3298,6 +3321,508 @@ async function setSpendCeiling(ctx: TenantContext, usd: number | null): Promise<
   }
 }
 
+// --- the Agents tab: the grid aggregate, one agent in full, and the lifecycle ---------------
+//
+// §7.2 IS THE WHOLE DESIGN CONSTRAINT HERE: the grid needs, per agent, a thread count, a 7-day run
+// count, 7-day spend, a last-run time, its latest thread's title and last turn, health inputs,
+// deploy state, version drift and a missing-credential count — and the number of statements that
+// costs must not grow with the number of agents. Everything below reads a WORKSPACE at a time and
+// joins in memory. `test:agent-grid` asserts the count is constant against one agent and against
+// forty, which is the only version of that claim worth having.
+//
+// §7.4's SHAPE, UNCHANGED: the three reads are answered by the relay to the socket that asked, and
+// every mutation broadcasts the whole grid. No client merges a partial update — §5.4's tag
+// precedence is computed against a row as a whole, so a merged row is a row whose tags were decided
+// at two different moments.
+
+/** The window §4's sort, §5.2's footer and §5.4's health all read. Seven days, in milliseconds. */
+const GRID_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/** The second window §6's Health tab asks for, beside the first. */
+const GRID_WINDOW_30_MS = 30 * 24 * 60 * 60 * 1000;
+
+const AGENT_COMMAND_NAMES = new Set([
+  "archiveAgent", "restoreAgent", "renameAgent", "forkAgent", "restoreAgentVersion",
+]);
+
+/** A refusal on the agents channel, to the socket that earned it and nobody else. */
+function refuseAgent(ctx: TenantContext, message: string, agentId?: string): void {
+  relay.sendAgents(ctx, ctx.requestId, { type: "error", message, ...(agentId ? { agentId } : {}) });
+}
+
+/** A statement of fact on the agents channel, to the socket that asked for it. */
+function noticeAgent(ctx: TenantContext, message: string, agentId?: string): void {
+  relay.sendAgents(ctx, ctx.requestId, { type: "notice", message, ...(agentId ? { agentId } : {}) });
+}
+
+/**
+ * Which agents are mid-build right now, by slug.
+ *
+ * READ OFF THE SINGLE-SLOT SUBSYSTEMS this process already has, rather than from a column. A
+ * generation and an edit are in-memory, single-slot and refuse a second while one runs — the same
+ * facts `threadFactsFor` reads for the same reason — so "is this agent generating" is a comparison
+ * against the slot, and a durable flag would be one a restart left set forever.
+ *
+ * The generation slot names an agent only once it has one, so the set is empty for the seconds
+ * before that and the card reads Idle. That is true: nothing is being written to an agent that does
+ * not exist yet.
+ */
+function buildingAgents(ctx: TenantContext): Set<string> {
+  const out = new Set<string>();
+  if (editContext?.workspaceId === ctx.workspaceId) {
+    for (const p of editor.openProposals(ctx).values()) out.add(p.agentId);
+  }
+  return out;
+}
+
+/**
+ * The workspace's agents, as the grid renders them (§4, §5).
+ *
+ * NINE STATEMENTS, AND NOT ONE PER AGENT. Each of the reads below is bounded by the workspace and
+ * grouped or keyed in the database; the joining is a handful of Map lookups. The naive shape — walk
+ * the agent list and ask five questions per row — is 5N round trips on the path a socket is waiting
+ * on, which is the N+1 §7.2 says will be instantly visible at forty agents.
+ *
+ * ARCHIVED AGENTS ARE IN THE LIST AND FLAGGED, exactly as `listAgents` carries them: §4 hides them
+ * behind a filter, which is a decision the grid makes about what to render and not a reason for the
+ * server to withhold the rows the Archived filter exists to show.
+ *
+ * SOFT-DELETED ONES ARE NOT. `agentRepo.list` excludes `deleted_at` unconditionally and this does
+ * not override it: a swept row is a mirror of a directory that has gone, not something somebody put
+ * away, and §4's Archived filter is about the second.
+ */
+async function agentGridSnapshot(ctx: TenantContext): Promise<AgentGridSnapshot> {
+  const since7 = new Date(Date.now() - GRID_WINDOW_MS).toISOString();
+
+  const [agents, runFacts, threadFacts, deployed, spend, versionSources, refs, tools, workspace] =
+    await Promise.all([
+      agentRepo.list(ctx, { includeArchived: true }),
+      store.agentRunFacts(ctx, since7, OUTCOME_WINDOW),
+      threadStore.agentThreadFacts(ctx),
+      deployStore.currentByAgent(ctx),
+      billing.spendByAgent(ctx, since7),
+      agentRepo.currentVersionSources(ctx),
+      // EVERY DECLARED NAME IN THE WORKSPACE, ONCE. §5.2's warning line is `required_env` against
+      // `secret_refs`, and asking per agent would be the N+1 all over again for the line the
+      // specification calls the most important one on the card.
+      secretRefs.list(ctx),
+      // Likewise for the impact classifications: one read of the workspace's tools, joined against
+      // each agent's own `server/tool` refs. `mcpRegistry.resolve` is a lookup PER REF, which across
+      // forty agents with a handful of grants each is exactly what this avoids.
+      mcpRegistry.allTools(ctx),
+      bootIdentity.workspaceById(ctx, ctx.workspaceId),
+    ]);
+
+  // `configured` IS THE TEST, NOT EXISTENCE — see `missingCredentials`. A row exists for every name
+  // an agent has ever declared, so a membership test against the table would report every declared
+  // credential as present and the warning line would never appear.
+  const configured = new Set(refs.filter((r) => r.configured).map((r) => r.name));
+  const impactByRef = new Map(tools.map((t) => [`${t.server_id}/${t.name}`, t.impact]));
+  const spendBySlug = new Map(spend.map((s) => [s.agentId ?? "", s]));
+  const building = buildingAgents(ctx);
+
+  const cards: AgentCardView[] = agents.map((a) => {
+    const runs = runFacts.get(a.slug);
+    const threads = threadFacts.get(a.id);
+    const deployment = deployed.get(a.slug) ?? null;
+    const money = spendBySlug.get(a.slug);
+    const versionSource = versionSources.get(a.id) ?? null;
+    const outcomes = runs?.recent ?? [];
+
+    return {
+      agent_id: a.slug,
+      uuid: a.id,
+      name: a.display_name ?? a.slug,
+      slug: a.slug,
+      description: a.description,
+      created_at: a.created_at,
+      created_by: a.created_by ?? null,
+      archived_at: a.archived_at,
+      hand_written: a.hand_written,
+      current_version: a.current_version,
+      version_source: versionSource,
+      creation_cost: a.creation_cost,
+      connectors: a.connectors,
+      mcp_tools: a.mcp_tools,
+      required_env: a.required_env,
+      missing_env: missingCredentials(a.required_env, configured),
+      // A ref whose server this workspace no longer has resolves to nothing and is not counted.
+      // That is not an undercount: a grant nothing can honour is not a tool this agent can reach,
+      // and the Capabilities tab shows the same ref with a null impact so the gap stays visible
+      // where it can be acted on.
+      high_impact_tools: a.mcp_tools.filter((ref) => impactByRef.get(ref) === "high").length,
+      default_provider: a.default_provider,
+      thread_count: threads?.threadCount ?? 0,
+      latest_thread: threads?.latest
+        ? {
+            id: threads.latest.id,
+            title: threads.latest.title,
+            last_activity_at: threads.latest.lastActivityAt,
+            last_turn: threads.latest.lastTurn,
+          }
+        : null,
+      runtime: runtimeOf({
+        liveRuns: runs?.liveRuns ?? 0,
+        pausedRuns: runs?.pausedRuns ?? 0,
+        building: building.has(a.slug),
+        deploying: deployment !== null && isDeployInFlight(deployment.status),
+      }),
+      health: healthOf({ outcomes: outcomes.map((o) => o.outcome), versionSource }),
+      activity: activityOf(runs?.runs7d ?? 0),
+      last_run_at: runs?.lastRunAt ?? null,
+      runs_7d: runs?.runs7d ?? 0,
+      errors_7d: runs?.errors7d ?? 0,
+      // The failing step is filled in below, for the few runs that need it.
+      outcomes: outcomes.map((o) => ({
+        run_id: o.runId,
+        outcome: o.outcome,
+        started_at: o.startedAt,
+        failed_step_id: null,
+      })),
+      last_error: runs?.lastError ?? null,
+      // NULL IS NOT ZERO, and the three states are the same three a thread's cost has. An agent
+      // that has not run this week has spent nothing rather than $0.00, and §5.4's `Cost unknown`
+      // tag is the middle case — a figure that is a floor because something ran unpriced.
+      spend_7d: money ? money.usd : null,
+      spend_known: money ? money.costKnown : true,
+      deployment: deployment
+        ? { id: deployment.id, status: deployment.status, url: deployment.url, version: deployment.version }
+        : null,
+      drift: deployment ? driftOf(deployment.version, a.current_version) : null,
+    };
+  });
+
+  // §5.5's "a failed bar opens on the failing step", resolved in ONE query for the whole grid rather
+  // than one per red bar. The mapping from a step to its place in a trace already exists and is what
+  // the click uses; this only supplies which step to open on. It is asked only for the runs that
+  // actually failed — which in a healthy workspace is none of them, and the query is then skipped
+  // entirely rather than run against an empty list.
+  const failedRunIds = cards.flatMap((c) =>
+    c.outcomes.filter((o) => o.outcome === "error").map((o) => o.run_id),
+  );
+  if (failedRunIds.length > 0) {
+    const firstFailures = await store.firstFailedStepFor(ctx, failedRunIds);
+    for (const card of cards) {
+      for (const bar of card.outcomes) {
+        if (bar.outcome === "error") bar.failed_step_id = firstFailures.get(bar.run_id) ?? null;
+      }
+    }
+  }
+
+  return { cards, team: workspace?.kind === "team" };
+}
+
+/**
+ * One agent in full (§6), for the client that clicked its card.
+ *
+ * BUILT ON `agentGridSnapshot` RATHER THAN ON A SECOND ASSEMBLY, so the card in the detail header
+ * and the card in the grid behind it can never disagree about a tag. That costs one grid read per
+ * card opened — and the alternative is two functions that are required to agree and cannot be made
+ * to, which is the mistake `threadView` documents having already avoided once.
+ *
+ * UNDEFINED FOR AN AGENT THIS WORKSPACE DOES NOT HAVE (§7.3). Every read below is scoped, so an id
+ * belonging to another workspace produces exactly the same answer as one that never existed.
+ */
+async function agentDetail(ctx: TenantContext, slug: string): Promise<AgentDetailView | undefined> {
+  const grid = await agentGridSnapshot(ctx);
+  const card = grid.cards.find((c) => c.slug === slug);
+  if (!card) return undefined;
+
+  const since30 = new Date(Date.now() - GRID_WINDOW_30_MS).toISOString();
+  const [versions, tools, refs, datasets, evalRuns, threads, runs, spend30, runs30] = await Promise.all([
+    agentRepo.versions(ctx, card.uuid),
+    mcpRegistry.allTools(ctx),
+    secretRefs.list(ctx),
+    evalStore.listDatasets(ctx, card.slug),
+    evalStore.listEvalRuns(ctx, 50),
+    threadStore.listForAgent(ctx, card.uuid),
+    store.listRuns(ctx, 50),
+    billing.spendByAgent(ctx, since30),
+    store.runCountSince(ctx, card.slug, since30),
+  ]);
+
+  const byRef = new Map(tools.map((t) => [`${t.server_id}/${t.name}`, t]));
+  const refByName = new Map(refs.map((r) => [r.name, r]));
+  // Durations of the settled runs in the same window the sparkline covers, so a p95 beside a
+  // sparkline is a percentile OF that sparkline rather than of a different set of runs.
+  const settled = new Set(
+    card.outcomes.filter((o) => o.outcome === "ok" || o.outcome === "error").map((o) => o.run_id),
+  );
+  const durations = runs
+    .filter((r) => settled.has(r.id) && r.ended_at)
+    .map((r) => new Date(r.ended_at!).getTime() - new Date(r.started_at).getTime());
+  const { p50, p95 } = percentiles(durations);
+  const spend30Usd = spend30.find((s) => s.agentId === card.slug)?.usd ?? null;
+
+  // COST PER RUN, NOT TOTAL COST, and null rather than zero when there is no denominator. §6 asks
+  // for "cost per run over 7 and 30 days", and an agent that has not run in the window has no cost
+  // per run at all — a zero there would read as "this agent is free", which is the same false
+  // confidence `creation_cost` is forbidden from claiming.
+  const perRun = (usd: number | null, count: number): number | null =>
+    usd === null || count <= 0 ? null : usd / count;
+
+  const lastEval = evalRuns.find((e) => e.agent_id === card.slug) ?? null;
+
+  return {
+    card,
+    versions: versions.map((v) => ({
+      version: v.version,
+      source: v.source,
+      instruction: v.instruction,
+      summary: v.summary,
+      file_stats: v.file_stats,
+      total_bytes: v.total_bytes,
+      undone_at: v.undone_at,
+      created_at: v.created_at,
+      created_by: null,
+      current: v.version === card.current_version,
+    })),
+    // EVERY GRANTED REF, INCLUDING THE ONES THAT NO LONGER RESOLVE. A grant whose server has been
+    // removed is a real thing to see on a Capabilities tab — it is why a tool the agent's code calls
+    // will fail — and dropping it would make the tab quietly shorter than the manifest it describes.
+    tools: card.mcp_tools.map((ref) => {
+      const slash = ref.indexOf("/");
+      const resolved = byRef.get(ref);
+      return {
+        ref,
+        server: slash > 0 ? ref.slice(0, slash) : ref,
+        tool: slash > 0 ? ref.slice(slash + 1) : "",
+        impact: resolved?.impact ?? null,
+        reason: resolved?.impact_reason ?? null,
+      };
+    }),
+    // NAMES AND A BOOLEAN. There is no field here a value could travel in, which is the same
+    // discipline the secrets panel and the deploy logs hold and the reason this is safe to send.
+    credentials: card.required_env.map((name) => ({
+      name,
+      configured: refByName.get(name)?.configured ?? false,
+      scope: refByName.get(name)?.scope ?? null,
+    })),
+    p50_ms: p50,
+    p95_ms: p95,
+    cost_per_run_7d: perRun(card.spend_7d, card.runs_7d),
+    cost_per_run_30d: perRun(spend30Usd, runs30),
+    evals: {
+      datasets: datasets.map((d) => ({ id: d.id, name: d.name, example_count: d.example_count })),
+      last: lastEval
+        ? { id: lastEval.id, status: lastEval.status, started_at: lastEval.started_at, winner: null }
+        : null,
+    },
+    threads: threads.map((t) => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      last_activity_at: t.last_activity_at,
+      archived: t.archived_at !== null,
+    })),
+    runs: runs
+      .filter((r) => r.agent_id === card.slug)
+      .slice(0, 20)
+      .map((r) => ({
+        id: r.id,
+        status: r.status,
+        started_at: r.started_at,
+        provider: r.provider,
+        model: r.model,
+      })),
+  };
+}
+
+/**
+ * One version's files (§6's browser, and the overflow menu's Export).
+ *
+ * OUT OF THE OBJECT STORE, NEVER OFF DISK, which §6 states as a requirement and the storage layer
+ * already enforces: a replica that has never run this agent must show byte-identical output to the
+ * one that generated it, and `runtime/agents/` is one namespace shared by every workspace on the
+ * box. `readVersion` reads the manifest and fetches what it names, so a half-published version is an
+ * error rather than a file that quietly vanishes from a project.
+ */
+async function agentVersionFiles(
+  ctx: TenantContext,
+  slug: string,
+  version: number | undefined,
+): Promise<{ version: number; files: AgentFileView[] } | undefined> {
+  if (!isSafeAgentId(slug)) return undefined;
+  const agent = (await agentRepo.list(ctx, { includeArchived: true })).find((a) => a.slug === slug);
+  if (!agent) return undefined;
+  const wanted = version ?? agent.current_version;
+  const row = await agentRepo.version(ctx, agent.id, wanted);
+  if (!row) return undefined;
+
+  const [files, blame] = await Promise.all([
+    projects.readVersion(ctx, agent.id, wanted),
+    agentRepo.fileBlame(ctx, agent.id),
+  ]);
+  // POSIX SEPARATORS, and the match is against object paths rather than against anything a
+  // filesystem produced. The Windows separator bug that silently dropped `tools/mcp_bridge.py` from
+  // the block list is exactly this comparison done against a platform path.
+  const connectorFiles = agentFilesDeps.connectorFilesFor(agent, slug);
+  const readOnly = readOnlyPaths(connectorFiles);
+
+  return {
+    version: wanted,
+    files: files.map((f) => ({
+      path: f.path,
+      content: f.content,
+      bytes: row.manifest[f.path]?.bytes ?? Buffer.byteLength(f.content, "utf8"),
+      read_only: readOnly.has(f.path),
+      read_only_reason: readOnlyReason(f.path, connectorFiles),
+      last_changed_in: blame.get(f.path) ?? null,
+    })),
+  };
+}
+
+/**
+ * The next free `<slug>_copy`, `<slug>_copy2`, … or null when there is no room for one.
+ *
+ * BOUNDED, AND THE BOUND IS THE SLUG PATTERN rather than a guess. `SAFE_SLUG` caps a slug at 64
+ * characters, so a name long enough that no suffix fits has to be refused rather than silently
+ * truncated into a collision with something else. Twenty attempts is well past the point where
+ * somebody wants a differently-named agent instead of another copy.
+ */
+function nextForkSlug(slug: string, taken: ReadonlySet<string>): string | null {
+  for (let n = 1; n <= 20; n++) {
+    const candidate = n === 1 ? `${slug}_copy` : `${slug}_copy${n}`;
+    if (SAFE_SLUG.test(candidate) && !taken.has(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Duplicate an agent (§7.5): its connectors and its current manifest, and none of its MCP grants.
+ *
+ * NO FILE IS COPIED. Objects are content-addressed and immutable, so the fork's first version names
+ * the same objects the original's current version does — a manifest and a pointer, exactly as §7.5
+ * says. Neither agent can affect the other's bytes, because nothing ever rewrites an object.
+ *
+ * THE MANIFEST IS REGISTERED WITH `addVersion` rather than by writing a row by hand, so the fork
+ * goes through the same reserve-then-promote path every other publish does — which is what makes it
+ * impossible for the new agent's `current_version` to point at a version whose objects do not exist.
+ *
+ * `source: "import"` IS THE TRUTHFUL LABEL, and it is worth stating because `generation` would read
+ * better. Nothing was generated: this version was published as-is out of another agent's manifest,
+ * which is precisely what migration 014 defines `import` to mean — and it is also honest about the
+ * validator, which never saw this project under this agent's name.
+ */
+async function forkAgent(ctx: TenantContext, slug: string): Promise<void> {
+  const all = await agentRepo.list(ctx, { includeArchived: true });
+  const source = all.find((a) => a.slug === slug);
+  if (!source) {
+    refuseAgent(ctx, `no agent called ${slug} in this workspace`, slug);
+    return;
+  }
+  const version = await agentRepo.version(ctx, source.id, source.current_version);
+  if (!version) {
+    refuseAgent(ctx, `${slug} has published nothing yet — there is no version to fork`, slug);
+    return;
+  }
+
+  const forkSlug = nextForkSlug(source.slug, new Set(all.map((a) => a.slug)));
+  if (!forkSlug) {
+    refuseAgent(ctx, `${slug} has too many copies — rename one before making another`, slug);
+    return;
+  }
+
+  const id = randomUUID();
+  await agentRepo.create(ctx, {
+    id,
+    slug: forkSlug,
+    display_name: `${source.display_name ?? source.slug} copy`,
+    description: source.description,
+    // COPIED, because a connector is a reviewed template this workspace has already audited and it
+    // carries no third-party grant with it.
+    connectors: source.connectors,
+    // NOT COPIED, and §7.5 gives the reason: copying them would silently re-grant high-impact
+    // third-party tools to a brand-new agent without anybody ticking a box, and the entire MCP
+    // design rests on access being granted per tool, deliberately.
+    mcp_tools: [],
+    required_env: source.required_env,
+    default_provider: source.default_provider,
+    hand_written: false,
+    // NULL, NOT THE ORIGINAL'S FIGURE. A fork cost a database row; claiming the original's
+    // generation cost would put somebody else's spend on a new agent's overview, and v0.1.9's rule
+    // is that a missing figure is not a zero — nor is it somebody else's.
+    creation_cost: null,
+  });
+  await agentRepo.addVersion(ctx, id, version.manifest, {
+    source: "import",
+    summary: `forked from ${source.slug} v${version.version}`,
+  });
+
+  console.log(`[agents] forked ${source.slug} v${version.version} to ${forkSlug}`);
+  await relay.broadcastAgents();
+  await relay.broadcastAgentGrid();
+  noticeAgent(ctx, `Forked to ${forkSlug}. Its MCP grants start empty.`, forkSlug);
+}
+
+/**
+ * Go back to an old version by publishing a NEW one that points at its manifest (§6).
+ *
+ * IT NEVER REWRITES HISTORY AND NEVER MOVES A POINTER BACKWARDS ONTO OBJECTS A CLEANUP MAY HAVE
+ * COLLECTED. Both halves of that sentence are load-bearing. Moving `current_version` back would make
+ * the version list stop describing what happened, and it would leave the pointer on objects whose
+ * only protection is a version row a retention sweep is entitled to consider superseded. A forward
+ * publish reserves a new number, names the same immutable objects, and promotes — the same order the
+ * storage layer already fixed once, for the failure where a pointer led a publish.
+ */
+async function restoreAgentVersion(ctx: TenantContext, slug: string, version: unknown): Promise<void> {
+  const wanted = typeof version === "number" && Number.isFinite(version) ? Math.floor(version) : null;
+  if (wanted === null || wanted < 1) {
+    refuseAgent(ctx, "that is not a version number", slug);
+    return;
+  }
+  const agent = (await agentRepo.list(ctx, { includeArchived: true })).find((a) => a.slug === slug);
+  if (!agent) {
+    refuseAgent(ctx, `no agent called ${slug} in this workspace`, slug);
+    return;
+  }
+  if (wanted === agent.current_version) {
+    noticeAgent(ctx, `v${wanted} is already live`, slug);
+    return;
+  }
+  // `includeUndone`, because a version taken off the line by an undo is exactly the one somebody
+  // reaches for when they want it back — and the objects are still there, which is the whole reason
+  // an undo is a pointer move rather than a delete.
+  const row = (await agentRepo.versions(ctx, agent.id, true)).find((v) => v.version === wanted);
+  if (!row) {
+    refuseAgent(ctx, `${slug} has no v${wanted}`, slug);
+    return;
+  }
+
+  const published = await agentRepo.addVersion(ctx, agent.id, row.manifest, {
+    source: "import",
+    summary: `restored v${wanted}`,
+  });
+  console.log(`[agents] ${slug} restored v${wanted} as v${published}`);
+  await relay.broadcastAgents();
+  relay.broadcastAgentFiles(ctx, slug);
+  void relay.broadcastAgentGraph(ctx, slug);
+  await relay.broadcastAgentGrid();
+  noticeAgent(ctx, `v${wanted} is live again, published as v${published}`, slug);
+}
+
+async function handleAgentCommand(ctx: TenantContext, cmd: AgentCommand): Promise<void> {
+  try {
+    // SHAPE-CHECKED BEFORE ANYTHING ELSE SEES IT. The relay forwards any member of AGENT_COMMANDS
+    // without checking its fields — deliberately, so the refusal can be written here and land on the
+    // channel the grid is waiting on rather than in the status bar.
+    if (typeof cmd.agentId !== "string" || !cmd.agentId) {
+      refuseAgent(ctx, "that command needs an agent");
+      return;
+    }
+    if (cmd.cmd === "archiveAgent") await setAgentArchived(ctx, cmd.agentId, true);
+    else if (cmd.cmd === "restoreAgent") await setAgentArchived(ctx, cmd.agentId, false);
+    else if (cmd.cmd === "renameAgent") await renameAgent(ctx, cmd.agentId, cmd.name);
+    else if (cmd.cmd === "forkAgent") await forkAgent(ctx, cmd.agentId);
+    else if (cmd.cmd === "restoreAgentVersion") await restoreAgentVersion(ctx, cmd.agentId, cmd.version);
+  } catch (err) {
+    // A FIXED SENTENCE, AND THE REAL ONE IN THE LOG — the same rule the thread commands follow. What
+    // throws on this path is usually a database driver, and nothing a driver wrote was written for a
+    // person to read.
+    console.error(`[agents] ${cmd.cmd} failed:`, (err as Error)?.message ?? err);
+    refuseAgent(ctx, "that did not work — the grid is unchanged", cmd.agentId);
+  }
+}
+
 // --- threads: the snapshot and the four mutations ---------------------------
 //
 // §7.1's convention, exactly as the eval, MCP and members channels follow it: the two reads are
@@ -3397,7 +3922,7 @@ function noteThreadItem(
 ): void {
   void threadStore
     .addItem(ctx, threadId, item)
-    .then(() => scheduleThreadBroadcast(ctx))
+    .then(() => scheduleListRefresh(ctx))
     .catch((err) => {
       console.error(`[threads] could not record a ${item.kind}:`, (err as Error)?.message ?? err);
     });
@@ -3430,7 +3955,7 @@ function noteUserMessage(ctx: TenantContext, threadId: string, body: string): vo
     // here, so two clients racing cannot get past it either.
     const first = await threadStore.firstMessage(ctx, threadId);
     if (first) await threadStore.autoTitle(ctx, threadId, threadTitle(first));
-    scheduleThreadBroadcast(ctx);
+    scheduleListRefresh(ctx);
   })().catch((err) => {
     console.error(`[threads] could not record a message:`, (err as Error)?.message ?? err);
   });
@@ -3701,7 +4226,7 @@ const THREAD_BROADCAST_COALESCE_MS = 60;
 const pendingThreadBroadcasts = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
- * Refresh the thread list soon, once, however many times this is called.
+ * Refresh the two workspace lists soon, once, however many times this is called.
  *
  * §7.1 FORBIDS A POLLING CHANNEL, NOT COALESCING. The rule is that a full snapshot goes out on a
  * genuine state transition and never per cost tick; nothing in it asks that three transitions
@@ -3709,19 +4234,32 @@ const pendingThreadBroadcasts = new Map<string, ReturnType<typeof setTimeout>>()
  * expensive by construction — it reads every thread, every item and every owned run — so a burst
  * issued one broadcast per event is the shape that makes the list appear to freeze under load.
  *
+ * BOTH LISTS, ON ONE TIMER, and that is what this grew into when the Agents tab landed. Every one of
+ * the eighteen places that calls this is a moment both lists changed: a run starting turns a thread
+ * row ● and an agent card amber, a run ending grows a card's sparkline and settles a thread's status,
+ * an applied edit moves a version on one surface and clears a pending diff on the other. Two
+ * schedulers over one set of transitions would be two chances to add a call site to only one of them
+ * — which is how a surface goes quietly stale — and the Agents grid's whole §5.5 promise is that it
+ * updates without a refresh.
+ *
  * The last call wins the context, which is correct because they are all the same workspace: the
  * key IS the workspace id, so two tenants never share a timer.
  *
- * Callers that must be immediate — a thread command answering the socket that sent it — still call
- * `broadcastThreads` directly. This is for the event-driven ones, which is most of them.
+ * Callers that must be immediate — a thread or agent command answering the socket that sent it —
+ * still broadcast directly. This is for the event-driven ones, which is most of them.
  */
-function scheduleThreadBroadcast(ctx: TenantContext): void {
+function scheduleListRefresh(ctx: TenantContext): void {
   const existing = pendingThreadBroadcasts.get(ctx.workspaceId);
   if (existing) clearTimeout(existing);
   const timer = setTimeout(() => {
     pendingThreadBroadcasts.delete(ctx.workspaceId);
     void broadcastThreads(ctx).catch((err) =>
       console.error(`[threads] could not refresh the list:`, (err as Error)?.message ?? err),
+    );
+    // Not awaited against the thread refresh and caught on its own: an Agents grid that could not be
+    // rebuilt must not stop the Threads list from being, and neither is worth failing a run over.
+    void relay.broadcastAgentGrid().catch((err) =>
+      console.error(`[agents] could not refresh the grid:`, (err as Error)?.message ?? err),
     );
   }, THREAD_BROADCAST_COALESCE_MS);
   // Never the reason a process stays alive: a pending list refresh is not work worth delaying an
@@ -6001,7 +6539,7 @@ onBothPools("event", ({ runId, event }) => {
     //
     // Coalesced (see `scheduleThreadBroadcast`), because the snapshot is expensive and a run ending
     // touches the list from three handlers within a millisecond of each other.
-    if (event.kind === "run_end") scheduleThreadBroadcast(runCtx);
+    if (event.kind === "run_end") scheduleListRefresh(runCtx);
   });
 });
 
@@ -6092,7 +6630,7 @@ onBothPools("control", ({ runId: slotRunId, ctrl }) => {
       // A halted graph waiting on a person is §3.3's `needs_you`, and the derivation reads
       // `pendingConfirms` live — so the fact is already true and nothing was telling the list.
       // The row turns amber while the run is blocked, and back when `clearConfirms` fires.
-      scheduleThreadBroadcast(runCtx);
+      scheduleListRefresh(runCtx);
     } else if (ctrl.ctrl === "tool_confirm_closed") {
       // The runner gave up waiting (or was denied) and has moved on. Close the ask so a
       // modal cannot linger over a question nobody is listening for any more.
@@ -6113,7 +6651,7 @@ onBothPools("spawnError", ({ runId, error }) => {
   // A run that never started is a run that ended, as far as §3.3 is concerned — its thread stops
   // being `running` and nothing else would say so. See the `run_end` broadcast for the whole
   // argument; this is the case where there is no `run_end` at all.
-  scheduleThreadBroadcast(contextForRun(runId));
+  scheduleListRefresh(contextForRun(runId));
   console.error(`[manager] spawn error (run ${runId}):`, error.message);
 });
 
@@ -6178,7 +6716,7 @@ onBothPools("exit", ({ runId, code, signal, timedOut, elapsedMs }) => {
   // AND THE LIST LEARNS THE RUN IS OVER, including the crash that never emitted a `run_end`. The
   // ingest chain's own broadcast covers the ordinary ending; this covers a killed or crashed
   // process, which is exactly the case §3.3 turns red and the badge should count.
-  scheduleThreadBroadcast(billedCtx);
+  scheduleListRefresh(billedCtx);
   traceBackpressure.release(runId);
   // A no-op for an eval run — it never acquired one. A paused run's process genuinely exits
   // (see debug depth §S3), so this releases the reservation across the pause too; resumeRun
@@ -6236,7 +6774,7 @@ planner.on("discarded", ({ planId, workspaceId }) => {
   // §3.3 counts a plan awaiting a decision as blocked work, read live off the planner's slot — so a
   // discard un-blocks the thread and nothing was saying so. The row went on reading `plan awaiting`
   // until something else in the workspace forced a snapshot.
-  scheduleThreadBroadcast(ctx);
+  scheduleListRefresh(ctx);
 });
 
 planner.on("plan", (e) => {
@@ -6499,7 +7037,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
           }
         }
         relay.broadcastAgents();
-        scheduleThreadBroadcast(genCtxNow);
+        scheduleListRefresh(genCtxNow);
       })
       .catch((err) => console.error(`[threads] could not attach the agent:`, (err as Error)?.message ?? err));
     cleanup();
@@ -6514,7 +7052,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     // exist in this process and nowhere else. The THREAD is what is blocked, and the next
     // generation in it is what clears the mark.
     if (genThread) rejectedGenerations.add(genThread);
-    scheduleThreadBroadcast(contextForGen());
+    scheduleListRefresh(contextForGen());
     cleanup();
   };
 
@@ -6579,7 +7117,7 @@ editor.on("applied", (e) => {
   // The proposal has left `openProposals`, so the thread is no longer blocked. Nothing is written —
   // the row that bound the proposal is still true — but the list has to be told, because the glyph
   // it is rendering has just stopped being amber.
-  scheduleThreadBroadcast(contextForEdit());
+  scheduleListRefresh(contextForEdit());
   void syncAgents().then(() => relay.broadcastAgents());
   relay.broadcastAgentFiles(contextForEdit(), e.agentId);
   // An edit changed the version, and the graph cache is keyed by it — so there is nothing to
@@ -6599,7 +7137,7 @@ editor.on("undone", (e) => {
 editor.on("discarded", (e) => {
   editOut({ type: "discarded", ...e });
   // Same as `applied`: the diff is gone from the editor, so the row is no longer blocked.
-  scheduleThreadBroadcast(contextForEdit());
+  scheduleListRefresh(contextForEdit());
 });
 
 editor.on("error", (e) => {
