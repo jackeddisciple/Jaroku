@@ -118,7 +118,7 @@ import {
 import { openCheckpointStore } from "./checkpoints/store.ts";
 import { introspectGraph, introspectGraphCached, type GraphResult } from "./graphIntrospect.ts";
 import { streamExplain } from "./explainer.ts";
-import type { ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, ProviderSnapshot } from "./wsRelay.ts";
+import type { ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, ProviderSnapshot } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
 import { currentTraceparent, formatTraceparent, openTracer, parseTraceparent } from "./obs/trace.ts";
@@ -137,7 +137,20 @@ import { InboxStore } from "./inbox/inboxStore.ts";
 import { InboxReconciler, describeReconcile } from "./inbox/reconciler.ts";
 import { inboxFacts, type FactDeps } from "./inbox/facts.ts";
 import { deriveInboxItems, disablesConfirmGate } from "./inbox/derive.ts";
-import { UndoLedger, seedOnboardingItems } from "./inbox/actions.ts";
+import {
+  UndoLedger,
+  applyInboxAction,
+  isInboxAction,
+  seedOnboardingItems,
+  undoInboxAction,
+} from "./inbox/actions.ts";
+import {
+  EMPTY_INBOX,
+  inboxSnapshot,
+  isSnoozeDuration,
+  type InboxSnapshot,
+  type SnoozeDuration,
+} from "./inbox/snapshot.ts";
 import { INBOX_RECONCILE_LOCK_KEY } from "./db/db.ts";
 import {
   noteDeployFailed,
@@ -553,7 +566,13 @@ const inboxStore = new InboxStore(store.database());
  * for it to do — an empty hook now is a hook nobody has to remember to add later, which is the
  * failure the members list had for the whole life of a tab.
  */
-const inboxDeps: GeneratorDeps = { inbox: inboxStore };
+const inboxDeps: GeneratorDeps = {
+  inbox: inboxStore,
+  // A card appearing is a state transition somebody is watching for — §5.6's "no refresh" applies to
+  // arrivals as much as to resolutions. Coalesced through the same scheduler the two lists use, so a
+  // burst of nine failures inside one millisecond is one rebuild rather than nine.
+  onChanged: (ctx) => scheduleInboxRefresh(ctx),
+};
 
 /**
  * The five seconds after a destructive action, so undo can put back exactly what was there.
@@ -1378,6 +1397,11 @@ const inboxReconciler = new InboxReconciler({
   // Bound to the reconciler's own key rather than the migration runner's. Advisory locks are one
   // flat namespace, and sharing the key would make a deploy applying migrations wait behind a sweep.
   withLock: (fn) => db.withAdvisoryLock(INBOX_RECONCILE_LOCK_KEY, fn),
+  // §5.6: "when an item resolves — from anywhere, including another tab or another team member —
+  // the card collapses and fades, and the column count decrements, with no refresh." The sweep is
+  // the "from anywhere" that nothing else could cover, so it is the one place that push has to come
+  // from. Per workspace and only when something moved, so a quiet minute costs nobody a frame.
+  onChanged: () => broadcastInbox(),
   log: (line) => console.log(line),
 });
 
@@ -2613,6 +2637,10 @@ const relay = new WsRelay({
   loadAgentVersion: (ctx, agentId, version) => agentVersionFiles(ctx, agentId, version),
   // The list and the counts together, so the chips and the nav badge are one number — §2.1.
   listThreads: (ctx) => threadSnapshot(ctx),
+  // §4's board, for the person on the asking socket. Answered locally like the two lists beside
+  // it, so §5.2's badge is right on frame one rather than after a round trip. A socket with no
+  // person on it — the dev path — gets an empty board rather than somebody else's.
+  listInbox: (ctx) => (ctx.actorUserId ? boardFor(ctx) : EMPTY_INBOX),
   // §2.2's `unreviewed_failures` leaves when any one of its traces is opened, and this is the one
   // path into a trace from any of the four surfaces that offer one. The card resolves because the
   // work was done rather than because the card was pressed, which is Law 2 in one wire.
@@ -2689,6 +2717,7 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (cmd.cmd === "loadEnforcement") void broadcastEnforcement(ctx);
     else if (cmd.cmd === "appealEnforcement") void appealEnforcement(ctx, cmd.note);
     else if (THREAD_COMMAND_NAMES.has(cmd.cmd)) void handleThreadCommand(ctx, cmd as ThreadCommand);
+    else if (INBOX_COMMAND_NAMES.has(cmd.cmd)) void handleInboxCommand(ctx, cmd as InboxCommand);
     else if (cmd.cmd === "loadUsage") void broadcastUsage(ctx);
     else if (cmd.cmd === "setSpendCeiling") void setSpendCeiling(ctx, cmd.usd);
     else void handleEvalCommand(ctx, cmd);
@@ -4056,6 +4085,186 @@ async function handleAgentCommand(ctx: TenantContext, cmd: AgentCommand): Promis
     // person to read.
     console.error(`[agents] ${cmd.cmd} failed:`, (err as Error)?.message ?? err);
     refuseAgent(ctx, "that did not work — the grid is unchanged", cmd.agentId);
+  }
+}
+
+// --- the inbox: one person's board, and the three verbs ---------------------
+//
+// §6.4's convention, exactly as threads follows it: the read is answered by the relay from
+// `boardFor` below, and every mutation broadcasts afterwards. What is different here — and it is the
+// only thing that is — is that a snapshot is PER PERSON, because a dismissal and a snooze are one
+// person's judgement. So the broadcast rebuilds per recipient and the undo token goes to the socket
+// that acted and to nobody else.
+
+const INBOX_COMMAND_NAMES = new Set([
+  "resolveInboxItem", "dismissInboxItem", "snoozeInboxItem", "undoInboxAction", "bulkInboxAction",
+]);
+
+/**
+ * The most items one bulk action may name.
+ *
+ * BOUNDED, because bulk takes a list a CLIENT composes. A range selection is tens; a column's
+ * overflow menu is whatever is in the column. Anything larger is not a person shift-clicking, and
+ * every id in the list costs a scoped read.
+ */
+const BULK_MAX = 500;
+
+/**
+ * One person's board, as the relay answers `listInbox` and as every broadcast rebuilds it.
+ *
+ * THE AGENT NAMES COME FROM THE AGENT LIST rather than from each item's payload, and that is the
+ * same decision `ThreadView.agent_name` made after getting it wrong: a name snapshotted into a
+ * payload is written once and never refreshed, so renaming an agent would leave every row in the
+ * left rail showing the old name while the sidebar two panels over showed the new one.
+ */
+async function boardFor(ctx: TenantContext): Promise<InboxSnapshot> {
+  const [agents, workspace] = await Promise.all([
+    agentRepo.list(ctx, { includeArchived: true }),
+    bootIdentity.workspaceById(ctx, ctx.workspaceId),
+  ]);
+  return inboxSnapshot(inboxStore, ctx, ctx.actorUserId, {
+    team: workspace?.kind === "team",
+    agentNames: new Map(agents.map((a) => [a.id, a.display_name ?? a.slug])),
+  });
+}
+
+/**
+ * Rebuild the board soon, once, however many times this is called.
+ *
+ * THE SAME COALESCING THE TWO LISTS GET, AND FOR A SHARPER VERSION OF THE REASON. Nine runs of one
+ * agent failing inside a burst is nine calls to a generator, and every one of them is a genuine
+ * transition — Law 3 is what collapses them into one CARD, and this is what collapses them into one
+ * rebuild. Without it a burst issues nine per-recipient snapshots of a board that ends up showing one
+ * row with a nine on it.
+ *
+ * A SEPARATE TIMER FROM `scheduleListRefresh`, deliberately. That one fires on transitions both the
+ * Threads list and the Agents grid care about; most of what moves this board moves neither. Sharing
+ * it would mean every dismissal rebuilding two lists that did not change.
+ */
+const INBOX_BROADCAST_COALESCE_MS = 60;
+const pendingInboxBroadcasts = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleInboxRefresh(ctx: TenantContext): void {
+  const existing = pendingInboxBroadcasts.get(ctx.workspaceId);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(() => {
+    pendingInboxBroadcasts.delete(ctx.workspaceId);
+    broadcastInbox();
+  }, INBOX_BROADCAST_COALESCE_MS);
+  // The key IS the workspace id, so two tenants never share a timer — and unref'd, so a pending
+  // rebuild never holds the process open at shutdown.
+  timer.unref?.();
+  pendingInboxBroadcasts.set(ctx.workspaceId, timer);
+}
+
+/** Rebuild every connected person's board. Floating and caught at every call site. */
+function broadcastInbox(): void {
+  void relay
+    .broadcastInbox()
+    .catch((err) => console.error("[inbox] could not refresh the board:", (err as Error)?.message ?? err));
+}
+
+/**
+ * The three verbs, undo, and bulk — which is the same path as one.
+ *
+ * A REFUSAL GOES TO THE SOCKET THAT ASKED, AND THE BOARD GOES TO EVERYBODY. Two different audiences
+ * for two different facts: "that item is not open any more" is about one person's click, and a
+ * resolution is about the workspace. Broadcasting the refusal would paint a red strip across every
+ * teammate's board over somebody else's mistimed keystroke — the failure `refuseThread` exists to
+ * have already fixed once on the channel next door.
+ *
+ * THE UNDO TOKEN IS SENT TO ONE SOCKET, and that is a rule rather than a nicety: a token is the
+ * authority to take an action back, and broadcasting one would hand every teammate the ability to
+ * undo somebody else's triage.
+ */
+async function handleInboxCommand(ctx: TenantContext, cmd: InboxCommand): Promise<void> {
+  const refuse = (message: string, itemId?: string): void =>
+    relay.sendInbox(ctx, ctx.requestId, { type: "error", message, itemId });
+
+  // ATTRIBUTION IS AUTHORISATION HERE, WHICH IS THE ONE PLACE IN THIS CODEBASE IT IS. Everywhere
+  // else `actorUserId` names a person for an audit row and decides nothing. A dismissal is a row
+  // keyed by (item, user), so without a user there is no row to write — and a null actor is a real
+  // caller: the dev socket, and work nobody triggered.
+  const userId = ctx.actorUserId;
+  if (!userId) {
+    refuse("this action is filed against a person, and this connection has none");
+    return;
+  }
+
+  try {
+    if (cmd.cmd === "undoInboxAction") {
+      if (typeof cmd.token !== "string") {
+        refuse("that undo carried no token");
+        return;
+      }
+      const { restored, action } = await undoInboxAction(inboxStore, inboxUndo, ctx, userId, cmd.token);
+      if (restored === 0) {
+        // THE SAME SENTENCE FOR EXPIRED, ALREADY-USED AND NOT-YOURS, which is §6.3's rule applied to
+        // a token: a caller learns nothing about what exists elsewhere.
+        refuse("that can no longer be undone");
+        return;
+      }
+      relay.sendInbox(ctx, ctx.requestId, {
+        type: "inboxUndo", token: null, action: action ?? "undo", changed: restored,
+      });
+      broadcastInbox();
+      return;
+    }
+
+    const single =
+      cmd.cmd === "resolveInboxItem" ? "resolve" :
+      cmd.cmd === "dismissInboxItem" ? "dismiss" :
+      cmd.cmd === "snoozeInboxItem" ? "snooze" : null;
+
+    const action = single ?? (cmd.cmd === "bulkInboxAction" ? cmd.action : null);
+    if (!isInboxAction(action)) {
+      refuse("that is not something this board can do");
+      return;
+    }
+
+    const itemIds: unknown[] = single
+      ? [(cmd as { itemId?: unknown }).itemId]
+      : ((cmd as { itemIds?: unknown }).itemIds as unknown[]);
+    if (!Array.isArray(itemIds) || itemIds.length === 0 || itemIds.some((id) => typeof id !== "string")) {
+      refuse("that action named no items");
+      return;
+    }
+    if (itemIds.length > BULK_MAX) {
+      refuse(`that is more than ${BULK_MAX} items at once`);
+      return;
+    }
+
+    const rawDuration = (cmd as { duration?: unknown }).duration;
+    const duration: SnoozeDuration | undefined = isSnoozeDuration(rawDuration) ? rawDuration : undefined;
+    if (action === "snooze" && rawDuration !== undefined && duration === undefined) {
+      refuse("that is not one of the three snooze durations");
+      return;
+    }
+
+    const result = await applyInboxAction(
+      inboxStore, inboxUndo, ctx, userId, { action, itemIds: itemIds as string[], duration },
+    );
+
+    if (result.changed === 0) {
+      refuse(
+        itemIds.length === 1
+          ? "that item is no longer open, or does not offer that action"
+          : "none of those items could be changed",
+        itemIds.length === 1 ? (itemIds[0] as string) : undefined,
+      );
+      return;
+    }
+
+    // §3's toast, to the one person entitled to press it.
+    relay.sendInbox(ctx, ctx.requestId, {
+      type: "inboxUndo", token: result.undoToken, action, changed: result.changed,
+    });
+    // AND THE BOARD TO EVERYBODY, because a resolution is shared even though the other two verbs are
+    // not — and one broadcast that rebuilds per recipient is correct for all three.
+    broadcastInbox();
+  } catch (err) {
+    console.error("[inbox] command failed:", (err as Error)?.message ?? err);
+    refuse("that could not be done");
   }
 }
 

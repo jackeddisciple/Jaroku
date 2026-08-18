@@ -1004,6 +1004,8 @@ export type ClientCommand =
   | ExplainCommand
   | EvalCommand
   | McpCommand
+  | ListInboxCommand
+  | InboxCommand
   | ListMcpServersCommand
   | ProviderCommand
   | ListProvidersCommand
@@ -1071,6 +1073,7 @@ export type ForwardedCommand =
   | ListAuditCommand
   | EnforcementCommand
   | ThreadCommand
+  | InboxCommand
   | BillingCommand;
 
 // Generation rides its own channel, deliberately parallel to "trace". It never enters the
@@ -1787,6 +1790,113 @@ export type ThreadEvent =
   | { type: "error"; message: string; threadId?: string }
   | { type: "notice"; message: string; threadId?: string };
 
+// --- the Inbox: what is waiting on somebody, and the three verbs -------------------------------
+//
+// ITS OWN CHANNEL, parallel to threads / agents / eval / mcp / deploy / github, and for the reason
+// each of those is not a field on another: what is waiting on you is not a session, not an artifact
+// and not a run. §6.4 asks for the established shape exactly, and the established shape is this one.
+//
+// THE ONE THING THAT IS GENUINELY DIFFERENT: A SNAPSHOT IS PER PERSON. Every other channel here
+// answers a question about a workspace, so one payload is correct for every socket in it. Two of the
+// three verbs are personal — a dismissal and a snooze are one person's judgement — so two people in
+// one workspace are entitled to two different boards, and a payload built once and fanned out would
+// show Ada's dismissals on Bob's screen. `broadcastInbox` therefore builds per RECIPIENT and memoises
+// per (workspace, user) rather than per workspace.
+//
+// THE FROZEN SCHEMA IS UNTOUCHED. Nothing here is a trace event and nothing here changes one, exactly
+// as threads, evals and MCP all did: new capability in new tables and a new channel BESIDE the
+// timeline.
+export type ListInboxCommand = { cmd: "listInbox" };
+export type ResolveInboxItemCommand = { cmd: "resolveInboxItem"; itemId: string };
+export type DismissInboxItemCommand = { cmd: "dismissInboxItem"; itemId: string };
+export type SnoozeInboxItemCommand = { cmd: "snoozeInboxItem"; itemId: string; duration?: string };
+/** §3's undo, by the token the toast was given. See UndoLedger for why the client sends only that. */
+export type UndoInboxActionCommand = { cmd: "undoInboxAction"; token: string };
+/** §3's bulk: a range, or a column's overflow menu. One action, one token, one undo. */
+export type BulkInboxActionCommand = {
+  cmd: "bulkInboxAction";
+  action: string;
+  itemIds: string[];
+  duration?: string;
+};
+
+export type InboxCommand =
+  | ResolveInboxItemCommand
+  | DismissInboxItemCommand
+  | SnoozeInboxItemCommand
+  | UndoInboxActionCommand
+  | BulkInboxActionCommand;
+
+// The five that MUTATE. `listInbox` is not here because it is answered locally — see `dispatch`.
+const INBOX_COMMANDS = new Set([
+  "resolveInboxItem", "dismissInboxItem", "snoozeInboxItem", "undoInboxAction", "bulkInboxAction",
+]);
+
+/**
+ * What `listInbox` answers with. Structural rather than imported, like every other wire shape here.
+ *
+ * `unknown[]` FOR THE ROWS RATHER THAN THE SERVER'S OWN TYPE, which is the same choice `listMembers`
+ * and `listDeployments` make. The relay's job is to carry this to the socket that asked; restating
+ * a sixteen-field card shape here would be a second definition of it that the first change to a
+ * payload field makes wrong.
+ */
+export interface InboxSnapshotPayload {
+  items: unknown[];
+  snoozed: unknown[];
+  counts: unknown;
+  agents: unknown[];
+  cleared_this_week: number;
+}
+
+/**
+ * What a socket is told when nothing answers `listInbox`.
+ *
+ * An empty board with zeroed counts rather than no message at all, for the reason the threads
+ * channel has the same constant: §5.3's zero state and "we have not been told yet" are two different
+ * renderings, and a client that received nothing could not tell them apart.
+ */
+const EMPTY_INBOX_PAYLOAD: InboxSnapshotPayload = {
+  items: [],
+  snoozed: [],
+  counts: { all: 0, blocking: 0, attention: 0, proposals: 0, team: 0, snoozed: 0, badge: 0 },
+  agents: [],
+  cleared_this_week: 0,
+};
+
+export type InboxEvent =
+  /**
+   * The whole board for one person, with counts.
+   *
+   * A FULL SNAPSHOT ON EVERY MUTATION, the discipline every channel here follows: a client REPLACES
+   * rather than merges, so it can never hold a board assembled from two moments and the badge can
+   * never be one snapshot behind the cards beside it.
+   */
+  | ({ type: "inbox" } & InboxSnapshotPayload)
+  /**
+   * One card, changed. §5.6's live resolution.
+   *
+   * A DELTA EXISTS ONLY FOR FACTS THAT ARE THE SAME FOR EVERY PERSON IN THE WORKSPACE, which is what
+   * makes it safe on a channel whose snapshots are per person. A resolution is shared — the problem
+   * is fixed, for everybody — so "this card is gone" is true on every board that was showing it. A
+   * DISMISSAL IS NOT, and there is deliberately no delta for one: it would arrive at a teammate who
+   * never made that judgement.
+   *
+   * `added` CARRIES THE WHOLE CARD, and is only emitted for an item that has just come into
+   * existence — one nobody can have dismissed yet. A re-opened item goes out as a full snapshot
+   * instead, because somebody may be holding an old dismissal of it.
+   *
+   * The client re-renders the affected card only, which §5.6 asks for and which is a rendering
+   * decision made against a board it already holds — never a licence for the server to send half of
+   * one.
+   */
+  | { type: "inboxDelta"; kind: "resolved"; itemId: string }
+  | { type: "inboxDelta"; kind: "count"; itemId: string; count: number; last_seen_at: string }
+  | { type: "inboxDelta"; kind: "added"; item: unknown }
+  /** The toast's token, to the socket that acted. Nobody else's undo. */
+  | { type: "inboxUndo"; token: string | null; action: string; changed: number }
+  | { type: "error"; message: string; itemId?: string }
+  | { type: "notice"; message: string; itemId?: string };
+
 // --- the Agents tab: one card per agent, and one agent in full ---------------------------------
 //
 // DERIVED FIELDS TRAVEL WITH THE ROW, exactly as they do on `ThreadView` and for the same reason.
@@ -2135,6 +2245,11 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // showing the old name with nothing saying why.
   listThreads: "threads", loadThread: "threads", createThread: "threads",
   renameThread: "threads", archiveThread: "threads", restoreThread: "threads",
+  // All six on `inbox`, the read included, for the reason the thread commands are all on `threads`:
+  // the channel HAS an error shape, so a refusal about a snooze that landed in the status bar would
+  // leave the card it was about still sitting there with nothing saying why.
+  listInbox: "inbox", resolveInboxItem: "inbox", dismissInboxItem: "inbox",
+  snoozeInboxItem: "inbox", undoInboxAction: "inbox", bulkInboxAction: "inbox",
   listDeployments: "deploy", planDeploy: "deploy", deploy: "deploy", cancelDeploy: "deploy",
   forgetDeployment: "deploy", loadDeployLogs: "deploy", setRailwayToken: "deploy",
   testRailwayToken: "deploy",
@@ -2308,6 +2423,19 @@ export interface RelayOptions {
    * badge needs on frame one behind the app's dispatch chain for no benefit.
    */
   listThreads?: (ctx: TenantContext) => ThreadSnapshot | Promise<ThreadSnapshot>;
+  /**
+   * One person's board (§4), with the counts §5.1 and §5.2 are drawn from.
+   *
+   * ANSWERED LOCALLY, like `listThreads` and `listAgentGrid` beside it, because it is rows this
+   * process can already reach. The sidebar badge needs it on frame one; putting it behind the app's
+   * dispatch chain would buy nothing and cost a round trip on the read that decides whether somebody
+   * even opens the tab.
+   *
+   * TAKES THE ASKING SOCKET'S CONTEXT, AND THE PERSON IS IN IT. `ctx.actorUserId` is who this board
+   * is for — two people in one workspace get two different boards, because two of the three verbs
+   * are personal. That is why this cannot be memoised per workspace the way the agent grid is.
+   */
+  listInbox?: (ctx: TenantContext) => InboxSnapshotPayload | Promise<InboxSnapshotPayload>;
   /**
    * One thread, for the client that asked to open it (§4.5).
    *
@@ -2488,6 +2616,16 @@ export class WsRelay {
           channel: "threads",
           type: "threads",
           ...((await this.opts.listThreads?.(ctx)) ?? EMPTY_THREADS),
+        });
+        // AND WHAT IS WAITING ON THIS PERSON, so §5.2's sidebar badge is right on frame one. The
+        // badge's whole claim is that nobody has to open the tab to find out whether anything is
+        // blocked; a client that had to ask first renders no badge for as long as that takes, which
+        // is the moment somebody decides there is nothing to look at. Exactly the argument the
+        // Threads badge above it makes.
+        this.sendTo(ws, {
+          channel: "inbox",
+          type: "inbox",
+          ...((await this.opts.listInbox?.(ctx)) ?? EMPTY_INBOX_PAYLOAD),
         });
         // And WHO IS IN THE WORKSPACE, for the same reason and only where it means something.
         //
@@ -2762,6 +2900,16 @@ export class WsRelay {
                     message: "no such thread in this workspace",
                   };
             }, live);
+          } else if (msg.cmd === "listInbox") {
+            void this.answer(ws, async (ctx) => ({
+              channel: "inbox",
+              type: "inbox",
+              ...((await this.opts.listInbox?.(ctx)) ?? EMPTY_INBOX_PAYLOAD),
+            }), live);
+          } else if (INBOX_COMMANDS.has(msg.cmd)) {
+            // Shape-checked in the app, which owns the store and the undo ledger and can answer with
+            // a precise error on the "inbox" channel rather than dropping the message here.
+            void withContext((ctx) => this.onCommand?.(msg as InboxCommand, ctx));
           } else if (THREAD_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the thread store and can answer with a precise
             // error on the "threads" channel rather than dropping the message here.
@@ -3155,6 +3303,62 @@ export class WsRelay {
    */
   broadcastThreads(ctx: TenantContext, event: ThreadEvent): void {
     this.broadcastTo(ctx, { channel: "threads", ...event });
+  }
+
+  /**
+   * The board, to every socket in the workspace — REBUILT PER RECIPIENT.
+   *
+   * `perClient` RATHER THAN `broadcastTo`, and here the reason is stronger than it is anywhere else
+   * on this relay. Every other channel's payload is a fact about a workspace, so one build fanned out
+   * is merely a cross-tenant risk; this payload is a fact about a PERSON, so one build fanned out
+   * would put Ada's dismissals and Ada's snoozes on Bob's screen inside the same workspace. There is
+   * no payload here that is correct for two people.
+   *
+   * MEMOISED PER (WORKSPACE, USER) rather than per workspace, for exactly that reason — two tabs
+   * belonging to one person are entitled to the identical board and should not pay for it twice, and
+   * two people are not. The memo lives for the length of this call and is thrown away; a cache that
+   * outlived it would be the thing full-snapshot channels exist to avoid.
+   */
+  async broadcastInbox(): Promise<void> {
+    const byViewer = new Map<string, Promise<InboxSnapshotPayload>>();
+    await this.perClient(async (ws, ctx) => {
+      const key = `${ctx.workspaceId}:${ctx.actorUserId ?? ""}`;
+      let building = byViewer.get(key);
+      if (!building) {
+        building = Promise.resolve(this.opts.listInbox?.(ctx) ?? EMPTY_INBOX_PAYLOAD);
+        byViewer.set(key, building);
+      }
+      this.sendTo(ws, { channel: "inbox", type: "inbox", ...(await building) });
+    });
+  }
+
+  /**
+   * One card's change, to the workspace it belongs to. §5.6's live resolution.
+   *
+   * SAFE TO BROADCAST AS ONE PAYLOAD, unlike a snapshot, because a delta only ever carries a fact
+   * that is the same for everybody: an item resolved, an item's count moved, an item that has just
+   * come into existence. A dismissal has no delta on purpose — see `InboxEvent`.
+   */
+  broadcastInboxDelta(ctx: TenantContext, event: InboxEvent): void {
+    this.broadcastTo(ctx, { channel: "inbox", ...event });
+  }
+
+  /**
+   * Answer ONE client about the Inbox — the socket whose command this is.
+   *
+   * Same mechanism as `sendThreads`, and the undo token is why it has to exist: the toast belongs to
+   * the person who pressed the thing, and broadcasting a token would hand every teammate the ability
+   * to take back somebody else's action. A REFUSAL is one person's click too — a snooze somebody's
+   * client sent for an item that had already resolved must not paint a red strip across every board
+   * in the workspace.
+   */
+  sendInbox(ctx: TenantContext, requestId: string, event: InboxEvent): void {
+    for (const [ws, session] of this.sessions) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (session.context.workspaceId !== ctx.workspaceId) continue;
+      if (session.context.requestId !== requestId) continue;
+      this.sendTo(ws, { channel: "inbox", ...event });
+    }
   }
 
   /**

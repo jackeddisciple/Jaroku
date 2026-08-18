@@ -278,6 +278,27 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   archiveThread: "agent:write",
   restoreThread: "agent:write",
 
+  // inbox
+  //
+  // `agent:read` FOR THE BOARD AND `agent:write` FOR THE THREE VERBS, and no capability of its own,
+  // for the reason the thread commands have none: an item is a fact about work `agent:read` already
+  // covers — a credential an agent needs, a deploy that failed, a version that is behind — and a
+  // second gate in front of it could disagree with the one on the work itself. A member who may see
+  // that an agent's deploy failed and may not see the card saying so is a role nobody meant to
+  // create.
+  //
+  // MEMBER-LEVEL, LIKE THREADS, because two of the three verbs are PERSONAL: a dismissal and a
+  // snooze change one person's own board and nobody else's. Making them privileged would mean a
+  // member could not tidy their own triage surface. The third, resolve, is shared — and it is shared
+  // in the direction that is safe, because the sweep raises the item again if the problem is not
+  // actually fixed.
+  listInbox: "agent:read",
+  resolveInboxItem: "agent:write",
+  dismissInboxItem: "agent:write",
+  snoozeInboxItem: "agent:write",
+  undoInboxAction: "agent:write",
+  bulkInboxAction: "agent:write",
+
   // eval
   listDatasets: "eval:read",
   loadDataset: "eval:read",

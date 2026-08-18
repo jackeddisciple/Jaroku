@@ -108,6 +108,14 @@ const TENANT_CHANNELS = new Set([
   // it, and `created_by` names a person — so a snapshot delivered across the boundary would be one
   // tenant's whole backlog, in their own words, under another tenant's name.
   "threads",
+  // What is waiting on somebody, which is a map of everything currently wrong in one workspace: the
+  // NAMES of the credentials its agents are missing, which of its MCP servers cannot authenticate,
+  // which deploys failed and with what error, which agents are spending three times their usual, and
+  // which of its people have not accepted an invitation. A snapshot delivered across the boundary
+  // would be a list of one tenant's live weaknesses under another tenant's name — and it is per
+  // PERSON as well as per workspace, so `broadcastInbox` rebuilds per recipient rather than fanning
+  // one payload out.
+  "inbox",
   // Who revealed which credential, who overrode a push refusal, who removed whom. It is answered to
   // one socket rather than broadcast, which is a stronger guarantee than scoping — but it is in this
   // list because the classification is about what the PAYLOAD is, and this payload is a workspace's
@@ -468,6 +476,10 @@ console.log("\nfired live, in A, and B receives none of it");
   relay.broadcastBilling(ctxA, { type: "error", message: MARK });
   relay.broadcastGithub(ctxA, { type: "error", message: MARK });
   relay.broadcastThreads(ctxA, { type: "error", message: MARK });
+  // A DELTA RATHER THAN A SNAPSHOT, because a snapshot on this channel is per PERSON and this suite's
+  // sockets have no person on them. The delta is the payload that is the same for everybody, which is
+  // exactly why it is the only shape allowed to be broadcast rather than rebuilt per recipient.
+  relay.broadcastInboxDelta(ctxA, { type: "error", message: MARK });
   relay.broadcastEnforcement(ctxA, { type: "notice", message: MARK });
   relay.sendAudit(ctxA, ctxA.requestId, { type: "error", message: MARK });
   relay.sendMembers(ctxA, ctxA.requestId, { type: "notice", message: MARK });
