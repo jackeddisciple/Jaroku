@@ -25,7 +25,8 @@ import { AgentVersions } from "./AgentVersions.tsx";
 import { AgentFiles } from "./AgentFiles.tsx";
 import { AgentTabs } from "./AgentTabs.tsx";
 import { EmptyState } from "./EmptyState.tsx";
-import { SparklesIcon } from "./panelIcons.tsx";
+import { AlertTriangleIcon, SparklesIcon } from "./panelIcons.tsx";
+import { sendLoadAgentDetail } from "../lib/socket.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
 
 /**
@@ -41,6 +42,7 @@ const STACK_BELOW_PX = 720;
 export function AgentDetail() {
   const detail = useAgentGridStore((s) => s.detail);
   const loading = useAgentGridStore((s) => s.detailLoading);
+  const error = useAgentGridStore((s) => s.error);
   const openAgentId = useAgentGridStore((s) => s.openAgentId);
   const [narrow, setNarrow] = useState(false);
   const [host, setHost] = useState<HTMLDivElement | null>(null);
@@ -66,16 +68,51 @@ export function AgentDetail() {
     );
   }
 
+  /**
+   * A REFUSAL IS SHOWN HERE, not left to the grid's error strip.
+   *
+   * The comment this replaces said "a refusal has already replaced this with the grid's own error
+   * strip", and that was simply false: opening a card collapses the full-screen view, so `AgentsView`
+   * — which is where the strip lives — is not mounted. A `loadAgentDetail` that was refused therefore
+   * showed three grey skeleton bars and the word "Ask again", with the actual sentence the server
+   * sent rendered nowhere at all. The pane that asked is the pane that has to say.
+   */
+  if (!detail && error) {
+    return (
+      <EmptyState
+        icon={AlertTriangleIcon}
+        title="That agent could not be opened"
+        hint={
+          <>
+            <span>{error}</span>
+            <button
+              onClick={() => sendLoadAgentDetail(openAgentId)}
+              className="ml-2 text-muted underline decoration-dotted hover:text-ink"
+            >
+              Try again
+            </button>
+          </>
+        }
+      />
+    );
+  }
+
   if (!detail) {
     // NOT A SPINNER (§9). Skeleton at the real geometry, so the pane does not jump when the record
-    // lands — and a refusal has already replaced this with the grid's own error strip.
+    // lands. A refusal took the branch above; this is the wait, and the line under it is for the
+    // case where neither ever arrives — a dropped frame on a reconnect.
     return (
       <div className="h-full space-y-3 p-4">
         <div className="h-4 w-1/3 rounded bg-active" />
         <div className="h-3 w-1/2 rounded bg-active/70" />
         <div className="h-3 w-2/3 rounded bg-active/70" />
         {!loading && (
-          <div className="pt-4 text-[11px] text-faint">Ask again from the Agents tab.</div>
+          <button
+            onClick={() => sendLoadAgentDetail(openAgentId)}
+            className="pt-4 text-[11px] text-muted underline decoration-dotted hover:text-ink"
+          >
+            Ask again
+          </button>
         )}
       </div>
     );
