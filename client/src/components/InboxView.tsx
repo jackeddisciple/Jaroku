@@ -26,6 +26,15 @@
 // session, and local state does that by construction because the view unmounts when you leave it.
 
 import { useEffect, useMemo, useState } from "react";
+
+/**
+ * The width below which three columns stop being three columns.
+ *
+ * 720px, which is roughly three cards at the width a blocking card needs to hold an inline form
+ * plus the rail beside them. Below it the columns are narrower than their own contents, and a card
+ * whose subject line wraps to three lines has stopped carrying its severity in its size.
+ */
+const STACK_BELOW_PX = 720;
 import {
   COLUMN_EMPTY,
   COLUMN_LABEL,
@@ -40,6 +49,7 @@ import { sendListInbox } from "../lib/socket.ts";
 import { ICON, MOTION, TYPE } from "../lib/tokens.ts";
 import { useInboxStore } from "../store/inboxStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
+import { useUiStore } from "../store/uiStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { InboxCard } from "./InboxCard.tsx";
 import { InboxTray } from "./InboxTray.tsx";
@@ -280,6 +290,42 @@ export function InboxView() {
    * and landing it on the first card is a better first move than restoring somewhere.
    */
   const [cursor, setCursor] = useState<string | null>(null);
+
+  /**
+   * §8: "Narrow widths: three columns do not survive. Fall back to a SINGLE COLUMN with cards keeping
+   * their variable heights, ordered by severity then age. The board's whole benefit survives the
+   * columns disappearing."
+   *
+   * WHICH IS WHY THE FALLBACK IS ONE COLUMN AND NOT TWO, and why the cards do not shrink. What the
+   * board communicates is priority-by-size; three columns are how that is arranged when there is room
+   * and are not themselves the thing. Two narrow columns would keep the arrangement and lose the
+   * sizes, which is the half worth keeping.
+   *
+   * MEASURED WITH A ResizeObserver ON THE BOARD RATHER THAN A MEDIA QUERY, because this app's panes
+   * are draggable: the viewport can be wide while this surface is not, and a media query would keep
+   * three columns inside a pane somebody has dragged to a third of the screen. The same reason
+   * `AgentDetail` measures itself.
+   */
+  const [narrow, setNarrow] = useState(false);
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!host || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setNarrow(entry.contentRect.width < STACK_BELOW_PX);
+    });
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [host]);
+
+  /**
+   * §5.7's pointer, arriving. Consumed once on mount and cleared, so it is an intent rather than a
+   * filter that sticks — coming back to the board later starts at All, which is what §5.1's
+   * per-session rule asks for.
+   */
+  useEffect(() => {
+    const intent = useUiStore.getState().takeInboxAgentIntent();
+    if (intent) setAgentId(intent);
+  }, []);
   /** §3's bulk selection, built by shift-click and acted on by the keyboard. */
   const [selection, setSelection] = useState<string[]>([]);
 
@@ -397,7 +443,7 @@ export function InboxView() {
       <div className="flex min-h-0 flex-1">
         <LeftRail filter={filter} onFilter={setFilter} agentId={agentId} onAgent={setAgentId} />
 
-        <div className="min-w-0 flex-1 overflow-hidden px-4 py-3">
+        <div ref={setHost} className="min-w-0 flex-1 overflow-hidden px-4 py-3">
           {!loaded ? (
             // NOT A SPINNER (§9). Three skeleton cards at the three sizes, so the board does not jump
             // when the real ones land — and so the wait says what is coming rather than only that
@@ -437,6 +483,32 @@ export function InboxView() {
                   />
                 ))
               )}
+            </div>
+          ) : narrow ? (
+            // ONE COLUMN, CARDS UNCHANGED. `ordered` is already severity then age — the same order
+            // the three columns read in — so the fallback is the columns' own sequence poured into
+            // one lane rather than a second arrangement to keep in step.
+            <div className="h-full space-y-2 overflow-y-auto pr-1">
+              {ordered.map((item) => (
+                <div
+                  key={item.id}
+                  {...drag.cardProps(item.id)}
+                  className={drag.state.itemId === item.id ? "opacity-50" : ""}
+                  onClickCapture={(e) => selectOnClick(ordered, item.id, e.shiftKey, cursor, setSelection)}
+                >
+                  <InboxCard
+                    item={item}
+                    now={now}
+                    expanded={expandedId === item.id}
+                    selected={cursor === item.id || selection.includes(item.id)}
+                    leaving={Boolean(leaving[item.id])}
+                    onClick={(e) => {
+                      if (e.shiftKey) return;
+                      setExpandedId(expandedId === item.id ? null : item.id);
+                    }}
+                  />
+                </div>
+              ))}
             </div>
           ) : (
             <div className="flex h-full gap-4">

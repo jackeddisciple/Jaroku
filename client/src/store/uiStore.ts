@@ -237,6 +237,17 @@ interface UiState {
    * that was reset would drop them back into a conversation belonging to the workspace they just
    * left.
    */
+  /**
+   * §5.7's pointer: open the Inbox already narrowed to one agent.
+   *
+   * IN THE STORE RATHER THAN AS AN ARGUMENT TO `openNav`, because it has to survive the navigation:
+   * the strip is in the Agent detail view, which unmounts as the full-width view opens, so there is
+   * nobody left to pass it to. Consumed and cleared by the board on mount, which is what keeps it a
+   * one-shot intent rather than a filter that sticks — the same shape `prefillChat` has.
+   */
+  inboxAgentIntent: string | null;
+  openInboxForAgent: (agentId: string) => void;
+  takeInboxAgentIntent: () => string | null;
   navView: NavDestination | null;
   openNav: (destination: NavDestination) => void;
   closeNav: () => void;
@@ -420,6 +431,20 @@ export const useUiStore = create<UiState>((set) => ({
   navSection: null,
   // Both, together: opening a destination is being in it AND seeing its list.
   openNav: (navView) => set({ navView, navSection: navView }),
+  inboxAgentIntent: null,
+  openInboxForAgent: (agentId) =>
+    set({ inboxAgentIntent: agentId, navView: "inbox", navSection: "inbox" }),
+  takeInboxAgentIntent: () => {
+    // READ AND CLEARED IN ONE `set`, which is what makes it a one-shot rather than a filter that
+    // sticks. Two mounts racing — a re-render during the navigation — would otherwise both see the
+    // intent and the second would re-apply a filter the first had already consumed.
+    let intent: string | null = null;
+    useUiStore.setState((s) => {
+      intent = s.inboxAgentIntent;
+      return intent ? { inboxAgentIntent: null } : {};
+    });
+    return intent;
+  },
   // Called by the sidebar's own selections as well as by picking a row inside a view: selecting IS
   // the transition (§2), so there is nothing here that asks first and nothing that remembers where
   // it came from. `navSection` is deliberately untouched — descending into a row does not leave the

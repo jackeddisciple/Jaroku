@@ -18,6 +18,7 @@ import { ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { useUiStore, type NavDestination } from "../store/uiStore.ts";
 import { useGithubStore } from "../store/githubStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
+import { useInboxStore } from "../store/inboxStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
@@ -357,6 +358,18 @@ function NavButtons() {
   const navSection = useUiStore((s) => s.navSection);
   const openNav = useUiStore((s) => s.openNav);
   const needsYou = useThreadStore((s) => s.counts.needs_you);
+  /**
+   * §5.2's badge: BLOCKING PLUS PROPOSALS ONLY.
+   *
+   * ATTENTION IS DELIBERATELY EXCLUDED, and the specification asks in as many words that nobody
+   * "fix" it: if the badge counted everything it would never reach zero, and a badge that is never
+   * zero is a badge people train themselves to ignore.
+   *
+   * ONE NUMBER, COMPUTED ONCE ON THE SERVER. `counts.badge` is the same field the board's own rail
+   * reads, which is the rule the Threads badge above already follows — two independently-derived
+   * counts of "what is waiting on me" that disagree are visible in two places somebody compares.
+   */
+  const waiting = useInboxStore((s) => s.counts.badge);
 
   return (
     <div className="shrink-0 px-3 pt-3">
@@ -376,6 +389,19 @@ function NavButtons() {
             {/* The same amber ◆ the rows use, so the badge needs no vocabulary of its own. Present only
                 when there is something to say — and `tabular-nums` so a count going from 9 to 10 does
                 not shift the glyph beside it. */}
+            {/* NEUTRAL, NOT AMBER. The Threads badge beside this one is amber because ◆ means "waiting
+                on you" there and amber is that surface's own vocabulary; on the Inbox amber would
+                mean RUNNING, which is the one thing v0.2.2's wordmark pass established it may never
+                be borrowed for. Ink at tabular width is the whole treatment. */}
+            {id === "inbox" && waiting > 0 && (
+              <span
+                className="ml-auto shrink-0 rounded-chip px-1 text-[10px] tabular-nums text-ink"
+                style={{ background: "#26262b" }}
+                title={`${waiting} item${waiting === 1 ? "" : "s"} blocked or waiting on a decision`}
+              >
+                {waiting}
+              </span>
+            )}
             {id === "threads" && needsYou > 0 && (
               <span
                 className="ml-auto flex shrink-0 items-center gap-1 text-[10px] tabular-nums"

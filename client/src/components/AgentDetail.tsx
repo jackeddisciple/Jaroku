@@ -20,6 +20,7 @@
 
 import { useEffect, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { InboxPointer } from "./InboxPointer.tsx";
 import { AgentOverview } from "./AgentOverview.tsx";
 import { AgentVersions } from "./AgentVersions.tsx";
 import { AgentFiles } from "./AgentFiles.tsx";
@@ -128,6 +129,13 @@ export function AgentDetail() {
 
   return (
     <div ref={setHost} className="flex h-full flex-col bg-bg">
+      {/* §5.7: a thin strip saying how many Inbox items are about this agent, and nothing else.
+          Above everything, because it is the reason somebody might stop reading the rest — and it
+          renders nothing at all when there is nothing waiting. */}
+      {/* THE UUID, NOT THE SLUG, because an Inbox item's `subject_id` is an agent's uuid — a slug is
+          renameable and a card keyed on one would be orphaned by a rename. `card.uuid` is where the
+          grid carries it. */}
+      <InboxPointer agentUuid={detail.card.uuid} />
       {narrow ? (
         // STACKED, ARTIFACT FIRST. The overview and the version history are what the surface is
         // about; the tabs are what you go to next, which is the right order to scroll through.
