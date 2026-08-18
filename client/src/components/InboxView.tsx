@@ -37,13 +37,15 @@ import {
   type InboxFilter,
 } from "../lib/inboxBoard.ts";
 import { sendListInbox } from "../lib/socket.ts";
-import { ICON, TYPE } from "../lib/tokens.ts";
+import { ICON, MOTION, TYPE } from "../lib/tokens.ts";
 import { useInboxStore } from "../store/inboxStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { InboxCard } from "./InboxCard.tsx";
 import { InboxTray } from "./InboxTray.tsx";
 import { useInboxDrag } from "./useInboxDrag.ts";
+import { selectOnClick, useInboxKeys } from "./useInboxKeys.ts";
+import { InboxUndoToast } from "./InboxUndoToast.tsx";
 import { sendSnoozeInboxItem } from "../lib/socket.ts";
 import { RefreshIcon } from "./panelIcons.tsx";
 import type { InboxItemView, InboxSeverity } from "../types.ts";
@@ -161,8 +163,12 @@ function Column({
   severity,
   items,
   now,
+  leaving,
   expandedId,
   onExpand,
+  cursor,
+  selection,
+  onSelect,
   dragProps,
   dimmed,
   draggingId,
@@ -170,8 +176,15 @@ function Column({
   severity: InboxSeverity;
   items: InboxItemView[];
   now: number;
+  /** Cards on their way out (§5.6). Keyed by id, so a column re-renders one card rather than itself. */
+  leaving: Record<string, true>;
   expandedId: string | null;
   onExpand: (id: string | null) => void;
+  /** Where the keyboard is. Not the same as what is expanded — see `InboxCard`. */
+  cursor: string | null;
+  /** A shift-clicked range, which the keyboard's E / X / S then act on together. */
+  selection: string[];
+  onSelect: (itemId: string, shiftKey: boolean) => void;
   /** The pointer handlers for one card. See `useInboxDrag` for why this is not a library. */
   dragProps: (itemId: string) => Record<string, unknown>;
   /** A card is being dragged: §4.1 asks the columns to dim so it reads instantly as not-a-lane. */
@@ -198,14 +211,26 @@ function Column({
           <div className="px-1 py-3 text-[11px] text-faint">{COLUMN_EMPTY[severity]}</div>
         ) : (
           items.map((item) => (
-            <div key={item.id} {...dragProps(item.id)} className={draggingId === item.id ? "opacity-50" : ""}>
+            <div
+              key={item.id}
+              {...dragProps(item.id)}
+              className={draggingId === item.id ? "opacity-50" : ""}
+              onClickCapture={(e) => onSelect(item.id, e.shiftKey)}
+            >
               <InboxCard
                 item={item}
                 now={now}
                 expanded={expandedId === item.id}
+                selected={cursor === item.id || selection.includes(item.id)}
+                leaving={Boolean(leaving[item.id])}
                 // §4.5: clicking a card expands it IN PLACE, and clicking it again closes it. It does
                 // not navigate — navigation is what the actions are for, and it is the fallback.
-                onClick={() => onExpand(expandedId === item.id ? null : item.id)}
+                // A shift-click builds a range instead, which `onClickCapture` above has already
+                // recorded — so expanding is skipped for it rather than happening as well.
+                onClick={(e) => {
+                  if (e.shiftKey) return;
+                  onExpand(expandedId === item.id ? null : item.id);
+                }}
               />
             </div>
           ))
@@ -249,6 +274,16 @@ export function InboxView() {
   const drag = useInboxDrag((itemId) => sendSnoozeInboxItem(itemId, "tomorrow"));
 
   /**
+   * §5.5's cursor: where the keyboard is, which is NOT the same as which card is expanded.
+   *
+   * It starts unplaced, because the first `J` is the most common keystroke this view will ever see
+   * and landing it on the first card is a better first move than restoring somewhere.
+   */
+  const [cursor, setCursor] = useState<string | null>(null);
+  /** §3's bulk selection, built by shift-click and acted on by the keyboard. */
+  const [selection, setSelection] = useState<string[]>([]);
+
+  /**
    * The clock the age bars are drawn against.
    *
    * ONE VALUE FOR THE WHOLE BOARD, ticked on a timer rather than read per card. Forty cards each
@@ -269,6 +304,59 @@ export function InboxView() {
     () => filterInbox(items, snoozed, filter, agentId),
     [items, snoozed, filter, agentId],
   );
+
+  /**
+   * The cards in the order they RENDER, which is what J/K walks.
+   *
+   * ACROSS COLUMN BOUNDARIES IN VISUAL ORDER (§5.5), which means column by column — blocking, then
+   * attention, then proposals — because that is how the three columns read. Walking the store's
+   * array instead would move the cursor around the screen at random.
+   */
+  const ordered = useMemo(
+    () =>
+      filter === "snoozed" || filter === "team"
+        ? visible
+        : INBOX_COLUMNS.flatMap((severity) => columnItems(visible, severity)),
+    [visible, filter],
+  );
+
+  useInboxKeys({
+    rows: ordered,
+    cursor,
+    setCursor,
+    setFilter,
+    toggleExpand: (id) => setExpandedId((open) => (open === id ? null : id)),
+    selection,
+    setSelection,
+  });
+
+  /**
+   * §5.5: "focus must survive a filter change and a card resolving out from under it."
+   *
+   * The keyboard moves the cursor off a card before it acts on it, which covers the second half from
+   * this tab's own actions. This covers everything else: a filter change, a teammate's resolution
+   * arriving on the socket, a snooze returning. A cursor on a card nobody can see is a cursor nobody
+   * can see MOVING, so it falls back to the first card rather than to nothing.
+   */
+  useEffect(() => {
+    if (cursor && !ordered.some((i) => i.id === cursor)) setCursor(ordered[0]?.id ?? null);
+  }, [cursor, ordered]);
+
+  /**
+   * §5.6: a card that has resolved plays its collapse and then goes.
+   *
+   * THE TIMER IS HERE RATHER THAN IN THE STORE, because how long the animation takes is a rendering
+   * decision and the store holds facts. `MOTION.base` is the app's one duration for a state change
+   * with something to show, so a card leaving takes exactly as long as everything else that leaves.
+   */
+  const leaving = useInboxStore((s) => s.leaving);
+  const dropLeaving = useInboxStore((s) => s.dropLeaving);
+  useEffect(() => {
+    const ids = Object.keys(leaving);
+    if (ids.length === 0) return;
+    const timer = setTimeout(() => ids.forEach(dropLeaving), MOTION.base + 40);
+    return () => clearTimeout(timer);
+  }, [leaving, dropLeaving]);
 
   // A cursor on an agent that no longer has anything open is a filter showing an empty board with
   // no way to tell why. It falls back to everything, which is what the rail would show anyway.
@@ -343,6 +431,8 @@ export function InboxView() {
                     item={item}
                     now={now}
                     expanded={expandedId === item.id}
+                    selected={cursor === item.id}
+                    leaving={Boolean(leaving[item.id])}
                     onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
                   />
                 ))
@@ -356,8 +446,12 @@ export function InboxView() {
                   severity={severity}
                   items={columnItems(visible, severity)}
                   now={now}
+                  leaving={leaving}
                   expandedId={expandedId}
                   onExpand={setExpandedId}
+                  cursor={cursor}
+                  selection={selection}
+                  onSelect={(id, shift) => selectOnClick(ordered, id, shift, cursor, setSelection)}
                   dragProps={drag.cardProps}
                   dimmed={drag.state.itemId !== null}
                   draggingId={drag.state.itemId}
@@ -367,6 +461,10 @@ export function InboxView() {
           )}
         </div>
       </div>
+
+      {/* §3's toast, above the tray and in the flow rather than floating: a floating card covers the
+          bottom of the board, which is where somebody who has just dismissed something is looking. */}
+      <InboxUndoToast />
 
       {/* §5.4's strip, which is what keeps snooze from being a slower dismissal. It is also the one
           drop target on the board — see `useInboxDrag` for why that is a pointer handler rather than

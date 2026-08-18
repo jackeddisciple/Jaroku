@@ -143,7 +143,14 @@ export function InboxCard({
   expanded?: boolean;
   /** Anything the board wants under the card — the drag affordance, a per-card notice. */
   children?: React.ReactNode;
-  onClick?: () => void;
+  /**
+   * The card was clicked.
+   *
+   * TAKES THE EVENT, because a shift-click is a range selection rather than an expansion and the
+   * board is what knows the difference. A handler with no arguments would have made the card decide,
+   * and the card does not know what is selected.
+   */
+  onClick?: (e: React.MouseEvent<HTMLElement>) => void;
 }) {
   const size = SIZE[item.severity];
   const Icon = INBOX_ICON[item.icon];
