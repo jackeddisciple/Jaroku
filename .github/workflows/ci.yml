@@ -293,6 +293,12 @@ jobs:
           # dismissals and one column, and clearing it would put the card back on a board somebody
           # had deliberately cleared. Plus the seeds, which must be written once and never again.
           npm run test:inbox-actions
+          # §6.5's own requirement, built the way `test:log-redaction` is: one known secret, and
+          # every route into a payload tried against it. A payload is a sink in exactly the sense a
+          # log is — stored, broadcast to every socket in the workspace, and outliving the problem
+          # it describes — and it carries one thing a log does not, a build's own error text from a
+          # process that had the credentials in its environment.
+          npm run test:inbox-payload
 
       - name: cost, abuse and the data lifecycle
         working-directory: server

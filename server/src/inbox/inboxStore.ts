@@ -31,6 +31,7 @@ import { randomUUID } from "node:crypto";
 
 import { asInt, jsonFromColumn, type Db, type Queryable } from "../db/db.ts";
 import type { TenantContext } from "../db/tenant.ts";
+import { boundPayload } from "./payload.ts";
 import {
   inboxType,
   isInboxItemType,
@@ -181,7 +182,10 @@ export class InboxStore {
   async record(ctx: TenantContext, input: RecordInput): Promise<InboxItem> {
     const def = inboxType(input.type);
     const now = input.at ?? nowIso();
-    const payload = JSON.stringify(input.payload ?? {});
+    // §6.5, ON THE WAY IN AND IN ONE PLACE. Bounding at render time would leave the ROW holding the
+    // unbounded text for the next surface to read raw, and bounding at each generator would mean the
+    // one written next month does not. There is no other path to this column.
+    const payload = JSON.stringify(boundPayload(input.payload));
 
     // A DERIVED ITEM COUNTS ONE, HOWEVER MANY TIMES IT IS OBSERVED, and the difference is the badge.
     // `count` means occurrences: forty runs failed, so the card reads `×40`. A derived item is not
@@ -263,7 +267,9 @@ export class InboxStore {
     const res = await this.q(ctx).run(
       `UPDATE inbox_items SET payload = ?
         WHERE workspace_id = ? AND dedupe_key = ? AND state = 'open'`,
-      [JSON.stringify(payload ?? {}), ctx.workspaceId, dedupeKey],
+      // The same bound as `record`'s, because this is the other write of the same column — and a
+      // stamp path that skipped it would be the twelfth call site the header warns about.
+      [JSON.stringify(boundPayload(payload)), ctx.workspaceId, dedupeKey],
     );
     return res.changes > 0;
   }
