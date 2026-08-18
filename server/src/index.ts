@@ -3355,22 +3355,29 @@ function noticeAgent(ctx: TenantContext, message: string, agentId?: string): voi
 }
 
 /**
- * Which agents are mid-build right now, by slug.
+ * Which agents a model is writing files for at this instant, by slug.
  *
- * READ OFF THE SINGLE-SLOT SUBSYSTEMS this process already has, rather than from a column. A
- * generation and an edit are in-memory, single-slot and refuse a second while one runs — the same
- * facts `threadFactsFor` reads for the same reason — so "is this agent generating" is a comparison
- * against the slot, and a durable flag would be one a restart left set forever.
+ * READ OFF THE SINGLE-SLOT SUBSYSTEM this process already has, rather than from a column. An edit is
+ * in-memory, single-slot and refuses a second while one runs — the same fact `threadFactsFor` reads
+ * for the same reason — so "is this agent being written to" is a comparison against the slot, and a
+ * durable flag would be one a restart left set forever.
  *
- * The generation slot names an agent only once it has one, so the set is empty for the seconds
- * before that and the card reads Idle. That is true: nothing is being written to an agent that does
- * not exist yet.
+ * IT IS `editingAgentId` AND NOT `openProposals`, and that difference is the whole of this function.
+ * A pending proposal is a diff that has ARRIVED and is waiting for somebody to apply or discard it —
+ * work that has STOPPED — so reading it here put the amber `Generating` tag on an agent whose diff
+ * was sitting still, and left an edit that was genuinely streaming wearing `Idle`. Both halves were
+ * wrong and the first is the worse one: amber means runtime activity, and an unapplied diff is
+ * somebody's turn rather than the machine's. A pending diff is the THREAD's business, which is
+ * exactly where §3's rule puts it — it is not a fact about the agent.
+ *
+ * A GENERATION IS ABSENT ON PURPOSE. `generate` mints an agent's slug at the end, so for the whole
+ * of a generation there is no row to mark and the grid has no card to put a tag on. By the time the
+ * row exists the generation is over.
  */
 function buildingAgents(ctx: TenantContext): Set<string> {
   const out = new Set<string>();
-  if (editContext?.workspaceId === ctx.workspaceId) {
-    for (const p of editor.openProposals(ctx).values()) out.add(p.agentId);
-  }
+  const editing = editor.editingAgentId;
+  if (editing && editContext?.workspaceId === ctx.workspaceId) out.add(editing);
   return out;
 }
 
