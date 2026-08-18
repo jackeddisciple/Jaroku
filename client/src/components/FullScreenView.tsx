@@ -1,10 +1,9 @@
 // The full-screen region a sidebar nav button opens (§2).
 //
-// ONE SWITCH, FOUR DESTINATIONS, AND ONLY ONE OF THEM BUILT HERE. This document covers Threads; the
-// other three are specified separately and must not be built here. What this commit owes them is the
-// mechanism — the shell is generic, so plugging Agents in later is a case in this switch and nothing
-// else — and what it owes a person who clicks Agents today is a screen that says so rather than a
-// blank region.
+// ONE SWITCH, FOUR DESTINATIONS, TWO OF THEM BUILT. Threads came first and Agents is the second; the
+// mechanism that shell was built for is what made plugging this one in a case in this switch and
+// nothing else, exactly as its own comment promised. Memory and Activity are specified separately and
+// must not be built here.
 //
 // THE PLACEHOLDERS ARE NOT DECORATION. This product's disabled-state discipline is to state what is
 // true rather than to hide the control: the nav buttons exist because §2 says the sidebar has four,
@@ -19,14 +18,11 @@
 import type { NavDestination } from "../store/uiStore.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { ThreadsView } from "./ThreadsView.tsx";
-import { ActivityIcon, DatabaseIcon, SparklesIcon } from "./panelIcons.tsx";
+import { AgentsView } from "./AgentsView.tsx";
+import { ActivityIcon, DatabaseIcon } from "./panelIcons.tsx";
 
 /** What each unbuilt destination says for itself. Short, factual, present tense (§9). */
-const NOT_HERE: Record<Exclude<NavDestination, "threads">, { title: string; hint: string }> = {
-  agents: {
-    title: "Agents is a separate surface",
-    hint: "Its own specification covers it. The agent list in the sidebar is still how you pick one.",
-  },
+const NOT_HERE: Record<Exclude<NavDestination, "threads" | "agents">, { title: string; hint: string }> = {
   memory: {
     title: "Memory is a separate surface",
     hint: "Specified apart from Threads, and not built in this pass.",
@@ -37,14 +33,14 @@ const NOT_HERE: Record<Exclude<NavDestination, "threads">, { title: string; hint
   },
 };
 
-const ICON: Record<Exclude<NavDestination, "threads">, typeof SparklesIcon> = {
-  agents: SparklesIcon,
+const ICON: Record<Exclude<NavDestination, "threads" | "agents">, typeof DatabaseIcon> = {
   memory: DatabaseIcon,
   activity: ActivityIcon,
 };
 
 export function FullScreenView({ destination }: { destination: NavDestination }) {
   if (destination === "threads") return <ThreadsView />;
+  if (destination === "agents") return <AgentsView />;
   const { title, hint } = NOT_HERE[destination];
   return (
     <div className="flex h-full flex-col bg-bg">
