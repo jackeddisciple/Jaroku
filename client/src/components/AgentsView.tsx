@@ -246,6 +246,17 @@ export function AgentsView() {
     if (connected) sendListAgentGrid();
   }, [connected]);
 
+  /**
+   * A notice belongs to the visit it happened in.
+   *
+   * "Forked to api_gateway_copy" is worth reading once, on the surface where the fork was made. It
+   * lives in the store because the answer arrives after the broadcast that caused it — but the store
+   * outlives this view, so without this it was still sitting there days later, greeting somebody who
+   * opened the tab to do something else entirely. Cleared on the way out rather than on the way in,
+   * so a notice that lands in the same tick as a navigation is still shown before it goes.
+   */
+  useEffect(() => () => useAgentGridStore.getState().setNotice(null), []);
+
   const visible = useMemo(() => visibleAgents(cards, filters, sort), [cards, filters, sort]);
   const connectors = useMemo(() => connectorOptions(cards), [cards]);
   /**
