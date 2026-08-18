@@ -27,7 +27,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { asBool, type Db, type Queryable } from "./db/db.ts";
+import { asBool, asInt, type Db, type Queryable } from "./db/db.ts";
 import type { TenantContext } from "./db/tenant.ts";
 
 /** §3.3's five. Derived, never sent by a client — see `setStatus`. */
@@ -583,4 +583,110 @@ export class ThreadStore {
     );
     return res.changes;
   }
+
+  /**
+   * §5.2's "current work" line, for every agent in the workspace, in two statements.
+   *
+   * WHAT THE CARD ACTUALLY ASKS FOR is "the latest thread's title, plus one line derived from its last
+   * turn". Done naively that is a sorted read of one agent's threads and then a read of that thread's
+   * messages — two round trips per card, eighty for a workspace of forty agents, on the path a socket
+   * is waiting on. Both halves here are one statement over a workspace-bounded scan, which is what
+   * migration 048's `(workspace_id, agent_id, last_activity_at DESC)` exists to make cheap.
+   *
+   * THE COUNT AND THE LATEST THREAD DISAGREE ABOUT ARCHIVED ROWS, on purpose. The footer's thread
+   * count is how many sessions this agent has open, so it excludes archived ones — a count that
+   * included them would keep rising for an agent nobody has touched in months. The latest thread does
+   * NOT exclude them, because the line it feeds says whether the agent has been STARTED: an agent
+   * whose only session was archived has still been started, and "Not started yet" would be false.
+   *
+   * ONLY THE USER'S OWN TURNS ARE AVAILABLE TO DERIVE THE SECOND LINE FROM, and that is migration
+   * 044's decision rather than a gap here: Jaroku's prose is streamed on the gen / edit / reply
+   * channels and rebuilt from them, so `thread_items` holds no reply to quote. The honest last turn
+   * is therefore the last thing the person said, which is also what the Threads list shows and for
+   * the reason it gives — the user's own intent is what makes a session recognisable.
+   */
+  async agentThreadFacts(ctx: TenantContext): Promise<Map<string, AgentThreadFacts>> {
+    const out = new Map<string, AgentThreadFacts>();
+    const at = (agentId: string): AgentThreadFacts => {
+      const existing = out.get(agentId);
+      if (existing) return existing;
+      const fresh: AgentThreadFacts = { threadCount: 0, latest: null };
+      out.set(agentId, fresh);
+      return fresh;
+    };
+
+    // How many live sessions each agent has, and which of ALL of them was active last. One pass,
+    // with the archived split expressed as a conditional count rather than as a second query.
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT agent_id, id, title, last_activity_at, live_count FROM (
+         SELECT t.agent_id AS agent_id, t.id AS id, t.title AS title,
+                t.last_activity_at AS last_activity_at,
+                COUNT(CASE WHEN t.archived_at IS NULL THEN 1 END)
+                  OVER (PARTITION BY t.agent_id) AS live_count,
+                ROW_NUMBER()
+                  OVER (PARTITION BY t.agent_id ORDER BY t.last_activity_at DESC, t.id DESC) AS rn
+           FROM threads t
+          WHERE t.workspace_id = ? AND t.agent_id IS NOT NULL
+       ) ranked
+        WHERE rn = 1`,
+      [ctx.workspaceId],
+    );
+    for (const row of rows) {
+      const facts = at(String(row["agent_id"]));
+      facts.threadCount = asInt(row["live_count"]);
+      facts.latest = {
+        id: String(row["id"]),
+        title: String(row["title"]),
+        lastActivityAt: String(row["last_activity_at"]),
+        lastTurn: null,
+      };
+    }
+
+    const latestIds = [...out.values()].map((f) => f.latest?.id).filter((id): id is string => !!id);
+    if (latestIds.length === 0) return out;
+
+    // The last thing said in each of those threads. Bounded by the number of AGENTS rather than by
+    // the number of threads, and batched for the same reason `runOutcomes` batches: a parameter list
+    // has a limit on both drivers, and a query that works until the first workspace large enough to
+    // need it is worse than no optimisation at all.
+    const byThread = new Map<string, string>();
+    for (let i = 0; i < latestIds.length; i += 200) {
+      const chunk = latestIds.slice(i, i + 200);
+      const placeholders = chunk.map(() => "?").join(", ");
+      const turns = await this.q(ctx).all<Record<string, unknown>>(
+        `SELECT thread_id, body FROM (
+           SELECT i.thread_id AS thread_id, i.body AS body,
+                  ROW_NUMBER() OVER (PARTITION BY i.thread_id
+                                     ORDER BY i.created_at DESC, i.id DESC) AS rn
+             FROM thread_items i
+            WHERE i.workspace_id = ? AND i.kind = 'message' AND i.role = 'user'
+              AND i.body IS NOT NULL AND i.thread_id IN (${placeholders})
+         ) ranked
+          WHERE rn = 1`,
+        [ctx.workspaceId, ...chunk],
+      );
+      for (const row of turns) byThread.set(String(row["thread_id"]), String(row["body"]));
+    }
+    for (const facts of out.values()) {
+      if (facts.latest) facts.latest.lastTurn = byThread.get(facts.latest.id) ?? null;
+    }
+    return out;
+  }
+}
+
+/** The session an agent's card names, and the last thing said in it. */
+export interface LatestThread {
+  id: string;
+  title: string;
+  lastActivityAt: string;
+  /** The user's last turn, or null for a session nobody has spoken in yet. */
+  lastTurn: string | null;
+}
+
+/** What one agent's threads say about it. See `ThreadStore.agentThreadFacts`. */
+export interface AgentThreadFacts {
+  /** Sessions still open on this agent. Archived ones are excluded — see the method's note. */
+  threadCount: number;
+  /** The most recently active session, archived or not, or null for an agent with none. */
+  latest: LatestThread | null;
 }
