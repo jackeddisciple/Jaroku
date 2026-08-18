@@ -146,6 +146,33 @@ export interface ProviderMetrics {
   unscored: number;
 }
 
+/**
+ * Which leg won, by quality, or null when nothing was scored.
+ *
+ * HERE RATHER THAN AT THE CALL SITE, because two surfaces ask it: the eval dashboard marks the
+ * leading leg, and the Agents tab's Evals panel names the winning provider on an agent's last eval.
+ * Two reduces would be two answers, and they would disagree the first moment a judge failed on one
+ * leg — which is exactly the case the rule below is careful about.
+ *
+ * UNSCORED LEGS ARE EXCLUDED, NOT TREATED AS ZERO. A judge that failed says nothing about a
+ * provider, and averaging its silence in as a zero would punish the provider for it — the same rule
+ * `qualityScore` itself follows, applied to the ranking over it.
+ *
+ * COST IS NOT THE TIEBREAK AND `costUnknown` IS NOT A DISQUALIFIER HERE. §6 excludes an unpriced
+ * model from any COST ranking, and this is a quality ranking: a leg that scored best and happens to
+ * have no price entry still scored best. Ties fall to the higher success rate, then to the model
+ * name, so the answer is stable rather than dependent on the order the legs came back in.
+ */
+export function bestByQuality(providers: readonly ProviderMetrics[]): ProviderMetrics | null {
+  const scored = providers.filter((p) => p.qualityScore !== null);
+  if (scored.length === 0) return null;
+  return scored.reduce((a, b) => {
+    if ((b.qualityScore ?? 0) !== (a.qualityScore ?? 0)) return (b.qualityScore ?? 0) > (a.qualityScore ?? 0) ? b : a;
+    if (b.successRate !== a.successRate) return b.successRate > a.successRate ? b : a;
+    return a.model.localeCompare(b.model) <= 0 ? a : b;
+  });
+}
+
 export interface EvalTotals {
   /** Every attempt (including failed and retried) plus judge cost. What hit the card. */
   trueSpendUsd: number;

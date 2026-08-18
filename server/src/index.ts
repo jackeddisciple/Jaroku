@@ -28,7 +28,7 @@ import { EvalStore, type Rubric, type RubricCriterion } from "./evalStore.ts";
 import { EvalRunner } from "./evalRunner.ts";
 import { DEFAULT_CRITERIA } from "./judge/rubric.ts";
 import { JudgeScorer } from "./judge/score.ts";
-import { aggregateEval } from "./evalAggregate.ts";
+import { aggregateEval, bestByQuality } from "./evalAggregate.ts";
 import { estimateEval, estimateRun } from "./evalEstimate.ts";
 import { fmtBytes, sweepEvalArtifacts, sweepOrphanedEvalArtifacts } from "./evalCleanup.ts";
 import {
@@ -3568,6 +3568,24 @@ async function agentDetail(ctx: TenantContext, slug: string): Promise<AgentDetai
     usd === null || count <= 0 ? null : usd / count;
 
   const lastEval = evalRuns.find((e) => e.agent_id === card.slug) ?? null;
+  /**
+   * §6's "winning provider", which shipped as a hardcoded `null`.
+   *
+   * The field was on the wire shape and the tab rendered a chip for it, and nothing ever put a value
+   * in — a stub wearing a feature's clothes. `aggregateEval` is the authority that the eval dashboard
+   * is already drawn from, and `bestByQuality` is its ranking rule, so this is the same answer rather
+   * than a second one.
+   *
+   * ONE EVAL, AND ONLY WHEN THERE IS ONE. The aggregate reads that eval's jobs and scores, which is
+   * two statements for the single most recent comparison — not per agent, and not per card. An agent
+   * that has never been evaluated pays nothing.
+   */
+  const winner = lastEval
+    ? await aggregateEval(ctx, evalStore, lastEval.id)
+        .then((agg) => (agg ? (bestByQuality(agg.providers)?.model ?? null) : null))
+        // A ranking is a label. It must not be able to fail the read of an agent's record.
+        .catch(() => null)
+    : null;
 
   return {
     card,
@@ -3611,7 +3629,7 @@ async function agentDetail(ctx: TenantContext, slug: string): Promise<AgentDetai
     evals: {
       datasets: datasets.map((d) => ({ id: d.id, name: d.name, example_count: d.example_count })),
       last: lastEval
-        ? { id: lastEval.id, status: lastEval.status, started_at: lastEval.started_at, winner: null }
+        ? { id: lastEval.id, status: lastEval.status, started_at: lastEval.started_at, winner }
         : null,
     },
     threads: threads.map((t) => ({
