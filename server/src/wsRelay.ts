@@ -1839,6 +1839,14 @@ export interface AgentCardView {
   /** Null means live. §4: archived agents are hidden unless the Archived filter is on. */
   archived_at: string | null;
   hand_written: boolean;
+  /**
+   * The SLUG of the agent this one was copied from, or null (migration 049).
+   *
+   * What §5.4's `Forked` tag renders. It was absent from this shape while `agentTags` already read
+   * it, which made that tag unreachable code claiming to be a feature — the worst kind of gap,
+   * because nothing about the screen looks wrong.
+   */
+  forked_from: string | null;
 
   current_version: number;
   /** What made the live version. Null when nothing has been published — see `agentHealth`. */

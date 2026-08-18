@@ -33,6 +33,7 @@ const card = (over: Partial<AgentCardView> = {}): AgentCardView => ({
   created_by: "u1",
   archived_at: null,
   hand_written: false,
+  forked_from: null,
   current_version: 9,
   version_source: "edit",
   creation_cost: 0.42,

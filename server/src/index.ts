@@ -3418,6 +3418,9 @@ async function agentGridSnapshot(ctx: TenantContext): Promise<AgentGridSnapshot>
   const configured = new Set(refs.filter((r) => r.configured).map((r) => r.name));
   const impactByRef = new Map(tools.map((t) => [`${t.server_id}/${t.name}`, t.impact]));
   const spendBySlug = new Map(spend.map((s) => [s.agentId ?? "", s]));
+  // `forked_from` is a uuid on the row and a SLUG on the wire, for the reason every other agent id on
+  // it is: a slug is what a person recognises and what every other surface calls an agent id.
+  const slugByUuid = new Map(agents.map((a) => [a.id, a.slug]));
   const building = buildingAgents(ctx);
 
   const cards: AgentCardView[] = agents.map((a) => {
@@ -3438,6 +3441,11 @@ async function agentGridSnapshot(ctx: TenantContext): Promise<AgentGridSnapshot>
       created_by: a.created_by ?? null,
       archived_at: a.archived_at,
       hand_written: a.hand_written,
+      // THE SOURCE'S SLUG, NOT ITS UUID. The tag renders "Copied from api_gateway" — a name somebody
+      // can recognise — and every other agent id on this wire shape is a slug for the same reason.
+      // Null when the source has since been swept, which is the honest answer: the copy is still a
+      // fork, and there is no longer a name to point at.
+      forked_from: a.forked_from ? (slugByUuid.get(a.forked_from) ?? null) : null,
       current_version: a.current_version,
       version_source: versionSource,
       creation_cost: a.creation_cost,
@@ -3755,6 +3763,10 @@ async function forkAgent(ctx: TenantContext, slug: string): Promise<void> {
     // generation cost would put somebody else's spend on a new agent's overview, and v0.1.9's rule
     // is that a missing figure is not a zero — nor is it somebody else's.
     creation_cost: null,
+    // THE PROVENANCE, AS A KEY RATHER THAN AS PROSE (migration 049). The version summary below says
+    // the same thing for a person to read, and it is not what anything reads: a tag driven by parsing
+    // that string would break silently the first time somebody reworded it.
+    forkedFrom: source.id,
   });
   await agentRepo.addVersion(ctx, id, version.manifest, {
     source: "import",

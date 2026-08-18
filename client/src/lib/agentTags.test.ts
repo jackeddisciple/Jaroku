@@ -42,6 +42,7 @@ const base: TagInput = {
   spend_known: true,
   deployment: null,
   drift: null,
+  forked_from: null,
 };
 
 const ids = (a: TagInput): string[] => agentTags(a, NOW).map((t) => t.id);

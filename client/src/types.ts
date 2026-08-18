@@ -979,6 +979,8 @@ export interface AgentCardView {
   created_by: string | null;
   archived_at: string | null;
   hand_written: boolean;
+  /** The SLUG this one was copied from, or null. What §5.4's `Forked` tag renders. */
+  forked_from: string | null;
 
   current_version: number;
   version_source: "generation" | "edit" | "import" | "deploy" | null;

@@ -105,6 +105,18 @@ export interface Agent {
    * nobody wrote — the same reasoning `threads.created_by` gives for the same nullability.
    */
   created_by: string | null;
+  /**
+   * The agent this one was copied from, or null (migration 049).
+   *
+   * NOT DERIVABLE, which is why it is a column in a schema that otherwise refuses one. A fork writes
+   * a row and a version whose manifest happens to equal another agent's, and nothing about either
+   * says where it came from — the only trace was the version summary's prose, and parsing a display
+   * string as an API is how a rewording silently breaks a tag.
+   *
+   * Written once by `forkAgent` and never again: a copy is an independent agent from the moment it
+   * exists, and its provenance is a fact about its creation rather than about its current state.
+   */
+  forked_from: string | null;
   created_at: string;
 }
 
@@ -160,7 +172,7 @@ export interface AgentOnDisk {
 
 const COLUMNS = `id, slug, display_name, display_name_is_custom, description, connectors,
                  mcp_tools, required_env, default_provider, hand_written, current_version,
-                 creation_cost, created_by, archived_at, created_at`;
+                 creation_cost, created_by, forked_from, archived_at, created_at`;
 
 export class AgentRepository {
   constructor(private db: Db) {}
@@ -185,6 +197,7 @@ export class AgentRepository {
       display_name_is_custom: asBool(row["display_name_is_custom"]),
       current_version: asInt(row["current_version"], 1),
       created_by: (row["created_by"] as string | null) ?? null,
+      forked_from: (row["forked_from"] as string | null) ?? null,
       archived_at: (row["archived_at"] as string | null) ?? null,
     };
   }
@@ -335,13 +348,20 @@ export class AgentRepository {
    * check rather than something to quietly overwrite: the row it would overwrite belongs to an
    * agent with runs, evals and deployments pointing at it.
    */
-  async create(ctx: TenantContext, a: AgentOnDisk & { id: string }): Promise<Agent> {
+  async create(
+    ctx: TenantContext,
+    a: AgentOnDisk & {
+      id: string;
+      /** The agent this one was copied from — `forkAgent`'s, and nothing else's. See migration 049. */
+      forkedFrom?: string | null;
+    },
+  ): Promise<Agent> {
     if (!SAFE_SLUG.test(a.slug)) throw new Error(`not a usable agent id: ${a.slug}`);
     await this.q(ctx).run(
       `INSERT INTO agents (id, workspace_id, slug, display_name, description, connectors,
          mcp_tools, required_env, default_provider, hand_written, creation_cost, created_by,
-         created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         forked_from, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         a.id,
         ctx.workspaceId,
@@ -355,6 +375,10 @@ export class AgentRepository {
         a.hand_written ? 1 : 0,
         a.creation_cost ?? null,
         ctx.actorUserId,
+        // ONLY HERE. `upsertFromDisk` never writes it, because a directory knows nothing about forks
+        // and a reconciliation that cleared it would lose the fact on the next boot — the trap
+        // `display_name` was in before `display_name_is_custom` closed it.
+        a.forkedFrom ?? null,
         a.created_at ?? new Date().toISOString(),
       ],
     );

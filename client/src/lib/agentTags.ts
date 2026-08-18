@@ -82,8 +82,15 @@ export interface TagInput {
   spend_known: boolean;
   deployment: { status: string; url: string | null } | null;
   drift: { deployed: number; current: number } | null;
-  /** Set when this agent was made by forking another. Null otherwise. */
-  forked_from?: string | null;
+  /**
+   * The slug this agent was copied from, or null.
+   *
+   * REQUIRED, NOT OPTIONAL, and the difference is what caught this once already. While it was
+   * optional, `AgentCardView` simply did not have the field — so every card passed `undefined`, the
+   * `Forked` branch below could never be taken, and the whole tag was unreachable code that
+   * typechecked. A required field makes a card that cannot answer a compile error.
+   */
+  forked_from: string | null;
 }
 
 /** How new is New. Seven days, which is §5.4's own number. */

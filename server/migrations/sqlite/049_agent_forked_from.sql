@@ -1,0 +1,12 @@
+-- 049_agent_forked_from — the SQLite half. Read the Postgres file for why this is a column at all
+-- when 048 deliberately added none, why parsing the fork's own version summary is not an answer, and
+-- why it is nullable with nothing to backfill.
+--
+-- Same translation as every migration on this driver: uuid -> TEXT.
+--
+-- THE `REFERENCES` CLAUSE IS ALLOWED HERE ONLY BECAUSE THE DEFAULT IS NULL, which is worth stating
+-- rather than discovering. SQLite refuses `ALTER TABLE ... ADD COLUMN` with a foreign key unless the
+-- new column's default is NULL — and it is, because there is no fork to point at for any row that
+-- already exists. Foreign keys are ON for this driver (see the note in db/sqlite.ts: `node:sqlite`
+-- enables them by default, unlike the CLI), so the constraint is real rather than decorative.
+ALTER TABLE agents ADD COLUMN forked_from TEXT REFERENCES agents(id) ON DELETE SET NULL;
