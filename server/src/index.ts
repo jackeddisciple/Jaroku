@@ -3487,7 +3487,14 @@ async function agentGridSnapshot(ctx: TenantContext): Promise<AgentGridSnapshot>
       deployment: deployment
         ? { id: deployment.id, status: deployment.status, url: deployment.url, version: deployment.version }
         : null,
-      drift: deployment ? driftOf(deployment.version, a.current_version) : null,
+      // DRIFT IS ONLY A FACT ABOUT SOMETHING THAT IS SERVING. `currentByAgent` answers with an
+      // agent's most recent deployment whatever became of it, so a deploy that FAILED at the build
+      // step, or one somebody has since forgotten, still carries the version it was going to build
+      // from — and computing drift off that put `v2 → v9` on a card with nothing deployed at all,
+      // claiming old code was live when no code was. The card guarded on `live` and the tag row did
+      // not, which is exactly the kind of rule that has to be decided once, here, rather than
+      // remembered by each surface that renders it.
+      drift: deployment?.status === "live" ? driftOf(deployment.version, a.current_version) : null,
     };
   });
 
