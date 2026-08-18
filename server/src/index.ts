@@ -137,6 +137,7 @@ import { InboxStore } from "./inbox/inboxStore.ts";
 import { InboxReconciler, describeReconcile } from "./inbox/reconciler.ts";
 import { inboxFacts, type FactDeps } from "./inbox/facts.ts";
 import { deriveInboxItems, disablesConfirmGate } from "./inbox/derive.ts";
+import { UndoLedger, seedOnboardingItems } from "./inbox/actions.ts";
 import { INBOX_RECONCILE_LOCK_KEY } from "./db/db.ts";
 import {
   noteDeployFailed,
@@ -553,6 +554,16 @@ const inboxStore = new InboxStore(store.database());
  * failure the members list had for the whole life of a tab.
  */
 const inboxDeps: GeneratorDeps = { inbox: inboxStore };
+
+/**
+ * The five seconds after a destructive action, so undo can put back exactly what was there.
+ *
+ * MODULE STATE, LIKE THE CONFIRM QUEUE AND THE PLANNER'S SLOT, and for the same reason each of those
+ * is: it describes something a live client is looking at right now. A toast lives five seconds; a
+ * table holding the inverse of every dismissal would grow forever to serve a window that has already
+ * closed, and a restart inside those five seconds takes the toast with it anyway.
+ */
+const inboxUndo = new UndoLedger();
 
 /**
  * Write an Inbox item, and never let doing so break what was actually happening.
@@ -1358,8 +1369,12 @@ const inboxReconciler = new InboxReconciler({
   inbox: inboxStore,
   workspaces: (ctx) => bootIdentity.listWorkspaceIds(ctx).then((ids) => ids.map((id) => ({ id }))),
   factsFor: (ctx) => inboxFacts(inboxFactDeps, ctx),
-  // §6.2's derived half, over the same facts and the same read of the board the settle uses.
-  derive: (ctx, facts, open) => deriveInboxItems(inboxStore, ctx, facts, open),
+  // §6.2's derived half, over the same facts and the same read of the board the settle uses — plus
+  // §2.5's two seeded items, which are written once per workspace and never again. Seeding sits here
+  // rather than at workspace creation because a workspace created before this feature existed needs
+  // them too, and a sweep that runs every minute is a backfill nobody has to write.
+  derive: async (ctx, facts, open) =>
+    (await deriveInboxItems(inboxStore, ctx, facts, open)) + (await seedOnboardingItems(inboxStore, ctx, facts)),
   // Bound to the reconciler's own key rather than the migration runner's. Advisory locks are one
   // flat namespace, and sharing the key would make a deploy applying migrations wait behind a sweep.
   withLock: (fn) => db.withAdvisoryLock(INBOX_RECONCILE_LOCK_KEY, fn),

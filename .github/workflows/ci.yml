@@ -287,6 +287,12 @@ jobs:
           # also holds the badge rule, which the specification asks nobody to "fix": blocking plus
           # proposals only, because a badge that never reaches zero is one people learn to ignore.
           npm run test:inbox-snapshot
+          # Undo, which is why this surface has no confirmation dialogs and therefore has to work.
+          # Its load-bearing assertion is that undoing a dismissal restores the PRIOR value rather
+          # than clearing the column: an item dismissed last week and dismissed again today has two
+          # dismissals and one column, and clearing it would put the card back on a board somebody
+          # had deliberately cleared. Plus the seeds, which must be written once and never again.
+          npm run test:inbox-actions
 
       - name: cost, abuse and the data lifecycle
         working-directory: server
