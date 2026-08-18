@@ -82,6 +82,68 @@ agent-level fact, so an agent shows its grants and not the servers.
 
 ### Fixed
 
+An adversarial pass over the tab found fourteen defects in the code above, every one of them
+invisible from a screenshot. They are listed here rather than folded quietly into the entries they
+correct, because the failure mode most of them share is worth naming once: **a control that appears
+to work and does not**, and **code that claims a feature and can never run**.
+
+- **`Forked` was a tag family member no card could ever wear.** `agentTags` read `forked_from`, the
+  family listed it, and the wire shape had no such field — so the branch typechecked and was
+  unreachable. A fork's provenance is genuinely not derivable: the only trace was its version
+  summary's prose, and parsing a display string as an API is how a rewording silently breaks a tag.
+  Migration 049 adds the column, which is the one place this release adds one.
+- **An unapplied diff was painted as the machine's turn.** `buildingAgents` read `openProposals` —
+  diffs that have ARRIVED and are waiting on a person — and called it `Generating`, so work that had
+  STOPPED wore amber, which the colour law reserves for runtime activity, while an edit genuinely
+  streaming files wore `Idle`. The editor now names the agent it is writing to, set with `busy` and
+  cleared in the same `finally`.
+- **A deploy that failed still carried the version it meant to build, and drift believed it.**
+  `currentByAgent` answers with an agent's most recent deployment whatever became of it, so a build
+  that never got off the ground put `v2 → v9` on a card with nothing serving. The card guarded on
+  `live` and the tag row did not.
+- **The Evals tab rendered a chip for a winning provider hardcoded to `null`.** `bestByQuality` is the
+  ranking rule now, beside the aggregate the eval dashboard is already drawn from: unscored legs
+  cannot win or lose, an unpriced model is not disqualified from a QUALITY ranking (§6 excludes it
+  from a COST one), and ties are broken stably so two reads never disagree.
+- **A cast invented an `id` on `Member`.** The store's real type is keyed by `user_id`, so every
+  option in §4's Team-only creator filter came out `undefined` — it narrowed to nothing whatever was
+  picked, and §5.2's creator avatar never rendered on a single card. Both features were dead and both
+  typechecked. The cast is gone, which is what makes the type catch it.
+- **"Export current version" fetched the files into a store and saved nothing.** The download lived
+  only inside the detail's file browser, where a card cannot reach it. The builder moved to a shared
+  module, and the card sets a one-shot intent the grid consumes when the payload lands — matched on
+  the agent, so a version somebody is browsing is never saved by accident.
+- **The `Files` button on a version row fetched into a collapsed region**, so clicking it did nothing
+  anybody could see. A version arriving is somebody asking to look at files, so the region opens
+  itself — and only ever opens, because folding it away while one is showing is a decision a later
+  broadcast must not undo.
+- **Escape cancelled a rename and the blur it caused sent it anyway.** Taking the field down fires
+  `onBlur`, and that handler had closed over the render where the draft was still what somebody typed.
+  A ref is read at call time, so the blur sees the cancellation that caused it.
+- **A refused `loadAgentDetail` showed three grey bars and hid the sentence the server sent.** The
+  comment claimed the grid's error strip had it covered; opening a card collapses the full-screen
+  view, so that strip is not mounted. The pane that asked is the pane that says.
+- **A hovered card lost its glow whenever an unrelated agent emitted a step.** The hover was written
+  imperatively onto `element.style` on an element whose `style` prop React also owned, so React won on
+  the next render — and the grid re-renders on every broadcast by design.
+- **A fork asked whether a slug was free of the one list that hides swept rows.** `list` excludes
+  soft-deleted agents and a swept row keeps its slug, so the fork was told a name was available, hit
+  UNIQUE on INSERT, and answered "that did not work". `takenSlugs` asks what the constraint holds.
+- **Four tabs on one workspace paid for four identical grids on every transition.** `perClient`
+  rebuilds per recipient, which is what makes it safe — and this snapshot is ten statements over the
+  whole workspace. Memoised per call, keyed by workspace, thrown away when the broadcast ends.
+- **A fork's notice outlived the visit it belonged to**, greeting whoever next opened the tab.
+- **§4 asks the header for the workspace name** and it only ever said "Agents".
+
+Two suites were wrong rather than the code they guard:
+
+- **The browser-key audit read a comment.** It scans raw source for a quoted `jaroku.` prefix, and
+  that prefix is not exclusive to browser storage — an agent project's own metadata is `jaroku.json`.
+  A suite that fails over prose is one somebody switches off.
+- **The query counter handed repositories a `Queryable` with no `dialect`**, so a hydrator reading it
+  to choose a JSON branch would have taken the wrong one and the counter would have been measuring a
+  differently behaved query.
+
 - **Migration 041 added the version a deploy built from, and nothing ever wrote it.** The column has
   been NULL on every deployment row this product has created, so a card could say a deploy is live and
   never that it is behind. Recorded at creation now, from the version the artifacts are about to be
@@ -152,8 +214,12 @@ agent-level fact, so an agent shows its grants and not the servers.
   having. Beside it, cross-workspace reads returning absent rather than forbidden.
 - The existing server and client suites green — threads, tenancy, the db boundary, channels, relay,
   acceptance, capabilities, boolean literals, migrations, read-only and the store reset.
-- The server boots against a real database, applies 048 and answers; the client builds and serves the
-  gradients under their generated names.
+- The server boots against a real database, applies 048 and 049, and answers a real socket: the grid
+  came back with nine cards, `drifted_agent` carrying `v5 → v9` while `deployed_agent` — up to date —
+  carried none, the credential-missing card naming `STRIPE_SECRET_KEY` and nothing else, and an agent
+  id this workspace does not have reading as "no such agent in this workspace" rather than as a
+  refusal. Every field on a card was inspected for anything value-shaped; there is nothing but names.
+- `test:agent-adversarial`, which pins each defect above as a claim rather than a memory.
 
 ### Still owed
 
