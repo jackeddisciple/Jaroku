@@ -11,7 +11,7 @@
 // three sizes and a fourth one produced by `transform: scale` is a fourth size with no name.
 //
 // STRUCTURE IN HAIRLINES, NOT FILLS (§9). One border, one radius from the size ladder, one elevation
-// — and the hover is `GLOW.hover` rather than a darker background, because on #0d0d0f a card cannot
+// — and the hover is `shadow-glow` rather than a darker background, because on #0d0d0f a card cannot
 // get meaningfully darker and can only get brighter at its edge.
 
 import { useState } from "react";
@@ -24,7 +24,7 @@ import { GitForkIcon, KebabIcon, PencilIcon, PlusIcon } from "./panelIcons.tsx";
 import { artFor } from "../lib/agentArt.ts";
 import { agentContextMarkdown } from "../lib/agentContext.ts";
 import { relTime, fmtCost } from "../lib/format.ts";
-import { GLOW, ICON, STATUS, TEXT, TYPE } from "../lib/tokens.ts";
+import { ICON, STATUS, TEXT, TYPE } from "../lib/tokens.ts";
 import { spendFor, useAgentGridStore } from "../store/agentGridStore.ts";
 import type { AgentCardView } from "../types.ts";
 import type { AgentDensity } from "../lib/agentFilter.ts";
@@ -210,16 +210,15 @@ export function AgentCard({
       }}
       data-agent-card={agent.slug}
       aria-label={agent.name}
+      // THE HOVER IS A CLASS, NOT AN IMPERATIVE STYLE, and the difference is not tidiness. Writing
+      // `element.style.boxShadow` from a pointer handler on an element whose `style` prop React also
+      // owns means React wins on the next render — and §5.5's whole promise is that this grid
+      // re-renders whenever a broadcast lands, so a hovered card lost its glow every time an
+      // unrelated agent's run emitted a step. `shadow-glow` is the same token from `tailwind.config`
+      // that `GLOW.hover` is in `tokens.ts`, so nothing about the appearance changes.
       className={`group flex cursor-pointer flex-col overflow-hidden rounded-card border bg-panel text-left transition-shadow duration-fast ${
-        focused ? "border-edge" : "border-hair hover:border-edge"
+        focused ? "border-edge shadow-glow" : "border-hair hover:border-edge hover:shadow-glow"
       } ${agent.archived_at ? "opacity-70" : ""}`}
-      style={{ boxShadow: focused ? GLOW.hover : undefined }}
-      onMouseEnter={(e) => {
-        if (!focused) e.currentTarget.style.boxShadow = GLOW.hover;
-      }}
-      onMouseLeave={(e) => {
-        if (!focused) e.currentTarget.style.boxShadow = "";
-      }}
     >
       <Thumbnail agent={agent} height={compact ? 64 : 104} working={working} />
 
