@@ -1,0 +1,44 @@
+-- 048_agents_grid — the one read the Agents grid is built on gets an index to stand on.
+--
+-- WHAT THIS MIGRATION DELIBERATELY DOES NOT DO, first, because the absence is the decision. The
+-- Agents tab's card wants a title, a slug, a description, a tag row, the latest thread's title and
+-- last turn, a missing-credential count, a deploy badge with version drift, a thread count and an
+-- activity level. Every one of those is already in this schema: `agents` has carried `description`
+-- since 008 and `archived_at` since 047, `agent_versions` has carried the manifest, the summary and
+-- the per-file stat since 014, `threads` and `thread_items` carry the session since 043/044,
+-- `deployments.version` has carried what a deploy built from since 041, and `secret_refs` carries
+-- which names are configured since 016. So there is no column here. A column you can derive is a
+-- second copy of a fact, and the second copy is the one that goes stale.
+--
+-- WHAT IS ACTUALLY MISSING IS ONE ACCESS PATH, and it is the one the grid reads on every load.
+--
+-- The card's "current work" line and the grid's DEFAULT SORT are the same question: for each agent,
+-- which of its threads was active most recently, and what is it called. 043 gave `threads` two
+-- indexes and neither answers it. `threads_ws_archived_activity` is (workspace_id, archived_at,
+-- last_activity_at DESC) — right for the Threads list, which orders every thread in the workspace
+-- and does not group — and `threads_agent` is (workspace_id, agent_id) with no ordering column at
+-- all, built for §4.3.4's collision COUNT, where order is irrelevant. Asking either for "the newest
+-- thread per agent" means reading every thread an agent has ever had and sorting them, per agent,
+-- per grid load. That is invisible at three threads and is the whole cost of the query at three
+-- hundred, which is the same argument 014 makes for its own DESC index.
+--
+-- `workspace_id` LEADS, per CONTRIBUTING's index discipline and for the reason every other index in
+-- this schema follows it: every read of this table is answered inside one workspace, so a scope that
+-- is not the leading column is a scope the planner applies last.
+--
+-- `archived_at` IS NOT IN IT, unlike the Threads list's index, and that is not an oversight. The
+-- grid asks for an agent's most recent SESSION regardless of whether somebody has since put that
+-- session away — "not started yet" is a statement about the agent, and an agent whose only thread
+-- was archived has still been started. Adding the column would split the scan the card actually
+-- makes into two.
+--
+-- ON `threads` RATHER THAN ON `runs` OR `usage_events`, which is the other index this grid could
+-- want and cannot have. The card's activity level and 7-day spend are read per agent out of those
+-- two, and `migrate:check` refuses an unqualified CREATE INDEX on either: building one takes a write
+-- lock for the whole build on the hottest write path in the system, and a migration file cannot use
+-- CONCURRENTLY because the runner puts each file in one transaction. Both reads are already bounded
+-- by a leading `workspace_id` (`runs_ws_started`, `usage_events_ws_occurred`) and then grouped, which
+-- is the same shape `spendByAgent` has always had — so what an index would buy is a per-workspace
+-- grouping it already has, at the cost of an outage on deploy. 044 declined the same index for the
+-- same reason and said so; this says it again rather than leaving the next reader to wonder.
+CREATE INDEX threads_ws_agent_activity ON threads (workspace_id, agent_id, last_activity_at DESC);
