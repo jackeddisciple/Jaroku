@@ -171,15 +171,33 @@ export class ThreadStore {
     const id = randomUUID();
     const now = nowIso();
     await this.q(ctx).run(
+      // `title_is_custom` IS A BOUND PARAMETER AND NOT AN INLINE `0`, and that is the whole
+      // difference between this working and this never having worked on Postgres.
+      //
+      // The column is `INTEGER` on SQLite and `boolean` on Postgres. A bound value is untyped when
+      // it leaves the driver, so Postgres resolves it against the target column and accepts `0` as
+      // false — which is how every other boolean in this codebase is written (`hand_written`,
+      // `configured`, `overridden`). A LITERAL `0` in the statement text is typed `integer` before
+      // the column is consulted, and Postgres refuses to assign it:
+      //
+      //     column "title_is_custom" is of type boolean but expression is of type integer
+      //
+      // So `create` threw on every call against the production driver — which means creating a
+      // thread, and therefore `ensureForAgent` and every run, generation and edit that resolves a
+      // session through it, could not work there at all. It went unseen because every thread suite
+      // opens SQLite: the same shape as migration 044's COALESCE, and the same lesson.
       `INSERT INTO threads (id, workspace_id, agent_id, agent_name_snapshot, title,
                             title_is_custom, created_by, created_at, last_activity_at, status)
-       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, 'idle')`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle')`,
       [
         id,
         ctx.workspaceId,
         t.agentId ?? null,
         t.agentName ?? null,
         (t.title ? capTitle(t.title) : "") || UNTITLED,
+        // A new thread's title is whatever this row was opened with, never something a person
+        // typed — `rename` is the only thing that makes it custom.
+        0,
         // `actorUserId` rather than a required argument: every caller already has a context, and
         // a second place to pass the person is a second place to pass the wrong one.
         t.createdBy ?? ctx.actorUserId ?? null,

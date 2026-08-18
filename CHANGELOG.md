@@ -178,6 +178,17 @@ there. What is new is that the product's own surface reaches them.
 
 ### Fixed
 
+- **Creating a thread threw on Postgres, and always had.** `ThreadStore.create` wrote
+  `title_is_custom` as an inline SQL `0` into a column that is `INTEGER` on SQLite and `boolean` on
+  Postgres — and a literal is typed before the column is consulted, so the production driver refused
+  it: *column "title_is_custom" is of type boolean but expression is of type integer*. That is not
+  one broken row; it is `create`, and therefore `ensureForAgent`, and therefore every run, generation
+  and edit that resolves a session through it. Bound as a parameter now, which is how every other
+  boolean in this codebase is written and what lets Postgres resolve it against the column.
+  It survived a release because **every thread suite opens SQLite** — the same blind spot, and the
+  same shape, as migration 044's COALESCE. `test:agent-lifecycle` runs on both drivers and creates a
+  thread on each, which is what surfaced it; the assertion is now stated in that suite rather than
+  left as a side effect of it.
 - **A CI check would have failed every job it dispatched.** `checkRunner` passed the agent's **uuid**
   to `startEval`, where the eval engine takes the **slug** — which becomes the eval row's `agent_id`
   and then `runtime/agents/<agentId>`, the working directory of every job's subprocess. It could not

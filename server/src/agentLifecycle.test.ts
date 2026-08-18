@@ -51,11 +51,23 @@ async function suite(driver: string, db: Db): Promise<void> {
     default_provider: "fake",
   };
   const agent = await agents.upsertFromDisk(ctx, onDisk);
+  // A THREAD, ON THIS DRIVER, AT ALL — and this line is load-bearing beyond what it looks like.
+  //
+  // Every thread suite in the repository opens SQLite, so `ThreadStore.create` had never run against
+  // Postgres, and it wrote `title_is_custom` as an inline `0` into a `boolean` column: it threw on
+  // every call against the production driver, which took `ensureForAgent` and every run, generation
+  // and edit that resolves a session with it. This suite is the first thing to have created one on
+  // both drivers, which is how that was found — so the assertion is stated rather than left implied,
+  // and it stays here to keep it stated.
   const thread = await threads.create(ctx, {
     agentId: agent.id,
     agentName: agent.slug,
     title: "Rate limiting",
   });
+  check("a thread can be created on this driver at all", thread.id.length > 0);
+  check("...with the title it was opened with, and not marked as one somebody typed",
+    thread.title === "Rate limiting" && thread.title_is_custom === false,
+    `title=${thread.title} custom=${String(thread.title_is_custom)}`);
 
   console.log("  · archiving");
   {
