@@ -75,6 +75,11 @@ there. What is new is that the product's own surface reaches them.
   order, with each provider's display name resolved server-side — which also removed the two
   disagreeing copies of that mapping in the browser, the reason one provider was "Gemini" where you
   picked it and `google` where you configured it. `test:pricing` asserts what keeps it safe.
+- **Abandoned OAuth flows are swept.** `sweepStates` existed and nothing called it on a timer, so a
+  row per started-and-closed consent screen accumulated forever — each holding a code verifier and a
+  return path long past the ten minutes either means anything for. Hourly, beside the hold sweep and
+  the ticket sweep, unref'd. Housekeeping and explicitly not a boundary: an expired state is already
+  refused at redemption, which is where the check that matters lives.
 - **A manual refresh, and the operator queue can be read.** `sendListAgents`, `sendListProviders`
   and `sendListThreads` were exported and called by nothing, so a snapshot that went stale had no
   remedy but reloading the page: there is a palette entry that asks for all three, and a quiet

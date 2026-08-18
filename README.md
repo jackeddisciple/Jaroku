@@ -4297,7 +4297,7 @@ that is the fact a future cleanup will not know.
 | Postgres `langgraph` schema | The same checkpoints, hosted, keyed `ws:<workspace_id>:run:<run_id>`. LangGraph owns the tables; Jaroku owns the schema and the grant | No |
 | `runtime/.env` | Provider, connector and MCP server keys, when `JAROKU_SECRET_STORE=dotenv` (the default) | No |
 | `oauth_connections` | Which connectors a workspace has authorised, whose account, which scopes were granted, and the NAMES its tokens live under. No token columns exist | No |
-| `oauth_states` | A hashed, single-use, ten-minute flow. Gone the moment a callback consumes it | No |
+| `oauth_states` | A hashed, single-use, ten-minute flow. Gone the moment a callback consumes it — and an ABANDONED one is swept hourly, which is housekeeping rather than a boundary: an expired state is already refused at redemption | No |
 | `workspace_secrets` / `workspace_data_keys` | The same credentials, hosted: envelope-encrypted ciphertext, per-workspace data key. Never a plaintext column | No |
 | `abuse_signals` | What a workspace — or an address with no workspace — has been observed doing, with the weight each observation carried at the time. Swept after 30 days | No |
 | `workspace_enforcements` | Which rung a workspace is under, who decided, the evidence at the time, and the appeal. Append-only, with a `lifted_at` | No |

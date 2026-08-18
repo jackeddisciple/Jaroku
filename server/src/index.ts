@@ -1115,6 +1115,36 @@ async function buildRunEgress(
   }
 }
 
+/**
+ * Expired OAuth `state` rows, swept.
+ *
+ * ONE ROW PER STARTED-AND-ABANDONED FLOW, and every product has those: somebody presses Connect,
+ * reads the consent screen, and closes the tab. `sweepStates` was written to remove them and nothing
+ * ever called it on a timer, so the table only grew — slowly, invisibly, and with a row per
+ * abandonment holding a `code_verifier` and a return path long past the ten minutes either means
+ * anything for.
+ *
+ * IT IS NOT A SECURITY BOUNDARY and must not be mistaken for one: an expired state is already
+ * refused by `expires_at` at redemption, which is where the check that matters lives. This is
+ * housekeeping — the same shape and the same reasoning as the ticket sweep and the hold sweep it
+ * sits beside, unref'd so tidying up can never hold a process open.
+ *
+ * Hourly rather than every few minutes, because nothing depends on the row being gone: the only
+ * cost of a stale one is a row.
+ */
+const sweepOauthStates = async (): Promise<void> => {
+  const removed = await oauthRepo.sweepStates();
+  if (removed > 0) console.log(`[connections] swept ${removed} expired OAuth state(s)`);
+};
+await sweepOauthStates().catch((err) =>
+  console.error("[connections] state sweep failed:", (err as Error)?.message ?? err),
+);
+setInterval(() => {
+  void sweepOauthStates().catch((err) =>
+    console.error("[connections] state sweep failed:", (err as Error)?.message ?? err),
+  );
+}, 3_600_000).unref();
+
 const tokenRefresher = new TokenRefresher({
   repo: oauthRepo,
   secrets,
