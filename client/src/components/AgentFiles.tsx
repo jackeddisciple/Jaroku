@@ -130,6 +130,21 @@ export function AgentFiles({ detail }: { detail: AgentDetailView }) {
   // `agent.py` under another agent's name for as long as the next read took.
   useEffect(() => setExpanded(null), [slug, showing?.version]);
 
+  /**
+   * A VERSION ARRIVING IS SOMEBODY ASKING TO SEE FILES, so the region opens itself.
+   *
+   * The version history above has a `Files` button per row, and it could only fetch: the payload
+   * landed in the store, this region was collapsed, and nothing whatever happened on screen. That is
+   * the same class of failure as the card's Export — a control that appears to work and does not —
+   * and the fix is the same shape, which is that the thing that CAN respond does.
+   *
+   * Only ever opens, never closes. Somebody who folded this away while a version was already showing
+   * has said they do not want to look at it, and a later broadcast must not reopen it over them.
+   */
+  useEffect(() => {
+    if (showing) setOpen(true);
+  }, [showing?.agentId, showing?.version]);
+
   const files = showing?.files ?? [];
 
   return (
