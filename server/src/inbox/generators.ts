@@ -232,3 +232,118 @@ export async function noteEvalResultsOpened(
   deps.onChanged?.(ctx);
   return true;
 }
+
+/**
+ * An MCP server changed status. §2.1's `mcp_auth_required`, raised where the change is known.
+ *
+ * ONLY `auth_required` IS EVENT-DRIVEN HERE, and that asymmetry is deliberate. A server asking for
+ * a credential is a fact the moment discovery says so, and it is Blocking — an agent scoped to that
+ * server cannot call anything. `unreachable` is the OTHER MCP item and it is derived, because §2.2's
+ * trigger is not "unreachable" but "unreachable for over 24 hours": raising it on the event would
+ * put a card on the board every time a third party restarted, and the reconciler is the only thing
+ * that can ask how long a state has held.
+ *
+ * NOTHING IS RESOLVED HERE. A server coming back is the reconciler's to notice, through the same
+ * predicate that would notice it if the recovery arrived any other way — which is Law 2's rule
+ * about there being exactly one thing that decides an item is settled.
+ */
+export async function noteMcpStatus(
+  deps: GeneratorDeps,
+  ctx: TenantContext,
+  server: { id: string; label?: string | null; server_name?: string | null; status: string },
+): Promise<InboxItem | null> {
+  if (server.status !== "auth_required") return null;
+  const item = await deps.inbox.record(ctx, {
+    type: "mcp_auth_required",
+    subjectId: server.id,
+    dedupeKey: dedupeKey("mcp_auth_required", server.id),
+    // The server's own advertised name if it has one, else the label this workspace gave it. Both
+    // are third-party or user text on their way into a payload every socket receives, and both go
+    // through the bounding §6.5 requires — see `payload.ts`.
+    payload: { server_name: server.server_name || server.label || server.id } satisfies InboxPayload,
+  });
+  deps.onChanged?.(ctx);
+  return item;
+}
+
+/**
+ * The failure → fix → pass triple, and the only thing that may propose a memory.
+ *
+ * §2.3 IS UNUSUALLY STRICT ABOUT THIS AND THE STRICTNESS IS THE FEATURE: "That is the only trigger.
+ * Do not propose memory from weaker evidence." The weaker evidence is easy to reach for — an edit
+ * somebody made, a run that passed, a pattern in a prompt — and every one of those proposes memories
+ * from things that were not fixes. A proposal nobody trusts is worse than no proposal, because the
+ * cost of reading and rejecting it falls on somebody every single time.
+ *
+ * ALL THREE LEGS ARE READ FROM ROWS, none from anything this process is holding. The failure is a
+ * `runs` row, the fix is an `agent_versions` row whose source is `edit`, and the pass is the run
+ * that just ended. That matters because the three can be days apart and across restarts: an
+ * implementation that watched for them in memory would propose only when all three happened inside
+ * one process lifetime, which makes "the only trigger" mean "the only trigger, on a good day".
+ *
+ * ONE PROPOSAL PER EDIT, which is what the version number in the dedupe key buys. Ten runs passing
+ * after one fix are one piece of evidence that the fix worked, not ten proposals — and the count on
+ * the card is how many passes have been seen.
+ *
+ * A MEMORY THAT CANNOT NAME THE EVIDENCE THAT PRODUCED IT MUST NOT EXIST, so the payload carries all
+ * three ids. `view evidence` opens them; the injection into planner, generator and editor prompts is
+ * attributable back to this item because this item is where the evidence lives.
+ */
+export async function noteMemoryProposal(
+  deps: GeneratorDeps,
+  ctx: TenantContext,
+  input: {
+    agentUuid: string;
+    agentSlug: string;
+    agentName: string;
+    /** The run that just passed. The third leg. */
+    passingRunId: string;
+    /** The newest edit-sourced version, or null when the agent has never been edited. */
+    edit: { version: number; created_at: string; instruction: string | null } | null;
+    /** The failure before that edit, or null when there was none. */
+    failure: { id: string; started_at: string } | null;
+  },
+): Promise<InboxItem | null> {
+  if (!input.edit || !input.failure) return null;
+
+  const item = await deps.inbox.record(ctx, {
+    type: "memory_proposal",
+    subjectId: input.agentUuid,
+    dedupeKey: dedupeKey("memory_proposal", input.agentUuid, `v${input.edit.version}`),
+    payload: {
+      agent_name: input.agentName,
+      agent_slug: input.agentSlug,
+      version: input.edit.version,
+      // What somebody asked for, which is the readable half of the evidence. Bounded on the way in.
+      instruction: input.edit.instruction,
+      failed_run_id: input.failure.id,
+      passing_run_id: input.passingRunId,
+    } satisfies InboxPayload,
+  });
+  deps.onChanged?.(ctx);
+  return item;
+}
+
+/**
+ * Somebody answered a proposal. The one resolve condition in the feature that IS the action.
+ *
+ * STATED RATHER THAN HIDDEN. Every other item type here resolves from facts nobody had to touch,
+ * and this one cannot: there is no external world in which a proposal becomes answered. §2.3 gives
+ * "accepted or rejected" as the condition, and both are decisions rather than observations.
+ *
+ * IT STILL GOES THROUGH THE PREDICATE. The decision is written onto the row and the sweep is what
+ * settles it, so there remains exactly one thing in this codebase that decides an item is resolved —
+ * which is what stops this becoming the exception that grows a second resolution path.
+ */
+export async function noteMemoryDecision(
+  deps: GeneratorDeps,
+  ctx: TenantContext,
+  itemId: string,
+  decision: "saved" | "rejected",
+): Promise<boolean> {
+  const item = await deps.inbox.get(ctx, itemId);
+  if (!item || item.type !== "memory_proposal" || item.state !== "open") return false;
+  await deps.inbox.setPayload(ctx, item.dedupe_key, { ...item.payload, decision } satisfies InboxPayload);
+  deps.onChanged?.(ctx);
+  return true;
+}

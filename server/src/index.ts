@@ -138,6 +138,8 @@ import {
   noteDeployFailed,
   noteEvalFinished,
   noteEvalResultsOpened,
+  noteMcpStatus,
+  noteMemoryProposal,
   noteRunFailed,
   noteTraceOpened,
   type GeneratorDeps,
@@ -738,6 +740,16 @@ const mcpDiscovery = new McpDiscoveryQueue({
     } else if (result.message) {
       relay.broadcastMcp(ctx, { type: "notice", message: result.message, serverId: payload.serverId });
     }
+    // §2.1'S `mcp_auth_required`, RAISED WHERE THE STATUS IS ALREADY KNOWN rather than by teaching
+    // the registry what an Inbox is. A server asking for a credential is Blocking the moment
+    // discovery says so — every agent scoped to it can call nothing — and this is the one place both
+    // a first registration and a rediscovery arrive at.
+    //
+    // `unreachable` DELIBERATELY RAISES NOTHING HERE. §2.2's trigger is not "unreachable" but
+    // "unreachable for over 24 hours", which is a question about how long a state has held and only
+    // the reconciler can ask it. Raised on the event, it would put a card on the board every time a
+    // third party restarted.
+    if (result.server) noteInbox("an MCP server needing a credential", noteMcpStatus(inboxDeps, ctx, result.server));
   },
   onError: (ctx, payload, err) => {
     console.error(`[mcp] ${payload.kind} ${payload.serverId} threw:`, err);
@@ -6676,6 +6688,47 @@ onBothPools("event", ({ runId, event }) => {
     // failures are the eval's result — the comparison exists to show which target failed — and
     // putting a card on the board for each would bury the one item that matters, which is that the
     // eval finished and its results are unread.
+    // A RUN THAT PASSED, AND THE TRIPLE §2.3 IS THE ONLY TRIGGER FOR: a run failed, an edit was
+    // applied, and subsequent runs passed. All three legs are read from rows rather than from
+    // anything this process is holding, because they can be days apart and across restarts — an
+    // implementation watching for them in memory would propose only when all three landed inside
+    // one process lifetime, which turns "the only trigger" into "the only trigger, on a good day".
+    //
+    // BOUNDED BY THE EDIT'S OWN AGE. A failure is only evidence that this edit fixed something if
+    // it happened while the edit's predecessor was live, so the lookback ends at the version before
+    // it — which is also what keeps the query's scan bounded.
+    if (event.kind === "run_end" && event.run.status === "completed" && !isEvalRun(runId)) {
+      const passedRunId = runId;
+      const slug = event.run.agent_id;
+      noteInbox(
+        "a memory proposal",
+        (async () => {
+          const agent = await agentRepo.bySlug(runCtx, slug);
+          if (!agent) return;
+          const versions = await agentRepo.versions(runCtx, agent.id);
+          const edit = versions.find((v) => v.source === "edit");
+          if (!edit) return;
+          // The version immediately before the edit. Its creation is when the code the failure ran
+          // on became live, so a failure earlier than that was a failure of something else.
+          const previous = versions.find((v) => v.version < edit.version);
+          const failure = await store.failedRunBefore(
+            runCtx,
+            slug,
+            edit.created_at,
+            previous?.created_at ?? "1970-01-01T00:00:00.000Z",
+          );
+          await noteMemoryProposal(inboxDeps, runCtx, {
+            agentUuid: agent.id,
+            agentSlug: agent.slug,
+            agentName: agent.display_name ?? agent.slug,
+            passingRunId: passedRunId,
+            edit: { version: edit.version, created_at: edit.created_at, instruction: edit.instruction },
+            failure,
+          });
+        })(),
+      );
+    }
+
     if (event.kind === "run_end" && event.run.status === "error" && !isEvalRun(runId)) {
       // The run carries the SLUG (the frozen schema's `agent_id`); the item is keyed by the uuid,
       // because a slug is renameable and a card that survived a rename would key on a name.

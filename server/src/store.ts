@@ -576,6 +576,41 @@ export class TraceStore {
    * per-bar lookup would be the N+1 at its worst — and it is asked only for the runs that failed,
    * which in a healthy workspace is none.
    */
+  /**
+   * The most recent run of this agent that failed before a moment. Null when there was none.
+   *
+   * THE FIRST LEG OF THE INBOX'S memory-proposal TRIPLE (§2.3): a run failed, an edit was applied,
+   * and subsequent runs passed. The other two legs are already readable — the edit is an
+   * `agent_versions` row whose `source` is `edit`, and the pass is the run that just ended — so this
+   * is the one question nothing could answer.
+   *
+   * A QUERY RATHER THAN SOMETHING THIS PROCESS REMEMBERS, and that is the whole reason it is here.
+   * The obvious implementation keeps a map of "agents that recently failed" in memory and consults
+   * it when an edit lands, which means a proposal is only ever made when the failure, the edit and
+   * the pass all happen inside one process lifetime. §2.3 says the triple is the ONLY trigger, and a
+   * trigger that a restart can erase is one that fires on some days and not others.
+   *
+   * BOUNDED BY A LOOKBACK rather than reading an agent's whole history. A failure from three months
+   * ago is not evidence that today's edit fixed anything, and the index this reads leads with
+   * `workspace_id, started_at` — so a bound on the time is a bound on the scan.
+   */
+  async failedRunBefore(
+    ctx: TenantContext,
+    agentSlug: string,
+    before: string,
+    notBefore: string,
+  ): Promise<{ id: string; started_at: string } | null> {
+    const row = await this.q(ctx).get<{ id: string; started_at: string }>(
+      `SELECT id, started_at FROM runs
+        WHERE workspace_id = ? AND agent_id = ? AND status = 'error'
+          AND started_at < ? AND started_at >= ?
+        ORDER BY started_at DESC
+        LIMIT 1`,
+      [ctx.workspaceId, agentSlug, before, notBefore],
+    );
+    return row ?? null;
+  }
+
   async firstFailedStepFor(ctx: TenantContext, runIds: readonly string[]): Promise<Map<string, string>> {
     const out = new Map<string, string>();
     if (runIds.length === 0) return out;

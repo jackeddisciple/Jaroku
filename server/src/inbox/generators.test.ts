@@ -29,6 +29,9 @@ import {
   noteDeployFailed,
   noteEvalFinished,
   noteEvalResultsOpened,
+  noteMcpStatus,
+  noteMemoryDecision,
+  noteMemoryProposal,
   noteRunFailed,
   noteTraceOpened,
   type GeneratorDeps,
@@ -234,6 +237,87 @@ console.log("\na card that comes back does not inherit the batch somebody alread
     !isResolved(back, facts()),
   );
   check("...counting from one", back.count === 1);
+
+  await close();
+}
+
+// --- 6. an MCP server that cannot authenticate ---------------------------------------------
+
+console.log("\nonly a server asking for a credential is an event; unreachable is a duration");
+{
+  const { deps, inbox, close } = await fresh();
+
+  check(
+    "a connected server raises nothing",
+    (await noteMcpStatus(deps, ctx, { id: "linear", label: "linear", status: "connected" })) === null,
+  );
+  check(
+    "an unreachable one raises nothing HERE, because §2.2's trigger is a day of it and only the sweep can time that",
+    (await noteMcpStatus(deps, ctx, { id: "linear", label: "linear", status: "unreachable" })) === null,
+  );
+  check("...so the board is still empty", (await inbox.listOpen(ctx)).length === 0);
+
+  const raised = await noteMcpStatus(deps, ctx, {
+    id: "linear", label: "linear", server_name: "Linear MCP", status: "auth_required",
+  });
+  check("a server asking for a credential is Blocking", raised?.severity === "blocking");
+  check(
+    "...named by what it calls itself, falling back to the label this workspace gave it",
+    raised?.payload["server_name"] === "Linear MCP",
+  );
+  check(
+    "...keyed by the server, so a second discovery is not a second card",
+    (await noteMcpStatus(deps, ctx, { id: "linear", label: "linear", status: "auth_required" })) !== null &&
+      (await inbox.listOpen(ctx)).length === 1,
+  );
+
+  await close();
+}
+
+// --- 7. the triple, and nothing weaker -----------------------------------------------------
+
+console.log("\na memory is proposed from a failure, a fix and a pass — and from nothing else");
+{
+  const { deps, inbox, close } = await fresh();
+  const edit = { version: 4, created_at: "2026-08-18T10:00:00.000Z", instruction: "retry the 429s" };
+  const failure = { id: "run-failed", started_at: "2026-08-18T09:00:00.000Z" };
+  const base = { agentUuid: AGENT, agentSlug: "api_gateway", agentName: "API Gateway", passingRunId: "run-passed" };
+
+  check(
+    "a pass with no edit behind it proposes nothing",
+    (await noteMemoryProposal(deps, ctx, { ...base, edit: null, failure })) === null,
+  );
+  check(
+    "an edit with no failure behind it proposes nothing either — that is somebody changing their mind",
+    (await noteMemoryProposal(deps, ctx, { ...base, edit, failure: null })) === null,
+  );
+  check("...so the board is still empty", (await inbox.listOpen(ctx)).length === 0);
+
+  const proposed = await noteMemoryProposal(deps, ctx, { ...base, edit, failure });
+  check("all three legs propose one", proposed !== null);
+  check("...as a Proposal rather than something blocking anybody", proposed?.severity === "proposal");
+  check(
+    "...naming all three pieces of evidence, because a memory that cannot name what produced it must not exist",
+    proposed?.payload["failed_run_id"] === "run-failed" &&
+      proposed?.payload["passing_run_id"] === "run-passed" &&
+      proposed?.payload["version"] === 4,
+  );
+
+  await noteMemoryProposal(deps, ctx, { ...base, edit, failure, passingRunId: "run-passed-2" });
+  const after = await inbox.listOpen(ctx);
+  check("ten runs passing after one fix are one proposal, not ten", after.length === 1);
+  check("...counting the passes", after[0]?.count === 2);
+
+  const later = { version: 5, created_at: "2026-08-19T10:00:00.000Z", instruction: "and the 500s" };
+  await noteMemoryProposal(deps, ctx, { ...base, edit: later, failure });
+  check("a SECOND fix is a second proposal, because it is different evidence", (await inbox.listOpen(ctx)).length === 2);
+
+  // §2.3's resolve condition is the one in the feature that IS the action — stated rather than
+  // hidden, and still routed through the predicate so nothing grows a second resolution path.
+  const answered = await noteMemoryDecision(deps, ctx, proposed!.id, "rejected");
+  const card = (await inbox.listOpen(ctx)).find((i) => i.id === proposed!.id)!;
+  check("rejecting it is recorded", answered);
+  check("...and the predicate says resolved", isResolved(card, facts()));
 
   await close();
 }

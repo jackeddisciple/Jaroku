@@ -226,6 +226,10 @@ async function suite(label: string, db: Db): Promise<void> {
 
   console.log("  · reading by id");
   check((await trace.getRun(A.ctx, B.runId)) === undefined, "a run id from B resolves to nothing");
+  check(
+    (await trace.failedRunBefore(A.ctx, "agent_b", "2099-01-01T00:00:00.000Z", "1970-01-01T00:00:00.000Z")) === null,
+    "a failure of B's agent is not evidence A may build a memory proposal from",
+  );
   check((await trace.stepsForRun(A.ctx, B.runId)).length === 0, "...and its steps to nothing");
   check((await evals.getDataset(A.ctx, B.datasetId)) === undefined, "a dataset id from B resolves to nothing");
   check((await evals.listExamples(A.ctx, B.datasetId)).length === 0, "...and its examples to nothing");
@@ -448,6 +452,9 @@ const SCOPED_API: Record<string, string[]> = {
   TraceStore: [
     "upsertRun", "insertStep", "listRuns", "getRun", "setRunStatus", "maxSeqForRun",
     "setCheckpointUpto", "boundaryForStep", "copyRunPrefix", "stepsForRun",
+    // The first leg of the Inbox's memory-proposal triple. A cross-tenant read here would offer one
+    // workspace a proposal built from another workspace's failure.
+    "failedRunBefore",
   ],
   EvalStore: [
     "createDataset", "renameDataset", "listDatasets", "getDataset", "deleteDataset",
