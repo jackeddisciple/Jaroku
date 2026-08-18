@@ -54,6 +54,7 @@
     "test:tracing": "tsx src/obs/trace.test.ts",
     "test:metrics": "tsx src/obs/metrics.test.ts",
     "test:migration-gate": "tsx src/db/expandContract.test.ts",
+    "test:boolean-literals": "tsx src/db/booleanLiterals.test.ts",
     "migrate:check": "tsx src/db/gate.cli.ts",
     "drill:restore": "tsx src/lifecycle/drill.cli.ts",
     "obs:render": "tsx src/obs/render.cli.ts",

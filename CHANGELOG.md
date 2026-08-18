@@ -189,6 +189,20 @@ there. What is new is that the product's own surface reaches them.
   same shape, as migration 044's COALESCE. `test:agent-lifecycle` runs on both drivers and creates a
   thread on each, which is what surfaced it; the assertion is now stated in that suite rather than
   left as a side effect of it.
+- **Renaming and auto-titling a thread threw on Postgres too.** The same mistake as `create`, twice
+  more in the same file: `rename` set `title_is_custom = 1` and `autoTitle` guarded on
+  `title_is_custom = 0` in a WHERE. The second is the one that reads least like a type problem —
+  Postgres reports it as *operator does not exist: boolean = integer*, which looks like a missing
+  operator rather than the wrong value — and it meant the first user message in any thread failed on
+  the production driver, after `create` had already failed. Both bound.
+- **`test:boolean-literals`**, so this class cannot come back quietly. It reads the Postgres
+  migrations for which columns are boolean and the production SQL for what is written into and
+  compared against them, and fails on a literal where a parameter is needed — in a VALUES, in a SET,
+  and in a WHERE, which is the position that hid the third occurrence from a hand search. It is a
+  linter and says so, it excludes tests and CLIs because a SQLite-only suite may legitimately spell a
+  boolean `0`, and it carries the original broken statement as a fixture: a lint with no proof that
+  it catches anything is decoration. It needs no database, so it fails on the laptop where that SQL
+  gets written rather than in CI.
 - **A CI check would have failed every job it dispatched.** `checkRunner` passed the agent's **uuid**
   to `startEval`, where the eval engine takes the **slug** — which becomes the eval row's `agent_id`
   and then `runtime/agents/<agentId>`, the working directory of every job's subprocess. It could not

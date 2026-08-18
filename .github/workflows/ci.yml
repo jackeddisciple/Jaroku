@@ -105,6 +105,12 @@ jobs:
           npm run test:db-boundary
           npm run test:tenancy
           npm run test:migration-gate
+          # A literal 0 is not a false, and only Postgres says so. It reads the schema for which
+          # columns are boolean and the production SQL for what is written into them — because the
+          # bug it exists for shipped a release: creating a thread threw on the production driver
+          # and every thread suite opens SQLite. This one needs no database, so it fails on the
+          # laptop where that SQL gets written rather than here.
+          npm run test:boolean-literals
 
       - name: storage, secrets and checkpoints
         working-directory: server

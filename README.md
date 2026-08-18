@@ -2151,6 +2151,7 @@ npm run test:log-redaction # a known key, and eight sinks it must not reach
 npm run test:tracing     # four tiers, one trace id, the run id on every span
 npm run test:metrics     # every alert names a metric something actually emits
 npm run test:migration-gate # what breaks a version that is still serving
+npm run test:boolean-literals # a literal 0 is not a false, and only Postgres says so
 npm run migrate:check    # ...and the same check, as the gate the deploy pipeline runs
 npm run drill:restore    # restore into a scratch database and verify what came back
 npm run billing:stuck    # webhook events that arrived and never finished — the operator queue

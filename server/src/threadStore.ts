@@ -267,26 +267,36 @@ export class ThreadStore {
     const trimmed = capTitle(title);
     if (!trimmed) return;
     await this.q(ctx).run(
-      `UPDATE threads SET title = ?, title_is_custom = 1 WHERE workspace_id = ? AND id = ?`,
-      [trimmed, ctx.workspaceId, id],
+      // `title_is_custom` IS BOUND, for the reason `create` states at length: the column is INTEGER
+      // on SQLite and boolean on Postgres, and a literal `1` in the statement text is typed integer
+      // before the column is consulted — so this refused every rename on the production driver, in
+      // exactly the way `create` refused every thread.
+      `UPDATE threads SET title = ?, title_is_custom = ? WHERE workspace_id = ? AND id = ?`,
+      [trimmed, 1, ctx.workspaceId, id],
     );
   }
 
   /**
    * The auto-title, applied only where nobody has chosen one.
    *
-   * The `title_is_custom = 0` in the WHERE rather than a read-then-write, because the guarantee is
+   * The custom-title guard is IN THE WHERE rather than a read-then-write, because the guarantee is
    * "never overwrites a custom title" and a check in TypeScript is a check with a gap in it: two
    * clients in a Team workspace can rename and send in the same millisecond, and the rung-ordering
    * bug this codebase already fixed once is what that looks like when it happens.
+   *
+   * AND IT IS A BOUND PARAMETER, not a literal `0`, for the reason `create` gives — with one extra
+   * turn of the screw. In a SET or a VALUES a literal is a type mismatch Postgres reports plainly;
+   * in a WHERE it is `operator does not exist: boolean = integer`, which reads like a missing
+   * operator rather than like the wrong value. Bound, it is resolved against the column and works on
+   * both drivers, which is what makes auto-titling happen at all on Postgres.
    */
   async autoTitle(ctx: TenantContext, id: string, title: string): Promise<void> {
     const trimmed = capTitle(title);
     if (!trimmed) return;
     await this.q(ctx).run(
       `UPDATE threads SET title = ?
-        WHERE workspace_id = ? AND id = ? AND title_is_custom = 0`,
-      [trimmed, ctx.workspaceId, id],
+        WHERE workspace_id = ? AND id = ? AND title_is_custom = ?`,
+      [trimmed, ctx.workspaceId, id, 0],
     );
   }
 
