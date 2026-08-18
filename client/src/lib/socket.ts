@@ -19,6 +19,7 @@ import { useMemberStore } from "../store/memberStore.ts";
 import { useAuditStore } from "../store/auditStore.ts";
 import { useEnforcementStore } from "../store/enforcementStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
+import { useInboxStore } from "../store/inboxStore.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { resetWorkspaceStores } from "../store/reset.ts";
 import { INPUT_KEY_PREFIX, useUiStore } from "../store/uiStore.ts";
@@ -32,8 +33,8 @@ import {
 } from "./auth.ts";
 import type {
   ClientCommand, EvalTarget, ExplainSubject, GithubAttachment, GithubHunkSelection,
-  GithubProviderPolicy, GithubRestackStep, McpConfirmVerdict, McpImpact, RubricCriterion,
-  ServerMessage,
+  GithubProviderPolicy, GithubRestackStep, InboxAction, McpConfirmVerdict, McpImpact,
+  RubricCriterion, ServerMessage, SnoozeDuration,
 } from "../types.ts";
 
 const RECONNECT_MS = 1000;
@@ -411,6 +412,25 @@ function dispatch(msg: ServerMessage): void {
       else if (msg.type === "inviteLink") m.setInviteLink(msg);
       else if (msg.type === "error") m.setError(msg.message);
       else if (msg.type === "notice") m.setNotice(msg.message);
+      break;
+    }
+    case "inbox": {
+      // A SNAPSHOT REPLACES AND A DELTA TOUCHES ONE CARD. §5.6 asks that a resolving card collapse
+      // and fade with only the affected card re-rendering, which is why the resolution arrives as a
+      // delta at all — and what makes that safe is that a delta only ever carries a fact that is
+      // true for everybody in the workspace. See inboxStore's own header.
+      const i = useInboxStore.getState();
+      if (msg.type === "inbox") i.setSnapshot(msg);
+      else if (msg.type === "inboxDelta") {
+        if (msg.kind === "resolved") i.noteResolved(msg.itemId);
+        else if (msg.kind === "count") i.noteCount(msg.itemId, msg.count, msg.last_seen_at);
+        else i.noteAdded(msg.item);
+      } else if (msg.type === "inboxUndo") {
+        // A NULL TOKEN IS THE ANSWER TO AN UNDO, not the offer of one: the action has been taken
+        // back and there is nothing further to take back. Clearing the toast is what says so.
+        i.setUndo(msg.token ? { token: msg.token, action: msg.action, changed: msg.changed, at: Date.now() } : null);
+      } else if (msg.type === "error") i.setError(msg.message);
+      else if (msg.type === "notice") console.info("[inbox]", msg.message);
       break;
     }
     case "threads": {
@@ -1462,4 +1482,47 @@ export function sendGenerateGithubMessage(agentId: string): void {
 /** §3.4's commit box. `push` false is refused server-side — there is no local repository here. */
 export function sendCommitGithub(agentId: string, message: string, push = true): void {
   send({ cmd: "commitGithub", agentId, message, push });
+}
+
+// --- the Inbox: one read and five mutations (§6.4) ---------------------------------------------
+//
+// EVERY MUTATION RETURNS WHETHER IT LEFT THE TAB, which is the lesson §3.4's archive notice taught
+// on the channel next door: a toast claiming forty items were dismissed over a socket that silently
+// dropped the command is a promise the product did not keep. The board's own actions check.
+
+/** Ask for the board again. A full-snapshot channel's way of checking it is not stale. */
+export function sendListInbox(): void {
+  send({ cmd: "listInbox" });
+}
+
+export function sendResolveInboxItem(itemId: string): boolean {
+  return send({ cmd: "resolveInboxItem", itemId });
+}
+
+export function sendDismissInboxItem(itemId: string): boolean {
+  return send({ cmd: "dismissInboxItem", itemId });
+}
+
+/** §3's three durations, by name. The server decides what tomorrow means — see `snoozeUntil`. */
+export function sendSnoozeInboxItem(itemId: string, duration: SnoozeDuration): boolean {
+  return send({ cmd: "snoozeInboxItem", itemId, duration });
+}
+
+/**
+ * §3's bulk: a shift-clicked range, or a column's overflow menu.
+ *
+ * ONE COMMAND FOR ONE AND FOR FORTY, because the server's path is the same one — and because a
+ * separate single-item command would be a second place the undo token has to be handled.
+ */
+export function sendBulkInboxAction(
+  action: InboxAction,
+  itemIds: string[],
+  duration?: SnoozeDuration,
+): boolean {
+  return send({ cmd: "bulkInboxAction", action, itemIds, duration });
+}
+
+/** §3's undo, by the token the toast was handed. The client never names the items. */
+export function sendUndoInboxAction(token: string): boolean {
+  return send({ cmd: "undoInboxAction", token });
 }

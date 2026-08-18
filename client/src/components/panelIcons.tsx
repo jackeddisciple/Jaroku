@@ -223,6 +223,24 @@ export function GitForkIcon(p: P) {
  * built out of step rows, so nothing anywhere was a picture of the thing — which only shows when
  * there is no trace to draw and the panel has to say what it is waiting for.
  */
+/**
+ * The Inbox tab's own mark: a tray with a line arriving into it.
+ *
+ * HugeIcons `inbox`, at this app's stroke weight — the sidebar's four destinations each wear one
+ * glyph and this is the fourth. It lives here rather than in `inboxIcons.tsx` because that file is
+ * item TYPES, and this is a destination: the same distinction that keeps `HashIcon` and
+ * `SparklesIcon` here rather than in whatever panel happens to use them.
+ */
+export function InboxIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M3 13h4l1.5 2.5h7L17 13h4" />
+      <path d="M4.2 6.6 3 13v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4l-1.2-6.4A2 2 0 0 0 17.83 5H6.17a2 2 0 0 0-1.97 1.6z" />
+    </>,
+  );
+}
+
 export function ActivityIcon(p: P) {
   return svg(p, <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />);
 }

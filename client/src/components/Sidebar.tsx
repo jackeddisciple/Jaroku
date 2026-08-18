@@ -25,7 +25,7 @@ import { StatusDot } from "./StatusBadge.tsx";
 import { ThreadGlyph } from "./ThreadGlyph.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import {
-  ActivityIcon, ChevronRightIcon, DatabaseIcon, GitForkIcon, GithubIcon, GlobeIcon, HashIcon,
+  ActivityIcon, ChevronRightIcon, GitForkIcon, GithubIcon, GlobeIcon, HashIcon, InboxIcon,
   LoaderIcon, PauseIcon, PencilIcon, PlusIcon, SearchIcon, SettingsIcon, SparklesIcon, XIcon,
 } from "./panelIcons.tsx";
 
@@ -38,7 +38,7 @@ import {
 const NAV_DESTINATIONS: { id: NavDestination; label: string; icon: (p: { size?: number }) => React.ReactElement }[] = [
   { id: "threads", label: "Threads", icon: HashIcon },
   { id: "agents", label: "Agents", icon: SparklesIcon },
-  { id: "memory", label: "Memory", icon: DatabaseIcon },
+  { id: "inbox", label: "Inbox", icon: InboxIcon },
   { id: "activity", label: "Activity", icon: ActivityIcon },
 ];
 

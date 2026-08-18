@@ -371,6 +371,12 @@ jobs:
           npm run test:agent-tags
           npm run test:agent-filter
           npm run test:agent-context
+          # THE INBOX BOARD'S ARRANGEMENT RULES, which are the same kind of thing as the four above:
+          # each one looks obviously right in a screenshot and is wrong in the case nobody had that
+          # day. The age bar is logarithmic because a linear one over a week makes the first hour —
+          # the period a triage surface is about — invisible; the tray never renders a negative
+          # duration; and a shift-click range works upwards, which is the half nobody tries first.
+          npm run test:inbox-board
           npm run test:auth
           # The two ends of an invitation link. The failure it exists for is silent and partial: an
           # unencoded token produces a link that works for most secrets and fails for the ones with

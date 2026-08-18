@@ -16,7 +16,21 @@ import type { GithubAttachment } from "../types.ts";
  * the type rather than adding them later is what makes "the shell is generic" checkable — a
  * destination the shell cannot render is a compile error, not a blank screen.
  */
-export type NavDestination = "threads" | "agents" | "memory" | "activity";
+/**
+ * §2's four sidebar destinations.
+ *
+ * `inbox` REPLACES `memory`, WHICH IS A CHANGE OF WHAT THE FOURTH TAB IS RATHER THAN A RENAME.
+ * v0.3.0 gave every built capability a door and recorded three that stayed shells; Memory was
+ * one of them, and nothing was ever built behind it. What ships instead is the surface the
+ * memory idea was actually for: a proposal Jaroku makes from a failure → fix → pass triple is an
+ * ITEM on this board, answered or rejected there, so "what has Jaroku learned" is a question the
+ * Inbox asks at the moment there is an answer instead of a tab somebody has to go and read.
+ *
+ * THE OLD NAME IS NOT KEPT AS AN ALIAS. Nothing persists a destination — `navView` and
+ * `navSection` are in-memory state reset on every load — so there is no stored value to migrate
+ * and an alias would be a second spelling with nothing to spell.
+ */
+export type NavDestination = "threads" | "agents" | "inbox" | "activity";
 
 /**
  * Which part of the workspace panel is showing, or null for closed.

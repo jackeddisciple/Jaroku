@@ -1558,6 +1558,11 @@ export type ServerMessage =
   | SessionMessage
   | MemberMessage
   | ThreadMessage
+  // Its own channel, parallel to `threads` and for the same reason: what is waiting on you is not a
+  // session. The one thing that is genuinely different about it is that a SNAPSHOT here is per
+  // person — two of the three verbs are personal — which is why the server rebuilds it per recipient
+  // and why only a delta is ever broadcast as one payload.
+  | ({ channel: "inbox" } & InboxMessage)
   // `complete` and `window` are present only on the answer to `loadHistory` — a growing WINDOW
   // rather than a cursor, so the channel keeps its full-snapshot discipline and `applyHistory` keeps
   // merging by run id. A broadcast that carries neither leaves the flags alone.
@@ -1864,6 +1869,15 @@ export type ClientCommand =
    * question asked during a review rather than a fact the panel needs on every render.
    */
   | { cmd: "listScanFindings"; agentId: string }
+  // The Inbox's read and its five mutations (§6.4). The inline resolve paths are deliberately absent
+  // — they REUSE the commands that already exist (`setSecret`, `deploy`, `rediscoverMcpServer`,
+  // `setMcpToolImpact`) rather than being reimplemented behind new names.
+  | { cmd: "listInbox" }
+  | { cmd: "resolveInboxItem"; itemId: string }
+  | { cmd: "dismissInboxItem"; itemId: string }
+  | { cmd: "snoozeInboxItem"; itemId: string; duration: SnoozeDuration }
+  | { cmd: "bulkInboxAction"; action: InboxAction; itemIds: string[]; duration?: SnoozeDuration }
+  | { cmd: "undoInboxAction"; token: string }
   /**
    * §B.7's Agent diff. On demand rather than on the snapshot: it costs a tree read from GitHub and
    * a parse of both sides, and a toggle is a click where a snapshot is a render.
@@ -1884,6 +1898,149 @@ export type ClientCommand =
       version?: number;
       reply?: string;
     };
+
+// --- the Inbox: what is waiting on you --------------------------------------------------------
+//
+// RESTATED STRUCTURALLY RATHER THAN IMPORTED, like every other wire shape in this file and for the
+// reason the header gives: the server and the client are two programs, and a field added to a
+// payload should be a deliberate decision to render rather than something that arrives because a
+// type was shared.
+//
+// EVERY DECISION THAT IS A FACT IS ALREADY MADE BY THE TIME THIS ARRIVES. Which column a card is in,
+// what its subject line says, what may be done about it, how many occurrences it collapsed — all of
+// it is on the row. What the client decides is what a card LOOKS like: size carries severity, the
+// age bar fills from `first_seen_at`, and colour barely participates. That split is the same one
+// `ThreadView` makes, and for the same reason — forty cards each deriving their own answer is a
+// board disagreeing with itself.
+
+/** §4.2's three columns. Assigned by the system; a card never moves between them. */
+export type InboxSeverity = "blocking" | "attention" | "proposal";
+
+/** The registry's sixteen. A union, so a `switch` over them is exhaustive. */
+export type InboxItemType =
+  | "credential_missing"
+  | "mcp_auth_required"
+  | "deploy_failed"
+  | "budget_ceiling_hit"
+  | "unreviewed_failures"
+  | "version_drift"
+  | "eval_finished"
+  | "mcp_unreachable"
+  | "cost_anomaly"
+  | "memory_proposal"
+  | "ungated_high_impact"
+  | "invite_pending"
+  | "member_joined"
+  | "agent_deleted_by_other"
+  | "setup_api_key"
+  | "setup_first_agent";
+
+/** Which drawing a card wears. `components/inboxIcons.tsx` is the one lookup. */
+export type InboxIconName =
+  | "key" | "plug" | "rocket" | "wallet" | "alert" | "drift" | "flask" | "unplugged"
+  | "spike" | "memory" | "shield" | "invite" | "person" | "trash" | "spark";
+
+/**
+ * What a card offers, in order, primary first.
+ *
+ * §7: the primary action is an ICON and the rest live in the overflow, so the ORDER is the
+ * rendering. `dismiss` appears only where the catalog gives one — four types deliberately have none,
+ * and the `×` on a card is drawn from this list rather than from a flag.
+ */
+export type InboxActionName =
+  | "set_secret" | "open_agent" | "set_mcp_credential" | "rediscover" | "remove_server"
+  | "view_logs" | "retry_deploy" | "cancel_deploy" | "raise_ceiling" | "view_results"
+  | "open_latest_failure" | "view_all_failures" | "dismiss_all" | "redeploy" | "view_diff"
+  | "open_comparison" | "export_results" | "view_usage" | "set_budget"
+  | "view_evidence" | "save_memory" | "reject_memory" | "enable_gate" | "remove_grant"
+  | "open_invites" | "open_members" | "restore_agent"
+  | "open_providers" | "new_agent"
+  | "dismiss";
+
+/** §3's three durations. Names rather than milliseconds — the server decides what tomorrow means. */
+export type SnoozeDuration = "hour" | "tomorrow" | "week";
+
+/** The three verbs. */
+export type InboxAction = "resolve" | "snooze" | "dismiss";
+
+export interface InboxItemView {
+  id: string;
+  type: InboxItemType;
+  severity: InboxSeverity;
+  icon: InboxIconName;
+  subject_type: "agent" | "mcp_server" | "deployment" | "eval" | "user" | "workspace" | null;
+  subject_id: string | null;
+  /** §4.4's bold first line, decided on the server. The client renders it and decides nothing. */
+  subject: string;
+  /**
+   * Names, ids, counts and short summaries. Never a value.
+   *
+   * `unknown` PER FIELD, so reading one is a decision somebody makes with a cast in front of them
+   * rather than something the compiler waved through. The fields each type carries are documented in
+   * the server's registry; a card reads the two or three its own kind needs.
+   */
+  payload: Record<string, unknown>;
+  /** Law 3's badge. `1` renders nothing at all; `40` renders `×40`. */
+  count: number;
+  /** The age bar fills from here. */
+  first_seen_at: string;
+  last_seen_at: string;
+  actions: InboxActionName[];
+  /** Set while this person has it snoozed. Null on the board. */
+  snoozed_until: string | null;
+}
+
+/**
+ * §5.1's filter counts, computed once on the server and rendered twice.
+ *
+ * `badge` IS BLOCKING PLUS PROPOSALS AND NOT `all`, which the specification asks nobody to "fix": a
+ * badge that counts everything never reaches zero, and a badge that is never zero is one people
+ * train themselves to ignore. It is on the payload rather than added up here for the reason the
+ * Threads badge is — one quantity derived twice is two quantities that can disagree.
+ */
+export interface InboxCounts {
+  all: number;
+  blocking: number;
+  attention: number;
+  proposals: number;
+  team: number;
+  snoozed: number;
+  badge: number;
+}
+
+/** §5.1's per-agent breakdown: the top five agents by open item count. */
+export interface InboxAgentCount {
+  agent_id: string;
+  name: string;
+  count: number;
+}
+
+export interface InboxSnapshot {
+  items: InboxItemView[];
+  /** §5.4's tray, soonest return first. */
+  snoozed: InboxItemView[];
+  counts: InboxCounts;
+  agents: InboxAgentCount[];
+  /** §5.3's one line of real statistic. Resolutions, never dismissals. */
+  cleared_this_week: number;
+}
+
+export type InboxMessage =
+  | ({ type: "inbox" } & InboxSnapshot)
+  /**
+   * §5.6's live resolution: one card, changed.
+   *
+   * ONLY FACTS THAT ARE THE SAME FOR EVERYBODY travel as a delta, because a snapshot on this channel
+   * is per person. There is deliberately no delta for a dismissal — it would arrive at a teammate
+   * who never made that judgement.
+   */
+  | { type: "inboxDelta"; kind: "resolved"; itemId: string }
+  | { type: "inboxDelta"; kind: "count"; itemId: string; count: number; last_seen_at: string }
+  | { type: "inboxDelta"; kind: "added"; item: InboxItemView }
+  /** §3's toast, to the socket that acted and to nobody else. */
+  | { type: "inboxUndo"; token: string | null; action: string; changed: number }
+  | { type: "error"; message: string; itemId?: string }
+  | { type: "notice"; message: string; itemId?: string };
 
 // Unified composer "explain" subject — what the question is about, built from already-in-memory
 // context (a trace step, a graph node, or the agent generally). No new data is fetched.

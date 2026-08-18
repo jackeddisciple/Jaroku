@@ -30,6 +30,7 @@ import { useDiagnosticsStore } from "./diagnosticsStore.ts";
 import { useEnforcementStore } from "./enforcementStore.ts";
 import { useEvalStore } from "./evalStore.ts";
 import { useGithubStore } from "./githubStore.ts";
+import { useInboxStore } from "./inboxStore.ts";
 import { useGraphStore } from "./graphStore.ts";
 import { useMcpStore } from "./mcpStore.ts";
 import { useMemberStore } from "./memberStore.ts";
@@ -74,6 +75,12 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
   // the same class of leak as a trace row, and rather harder to explain afterwards.
   billingStore: useBillingStore as unknown as Resettable,
   buildStore: useBuildStore as unknown as Resettable,
+  // What is waiting on somebody in THIS workspace, which is a map of everything currently wrong in
+  // it: the NAMES of the credentials its agents are missing, which of its MCP servers cannot
+  // authenticate, which deploys failed and with what error. Held across a switch it would show one
+  // tenant's live weaknesses under another tenant's name — and the sidebar badge, which is drawn
+  // from the same counts, would be reporting the previous workspace's blocked work.
+  inboxStore: useInboxStore as unknown as Resettable,
   chatStore: useChatStore as unknown as Resettable,
   // Which accounts a workspace has connected, and whose mailbox each points at. An account label
   // held across a switch would show one tenant's email address under another tenant's name, and
