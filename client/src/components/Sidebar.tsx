@@ -239,81 +239,81 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
       {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-ink" />}
       <div className="flex items-start gap-1 px-4 py-2.5">
         <button onClick={() => selectAgent(agent.agent_id)} className="min-w-0 flex-1 text-left">
-      <div className="flex items-center gap-2">
-        {agent.runnable ? (
-          <AgentDot status={status} />
-        ) : (
-          <StatusDot state="error" icon={XIcon} title="missing agent.py" />
-        )}
-        {renaming ? (
-          <input
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commit();
-              if (e.key === "Escape") setRenaming(false);
-            }}
-            // The click that lands in the field must not also select the agent underneath it.
-            onClick={(e) => e.stopPropagation()}
-            className="min-w-0 flex-1 rounded-control bg-void px-1.5 py-0.5 text-[13px] text-ink outline-none"
-          />
-        ) : (
-          <Truncate className="text-ink" title={agent.name}>{agent.name}</Truncate>
-        )}
-        {archived && <Chip size="sm" tone="faint" variant="bare">archived</Chip>}
-        {github?.badge && (
-          <span
-            className={`ml-auto shrink-0 font-mono text-[10px] tabular-nums ${
-              github.badge === "↕" || github.badge === "⚠" ? "text-err" : "text-faint"
-            }`}
-            title={github.verdict}
-          >
-            {github.badge}
-          </span>
-        )}
-        {last && <span className={`text-faint text-[11px] shrink-0 ${github?.badge ? "" : "ml-auto"}`}>{relTime(last.started_at)}</span>}
-      </div>
-      {/* A provider and a connector are both names of things this agent is wired to — the same
-          kind of label the plan card puts on a reviewed tool. Bare rather than filled: a row of
-          four filled chips under every agent would out-weigh the agent's own name above it. */}
-      <div className="mt-0.5 pl-2 flex flex-wrap items-center gap-0.5">
-        <Chip
-          size="sm"
-          tone="faint"
-          mono
-          variant="bare"
-          icon={<ProviderMark provider={agent.default_provider} size={10} />}
-        >
-          {agent.default_provider}
-        </Chip>
-        {agent.connectors.map((c) => (
-          <Chip key={c} size="sm" tone="faint" mono variant="bare" icon={<ConnectorDot id={c} />}>
-            {c}
-          </Chip>
-        ))}
-        {/* Where its code lives, for the same reason the URL below is here: a list that says
-            "synced" without saying where makes you open the tab to find out. */}
-        {github && (
-          <Chip size="sm" tone="faint" mono variant="bare" icon={<GithubIcon size={10} />} title={github.verdict}>
-            {github.link.repo_full_name}
-          </Chip>
-        )}
-        {/* Where it is serving, not just that it is. A URL is the whole point of a deploy, and
-            an agent list that says "deployed" without saying where makes you go and look. */}
-        {agent.deployment?.status === "live" && agent.deployment.url && (
-          <Chip
-            size="sm"
-            tone="faint"
-            mono
-            variant="bare"
-            icon={<span style={{ color: STATUS.ok }}><GlobeIcon size={10} /></span>}
-          >
-            {agent.deployment.url.replace(/^https?:\/\//, "")}
-          </Chip>
-        )}
-      </div>
+          <div className="flex items-center gap-2">
+            {agent.runnable ? (
+              <AgentDot status={status} />
+            ) : (
+              <StatusDot state="error" icon={XIcon} title="missing agent.py" />
+            )}
+            {renaming ? (
+              <input
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={commit}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commit();
+                  if (e.key === "Escape") setRenaming(false);
+                }}
+                // The click that lands in the field must not also select the agent underneath it.
+                onClick={(e) => e.stopPropagation()}
+                className="min-w-0 flex-1 rounded-control bg-void px-1.5 py-0.5 text-[13px] text-ink outline-none"
+              />
+            ) : (
+              <Truncate className="text-ink" title={agent.name}>{agent.name}</Truncate>
+            )}
+            {archived && <Chip size="sm" tone="faint" variant="bare">archived</Chip>}
+            {github?.badge && (
+              <span
+                className={`ml-auto shrink-0 font-mono text-[10px] tabular-nums ${
+                  github.badge === "↕" || github.badge === "⚠" ? "text-err" : "text-faint"
+                }`}
+                title={github.verdict}
+              >
+                {github.badge}
+              </span>
+            )}
+            {last && <span className={`text-faint text-[11px] shrink-0 ${github?.badge ? "" : "ml-auto"}`}>{relTime(last.started_at)}</span>}
+          </div>
+          {/* A provider and a connector are both names of things this agent is wired to — the same
+              kind of label the plan card puts on a reviewed tool. Bare rather than filled: a row of
+              four filled chips under every agent would out-weigh the agent's own name above it. */}
+          <div className="mt-0.5 pl-2 flex flex-wrap items-center gap-0.5">
+            <Chip
+              size="sm"
+              tone="faint"
+              mono
+              variant="bare"
+              icon={<ProviderMark provider={agent.default_provider} size={10} />}
+            >
+              {agent.default_provider}
+            </Chip>
+            {agent.connectors.map((c) => (
+              <Chip key={c} size="sm" tone="faint" mono variant="bare" icon={<ConnectorDot id={c} />}>
+                {c}
+              </Chip>
+            ))}
+            {/* Where its code lives, for the same reason the URL below is here: a list that says
+                "synced" without saying where makes you open the tab to find out. */}
+            {github && (
+              <Chip size="sm" tone="faint" mono variant="bare" icon={<GithubIcon size={10} />} title={github.verdict}>
+                {github.link.repo_full_name}
+              </Chip>
+            )}
+            {/* Where it is serving, not just that it is. A URL is the whole point of a deploy, and
+                an agent list that says "deployed" without saying where makes you go and look. */}
+            {agent.deployment?.status === "live" && agent.deployment.url && (
+              <Chip
+                size="sm"
+                tone="faint"
+                mono
+                variant="bare"
+                icon={<span style={{ color: STATUS.ok }}><GlobeIcon size={10} /></span>}
+              >
+                {agent.deployment.url.replace(/^https?:\/\//, "")}
+              </Chip>
+            )}
+          </div>
         </button>
         <AgentActions
           agent={agent}
