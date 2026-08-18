@@ -8,6 +8,174 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.3.2 : The Inbox Tab — What Is Waiting On You, and What Dies On Its Own
+
+The third of the four sidebar destinations, and the one that replaces Memory. v0.3.0 recorded Memory
+as a shell and nothing was ever built behind it; what ships instead is the surface the idea was
+actually for. A memory Jaroku proposes from a `failure → fix → pass` triple is an **item on this
+board**, answered where it is raised, rather than a tab somebody has to remember to go and read.
+
+The four tabs now divide cleanly: Threads is the conversation, Agents is the artifact, Activity is
+what happened, and the Inbox is what is waiting on you. Activity is passive, chronological and
+complete; this is active, prioritised, actionable, and it **shrinks as you work**.
+
+Three laws hold it up, and each is enforced by something other than a comment. **Every item has
+exactly one owner-action** — "run failed" is Activity, "run failed and nobody has opened the trace"
+is Inbox. **Every item dies on its own**: a resolve condition the server evaluates independently of
+any user action, so setting a missing credential from the Agents tab, from a thread or from a script
+clears the card with nobody dismissing anything. **Items collapse**: forty failed runs is one item
+with a count of forty, deduplicated at write time on a key in the database.
+
+### Added
+
+- **Sixteen item types as one typed registry.** Each entry declares its severity, its subject, how it
+  is produced, its icon, its action set, the sentence its card reads — and, load-bearing, the
+  predicate that says whether it is still true. The trigger that creates an item and the condition
+  that removes it sit three lines apart on purpose: a file apart they drift, and the type quietly
+  becomes one that can be raised and never cleared. Adding a seventeenth is one entry and no line in
+  the sweep, the store, the channel or the board.
+- **Two generators, because two kinds of item exist.** Event-driven ones hang off moments the control
+  plane already emits — a run failing, a deploy failing, an eval finishing, an MCP server changing
+  status, an applied edit. Derived ones have no event to hang off, because each is a *comparison*
+  between two states that are both simply true: a name in `required_env` with no configured secret, a
+  deployed version behind a current one, a server that last answered a day ago, spend three times its
+  own average, a high-impact grant with the confirmation gate off. **Nothing was added to the frozen
+  event schema.**
+- **A reconciler that is what makes Law 2 real.** Idempotent by its own `WHERE`, workspace-scoped one
+  at a time through the repository layer, safe against concurrent replicas on an advisory lock that
+  *tries and gives up* rather than queueing, and constant in the number of agents — one aggregate pass
+  plus two statements, asserted by counting them for two items and for forty. Every predicate lives in
+  the registry and the sweep is a generic loop over it.
+- **Three verbs, and they stay three.** Resolve is shared, because the problem is. Snooze is personal
+  and *returns*, evaluated at read time so there is no job that can fail to run and leave work away
+  forever. Dismiss is personal and does not return. Snoozed items live in a visible tray, because a
+  snooze somebody cannot see is a slower dismissal — which is exactly how an Inbox starts hiding real
+  problems.
+- **Undo instead of confirmation dialogs.** Every destructive action offers a five-second toast and a
+  `⌘Z`, and undo restores the **prior value** rather than clearing the column: an item dismissed last
+  week and dismissed again by a bulk action has two dismissals and one column, and clearing it would
+  put the card back on a board somebody had deliberately cleared. Tokens are single-use and scoped on
+  redemption, because unguessable is not a tenancy boundary. Bulk is the same path as single, so one
+  press takes back all forty.
+- **A severity board that does not behave like Kanban.** Columns are buckets, not lanes: severity is
+  assigned by the system and a card never moves between them, cards do not progress left to right, and
+  there are no WIP limits, no manual reordering and no swimlanes. Card **size** carries severity —
+  blocking large with its inline form visible, attention medium, proposals compact — so priority is
+  read from the shape before a word of it. Rose appears exactly once, on the left edge of a blocking
+  card. **Amber is not available**, because amber means running.
+- **In-place resolution that reuses the commands that already exist.** Setting a credential from a
+  card posts to the same guarded route the Secrets tab does; a redeploy is the same `deploy` command
+  through the same plan gate, with the provider and model the last deploy used carried on the payload
+  so nothing has to be invented. A card that cannot name them falls back to the Deploy panel rather
+  than guessing — a second way to put something on the internet is a second thing to get wrong.
+- **Keyboard triage.** `J`/`K` across column boundaries in visual order, `E` resolve, `S` then 1/2/3
+  snooze, `X` dismiss, `Enter` expand, `⌘Z` undo, 1–6 for the rail. It extends the binding layer from
+  v0.1.1 rather than adding a second one, and the cursor steps off a card *before* the action that
+  removes it — afterwards there is no neighbour left to find.
+- **Drag to snooze, with no dependency.** One destination and a pointer-event handler: a drag must not
+  swallow a click, pointer capture keeps the events coming when the pointer leaves the card, and
+  letting go over the board does nothing at all. Dragging toward another column dims the columns, so
+  "this is not a lane" needs no explanation.
+- **Fifteen icons from the HugeIcons free set, committed as inline SVG** and redrawn at this app's one
+  stroke weight. No runtime icon font, no hotlinking. `lib/actionIcons.tsx` is extended rather than
+  duplicated — resolve, retry, view logs, deploy and rediscover already had marks and keep them.
+- **The sidebar badge counts blocking plus proposals only.** Attention is deliberately excluded and
+  there is now a test that fails if somebody "fixes" it: a badge that counts everything never reaches
+  zero, and a badge that is never zero is one people train themselves to ignore.
+- **A pointer strip on Agent detail** — "2 items need you", the count and nothing else, clicking
+  through to the board filtered to that agent. A list there would be a second place an item can be
+  dealt with.
+- **The zero state, and the per-column empties.** "Nothing needs you" with one line of real statistic
+  beneath it, counted from resolutions and never from dismissals — somebody who cleared their board by
+  hiding things is not congratulated for it. Each empty column says its own thing, because three empty
+  columns mean three different things and `Blocking 0` should feel like an achievement.
+- **Two seeded items for a new workspace**, `setup_api_key` and `setup_first_agent`, which resolve the
+  moment the thing is actually done and never return. Real items with real resolve conditions, seeded
+  on the board read as well as on the sweep so §2.5 is true on frame one rather than a minute late.
+
+### Changed
+
+- **Memory is no longer a sidebar destination.** `NavDestination` names `inbox` where it named
+  `memory`; nothing persisted a destination, so there is no stored value to migrate and no alias with
+  anything to spell.
+- **`inbox_items` is swept by retention**, on `resolved_at` and never on `first_seen_at` — an item
+  that has been blocking somebody for six months is an unsolved problem, not old data. It is also
+  exported, because "when did this start going wrong" is the workspace's own operational record; the
+  per-user dismissals are not, because in a Team workspace they are a record of what each individual
+  chose not to look at.
+- **`Db` grew `withAdvisoryLock`**, distinct from the migration runner's and on a different key.
+  Advisory locks are one flat namespace: a sweep sharing the migration key would block behind a deploy
+  applying migrations, and — worse — a deploy would block behind a sweep.
+- **The relay's `loadRun` reports that a trace was opened.** That one call site is the whole of Law 2
+  for `unreviewed_failures`: the sidebar's run list, the Agents tab's health sparkline, the command
+  palette and a deep link all go through it, so the card leaves because the trace was read rather than
+  because the card was pressed.
+
+### Fixed
+
+- **A payload could have carried a credential, and now cannot.** Every string on its way into one goes
+  through the same redactor that protects the log sinks, *before* it is cut rather than after —
+  cutting first leaves a key truncated mid-value, unmatched by the redactor and therefore half
+  visible, which §6.5 rules out in as many words. Lists are capped, keys are capped, control
+  characters and ANSI escapes become spaces, and only five value shapes are allowed at all: a nested
+  object is where a future generator would put an entire response body without noticing.
+- **A derived condition observed every minute counted as 1,440 occurrences.** `count` means
+  occurrences — forty runs failed, so the card reads `×40` — and a condition is not an occurrence. The
+  store reads the registry's `origin` to know the difference.
+- **Opening a trace reported a tenth failure.** Stamping the review through `record` moved
+  `last_seen_at` and incremented the count, so reading nine failures made the badge say ×10.
+  `setPayload` exists for exactly the difference between "this happened again" and "here is something
+  more we know about it".
+- **The boot sweep died on every restart.** It called into the relay during module initialisation and
+  hit its temporal dead zone, so the first pass after every deploy was lost and logged an error for
+  it — leaving a board up to a minute stale at exactly the moment a boot sweep exists to prevent.
+- **A resolution re-sent the whole board.** §5.6 asks for the affected card only, so a resolution is a
+  delta now; a snapshot is reserved for a derived item, which is the case where what belongs on a
+  board genuinely depends on whose board it is.
+
+### Verification
+
+- `npm run typecheck` clean on server and client at every commit; `npm run build` clean.
+- `npm run test:tenancy` and `npm run test:db-boundary` green, both extended: the inbox store is in
+  `SCOPED_MODULES` and its ten methods are in `SCOPED_API`, and the suite now asserts §6.3 in the
+  direction that matters — a pass for workspace A cannot resolve, rewrite, snooze or undo anything in
+  B, and the two workspaces share a dedupe key while doing it.
+- Seven new suites, all in CI: the registry (every type's resolve condition, tested by resolving it
+  externally, plus the assertion that no predicate is a constant), the store (forty `record` calls
+  producing one row with `count = 40`), the generators, the derived rules and their round trip against
+  their own predicates, the reconciler's four §6.2 properties, the three verbs and the badge rule,
+  undo and the seeds, and the payload's known-secret test.
+- All existing server and client suites green — threads, agents, channels, relay, capabilities,
+  acceptance, retention, export, boolean literals, migrations and the store reset.
+- **A real socket, against the running server.** A brand-new workspace's board arrived on frame one
+  carrying both seeded items with the right severities, icons and actions and a badge of 2; a drift
+  card inserted underneath appeared without moving the badge, which is Attention doing what it is
+  supposed to; dismiss offered a token and rebuilt the board 3 → 2; undo put it back; a second undo
+  was refused with "that can no longer be undone"; a snooze moved a card to the tray with its return
+  time; a duration nobody offers and an item id from nowhere were both refused in the words a person
+  would read. Every field of every payload was inspected for anything value-shaped — there is nothing
+  but names.
+
+### Still owed
+
+- **The by-hand visual pass.** §9 asks that every card size, the zero state, the per-column empties,
+  the snooze tray and the narrow-width fallback are "all opened by hand and looked at", and that the
+  keyboard is walked end to end without a mouse. Every one of those is built, every rule behind them
+  is under a suite, and the channel that feeds them has been walked over a real socket — but nobody
+  has opened the board in a browser. Recorded here rather than claimed above, for the reason the
+  Agents tab recorded the same gap in v0.3.1: a verification section listing a check nobody ran is
+  worse than one that is short.
+- **The catalog names sixteen item types; §2 and §9 say eighteen.** Four blocking, five attention, two
+  proposals, three team and two onboarding is sixteen, and nothing was dropped — the arithmetic in the
+  specification does not match its own list. The sixteen that are specified are implemented, and
+  `INBOX_TYPES` is what anything asserting a count should read.
+- **The confirmation-gate detector is a pattern, not a proof.** v0.2.1 recorded that generated agent
+  code can set the environment variable that disables the bridge's high-impact gate, and said a
+  validation rule was needed. This is not that rule. It finds the obvious spellings and a miss
+  produces no card rather than a reassuring one — nothing in this feature ever claims a gate is *on*.
+
+---
+
 ## v0.3.1 : The Agents Tab — Threads Is the Conversation, Agents Is the Artifact
 
 v0.3.0 gave every built capability a door and recorded three that stayed shells: Agents, Memory and
