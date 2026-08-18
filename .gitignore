@@ -32,6 +32,13 @@ runtime/agents/*
 
 # Private product documentation — kept local, not published
 jaroku-product-documentation*.md
+# The implementation prompts, for the same reason. A specification is what the work was written
+# against; the work itself, and the changelog entry that summarises it, are what ship.
+jaroku-*-prompt.pdf
+
+# Cygwin drops one of these beside the repo when a bash process faults on Windows. It is a core
+# dump with a stack trace in it, not source, and it reappears whenever the shell falls over.
+*.stackdump
 
 # Debug-depth checkpoints (durable LangGraph checkpoints per run; control-plane, not tracked)
 runtime/.checkpoints/
