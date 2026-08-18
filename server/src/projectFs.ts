@@ -116,6 +116,39 @@ export function hostOwnedPaths(): string[] {
 }
 
 /**
+ * WHY a file cannot be edited, in one sentence, or null when it can be.
+ *
+ * §6 asks the file browser to show read-only files "with the stored reason shown", and until now
+ * there was no reason to show: `ProjectFile.readOnly` is a boolean, and the arguments for each half
+ * of the block list lived only in the comments above it. A lock with no explanation is the kind of
+ * refusal people work around rather than understand — and these three refusals are each protecting
+ * something different, which is precisely what a single "read-only" badge cannot say.
+ *
+ * DERIVED FROM THE SAME SETS `readOnlyPaths` BUILDS, not from a second table. A reason that could
+ * disagree with the block list would be worse than none: the browser would explain why a file is
+ * locked while the edit loop happily rewrote it, or the reverse. The order below matches the order
+ * `readOnlyPaths` unions them in, so a path in two sets is described by the same half that would
+ * have put it in the set.
+ *
+ * POSIX SEPARATORS, like everything compared against these sets. `tools/mcp_bridge.py` is written
+ * out rather than assembled, for the reason HOST_OWNED gives at length: `join` uses the platform
+ * separator, and a Windows backslash matched the local paths and matched nothing in the object
+ * store — silently emptying the block list for the one file that carries an agent's entire MCP
+ * grant.
+ */
+export function readOnlyReason(path: string, connectorFiles: string[]): string | null {
+  if (DEPLOY_ARTIFACTS.has(path)) {
+    return "the deploy layer writes this — serve.py answers a public URL and the Dockerfile decides what runs around it";
+  }
+  if (path === "mcp_tools.json" || path === "tools/mcp_bridge.py") {
+    return "this is the agent's MCP grant and the reviewed code that honours it — editing it would widen its reach without anyone approving it";
+  }
+  if (HOST_OWNED.has(path)) return "host-owned project metadata, written by Jaroku rather than by a model";
+  if (connectorFiles.includes(path)) return "a reviewed connector template, copied in verbatim and audited as written";
+  return null;
+}
+
+/**
  * All text files of an agent project, sorted, with read-only flags. `connectorFiles` are
  * project-relative connector template paths (e.g. "tools/gmail.py").
  *
