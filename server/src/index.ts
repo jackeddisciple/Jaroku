@@ -76,7 +76,7 @@ import { Generator, type UsageSummary } from "./generator.ts";
 import { Planner } from "./planner.ts";
 import { Editor } from "./editor.ts";
 import { scanAgentDirectory } from "./agents.ts";
-import { AgentRepository, SAFE_SLUG } from "./db/repositories/agents.ts";
+import { AgentRepository, nextForkSlug } from "./db/repositories/agents.ts";
 // The Agents grid's derivations, in their own module because every one of them is a rule that looks
 // obviously right in a screenshot and is wrong in the case nobody had that day — see agentHealth.ts.
 import {
@@ -3679,22 +3679,6 @@ async function agentVersionFiles(
 }
 
 /**
- * The next free `<slug>_copy`, `<slug>_copy2`, … or null when there is no room for one.
- *
- * BOUNDED, AND THE BOUND IS THE SLUG PATTERN rather than a guess. `SAFE_SLUG` caps a slug at 64
- * characters, so a name long enough that no suffix fits has to be refused rather than silently
- * truncated into a collision with something else. Twenty attempts is well past the point where
- * somebody wants a differently-named agent instead of another copy.
- */
-function nextForkSlug(slug: string, taken: ReadonlySet<string>): string | null {
-  for (let n = 1; n <= 20; n++) {
-    const candidate = n === 1 ? `${slug}_copy` : `${slug}_copy${n}`;
-    if (SAFE_SLUG.test(candidate) && !taken.has(candidate)) return candidate;
-  }
-  return null;
-}
-
-/**
  * Duplicate an agent (§7.5): its connectors and its current manifest, and none of its MCP grants.
  *
  * NO FILE IS COPIED. Objects are content-addressed and immutable, so the fork's first version names
@@ -3723,7 +3707,11 @@ async function forkAgent(ctx: TenantContext, slug: string): Promise<void> {
     return;
   }
 
-  const forkSlug = nextForkSlug(source.slug, new Set(all.map((a) => a.slug)));
+  // `takenSlugs`, NOT THE LIST ABOVE. `list` excludes soft-deleted rows by design, and a soft-deleted
+  // row keeps its slug — so checking a candidate against the list said `foo_copy` was free while the
+  // UNIQUE constraint disagreed, and the fork failed on INSERT with "that did not work" for a name
+  // that was never available. What has to be avoided is what the constraint actually holds.
+  const forkSlug = nextForkSlug(source.slug, await agentRepo.takenSlugs(ctx));
   if (!forkSlug) {
     refuseAgent(ctx, `${slug} has too many copies — rename one before making another`, slug);
     return;

@@ -37,6 +37,33 @@ export function nextVersionNumber(current: number, highest: number): number {
   return Math.max(current, highest) + 1;
 }
 
+/**
+ * The next free `<slug>_copy`, `<slug>_copy2`, … for a fork, or null when there is no room for one.
+ *
+ * BESIDE `SAFE_SLUG` BECAUSE IT IS A SLUG RULE, and out of `index.ts` because a rule that only the
+ * app entry point can reach is a rule no suite can drive: importing that module stands a server up.
+ * The interesting half is entirely in the two ways it can refuse, and neither is reachable by hand.
+ *
+ * BOUNDED BY THE PATTERN RATHER THAN BY A GUESS. `SAFE_SLUG` caps a slug at 64 characters, so an
+ * agent whose name leaves no room for a suffix has to be refused rather than silently truncated into
+ * a collision with something else — and `agents_ws_slug` is unique, so a collision is an INSERT that
+ * throws in front of somebody who asked for a copy.
+ *
+ * `taken` MUST INCLUDE SOFT-DELETED SLUGS. What it is checked against is `UNIQUE (workspace_id,
+ * slug)`, and a swept row keeps its slug — see `AgentRepository.takenSlugs`, which exists because
+ * passing `list()` here said a name was free when the constraint disagreed.
+ *
+ * Twenty attempts is well past the point where somebody wants a differently-named agent rather than
+ * another copy.
+ */
+export function nextForkSlug(slug: string, taken: ReadonlySet<string>): string | null {
+  for (let n = 1; n <= 20; n++) {
+    const candidate = n === 1 ? `${slug}_copy` : `${slug}_copy${n}`;
+    if (SAFE_SLUG.test(candidate) && !taken.has(candidate)) return candidate;
+  }
+  return null;
+}
+
 export interface Agent {
   id: string;
   slug: string;
@@ -236,6 +263,27 @@ export class AgentRepository {
       [displayName, 1, ctx.workspaceId, id],
     );
     return res.changes > 0;
+  }
+
+  /**
+   * Every slug this workspace has spent, INCLUDING the soft-deleted ones.
+   *
+   * WHAT `UNIQUE (workspace_id, slug)` ACTUALLY CONSTRAINS, which is not what `list` returns. A
+   * soft-deleted row keeps its slug — the sweep marks it rather than removing it, and
+   * `upsertFromDisk` clears the mark when the directory comes back — so a caller minting a new slug
+   * has to avoid those too. `list` excludes them by design, which made it exactly the wrong thing to
+   * check a candidate against: `forkAgent` asked `list` whether `foo_copy` was free, was told yes,
+   * and hit the constraint on INSERT. The user saw "that did not work — the grid is unchanged", for
+   * a name that was never available.
+   *
+   * A SET OF SLUGS, not rows: every caller has a candidate in hand and wants a membership test.
+   */
+  async takenSlugs(ctx: TenantContext): Promise<Set<string>> {
+    const rows = await this.q(ctx).all<{ slug: unknown }>(
+      `SELECT slug FROM agents WHERE workspace_id = ?`,
+      [ctx.workspaceId],
+    );
+    return new Set(rows.map((r) => String(r.slug)));
   }
 
   /**
