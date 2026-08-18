@@ -26,7 +26,11 @@
     "test:thread-filter": "tsx src/lib/threadFilter.test.ts",
     "test:thread-resume": "tsx src/lib/threadResume.test.ts",
     "test:thread-archive": "tsx src/lib/threadArchive.test.ts",
-    "test:secrets-store": "tsx src/store/secretsStore.test.ts"
+    "test:secrets-store": "tsx src/store/secretsStore.test.ts",
+    "test:agent-art": "tsx src/lib/agentArt.test.ts",
+    "test:agent-tags": "tsx src/lib/agentTags.test.ts",
+    "test:agent-filter": "tsx src/lib/agentFilter.test.ts",
+    "test:agent-context": "tsx src/lib/agentContext.test.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
