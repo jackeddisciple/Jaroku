@@ -8,6 +8,157 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.3.1 : The Agents Tab — Threads Is the Conversation, Agents Is the Artifact
+
+v0.3.0 gave every built capability a door and recorded three that stayed shells: Agents, Memory and
+Activity. This is the first of the three, and it is the second of Jaroku's four sidebar destinations.
+
+It answers four questions and nothing else. What agents exist in this workspace. What can each one
+touch. What version is live, and is it drifting from what is deployed. Is it healthy. The live trace,
+the plan card, the diff card and the MCP registry itself are deliberately out of it — the first three
+live where they already live, one tab away, and the registry is workspace configuration rather than an
+agent-level fact, so an agent shows its grants and not the servers.
+
+### Added
+
+- **The grid, and the card that is a glance rather than a dashboard.** Search over display name and
+  slug, filters for status, connector, deployed, creator and archived, four sort orders, and two
+  densities that are real layouts rather than a scale transform — compact drops the current-work line
+  and shrinks the thumbnail, and the type ladder stays three sizes. Archived agents are hidden behind
+  their filter and appear greyed with a restore action and no `+ New thread`, because an agent that has
+  been put away should not be offering work. Two empty states, which mean different things: "no agents
+  here" is an entry point that opens a thread with the composer focused, and "nothing matches these
+  filters" names what is on and offers to clear it.
+- **The tag row, as a pure function with its own suite.** At most three tags render, then a `+n` chip;
+  precedence when trimming is Attention > Runtime > Deploy > Health > Lifecycle, so an agent that is
+  both failing and new shows `Failing` — the problem outranks the novelty. One tag per family, resolved
+  before the row is assembled, so `Idle` and `Running` can never appear together. Runtime and Health
+  stay separate axes and never collapse: "Idle · Failing" is a real state and a card that hid it would
+  be lying about the agent. **A warning is never amber** — v0.2.2 redrew the wordmark because an amber
+  outline read as a warning sign in an app where amber already means running, and `test:agent-tags`
+  asserts the colour law rather than trusting the comment above it.
+- **Health from the validator AND the record, because either alone lies.** The validator alone would
+  call an agent healthy while every one of its last ten runs failed; a rolling error rate alone would
+  call a hand-dropped project healthy for never having been run. The validator's verdict costs nothing
+  to read and needed no column: it is the gate on publishing, so a version whose `source` is
+  `generation`, `edit` or `deploy` passed it by construction, and `import` — the backfill and the
+  hand-dropped directory — is exactly what `Unverified` means.
+- **A gradient per agent that is stable forever.** FNV-1a over `agents.id` into an explicitly sorted
+  list built at build time, so the same agent shows the same image on every replica, for every member,
+  for the life of the agent. Everything convenient was ruled out: a render-order index moves when
+  somebody archives the card above it, a random pick changes on reload, and a stored column would hold
+  a fact the id already implies. The sort is not a detail — the order *is* the mapping, directory
+  iteration order is not stable across platforms, and this project has been bitten once already by a
+  platform-dependent path.
+- **A clickable health sparkline.** The last ~20 outcomes are individually clickable buttons rather
+  than a drawn path, because a path cannot be tabbed to, cannot carry a tooltip per segment, and cannot
+  be reached by a screen reader. A failed bar opens its trace **on the failing step** — the first one,
+  because a failure cascades and what somebody wants is where it went wrong — and the step-to-trace
+  mapping that already existed is reused rather than re-derived by name.
+- **Copy agent context**, as one markdown block for pasting into an issue: slug, version, connectors,
+  granted MCP tools, credential status by name, health summary, last error. Names only, and that is a
+  property of the shape rather than a discipline — there is no field on `AgentCardView` a value could
+  travel in, and `test:agent-context` asserts it by the same pattern that keeps a known secret out of a
+  log sink.
+- **The keyboard, extending the binding layer rather than adding a second one.** `/` focuses search,
+  `J`/`K` move between cards, `Enter` opens one, `⌘Enter` starts a thread on it, and `⌘K` fuzzy-jumps
+  to any agent by name from the palette. Focus is visible, is scrolled to, and survives a filter change
+  by falling back to the first card rather than to nothing.
+- **The detail view: the agent as an artifact.** Overview with inline rename, version history with a
+  comparison between any two versions, and a file browser that reads out of the object store rather
+  than off disk — so a replica that has never run this agent answers byte-identically to the one that
+  generated it. Beside them five tabs: Capabilities, Health, Deploy, Evals, and Threads & runs, which
+  is the only link from the artifact back to the conversation. Read-only files now show **why**: three
+  different things are protected — the deploy artifacts that answer a public URL, the MCP grant and the
+  reviewed bridge that honours it, and the audited connector templates — and one lock icon cannot say
+  which.
+- **Fork, and restore-to-a-version.** A fork copies the connectors and the current manifest and resets
+  MCP grants to zero, because copying them would silently re-grant high-impact third-party tools to a
+  brand-new agent without anybody ticking a box. No file is copied: objects are content-addressed and
+  immutable, so the fork's first version names the same ones. A restore publishes a NEW version
+  pointing at an old manifest and never moves `current_version` backwards, which would rewrite the
+  history the request was made from and leave the pointer on objects a retention sweep is entitled to
+  consider superseded.
+
+### Fixed
+
+- **Migration 041 added the version a deploy built from, and nothing ever wrote it.** The column has
+  been NULL on every deployment row this product has created, so a card could say a deploy is live and
+  never that it is behind. Recorded at creation now, from the version the artifacts are about to be
+  built from — reading it at the end cannot tell a publish that happened mid-deploy from one that did
+  not, which is the case 041 exists for. Never backfilled, because a guess there is a confident lie
+  about somebody's production, and `driftOf` draws no badge for a null.
+- **`agents.created_by` has existed since migration 008 and nothing ever selected it.** The Team-only
+  creator filter and the card's creator avatar are the first things to ask for it.
+- **The agent lifecycle answered on the wrong channel.** `archiveAgent`, `restoreAgent` and
+  `renameAgent` were classified `log`, so a refusal about one person's click went to every socket in
+  the workspace as a status-bar line — while the surface that asked sat waiting for an answer that had
+  already gone somewhere else. All five agent commands answer on `agents` now, and a refusal goes to
+  the socket that earned it.
+- **The sidebar item went dark at the moment §2 forbids it.** "The sidebar item stays visually active
+  the entire time, in both the full-width and the 3-pane state" — and one nullable field cannot say
+  that, because collapsing the view and leaving the section are two facts that move apart on the way
+  down. Descending into a row keeps the section; picking an agent out of the sidebar's own list clears
+  it. The Threads tab gets the fix for free, having had the same gap.
+
+### Changed
+
+- **`scheduleThreadBroadcast` became `scheduleListRefresh` and refreshes both lists.** Every one of its
+  eighteen call sites is a moment both changed: a run starting turns a thread row ● and a card amber, a
+  run ending grows a sparkline and settles a status, a deploy settling moves a drift badge. Two
+  schedulers over one set of transitions would be two chances to add a call site to only one of them,
+  which is how a surface goes quietly stale — and the grid's whole promise is that it updates without a
+  refresh. `test:channels` was widened to match, and its window for the run-ending handler went from
+  6,000 characters to 8,000: the refresh sat 5,975 in, which is a coincidence rather than a rule.
+
+### Migrations
+
+- `048_agents_grid` — one index, `threads (workspace_id, agent_id, last_activity_at DESC)`, and **no
+  column**. Every fact the card needs is already in this schema, and a column you can derive is a
+  second copy that goes stale. What was genuinely missing is one access path: the card's current-work
+  line and the grid's default sort are the same question — which of this agent's threads was active
+  last — and neither of 043's two indexes answers it. Deliberately not on `runs` or `usage_events`:
+  `migrate:check` refuses an unqualified `CREATE INDEX` on either, because building one takes a write
+  lock for the whole build on the hottest write path in the system.
+
+### Not in this release
+
+- **Memory and Activity stay shells.** Two of v0.3.0's three placeholders are still working as
+  specified; each has its own document.
+- **A multi-agent side-by-side compare, a per-card version scrubber, and a hover-to-flip graph on the
+  thumbnail.** Recorded so nobody adds them later by accident: the eval engine already answers the
+  first, version history already answers the second in full and the targets would be too small to hit,
+  and the third would cost a graph introspection per card on every grid load and is unreachable on
+  touch. The graph stays in the detail view.
+- **A delete for an agent.** The specification lists one in the overflow menu; this product has none,
+  deliberately, and v0.3.0 argued why — an agent's versions, runs, traces and costs are the record
+  every past comparison points at. So the confirmation the specification asks for, naming the creator
+  as the collaborative-workspace safety net, sits on **Archive**, which is the destructive-looking act
+  that actually exists.
+- **HugeIcons.** The specification names it as the source; §8's own first rule is "one stroke weight
+  everywhere… do not undo that", and every icon in this product is Lucide geometry drawn through one
+  factory at `ICON.strokeWidth`. A second family would give a filter bar two optical weights side by
+  side. The ten new marks go through that factory, and everything else §8 asks for holds: inline SVG
+  components committed to the repo, no runtime icon font, no hotlinks, and an accessible label plus a
+  tooltip on every icon-only control.
+
+### Verification
+
+- Both packages typecheck clean; `npm run build` clean; `migrate:check` passes with no contract step.
+- New suites, all in CI: `test:agent-health` and `test:agent-grid` on the server, `test:agent-art`,
+  `test:agent-tags`, `test:agent-filter` and `test:agent-context` in the client.
+- `test:agent-grid` is the one that matters: it instruments the driver and asserts the statement count
+  for one agent equals the count for forty, which is the only version of "this is not an N+1" worth
+  having. Beside it, cross-workspace reads returning absent rather than forbidden.
+- The existing server and client suites green — threads, tenancy, the db boundary, channels, relay,
+  acceptance, capabilities, boolean literals, migrations, read-only and the store reset.
+- The server boots against a real database, applies 048, and serves the grid; the client builds and
+  serves the gradients. The by-hand pass over every card state — never-run, working, failing, deployed,
+  drifted, credential-missing, archived, both densities, and the three awkward cases — runs against a
+  local fixture that seeds one agent per state.
+
+---
+
 ## v0.3.0 : Every Built Capability Gets a Door
 
 v0.2.17 fixed thirty-one defects and, in the same passes, counted nineteen findings that were not

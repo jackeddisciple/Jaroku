@@ -38,6 +38,7 @@ of the repo and run yourself.
 - [The build pipeline: plan → generate → validate](#the-build-pipeline-plan--generate--validate)
 - [The fix loop: propose → apply → undo](#the-fix-loop-propose--apply--undo)
 - [Threads](#threads)
+- [Agents](#agents)
 - [Debug depth: pause, resume, branch](#debug-depth-pause-resume-branch)
 - [The eval engine](#the-eval-engine)
 - [Cost accounting](#cost-accounting)
@@ -848,6 +849,88 @@ cascades away and there is nowhere left to read the name from.
 Two tables, both additive: `threads` (migration 043) and `thread_items` (044). Nothing about the
 frozen event schema moves for any of it — a run does not gain a field, and no thread appears in a
 trace.
+
+---
+
+## Agents
+
+Threads is the conversation. **Agents is the artifact.** It is the second of the four sidebar
+destinations and it answers four questions and nothing else: what agents exist here, what can each
+one touch, what version is live and is it drifting from what is deployed, and is it healthy. The
+live trace, the plan card and the diff card are deliberately not in it — they live where they
+already live, one tab away.
+
+**A card is a glance, not a dashboard.** Every element on it is one line or one badge, and the
+densest of them is the tag row, which is the main reason forty agents are scannable at all.
+
+| Family | Members | Colour |
+|---|---|---|
+| Attention | `Creds missing` · `High-impact tools` · `Cost unknown` | Rose |
+| Runtime | `Idle` · `Running` · `Generating` · `Deploying` · `Paused` | Amber for the three that are activity, grey for the two that are not |
+| Deploy | `Live` · drift, as `v5 → v9` | Green, rose when drifted |
+| Health | `Degraded` · `Failing` · `Unverified` | Rose, grey for unverified |
+| Lifecycle | `New` · `Draft` · `Forked` · `Archived` | Blue, grey for the inert two |
+
+Two rules keep the row from becoming noise, and both live in `lib/agentTags.ts` as a pure function
+rather than in the card's JSX: **at most three tags render**, followed by a `+n` chip, with
+precedence Attention > Runtime > Deploy > Health > Lifecycle — an agent that is both failing and new
+shows `Failing`, because the problem outranks the novelty — and **one tag per family**, resolved
+before the row is assembled, so `Idle` and `Running` can never appear together.
+
+**A warning is never amber.** v0.2.2 redrew the wordmark because an amber outline read as a warning
+sign in an app where amber already means running, and that rule holds here without exception:
+`Creds missing` is rose, and so is every other problem. `test:agent-tags` asserts it rather than
+trusting a comment.
+
+**Runtime and Health are separate axes and never collapse.** "Idle · Failing" is a real and
+important state — nothing is running and the last four runs failed — and a card that showed one tag
+for both would be lying about the agent.
+
+**Health is the validator's verdict on the live version AND a rolling error rate**, because either
+alone lies. The validator alone would call an agent healthy while every one of its last ten runs
+failed; the error rate alone would call a hand-dropped project healthy for never having been run.
+The validator's verdict costs nothing to read: it is the gate on publishing, so a version whose
+`source` is `generation`, `edit` or `deploy` passed it by construction, and `import` — the backfill
+and the hand-dropped directory — is what `Unverified` means.
+
+**The gradient on a card is a pure function of `agents.id`.** FNV-1a over the uuid, modulo an
+explicitly sorted list built at build time (`scripts/gen-agent-art.mjs`), so the same agent shows the
+same gradient on every replica, for every member of the workspace, forever. Sorting is not a detail:
+directory iteration order is not stable across platforms, and the sort order *is* the mapping.
+
+**The whole grid is one bounded set of reads.** Per agent the card needs a thread count, a 7-day run
+count and spend, a last-run time, its latest session's title and last turn, health inputs, deploy
+state, version drift and a missing-credential count — and the number of statements that costs does
+not grow with the number of agents. Each read is grouped or windowed in the database and joined in
+memory; `test:agent-grid` instruments the driver and asserts the count for one agent equals the count
+for forty, which is the only version of that claim worth having.
+
+**A credential is a NAME, everywhere.** `required_env` against `secret_refs.configured` produces a
+list of names, and there is no field on the wire shape a value could travel in — which is what makes
+the card's warning line, the Capabilities tab and §5.5's copy-to-clipboard safe by construction
+rather than by discipline. `test:agent-context` asserts it by the same pattern that keeps a known
+secret out of a log sink.
+
+**The detail is a tab of the right panel, not a fourth column.** The composer keeps the centre
+unchanged; the surface splits into the artifact (overview, version history, file browser) and five
+tabs (Capabilities · Health · Deploy · Evals · Threads & runs). Reading it as a fourth column would
+have put the trace out of reach for anybody who arrived from the Agents tab, when the trace is only
+out of scope *for* that tab.
+
+**Version history is a render, not a query.** Migration 014 already put the instruction, the summary,
+the per-file diff stat and the undone flag onto the version row. Restoring an old version **publishes
+a new one pointing at its manifest** — it never moves `current_version` backwards, which would rewrite
+the history the request was made from and leave the pointer on objects a retention sweep is entitled
+to consider superseded.
+
+**Fork copies the connectors and the current manifest, and resets MCP grants to zero.** Copying them
+would silently re-grant high-impact third-party tools to a brand-new agent without anybody ticking a
+box, and the whole MCP design rests on access being granted per tool, deliberately. No file is
+copied: objects are content-addressed and immutable, so the fork's first version names the same ones.
+
+One migration, and it adds no column: `048_agents_grid` is an index on
+`threads (workspace_id, agent_id, last_activity_at DESC)`, because the card's current-work line and
+the grid's default sort are the same question and neither of 043's two indexes answers it.
 
 ---
 
@@ -1789,6 +1872,7 @@ frozen event schema, and everything added since rides beside it.
 | `billing` | What this workspace has spent this period, against which ceilings — see [cost metering](#cost-metering-budgets-and-billing) |
 | `reply` | Streaming "explain" answers |
 | `threads` | The workspace's build sessions with §3.3's derived status and the filter counts, one thread's conversation when it is opened, and refusals answered to the socket that earned them — see [Threads](#threads) |
+| `agents` | The sidebar's agent list, and — since the Agents tab — the grid with every card's tags already derived, one agent in full, one version's files, and refusals answered to the socket that earned them. One channel rather than two: every message is the same subject, and a second would be a second place a broadcast could forget to be scoped — see [Agents](#agents) |
 | `github` | Link state, sync verdicts, push and pull outcomes, staged hunks, secret-scan refusals, and pull-request check results — see [GitHub](#github) |
 | `log` | stderr lines and parse errors, for visibility |
 
@@ -1809,7 +1893,9 @@ frozen event schema, and everything added since rides beside it.
 `testRailwayToken` · and the membership set: `listMembers` · `inviteMember` · `revokeInvite` ·
 `setMemberRole` · `removeMember` · `listAudit` · `loadEnforcement` · `appealEnforcement` · and the
 thread set: `listThreads` · `loadThread` ·
-`createThread` · `renameThread` · `archiveThread` · `restoreThread` · and the GitHub set:
+`createThread` · `renameThread` · `archiveThread` · `restoreThread` · the agent set:
+`listAgentGrid` · `loadAgentDetail` · `loadAgentVersion` · `archiveAgent` · `restoreAgent` ·
+`renameAgent` · `forkAgent` · `restoreAgentVersion` · and the GitHub set:
 `listGithub` · `listGithubRepos` · `checkGithubRepo` · `linkGithub` · `unlinkGithub` ·
 `refreshGithub` · `pushGithub` · `pullGithub` · `switchGithubBranch` · `createGithubBranch` ·
 `openGithubPr` · `commitGithub` · `generateGithubMessage` · `diagnoseFile` ·
