@@ -25,6 +25,7 @@ import {
   visibleAgents, type AgentDensity, type AgentFilterState, type AgentSort,
 } from "../lib/agentFilter.ts";
 import { openAgentDetail, startAgentThread } from "../lib/agentNav.ts";
+import { downloadVersion } from "../lib/agentExport.ts";
 import {
   sendArchiveAgent, sendForkAgent, sendListAgentGrid, sendLoadAgentVersion, sendRenameAgent,
   sendRestoreAgent,
@@ -222,6 +223,8 @@ export function AgentsView() {
   const loaded = useAgentGridStore((s) => s.loaded);
   const error = useAgentGridStore((s) => s.error);
   const notice = useAgentGridStore((s) => s.notice);
+  const version = useAgentGridStore((s) => s.version);
+  const exportRequest = useAgentGridStore((s) => s.exportRequest);
   const workspaceName = useSessionStore((s) => s.workspaces.find((w) => w.id === s.workspaceId)?.name ?? null);
   // NO CAST. The one that was here invented a shape with an `id` on it, and the store's real `Member`
   // is keyed by `user_id` — so the filter below read a field that does not exist and typechecked
@@ -277,6 +280,23 @@ export function AgentsView() {
   useEffect(() => {
     if (cursor && !visible.some((c) => c.slug === cursor)) setCursor(visible[0]?.slug ?? null);
   }, [cursor, visible]);
+
+  /**
+   * §5.2's "Export current version", finished.
+   *
+   * THE MENU ENTRY COULD ONLY ASK; THIS IS WHAT ANSWERS. Exporting is a round trip — the files are in
+   * the object store, not in the grid snapshot — so the card sets a one-shot intent and the payload
+   * that comes back is saved here. Without this half the menu entry fetched a version into the store
+   * and downloaded nothing at all, which is a control that appears to work and does not.
+   *
+   * MATCHED ON THE AGENT, so a version somebody happens to be BROWSING in the detail is never saved
+   * by accident: the intent names a slug, and only a payload for that slug consumes it.
+   */
+  useEffect(() => {
+    if (!exportRequest || !version || version.agentId !== exportRequest) return;
+    downloadVersion(version.agentId, version.version, version.files);
+    useAgentGridStore.getState().clearExportRequest();
+  }, [exportRequest, version]);
 
   // AND THE FOCUSED CARD IS SCROLLED TO. A cursor that is visible only when it happens to be on
   // screen is a cursor somebody loses on the second J.
@@ -492,7 +512,12 @@ export function AgentsView() {
                   const next = window.prompt(`Rename ${agent.name}`, agent.name);
                   if (next && next.trim()) sendRenameAgent(agent.slug, next.trim());
                 }}
-                onExport={() => sendLoadAgentVersion(agent.slug)}
+                onExport={() => {
+                  // The intent first, then the request: on a warm store the answer can land in the
+                  // same tick, and an intent set afterwards would be one nothing consumes.
+                  useAgentGridStore.getState().requestExport(agent.slug);
+                  sendLoadAgentVersion(agent.slug);
+                }}
                 onArchive={() => {
                   // §7.5's confirmation, NAMING THE CREATOR, as the collaborative-workspace safety
                   // net. It sits on archive because archive is the destructive-looking act this

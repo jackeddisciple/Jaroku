@@ -69,6 +69,22 @@ interface AgentGridState {
   versionLoading: boolean;
 
   /**
+   * An agent whose next version payload should be SAVED rather than shown, by slug.
+   *
+   * A ONE-SHOT INTENT, exactly like `uiStore.secretsAddProvider` and for the same structural reason:
+   * the thing that asks is a menu entry on a card in the grid, and the thing that can answer is
+   * whatever is mounted when the files land, on the other side of a round trip. Lifting the download
+   * into the store instead would put a DOM call in a store; passing a callback through the socket
+   * layer would put a continuation in a protocol.
+   *
+   * CLEARED BY WHOEVER CONSUMES IT, because it describes something somebody asked for once. Left
+   * set, the next time anybody browsed a version of that agent it would silently save a file.
+   */
+  exportRequest: string | null;
+  requestExport: (slug: string) => void;
+  clearExportRequest: () => void;
+
+  /**
    * Per-agent spend that has arrived since the last snapshot, by SLUG (§5.5's ticker).
    *
    * KEYED BY SLUG AND FED FROM RUN IDS. A trace step carries a run id and nothing else — the frozen
@@ -103,6 +119,7 @@ export const useAgentGridStore = create<AgentGridState>((set, get) => ({
   detailLoading: false,
   version: null,
   versionLoading: false,
+  exportRequest: null,
   liveSpend: {},
   countedSteps: {},
 
@@ -145,6 +162,8 @@ export const useAgentGridStore = create<AgentGridState>((set, get) => ({
   closeDetail: () => set({ openAgentId: null, detail: null, detailLoading: false, version: null }),
 
   startVersion: () => set({ versionLoading: true }),
+  requestExport: (slug) => set({ exportRequest: slug }),
+  clearExportRequest: () => set({ exportRequest: null }),
   setVersion: (agentId, version, files) => set({ version: { agentId, version, files }, versionLoading: false }),
 
   setError: (error) => set({ error, detailLoading: false, versionLoading: false }),

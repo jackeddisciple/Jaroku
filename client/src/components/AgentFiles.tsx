@@ -25,6 +25,7 @@ import { DownloadIcon } from "./agentIcons.tsx";
 import { LockIcon } from "./panelIcons.tsx";
 import { iconForPath } from "./fileIcons.tsx";
 import { sendLoadAgentVersion } from "../lib/socket.ts";
+import { downloadVersion } from "../lib/agentExport.ts";
 import { fmtBytes } from "../lib/agentFormat.ts";
 import { ACCENT, ICON } from "../lib/tokens.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
@@ -142,17 +143,9 @@ export function AgentFiles({ detail }: { detail: AgentDetailView }) {
           showing && files.length > 0 ? (
             <button
               type="button"
-              onClick={() => {
-                // A DOWNLOAD RATHER THAN A CLIPBOARD, because a project is longer than anybody wants
-                // to paste, and the filename is what makes the export identifiable afterwards.
-                const blob = new Blob([exportMarkdown(slug, showing.version, files)], { type: "text/markdown" });
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement("a");
-                link.href = url;
-                link.download = `${slug}-v${showing.version}.md`;
-                link.click();
-                URL.revokeObjectURL(url);
-              }}
+              // THE SHARED BUILDER, so this and the card's overflow entry produce the same document.
+              // Two copies of it would drift the first time one grew a heading.
+              onClick={() => downloadVersion(slug, showing.version, files)}
               title={`Export ${slug} v${showing.version} as markdown`}
               aria-label={`Export ${slug} v${showing.version}`}
               className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active hover:text-ink"
