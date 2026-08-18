@@ -223,7 +223,10 @@ export function AgentsView() {
   const error = useAgentGridStore((s) => s.error);
   const notice = useAgentGridStore((s) => s.notice);
   const workspaceName = useSessionStore((s) => s.workspaces.find((w) => w.id === s.workspaceId)?.name ?? null);
-  const members = useMemberStore((s) => s.members) as unknown as { id: string; email?: string; display_name?: string }[];
+  // NO CAST. The one that was here invented a shape with an `id` on it, and the store's real `Member`
+  // is keyed by `user_id` — so the filter below read a field that does not exist and typechecked
+  // anyway. A cast that describes a type wrongly is worse than no type at all.
+  const members = useMemberStore((s) => s.members);
   // Whether this view's mutations can actually leave the tab. The composer has read the same thing
   // since it was written; a dropped write is otherwise invisible.
   const connected = useTraceStore((s) => s.connection === "open");
@@ -242,8 +245,17 @@ export function AgentsView() {
 
   const visible = useMemo(() => visibleAgents(cards, filters, sort), [cards, filters, sort]);
   const connectors = useMemo(() => connectorOptions(cards), [cards]);
+  /**
+   * The workspace's people, as the `created_by` filter and the creator avatar need them.
+   *
+   * `user_id`, NOT `id`, AND THAT WAS THE WHOLE BUG. `Member` is keyed by `user_id` — the column
+   * `workspace_members` actually holds — and this read `m.id`, which is not a field on that type at
+   * all. Every option came out with `id: undefined`, so §4's Team-only creator filter matched
+   * nothing whatever was picked and §5.2's avatar never rendered on any card. It typechecked because
+   * the store's array was cast on the way in; the cast is gone, so the type is what catches this now.
+   */
   const memberOptions = useMemo(
-    () => members.map((m) => ({ id: m.id, name: m.display_name || m.email || m.id.slice(0, 6) })),
+    () => members.map((m) => ({ id: m.user_id, name: m.display_name || m.email || m.user_id.slice(0, 6) })),
     [members],
   );
 
