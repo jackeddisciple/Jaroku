@@ -3363,9 +3363,32 @@ export class WsRelay {
    * server to send half a list.
    */
   async broadcastAgentGrid(): Promise<void> {
+    /**
+     * ONE BUILD PER WORKSPACE, NOT ONE PER SOCKET.
+     *
+     * `perClient` rebuilds the payload with each client's own context, which is what makes it safe —
+     * and for a grid it was also making it expensive in a way nothing else on this relay is. The
+     * snapshot behind this is ten statements over the whole workspace, and it fires on every
+     * transition a run produces; a person with four tabs open was paying forty of them per burst,
+     * for four byte-identical answers.
+     *
+     * THE MEMO IS PER CALL AND KEYED BY WORKSPACE, which is the only key that is safe: two sockets
+     * in the same workspace are entitled to exactly the same rows, and two in different ones share
+     * nothing. It lives for the length of this broadcast and is thrown away, so nothing here can go
+     * stale — a cache that outlived the call would be the very thing full-snapshot channels exist to
+     * avoid.
+     *
+     * The promise is cached rather than the value, so N sockets that arrive together await one
+     * in-flight build instead of starting N.
+     */
+    const byWorkspace = new Map<string, Promise<AgentGridSnapshot>>();
     await this.perClient(async (ws, ctx) => {
-      const snapshot = (await this.opts.listAgentGrid?.(ctx)) ?? EMPTY_GRID;
-      this.sendTo(ws, { channel: "agents", type: "grid", ...snapshot });
+      let building = byWorkspace.get(ctx.workspaceId);
+      if (!building) {
+        building = Promise.resolve(this.opts.listAgentGrid?.(ctx) ?? EMPTY_GRID);
+        byWorkspace.set(ctx.workspaceId, building);
+      }
+      this.sendTo(ws, { channel: "agents", type: "grid", ...(await building) });
     });
   }
 }
