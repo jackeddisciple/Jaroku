@@ -328,8 +328,14 @@ export function AgentsView() {
     <div className="flex h-full flex-col bg-bg">
       {/* §4's header bar. */}
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-hair px-5 py-3">
-        <span className={TYPE.panelLabel}>Agents</span>
+        {/* §4: "Workspace name and agent count." The NAME, not just the word Agents — this is a
+            full-width surface with no other chrome saying whose agents these are, and a Team
+            workspace switcher two clicks away makes "which workspace am I looking at" a real
+            question. It falls back to the section name before the session lands rather than
+            rendering a placeholder that flashes into somebody else's workspace. */}
+        <span className={TYPE.panelLabel}>{workspaceName ?? "Agents"}</span>
         <span className="text-faint text-[11px] tabular-nums">{cards.filter((c) => !c.archived_at).length}</span>
+        {workspaceName && <span className="text-[11px] text-faint">agents</span>}
         {!connected && (
           <span className="text-[11px] text-muted" title="Changes here need a connection">
             reconnecting…
