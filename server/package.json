@@ -174,7 +174,8 @@
     "test:secrets-e2e": "tsx src/secrets/e2e.test.ts",
     "mock:github": "tsx fixtures/github/mockGithubApi.ts",
     "test:github-webhook": "tsx src/githubWebhook.test.ts",
-    "test:inbox-registry": "tsx src/inbox/registry.test.ts"
+    "test:inbox-registry": "tsx src/inbox/registry.test.ts",
+    "test:inbox-store": "tsx src/inbox/inboxStore.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",

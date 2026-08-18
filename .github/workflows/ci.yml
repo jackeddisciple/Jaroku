@@ -256,6 +256,12 @@ jobs:
           # that no predicate is a constant. A predicate stuck at `true` passes every happy-path
           # check above it and makes its item type one that can never appear on a board.
           npm run test:inbox-registry
+          # Law 3, which is prose in the specification and a constraint in the database. Forty
+          # `record` calls producing one row with `count = 40` is what makes the sentence a claim,
+          # and the three assertions beside it are the decisions somebody could reasonably have made
+          # the other way: a recurrence starts its age again, a second sweep does not move
+          # `resolved_at`, and a per-user patch touches only the column it names.
+          npm run test:inbox-store
 
       - name: cost, abuse and the data lifecycle
         working-directory: server
