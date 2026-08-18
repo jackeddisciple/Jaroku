@@ -154,6 +154,20 @@ export class Editor extends EventEmitter<EditorEvents> {
    * one's source files were still streaming to.
    */
   private claimed = false;
+  /**
+   * The agent whose edit holds the slot right now, or null.
+   *
+   * WHY A SECOND FIELD RATHER THAN A LOOK AT `pending`. The two mean opposite things and the Agents
+   * grid needs exactly this one: `pending` holds proposals that have ARRIVED and are waiting for a
+   * person to apply or discard them — work that has stopped — while this is the agent a model is
+   * writing files for at this instant. A card that read the first and called it `Generating` would
+   * wear the running colour for a diff that is sitting still, which is both wrong and the precise
+   * inversion of what the tag means: an unapplied diff is somebody's turn, not the machine's.
+   *
+   * Set in the same synchronous block as `busy` and cleared wherever `busy` is, so it can never
+   * outlive the edit it names.
+   */
+  private editing: string | null = null;
 
   constructor(private readonly opts: EditorDeps) {
     super();
@@ -170,6 +184,19 @@ export class Editor extends EventEmitter<EditorEvents> {
    */
   get inFlight(): boolean {
     return this.busy || this.claimed;
+  }
+
+  /**
+   * The agent a model is writing files for at this instant, or null.
+   *
+   * FOR THE AGENTS GRID's `Generating` TAG, and deliberately narrower than `inFlight`: a caller that
+   * has claimed the slot but not reached `propose` has not named an agent yet, so there is no card
+   * to mark. Null then, which reads as Idle for a few milliseconds and is true.
+   *
+   * The SLUG, because that is what a card is keyed by and what `propose` is given.
+   */
+  get editingAgentId(): string | null {
+    return this.editing;
   }
 
   /**
@@ -244,6 +271,9 @@ export class Editor extends EventEmitter<EditorEvents> {
       return;
     }
     this.busy = true;
+    // Named in the same breath as the slot is taken, so the grid can say WHICH agent is being
+    // written to rather than only that something is. Cleared wherever `busy` is.
+    this.editing = agentId;
     // The claim, if the caller took one, has now become the edit it was holding the slot for.
     // A direct caller that never claimed clears a flag that was already false.
     this.claimed = false;
@@ -440,6 +470,10 @@ export class Editor extends EventEmitter<EditorEvents> {
     } finally {
       rmSync(scratch, { recursive: true, force: true });
       this.busy = false;
+      // WITH `busy`, IN THE SAME `finally`, so the two can never disagree. An `editing` that outlived
+      // its edit would leave a card wearing `Generating` until the next one started — which on a
+      // workspace that edits once a week is forever.
+      this.editing = null;
     }
   }
 
