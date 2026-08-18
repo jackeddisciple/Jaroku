@@ -66,6 +66,18 @@ export interface Agent {
    * materialised the project.
    */
   archived_at: string | null;
+  /**
+   * Who made it, or null.
+   *
+   * THE COLUMN HAS EXISTED SINCE MIGRATION 008 AND WAS NEVER SELECTED. §4's `created_by` filter and
+   * §5.2's creator avatar are the first things to ask for it — both Team-only, because a personal
+   * workspace has one member and a filter with one option is not a filter.
+   *
+   * Nullable, and null is a real answer rather than an unknown: `upsertFromDisk` writes no creator
+   * because a directory somebody dropped in has none, and inventing one would put a name on a row
+   * nobody wrote — the same reasoning `threads.created_by` gives for the same nullability.
+   */
+  created_by: string | null;
   created_at: string;
 }
 
@@ -121,7 +133,7 @@ export interface AgentOnDisk {
 
 const COLUMNS = `id, slug, display_name, display_name_is_custom, description, connectors,
                  mcp_tools, required_env, default_provider, hand_written, current_version,
-                 creation_cost, archived_at, created_at`;
+                 creation_cost, created_by, archived_at, created_at`;
 
 export class AgentRepository {
   constructor(private db: Db) {}
@@ -145,6 +157,7 @@ export class AgentRepository {
       hand_written: asBool(row["hand_written"]),
       display_name_is_custom: asBool(row["display_name_is_custom"]),
       current_version: asInt(row["current_version"], 1),
+      created_by: (row["created_by"] as string | null) ?? null,
       archived_at: (row["archived_at"] as string | null) ?? null,
     };
   }
@@ -659,6 +672,65 @@ export class AgentRepository {
       ]);
       return { from, to };
     });
+  }
+
+  /**
+   * What made each agent's CURRENT version, for the whole workspace.
+   *
+   * ONE QUERY FOR THE GRID, keyed by agent uuid, for the reason `editCounts` gives two methods up:
+   * the surface renders this for every agent at once, and the alternative is a round trip per row.
+   *
+   * A MISSING ENTRY IS A REAL ANSWER and is not the same as `import`. An agent whose row exists and
+   * whose `current_version` has no version row behind it has published nothing — the hand-dropped
+   * directory before the boot import has run, or a row a generation created and never filled — and
+   * `agentHealth.healthOf` reads that absence as `unverified`, which is exactly what it means.
+   */
+  async currentVersionSources(ctx: TenantContext): Promise<Map<string, VersionSource>> {
+    const rows = await this.q(ctx).all<{ agent_id: unknown; source: unknown }>(
+      `SELECT v.agent_id AS agent_id, v.source AS source
+         FROM agent_versions v
+         JOIN agents a ON a.id = v.agent_id AND a.current_version = v.version
+        WHERE a.workspace_id = ?`,
+      [ctx.workspaceId],
+    );
+    return new Map(rows.map((r) => [String(r.agent_id), String(r.source ?? "import") as VersionSource]));
+  }
+
+  /**
+   * Which version each of an agent's files was last CHANGED in — §6's per-file blame.
+   *
+   * READ OFF `file_stats` RATHER THAN BY DIFFING MANIFESTS, and that is the whole reason this is
+   * cheap enough to render beside a file list. The manifest says what a version CONTAINS, so
+   * "when did this file last change" from manifests means fetching every version's manifest and
+   * comparing shas pairwise; `file_stats` says what CHANGED, which migration 014 put on the row
+   * precisely because those are two different questions the UI asks separately.
+   *
+   * ASCENDING, SO THE LAST WRITE WINS. The map is built oldest-first and overwritten, which leaves
+   * the highest version that touched each path — the same answer a descending scan with a
+   * first-write-wins guard would give, without the guard.
+   *
+   * A PATH WITH NO ENTRY IS NOT A BUG. A version imported from disk records no file stats at all
+   * (014's default is an empty array, and it says why: nobody recorded a diff), so every file of a
+   * hand-dropped project is unattributed. The browser renders nothing rather than claiming v1.
+   */
+  async fileBlame(ctx: TenantContext, agentId: string): Promise<Map<string, number>> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT v.version AS version, v.file_stats AS file_stats
+         FROM agent_versions v JOIN agents a ON a.id = v.agent_id
+        WHERE v.agent_id = ? AND a.workspace_id = ? AND v.undone_at IS NULL
+        ORDER BY v.version ASC`,
+      [agentId, ctx.workspaceId],
+    );
+    const out = new Map<string, number>();
+    for (const row of rows) {
+      const version = asInt(row["version"], 0);
+      const stats = jsonFromColumn(this.db.dialect, row["file_stats"]);
+      if (!Array.isArray(stats)) continue;
+      for (const stat of stats as VersionFileStat[]) {
+        if (stat && typeof stat.path === "string") out.set(stat.path, version);
+      }
+    }
+    return out;
   }
 
   private hydrateVersion(row: Record<string, unknown>): AgentVersion {
