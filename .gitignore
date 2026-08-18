@@ -34,7 +34,14 @@ runtime/agents/*
 jaroku-product-documentation*.md
 # The implementation prompts, for the same reason. A specification is what the work was written
 # against; the work itself, and the changelog entry that summarises it, are what ship.
+#
+# TWO PATTERNS, because the prompts have not been named consistently. The originals arrived as
+# `jaroku-<feature>-prompt.pdf`; the Inbox tab's arrived as `inbox_tab.pdf`. A rule that only
+# matched the first shape would have let the second one into a commit, which is how a private
+# specification ends up published — so the destination's own name is matched too rather than the
+# file being renamed to suit the rule.
 jaroku-*-prompt.pdf
+*_tab.pdf
 
 # Cygwin drops one of these beside the repo when a bash process faults on Windows. It is a core
 # dump with a stack trace in it, not source, and it reappears whenever the shell falls over.
