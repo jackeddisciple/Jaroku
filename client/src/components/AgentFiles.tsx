@@ -31,19 +31,6 @@ import { ACCENT, ICON } from "../lib/tokens.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
 import type { AgentDetailView, AgentFileView } from "../types.ts";
 
-/**
- * The whole version as one markdown document, for the overflow menu's Export.
- *
- * MARKDOWN WITH FENCED BLOCKS, not a zip. A browser cannot write a zip without a library, and the
- * thing somebody exporting a version actually does with it is read it or paste it somewhere — an
- * issue, a review, another tool. Fenced by path, in manifest order, so it is still a project.
- */
-function exportMarkdown(slug: string, version: number, files: readonly AgentFileView[]): string {
-  const head = [`# ${slug} — v${version}`, "", `${files.length} file${files.length === 1 ? "" : "s"}`, ""];
-  const body = files.map((f) => [`## ${f.path}`, "", "```", f.content, "```", ""].join("\n"));
-  return [...head, ...body].join("\n");
-}
-
 function FileRow({
   file,
   open,
