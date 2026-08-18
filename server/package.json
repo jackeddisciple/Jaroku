@@ -77,6 +77,7 @@
     "test:byok": "tsx src/billing/byok.test.ts",
     "test:platform-key": "tsx src/billing/platformKey.test.ts",
     "test:stripe": "tsx src/billing/stripe.test.ts",
+    "billing:stuck": "tsx src/billing/replay.cli.ts",
     "test:pool": "tsx src/runPool.test.ts",
     "test:interactive-slot": "tsx src/interactiveSlot.test.ts",
     "test:sandbox-image": "tsx src/sandbox/image.test.ts",

@@ -2145,6 +2145,7 @@ npm run test:metrics     # every alert names a metric something actually emits
 npm run test:migration-gate # what breaks a version that is still serving
 npm run migrate:check    # ...and the same check, as the gate the deploy pipeline runs
 npm run drill:restore    # restore into a scratch database and verify what came back
+npm run billing:stuck    # webhook events that arrived and never finished — the operator queue
 
 # auth — see "Authentication and membership"
 npm run test:http        # the HTTP layer: error envelope, body caps, log redaction
@@ -3205,6 +3206,16 @@ writing it twice records one charge twice, and a webhook is idempotent because *
 applies a state transition twice — a plan change reapplied after a later one superseded it, a
 cancellation undone by its own retry. An event that fails mid-transition is left unprocessed on
 purpose, because that is the queue an operator replays.
+
+**And the queue can be read.** `npm run billing:stuck` lists what arrived and never finished, oldest
+first, and exits non-zero so it can be a cron line rather than only something somebody types —
+anything in that list is money that has not moved. It deliberately cannot replay the event itself:
+the table stores an id, a type, a workspace and two timestamps and **not** the payload, because
+keeping one would be a second copy of every customer object with no retention story, and the
+signature is over bytes we no longer have. So the operator resends from the provider's dashboard by
+id — redelivery goes through the verified path, and the claim makes a duplicate harmless — and then
+marks the row resolved with `--resolve <id> --note "…"`, because a queue that only grows is one
+people stop reading.
 
 **And a plan can be bought from inside the product.** Every layer of that existed for a release
 before the button did: the checkout route validating the plan against the `plans` table and never

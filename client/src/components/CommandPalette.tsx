@@ -14,7 +14,9 @@ import { useUiStore } from "../store/uiStore.ts";
 import { runProviders, useProviderStore } from "../store/providerStore.ts";
 import { inputKey } from "../store/uiStore.ts";
 import { Truncate } from "./Truncate.tsx";
-import { sendCreateThread, sendRun } from "../lib/socket.ts";
+import {
+  sendCreateThread, sendListAgents, sendListProviders, sendListThreads, sendRun,
+} from "../lib/socket.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { openThread } from "../lib/threadNav.ts";
 import { relTime } from "../lib/format.ts";
@@ -175,6 +177,24 @@ export function CommandPalette() {
                     Switch to {p.label}
                   </Item>
                 ))}
+              </Command.Group>
+
+              {/* ASK EVERY SNAPSHOT AGAIN — the manual refresh this product had none of.
+                  `sendListAgents`, `sendListProviders` and `sendListThreads` have all existed since
+                  the surfaces they feed did, and no component called any of them: every list is
+                  pushed on the transitions that change it, so a transition that pushed nothing left
+                  the only remedy as reloading the page. One entry rather than three, because
+                  "something on screen looks stale" is one thought and does not name a channel. */}
+              <Command.Group heading="Refresh" className="mb-1">
+                <Item
+                  onSelect={run(() => {
+                    sendListAgents();
+                    sendListProviders();
+                    sendListThreads();
+                  })}
+                >
+                  Refresh agents, providers and threads
+                </Item>
               </Command.Group>
 
               <Command.Group heading="View" className="mb-1">

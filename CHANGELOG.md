@@ -75,6 +75,14 @@ there. What is new is that the product's own surface reaches them.
   order, with each provider's display name resolved server-side — which also removed the two
   disagreeing copies of that mapping in the browser, the reason one provider was "Gemini" where you
   picked it and `google` where you configured it. `test:pricing` asserts what keeps it safe.
+- **A manual refresh, and the operator queue can be read.** `sendListAgents`, `sendListProviders`
+  and `sendListThreads` were exported and called by nothing, so a snapshot that went stale had no
+  remedy but reloading the page: there is a palette entry that asks for all three, and a quiet
+  refresh on the Threads header, which is the surface a missed transition bites hardest.
+  `npm run billing:stuck` reads the webhook events that arrived and never finished — the queue
+  `http/billing.ts` deliberately leaves rows in and whose reader had no caller anywhere. It cannot
+  replay an event and says so: the table stores no payload on purpose, so the operator resends by id
+  from the provider and marks the row resolved here, which is what keeps the queue drainable.
 - **Two written-and-unreadable histories became readable.** Every credential rotation has been
   recorded since the vault landed — with its reason, its masked hint and a millisecond-safe tie-break
   ordering — and `rotations()` had no caller: the Secrets panel could rotate a credential and could

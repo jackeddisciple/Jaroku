@@ -17,7 +17,7 @@ import { groupThreads } from "../lib/threadGroups.ts";
 import { filterThreads, FILTER_LABEL, type ThreadFilter } from "../lib/threadFilter.ts";
 import { openThread, openThreadAgent } from "../lib/threadNav.ts";
 import {
-  sendArchiveThread, sendCreateThread, sendRenameThread, sendRestoreThread,
+  sendArchiveThread, sendCreateThread, sendListThreads, sendRenameThread, sendRestoreThread,
 } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
@@ -27,7 +27,7 @@ import { EmptyState } from "./EmptyState.tsx";
 import { ThreadFilterBar } from "./ThreadFilterBar.tsx";
 import { ThreadRow } from "./ThreadRow.tsx";
 import { useThreadKeys } from "./useThreadKeys.ts";
-import { PlusIcon, SearchIcon, XIcon } from "./panelIcons.tsx";
+import { PlusIcon, RefreshIcon, SearchIcon, XIcon } from "./panelIcons.tsx";
 
 /**
  * §4.6's first empty state, which is an ENTRY POINT rather than a notice.
@@ -200,10 +200,24 @@ export function ThreadsView() {
             reconnecting…
           </span>
         )}
+        {/* ASK AGAIN. The list is a full-snapshot channel pushed on the transitions §3.3 derives
+            from, and a snapshot that goes stale — a transition nothing broadcast, a frame dropped
+            during a reconnect — had no remedy but reloading the page or switching workspace and
+            back. `sendListThreads` has existed since the feature shipped and nothing called it.
+            Quiet and to the left of the action, because it is a way to check rather than a thing to
+            do. */}
+        <button
+          onClick={() => sendListThreads()}
+          disabled={!connected}
+          className="ml-auto rounded-control p-1.5 text-faint transition-colors hover:bg-active hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+          title="Ask for the list again"
+        >
+          <RefreshIcon size={12} />
+        </button>
         <button
           onClick={() => sendCreateThread()}
           disabled={!connected}
-          className="ml-auto flex items-center gap-1.5 rounded-control px-2.5 py-1.5 text-[12px] text-muted transition-colors hover:bg-active hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+          className="flex items-center gap-1.5 rounded-control px-2.5 py-1.5 text-[12px] text-muted transition-colors hover:bg-active hover:text-ink disabled:pointer-events-none disabled:opacity-40"
           title={connected ? "New thread" : "Reconnecting — a new thread needs a connection"}
         >
           <PlusIcon size={12} /> New thread
