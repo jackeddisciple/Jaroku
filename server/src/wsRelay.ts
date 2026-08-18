@@ -119,9 +119,73 @@ export type ArchiveAgentCommand = { cmd: "archiveAgent"; agentId: string };
 export type RestoreAgentCommand = { cmd: "restoreAgent"; agentId: string };
 export type RenameAgentCommand = { cmd: "renameAgent"; agentId: string; name: string };
 
-export type AgentCommand = ArchiveAgentCommand | RestoreAgentCommand | RenameAgentCommand;
+/**
+ * Duplicate an agent: its connectors and its current version, and none of its MCP grants (§7.5).
+ *
+ * CHEAP BY CONSTRUCTION — a manifest and a pointer. The forked agent's first version names the SAME
+ * objects the original's current version does, because they are content-addressed and immutable, so
+ * nothing is copied and neither agent can affect the other's bytes.
+ *
+ * IT RESETS MCP GRANTS TO ZERO, and that is the decision rather than an omission. Copying them would
+ * silently re-grant high-impact third-party tools to a brand-new agent without anybody ticking a
+ * box, and the entire MCP design rests on access being granted per tool, deliberately. Connectors
+ * ARE copied, because a connector is a reviewed template this workspace has already audited and
+ * carries no third-party grant with it.
+ */
+export type ForkAgentCommand = { cmd: "forkAgent"; agentId: string };
 
-const AGENT_COMMANDS = new Set(["archiveAgent", "restoreAgent", "renameAgent"]);
+/**
+ * Publish a NEW version whose manifest is an old one's (§6).
+ *
+ * NOT A POINTER MOVE BACKWARDS, and the distinction is the whole of it. `undoEdit` walks
+ * `current_version` back one and marks what it left behind — a linear history with a shape. This is
+ * a person saying "go back to v3" from a list, which may be six versions back and may be a version
+ * that has already been undone, and answering that by moving the pointer would rewrite the history
+ * that made the request legible. Publishing forward instead mirrors the publish-reserves-then-
+ * promotes fix in the storage layer: the new version's objects are the old version's objects, which
+ * are immutable and therefore cannot have been collected out from under a pointer that now names
+ * them.
+ */
+export type RestoreAgentVersionCommand = {
+  cmd: "restoreAgentVersion";
+  agentId: string;
+  version: number;
+};
+
+export type AgentCommand =
+  | ArchiveAgentCommand
+  | RestoreAgentCommand
+  | RenameAgentCommand
+  | ForkAgentCommand
+  | RestoreAgentVersionCommand;
+
+const AGENT_COMMANDS = new Set([
+  "archiveAgent", "restoreAgent", "renameAgent", "forkAgent", "restoreAgentVersion",
+]);
+
+/**
+ * The Agents tab's three reads (§4, §6).
+ *
+ * ON THE EXISTING `agents` CHANNEL rather than a new one, which §7.4 asks to be argued either way.
+ * There is no reason to open one: every message here is the same subject the channel already
+ * carries — this workspace's agents — every recipient is a socket already receiving that subject,
+ * and `test:channels` classifies a channel once, by what it carries. A second channel would be a
+ * second classification of one fact and a second place a broadcast could forget to be scoped.
+ *
+ * ALL THREE ARE ANSWERED TO THE ASKING SOCKET, like `listAgents` beside them: they are rows this
+ * process can already reach, and opening a card is one client's navigation. The MUTATIONS —
+ * archive, restore, rename, fork, restore-version — broadcast the whole grid, so no client ever
+ * merges a partial update into a list whose derived tags it did not compute.
+ */
+export type ListAgentGridCommand = { cmd: "listAgentGrid" };
+export type LoadAgentDetailCommand = { cmd: "loadAgentDetail"; agentId: string };
+/** One version's files, for §6's browser and for the overflow menu's Export. */
+export type LoadAgentVersionCommand = {
+  cmd: "loadAgentVersion";
+  agentId: string;
+  /** Omitted means the agent's current version, which is what the browser opens on. */
+  version?: number;
+};
 // The fix loop (doc §8 Week 4): every mutation is proposal -> explicit apply/undo.
 export type EditCommand = {
   cmd: "edit";
@@ -923,6 +987,9 @@ export type ClientCommand =
   | PlanAgentCommand
   | DiscardPlanCommand
   | ListAgentsCommand
+  | ListAgentGridCommand
+  | LoadAgentDetailCommand
+  | LoadAgentVersionCommand
   | AgentCommand
   | EditCommand
   | ApplyEditCommand
@@ -1720,6 +1787,217 @@ export type ThreadEvent =
   | { type: "error"; message: string; threadId?: string }
   | { type: "notice"; message: string; threadId?: string };
 
+// --- the Agents tab: one card per agent, and one agent in full ---------------------------------
+//
+// DERIVED FIELDS TRAVEL WITH THE ROW, exactly as they do on `ThreadView` and for the same reason.
+// Health is a function of the validator's verdict on the live version and a rolling error rate off
+// `runs`; drift is a function of what a deploy recorded against what the agent has now; a missing
+// credential is `required_env` against `secret_refs.configured`. None of those is visible to a
+// browser, so a client that derived its own would be guessing from less — and forty cards each
+// guessing differently is the grid disagreeing with itself.
+//
+// WHAT IS DELIBERATELY NOT HERE: a secret value, a fragment of one, or its length. §5.2 and §5.5 are
+// both explicit — names only — and the cheapest way to keep that true across a broadcast, a
+// clipboard and a log sink is for the value never to enter the shape.
+
+/** How busy an agent has been over seven days, bucketed. See `agentHealth.activityOf`. */
+export type AgentActivityLevel = "quiet" | "steady" | "high";
+
+/** One recent run, as §5.5's clickable sparkline draws it. Oldest first. */
+export interface AgentRunBar {
+  run_id: string;
+  outcome: "ok" | "error" | "running" | "paused";
+  started_at: string;
+  /**
+   * The step the failure happened at, for §5.5's "a failed bar opens on the failing step".
+   *
+   * REUSED RATHER THAN RE-DERIVED. The mapping from a step to its place in a trace already exists
+   * and was built deliberately rather than by name matching; this carries the step's id so the click
+   * lands on it, and nothing here re-implements the mapping.
+   */
+  failed_step_id: string | null;
+}
+
+/**
+ * One agent, as the grid renders a card (§5).
+ *
+ * `agent_id` IS THE SLUG. Every other thing the client holds calls the slug "the agent id" —
+ * `listAgents` maps it that way, the sidebar selects by it, run rows carry it — so sending the uuid
+ * under that name would make this the one place an agent id means something else. The uuid rides
+ * alongside as `uuid`, because the version, thread and credential reads are keyed by it.
+ */
+export interface AgentCardView {
+  agent_id: string;
+  uuid: string;
+  name: string;
+  slug: string;
+  description: string | null;
+
+  created_at: string;
+  /** The user id, for §4's Team-only `created_by` filter and §5.2's creator avatar. */
+  created_by: string | null;
+  /** Null means live. §4: archived agents are hidden unless the Archived filter is on. */
+  archived_at: string | null;
+  hand_written: boolean;
+
+  current_version: number;
+  /** What made the live version. Null when nothing has been published — see `agentHealth`. */
+  version_source: "generation" | "edit" | "import" | "deploy" | null;
+  /** Null renders as unknown and never as `$0` — v0.1.9's rule, and §6 restates it. */
+  creation_cost: number | null;
+
+  connectors: string[];
+  mcp_tools: string[];
+  required_env: string[];
+  /** NAMES ONLY. §5.2's amber warning line is `missing_env.length` credentials missing. */
+  missing_env: string[];
+  /** Granted MCP tools whose impact classification asks for a confirmation before the first call. */
+  high_impact_tools: number;
+  default_provider: string;
+
+  /** Live sessions on this agent. Archived ones excluded — see `ThreadStore.agentThreadFacts`. */
+  thread_count: number;
+  /** §5.2's current-work line. Null is "Not started yet", and nothing is fabricated. */
+  latest_thread: {
+    id: string;
+    title: string;
+    last_activity_at: string;
+    /** The user's last turn in it, or null for a session nobody has spoken in. */
+    last_turn: string | null;
+  } | null;
+
+  /** §5.4's Runtime family, already resolved to one member. */
+  runtime: "idle" | "running" | "generating" | "deploying" | "paused";
+  /** §5.4's Health family, likewise. Runtime and Health never collapse into one tag. */
+  health: "healthy" | "degraded" | "failing" | "unverified";
+  activity: AgentActivityLevel;
+
+  /** The grid's default sort key. Null for an agent that has never run. */
+  last_run_at: string | null;
+  runs_7d: number;
+  errors_7d: number;
+  /** The last ~20 outcomes, oldest first. §5.5's sparkline, and what `health` was derived from. */
+  outcomes: AgentRunBar[];
+  /** The most recent failure's message, for the card and for §5.5's copy-context block. */
+  last_error: string | null;
+
+  /**
+   * What this agent's runs cost over seven days, or null when nothing has been spent.
+   *
+   * THREE STATES, NOT TWO, exactly as `ThreadView.cost_usd` has: null is "nothing yet",
+   * `spend_known: false` beside a figure is "this is a floor because something ran on an unpriced
+   * model", and a figure with `spend_known: true` is the answer. §5.4's `Cost unknown` tag is the
+   * middle case, and a zero would claim the third about the first.
+   */
+  spend_7d: number | null;
+  spend_known: boolean;
+
+  deployment: { id: string; status: string; url: string | null; version: number | null } | null;
+  /** §5.2's `v5 → v9`. Null when there is nothing to say — see `agentHealth.driftOf`. */
+  drift: { deployed: number; current: number } | null;
+}
+
+/** What `listAgentGrid` answers with. */
+export interface AgentGridSnapshot {
+  cards: AgentCardView[];
+  /**
+   * Whether this workspace has a members list at all.
+   *
+   * §4's `created_by` filter and §5.2's creator avatar are Team-only, and the honest place to decide
+   * that is here rather than in the browser: a personal workspace has one member, so the filter is a
+   * control with one option and the avatar is a picture of the only person who could have made it.
+   */
+  team: boolean;
+}
+
+/** A version, as §6's history list renders it. The manifest itself stays on the server. */
+export interface AgentVersionView {
+  version: number;
+  source: "generation" | "edit" | "import" | "deploy";
+  instruction: string | null;
+  summary: string | null;
+  file_stats: { path: string; status: string; additions: number; deletions: number }[];
+  total_bytes: number;
+  undone_at: string | null;
+  created_at: string;
+  created_by: string | null;
+  /** True for the version `agents.current_version` points at. */
+  current: boolean;
+}
+
+/** One file of one version, as §6's browser renders it. */
+export interface AgentFileView {
+  path: string;
+  content: string;
+  bytes: number;
+  read_only: boolean;
+  /** Why it cannot be edited, in the words the block list gives. Null when it can be. */
+  read_only_reason: string | null;
+  /** §6's per-file blame: the version this path last changed in. Null when nothing recorded one. */
+  last_changed_in: number | null;
+}
+
+/** One granted MCP tool, as §6's Capabilities tab shows it. */
+export interface AgentToolView {
+  /** `server/tool`, the ref the manifest holds. */
+  ref: string;
+  server: string;
+  tool: string;
+  /** low | high, or null for a tool whose server this workspace no longer has. */
+  impact: string | null;
+  /** The stored reason the classification carries. Never invented here. */
+  reason: string | null;
+}
+
+/** One agent, in full (§6). Everything the five tabs need that the card does not already carry. */
+export interface AgentDetailView {
+  card: AgentCardView;
+  versions: AgentVersionView[];
+  tools: AgentToolView[];
+  /** `required_env` against `secret_refs`, by name, with whether a value has landed. Names only. */
+  credentials: { name: string; configured: boolean; scope: string | null }[];
+  /** Latency over the same window `outcomes` covers. Null rather than zero — see `percentiles`. */
+  p50_ms: number | null;
+  p95_ms: number | null;
+  /** Cost per run over the two windows §6's Health tab asks for. Null is unknown, never zero. */
+  cost_per_run_7d: number | null;
+  cost_per_run_30d: number | null;
+  /** Datasets belonging to this agent and its last eval, for tab 4. */
+  evals: {
+    datasets: { id: string; name: string; example_count: number }[];
+    last: { id: string; status: string; started_at: string; winner: string | null } | null;
+  };
+  /** Threads on this agent and its recent runs, for tab 5 — the one link back to the conversation. */
+  threads: { id: string; title: string; status: string; last_activity_at: string; archived: boolean }[];
+  runs: { id: string; status: string; started_at: string; provider: string; model: string }[];
+}
+
+export type AgentEvent =
+  /**
+   * The whole grid for one workspace.
+   *
+   * A FULL SNAPSHOT ON EVERY MUTATION, the same discipline every other channel here follows. There
+   * is deliberately no per-agent update message: a client that merged one would be holding a list
+   * whose tags were derived at two different moments, and §5.4's precedence rules are computed
+   * against the row as a whole.
+   */
+  | { type: "grid"; cards: AgentCardView[]; team: boolean }
+  /** One agent, for the client that asked to open it. Answered to that socket only. */
+  | { type: "detail"; detail: AgentDetailView }
+  /** One version's files, for the browser and for Export. */
+  | { type: "version"; agentId: string; version: number; files: AgentFileView[] }
+  | { type: "error"; message: string; agentId?: string }
+  | { type: "notice"; message: string; agentId?: string };
+
+/**
+ * What a socket is told when nothing answers `listAgentGrid`.
+ *
+ * An empty grid rather than no message at all, for the reason `EMPTY_THREADS` exists: §4's two empty
+ * states are both rendered surfaces, and a client that received nothing could not tell "no agents"
+ * from "not answered yet" — which is a skeleton card versus a prompt to describe one.
+ */
+const EMPTY_GRID: AgentGridSnapshot = { cards: [], team: false };
+
 // The session channel: the only one that is about the CONNECTION rather than about the work.
 //
 // It exists because a WebSocket is the one thing in this system with no natural expiry. An
@@ -1815,7 +2093,16 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // which every client already applies, and the `agents` channel has no error shape a store would
   // recognise. A refusal ("that name is too long", "no such agent") lands in the status bar, which is
   // where every other refusal about the agent list already lands.
-  archiveAgent: "log", restoreAgent: "log", renameAgent: "log",
+  // THE AGENT LIFECYCLE MOVES OFF `log` AND ONTO `agents`, which is where its answer already went.
+  // Each of these is answered by a re-broadcast agent snapshot, so a REFUSAL that landed in the
+  // status bar left the surface that asked — the sidebar row, and now the Agents grid — waiting on
+  // an answer that had already come and gone somewhere else. The channel has an error shape for
+  // exactly this, the same reason the thread and github commands are classified here.
+  archiveAgent: "agents", restoreAgent: "agents", renameAgent: "agents",
+  forkAgent: "agents", restoreAgentVersion: "agents",
+  // §4 and §6's three reads. On `agents` beside `listAgents` rather than on a channel of their own
+  // — see ListAgentGridCommand for why this is not a new channel.
+  listAgentGrid: "agents", loadAgentDetail: "agents", loadAgentVersion: "agents",
 
   planAgent: "gen", discardPlan: "gen", generate: "gen",
   edit: "edit", applyEdit: "edit", undoEdit: "edit", discardEdit: "edit",
@@ -2024,6 +2311,28 @@ export interface RelayOptions {
     ctx: TenantContext,
     threadId: string,
   ) => Promise<{ thread: ThreadView; items: ThreadItemView[] } | undefined>;
+  /**
+   * The Agents grid (§4), with every card's tags already derived.
+   *
+   * Answered locally, like `listAgents` and `listThreads` beside it, because it is rows this process
+   * can already reach. Forwarding a read the grid needs on frame one behind the app's dispatch chain
+   * would buy nothing.
+   */
+  listAgentGrid?: (ctx: TenantContext) => AgentGridSnapshot | Promise<AgentGridSnapshot>;
+  /**
+   * One agent in full (§6), for the client that clicked its card.
+   *
+   * Returns undefined for an id that is not this workspace's, which is what a scoped read produces
+   * for another tenant's agent. §7.3: an id belonging to another workspace reads as ABSENT, not as
+   * forbidden — the refusal and the "no such agent" are deliberately the same answer.
+   */
+  loadAgentDetail?: (ctx: TenantContext, agentId: string) => Promise<AgentDetailView | undefined>;
+  /** One version's files (§6's browser, and the overflow menu's Export). Scoped the same way. */
+  loadAgentVersion?: (
+    ctx: TenantContext,
+    agentId: string,
+    version: number | undefined,
+  ) => Promise<{ version: number; files: AgentFileView[] } | undefined>;
   /**
    * Who is in this workspace, for the initial snapshot.
    *
@@ -2498,6 +2807,41 @@ export class WsRelay {
               channel: "agents",
               agents: (await this.opts.listAgents?.(ctx)) ?? [],
             }), live);
+          } else if (msg.cmd === "listAgentGrid") {
+            void this.answer(ws, async (ctx) => ({
+              channel: "agents",
+              type: "grid",
+              ...((await this.opts.listAgentGrid?.(ctx)) ?? EMPTY_GRID),
+            }), live);
+          } else if (msg.cmd === "loadAgentDetail" && typeof msg.agentId === "string") {
+            // To the asking socket only. Opening a card is one client's navigation, and
+            // broadcasting it would move everybody else's centre pane — the same reason
+            // `loadThread` is answered this way.
+            const agentId = msg.agentId;
+            void this.answer(ws, async (ctx) => {
+              const detail = await this.opts.loadAgentDetail?.(ctx, agentId);
+              return detail
+                ? { channel: "agents", type: "detail", detail }
+                : {
+                    channel: "agents",
+                    type: "error",
+                    agentId,
+                    // §7.3: the same sentence for "gone" and "not yours", so a caller learns
+                    // nothing about what exists in another workspace.
+                    message: "no such agent in this workspace",
+                  };
+            }, live);
+          } else if (msg.cmd === "loadAgentVersion" && typeof msg.agentId === "string") {
+            const agentId = msg.agentId;
+            const asked = typeof msg.version === "number" && Number.isFinite(msg.version)
+              ? Math.floor(msg.version)
+              : undefined;
+            void this.answer(ws, async (ctx) => {
+              const loaded = await this.opts.loadAgentVersion?.(ctx, agentId, asked);
+              return loaded
+                ? { channel: "agents", type: "version", agentId, version: loaded.version, files: loaded.files }
+                : { channel: "agents", type: "error", agentId, message: "no such agent version in this workspace" };
+            }, live);
           } else if (msg.cmd === "loadHistory") {
             // ANSWERED LOCALLY, like the other reads the relay can serve from the store it already
             // holds, and to the ASKING SOCKET only: one person scrolling back through their own
@@ -2803,6 +3147,24 @@ export class WsRelay {
   }
 
   /**
+   * Answer ONE client about an agent — the socket whose command this is.
+   *
+   * Same mechanism as `sendThreads`, and for both the same reasons. A REFUSAL is about one person's
+   * click: a rename somebody mistyped must not paint a red strip across every teammate's grid, which
+   * is the failure `refuseThread` exists to have already fixed once. And opening a card (§6) is one
+   * client's navigation — broadcasting the detail would collapse every other tab in the workspace
+   * out of whatever it was showing and into somebody else's agent.
+   */
+  sendAgents(ctx: TenantContext, requestId: string, event: AgentEvent): void {
+    for (const [ws, session] of this.sessions) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (session.context.workspaceId !== ctx.workspaceId) continue;
+      if (session.context.requestId !== requestId) continue;
+      this.sendTo(ws, { channel: "agents", ...event });
+    }
+  }
+
+  /**
    * Answer ONE client on the MCP channel — the socket whose command this is.
    *
    * The same shape as `sendThreads` and `sendMembers`, for the refusal that most obviously needed
@@ -2977,6 +3339,25 @@ export class WsRelay {
   async broadcastAgents(): Promise<void> {
     await this.perClient(async (ws, ctx) => {
       this.sendTo(ws, { channel: "agents", agents: (await this.opts.listAgents?.(ctx)) ?? [] });
+    });
+  }
+
+  /**
+   * The Agents grid, to every socket in every workspace that has one — rebuilt per recipient.
+   *
+   * `perClient` RATHER THAN `broadcastTo`, like `broadcastAgents` above it and for the same reason:
+   * the payload is a workspace's own derived rows, so there is no one payload that could correctly
+   * go to two workspaces. One built and fanned out is a cross-tenant read wearing a different hat,
+   * which is precisely what `test:channels` enumerates this file to catch.
+   *
+   * A FULL SNAPSHOT ON EVERY MUTATION. §5.5's live grid re-renders the affected card only, which is
+   * a rendering decision the browser makes against a list it has replaced — not a licence for the
+   * server to send half a list.
+   */
+  async broadcastAgentGrid(): Promise<void> {
+    await this.perClient(async (ws, ctx) => {
+      const snapshot = (await this.opts.listAgentGrid?.(ctx)) ?? EMPTY_GRID;
+      this.sendTo(ws, { channel: "agents", type: "grid", ...snapshot });
     });
   }
 }

@@ -218,6 +218,31 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   restoreAgent: "agent:write",
   renameAgent: "agent:write",
 
+  /**
+   * Fork, and restore-to-a-version.
+   *
+   * `agent:write` FOR BOTH, and neither is more than that. A fork creates a new agent out of a
+   * manifest this workspace already owns and resets its MCP grants to zero, so it can reach strictly
+   * less than the agent it came from — there is nothing here that a member allowed to generate could
+   * not already do by generating. A restore publishes a NEW version pointing at an old manifest; it
+   * rewrites no history and moves no pointer backwards, which makes it the same act as applying an
+   * edit and reversible the same way.
+   */
+  forkAgent: "agent:write",
+  restoreAgentVersion: "agent:write",
+
+  /**
+   * The Agents tab's three reads.
+   *
+   * `agent:read`, beside `listAgents` and `loadAgentFiles`, because that is what they are: the grid
+   * is the agent list with its derived tags, the detail is one agent's own record, and the version
+   * read is `loadAgentFiles` for a version other than the current one. A capability of their own
+   * would be a second gate in front of the list the sidebar already shows unguarded.
+   */
+  listAgentGrid: "agent:read",
+  loadAgentDetail: "agent:read",
+  loadAgentVersion: "agent:read",
+
   // build
   planAgent: "agent:write",
   discardPlan: "agent:write",
