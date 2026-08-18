@@ -124,10 +124,45 @@ export interface Db extends Queryable {
    * making it queue would turn a hosted server into a single-writer one.
    */
   transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T>;
+  /**
+   * Run `fn` holding a named lock across every replica, or skip when somebody else holds it.
+   *
+   * WHY THIS IS A SECOND LOCK AND NOT THE MIGRATION RUNNER'S. `migrationTarget().withLock` BLOCKS
+   * until the lock is free, which is right for a migration — every replica has to end up on the new
+   * schema, so a loser waiting its turn and then finding nothing to do is correct. A periodic sweep
+   * is the opposite: three replicas waking on the same minute should produce ONE sweep, not three in
+   * a queue, and a loser that waited would run the identical pass a second later against facts that
+   * have not changed.
+   *
+   * SO IT TRIES AND GIVES UP. `null` means somebody else is doing it, which is a normal outcome and
+   * not a failure — the caller logs nothing and waits for its next tick. Anything else is `fn`'s
+   * own answer.
+   *
+   * ON SQLITE IT ALWAYS RUNS. There is one process by construction on that driver, so there is
+   * nothing to serialise against, and the honest implementation is to call `fn` — the same answer
+   * the migration target's `withLock` gives there and for the same reason.
+   */
+  withAdvisoryLock<T>(key: number, fn: () => Promise<T>): Promise<T | null>;
   /** The narrower surface the migration runner wants: one connection, held, plus a lock. */
   migrationTarget(): MigrationTarget;
   close(): Promise<void>;
 }
+
+/**
+ * The advisory-lock key the Inbox reconciler takes.
+ *
+ * HERE RATHER THAN IN `postgres.ts` BESIDE `MIGRATION_LOCK_KEY`, even though only that driver has
+ * advisory locks. The migration key is chosen and used entirely inside the Postgres driver, so it
+ * belongs there; this one is chosen by a CALLER outside `src/db/`, and putting it in the driver
+ * would mean the reconciler importing a module whose whole purpose is `pg` — which is the import
+ * `test:db-boundary` exists to keep out of the rest of the codebase, in spirit if not in letter.
+ *
+ * A DIFFERENT NUMBER FROM THE MIGRATION KEY, which is the whole reason that constant's own note
+ * says what it says. Advisory locks are one flat namespace across the database: a sweep sharing the
+ * migration key would block behind a deploy applying migrations, and — worse — a deploy would block
+ * behind a sweep. The two have nothing to do with each other and must never wait on each other.
+ */
+export const INBOX_RECONCILE_LOCK_KEY = 8_314_072;
 
 /**
  * SQLite has no boolean type and stores 0/1; Postgres has one and returns true/false. A

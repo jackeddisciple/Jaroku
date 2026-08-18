@@ -134,6 +134,9 @@ import {
 } from "./threadStore.ts";
 import { threadTitle } from "./threadTitle.ts";
 import { InboxStore } from "./inbox/inboxStore.ts";
+import { InboxReconciler, describeReconcile } from "./inbox/reconciler.ts";
+import { inboxFacts, type FactDeps } from "./inbox/facts.ts";
+import { INBOX_RECONCILE_LOCK_KEY } from "./db/db.ts";
 import {
   noteDeployFailed,
   noteEvalFinished,
@@ -1286,6 +1289,63 @@ const sweepRetention = (): void => {
     .catch((err) => console.error("[retention] sweep failed:", (err as Error)?.message ?? err));
 };
 setInterval(sweepRetention, 24 * 3_600_000).unref();
+
+// --- the Inbox reconciler ----------------------------------------------------------------
+//
+// §6.2's second generator, and what makes Law 2 real. Nothing emits "the credential is no longer
+// missing" — it is the absence of a condition, and only something that goes and looks can notice
+// it. Without this pass the board shows items that were fixed weeks ago, which the specification
+// says kills the surface in a week.
+//
+// EVERY MINUTE, AND AT BOOT. Unlike retention, which deletes and is therefore deliberately not run
+// at startup, this only ever writes rows and settles them — so a restart reconciling immediately is
+// the correct behaviour rather than a risk, and it is what makes a board right on the first frame
+// after a deploy rather than up to a minute later. Unref'd, like every other timer in this file.
+//
+// THE FACTS COME FROM SIX SUBSYSTEMS AND THE RECONCILER KNOWS ABOUT NONE OF THEM. Everything below
+// is a read that already existed; the reconciler is handed one function that returns a value.
+const inboxFactDeps: FactDeps = {
+  secretRefs: (ctx) => secretRefs.list(ctx),
+  agents: (ctx) => agentRepo.list(ctx, { includeArchived: true }),
+  deployments: async (ctx) => {
+    const out = new Map<string, { status: string; version: number | null; updated_at: string; ended_at: string | null }>();
+    for (const [slug, d] of await deployStore.currentByAgent(ctx)) {
+      out.set(slug, { status: d.status, version: d.version, updated_at: d.updated_at, ended_at: d.ended_at });
+    }
+    return out;
+  },
+  mcpServers: (ctx) => mcpStore.listServers(ctx),
+  mcpTools: (ctx) => mcpRegistry.allTools(ctx),
+  spend: (ctx, since) => billing.spendByAgent(ctx, since),
+  // The workspace's OWN ceiling, which is the number a refusal was measured against. Null means the
+  // plan's, which the item's predicate reads as "no ceiling of its own to raise".
+  spendCeiling: async (ctx) => (await billing.balance(ctx)).ceiling_usd,
+  invites: (ctx) => bootIdentity.listInvites(ctx),
+  members: (ctx) => bootIdentity.listMembers(ctx),
+  isTeam: async (ctx) => (await bootIdentity.workspaceById(ctx, ctx.workspaceId))?.kind === "team",
+};
+
+const inboxReconciler = new InboxReconciler({
+  inbox: inboxStore,
+  workspaces: (ctx) => bootIdentity.listWorkspaceIds(ctx).then((ids) => ids.map((id) => ({ id }))),
+  factsFor: (ctx) => inboxFacts(inboxFactDeps, ctx),
+  // Bound to the reconciler's own key rather than the migration runner's. Advisory locks are one
+  // flat namespace, and sharing the key would make a deploy applying migrations wait behind a sweep.
+  withLock: (fn) => db.withAdvisoryLock(INBOX_RECONCILE_LOCK_KEY, fn),
+  log: (line) => console.log(line),
+});
+
+const sweepInbox = (): void => {
+  void inboxReconciler
+    .sweep()
+    .then((report) => {
+      const line = describeReconcile(report);
+      if (line) console.log(line);
+    })
+    .catch((err) => console.error("[inbox] sweep failed:", (err as Error)?.message ?? err));
+};
+setInterval(sweepInbox, 60_000).unref();
+sweepInbox();
 
 // THE FILES, AS VERSIONS.
 //

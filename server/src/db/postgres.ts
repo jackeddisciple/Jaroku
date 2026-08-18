@@ -319,6 +319,32 @@ export class PostgresDb implements Db {
    * It blocks rather than fails, so the losers simply wait and then find there is nothing
    * pending, which is exactly what should happen.
    */
+  /**
+   * A named lock, taken without waiting. See `Db.withAdvisoryLock` for why it does not block.
+   *
+   * ONE CONNECTION FOR THE WHOLE OF IT, held explicitly rather than taken from the pool per
+   * statement. A session-level advisory lock belongs to the SESSION that took it, so acquiring it on
+   * one pooled connection and releasing it on whichever came back next would leave the lock held for
+   * the life of a connection nobody is tracking — under PgBouncer, forever.
+   *
+   * RELEASED IN A `finally`, and the connection released after it, so a sweep that throws does not
+   * take the next hour's sweeps down with it.
+   */
+  async withAdvisoryLock<T>(key: number, fn: () => Promise<T>): Promise<T | null> {
+    const client = await this.pool.connect();
+    try {
+      const got = await client.query<{ locked: boolean }>("SELECT pg_try_advisory_lock($1) AS locked", [key]);
+      if (!got.rows[0]?.locked) return null;
+      try {
+        return await fn();
+      } finally {
+        await client.query("SELECT pg_advisory_unlock($1)", [key]);
+      }
+    } finally {
+      client.release();
+    }
+  }
+
   migrationTarget(): MigrationTarget {
     const pool = this.pool;
     let held: PoolClient | null = null;

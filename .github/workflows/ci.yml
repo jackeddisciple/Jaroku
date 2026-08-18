@@ -267,6 +267,13 @@ jobs:
           # nothing, an eval's own failed runs raise no failure card, and the one payload field that
           # grows has a cap on it. Every one of those would look right in a screenshot.
           npm run test:inbox-generators
+          # The sweep, and the four properties §6.2 names: idempotent, constant in the number of
+          # agents, safe against concurrent replicas, and cross-workspace isolated in BOTH
+          # directions. The last is why this suite exists at all — §6.3 calls the reconciler the
+          # highest-risk code in the feature, because it is the one path that legitimately touches
+          # many workspaces, and "a pass for A cannot resolve an item in B" is not a property a
+          # single-tenant test can observe.
+          npm run test:inbox-reconciler
 
       - name: cost, abuse and the data lifecycle
         working-directory: server

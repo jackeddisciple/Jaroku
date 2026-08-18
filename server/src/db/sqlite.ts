@@ -155,6 +155,18 @@ export class SqliteDb implements Db {
    * loser's INSERT fails and its transaction rolls the migration back with it, rather than
    * applying anything twice.
    */
+  /**
+   * Always runs, and that is the correct answer rather than a missing one.
+   *
+   * The lock exists for the hosted case — several stateless replicas waking on the same minute,
+   * where exactly one should sweep. There is no such thing here: SQLite is one process on one
+   * machine by construction, so there is nobody to lose the race to and skipping would mean the
+   * local development path never reconciles at all.
+   */
+  async withAdvisoryLock<T>(_key: number, fn: () => Promise<T>): Promise<T | null> {
+    return fn();
+  }
+
   migrationTarget(): MigrationTarget {
     return {
       dialect: DIALECT,
