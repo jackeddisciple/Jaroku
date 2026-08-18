@@ -26,6 +26,7 @@
     "test:agent-lifecycle": "tsx src/agentLifecycle.test.ts",
     "test:agent-health": "tsx src/agentHealth.test.ts",
     "test:agent-grid": "tsx src/agentGrid.test.ts",
+    "test:agent-adversarial": "tsx src/agentAdversarial.test.ts",
     "test:thread-title": "tsx src/threadTitle.test.ts",
     "test:thread-archive": "tsx src/threadArchive.test.ts",
     "test:rls": "tsx src/db/rls.test.ts",

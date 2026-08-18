@@ -224,6 +224,11 @@ jobs:
           # one agent equals the statement count for forty — an N+1 here is invisible in review and
           # instantly visible in a real workspace.
           npm run test:agent-grid
+          # The adversarial pass. Every block in it corresponds to a defect that was in the shipped
+          # code — a drift badge on a deploy that failed, a fork offered a slug the constraint held,
+          # an archived-only session reading as "not started" — so this is the suite that stops them
+          # coming back rather than the one that found them.
+          npm run test:agent-adversarial
 
       - name: the threads destination
         working-directory: server
