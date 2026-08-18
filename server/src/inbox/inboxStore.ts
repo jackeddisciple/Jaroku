@@ -181,8 +181,18 @@ export class InboxStore {
   async record(ctx: TenantContext, input: RecordInput): Promise<InboxItem> {
     const def = inboxType(input.type);
     const now = input.at ?? nowIso();
-    const delta = Math.max(1, Math.trunc(input.count ?? 1));
     const payload = JSON.stringify(input.payload ?? {});
+
+    // A DERIVED ITEM COUNTS ONE, HOWEVER MANY TIMES IT IS OBSERVED, and the difference is the badge.
+    // `count` means occurrences: forty runs failed, so the card reads `×40`. A derived item is not
+    // an occurrence at all — it is a CONDITION that is either true or not — and the sweep re-observes
+    // it every minute, so incrementing would put `×1440` on a credential that has been missing for a
+    // day. The decision is read off the registry rather than passed by the caller, because "is this
+    // type a thing that happens or a thing that is true" is a fact about the type.
+    const delta = def.origin === "derived" ? 0 : Math.max(1, Math.trunc(input.count ?? 1));
+    // What a RECURRENCE resets to. A derived condition that comes back is one occurrence of it, so
+    // even a zero-increment type starts at one rather than at nothing.
+    const reset = Math.max(1, delta);
 
     await this.q(ctx).run(
       `INSERT INTO inbox_items
@@ -200,9 +210,13 @@ export class InboxStore {
          -- A recurrence is a new occurrence: it counts from one and it ages from now. Comparing the
          -- stored text column against a literal rather than against a bound parameter, so neither
          -- driver has to infer a type for it.
+         --
+         -- THE INCREMENT IS A PARAMETER AND IS ZERO FOR A DERIVED TYPE — see the delta above. It is
+         -- not excluded.count, because the two branches want different numbers: a recurrence
+         -- starts at one, and a re-observation of a condition adds nothing.
          count         = CASE WHEN inbox_items.state = 'resolved'
-                              THEN excluded.count
-                              ELSE inbox_items.count + excluded.count END,
+                              THEN ?
+                              ELSE inbox_items.count + ? END,
          first_seen_at = CASE WHEN inbox_items.state = 'resolved'
                               THEN excluded.first_seen_at
                               ELSE inbox_items.first_seen_at END`,
@@ -215,9 +229,11 @@ export class InboxStore {
         input.subjectId ?? null,
         input.dedupeKey,
         payload,
+        reset,
+        now,
+        now,
+        reset,
         delta,
-        now,
-        now,
       ],
     );
 

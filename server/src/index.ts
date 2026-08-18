@@ -136,6 +136,7 @@ import { threadTitle } from "./threadTitle.ts";
 import { InboxStore } from "./inbox/inboxStore.ts";
 import { InboxReconciler, describeReconcile } from "./inbox/reconciler.ts";
 import { inboxFacts, type FactDeps } from "./inbox/facts.ts";
+import { deriveInboxItems, disablesConfirmGate } from "./inbox/derive.ts";
 import { INBOX_RECONCILE_LOCK_KEY } from "./db/db.ts";
 import {
   noteDeployFailed,
@@ -1323,12 +1324,42 @@ const inboxFactDeps: FactDeps = {
   invites: (ctx) => bootIdentity.listInvites(ctx),
   members: (ctx) => bootIdentity.listMembers(ctx),
   isTeam: async (ctx) => (await bootIdentity.workspaceById(ctx, ctx.workspaceId))?.kind === "team",
+  /**
+   * Which of these agents have turned the confirmation gate off in their own code.
+   *
+   * A READ PER CANDIDATE, AND THE CANDIDATES ARE THE POINT. `facts.ts` only asks about agents that
+   * hold a high-impact grant at all — which in most workspaces is none of them, so this runs zero
+   * times and the "one aggregate pass" §6.2 asks for is intact. In a workspace where somebody has
+   * granted destructive third-party tools to three agents, it is three reads of files this process
+   * can already reach, and knowing whether those three can call them unasked is worth three reads.
+   *
+   * THE FILES ARE THE ONLY SOURCE. v0.2.1 recorded that generated agent code can set the environment
+   * variable that disables the bridge's gate, and no column anywhere records that it did — so the
+   * honest answer comes from reading what the agent will actually run.
+   */
+  gatesDisabled: async (ctx, candidates) => {
+    const off = new Set<string>();
+    for (const candidate of candidates) {
+      try {
+        const { files } = await readAgentFiles(agentFilesDeps, ctx, candidate.slug);
+        if (files.some((f) => disablesConfirmGate(f.content ?? ""))) off.add(candidate.id);
+      } catch (err) {
+        // A FILE THIS PROCESS COULD NOT READ IS NOT EVIDENCE THAT A GATE IS OFF. The fact is used
+        // only to RAISE an item, so failing closed here would mean a card about an agent that is
+        // fine — and this is a card claiming somebody's agent can make destructive calls unasked.
+        console.error(`[inbox] could not read ${candidate.slug} to check its gate:`, (err as Error)?.message ?? err);
+      }
+    }
+    return off;
+  },
 };
 
 const inboxReconciler = new InboxReconciler({
   inbox: inboxStore,
   workspaces: (ctx) => bootIdentity.listWorkspaceIds(ctx).then((ids) => ids.map((id) => ({ id }))),
   factsFor: (ctx) => inboxFacts(inboxFactDeps, ctx),
+  // §6.2's derived half, over the same facts and the same read of the board the settle uses.
+  derive: (ctx, facts, open) => deriveInboxItems(inboxStore, ctx, facts, open),
   // Bound to the reconciler's own key rather than the migration runner's. Advisory locks are one
   // flat namespace, and sharing the key would make a deploy applying migrations wait behind a sweep.
   withLock: (fn) => db.withAdvisoryLock(INBOX_RECONCILE_LOCK_KEY, fn),

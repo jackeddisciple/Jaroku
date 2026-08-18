@@ -35,7 +35,7 @@
 // whose first statement is the trigger, and the two would drift the first time either changed.
 
 import { newRequestId, systemContext, systemContextFor, type TenantContext } from "../db/tenant.ts";
-import type { InboxStore } from "./inboxStore.ts";
+import type { InboxItem, InboxStore } from "./inboxStore.ts";
 import { isResolved, type InboxFacts } from "./registry.ts";
 
 export interface WorkspaceReconcile {
@@ -87,7 +87,7 @@ export interface ReconcilerDeps {
    * Optional, so the loop is testable with nothing behind it — and absent until the derived
    * generators exist.
    */
-  derive?: (ctx: TenantContext, facts: InboxFacts) => Promise<number>;
+  derive?: (ctx: TenantContext, facts: InboxFacts, open: readonly InboxItem[]) => Promise<number>;
   /**
    * Take the cross-replica lock, or answer null because somebody else has it.
    *
@@ -158,9 +158,19 @@ export class InboxReconciler {
    */
   async sweepWorkspace(ctx: TenantContext): Promise<WorkspaceReconcile> {
     const facts = await this.deps.factsFor(ctx);
-    const derived = (await this.deps.derive?.(ctx, facts)) ?? 0;
 
-    const open = await this.deps.inbox.listOpen(ctx);
+    // THE OPEN ROWS ARE READ ONCE AND HANDED TO BOTH HALVES. The derived generators need them for a
+    // reason that is not obvious: several of them maintain a field on a row that ALREADY EXISTS —
+    // `cost_anomaly` records when spend went back to normal, and cannot know that without the row it
+    // is about — so a derive pass that could not see the board would have to read it itself, and the
+    // sweep would list the same rows twice on every tick.
+    let open = await this.deps.inbox.listOpen(ctx);
+    const derived = (await this.deps.derive?.(ctx, facts, open)) ?? 0;
+    // AND RE-READ ONLY IF SOMETHING WAS WRITTEN. What the derived half produced has to be examined by
+    // the settle half in the SAME pass, or a problem that came and went inside one interval leaves a
+    // card nothing ever asked the predicate about. In the ordinary case — a workspace where nothing
+    // changed — this costs nothing at all.
+    if (derived > 0) open = await this.deps.inbox.listOpen(ctx);
     // THE GENERIC LOOP, AND THE WHOLE OF THE SWEEP'S LOGIC. No branch per type, no special case:
     // `isResolved` reads the registry, which is where the trigger that created each of these lives
     // too. Adding a seventeenth item type must not require a line in this file.

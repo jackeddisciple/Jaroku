@@ -274,6 +274,13 @@ jobs:
           # many workspaces, and "a pass for A cannot resolve an item in B" is not a property a
           # single-tenant test can observe.
           npm run test:inbox-reconciler
+          # The derived generators, and the round trip that is the reason the suite exists: a
+          # trigger and its resolve predicate live in two files, so the failure mode is a rule that
+          # raises what the predicate immediately resolves — a card appearing and vanishing on every
+          # sweep — or one nothing can clear. Both look correct in review. It also holds the
+          # exclusion v0.1.9 paid for: an agent with no pricing is out of anomaly detection
+          # entirely, and never a $0 baseline that everything spikes against.
+          npm run test:inbox-derive
 
       - name: cost, abuse and the data lifecycle
         working-directory: server
