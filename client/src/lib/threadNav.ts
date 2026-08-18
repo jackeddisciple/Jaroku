@@ -47,7 +47,7 @@ export function openThread(
   // `keepThread`, because the row that was just clicked IS the session — and `selectAgent`
   // otherwise resolves the agent's most recently active one, which for any agent with two threads
   // is usually not this one.
-  if (thread.agent_id) selectAgent(thread.agent_id, { keepThread: true });
+  if (thread.agent_id) selectAgent(thread.agent_id, { keepThread: true, fromNav: true });
   else useUiStore.getState().closeNav();
 }
 

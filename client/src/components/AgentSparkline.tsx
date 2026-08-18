@@ -53,7 +53,7 @@ const LABEL: Record<AgentRunBar["outcome"], string> = {
  * prevent: this agent's name above another agent's trace.
  */
 function openRun(bar: AgentRunBar): void {
-  selectRun(bar.run_id);
+  selectRun(bar.run_id, { fromNav: true });
   useUiStore.getState().setRightTab("trace");
   if (bar.failed_step_id) {
     const trace = useTraceStore.getState();

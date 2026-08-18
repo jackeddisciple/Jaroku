@@ -228,6 +228,26 @@ interface UiState {
   closeNav: () => void;
 
   /**
+   * Which nav destination the person is IN, whether or not its full-width view is on screen.
+   *
+   * §2'S FOURTH RULE, WHICH `navView` ALONE CANNOT EXPRESS: "The sidebar item stays visually active
+   * the entire time, in both the full-width and the 3-pane state." Picking a row or a card collapses
+   * the full-width view — that is the transition — so a sidebar drawn from `navView` goes dark at
+   * exactly the moment §2 says it must not, and the only way back to the list stops looking like a
+   * way back to anything.
+   *
+   * TWO FIELDS BECAUSE THEY ARE TWO FACTS. `navView` is "is the full-width view showing"; this is
+   * "which section am I in". They move together on the way in and apart on the way down, which is
+   * precisely the state §2 describes and is not derivable from either half.
+   *
+   * IT IS CLEARED BY A SELECTION MADE OUTSIDE A NAV VIEW — an agent row or a run row in the sidebar's
+   * own lists — because that is somebody leaving the section rather than descending into it. See
+   * `lib/selection.ts`, where the two callers are told apart by a flag rather than by guessing.
+   */
+  navSection: NavDestination | null;
+  clearNavSection: () => void;
+
+  /**
    * Agent slugs this person has pinned, in the order they pinned them (§2's PINNED section).
    *
    * In the store as well as in `localStorage` because the sidebar re-renders from it; storage is where
@@ -383,11 +403,15 @@ export const useUiStore = create<UiState>((set) => ({
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
 
   navView: null,
-  openNav: (navView) => set({ navView }),
+  navSection: null,
+  // Both, together: opening a destination is being in it AND seeing its list.
+  openNav: (navView) => set({ navView, navSection: navView }),
   // Called by the sidebar's own selections as well as by picking a row inside a view: selecting IS
   // the transition (§2), so there is nothing here that asks first and nothing that remembers where
-  // it came from.
+  // it came from. `navSection` is deliberately untouched — descending into a row does not leave the
+  // section, and the sidebar item has to keep saying so.
   closeNav: () => set({ navView: null }),
+  clearNavSection: () => set({ navSection: null }),
 
   // Empty at module load, for the reason onboarding progress is: there is no session yet, so there is
   // no workspace to read the pins OF. `loadPinnedAgents` runs once one lands.

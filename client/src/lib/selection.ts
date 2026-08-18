@@ -56,16 +56,29 @@ function latestThreadFor(agentId: string): string | null {
  */
 export function selectAgent(
   agentId: string | null,
-  /**
-   * Leave the thread selection alone, for a caller that has just made one.
-   *
-   * `openThread` picks the row and then follows it to its agent, and without this the agent
-   * would immediately repoint the session at whichever of its threads was touched last — which
-   * for any agent with two threads is usually not the one that was just clicked.
-   */
-  opts?: { keepThread?: boolean },
+  opts?: {
+    /**
+     * Leave the thread selection alone, for a caller that has just made one.
+     *
+     * `openThread` picks the row and then follows it to its agent, and without this the agent
+     * would immediately repoint the session at whichever of its threads was touched last — which
+     * for any agent with two threads is usually not the one that was just clicked.
+     */
+    keepThread?: boolean;
+    /**
+     * This selection was made INSIDE a nav view, by picking a row or a card in it.
+     *
+     * §2'S FOURTH RULE IS WHY THIS FLAG EXISTS. Descending from a list into one of its rows keeps
+     * you in that section — the sidebar item stays active, and clicking it is the way back — while
+     * picking an agent out of the sidebar's own list is leaving the section for something else.
+     * Both paths land here, they mean opposite things for the sidebar, and no amount of looking at
+     * the store afterwards can tell them apart.
+     */
+    fromNav?: boolean;
+  },
 ): void {
   useUiStore.getState().closeNav();
+  if (!opts?.fromNav) useUiStore.getState().clearNavSection();
   const build = useBuildStore.getState();
   if (build.activeAgentId === agentId) return;
   build.selectAgent(agentId);
@@ -85,9 +98,15 @@ export function selectAgent(
   trace.clearRunSelection();
 }
 
-/** Select a run, following it to the agent that made it — and back out of a full-screen view. */
-export function selectRun(runId: string): void {
+/**
+ * Select a run, following it to the agent that made it — and back out of a full-screen view.
+ *
+ * `fromNav` for the same reason `selectAgent` takes it: §5.5's sparkline opens a run from INSIDE the
+ * Agents surface, and that is descending rather than leaving.
+ */
+export function selectRun(runId: string, opts?: { fromNav?: boolean }): void {
   useUiStore.getState().closeNav();
+  if (!opts?.fromNav) useUiStore.getState().clearNavSection();
   const trace = useTraceStore.getState();
   trace.selectRun(runId);
 

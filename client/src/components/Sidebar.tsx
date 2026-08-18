@@ -346,14 +346,22 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
  * "current" in one column would make the two compete.
  */
 function NavButtons() {
-  const navView = useUiStore((s) => s.navView);
+  /**
+   * `navSection`, NOT `navView` — §2's fourth rule.
+   *
+   * "The sidebar item stays visually active the entire time, in both the full-width and the 3-pane
+   * state." Picking a row or a card collapses the full-width view, which is the transition, so an
+   * item drawn from `navView` went dark at exactly the moment the spec says it must not — and the
+   * only way back to the list stopped looking like a way back to anything.
+   */
+  const navSection = useUiStore((s) => s.navSection);
   const openNav = useUiStore((s) => s.openNav);
   const needsYou = useThreadStore((s) => s.counts.needs_you);
 
   return (
     <div className="shrink-0 px-3 pt-3">
       {NAV_DESTINATIONS.map(({ id, label, icon: Icon }) => {
-        const active = navView === id;
+        const active = navSection === id;
         return (
           <button
             key={id}

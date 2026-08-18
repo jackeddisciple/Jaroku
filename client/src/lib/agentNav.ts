@@ -41,7 +41,7 @@ export function openAgentDetail(slug: string): void {
   // The right pane's Agent tab is what §6's five tabs live in, so opening a card puts the panel
   // there. Somebody who then wants the trace clicks Trace; nothing is taken away.
   useUiStore.getState().setRightTab("agent");
-  selectAgent(slug);
+  selectAgent(slug, { fromNav: true });
 }
 
 /**
@@ -58,7 +58,7 @@ export function openAgentDetail(slug: string): void {
 export function startAgentThread(slug: string): void {
   useAgentGridStore.getState().closeDetail();
   sendCreateThread(slug);
-  selectAgent(slug);
+  selectAgent(slug, { fromNav: true });
   useUiStore.getState().focusChat();
 }
 
