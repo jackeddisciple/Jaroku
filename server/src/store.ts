@@ -451,9 +451,184 @@ export class TraceStore {
     return Number(row?.n ?? 0);
   }
 
+  /**
+   * Everything the Agents grid reads out of `runs`, for every agent in the workspace, in two
+   * statements that do not grow with the number of agents.
+   *
+   * TWO RATHER THAN FORTY, WHICH IS THE POINT (§7.2). The obvious version of this is a per-agent
+   * count and a per-agent "last twenty" — and at forty agents that is eighty round trips on the path
+   * a socket is waiting on, which is the N+1 the specification says will be instantly visible. Both
+   * of these are GROUP BY / PARTITION BY over the same workspace-bounded scan `runs_ws_started`
+   * already provides, so the cost is a function of how many runs a workspace has, not how many
+   * agents it has.
+   *
+   * NO NEW INDEX BEHIND THEM, deliberately. `migrate:check` refuses an unqualified CREATE INDEX on
+   * `runs` — building one takes a write lock for the whole build on the hottest write path in the
+   * system, and a migration file cannot use CONCURRENTLY because the runner puts each file in one
+   * transaction. `(workspace_id, started_at DESC)` bounds both scans to one workspace, which is the
+   * same shape `spendByAgent` has always had.
+   *
+   * KEYED BY SLUG, because `runs.agent_id` is the slug: it predates migration 008 and still names the
+   * directory a run's subprocess works in. The caller joins it to the uuid, which is where the two
+   * names for an agent are already reconciled.
+   *
+   * `started_at` IS ISO-8601 TEXT and is compared as text, which is correct here and is worth saying
+   * because migration 044 had to cast it. Every value this system writes is UTC `Z`-suffixed, so
+   * lexicographic order is chronological order — and unlike 044 there is no COALESCE with a real
+   * timestamp for Postgres to refuse to unify.
+   */
+  async agentRunFacts(
+    ctx: TenantContext,
+    /** The start of the 7-day window, ISO-8601. Everything at or after it counts. */
+    since: string,
+    /** How many recent runs per agent the sparkline draws. See agentHealth.OUTCOME_WINDOW. */
+    window: number,
+  ): Promise<Map<string, AgentRunFacts>> {
+    const out = new Map<string, AgentRunFacts>();
+    const at = (slug: string): AgentRunFacts => {
+      const existing = out.get(slug);
+      if (existing) return existing;
+      const fresh: AgentRunFacts = {
+        runs7d: 0, errors7d: 0, liveRuns: 0, pausedRuns: 0,
+        lastRunAt: null, lastError: null, recent: [],
+      };
+      out.set(slug, fresh);
+      return fresh;
+    };
+
+    // The counts. `runs7d` and `errors7d` are windowed; `liveRuns`, `pausedRuns` and `lastRunAt` are
+    // not, because "is something running right now" and "when did this last do anything" are not
+    // questions about the last seven days — an agent whose only run was a fortnight ago is Quiet and
+    // still has a last-active date, and one paused for a fortnight is still paused.
+    const counts = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT agent_id AS agent_id,
+              COUNT(CASE WHEN started_at >= ? THEN 1 END) AS runs_7d,
+              COUNT(CASE WHEN started_at >= ? AND status = 'error' THEN 1 END) AS errors_7d,
+              COUNT(CASE WHEN status = 'running' THEN 1 END) AS live_runs,
+              COUNT(CASE WHEN status = 'paused'  THEN 1 END) AS paused_runs,
+              MAX(started_at) AS last_run_at
+         FROM runs
+        WHERE workspace_id = ?
+        GROUP BY agent_id`,
+      [since, since, ctx.workspaceId],
+    );
+    for (const row of counts) {
+      const facts = at(String(row["agent_id"]));
+      facts.runs7d = asInt(row["runs_7d"]);
+      facts.errors7d = asInt(row["errors_7d"]);
+      facts.liveRuns = asInt(row["live_runs"]);
+      facts.pausedRuns = asInt(row["paused_runs"]);
+      facts.lastRunAt = (row["last_run_at"] as string | null) ?? null;
+    }
+
+    // The last N per agent, as ONE window function rather than one query per agent. `node:sqlite` and
+    // Postgres both support `ROW_NUMBER() OVER (PARTITION BY …)`, and this is the read that would
+    // otherwise be the N+1 — §5.5's sparkline is on every card in the grid.
+    //
+    // THE OUTER SELECT NAMES ITS COLUMNS rather than `SELECT *`, for the reason RUN_COLUMNS exists:
+    // `workspace_id` is a storage column and the one documented exception to the frozen event
+    // schema, and a `*` here would put it into a payload that is broadcast.
+    const recent = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT id, agent_id, status, started_at, ended_at, error FROM (
+         SELECT id, agent_id, status, started_at, ended_at, error,
+                ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY started_at DESC, id DESC) AS rn
+           FROM runs
+          WHERE workspace_id = ?
+       ) ranked
+        WHERE rn <= ?
+        ORDER BY agent_id ASC, started_at ASC, id ASC`,
+      [ctx.workspaceId, window],
+    );
+    for (const row of recent) {
+      const facts = at(String(row["agent_id"]));
+      const status = String(row["status"]);
+      // OLDEST FIRST, because that is the order a sparkline is read in and the order `healthOf`
+      // asks for — the ORDER BY above ascends deliberately, after the window has already taken the
+      // newest N descending. Sorting the whole table ascending and taking the first N would take
+      // the OLDEST twenty, which is the opposite list.
+      facts.recent.push({
+        runId: String(row["id"]),
+        outcome:
+          status === "error" ? "error"
+            : status === "running" ? "running"
+            : status === "paused" ? "paused"
+            : "ok",
+        startedAt: String(row["started_at"]),
+        endedAt: (row["ended_at"] as string | null) ?? null,
+      });
+      // The newest error in the window, which is what "last error" means on a card. Assigned as the
+      // ascending scan goes, so the last one written is the most recent.
+      if (status === "error" && row["error"]) facts.lastError = String(row["error"]);
+    }
+
+    return out;
+  }
+
+  /**
+   * The first failing step of each of these runs — §5.5's "a failed bar opens on the failing step".
+   *
+   * THE FIRST, NOT THE LAST. A failure usually cascades: a tool call raises, the router sends the
+   * graph down an error branch, and the node after that fails for want of what the first one did not
+   * produce. What somebody clicking a red bar wants is where it went wrong, which is the first one;
+   * the ones after it are consequences and are visible in the trace beside it anyway.
+   *
+   * ONE QUERY FOR EVERY RED BAR IN THE GRID, batched. The grid can carry twenty bars per card, so a
+   * per-bar lookup would be the N+1 at its worst — and it is asked only for the runs that failed,
+   * which in a healthy workspace is none.
+   */
+  async firstFailedStepFor(ctx: TenantContext, runIds: readonly string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (runIds.length === 0) return out;
+    for (const chunk of batches([...new Set(runIds)], 200)) {
+      const placeholders = chunk.map(() => "?").join(", ");
+      const rows = await this.q(ctx).all<Record<string, unknown>>(
+        `SELECT run_id, id FROM (
+           SELECT run_id, id, ROW_NUMBER() OVER (PARTITION BY run_id ORDER BY seq ASC) AS rn
+             FROM steps
+            WHERE workspace_id = ? AND error IS NOT NULL AND run_id IN (${placeholders})
+         ) ranked
+          WHERE rn = 1`,
+        [ctx.workspaceId, ...chunk],
+      );
+      for (const row of rows) out.set(String(row["run_id"]), String(row["id"]));
+    }
+    return out;
+  }
+
+  /** How many runs one agent has started since a moment. The denominator for a cost per run. */
+  async runCountSince(ctx: TenantContext, agentSlug: string, since: string): Promise<number> {
+    const row = await this.q(ctx).get<{ n: unknown }>(
+      `SELECT COUNT(*) AS n FROM runs WHERE workspace_id = ? AND agent_id = ? AND started_at >= ?`,
+      [ctx.workspaceId, agentSlug, since],
+    );
+    return asInt(row?.n, 0);
+  }
+
   async close(): Promise<void> {
     await this.db.close();
   }
+}
+
+/** One recent run, as the Agents card's sparkline draws it and clicks through to it (§5.5). */
+export interface RecentRun {
+  runId: string;
+  outcome: "ok" | "error" | "running" | "paused";
+  startedAt: string;
+  /** Null while a run is still going, which is what makes its duration unknown rather than zero. */
+  endedAt: string | null;
+}
+
+/** What one agent's runs say about it. See `TraceStore.agentRunFacts`. */
+export interface AgentRunFacts {
+  runs7d: number;
+  errors7d: number;
+  liveRuns: number;
+  pausedRuns: number;
+  lastRunAt: string | null;
+  /** The message of the most recent failure in the window, or null. */
+  lastError: string | null;
+  /** The last ~20, OLDEST FIRST — the order the sparkline is drawn and read in. */
+  recent: RecentRun[];
 }
 
 /** Split a list into chunks a parameter list can carry on both drivers. */
