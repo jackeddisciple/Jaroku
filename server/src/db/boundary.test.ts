@@ -87,6 +87,11 @@ const SCOPED_MODULES = [
   "evalStore.ts",
   "mcpStore.ts",
   "deployStore.ts",
+  // The Inbox's two tables. The rule matters more here than almost anywhere: §6.3 calls the
+  // reconciler the highest-risk code in the feature, because it is the one path that legitimately
+  // touches many workspaces, and the only thing standing between "loop the workspaces and scope each
+  // pass" and "run once as the server" is that no method on this class can be called without a scope.
+  "inbox/inboxStore.ts",
   "db/repositories/agents.ts",
   "db/repositories/secretRefs.ts",
   "db/repositories/secretUsages.ts",

@@ -40,6 +40,8 @@ import { TraceStore } from "./store.ts";
 import { EvalStore } from "./evalStore.ts";
 import { McpStore } from "./mcpStore.ts";
 import { DeployStore } from "./deployStore.ts";
+import { InboxStore } from "./inbox/inboxStore.ts";
+import { dedupeKey } from "./inbox/registry.ts";
 import { DbTicketStore } from "./db/repositories/tickets.ts";
 import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
 import { SecretUsageRepository } from "./db/repositories/secretUsages.ts";
@@ -83,6 +85,9 @@ interface Fixture {
   serverId: string;
   deploymentId: string;
   agentSlug: string;
+  /** One open Inbox item, and the person whose dismissal of it is theirs alone. */
+  inboxItemId: string;
+  userId: string;
 }
 
 async function populate(db: Db, label: string): Promise<Fixture> {
@@ -149,9 +154,31 @@ async function populate(db: Db, label: string): Promise<Fixture> {
   // The same slug in both, which migration 008 is what makes possible.
   await agents.upsertFromDisk(ctx, { slug: "support_bot", display_name: `support (${label})` });
 
+  // ONE INBOX ITEM AND ONE PERSON WHO HAS DISMISSED IT. Both halves are needed: §6.3 asks for a test
+  // that an item generated for A is invisible to B, and the per-user table has no `workspace_id` of
+  // its own — it is scoped entirely by the join in `setUserState`, which is the kind of enforcement
+  // that is invisible in a single-tenant test and is the whole of the wall on SQLite.
+  //
+  // The same dedupe key in both workspaces, on purpose, for the reason the MCP server shares an id:
+  // `credential_missing:...:STRIPE_KEY` is what two tenants missing the same credential produce, and
+  // the constraint is scoped so both may hold it.
+  const inbox = new InboxStore(db);
+  const member = await identity.provisionUser(sys, {
+    externalId: `inbox-${label}-${randomUUID().slice(0, 8)}`,
+    email: `inbox-${label}-${randomUUID().slice(0, 8)}@example.com`,
+  });
+  const item = await inbox.record(ctx, {
+    type: "credential_missing",
+    subjectId: null,
+    dedupeKey: dedupeKey("credential_missing", "shared-agent", "STRIPE_KEY"),
+    payload: { credential: "STRIPE_KEY", agent_name: `agent (${label})` },
+  });
+  await inbox.setUserState(ctx, item.id, member.user.id, { dismissed_at: new Date().toISOString() });
+
   return {
     ctx, runId, datasetId: dataset.id, exampleId: example.id, evalId: evalRun.id,
     jobId: job!.id, serverId: "mock", deploymentId: deployment.id, agentSlug: "support_bot",
+    inboxItemId: item.id, userId: member.user.id,
   };
 }
 
@@ -165,6 +192,7 @@ async function suite(label: string, db: Db): Promise<void> {
   const mcp = new McpStore(db);
   const deploys = new DeployStore(db);
   const agents = new AgentRepository(db);
+  const inbox = new InboxStore(db);
 
   // --- enumerate ---------------------------------------------------------------
 
@@ -180,9 +208,19 @@ async function suite(label: string, db: Db): Promise<void> {
     "agents list none of B's, even sharing a slug",
   );
 
+  check(
+    (await inbox.listOpen(A.ctx)).every((i) => i.id !== B.inboxItemId),
+    "the Inbox lists none of B's items, even sharing a dedupe key",
+  );
+  check(
+    (await inbox.listForUser(A.ctx, A.userId)).every((i) => i.id !== B.inboxItemId),
+    "...and neither does the board one of A's people is shown",
+  );
+
   // Both really do have their own, or the assertions above pass on an empty database.
   check((await trace.listRuns(A.ctx)).some((r) => r.id === A.runId), "...while A sees its own run");
   check((await agents.list(A.ctx)).some((a) => a.display_name === "support (a)"), "...and its own agent");
+  check((await inbox.listOpen(A.ctx)).some((i) => i.id === A.inboxItemId), "...and its own Inbox item");
 
   // --- read by id --------------------------------------------------------------
 
@@ -207,6 +245,16 @@ async function suite(label: string, db: Db): Promise<void> {
   check(myTool?.description === "for a", `...and my tool of that name (${myTool?.description})`);
   const myAgent = await agents.bySlug(A.ctx, "support_bot");
   check(myAgent?.display_name === "support (a)", `the same agent slug resolves to MY agent`);
+  check((await inbox.get(A.ctx, B.inboxItemId)) === undefined, "an Inbox item id from B resolves to nothing");
+  // The same shared-key case, for the read every generator addresses a row by. A key is composed
+  // from a type and a subject, so two tenants missing the same credential produce the same string —
+  // and the constraint that makes Law 3 true is scoped, which is what lets both of them hold it.
+  const myItem = await inbox.byKey(A.ctx, dedupeKey("credential_missing", "shared-agent", "STRIPE_KEY"));
+  check(myItem?.id === A.inboxItemId, "the same dedupe key resolves to MY item");
+  check(
+    (await inbox.userState(A.ctx, B.inboxItemId, B.userId)).dismissed_at === null,
+    "B's person's dismissal of B's item is not readable from A, even naming both ids",
+  );
 
   // --- mutate ------------------------------------------------------------------
 
@@ -268,6 +316,34 @@ async function suite(label: string, db: Db): Promise<void> {
     (await agents.bySlug(B.ctx, "support_bot"))?.display_name === "support (b)",
     "nor rewriting B's agent of the same slug",
   );
+
+  // §6.3'S SECOND SENTENCE, IN BOTH DIRECTIONS. "A reconciler pass for A cannot resolve an item in
+  // B" is the one that matters most in this feature: the sweep is the only path that legitimately
+  // walks many workspaces, and the failure it must not have is a settle that reached across.
+  await inbox.resolve(A.ctx, [B.inboxItemId]);
+  check((await inbox.get(B.ctx, B.inboxItemId))?.state === "open", "a sweep in A cannot resolve an item in B");
+
+  await inbox.record(A.ctx, {
+    type: "credential_missing",
+    subjectId: null,
+    dedupeKey: dedupeKey("credential_missing", "shared-agent", "STRIPE_KEY"),
+    payload: { credential: "STRIPE_KEY", agent_name: "hijacked" },
+  });
+  check(
+    (await inbox.byKey(B.ctx, dedupeKey("credential_missing", "shared-agent", "STRIPE_KEY")))?.payload["agent_name"] ===
+      "agent (b)",
+    "nor does observing the same problem in A rewrite B's row of the same key",
+  );
+
+  await inbox.setUserState(A.ctx, B.inboxItemId, B.userId, { snoozed_until: new Date().toISOString() });
+  check(
+    (await inbox.userState(B.ctx, B.inboxItemId, B.userId)).snoozed_until === null,
+    "nor can A snooze an item in B on behalf of one of B's people",
+  );
+
+  const reopened = await inbox.reopen(A.ctx, [B.inboxItemId]);
+  check(reopened === 0, "nor undo a resolution in B");
+  check((await inbox.resolvedSince(A.ctx, "1970-01-01T00:00:00.000Z")) === 0, "and A's cleared count counts none of B's");
 
   // --- a forged workspace in a payload -----------------------------------------
 
@@ -415,6 +491,13 @@ const SCOPED_API: Record<string, string[]> = {
     // Session 9 — how hard this workspace gates its credentials. Reading another tenant's would
     // say how well defended they are; writing one would lower a defence somebody else chose.
     "secretsGate", "setSecretsGate",
+  ],
+  // The Inbox's two tables. `newId` is deliberately absent: it is a static uuid generator that
+  // touches nothing, which is why it is static — a method taking a context to mint a random string
+  // would be a signature claiming a scope it has no use for.
+  InboxStore: [
+    "record", "listOpen", "listForUser", "get", "byKey", "resolve", "reopen",
+    "setUserState", "userState", "resolvedSince",
   ],
   // `sweep` is deliberately absent: it deletes EXPIRED rows across every workspace, which is
   // maintenance rather than a scoped operation, and asserting it "cannot reach another
