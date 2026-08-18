@@ -50,6 +50,7 @@ function agent(over: Partial<AgentInboxFacts> = {}): AgentInboxFacts {
     requiredEnv: ["STRIPE_KEY"],
     currentVersion: 9,
     deployedVersion: null,
+    lastDeploy: null,
     liveDeployAt: null,
     highImpactTools: [],
     confirmGateEnabled: true,

@@ -1339,9 +1339,15 @@ const inboxFactDeps: FactDeps = {
   secretRefs: (ctx) => secretRefs.list(ctx),
   agents: (ctx) => agentRepo.list(ctx, { includeArchived: true }),
   deployments: async (ctx) => {
-    const out = new Map<string, { status: string; version: number | null; updated_at: string; ended_at: string | null }>();
+    const out = new Map<string, Awaited<ReturnType<FactDeps["deployments"]>> extends ReadonlyMap<string, infer V> ? V : never>();
     for (const [slug, d] of await deployStore.currentByAgent(ctx)) {
-      out.set(slug, { status: d.status, version: d.version, updated_at: d.updated_at, ended_at: d.ended_at });
+      out.set(slug, {
+        status: d.status, version: d.version, updated_at: d.updated_at, ended_at: d.ended_at,
+        // Names only — `env_keys` is what the store holds, and there is no column beside it that
+        // could carry a value. It is here so §4.5's inline redeploy can repeat the configuration
+        // rather than invent one.
+        provider: d.provider, model: d.model, env_keys: d.env_keys,
+      });
     }
     return out;
   },

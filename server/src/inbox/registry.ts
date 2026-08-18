@@ -211,6 +211,14 @@ export interface AgentInboxFacts {
   currentVersion: number;
   /** The version a LIVE deployment is serving, or null — see `driftOf` for why the three nulls. */
   deployedVersion: number | null;
+  /**
+   * How the last deploy of this agent was configured, so a card can repeat it. Names only.
+   *
+   * FROM THE LAST DEPLOY WHATEVER BECAME OF IT, not only from a live one: `retry_deploy` sits on a
+   * card about a deploy that FAILED, and the configuration it failed with is exactly what a retry
+   * should use.
+   */
+  lastDeploy: { provider: string; model: string; envKeys: readonly string[] } | null;
   /** When the newest LIVE deployment of this agent landed, ISO. Null when nothing is serving. */
   liveDeployAt: string | null;
   /** `server/tool` refs this agent holds that the registry classifies as high impact. */

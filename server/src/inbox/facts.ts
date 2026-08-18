@@ -53,7 +53,30 @@ export interface FactDeps {
   >;
   /** The most recent deployment per agent SLUG, whatever became of it. */
   deployments: (ctx: TenantContext) => Promise<
-    ReadonlyMap<string, { status: string; version: number | null; updated_at: string; ended_at: string | null }>
+    ReadonlyMap<
+      string,
+      {
+        status: string;
+        version: number | null;
+        updated_at: string;
+        ended_at: string | null;
+        /**
+         * What the last deploy of this agent used.
+         *
+         * HERE SO THE DRIFT CARD CAN CARRY IT, which is what makes §4.5's inline redeploy possible
+         * rather than a navigation. "Redeploy" honestly means "put the current version out the way
+         * this agent was already put out", and the only place that answer exists is the deployment
+         * row — a card that guessed a provider would be a second, weaker way to put something on the
+         * internet.
+         *
+         * NAMES ONLY. `env_keys` is the list of variable NAMES the host was handed, and there is no
+         * column on `deployments` that could hold a value.
+         */
+        provider: string;
+        model: string;
+        env_keys: readonly string[];
+      }
+    >
   >;
   /** Every MCP server this workspace has connected. */
   mcpServers: (ctx: TenantContext) => Promise<
@@ -158,6 +181,12 @@ export async function inboxFacts(deps: FactDeps, ctx: TenantContext, now: number
       // `updated_at` covers one still reporting. A failed deploy's card is resolved by a LATER
       // success, so this timestamp is the comparison and a wrong one would resolve it early.
       liveDeployAt: live ? (live.ended_at ?? live.updated_at) : null,
+      // FROM THE LAST DEPLOY WHATEVER BECAME OF IT, not only from a live one: `retry_deploy` is on a
+      // card about a deploy that FAILED, and the configuration it failed with is exactly what a
+      // retry should use.
+      lastDeploy: deployment
+        ? { provider: deployment.provider, model: deployment.model, envKeys: deployment.env_keys }
+        : null,
       highImpactTools,
       // Filled in below for the agents that could possibly qualify. See `gatesDisabled`.
       confirmGateEnabled: true,

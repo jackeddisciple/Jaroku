@@ -148,7 +148,18 @@ export async function noteTraceOpened(
 export async function noteDeployFailed(
   deps: GeneratorDeps,
   ctx: TenantContext,
-  input: { deploymentId: string; agentUuid: string; agentName: string; error?: string | null },
+  input: {
+    deploymentId: string;
+    agentUuid: string;
+    /** The slug, because every agent-addressed command on this socket takes one. */
+    agentSlug?: string;
+    agentName: string;
+    error?: string | null;
+    /** What the failed attempt was configured with, so §4.5's retry can repeat it. Names only. */
+    provider?: string;
+    model?: string;
+    envKeys?: readonly string[];
+  },
 ): Promise<InboxItem> {
   const item = await deps.inbox.record(ctx, {
     type: "deploy_failed",
@@ -156,7 +167,11 @@ export async function noteDeployFailed(
     dedupeKey: dedupeKey("deploy_failed", input.deploymentId),
     payload: {
       agent_uuid: input.agentUuid,
+      agent_slug: input.agentSlug ?? null,
       agent_name: input.agentName,
+      provider: input.provider ?? null,
+      model: input.model ?? null,
+      env_keys: input.envKeys ? [...input.envKeys] : [],
       // A build log's own error text, which is third-party output on its way into a payload every
       // socket in the workspace receives. It goes through the bounding and redaction §6.5 requires
       // before it lands — see `payload.ts`.

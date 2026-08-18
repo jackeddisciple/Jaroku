@@ -158,10 +158,14 @@ function Column({
   severity,
   items,
   now,
+  expandedId,
+  onExpand,
 }: {
   severity: InboxSeverity;
   items: InboxItemView[];
   now: number;
+  expandedId: string | null;
+  onExpand: (id: string | null) => void;
 }) {
   return (
     <div className="flex min-w-0 flex-1 flex-col">
@@ -175,7 +179,17 @@ function Column({
           // §5.3: per-column empties get a quiet line of their own, and each says its own thing.
           <div className="px-1 py-3 text-[11px] text-faint">{COLUMN_EMPTY[severity]}</div>
         ) : (
-          items.map((item) => <InboxCard key={item.id} item={item} now={now} />)
+          items.map((item) => (
+            <InboxCard
+              key={item.id}
+              item={item}
+              now={now}
+              expanded={expandedId === item.id}
+              // §4.5: clicking a card expands it IN PLACE, and clicking it again closes it. It does
+              // not navigate — navigation is what the actions are for, and it is the fallback.
+              onClick={() => onExpand(expandedId === item.id ? null : item.id)}
+            />
+          ))
         )}
       </div>
     </div>
@@ -196,6 +210,14 @@ export function InboxView() {
 
   const [filter, setFilter] = useState<InboxFilter>("all");
   const [agentId, setAgentId] = useState<string | null>(null);
+  /**
+   * Which card is open (§4.5). ONE AT A TIME, deliberately.
+   *
+   * Two expanded cards is a board that has stopped being scannable, which is the one thing this
+   * surface cannot afford to lose — and a card whose evidence is worth reading is a card somebody is
+   * dealing with now rather than one of three they are comparing.
+   */
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   /**
    * The clock the age bars are drawn against.
@@ -286,13 +308,28 @@ export function InboxView() {
                   Nothing under {INBOX_FILTER_LABEL[filter]}
                 </div>
               ) : (
-                visible.map((item) => <InboxCard key={item.id} item={item} now={now} />)
+                visible.map((item) => (
+                  <InboxCard
+                    key={item.id}
+                    item={item}
+                    now={now}
+                    expanded={expandedId === item.id}
+                    onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                  />
+                ))
               )}
             </div>
           ) : (
             <div className="flex h-full gap-4">
               {INBOX_COLUMNS.map((severity) => (
-                <Column key={severity} severity={severity} items={columnItems(visible, severity)} now={now} />
+                <Column
+                  key={severity}
+                  severity={severity}
+                  items={columnItems(visible, severity)}
+                  now={now}
+                  expandedId={expandedId}
+                  onExpand={setExpandedId}
+                />
               ))}
             </div>
           )}

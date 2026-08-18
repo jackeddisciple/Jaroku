@@ -56,6 +56,7 @@ function agent(over: Partial<AgentInboxFacts> = {}): AgentInboxFacts {
     requiredEnv: [],
     currentVersion: 9,
     deployedVersion: null,
+    lastDeploy: null,
     liveDeployAt: null,
     highImpactTools: [],
     confirmGateEnabled: true,

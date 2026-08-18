@@ -24,6 +24,8 @@ import { ELEVATION, ICON, MOTION, RADIUS, SURFACE, TEXT } from "../lib/tokens.ts
 import { ageFraction } from "../lib/inboxBoard.ts";
 import { relTime } from "../lib/format.ts";
 import { INBOX_ICON } from "./inboxIcons.tsx";
+import { InboxCardActions } from "./InboxCardActions.tsx";
+import { InboxEvidence } from "./InboxEvidence.tsx";
 import { Truncate } from "./Truncate.tsx";
 import type { InboxItemView, InboxSeverity } from "../types.ts";
 
@@ -114,6 +116,7 @@ export function InboxCard({
   now,
   leaving = false,
   selected = false,
+  expanded = false,
   children,
   onClick,
 }: {
@@ -128,9 +131,17 @@ export function InboxCard({
    * movement is.
    */
   leaving?: boolean;
-  /** Where the keyboard is. Not the same as which card is expanded — see §5.5. */
+  /** Where the keyboard is. Not the same as which card is expanded — see `expanded`. */
   selected?: boolean;
-  /** The expanded region (§4.5), when this card is open. */
+  /**
+   * §4.5: clicking a card expands it IN PLACE. It does not navigate.
+   *
+   * WHICH IS NOT THE SAME AS BEING SELECTED. `selected` is where the keyboard is and moves with J/K;
+   * this is what somebody opened. Two different questions, two different marks — and conflating them
+   * would mean moving the cursor opened four cards on the way past.
+   */
+  expanded?: boolean;
+  /** Anything the board wants under the card — the drag affordance, a per-card notice. */
   children?: React.ReactNode;
   onClick?: () => void;
 }) {
@@ -184,9 +195,16 @@ export function InboxCard({
         )}
       </div>
 
+      {/* §4.5: THE EXPANDED STATE CARRIES THE EVIDENCE — a trace snippet, a diff stat, the last lines
+          of a build log — and, where the fix is possible without leaving, the form itself. A blocking
+          card shows its evidence without being expanded, which is what "large" actually buys. */}
+      {(expanded || item.severity === "blocking") && <InboxEvidence item={item} />}
+
       {children}
 
       <AgeBar item={item} now={now} />
+
+      <InboxCardActions item={item} expanded={expanded} />
     </div>
   );
 }
