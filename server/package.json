@@ -178,7 +178,8 @@
     "test:inbox-store": "tsx src/inbox/inboxStore.test.ts",
     "test:inbox-generators": "tsx src/inbox/generators.test.ts",
     "test:inbox-reconciler": "tsx src/inbox/reconciler.test.ts",
-    "test:inbox-derive": "tsx src/inbox/derive.test.ts"
+    "test:inbox-derive": "tsx src/inbox/derive.test.ts",
+    "test:inbox-snapshot": "tsx src/inbox/snapshot.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",

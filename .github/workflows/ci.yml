@@ -281,6 +281,12 @@ jobs:
           # exclusion v0.1.9 paid for: an agent with no pricing is out of anomaly detection
           # entirely, and never a $0 baseline that everything spikes against.
           npm run test:inbox-derive
+          # §3's three verbs, whose whole point is that they are three. Collapsing any two is the
+          # failure the specification spends a section preventing: a dismissal that resolved would
+          # clear a teammate's board, and a snooze that vanished would be a slower dismissal. It
+          # also holds the badge rule, which the specification asks nobody to "fix": blocking plus
+          # proposals only, because a badge that never reaches zero is one people learn to ignore.
+          npm run test:inbox-snapshot
 
       - name: cost, abuse and the data lifecycle
         working-directory: server
