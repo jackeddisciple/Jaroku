@@ -19,6 +19,7 @@
 // looks empty in the devtools panel somebody happens to open, and the field nobody looked at
 // still holds the last tenant's data.
 
+import { useAgentGridStore } from "./agentGridStore.ts";
 import { useAuditStore } from "./auditStore.ts";
 import { useBillingStore } from "./billingStore.ts";
 import { useBuildStore } from "./buildStore.ts";
@@ -59,6 +60,12 @@ interface Resettable {
  *   onboarding and then switched workspace would be sent back to the welcome screen.
  */
 export const WORKSPACE_STORES: Record<string, Resettable> = {
+  // The Agents grid, and whichever agent record is open in the detail view. Every card carries the
+  // workspace's own agent names, the last error one of its runs produced, and — most of all — the
+  // NAMES of the credentials each agent is missing. Held across a switch it would show one tenant's
+  // agents under another tenant's name, and the `+ New thread` button on each card would offer to
+  // start work against an agent the new workspace cannot see.
+  agentGridStore: useAgentGridStore as unknown as Resettable,
   // Who revealed which credential, who overrode a secret-scan refusal, who removed whom. The most
   // person-identifying list in the client after the member list, and for the same reason it is here:
   // held across a switch it would show one workspace's decisions under another workspace's name.

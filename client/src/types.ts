@@ -938,6 +938,159 @@ export interface ThreadItemView {
   created_at: string;
 }
 
+// --- the Agents tab ------------------------------------------------------------------------
+//
+// Hand-mirrored from `server/src/wsRelay.ts`, like every other cross-boundary type in this file. The
+// duplication is deliberate: there is no shared package, and a generated one would make the wire
+// shape something nobody reads. What keeps them in step is that both are named the same and sit
+// beside the same commentary.
+//
+// EVERY DERIVED FIELD ARRIVES DERIVED. Health, drift, the missing-credential list, the activity
+// bucket — all of them are functions of things a browser cannot see (the validator's verdict on a
+// version, `runs.status` across the workspace, `secret_refs.configured`), so nothing in the client
+// recomputes them. What the client DOES decide is the tag row, the ordering and the trimming, which
+// are presentation rules and live in `lib/agentTags.ts` and `lib/agentFilter.ts`.
+//
+// AND NOT ONE FIELD HERE CAN HOLD A CREDENTIAL. `required_env` and `missing_env` are lists of NAMES.
+// That is what makes §5.5's copy-to-clipboard safe by construction rather than by discipline.
+
+/** How busy an agent has been over seven days, bucketed. §5.2's footer. */
+export type AgentActivityLevel = "quiet" | "steady" | "high";
+
+/** One recent run, as §5.5's clickable sparkline draws it. Oldest first. */
+export interface AgentRunBar {
+  run_id: string;
+  outcome: "ok" | "error" | "running" | "paused";
+  started_at: string;
+  /** Where a failed bar opens the trace. Null when nothing recorded a failing step. */
+  failed_step_id: string | null;
+}
+
+/** One agent, as the grid renders a card (§5). `agent_id` is the SLUG, like everywhere else. */
+export interface AgentCardView {
+  agent_id: string;
+  /** The row's uuid. What the gradient is hashed from, and what the version reads are keyed by. */
+  uuid: string;
+  name: string;
+  slug: string;
+  description: string | null;
+
+  created_at: string;
+  created_by: string | null;
+  archived_at: string | null;
+  hand_written: boolean;
+
+  current_version: number;
+  version_source: "generation" | "edit" | "import" | "deploy" | null;
+  /** Null renders as unknown, never as `$0` — v0.1.9's rule, restated by §6. */
+  creation_cost: number | null;
+
+  connectors: string[];
+  mcp_tools: string[];
+  required_env: string[];
+  /** NAMES ONLY. §5.2's amber-forbidden warning line counts these. */
+  missing_env: string[];
+  high_impact_tools: number;
+  default_provider: string;
+
+  thread_count: number;
+  /** §5.2's current-work line. Null reads "Not started yet"; nothing is fabricated. */
+  latest_thread: { id: string; title: string; last_activity_at: string; last_turn: string | null } | null;
+
+  runtime: "idle" | "running" | "generating" | "deploying" | "paused";
+  health: "healthy" | "degraded" | "failing" | "unverified";
+  activity: AgentActivityLevel;
+
+  last_run_at: string | null;
+  runs_7d: number;
+  errors_7d: number;
+  /** The last ~20, oldest first. §5.5's sparkline, and the evidence behind `health`. */
+  outcomes: AgentRunBar[];
+  last_error: string | null;
+
+  /** Three states, like a thread's cost: null is nothing spent, `spend_known: false` is a floor. */
+  spend_7d: number | null;
+  spend_known: boolean;
+
+  deployment: { id: string; status: DeployStatus; url: string | null; version: number | null } | null;
+  /** §5.2's `v5 → v9`. Null when there is nothing to say. */
+  drift: { deployed: number; current: number } | null;
+}
+
+/** A version, as §6's history list renders it. */
+export interface AgentVersionView {
+  version: number;
+  source: "generation" | "edit" | "import" | "deploy";
+  instruction: string | null;
+  summary: string | null;
+  file_stats: { path: string; status: string; additions: number; deletions: number }[];
+  total_bytes: number;
+  undone_at: string | null;
+  created_at: string;
+  created_by: string | null;
+  current: boolean;
+}
+
+/** One file of one version, as §6's browser renders it. */
+export interface AgentFileView {
+  path: string;
+  content: string;
+  bytes: number;
+  read_only: boolean;
+  /** Why it cannot be edited, in the words the block list gives. Null when it can be. */
+  read_only_reason: string | null;
+  /** §6's per-file blame. Null when no version recorded a change to this path. */
+  last_changed_in: number | null;
+}
+
+/** One granted MCP tool, as §6's Capabilities tab shows it. */
+export interface AgentToolView {
+  ref: string;
+  server: string;
+  tool: string;
+  /** Null for a ref whose server this workspace no longer has — a grant nothing can honour. */
+  impact: string | null;
+  reason: string | null;
+}
+
+/** One agent in full (§6): everything the five tabs need that the card does not already carry. */
+export interface AgentDetailView {
+  card: AgentCardView;
+  versions: AgentVersionView[];
+  tools: AgentToolView[];
+  credentials: { name: string; configured: boolean; scope: string | null }[];
+  p50_ms: number | null;
+  p95_ms: number | null;
+  cost_per_run_7d: number | null;
+  cost_per_run_30d: number | null;
+  evals: {
+    datasets: { id: string; name: string; example_count: number }[];
+    last: { id: string; status: string; started_at: string; winner: string | null } | null;
+  };
+  threads: { id: string; title: string; status: string; last_activity_at: string; archived: boolean }[];
+  runs: { id: string; status: string; started_at: string; provider: string; model: string }[];
+}
+
+/**
+ * The agents channel: the sidebar's list, plus §4 and §6's three answers.
+ *
+ * ONE CHANNEL RATHER THAN TWO, which §7.4 asks to be argued either way. Every message is the same
+ * subject the channel already carries — this workspace's agents — every recipient already receives
+ * that subject, and `test:channels` classifies a channel once by what it carries. A second one would
+ * be a second classification of one fact and a second place a broadcast could forget to be scoped.
+ *
+ * `type` IS ABSENT ON THE SIDEBAR SNAPSHOT, which is what discriminates it. That shape predates the
+ * Agents tab and is read by the sidebar, the composer's target list and the eval picker; giving it a
+ * discriminator would have meant touching all three to add a tab.
+ */
+export type AgentMessage =
+  | { channel: "agents"; type?: undefined; agents: AgentSummary[] }
+  | { channel: "agents"; type: "grid"; cards: AgentCardView[]; team: boolean }
+  | { channel: "agents"; type: "detail"; detail: AgentDetailView }
+  | { channel: "agents"; type: "version"; agentId: string; version: number; files: AgentFileView[] }
+  | { channel: "agents"; type: "error"; message: string; agentId?: string }
+  | { channel: "agents"; type: "notice"; message: string; agentId?: string };
+
 /** Threads. Full snapshots, plus the single row `loadThread` answers the asking client with. */
 export type ThreadMessage =
   | { channel: "threads"; type: "threads"; threads: ThreadView[]; counts: ThreadCounts }
@@ -1410,7 +1563,7 @@ export type ServerMessage =
   | { channel: "trace"; event: TraceEvent }
   | { channel: "runSteps"; runId: string; steps: Step[] }
   | { channel: "log"; level: "stderr" | "parseError"; text: string }
-  | { channel: "agents"; agents: AgentSummary[] }
+  | AgentMessage
   | { channel: "agentFiles"; agentId: string; files: AgentFile[] }
   | { channel: "graph"; agentId: string; graph: AgentGraph | null }
   | { channel: "debug"; type: "paused"; runId: string; seq: number }
@@ -1514,6 +1667,33 @@ export type ClientCommand =
   | { cmd: "archiveAgent"; agentId: string }
   | { cmd: "restoreAgent"; agentId: string }
   | { cmd: "renameAgent"; agentId: string; name: string }
+  /**
+   * §7.5's fork: the connectors and the current manifest copied, and the MCP grants NOT.
+   *
+   * Copying the grants would silently re-grant high-impact third-party tools to a brand-new agent
+   * without anybody ticking a box, and the entire MCP design rests on access being granted per tool,
+   * deliberately. Connectors are copied because a connector is a reviewed template this workspace
+   * has already audited and carries no third-party grant with it.
+   */
+  | { cmd: "forkAgent"; agentId: string }
+  /**
+   * §6's restore: publish a NEW version pointing at an old manifest.
+   *
+   * Never a pointer moved backwards. That would rewrite the history the request was made from, and
+   * would leave `current_version` on objects whose only protection is a version row a retention
+   * sweep is entitled to consider superseded.
+   */
+  | { cmd: "restoreAgentVersion"; agentId: string; version: number }
+  /**
+   * §4 and §6's three reads. All answered to the asking socket, like `listAgents` beside them.
+   *
+   * `listAgentGrid` IS NOT `listAgents` WITH MORE FIELDS. The sidebar's list is keyed by slug and
+   * describes what exists; this one carries the derived tags, the health, the drift and the
+   * missing-credential names — every one of which is a function of things a browser cannot see.
+   */
+  | { cmd: "listAgentGrid" }
+  | { cmd: "loadAgentDetail"; agentId: string }
+  | { cmd: "loadAgentVersion"; agentId: string; version?: number }
   | { cmd: "edit"; agentId: string; instruction: string; threadId?: string }
   | { cmd: "applyEdit"; proposalId: string }
   | { cmd: "undoEdit"; agentId: string }

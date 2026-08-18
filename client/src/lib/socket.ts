@@ -19,6 +19,7 @@ import { useMemberStore } from "../store/memberStore.ts";
 import { useAuditStore } from "../store/auditStore.ts";
 import { useEnforcementStore } from "../store/enforcementStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
+import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { resetWorkspaceStores } from "../store/reset.ts";
 import { INPUT_KEY_PREFIX, useUiStore } from "../store/uiStore.ts";
 // A thread this client just created is opened here, which is a navigation — see the `threads`
@@ -79,6 +80,11 @@ function dispatch(msg: ServerMessage): void {
       // that threads exist, which is the whole arrangement §7 asks for.
       if (msg.event.kind === "step" && msg.event.step.cost != null) {
         useThreadStore.getState().addStepCost(msg.event.step.run_id, msg.event.step.cost, msg.event.step.id);
+        // §5.5's live spend ticker, from the same event and by the same route: the frozen schema has
+        // no agent field either, so the card is found through the run ids the last grid snapshot
+        // carried. Two stores reading one event rather than one store holding both lists — see
+        // agentGridStore's header for why they are separate.
+        useAgentGridStore.getState().addStepCost(msg.event.step.run_id, msg.event.step.cost, msg.event.step.id);
       }
       break;
     case "runSteps":
@@ -87,9 +93,19 @@ function dispatch(msg: ServerMessage): void {
     case "log":
       s.addLog({ level: msg.level, text: msg.text });
       break;
-    case "agents":
-      useBuildStore.getState().setAgents(msg.agents);
+    case "agents": {
+      // TWO SHAPES ON ONE CHANNEL, discriminated by whether `type` is there. The untyped one is the
+      // sidebar's list and predates the Agents tab; giving it a discriminator would have meant
+      // touching the sidebar, the composer's target list and the eval picker to add a tab.
+      const a = useAgentGridStore.getState();
+      if (msg.type === undefined) useBuildStore.getState().setAgents(msg.agents);
+      else if (msg.type === "grid") a.setGrid(msg.cards, msg.team);
+      else if (msg.type === "detail") a.setDetail(msg.detail);
+      else if (msg.type === "version") a.setVersion(msg.agentId, msg.version, msg.files);
+      else if (msg.type === "error") a.setError(msg.message);
+      else if (msg.type === "notice") a.setNotice(msg.message);
       break;
+    }
     case "agentFiles":
       useBuildStore.getState().setAgentFiles(msg.agentId, msg.files);
       break;
@@ -827,6 +843,55 @@ export function sendRestoreAgent(agentId: string): void {
 }
 export function sendRenameAgent(agentId: string, name: string): void {
   send({ cmd: "renameAgent", agentId, name });
+}
+
+/**
+ * §7.5's fork: connectors and the current manifest copied, MCP grants reset to zero.
+ *
+ * Answered with a refreshed grid plus a notice naming the new slug, so there is nothing here to
+ * handle on the way back — the grid IS the answer, and the notice is what says which card is new.
+ */
+export function sendForkAgent(agentId: string): boolean {
+  return send({ cmd: "forkAgent", agentId });
+}
+
+/**
+ * §6's restore: publish a NEW version pointing at an old manifest.
+ *
+ * Deliberately not "go back to v3": nothing here moves a pointer backwards, because that would
+ * rewrite the history the request was made from and leave the pointer on objects a cleanup is
+ * entitled to consider superseded.
+ */
+export function sendRestoreAgentVersion(agentId: string, version: number): boolean {
+  return send({ cmd: "restoreAgentVersion", agentId, version });
+}
+
+// --- the Agents tab --------------------------------------------------------
+// §7.4: the three reads are answered to THIS client alone, and every mutation above comes back as a
+// full grid to the whole workspace. So nothing here optimistically patches local state — a client
+// that did would be holding a list whose §5.4 tags were derived from its own guess.
+
+/** The whole grid for the active workspace, with every card's tags already derived. */
+export function sendListAgentGrid(): void {
+  send({ cmd: "listAgentGrid" });
+}
+
+/** Open one agent (§6). Answered to this client only — opening a card is one client's navigation. */
+export function sendLoadAgentDetail(agentId: string): void {
+  useAgentGridStore.getState().startDetail(agentId);
+  send({ cmd: "loadAgentDetail", agentId });
+}
+
+/**
+ * One version's files, for §6's browser and for the overflow menu's Export.
+ *
+ * `version` omitted means the agent's current one, which is what the browser opens on. The files come
+ * out of the object store rather than off disk, so a replica that has never run this agent answers
+ * byte-identically to the one that generated it.
+ */
+export function sendLoadAgentVersion(agentId: string, version?: number): void {
+  useAgentGridStore.getState().startVersion();
+  send({ cmd: "loadAgentVersion", agentId, ...(version === undefined ? {} : { version }) });
 }
 
 // --- fix loop -------------------------------------------------------------
