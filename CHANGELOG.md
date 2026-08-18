@@ -152,10 +152,18 @@ agent-level fact, so an agent shows its grants and not the servers.
   having. Beside it, cross-workspace reads returning absent rather than forbidden.
 - The existing server and client suites green — threads, tenancy, the db boundary, channels, relay,
   acceptance, capabilities, boolean literals, migrations, read-only and the store reset.
-- The server boots against a real database, applies 048, and serves the grid; the client builds and
-  serves the gradients. The by-hand pass over every card state — never-run, working, failing, deployed,
-  drifted, credential-missing, archived, both densities, and the three awkward cases — runs against a
-  local fixture that seeds one agent per state.
+- The server boots against a real database, applies 048 and answers; the client builds and serves the
+  gradients under their generated names.
+
+### Still owed
+
+- **The by-hand pass over every card state.** §5.3 asks for never-run, working, failing, deployed,
+  drifted, credential-missing and archived to be built AND looked at — "a state you have not looked at
+  is a state that is broken" — and §10 adds both densities at desktop and narrow widths plus the three
+  awkward cases: a long display name, a long thread title, and an agent with fifteen connectors. Every
+  one of those is built and every rule behind them is under a suite; what has not happened is somebody
+  opening them. Recorded here rather than claimed above, because a verification section that lists a
+  check nobody ran is worse than one that is short.
 
 ---
 
