@@ -31,6 +31,20 @@ export type WorkspaceSection = "members" | "audit" | "data";
 export type RightTab =
   | "secrets"
   | "github"
+  /**
+   * §6's agent detail, which is a TAB rather than a fourth column.
+   *
+   * WHY IT IS HERE AT ALL. §2's layout law says clicking a card "restores the 3-pane layout with
+   * that entity selected", and this app's three panes are the sidebar, the composer and this panel.
+   * §6 then names its own three — composer, centre, right — which taken literally would be four
+   * columns beside the sidebar AND would put the trace, the graph and every other tab out of reach
+   * for anybody who arrived from the Agents tab, when §1 only says the live trace is out of scope
+   * FOR THAT TAB rather than out of reach from it.
+   *
+   * As a tab, all of it holds: the composer keeps the centre unchanged, §6's centre and right become
+   * the two columns inside the surface, and Trace is one click away rather than a navigation away.
+   */
+  | "agent"
   | "graph" | "trace" | "evals" | "mcp" | "connections" | "deploy" | "usage" | "code";
 
 // The single composer has two send modes: "chat" talks to Jaroku (generate/edit/explain/…),

@@ -24,8 +24,14 @@ import { useBuildStore } from "../store/buildStore.ts";
 import { fetchHealth } from "../lib/secrets.ts";
 import { isDeployInFlight } from "../types.ts";
 import { StepDetailPanel } from "./StepDetailPanel.tsx";
+import { AgentDetail } from "./AgentDetail.tsx";
+import { useAgentGridStore } from "../store/agentGridStore.ts";
 
 const TABS: { id: RightTab; label: string }[] = [
+  // FIRST, AND ONLY WHEN AN AGENT IS OPEN — see `agentTabVisible` below. §6's detail is a tab rather
+  // than a fourth column, and it leads the row because arriving from the Agents grid is what puts it
+  // there: the panel should already be showing what was clicked.
+  { id: "agent", label: "Agent" },
   { id: "graph", label: "Graph" },
   { id: "trace", label: "Trace" },
   { id: "evals", label: "Evals" },
@@ -46,7 +52,19 @@ const TABS: { id: RightTab; label: string }[] = [
 ];
 
 export function RightPanel() {
-  const tab = useUiStore((s) => (s.rightTab === "code" ? "trace" : s.rightTab));
+  const rightTab = useUiStore((s) => s.rightTab);
+  /**
+   * Whether §6's detail has an agent to show.
+   *
+   * THE TAB IS ABSENT RATHER THAN DISABLED WHEN NOTHING IS OPEN, which is a deliberate exception to
+   * this product's state-what-is-true rule and worth saying why. That rule is about a control whose
+   * ACTION is refused — a Push button with nothing to push says so instead of vanishing. This is not
+   * a refused action, it is a view of an object that has not been chosen: an "Agent" tab standing
+   * permanently in the bar with nothing behind it would be a ninth tab that never does anything,
+   * and the door to it is the Agents grid rather than this row.
+   */
+  const agentOpen = useAgentGridStore((s) => s.openAgentId !== null);
+  const tab = rightTab === "code" ? "trace" : rightTab === "agent" && !agentOpen ? "trace" : rightTab;
   const setTab = useUiStore((s) => s.setRightTab);
   const activeRunId = useTraceStore((s) => s.activeRunId);
   const prevRunId = useRef(activeRunId);
@@ -121,7 +139,7 @@ export function RightPanel() {
   return (
     <div className="relative flex h-full flex-col bg-bg overflow-clip">
       <div className="flex shrink-0 items-center gap-1 border-b border-hair px-4 py-2">
-        {TABS.map((t) => (
+        {TABS.filter((t) => t.id !== "agent" || agentOpen).map((t) => (
           <button key={t.id} className={tabClass(t.id)} onClick={() => setTab(t.id)}>
             {t.label}
             {/* THE ONE BADGE IN THIS BAR, and it is computable while the tab is locked — the
@@ -153,7 +171,8 @@ export function RightPanel() {
         ))}
       </div>
       <div className="flex-1 min-h-0">
-        {tab === "graph" ? <GraphView />
+        {tab === "agent" ? <AgentDetail />
+          : tab === "graph" ? <GraphView />
           : tab === "evals" ? <EvalsPanel />
           : tab === "mcp" ? <McpPanel />
           : tab === "connections" ? <div className="h-full overflow-y-auto px-4 py-3"><ConnectionsPanel /></div>

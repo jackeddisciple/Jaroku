@@ -15,10 +15,12 @@ import { runProviders, useProviderStore } from "../store/providerStore.ts";
 import { inputKey } from "../store/uiStore.ts";
 import { Truncate } from "./Truncate.tsx";
 import {
-  sendCreateThread, sendListAgents, sendListProviders, sendListThreads, sendRun,
+  sendCreateThread, sendListAgentGrid, sendListAgents, sendListProviders, sendListThreads, sendRun,
 } from "../lib/socket.ts";
 import { useThreadStore } from "../store/threadStore.ts";
+import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { openThread } from "../lib/threadNav.ts";
+import { openAgentDetail } from "../lib/agentNav.ts";
 import { relTime } from "../lib/format.ts";
 
 function isTypingTarget(el: EventTarget | null): boolean {
@@ -70,7 +72,20 @@ export function CommandPalette() {
   const openInCode = useBuildStore((s) => s.openInCode);
   const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === s.activeAgentId));
 
-  const [mode, setMode] = useState<"root" | "files" | "threads">("root");
+  const [mode, setMode] = useState<"root" | "files" | "threads" | "agents">("root");
+  /**
+   * §5.5's `⌘K` fuzzy jump to any agent by name.
+   *
+   * THE PALETTE IS WHERE IT LIVES, which is what "extend that binding layer rather than adding a
+   * second one" means: ⌘K already opens this, `cmdk` already fuzzy-matches what is typed, and the
+   * entries are read from the grid store rather than from a second list — so what the palette offers
+   * and what the Agents tab shows can never be two different sets.
+   *
+   * LIVE AGENTS ONLY. §4 hides archived ones behind a filter, and "jump to an agent" is a default
+   * list; an archived row appearing here would undo the one thing archiving is for. Same reasoning,
+   * same exclusion, as the thread entries above.
+   */
+  const agentCards = useAgentGridStore((s) => s.cards).filter((c) => c.archived_at === null);
   // §4.7: reaching a thread never requires opening the tab at all. The list is the store's own
   // snapshot, so what the palette offers and what the tab shows can never be two different lists.
   // ACTIVE ROWS ONLY. The snapshot deliberately carries archived threads so the Archived chip has
@@ -134,14 +149,34 @@ export function CommandPalette() {
         <Command.Input
           autoFocus
           placeholder={
-            mode === "files" ? "Jump to file…" : mode === "threads" ? "Go to thread…" : "Type a command or search…"
+            mode === "files" ? "Jump to file…"
+              : mode === "threads" ? "Go to thread…"
+              : mode === "agents" ? "Go to agent…"
+              : "Type a command or search…"
           }
           className="w-full bg-transparent text-ink placeholder:text-faint px-4 py-3 outline-none text-[13px] border-b border-hair"
         />
         <Command.List className="max-h-[52vh] overflow-auto p-2">
           <Command.Empty className="px-3 py-6 text-center text-muted text-[12px]">No results.</Command.Empty>
 
-          {mode === "threads" ? (
+          {mode === "agents" ? (
+            <Command.Group heading="Agents" className="mb-1">
+              {agentCards.map((a) => (
+                // The name and the slug, because those are the two fields the grid searches and the
+                // two a person would type. The health word rides along for the same reason a
+                // thread's fragment does: an entry showing only a name would make somebody open two
+                // agents to find the one that is failing.
+                <Item
+                  key={a.slug}
+                  onSelect={run(() => openAgentDetail(a.slug))}
+                  kbd={a.health === "healthy" ? undefined : a.health}
+                >
+                  <Truncate>{a.name}</Truncate>
+                  <span className="shrink-0 font-mono text-[11px] text-faint">{a.slug}</span>
+                </Item>
+              ))}
+            </Command.Group>
+          ) : mode === "threads" ? (
             <Command.Group heading="Threads" className="mb-1">
               {threads.map((t) => (
                 // The row's own vocabulary, in one line: what it is called, and the one fact §4.3 puts
@@ -189,6 +224,7 @@ export function CommandPalette() {
                 <Item
                   onSelect={run(() => {
                     sendListAgents();
+                    sendListAgentGrid();
                     sendListProviders();
                     sendListThreads();
                   })}
@@ -210,6 +246,10 @@ export function CommandPalette() {
                 {/* Switching mode rather than closing: `run` would dismiss the dialog, and the whole
                     point of this entry is the list that comes next. */}
                 <Item onSelect={() => setMode("threads")}>Go to thread…</Item>
+                {/* Switching mode rather than closing, like the two above it: the whole point of the
+                    entry is the list that comes next. */}
+                <Item onSelect={() => setMode("agents")}>Go to agent…</Item>
+                <Item onSelect={run(() => useUiStore.getState().openNav("agents"))}>Open Agents</Item>
                 <Item onSelect={run(() => useUiStore.getState().openNav("threads"))}>Open Threads</Item>
                 <Item onSelect={run(() => sendCreateThread())} kbd="⌘N">New thread</Item>
                 <Item onSelect={run(focusChat)} kbd="⌘/">Focus chat</Item>
