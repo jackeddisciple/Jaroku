@@ -89,6 +89,14 @@ export interface WorkspaceSweep {
   stagingDeleted: number;
   /** Rows in migration 044's join table left pointing at a run or eval this sweep removed. */
   threadItemsDeleted: number;
+  /**
+   * RESOLVED inbox items past the plan's window, and their per-user state with them.
+   *
+   * Resolved only — an open item is a live problem however old it is, and the age bar filling under
+   * its card is the whole point of keeping the timestamp. Sweeping one because it had been true for
+   * a month would silently remove a blocking problem from the board that exists to show it.
+   */
+  inboxItemsDeleted: number;
 }
 
 export interface RetentionReport {
@@ -116,6 +124,11 @@ export const RETENTION_SWEPT_TABLES: readonly string[] = [
   "runs",
   "steps",
   "thread_items",
+  // §6.2 of the Inbox specification says the reconciler is what keeps this table from becoming a
+  // landfill, and it is only half right: the reconciler stops OPEN items being stale, and nothing
+  // it does removes the resolved ones it leaves behind. A workspace that clears fourteen items a
+  // week accumulates them forever, and this is the table the zero state's statistic reads.
+  "inbox_items",
 ];
 
 export const RETENTION_KEPT_TABLES: Record<string, string> = {
@@ -208,7 +221,28 @@ export class RetentionSweeper {
       exportsDeleted: 0,
       stagingDeleted: 0,
       threadItemsDeleted: 0,
+      inboxItemsDeleted: 0,
     };
+
+    // RESOLVED INBOX ITEMS, BEFORE THE RUN READ AND ITS EARLY RETURN. This has nothing to do with
+    // which runs expired — a workspace with no expired runs still accumulates resolved items — and
+    // putting it after the `expired.length === 0` return below would mean the table is only ever
+    // swept in workspaces that also happen to have old traces.
+    //
+    // `resolved_at` RATHER THAN `first_seen_at`, and the difference is the one that matters: an item
+    // that has been blocking somebody for six months is not old data, it is an unsolved problem, and
+    // the age bar under its card is drawn from exactly the timestamp a `first_seen_at` cutoff would
+    // sweep it by. The per-user dismissals and snoozes go with it through the foreign key's cascade.
+    out.inboxItemsDeleted = (
+      await this.deps.db.scoped(ctx.workspaceId, async (tx) =>
+        tx.run(
+          `DELETE FROM inbox_items
+            WHERE workspace_id = ? AND state = 'resolved' AND resolved_at IS NOT NULL
+              AND resolved_at < ?`,
+          [ctx.workspaceId, cutoff],
+        ),
+      )
+    ).changes;
 
     // WHICH RUNS ARE PAST IT — read before anything is deleted, because they are also the list
     // of checkpoint threads to sweep, and a run row deleted first is a checkpoint nobody can
@@ -355,12 +389,18 @@ export function describeSweep(report: RetentionReport, _ctx?: AnyContext): strin
   const objects = report.workspaces.reduce((n, w) => n + w.exportsDeleted + w.stagingDeleted, 0);
   const checkpoints = report.workspaces.reduce((n, w) => n + w.checkpointsSwept, 0);
   const items = report.workspaces.reduce((n, w) => n + w.threadItemsDeleted, 0);
-  if (!runs && !steps && !objects && !checkpoints && !items && report.partitionsDropped.length === 0) return null;
+  const inbox = report.workspaces.reduce((n, w) => n + w.inboxItemsDeleted, 0);
+  if (!runs && !steps && !objects && !checkpoints && !items && !inbox && report.partitionsDropped.length === 0) {
+    return null;
+  }
   return (
     `[retention] ${runs} run(s), ${steps} step(s), ${checkpoints} checkpoint(s), ${objects} object(s)` +
     // Said rather than silent: a sweep that quietly removed rows from the thread list's own join
     // table would be a list that got shorter for a reason nothing in the log explains.
     (items ? `, ${items} thread item(s)` : "") +
+    // And for the same reason: the zero state's "cleared 14 items this week" is counted off this
+    // table, so a sweep that shortens it without saying so makes that sentence quietly wrong.
+    (inbox ? `, ${inbox} inbox item(s)` : "") +
     (report.partitionsDropped.length ? `, ${report.partitionsDropped.length} partition(s)` : "")
   );
 }

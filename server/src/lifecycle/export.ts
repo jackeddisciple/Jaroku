@@ -151,6 +151,23 @@ export const EXPORTED_TABLES = [
   // the questions somebody asked, in their own words. Exporting `threads` without it would hand over
   // a list of session titles with no way to tell what any of them did.
   "thread_items",
+  // WHAT NEEDED SOMEBODY, AND WHEN IT STOPPED. An inbox item is the workspace's own operational
+  // record — which credential was missing, which deploy failed, which agent was drifting, and how
+  // long each of those was true before it was fixed. It answers "when did this start going wrong"
+  // long after the run that revealed it has been swept, and none of it is reachable anywhere else.
+  //
+  // NO CREDENTIAL CAN BE IN IT, which is the only question this list asks, and here that is a
+  // property of the shape rather than a discipline: §6.5 puts names, ids, counts and short
+  // summaries in `payload` and nothing else, a credential item carries the NAME of what is missing,
+  // and every server-provided string in it has been through the same redaction filter build logs
+  // use. There is no field a value could live in.
+  //
+  // `inbox_item_user_state` IS DELIBERATELY NOT HERE, and it is absent from EXCLUDED_TABLES too
+  // because it carries no `workspace_id` of its own and the audit beside this file therefore never
+  // asks about it. Stated here so the absence is a decision rather than a gap: it holds one
+  // person's dismissals and snoozes, which in a Team workspace is a record of what each individual
+  // chose not to look at. Resolution is the workspace's and travels; one member's triage is theirs.
+  "inbox_items",
 ] as const;
 
 /**
