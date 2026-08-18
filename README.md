@@ -1734,6 +1734,14 @@ the trace honest (dedupe by step id, render in `seq` order, never arrival order)
 and would only add churn to a store whose correctness matters. They share a socket and
 nothing else.
 
+**Two surfaces sit outside the three columns**, because neither is about an agent. The **workspace
+panel** — Members, Audit and Data — opens from the workspace switcher and holds everything that is
+true of the workspace rather than of something in it: who may be here, what has been done here, and
+taking the whole of it away. A tab beside `GitHub` would have put "delete this workspace" one click
+from an agent's diff. The **enforcement strip** sits under the top bar for exactly as long as a rung
+of the abuse ladder is in force and nowhere at all otherwise — it is not a setting anybody goes
+looking for, it is the reason the last thing they pressed was refused.
+
 **Voice input** is available via the Web Speech API, with a live waveform fed from a
 short-lived `getUserMedia` stream. If `AudioContext`/`getUserMedia` are unavailable it falls
 back to a plain recording indicator rather than breaking.

@@ -195,6 +195,43 @@ there. What is new is that the product's own surface reaches them.
   follows from it, and both README entries say so. The variable is a development convenience again
   rather than a door.
 
+
+### Migrations
+
+- `047_agent_lifecycle` — `agents.archived_at` and `agents.display_name_is_custom`, plus an index on
+  `(workspace_id, archived_at)`. Both are additive and defaulted, so the version currently serving
+  ignores them; `migrate:check` passes with no contract step. `archived_at` is deliberately not
+  `deleted_at`: that column is the disk sweep's mark and `upsertFromDisk` clears it, so an archive
+  stored there would be undone by the next boot that materialised the project.
+
+### Not in this release
+
+Recorded so the next reader does not go looking for them:
+
+- **The Agents, Memory and Activity destinations stay shells.** The Threads specification is explicit
+  — "build the shell so they can slot in; do not build their contents" — so the three placeholders
+  are working as specified. The audit trail that would naturally live under Activity is in the
+  workspace panel instead, beside the membership it mostly records.
+- **Tearing down a deployment from Jaroku.** `forgetDeployment` detaches a record and touches
+  nothing in your hosting account, which the README states as a boundary rather than a limitation:
+  the same posture as never deleting a user's GitHub repository.
+- **Re-running a finished eval.** Retry exists inside `evalRunner` as automatic, bounded recovery
+  for retryable failures; it is deliberately not a user action, and nothing asks for one.
+- **GitHub's own history is not paged.** What the panel renders is versions and remote commits read
+  thirty at a time from GitHub's API. Widening that means paging somebody else's API for a surface
+  nobody scrolls, which is a different feature from the paging above.
+
+### Verification
+
+- Both packages typecheck clean; the three gates that are not tests pass (`migrate:check`,
+  `edge:render --check`, `obs:render --check`).
+- Every suite this release touches is green: the twenty-one server suites covering capabilities,
+  channels, relay, membership, session, identity, threads, the new agent lifecycle, pricing, the
+  check runner, Stripe, plans, enforcement, tenancy, acceptance and migrations — and all nineteen
+  client suites, including the new `test:invite`.
+- Two structural audits did their job during the work rather than after it: `test:channels` refused
+  the two new channels until they were classified as tenant data and actually exercised, and
+  `test:reset` refused the two new stores until they were wired into the workspace reset.
 ---
 
 ## v0.2.17 : Threads, Documented — and Thirty-One Defects an Adversarial Read Found
