@@ -71,8 +71,6 @@ function facts(over: Partial<InboxFacts> = {}): InboxFacts {
     configuredSecrets: new Set<string>(),
     agents: new Map([["agent-1", agent()]]),
     mcpServers: new Map([["mcp-1", server()]]),
-    openedEvals: new Set<string>(),
-    openedRuns: new Set<string>(),
     spendCeilingUsd: null,
     pendingInvites: new Set<string>(),
     memberIds: new Set<string>(["user-1"]),
@@ -251,11 +249,14 @@ console.log("\nunreviewed_failures resolves when any one of those traces is open
     payload: { agent_name: "API Gateway", run_ids: ["run-a", "run-b", "run-c"] },
   });
   check("nothing opened is unresolved", !isResolved(it, facts()));
-  check("opening ANY of them resolves it", isResolved(it, facts({ openedRuns: new Set(["run-b"]) })));
-  check(
-    "opening some other run does not",
-    !isResolved(it, facts({ openedRuns: new Set(["run-z"]) })),
-  );
+  // THE STAMP IS ON THE ROW rather than in a set of reviewed run ids the sweep is handed, because
+  // that set would be this process's memory and a restart would empty it — resurrecting every card
+  // somebody dealt with last week, which is the one thing Law 2 promises does not happen.
+  const reviewed = item("unreviewed_failures", {
+    subject_id: "agent-1",
+    payload: { agent_name: "API Gateway", run_ids: ["run-a", "run-b"], reviewed_at: ago(HOUR) },
+  });
+  check("opening any one of those traces resolves it, from anywhere a trace can be opened", isResolved(reviewed, facts()));
 }
 
 console.log("\nversion_drift resolves when the pair stops being the pair");
@@ -288,10 +289,11 @@ console.log("\neval_finished resolves when the results are opened from anywhere"
 {
   const it = item("eval_finished", { subject_id: "eval-1", payload: { dataset_name: "regression" } });
   check("results nobody opened is unresolved", !isResolved(it, facts()));
-  check(
-    "opening them in the Evals tab resolves the Inbox card, with nothing pressed on the card",
-    isResolved(it, facts({ openedEvals: new Set(["eval-1"]) })),
-  );
+  const opened = item("eval_finished", {
+    subject_id: "eval-1",
+    payload: { dataset_name: "regression", opened_at: ago(HOUR) },
+  });
+  check("opening them in the Evals tab resolves the Inbox card, with nothing pressed on the card", isResolved(opened, facts()));
 }
 
 console.log("\nmcp_unreachable resolves when the server comes back");

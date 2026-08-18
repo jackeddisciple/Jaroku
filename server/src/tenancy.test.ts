@@ -343,6 +343,11 @@ async function suite(label: string, db: Db): Promise<void> {
 
   const reopened = await inbox.reopen(A.ctx, [B.inboxItemId]);
   check(reopened === 0, "nor undo a resolution in B");
+  check(
+    (await inbox.setPayload(A.ctx, dedupeKey("credential_missing", "shared-agent", "STRIPE_KEY"), { credential: "HIJACK" })) === true &&
+      (await inbox.byKey(B.ctx, dedupeKey("credential_missing", "shared-agent", "STRIPE_KEY")))?.payload["credential"] === "STRIPE_KEY",
+    "nor stamp a payload onto B's row of the same key",
+  );
   check((await inbox.resolvedSince(A.ctx, "1970-01-01T00:00:00.000Z")) === 0, "and A's cleared count counts none of B's");
 
   // --- a forged workspace in a payload -----------------------------------------
@@ -496,7 +501,7 @@ const SCOPED_API: Record<string, string[]> = {
   // touches nothing, which is why it is static — a method taking a context to mint a random string
   // would be a signature claiming a scope it has no use for.
   InboxStore: [
-    "record", "listOpen", "listForUser", "get", "byKey", "resolve", "reopen",
+    "record", "setPayload", "listOpen", "listForUser", "get", "byKey", "resolve", "reopen",
     "setUserState", "userState", "resolvedSince",
   ],
   // `sweep` is deliberately absent: it deletes EXPIRED rows across every workspace, which is

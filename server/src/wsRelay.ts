@@ -2363,6 +2363,22 @@ export interface RelayOptions {
    *  replicas over Redis — see queue/eventBridge.ts. Absent means single-replica, no bridge,
    *  exactly today's behaviour. */
   onBroadcast?: (ctx: TenantContext, payload: unknown) => void;
+  /**
+   * Somebody opened a trace. The Inbox's `unreviewed_failures` resolve condition, as an event.
+   *
+   * A CALLBACK RATHER THAN A CALL, because this file deliberately knows nothing about the Inbox —
+   * the same posture `revalidate` takes towards memberships and tokens. It reports what happened
+   * and acts on nothing.
+   *
+   * IT IS HERE AND NOT AT ONE OF THE PLACES A TRACE IS OPENED FROM, which is the whole point.
+   * `loadRun` is the one path into a trace whether somebody arrived from the sidebar's run list,
+   * the Agents tab's health sparkline, the command palette or a deep link — so a card resolving
+   * when the trace is read is structural rather than four call sites that have to be remembered.
+   *
+   * Fired after the answer is sent, and never allowed to affect it: a client asking for steps must
+   * get them whatever happens to a card.
+   */
+  onTraceOpened?: (ctx: TenantContext, runId: string) => void;
 }
 
 export class WsRelay {
@@ -2869,11 +2885,14 @@ export class WsRelay {
             // The read that used to be the hole: `loadRun` took an id from the client and
             // answered with that run's steps, with nothing checking whose run it was. Scoped
             // now, so an id belonging to another workspace resolves to an empty list.
-            void this.answer(ws, async (ctx) => ({
-              channel: "runSteps",
-              runId,
-              steps: await this.store.stepsForRun(ctx, runId),
-            }), live);
+            void this.answer(ws, async (ctx) => {
+              const steps = await this.store.stepsForRun(ctx, runId);
+              // AFTER THE READ AND OUTSIDE ITS RESULT. An empty list is still an opened trace as
+              // far as the client is concerned, but it is also what another workspace's run id
+              // answers with — so the notice is only sent for a run this workspace really has.
+              if (steps.length > 0) this.opts.onTraceOpened?.(ctx, runId);
+              return { channel: "runSteps", runId, steps };
+            }, live);
           }
       }
     } catch {

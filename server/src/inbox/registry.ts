@@ -255,10 +255,6 @@ export interface InboxFacts {
   configuredSecrets: ReadonlySet<string>;
   agents: ReadonlyMap<string, AgentInboxFacts>;
   mcpServers: ReadonlyMap<string, McpInboxFacts>;
-  /** Eval runs whose results have been opened, by eval id. See `eval_finished`. */
-  openedEvals: ReadonlySet<string>;
-  /** Runs whose trace has been opened, by run id. See `unreviewed_failures`. */
-  openedRuns: ReadonlySet<string>;
   /** The workspace's spend ceiling in USD, or null when there is none. */
   spendCeilingUsd: number | null;
   /** Invitations still awaiting an answer, by invite id. */
@@ -450,12 +446,15 @@ const DEFS: Record<InboxItemType, InboxTypeDef> = {
     teamOnly: false,
     actions: ["open_latest_failure", "view_all_failures", "dismiss_all"],
     subjectLine: (p) => `${str(p, "agent_name") || "An agent"} is failing and nobody has looked`,
-    // ANY ONE OF THOSE TRACES BEING OPENED, and `openedRuns` is a durable fact rather than something
-    // this process remembers: opening a trace writes the moment onto the run it opened, so a restart
-    // does not resurrect an item somebody has already dealt with. The ids are the ones this row
-    // collapsed — a failure that arrived afterwards is on the row too, and reviewing any of them is
-    // reviewing this agent's failures, which is what the item is about.
-    resolved: (item, facts) => list(item.payload, "run_ids").some((id) => facts.openedRuns.has(id)),
+    // ANY ONE OF THOSE TRACES BEING OPENED, recorded ON THE ROW rather than read out of a set of
+    // reviewed run ids the sweep is handed. Both spellings look the same from here and only one of
+    // them survives a deploy: this process could remember which traces were opened, and a restart
+    // would empty that memory, the sweep would conclude nothing had been reviewed, and every card
+    // somebody dealt with last week would come back. Law 2 promises a fixed problem stays gone, and
+    // a fact that does not outlive a restart cannot keep that promise. `loadRun` writes the stamp —
+    // from the sidebar, the health sparkline, the palette or a deep link, none of which is this
+    // card — and the sweep is still the only thing that resolves the row.
+    resolved: (item) => str(item.payload, "reviewed_at") !== "",
   },
 
   version_drift: {
@@ -493,10 +492,10 @@ const DEFS: Record<InboxItemType, InboxTypeDef> = {
     teamOnly: false,
     actions: ["open_comparison", "export_results", "dismiss"],
     subjectLine: (p) => `${str(p, "dataset_name") || "An eval"} finished`,
-    // RESULTS OPENED, from the same durable source `unreviewed_failures` reads: opening the
-    // comparison records it against the eval, not against this row, so opening it from the Evals tab
-    // clears this item exactly as opening it from the card does. That is Law 2's whole point.
-    resolved: (item, facts) => !!item.subject_id && facts.openedEvals.has(item.subject_id),
+    // RESULTS OPENED, stamped on the row by the one path into a comparison — `loadEvalResults` —
+    // however somebody arrived at it. Opening it from the Evals tab clears this card, which is Law
+    // 2's whole point. Durable for the reason `unreviewed_failures` is: see its predicate.
+    resolved: (item) => str(item.payload, "opened_at") !== "",
   },
 
   mcp_unreachable: {

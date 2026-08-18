@@ -230,6 +230,29 @@ export class InboxStore {
   }
 
   /**
+   * Rewrite an open item's payload, and change nothing else about it.
+   *
+   * A SECOND WRITE PATH, AND IT EARNS ITS KEEP. The obvious way to stamp `reviewed_at` onto a card
+   * is to call `record` again with the augmented payload — and that would move `last_seen_at` and
+   * increment `count`, so opening a trace would report a tenth failure that did not happen and the
+   * badge would read `×10` for nine failures. The two operations are genuinely different: `record`
+   * says "this happened again", and this says "here is something more we know about it".
+   *
+   * OPEN ROWS ONLY. A resolved item's payload is the record of what was true when it was settled,
+   * and a stamp landing on one would be annotating history. The predicate that reads the stamp only
+   * ever runs against open rows anyway, so refusing here costs nothing and stops the one write that
+   * could quietly rewrite a closed record.
+   */
+  async setPayload(ctx: TenantContext, dedupeKey: string, payload: InboxPayload): Promise<boolean> {
+    const res = await this.q(ctx).run(
+      `UPDATE inbox_items SET payload = ?
+        WHERE workspace_id = ? AND dedupe_key = ? AND state = 'open'`,
+      [JSON.stringify(payload ?? {}), ctx.workspaceId, dedupeKey],
+    );
+    return res.changes > 0;
+  }
+
+  /**
    * Every open item in this workspace. The reconciler's read, and nobody else's.
    *
    * NO PER-USER JOIN, deliberately. The sweep asks "is this still true", which is a question about

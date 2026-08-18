@@ -262,6 +262,11 @@ jobs:
           # the other way: a recurrence starts its age again, a second sweep does not move
           # `resolved_at`, and a per-user patch touches only the column it names.
           npm run test:inbox-store
+          # The event-driven generators, whose interesting assertions are all about something NOT
+          # happening: opening a trace does not report a tenth failure, a cancelled eval raises
+          # nothing, an eval's own failed runs raise no failure card, and the one payload field that
+          # grows has a cap on it. Every one of those would look right in a screenshot.
+          npm run test:inbox-generators
 
       - name: cost, abuse and the data lifecycle
         working-directory: server

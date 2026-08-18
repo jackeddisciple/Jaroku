@@ -133,6 +133,15 @@ import {
   type ThreadStatus,
 } from "./threadStore.ts";
 import { threadTitle } from "./threadTitle.ts";
+import { InboxStore } from "./inbox/inboxStore.ts";
+import {
+  noteDeployFailed,
+  noteEvalFinished,
+  noteEvalResultsOpened,
+  noteRunFailed,
+  noteTraceOpened,
+  type GeneratorDeps,
+} from "./inbox/generators.ts";
 import { NO_FACTS, activePerAgent, deriveThreadStatus } from "./threadStatus.ts";
 import {
   collectThreadFacts, type EvalFact, type RunFact, type ThreadDerivation,
@@ -524,6 +533,35 @@ const mcpStore = new McpStore(store.database());
 // control-plane table beside the frozen schema, one writer. A thread is not a trace event and
 // never becomes one.
 const threadStore = new ThreadStore(store.database());
+
+// And the Inbox, on the same connection for the same reason. Two additive control-plane tables
+// beside the frozen schema; nothing here is a trace event and nothing here changes one.
+const inboxStore = new InboxStore(store.database());
+
+/**
+ * What the event-driven generators need, in one object.
+ *
+ * `onChanged` IS ABSENT UNTIL THERE IS A CHANNEL TO PUSH DOWN. The generators call it after a write
+ * so a board updates without a refresh (§5.6), and until the `inbox` channel exists there is nothing
+ * for it to do — an empty hook now is a hook nobody has to remember to add later, which is the
+ * failure the members list had for the whole life of a tab.
+ */
+const inboxDeps: GeneratorDeps = { inbox: inboxStore };
+
+/**
+ * Write an Inbox item, and never let doing so break what was actually happening.
+ *
+ * FLOATING AND CAUGHT, exactly as `meterPlatformCall` and `noteThreadItem` are, and for a sharper
+ * version of the same reason: every call site below is a handler for something that HAS ALREADY
+ * HAPPENED. The deploy failed, the eval finished, the run ended. A card that could not be written is
+ * a card missing from a board; an exception thrown back into one of those handlers is the event
+ * itself being lost.
+ */
+function noteInbox(what: string, write: Promise<unknown>): void {
+  void write.catch((err) => {
+    console.error(`[inbox] could not record ${what}:`, (err as Error)?.message ?? err);
+  });
+}
 
 // TWO POOLS, SESSION 5. Before this, one pool reserved slot 0 for the interactive run and
 // lent the rest to the eval fan-out — a single, process-wide reservation, because there was
@@ -1481,6 +1519,28 @@ const deployDeps: DeployManagerDeps = {
     // stopping) changes what an idle thread on that agent says about itself — and nothing was
     // pushing a snapshot for it.
     scheduleListRefresh(contextForDeploy());
+
+    // A BUILD OR A HEALTH GATE THAT FAILED IS WORK THAT IS STOPPED — §2.1, and Blocking. Raised
+    // here rather than in the manager because this is where the outcome is already in hand, and
+    // because the manager knows nothing about the Inbox and should not start to.
+    //
+    // ONE CARD PER DEPLOYMENT rather than per agent, which is the exception to the shape everything
+    // else takes: a deploy is an attempt with its own build log, and `view logs` on a card that
+    // collapsed two attempts could only ever show one of them.
+    if (d.status === "failed") {
+      const ctx = contextForDeploy();
+      noteInbox(
+        "a failed deploy",
+        agentRepo.bySlug(ctx, d.agent_id).then((agent) =>
+          noteDeployFailed(inboxDeps, ctx, {
+            deploymentId: d.id,
+            agentUuid: agent?.id ?? d.agent_id,
+            agentName: agent?.display_name ?? d.agent_id,
+            error: d.error,
+          }),
+        ),
+      );
+    }
   },
   onChanged: () => {
     broadcastDeployments();
@@ -2435,6 +2495,11 @@ const relay = new WsRelay({
   loadAgentVersion: (ctx, agentId, version) => agentVersionFiles(ctx, agentId, version),
   // The list and the counts together, so the chips and the nav badge are one number — §2.1.
   listThreads: (ctx) => threadSnapshot(ctx),
+  // §2.2's `unreviewed_failures` leaves when any one of its traces is opened, and this is the one
+  // path into a trace from any of the four surfaces that offer one. The card resolves because the
+  // work was done rather than because the card was pressed, which is Law 2 in one wire.
+  onTraceOpened: (ctx, runId) =>
+    noteInbox("that a trace was opened", noteTraceOpened(inboxDeps, ctx, runId)),
   // Scoped, so another workspace's thread id is indistinguishable from one that does not exist.
   // The items come back with the row, because opening a thread that renders somebody else's
   // conversation is the failure §4.5 exists to prevent — see ThreadEvent's `thread` member.
@@ -2726,6 +2791,27 @@ evalRunner = new EvalRunner({
     // per job — that is the polling channel §7.1 refuses; see the eval-progress cost delta for how
     // the moving figure is fed instead.
     scheduleListRefresh(contextForEval(e.evalId));
+
+    // AN EVAL WHOSE RESULTS NOBODY HAS OPENED, and — separately — one that stopped starting jobs
+    // because it crossed a ceiling. Two items from one event on purpose: an eval can be both, and
+    // collapsing them would mean choosing which half to tell somebody. The ceiling read is the
+    // eval's own `budget_usd`, which is the number the refusal was measured against and therefore
+    // the number the card must name.
+    noteInbox(
+      "a finished eval",
+      (async () => {
+        const ctx = contextForEval(e.evalId);
+        const run = await evalStore.getEvalRun(ctx, e.evalId);
+        if (!run) return;
+        const dataset = await evalStore.getDataset(ctx, run.dataset_id);
+        await noteEvalFinished(inboxDeps, ctx, {
+          evalId: e.evalId,
+          datasetName: dataset?.name ?? run.agent_id,
+          status: e.status,
+          ceilingUsd: run.budget_usd,
+        });
+      })(),
+    );
 
     // Sweep the resumable-checkpoint blobs these runs left behind. The traces stay —
     // only the pause/resume machinery goes, and nobody resumes a finished eval job.
@@ -6342,6 +6428,14 @@ async function handleEvalCommand(ctx: TenantContext, cmd: ForwardedCommand): Pro
           return;
         }
         relay.broadcastEval(ctx, { type: "evalResults", evalId: cmd.evalId, results });
+        // §2.2's resolve condition for `eval_finished`, and this is the ONE path into a comparison
+        // however somebody arrived at it — the Evals tab, a drill-down, or the card's own primary
+        // action. That the Evals tab clears the Inbox card is Law 2 rather than a side effect: the
+        // item leaves because the results were read, not because anything was pressed on it.
+        //
+        // AFTER THE ANSWER, so a failure to record the stamp cannot cost somebody the results they
+        // asked for.
+        noteInbox("that an eval's results were opened", noteEvalResultsOpened(inboxDeps, ctx, cmd.evalId));
         return;
       }
       case "listEvals": {
@@ -6572,6 +6666,31 @@ onBothPools("event", ({ runId, event }) => {
     // Coalesced (see `scheduleThreadBroadcast`), because the snapshot is expensive and a run ending
     // touches the list from three handlers within a millisecond of each other.
     if (event.kind === "run_end") scheduleListRefresh(runCtx);
+
+    // A RUN THAT ENDED IN ERROR AND NOBODY HAS LOOKED AT, which is Inbox rather than Activity by
+    // §1's first law: "run failed" is something that happened, and "run failed and nobody has opened
+    // the trace" is something to do. One card per AGENT, so nine failures are one row with a nine on
+    // it rather than nine rows nobody reads.
+    //
+    // EVAL RUNS ARE EXCLUDED, and it is the same exclusion the broadcast above makes. An eval's
+    // failures are the eval's result — the comparison exists to show which target failed — and
+    // putting a card on the board for each would bury the one item that matters, which is that the
+    // eval finished and its results are unread.
+    if (event.kind === "run_end" && event.run.status === "error" && !isEvalRun(runId)) {
+      // The run carries the SLUG (the frozen schema's `agent_id`); the item is keyed by the uuid,
+      // because a slug is renameable and a card that survived a rename would key on a name.
+      noteInbox(
+        "a failed run",
+        agentRepo.bySlug(runCtx, event.run.agent_id).then((agent) => {
+          if (!agent) return null;
+          return noteRunFailed(inboxDeps, runCtx, {
+            runId,
+            agentUuid: agent.id,
+            agentName: agent.display_name ?? agent.slug,
+          });
+        }),
+      );
+    }
   });
 });
 
