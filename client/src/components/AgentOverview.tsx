@@ -54,11 +54,32 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
     if (renaming) input.current?.select();
   }, [renaming]);
 
+  /**
+   * Whether Escape has already answered for this edit.
+   *
+   * ESCAPE HAS TO BEAT THE BLUR IT CAUSES, and a piece of state cannot do it. Escape sets the draft
+   * back and takes the field down; taking it down fires `onBlur`, and that handler closed over the
+   * render where the draft was still what somebody had typed — so cancelling an edit SENT it, which
+   * is the one thing a cancel must never do. A ref is read at call time rather than captured, so the
+   * blur that follows sees the cancellation that caused it.
+   */
+  const cancelled = useRef(false);
+
   const commit = (): void => {
+    if (cancelled.current) {
+      cancelled.current = false;
+      return;
+    }
     const next = draft.trim();
     setRenaming(false);
     if (next && next !== a.name) sendRenameAgent(a.slug, next);
     else setDraft(a.name);
+  };
+
+  const cancel = (): void => {
+    cancelled.current = true;
+    setDraft(a.name);
+    setRenaming(false);
   };
 
   return (
@@ -87,10 +108,7 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
                   // back out of is one people stop starting.
                   e.stopPropagation();
                   if (e.key === "Enter") commit();
-                  if (e.key === "Escape") {
-                    setDraft(a.name);
-                    setRenaming(false);
-                  }
+                  if (e.key === "Escape") cancel();
                 }}
                 aria-label={`Rename ${a.name}`}
                 className="w-full rounded-control border border-edge bg-panel px-2 py-1 text-[13px] font-medium text-ink outline-none"
