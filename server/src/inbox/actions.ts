@@ -273,18 +273,36 @@ export async function undoInboxAction(
 export async function seedOnboardingItems(
   store: InboxStore,
   ctx: TenantContext,
-  facts: { hasProviderKey: boolean; agentCount: number },
+  /**
+   * The two facts, LAZILY, and the laziness is what makes this cheap enough to call on a board read.
+   *
+   * §2.5 has to be true ON FRAME ONE. A workspace created a second ago and shown an empty Inbox is
+   * exactly the confusing-rather-than-delightful case the section is about, and the sweep runs on a
+   * minute's timer — so the first minute of every new workspace's life would be the one this exists
+   * to prevent. Seeding on the board read fixes that, and the cost has to be bounded for it to be a
+   * fix rather than a trade.
+   *
+   * SO THE EXISTENCE CHECK COMES FIRST. Two indexed reads on the unique key settle it for every
+   * workspace that has ever been seeded — which is all of them after their first board — and the
+   * facts are only fetched when a row is genuinely missing. A thunk rather than a value, because
+   * computing "does this workspace have a provider key" is a read nobody should pay for to be told
+   * a row already exists.
+   */
+  load: () => Promise<{ hasProviderKey: boolean; agentCount: number }>,
 ): Promise<number> {
-  const wanted: { type: InboxItemType; needed: boolean }[] = [
-    { type: "setup_api_key", needed: !facts.hasProviderKey },
-    { type: "setup_first_agent", needed: facts.agentCount === 0 },
-  ];
+  const TYPES: InboxItemType[] = ["setup_api_key", "setup_first_agent"];
+  let facts: { hasProviderKey: boolean; agentCount: number } | null = null;
 
   let seeded = 0;
-  for (const { type, needed } of wanted) {
-    if (!needed) continue;
+  for (const type of TYPES) {
     const key = `${type}:workspace`;
+    // BEFORE THE FACTS, and it is what "never returns" costs. `record` re-opens a resolved row on
+    // the same key, so a seed rule that checked the condition first would resurrect "Add a provider
+    // key" the moment somebody removed one — turning a one-time welcome into a permanent nag.
     if (await store.byKey(ctx, key)) continue;
+    facts ??= await load();
+    const needed = type === "setup_api_key" ? !facts.hasProviderKey : facts.agentCount === 0;
+    if (!needed) continue;
     await store.record(ctx, { type, subjectId: null, dedupeKey: key });
     seeded++;
   }

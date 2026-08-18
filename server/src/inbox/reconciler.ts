@@ -44,6 +44,16 @@ export interface WorkspaceReconcile {
   examined: number;
   /** Items whose predicate said the problem is fixed. */
   resolved: number;
+  /**
+   * WHICH ones, so §5.6's live resolution can name them.
+   *
+   * "When an item resolves — from anywhere, including another tab or another team member — the card
+   * collapses and fades, and the column count decrements, with no refresh. RE-RENDER THE AFFECTED
+   * CARD ONLY, NEVER THE WHOLE BOARD." A count cannot express that; the ids can, and a resolution is
+   * the one fact on this channel that is identical for every person in the workspace — which is what
+   * makes it safe to broadcast as one payload where a snapshot is not.
+   */
+  resolvedIds: string[];
   /** Items the derived generators wrote or refreshed. Zero until commits 8–10 fill `derive` in. */
   derived: number;
 }
@@ -95,8 +105,15 @@ export interface ReconcilerDeps {
    * through the store. `index.ts` passes `db.withAdvisoryLock` bound to the reconciler's own key.
    */
   withLock: <T>(fn: () => Promise<T>) => Promise<T | null>;
-  /** Fired once per workspace that changed, so a caller can push a fresh board down (§5.6). */
-  onChanged?: (ctx: TenantContext, changed: number) => void;
+  /**
+   * Fired once per workspace that changed, so a caller can push §5.6's update down.
+   *
+   * IT REPORTS THE TWO HALVES SEPARATELY, because they need two different pushes. A resolution is
+   * one card leaving and is the same fact for everybody, so it goes out as a delta and every board
+   * animates it away. Something DERIVED is a new card, and whether it belongs on any given person's
+   * board depends on their dismissals — so that one is a snapshot, rebuilt per recipient.
+   */
+  onChanged?: (ctx: TenantContext, change: { resolvedIds: string[]; derived: number }) => void;
   /** The clock, so a suite can move it. Every predicate reads it off the facts rather than calling it. */
   now?: () => number;
   log?: (line: string) => void;
@@ -177,8 +194,13 @@ export class InboxReconciler {
     const settled = open.filter((item) => isResolved(item, facts)).map((item) => item.id);
     const resolved = await this.deps.inbox.resolve(ctx, settled, new Date(this.now()).toISOString());
 
-    if (resolved > 0 || derived > 0) this.deps.onChanged?.(ctx, resolved + derived);
-    return { workspaceId: ctx.workspaceId, examined: open.length, resolved, derived };
+    // THE IDS THE UPDATE ACTUALLY TOOK, not the ones the predicate nominated. `resolve` counts rows
+    // it changed and skips anything already settled, so a row another replica beat this pass to must
+    // not be announced twice — a client that received two resolutions for one card would decrement
+    // its column count twice.
+    const resolvedIds = resolved > 0 ? settled.slice(0, resolved) : [];
+    if (resolved > 0 || derived > 0) this.deps.onChanged?.(ctx, { resolvedIds, derived });
+    return { workspaceId: ctx.workspaceId, examined: open.length, resolved, derived, resolvedIds };
   }
 }
 

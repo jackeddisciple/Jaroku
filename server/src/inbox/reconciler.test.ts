@@ -349,5 +349,45 @@ console.log("\nderiving runs first and over the same facts, or a sweep raises an
   await db.close();
 }
 
+// --- 8. what a resolution announces --------------------------------------------------------
+
+console.log("\na resolution names the card, because the board is not what re-renders");
+{
+  const db = await freshDb();
+  const inbox = new InboxStore(db);
+  const a = await seedMissingCredential(inbox, ctx, "STRIPE_KEY");
+  const b = await seedMissingCredential(inbox, ctx, "SLACK_TOKEN");
+
+  const changes: { resolvedIds: string[]; derived: number }[] = [];
+  const r = reconciler(
+    inbox,
+    [{ id: ctx.workspaceId }],
+    () => facts({ configuredSecrets: new Set(["STRIPE_KEY", "SLACK_TOKEN"]) }),
+    { onChanged: (_c, change) => changes.push(change) },
+  );
+  const report = await r.sweep();
+
+  check("both resolved", report.workspaces[0]?.resolved === 2);
+  check(
+    "...and the sweep names WHICH, because §5.6 asks for the affected card and not the board",
+    report.workspaces[0]?.resolvedIds.length === 2,
+  );
+  check(
+    "...the two that actually settled",
+    [a, b].every((id) => report.workspaces[0]?.resolvedIds.includes(id)),
+  );
+  check("one change is reported for the workspace, not one per row", changes.length === 1);
+  check("...carrying the ids rather than a count", changes[0]?.resolvedIds.length === 2);
+  check("...and nothing derived, so no snapshot is asked for", changes[0]?.derived === 0);
+
+  // A SECOND SWEEP ANNOUNCES NOTHING. `resolve` counts rows it changed and skips what is already
+  // settled, so a card another replica beat this pass to is not announced twice — and a client that
+  // received two resolutions for one card would decrement its column count twice.
+  await r.sweep();
+  check("a second pass announces nothing at all", changes.length === 1);
+
+  await db.close();
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 if (fail > 0) process.exit(1);

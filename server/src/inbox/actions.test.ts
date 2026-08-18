@@ -241,7 +241,7 @@ console.log("\ntwo real items for a new workspace, written once and never again"
   const store = new InboxStore(db);
   const ada = await seedUser(db);
 
-  const seeded = await seedOnboardingItems(store, ctx, { hasProviderKey: false, agentCount: 0 });
+  const seeded = await seedOnboardingItems(store, ctx, async () => ({ hasProviderKey: false, agentCount: 0 }));
   check("a brand-new workspace is given both", seeded === 2);
   const snap = await inboxSnapshot(store, ctx, ada, { team: false, now: NOW });
   check("...so its Inbox is not empty, which the specification calls confusing rather than delightful",
@@ -251,7 +251,7 @@ console.log("\ntwo real items for a new workspace, written once and never again"
 
   check(
     "a second pass seeds nothing, because the rows exist",
-    (await seedOnboardingItems(store, ctx, { hasProviderKey: false, agentCount: 0 })) === 0,
+    (await seedOnboardingItems(store, ctx, async () => ({ hasProviderKey: false, agentCount: 0 }))) === 0,
   );
 
   // THE ONE THAT MATTERS. The items resolve when the thing is done, and must NEVER be raised again —
@@ -259,13 +259,13 @@ console.log("\ntwo real items for a new workspace, written once and never again"
   // one-time welcome into a nag the day somebody removed their last key.
   const key = await store.byKey(ctx, "setup_api_key:workspace");
   await store.resolve(ctx, [key!.id]);
-  const afterResolution = await seedOnboardingItems(store, ctx, { hasProviderKey: false, agentCount: 0 });
+  const afterResolution = await seedOnboardingItems(store, ctx, async () => ({ hasProviderKey: false, agentCount: 0 }));
   check("a resolved seed is never re-seeded, even with the condition true again", afterResolution === 0);
   check("...and stays resolved", (await store.byKey(ctx, "setup_api_key:workspace"))?.state === "resolved");
 
   check(
     "a workspace that already has a key and an agent is given nothing at all",
-    (await seedOnboardingItems(store, otherCtx, { hasProviderKey: true, agentCount: 3 })) === 0,
+    (await seedOnboardingItems(store, otherCtx, async () => ({ hasProviderKey: true, agentCount: 3 }))) === 0,
   );
 
   await db.close();

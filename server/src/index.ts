@@ -1399,15 +1399,29 @@ const inboxReconciler = new InboxReconciler({
   // rather than at workspace creation because a workspace created before this feature existed needs
   // them too, and a sweep that runs every minute is a backfill nobody has to write.
   derive: async (ctx, facts, open) =>
-    (await deriveInboxItems(inboxStore, ctx, facts, open)) + (await seedOnboardingItems(inboxStore, ctx, facts)),
+    (await deriveInboxItems(inboxStore, ctx, facts, open)) +
+    (await seedOnboardingItems(inboxStore, ctx, async () => facts)),
   // Bound to the reconciler's own key rather than the migration runner's. Advisory locks are one
   // flat namespace, and sharing the key would make a deploy applying migrations wait behind a sweep.
   withLock: (fn) => db.withAdvisoryLock(INBOX_RECONCILE_LOCK_KEY, fn),
   // §5.6: "when an item resolves — from anywhere, including another tab or another team member —
-  // the card collapses and fades, and the column count decrements, with no refresh." The sweep is
-  // the "from anywhere" that nothing else could cover, so it is the one place that push has to come
-  // from. Per workspace and only when something moved, so a quiet minute costs nobody a frame.
-  onChanged: () => broadcastInbox(),
+  // the card collapses and fades, and the column count decrements, with no refresh. RE-RENDER THE
+  // AFFECTED CARD ONLY, NEVER THE WHOLE BOARD." The sweep is the "from anywhere" nothing else could
+  // cover, so it is where that push comes from — and the two halves go out differently on purpose.
+  //
+  // A RESOLUTION IS A DELTA. It is the same fact for every person in the workspace, so one payload
+  // is correct for all of them, and it is what lets a card animate out instead of being replaced by
+  // a board that no longer contains it.
+  //
+  // SOMETHING DERIVED IS A SNAPSHOT, because whether a new card belongs on any given person's board
+  // depends on their own dismissals — there is no one payload that is right for two people. It is
+  // also the rarer case: most sweeps resolve and derive nothing.
+  onChanged: (ctx, { resolvedIds, derived }) => {
+    for (const itemId of resolvedIds) {
+      relay.broadcastInboxDelta(ctx, { type: "inboxDelta", kind: "resolved", itemId });
+    }
+    if (derived > 0) broadcastInbox();
+  },
   log: (line) => console.log(line),
 });
 
@@ -1421,7 +1435,18 @@ const sweepInbox = (): void => {
     .catch((err) => console.error("[inbox] sweep failed:", (err as Error)?.message ?? err));
 };
 setInterval(sweepInbox, 60_000).unref();
-sweepInbox();
+// AND ONCE AT BOOT, ON THE NEXT TICK RATHER THAN NOW.
+//
+// The sweep's `onChanged` reaches the relay, and the relay is constructed further down this file —
+// so a sweep called during module initialisation dies on `Cannot access 'relay' before
+// initialization`, which is exactly what the first boot after this landed printed. Every restart
+// lost its first pass and logged an error for it, and the board was up to a minute stale on a
+// deploy, which is precisely the window the boot sweep exists to close.
+//
+// A zero-delay timer is the smallest thing that fixes it: module initialisation is synchronous, so
+// anything scheduled runs after all of it. Unref'd like the interval beside it, so a pending first
+// sweep never holds the process open at shutdown.
+setTimeout(sweepInbox, 0).unref();
 
 // THE FILES, AS VERSIONS.
 //
@@ -4128,6 +4153,26 @@ async function boardFor(ctx: TenantContext): Promise<InboxSnapshot> {
     agentRepo.list(ctx, { includeArchived: true }),
     bootIdentity.workspaceById(ctx, ctx.workspaceId),
   ]);
+
+  // §2.5 ON FRAME ONE, WHICH THE SWEEP'S TIMER CANNOT GIVE IT. A workspace created a second ago is
+  // shown its Inbox immediately, and the reconciler runs on a minute's clock — so somebody signing
+  // up would meet exactly the empty board the section calls confusing rather than delightful, for
+  // as long as it took the next tick to arrive. Seeding here closes that minute.
+  //
+  // It costs two indexed reads on the unique key for every workspace that has already been seeded,
+  // and the facts behind the decision are fetched only when a row is genuinely absent — see
+  // `seedOnboardingItems` for why the existence check has to come first regardless.
+  //
+  // Floating and caught: a board must render whatever happened to a welcome item.
+  try {
+    await seedOnboardingItems(inboxStore, ctx, async () => ({
+      hasProviderKey: (await secretRefs.list(ctx)).some((r) => r.configured && r.kind === "provider_key"),
+      agentCount: agents.length,
+    }));
+  } catch (err) {
+    console.error("[inbox] could not seed the onboarding items:", (err as Error)?.message ?? err);
+  }
+
   return inboxSnapshot(inboxStore, ctx, ctx.actorUserId, {
     team: workspace?.kind === "team",
     agentNames: new Map(agents.map((a) => [a.id, a.display_name ?? a.slug])),
