@@ -150,4 +150,4 @@ console.log("\na long error is cut rather than pasted whole");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
-process.exit(fail === 0 ? 0 : 1);
+(globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

@@ -25,9 +25,8 @@ const check = (name: string, ok: boolean, detail = ""): void => {
 
 const card = (over: Partial<AgentCardView> & { slug: string }): AgentCardView => ({
   agent_id: over.slug,
-  uuid: `uuid-${over.slug}`,
   name: over.slug,
-  slug: over.slug,
+  uuid: `uuid-${over.slug}`,
   description: null,
   created_at: "2026-08-01T00:00:00.000Z",
   created_by: null,
@@ -194,4 +193,4 @@ console.log("\nvisibleAgents is filter-then-sort, in that order");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
-process.exit(fail === 0 ? 0 : 1);
+(globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

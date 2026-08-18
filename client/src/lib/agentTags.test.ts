@@ -228,4 +228,4 @@ console.log("\nRuntime and Health never collapse (§5.4's own example)");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
-process.exit(fail === 0 ? 0 : 1);
+(globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

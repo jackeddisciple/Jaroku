@@ -19,8 +19,6 @@
 //   npm run test:agent-art
 
 import { readdirSync } from "node:fs";
-import { randomUUID } from "node:crypto";
-import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AGENT_ART_COUNT, artFileFor, artFor, hash32 } from "./agentArt.ts";
@@ -32,7 +30,11 @@ const check = (name: string, ok: boolean, detail = ""): void => {
   else { fail++; console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ""}`); }
 };
 
-const ART_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "public", "agent-art");
+// RESOLVED FROM THIS FILE'S OWN URL rather than from a working directory, so the suite passes when
+// it is run from the repository root and when it is run from `client/`. `node:path` is deliberately
+// not in `node-shims.d.ts` — that file says adding to it should feel like a decision, and a URL join
+// answers this without one.
+const ART_DIR = fileURLToPath(new URL("../../public/agent-art", import.meta.url));
 
 console.log("\nthe asset list is real, sorted, and matches what is on disk");
 {
@@ -88,7 +90,7 @@ console.log("\nthe spread is roughly even across the set");
   const N = 20_000;
   const counts = new Map<string, number>();
   for (let i = 0; i < N; i++) {
-    const file = artFileFor(randomUUID());
+    const file = artFileFor(crypto.randomUUID());
     counts.set(file, (counts.get(file) ?? 0) + 1);
   }
 
@@ -106,4 +108,4 @@ console.log("\nthe spread is roughly even across the set");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
-process.exit(fail === 0 ? 0 : 1);
+(globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);
