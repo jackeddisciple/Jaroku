@@ -45,6 +45,10 @@ const check = (name: string, ok: boolean, detail = ""): void => {
 function counting(db: Db): { db: Db; count: () => number; reset: () => void } {
   let n = 0;
   const wrapQ = (q: Queryable): Queryable => ({
+    // `dialect` is forwarded rather than omitted: it is part of `Queryable`, and a hydrator that
+    // reads it to decide how to parse a json column would otherwise get `undefined` and take the
+    // wrong branch — a counter that changed how rows are READ would be measuring a different query.
+    dialect: q.dialect,
     get: <T>(sql: string, params?: readonly unknown[]) => { n++; return q.get<T>(sql, params); },
     all: <T>(sql: string, params?: readonly unknown[]) => { n++; return q.all<T>(sql, params); },
     run: (sql: string, params?: readonly unknown[]): Promise<WriteResult> => { n++; return q.run(sql, params); },
