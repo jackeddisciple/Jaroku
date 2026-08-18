@@ -278,11 +278,29 @@ export class DeployManager {
       };
     }
 
+    // WHICH VERSION THIS DEPLOY IS ABOUT TO BUILD, recorded on the row before anything is built.
+    //
+    // Migration 041 added the column for exactly this and nothing ever wrote it, so every deployment
+    // row in this product claims to have been deployed from a version nobody knows — which is what
+    // made the Agents card's drift badge (§5.2) unanswerable. Read HERE rather than at the end,
+    // because the honest answer is the version the artifacts are assembled from, and publishing
+    // while a deploy is in flight is precisely the case a timestamp cannot distinguish.
+    //
+    // A FAILURE TO READ IT LEAVES IT NULL RATHER THAN FAILING THE DEPLOY. The row's job is to record
+    // a deployment; an unrecorded version is a badge that does not draw, and 041 already defines
+    // null as "nobody recorded this". Refusing to deploy because a lookup for a label failed would
+    // be the tail wagging the dog.
+    const deployedVersion = await this.deps.agents
+      .bySlug(this.deps.context(), req.agentId)
+      .then((a) => a?.current_version ?? null)
+      .catch(() => null);
+
     const deployment = await this.deps.store.create(this.deps.context(), {
       agentId: req.agentId,
       provider: req.provider,
       model: req.model,
       envKeys,
+      version: deployedVersion,
     });
     this.active = { deploymentId: deployment.id, upload: null, cancelled: false };
     this.seenBuild.clear();

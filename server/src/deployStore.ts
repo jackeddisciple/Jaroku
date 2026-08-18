@@ -79,6 +79,23 @@ export interface Deployment {
   railway_service_id: string | null;
   railway_environment_id: string | null;
   railway_deployment_id: string | null;
+  /**
+   * The agent version this deploy built from, or null.
+   *
+   * MIGRATION 041 ADDED THE COLUMN AND NOTHING EVER READ OR WROTE IT. Its own header says why it is
+   * worth having — a marker pinned to the version that is LIVE cannot be inferred from a timestamp
+   * once somebody publishes while a deploy is in flight — and then the store's column list did not
+   * name it, so `deployments.version` was NULL on every row this product has ever written.
+   *
+   * §5.2's drift badge is what needed it: `v5 -> v9` is the deployed version against the current
+   * one, and without this half the card could only ever say "live" and never "behind". Recorded at
+   * creation, from the version the deploy is about to build.
+   *
+   * NULL STILL MEANS "NOBODY RECORDED THIS", and 041 is explicit that it is never backfilled: a
+   * guess here is a confident lie about somebody's production. `agentHealth.driftOf` draws no badge
+   * for a null, which is the honest rendering of a fact nobody wrote down.
+   */
+  version: number | null;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -103,6 +120,8 @@ export interface CreateDeployment {
   model: string;
   envKeys: string[];
   target?: string;
+  /** The agent's current version at the moment the deploy starts. See `Deployment.version`. */
+  version?: number | null;
 }
 
 export interface DeploymentPatch {
@@ -140,7 +159,7 @@ const PATCHABLE: ReadonlySet<string> = new Set([
 
 // Explicit column lists — a deployment goes onto the deploy channel, and workspace_id has no
 // business there.
-const DEPLOY_COLUMNS = `id, agent_id, target, status, url, provider, model, env_keys,
+const DEPLOY_COLUMNS = `id, agent_id, target, status, url, provider, model, env_keys, version,
                         railway_project_id, railway_service_id, railway_environment_id,
                         railway_deployment_id, error, created_at, updated_at, ended_at`;
 
@@ -192,7 +211,10 @@ export class DeployStore {
     // rather than hidden — the names are a convenience, the record is the point.
     const parsed = jsonFromColumn(this.db.dialect, row["env_keys"]);
     const envKeys = Array.isArray(parsed) ? parsed.filter((k): k is string => typeof k === "string") : [];
-    return { ...(row as unknown as Deployment), env_keys: envKeys };
+    // `asIntOrNull`, not `asInt`, and the difference is the whole of migration 041's argument: a row
+    // written before that column existed has no version, and `0` would be a confident claim that it
+    // was deployed from a version that cannot exist.
+    return { ...(row as unknown as Deployment), env_keys: envKeys, version: asIntOrNull(row["version"]) };
   }
 
   // --- writes ---
@@ -218,6 +240,7 @@ export class DeployStore {
       railway_service_id: null,
       railway_environment_id: null,
       railway_deployment_id: null,
+      version: opts.version ?? null,
       error: null,
       created_at: now,
       updated_at: now,
@@ -233,12 +256,12 @@ export class DeployStore {
       );
       await tx.run(
         `INSERT INTO deployments
-           (id, workspace_id, agent_id, target, status, url, provider, model, env_keys,
+           (id, workspace_id, agent_id, target, status, url, provider, model, env_keys, version,
             created_at, updated_at, created_seq)
-         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
         [
           row.id, ctx.workspaceId, row.agent_id, row.target, row.status,
-          row.provider, row.model, JSON.stringify(row.env_keys), now, now,
+          row.provider, row.model, JSON.stringify(row.env_keys), row.version, now, now,
           asInt(top?.n) + 1,
         ],
       );
