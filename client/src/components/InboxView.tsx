@@ -42,6 +42,9 @@ import { useInboxStore } from "../store/inboxStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { InboxCard } from "./InboxCard.tsx";
+import { InboxTray } from "./InboxTray.tsx";
+import { useInboxDrag } from "./useInboxDrag.ts";
+import { sendSnoozeInboxItem } from "../lib/socket.ts";
 import { RefreshIcon } from "./panelIcons.tsx";
 import type { InboxItemView, InboxSeverity } from "../types.ts";
 
@@ -160,15 +163,30 @@ function Column({
   now,
   expandedId,
   onExpand,
+  dragProps,
+  dimmed,
+  draggingId,
 }: {
   severity: InboxSeverity;
   items: InboxItemView[];
   now: number;
   expandedId: string | null;
   onExpand: (id: string | null) => void;
+  /** The pointer handlers for one card. See `useInboxDrag` for why this is not a library. */
+  dragProps: (itemId: string) => Record<string, unknown>;
+  /** A card is being dragged: §4.1 asks the columns to dim so it reads instantly as not-a-lane. */
+  dimmed: boolean;
+  draggingId: string | null;
 }) {
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
+    <div
+      // §4.1: "If a user starts dragging toward another column, DIM THE COLUMNS so it reads instantly
+      // as not-a-lane." The dimming is the explanation — there is no drop target to refuse, because
+      // a column is a bucket and severity is assigned by the system.
+      className={`flex min-w-0 flex-1 flex-col transition-opacity motion-reduce:transition-none ${
+        dimmed ? "opacity-40" : "opacity-100"
+      }`}
+    >
       <div className="flex shrink-0 items-center gap-2 px-1 pb-2">
         <span className="text-[10px] font-medium tracking-wider text-faint">{COLUMN_LABEL[severity]}</span>
         <span className="text-[10px] tabular-nums text-faint">{items.length}</span>
@@ -180,15 +198,16 @@ function Column({
           <div className="px-1 py-3 text-[11px] text-faint">{COLUMN_EMPTY[severity]}</div>
         ) : (
           items.map((item) => (
-            <InboxCard
-              key={item.id}
-              item={item}
-              now={now}
-              expanded={expandedId === item.id}
-              // §4.5: clicking a card expands it IN PLACE, and clicking it again closes it. It does
-              // not navigate — navigation is what the actions are for, and it is the fallback.
-              onClick={() => onExpand(expandedId === item.id ? null : item.id)}
-            />
+            <div key={item.id} {...dragProps(item.id)} className={draggingId === item.id ? "opacity-50" : ""}>
+              <InboxCard
+                item={item}
+                now={now}
+                expanded={expandedId === item.id}
+                // §4.5: clicking a card expands it IN PLACE, and clicking it again closes it. It does
+                // not navigate — navigation is what the actions are for, and it is the fallback.
+                onClick={() => onExpand(expandedId === item.id ? null : item.id)}
+              />
+            </div>
           ))
         )}
       </div>
@@ -218,6 +237,16 @@ export function InboxView() {
    * dealing with now rather than one of three they are comparing.
    */
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  /**
+   * §4.1's one drag, to §5.4's one destination.
+   *
+   * DROPPING SNOOZES UNTIL TOMORROW, which is a default rather than a choice — a drag has no way to
+   * express which of the three durations somebody meant, and asking mid-drop would be a menu opening
+   * under a pointer that is already moving away. The overflow and the keyboard are where the other
+   * two live, and the tray itself offers "1h" per row for the case where tomorrow was too far.
+   */
+  const drag = useInboxDrag((itemId) => sendSnoozeInboxItem(itemId, "tomorrow"));
 
   /**
    * The clock the age bars are drawn against.
@@ -329,12 +358,20 @@ export function InboxView() {
                   now={now}
                   expandedId={expandedId}
                   onExpand={setExpandedId}
+                  dragProps={drag.cardProps}
+                  dimmed={drag.state.itemId !== null}
+                  draggingId={drag.state.itemId}
                 />
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* §5.4's strip, which is what keeps snooze from being a slower dismissal. It is also the one
+          drop target on the board — see `useInboxDrag` for why that is a pointer handler rather than
+          a dependency. */}
+      <InboxTray snoozed={snoozed} now={now} trayRef={drag.trayRef} armed={drag.state.itemId !== null} />
 
       {/* The workspace is named when the board is empty and this is the first thing somebody sees —
           after a switch, "Nothing needs you in Acme Corp" reads as an empty scope where a bare
