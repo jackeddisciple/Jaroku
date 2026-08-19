@@ -41,6 +41,11 @@ function PaneDivider() {
   return (
     <PanelResizeHandle className="group relative w-[5px] shrink-0 cursor-col-resize">
       <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-hair transition-colors duration-fast group-hover:bg-grip" />
+      {/* A GRIP, revealed on approach. A colour shift on a one-pixel line is not discoverable —
+          you have to already be looking at it to see it change. Two pixels by sixteen at the
+          vertical centre says "this moves" the moment the pointer is near, and says nothing at
+          all when it is not. */}
+      <span className="pointer-events-none absolute left-1/2 top-1/2 h-4 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent transition-colors duration-fast group-hover:bg-chrome" />
     </PanelResizeHandle>
   );
 }
