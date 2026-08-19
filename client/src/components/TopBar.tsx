@@ -20,7 +20,7 @@ import { sendCancelDeploy, sendSetOwnKeyForPlatform } from "../lib/socket.ts";
 import { isDeployInFlight } from "../types.ts";
 import { agentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark, BRAND_COLOR, JarokuGlyph } from "../lib/icons.tsx";
-import { BRAND, ICON, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
+import { BRAND, ICON, TYPE } from "../lib/tokens.ts";
 
 import { Truncate } from "./Truncate.tsx";
 import { Chip } from "./Chip.tsx";
@@ -28,7 +28,7 @@ import { GithubIcon, KeyIcon, StopIcon } from "./panelIcons.tsx";
 import { useGithubStore } from "../store/githubStore.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { ShareIcon } from "./activityIcons.tsx";
-import { iconBtn } from "./buttons.ts";
+import { iconBtn, outlineBtn } from "./buttons.ts";
 
 function StatusDot({ status }: { status: string }) {
   const color = status === "running" ? "bg-run" : status === "draft" ? "bg-faint" : "bg-ok";
@@ -280,10 +280,19 @@ export function TopBar() {
             <StopIcon size={ICON.sm} />
           </button>
         ) : (
+          /* OUTLINE, NOT FILLED. This was pure #e4e4e7 on a near-black page, top right, present
+              on every screen, and merely dropped to 40% opacity when there was nothing to deploy
+              — which made the visual centre of gravity of the entire application a button the
+              user is usually not reaching for. Worse, it was one of three ink-filled controls
+              visible at once on the default screen, and the rule is one per view: on the composer
+              screen that one is the send control.
+
+              A fill is reserved for the act a screen is actually asking for. Deploying is a
+              deliberate, reviewed thing you go to the panel for; the button that opens that panel
+              does not need to shout. */
           <button
             title={agent ? `Deploy ${agent.name} to your own Railway account` : "Select an agent to deploy"}
-            className="rounded-control px-3 py-1 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ background: TEXT.ink, color: SURFACE.bg }}
+            className={outlineBtn}
             disabled={!agent}
             onClick={() => setRightTab("deploy")}
           >
