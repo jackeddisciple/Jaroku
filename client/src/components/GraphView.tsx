@@ -670,7 +670,7 @@ function GraphSkeleton() {
       <div className="flex items-center gap-10">
         {[0, 1, 2].map((i) => (
           <div key={i} className="flex items-center gap-10">
-            <div className="animate-pulse rounded-card bg-active motion-reduce:animate-none" style={{ width: i === 1 ? AGENT_W : CARD_W, height: i === 1 ? AGENT_H : CARD_H }} />
+            <div className="animate-stream-pulse rounded-card bg-active motion-reduce:animate-none" style={{ width: i === 1 ? AGENT_W : CARD_W, height: i === 1 ? AGENT_H : CARD_H }} />
             {i < 2 && <div className="h-px w-8 bg-hair" />}
           </div>
         ))}
