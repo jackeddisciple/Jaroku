@@ -18,9 +18,16 @@
 // Reusable beyond this panel — the evals bar has its own copies of the same geometry — but that is
 // outside this pass and stays where it is.
 
-/** The decision. Filled surface, ink text. */
+/**
+ * The decision. Filled surface, ink text.
+ *
+ * `inline-flex items-center gap-1.5` for the same reason `secondaryBtn` has it: several call sites
+ * pass an icon *and* a label, and without a flex context the glyph is a block that stacks above the
+ * words. That was visible on the GitHub tab, where the primary call to action rendered the mark on
+ * one line and "Connect GitHub" on the next.
+ */
 export const primaryBtn =
-  "rounded-control px-3 py-1.5 text-[12px] bg-panel text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+  "inline-flex items-center gap-1.5 rounded-control px-3 py-1.5 text-[12px] bg-panel text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
 /**
  * The other answer. Same box as primary so the two sit level, but no surface until you hover —
