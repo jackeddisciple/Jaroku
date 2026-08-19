@@ -26,29 +26,53 @@ import { isDeployInFlight } from "../types.ts";
 import { StepDetailPanel } from "./StepDetailPanel.tsx";
 import { AgentDetail } from "./AgentDetail.tsx";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
+import { ICON } from "../lib/tokens.ts";
+import {
+  ActivityIcon,
+  DollarSignIcon,
+  GitBranchIcon,
+  GithubIcon,
+  KeyIcon,
+  PlugIcon,
+  RocketIcon,
+  SparklesIcon,
+  WrenchIcon,
+} from "./panelIcons.tsx";
+import { FlaskIcon } from "./inboxIcons.tsx";
 
-const TABS: { id: RightTab; label: string }[] = [
-  // FIRST, AND ONLY WHEN AN AGENT IS OPEN — see `agentTabVisible` below. §6's detail is a tab rather
+// TEN DESTINATIONS IN 40px OF WIDTH, as glyphs in a vertical rail rather than as ten words in a
+// horizontal strip.
+//
+// The strip spent about 570px of the header on the words `Agent Graph Trace Evals MCP Connections
+// Deploy Secrets GitHub Usage`, which is what capped how narrow this pane could go — and because
+// the Agent tab appears and disappears with the grid's selection, every other tab shifted sideways
+// when somebody opened an agent, moving the click target they were reaching for. A rail is fixed
+// width by construction, so nothing in it moves when the set changes.
+//
+// The order is unchanged, and so is the reasoning for it, which is recorded per entry below.
+// Nothing is added, removed, merged or re-parented — this is the same ten destinations, drawn.
+const TABS: { id: RightTab; label: string; Icon: (p: { size?: number }) => React.ReactElement }[] = [
+  // FIRST, AND ONLY WHEN AN AGENT IS OPEN — see `agentOpen` below. §6's detail is a tab rather
   // than a fourth column, and it leads the row because arriving from the Agents grid is what puts it
   // there: the panel should already be showing what was clicked.
-  { id: "agent", label: "Agent" },
-  { id: "graph", label: "Graph" },
-  { id: "trace", label: "Trace" },
-  { id: "evals", label: "Evals" },
-  { id: "mcp", label: "MCP" },
+  { id: "agent", label: "Agent", Icon: SparklesIcon },
+  { id: "graph", label: "Graph", Icon: GitBranchIcon },
+  { id: "trace", label: "Trace", Icon: ActivityIcon },
+  { id: "evals", label: "Evals", Icon: FlaskIcon },
+  { id: "mcp", label: "MCP", Icon: WrenchIcon },
   // Beside MCP rather than beside Usage: both tabs answer "what does this workspace reach
   // outside itself", and the two are the pair somebody audits together.
-  { id: "connections", label: "Connections" },
-  { id: "deploy", label: "Deploy" },
+  { id: "connections", label: "Connections", Icon: PlugIcon },
+  { id: "deploy", label: "Deploy", Icon: RocketIcon },
   // Beside Connections, for the reason Connections sits beside MCP: the three answer "what does
   // this workspace reach outside itself, and with whose credentials", and they are audited
   // together.
-  { id: "secrets", label: "Secrets" },
+  { id: "secrets", label: "Secrets", Icon: KeyIcon },
   // Last in the row, and beside Deploy rather than beside Graph. The three tabs to its left answer
   // "what does this workspace reach outside itself"; this one answers "where does its code go",
   // which is the same kind of question about the same kind of boundary.
-  { id: "github", label: "GitHub" },
-  { id: "usage", label: "Usage" },
+  { id: "github", label: "GitHub", Icon: GithubIcon },
+  { id: "usage", label: "Usage", Icon: DollarSignIcon },
 ];
 
 export function RightPanel() {
@@ -124,10 +148,7 @@ export function RightPanel() {
     };
   }, []);
 
-  const tabClass = (t: RightTab) =>
-    `px-3 py-1.5 text-[12px] rounded-control transition-colors ${
-      tab === t ? "bg-active text-ink" : "text-muted hover:text-ink"
-    }`;
+  const visible = TABS.filter((t) => t.id !== "agent" || agentOpen);
 
   // overflow-CLIP, not hidden. Step Details parks itself off the right edge when it is closed
   // (`translate-x-full`), so 340px of this element's content sits past its right edge. `hidden`
@@ -137,54 +158,72 @@ export function RightPanel() {
   // left, where it stayed, with nothing to scroll it back. `clip` renders identically and
   // creates no scroll container at all, so there is nothing to scroll.
   return (
-    <div className="relative flex h-full flex-col bg-bg overflow-clip">
-      <div className="flex shrink-0 items-center gap-1 border-b border-hair px-4 py-2">
-        {TABS.filter((t) => t.id !== "agent" || agentOpen).map((t) => (
-          <button key={t.id} className={tabClass(t.id)} onClick={() => setTab(t.id)}>
-            {t.label}
-            {/* THE ONE BADGE IN THIS BAR, and it is computable while the tab is locked — the
-                health route answers in counts, without elevation, so somebody is not asked for a
-                passcode to be told whether they need to care. Carries a title as well as a colour,
-                because a coloured dot alone says nothing to a screen reader. */}
-            {/* Amber for anything in flight, the error tone for a stopped state. Diverged is NOT
-                amber, deliberately: it is not something working, it is something waiting for a
-                person, and wearing the running colour would make it read as progress. */}
-            {t.id === "github" && githubBadge ? (
-              <span
-                title={`GitHub: ${githubBadge}`}
-                className={`ml-1.5 align-middle font-mono text-[10px] tabular-nums ${
-                  githubBadge === "⟳" ? "text-run" : githubBadge === "⚠" || githubBadge === "↕" ? "text-err" : "text-muted"
-                }`}
-              >
-                {githubBadge}
-              </span>
-            ) : null}
-            {t.id === "secrets" && secretsNeedAttention ? (
-              <span
-                title="A credential needs attention"
-                aria-label="A credential needs attention"
-                role="img"
-                className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-run align-middle"
-              />
-            ) : null}
-          </button>
-        ))}
-      </div>
-      <div className="flex-1 min-h-0">
-        {tab === "agent" ? <AgentDetail />
-          : tab === "graph" ? <GraphView />
-          : tab === "evals" ? <EvalsPanel />
-          : tab === "mcp" ? <McpPanel />
-          : tab === "connections" ? <div className="h-full overflow-y-auto px-4 py-3"><ConnectionsPanel /></div>
-          : tab === "deploy" ? <DeployPanel />
-          : tab === "secrets" ? <SecretsPanel />
-          : tab === "github" ? <GitHubPanel />
-          : tab === "usage" ? <UsagePanel />
-          : <TraceTimeline />}
+    <div className="flex h-full bg-bg">
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-clip">
+        <div className="flex-1 min-h-0">
+          {tab === "agent" ? <AgentDetail />
+            : tab === "graph" ? <GraphView />
+            : tab === "evals" ? <EvalsPanel />
+            : tab === "mcp" ? <McpPanel />
+            : tab === "connections" ? <div className="h-full overflow-y-auto px-4 py-3"><ConnectionsPanel /></div>
+            : tab === "deploy" ? <DeployPanel />
+            : tab === "secrets" ? <SecretsPanel />
+            : tab === "github" ? <GitHubPanel />
+            : tab === "usage" ? <UsagePanel />
+            : <TraceTimeline />}
+        </div>
+
+        {/* Step Details slides in over this panel when a step is expanded. */}
+        <StepDetailPanel />
       </div>
 
-      {/* Step Details slides in over this panel when a step is expanded. */}
-      <StepDetailPanel />
+      <div className="flex w-10 shrink-0 flex-col items-center gap-0.5 border-l border-hair py-2">
+        {visible.map((t) => {
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              // The tooltip is not decoration here — it is the label. A glyph nobody can name is
+              // a worse control than the word it replaced, so every cell in this rail carries
+              // both a title for the pointer and a name for assistive tech.
+              title={t.label}
+              aria-label={t.label}
+              onClick={() => setTab(t.id)}
+              className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+                active ? "bg-active text-accent" : "text-muted hover:bg-active/40 hover:text-ink"
+              }`}
+            >
+              <t.Icon size={ICON.md} />
+              {/* THE ONE BADGE IN THIS RAIL, and it is computable while the tab is locked — the
+                  health route answers in counts, without elevation, so somebody is not asked for a
+                  passcode to be told whether they need to care. Carries a title as well as a colour,
+                  because a coloured dot alone says nothing to a screen reader. */}
+              {/* Amber for anything in flight, the error tone for a stopped state. Diverged is NOT
+                  amber, deliberately: it is not something working, it is something waiting for a
+                  person, and wearing the running colour would make it read as progress. */}
+              {t.id === "github" && githubBadge ? (
+                <span
+                  title={`GitHub: ${githubBadge}`}
+                  className={`absolute -right-0.5 -top-0.5 font-mono text-[10px] leading-none tabular-nums ${
+                    githubBadge === "⟳" ? "text-run" : githubBadge === "⚠" || githubBadge === "↕" ? "text-err" : "text-muted"
+                  }`}
+                >
+                  {githubBadge}
+                </span>
+              ) : null}
+              {t.id === "secrets" && secretsNeedAttention ? (
+                <span
+                  title="A credential needs attention"
+                  aria-label="A credential needs attention"
+                  role="img"
+                  className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-run"
+                />
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
