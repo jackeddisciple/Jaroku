@@ -20,6 +20,7 @@
 // `md:grid-cols-2`: the exception is expressed by the ABSENCE of a breakpoint rather than by a
 // media query that has to be remembered.
 
+import { LeaderboardCard, ModelMixCard, ReleasesCard, ToolUsageCard } from "./ActivityCards.tsx";
 import { ActivityHero, PulseBand } from "./ActivityHero.tsx";
 import { ActivityView } from "./ActivityView.tsx";
 
@@ -37,9 +38,16 @@ export function ActivityDashboard() {
 
       {/* Three pairs, in §3.1's order. `md:` and not `lg:`: the breakpoint that matters here is the
           one where two cards of numbers stop fitting side by side, which is well below a laptop. */}
-      <div className="grid gap-4 md:grid-cols-2" data-activity-region="leaderboard-mix" />
-      <div className="grid gap-4 md:grid-cols-2" data-activity-region="feed-releases" />
-      <div className="grid gap-4 md:grid-cols-2" data-activity-region="tools-team" />
+      <div className="grid gap-4 md:grid-cols-2">
+        <LeaderboardCard />
+        <ModelMixCard />
+      </div>
+      <div className="grid gap-4 md:grid-cols-2" data-activity-region="feed">
+        <ReleasesCard />
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <ToolUsageCard />
+      </div>
     </ActivityView>
   );
 }
