@@ -29,7 +29,6 @@ import { ICON, RADIUS, TYPE } from "../lib/tokens.ts";
 import { useActivityStore } from "../store/activityStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
-import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { RangeIcon } from "./activityIcons.tsx";
 
@@ -85,29 +84,32 @@ function Header() {
 
   return (
     <div className="flex shrink-0 items-center gap-3 border-b border-hair px-5 py-3">
+      {/* A TITLE AND A BREADCRUMB, the same two lines the top bar carries.
+          It was a 15px greeting on one line, a workspace name beside it, and a bordered scope chip
+          on a line of its own — three levels of chrome, and the largest and least actionable text
+          in the app sitting above a page whose entire content is figures. The greeting stays,
+          because a page that opens with your name is not a fault, but it stays at the size
+          everything else in this product's chrome is. */}
       <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          <span className="text-[15px] font-medium text-ink">
-            {greeting(new Date())}
-            {user?.displayName ? `, ${user.displayName.split(" ")[0]}` : ""}
-          </span>
-          {name && (
-            <Truncate className="text-[13px] text-muted" title={name}>
-              {name}
-            </Truncate>
-          )}
+        <div className="text-[13px] font-medium text-ink">
+          {greeting(new Date())}
+          {user?.displayName ? `, ${user.displayName.split(" ")[0]}` : ""}
         </div>
-        <div className="mt-0.5 flex items-center gap-1.5">
-          {/* §1's scope chip. A member COUNT and never a list — the member list has its own channel
-              with its own capability behind it, and a second copy here would be a second place to
-              leak it. */}
-          <Chip size="sm" tone="faint" variant="outline">
-            {team ? "Team" : "Personal"}
-          </Chip>
+        {/* §1's scope. A member COUNT and never a list — the member list has its own channel with
+            its own capability behind it, and a second copy here would be a second place to leak
+            it. As a breadcrumb rather than a bordered chip: it says where you are, and where you
+            are is not something to press. */}
+        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-faint">
+          {name && <Truncate className="min-w-0 max-w-[220px]" title={name}>{name}</Truncate>}
+          {name && <span aria-hidden>·</span>}
+          <span className="shrink-0">{team ? "team" : "personal"}</span>
           {team && members > 0 && (
-            <span className="text-[11px] tabular-nums text-faint">
-              {members} member{members === 1 ? "" : "s"}
-            </span>
+            <>
+              <span aria-hidden>·</span>
+              <span className="shrink-0 tabular-nums">
+                {members} member{members === 1 ? "" : "s"}
+              </span>
+            </>
           )}
         </div>
       </div>
