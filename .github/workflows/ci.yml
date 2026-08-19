@@ -326,6 +326,14 @@ jobs:
           # those is a count that looks right until you know the case, and the last of them would
           # report a deploy bouncing the server as the workspace's agents being broken.
           npm run test:activity-health
+          # §3.1's pulse band, whose load-bearing assertion is that its columns SUM to the hero row
+          # above them — a chart that disagreed with the figure over it would be two answers to one
+          # question on one screen. The bucketing groups by a date grain in SQL because `substr` is
+          # the only date arithmetic both dialects spell identically, and the fold from grain cell
+          # to column is exact only because the grid is epoch-aligned. An unaligned one loses the
+          # partial first column's rows silently, which is what this suite caught while it was
+          # being written.
+          npm run test:activity-pulse
 
       - name: cost, abuse and the data lifecycle
         working-directory: server

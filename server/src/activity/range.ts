@@ -72,7 +72,32 @@ export interface Window {
   previousTo: string;
   /** How wide one column of the pulse chart is, in ms. See `bucketFor`. */
   bucketMs: number;
-  /** How many columns that produces. Bounded — see `bucketFor`. */
+  /**
+   * Where the column grid starts: `from`, floored to a whole multiple of `bucketMs` since the
+   * epoch.
+   *
+   * THE GRID IS ALIGNED AND THE WINDOW IS NOT, and the two are different things on purpose.
+   *
+   * A window is "the last seven days", which ends now and therefore begins at whatever o'clock it
+   * happens to be. A COLUMN whose boundary is 14:37 is a column nobody can name, and §3.2's charts
+   * are drawn bare — no gridlines, hairline axes only — so a column carries its meaning entirely in
+   * where it starts. Aligning to the epoch puts six-hour columns on 00/06/12/18 and daily ones on
+   * midnight, which is what somebody reading the chart already assumes.
+   *
+   * It also makes the fold from a grain cell to a column EXACT rather than approximate. `pulse`
+   * groups in SQL by minute, hour or day — the three grains both dialects can produce with `substr`
+   * — and every one of those is itself epoch-aligned and divides every width on the ladder. So a
+   * grain cell always falls entirely inside one column. On an unaligned grid it would straddle two,
+   * and a chart would be silently smeared by up to one bucket.
+   *
+   * THE FIRST AND LAST COLUMNS ARE PARTIAL, and that is correct rather than tolerated. Rows are
+   * still bounded by `[from, to)` exactly, so the first column holds only the part of its hour that
+   * is inside the window and the last holds only the part of the current hour that has happened.
+   * The columns therefore still sum to the window's own totals, which is the property that matters:
+   * a pulse chart that did not add up to the hero row above it would be two answers to one question.
+   */
+  bucketFrom: string;
+  /** How many columns that produces, from `bucketFrom` to `to`. Bounded — see `bucketFor`. */
   buckets: number;
   /**
    * Whether this window is the live one (§5.5).
@@ -167,7 +192,11 @@ export function resolveWindow(range: ActivityRange, now: Date, custom?: CustomRa
 }
 
 function windowOf(range: ActivityRange, from: number, to: number, span: number): Window {
-  const { bucketMs, buckets } = bucketFor(span);
+  const { bucketMs } = bucketFor(span);
+  // Floored to the epoch grid — see `Window.bucketFrom`. The column count is then measured from
+  // there rather than from `from`, so the grid covers the whole window and never stops short of it.
+  const bucketFrom = Math.floor(from / bucketMs) * bucketMs;
+  const buckets = Math.max(1, Math.ceil((to - bucketFrom) / bucketMs));
   return {
     range,
     from: new Date(from).toISOString(),
@@ -178,9 +207,44 @@ function windowOf(range: ActivityRange, from: number, to: number, span: number):
     previousFrom: new Date(from - span).toISOString(),
     previousTo: new Date(from).toISOString(),
     bucketMs,
+    bucketFrom: new Date(bucketFrom).toISOString(),
     buckets,
     live: range === "24h",
   };
+}
+
+/**
+ * The grain `pulse` groups by in SQL, chosen so a grain cell always fits inside one column.
+ *
+ * THREE GRAINS, BECAUSE `substr` IS THE ONLY DATE ARITHMETIC BOTH DIALECTS SPELL THE SAME WAY.
+ * SQLite has `julianday` and Postgres has `EXTRACT(EPOCH FROM …)`, and a bucketing expression
+ * written in either is a query that runs on one driver — which is the class of difference this
+ * codebase has a whole conformance suite to prevent. An ISO-8601 timestamp sorts lexicographically
+ * and truncates by character, so `substr(at, 1, 13)` is "the hour" on both, exactly.
+ *
+ * The fold from grain cells to columns then happens in JavaScript, over a bounded number of rows:
+ * at most 120 minute cells (a grain only used for spans under two hours), at most 720 hour cells
+ * (thirty days), at most 366 day cells. That is the whole reason for the grain — the alternative is
+ * reading one row per RUN into this process, which for a busy month is tens of thousands.
+ */
+export type PulseGrain = "minute" | "hour" | "day";
+
+export function grainFor(bucketMs: number): PulseGrain {
+  if (bucketMs < 3_600_000) return "minute";
+  if (bucketMs < 86_400_000) return "hour";
+  return "day";
+}
+
+/** How many characters of an ISO-8601 timestamp one grain keeps, and what completes it again. */
+export const GRAIN_PREFIX: Record<PulseGrain, { length: number; suffix: string }> = {
+  minute: { length: 16, suffix: ":00.000Z" },
+  hour: { length: 13, suffix: ":00:00.000Z" },
+  day: { length: 10, suffix: "T00:00:00.000Z" },
+};
+
+/** A grain key back into the instant it names. The inverse of the `substr` the query does. */
+export function grainInstant(grain: PulseGrain, key: string): string {
+  return `${key}${GRAIN_PREFIX[grain].suffix}`;
 }
 
 /**
@@ -207,23 +271,34 @@ export function comparable(w: Window, workspaceCreatedAt: string | null | undefi
 }
 
 /**
- * Which bucket a moment falls in, as an index from the window's start.
+ * Which column of the chart a moment belongs to, as an index into `bucketStarts`.
  *
- * Returns -1 for a moment outside the window, which is not defensive: a run that started before the
- * range and ended inside it is a real row that a query bounded on `ended_at` will return, and
- * silently folding it into bucket zero would pile every long-running thing onto the chart's left
- * edge.
+ * THE GRID DECIDES THE COLUMN AND THE QUERY DECIDES MEMBERSHIP, and that division is worth stating
+ * because getting it the other way round drops rows silently — which it did, once, before this
+ * function was named for what it actually answers.
+ *
+ * `pulse` bounds its reads by the window exactly (`started_at >= from AND < to`), so anything that
+ * reaches here is already known to be inside it. What it is asked about is a GRAIN CELL'S OWN
+ * START, and for the first, partial column that instant is deliberately EARLIER than the window's
+ * start: the window begins at 14:37 and the hour cell holding its first rows begins at 14:00. A
+ * function that re-checked the window here would refuse that cell and quietly take its rows off the
+ * chart while the total above the chart still counted them — a pulse band that did not add up to
+ * its own hero row, which is the one thing a shared window exists to prevent.
+ *
+ * Outside the GRID is still -1, and that is not defensive either: a moment before `bucketFrom` or
+ * at/after `to` has no column, and clamping it into the first or last one would pile whatever
+ * produced it onto an edge and draw it as data.
  */
-export function bucketIndex(w: Window, at: string): number {
+export function columnFor(w: Window, at: string): number {
   const t = Date.parse(at);
   if (!Number.isFinite(t)) return -1;
-  const from = Date.parse(w.from);
-  if (t < from || t >= Date.parse(w.to)) return -1;
-  return Math.min(w.buckets - 1, Math.floor((t - from) / w.bucketMs));
+  const grid = Date.parse(w.bucketFrom);
+  if (t < grid || t >= Date.parse(w.to)) return -1;
+  return Math.min(w.buckets - 1, Math.floor((t - grid) / w.bucketMs));
 }
 
-/** The ISO start of each bucket, for a series that has to name its own x-axis. */
+/** The ISO start of each column, for a series that has to name its own x-axis. */
 export function bucketStarts(w: Window): string[] {
-  const from = Date.parse(w.from);
-  return Array.from({ length: w.buckets }, (_, i) => new Date(from + i * w.bucketMs).toISOString());
+  const grid = Date.parse(w.bucketFrom);
+  return Array.from({ length: w.buckets }, (_, i) => new Date(grid + i * w.bucketMs).toISOString());
 }

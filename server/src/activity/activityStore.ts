@@ -38,7 +38,14 @@
 import { asInt, type Db, type Queryable } from "../db/db.ts";
 import type { TenantContext } from "../db/tenant.ts";
 import { TraceStore } from "../store.ts";
-import type { Window } from "./range.ts";
+import {
+  GRAIN_PREFIX,
+  columnFor,
+  bucketStarts,
+  grainFor,
+  grainInstant,
+  type Window,
+} from "./range.ts";
 
 /**
  * One agent, as every module on this tab names it.
@@ -159,6 +166,27 @@ export interface RunHealth {
    */
   p50: number | null;
   p95: number | null;
+}
+
+/**
+ * One column of §3.1's WORKSPACE PULSE band: runs and spend over the range.
+ *
+ * TWO SERIES IN ONE ROW, because they are read against each other. "Spend went up and runs did not"
+ * is the whole question the band answers, and two independently bucketed charts would let a column
+ * in one sit beside a different hour in the other — which is exactly the ambiguity a shared window
+ * exists to remove.
+ *
+ * `errors` RIDES ALONG so §4's failure trend has somewhere to come from without a second query. The
+ * health strip states the rate; this states the shape of it over time, which is what makes a bad
+ * afternoon distinguishable from a bad month.
+ */
+export interface PulseColumn {
+  /** The column's own start, ISO-8601. Named so the chart can label an axis without arithmetic. */
+  at: string;
+  runs: number;
+  errors: number;
+  usd: number;
+  tokens: number;
 }
 
 export class ActivityStore {
@@ -515,6 +543,81 @@ export class ActivityStore {
       p50: numberOrNull(row?.["p50"]),
       p95: numberOrNull(row?.["p95"]),
     };
+  }
+
+  /**
+   * §3.1's workspace pulse: runs and spend over the range, bucketed. Two statements.
+   *
+   * GROUPED IN SQL BY A GRAIN AND FOLDED INTO COLUMNS IN JAVASCRIPT, which is the one genuinely
+   * non-obvious decision in this file and is explained at length on `grainFor`. The short version:
+   * `substr` is the only date arithmetic both dialects spell identically, so the query groups by
+   * minute, hour or day, and `bucketIndex` — already a pure, tested rule — does the rest. That
+   * bounds what crosses into this process at a few hundred rows whatever the workspace's size,
+   * where grouping per RUN would be tens of thousands.
+   *
+   * TWO STATEMENTS BECAUSE THERE ARE TWO TABLES AND NO USEFUL JOIN BETWEEN THEM. A run and the
+   * usage rows it produced are bucketed by different columns — `runs.started_at` and
+   * `usage_events.occurred_at` — and a usage row with no run at all (a generation, a plan, a judge
+   * verdict) is real money that a join through `runs` would drop. Two reads, one fold, one series.
+   *
+   * EVERY COLUMN EXISTS, INCLUDING THE EMPTY ONES. A series that returned only the buckets with
+   * rows in them would draw a chart whose columns are unevenly spaced and whose gaps read as
+   * "narrower period" rather than "nothing happened". §3.5's empty-is-not-zero applies to the CARD,
+   * which renders `--` when the whole series is empty; a zero inside a series that has data
+   * elsewhere is a genuine zero and is drawn as one.
+   */
+  async pulse(ctx: TenantContext, w: Window): Promise<PulseColumn[]> {
+    const q = this.q(ctx);
+    const grain = grainFor(w.bucketMs);
+    const { length } = GRAIN_PREFIX[grain];
+
+    const runRows = await q.all<Record<string, unknown>>(
+      `SELECT SUBSTR(started_at, 1, ?) AS k,
+              COUNT(*)                                        AS runs,
+              COUNT(CASE WHEN status = 'error' THEN 1 END)    AS errors
+         FROM runs
+        WHERE workspace_id = ? AND started_at >= ? AND started_at < ?
+        GROUP BY SUBSTR(started_at, 1, ?)`,
+      [length, ...bounds(ctx, w), length],
+    );
+
+    const usageRows = await q.all<Record<string, unknown>>(
+      `SELECT SUBSTR(occurred_at, 1, ?) AS k,
+              SUM(cost_usd)     AS usd,
+              SUM(total_tokens) AS tokens
+         FROM usage_events
+        WHERE workspace_id = ? AND occurred_at >= ? AND occurred_at < ?
+        GROUP BY SUBSTR(occurred_at, 1, ?)`,
+      [length, ...bounds(ctx, w), length],
+    );
+
+    const series: PulseColumn[] = bucketStarts(w).map((at) => ({
+      at, runs: 0, errors: 0, usd: 0, tokens: 0,
+    }));
+    const place = (key: unknown, apply: (column: PulseColumn) => void): void => {
+      const i = columnFor(w, grainInstant(grain, String(key)));
+      // A grain cell whose instant falls outside the window is one the WHERE already excluded, so
+      // this is unreachable in practice — and it is guarded rather than asserted because the
+      // alternative when a driver surprises us is writing into `series[-1]`.
+      if (i >= 0) apply(series[i]!);
+    };
+
+    for (const r of runRows) {
+      place(r["k"], (c) => {
+        c.runs += asInt(r["runs"]);
+        c.errors += asInt(r["errors"]);
+      });
+    }
+    for (const r of usageRows) {
+      place(r["k"], (c) => {
+        // An unpriced row contributes NULL, which adds nothing — the same rule the hero figure
+        // follows, and for the same reason. The card states the floor once; a column does not
+        // repeat the caveat.
+        c.usd += Number(r["usd"] ?? 0);
+        c.tokens += asInt(r["tokens"]);
+      });
+    }
+    return series;
   }
 }
 

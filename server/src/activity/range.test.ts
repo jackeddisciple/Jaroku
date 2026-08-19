@@ -26,9 +26,11 @@ import {
   BUCKET_TARGET,
   MAX_CUSTOM_SPAN_MS,
   bucketFor,
-  bucketIndex,
+  columnFor,
   bucketStarts,
   comparable,
+  grainFor,
+  grainInstant,
   isActivityRange,
   resolveWindow,
 } from "./range.ts";
@@ -157,26 +159,28 @@ console.log("\nthe series names its own x-axis and places a moment in it");
   const w = resolveWindow("24h", NOW, null);
   const starts = bucketStarts(w);
   check("one start per bucket", starts.length === w.buckets);
-  check("the first is the window's own start", starts[0] === w.from);
+  // NOW sits on the hour, so the grid and the window happen to coincide here. The section further
+  // down exercises the case where they do not, which is every other minute of the day.
+  check("the first column starts on the grid", starts[0] === w.bucketFrom);
   check(
     "the last is one bucket short of the end",
     Date.parse(starts[starts.length - 1]!) === Date.parse(w.to) - w.bucketMs,
   );
 
-  check("the first instant lands in bucket 0", bucketIndex(w, w.from) === 0);
+  check("the first instant lands in bucket 0", columnFor(w, w.from) === 0);
   check(
     "an instant just inside the end lands in the last bucket",
-    bucketIndex(w, new Date(Date.parse(w.to) - 1).toISOString()) === w.buckets - 1,
+    columnFor(w, new Date(Date.parse(w.to) - 1).toISOString()) === w.buckets - 1,
   );
-  // THE CASE THIS FUNCTION EXISTS FOR. A run that began before the range and ended inside it is a
-  // real row a query bounded on `ended_at` returns, and folding it into bucket zero would pile
-  // every long-running thing onto the chart's left edge.
+  // Before the grid is nowhere rather than column zero — folding it in would pile whatever produced
+  // it onto the chart's left edge and draw it as data. NOW sits on the hour here, so the grid and
+  // the window begin together and this moment is outside both.
   check(
-    "a moment before the window is not bucket 0",
-    bucketIndex(w, new Date(Date.parse(w.from) - 1).toISOString()) === -1,
+    "a moment before the grid is not column 0",
+    columnFor(w, new Date(Date.parse(w.bucketFrom) - 1).toISOString()) === -1,
   );
-  check("the exclusive end is outside", bucketIndex(w, w.to) === -1);
-  check("so is a date nobody can parse", bucketIndex(w, "not a date") === -1);
+  check("the exclusive end is outside", columnFor(w, w.to) === -1);
+  check("so is a date nobody can parse", columnFor(w, "not a date") === -1);
 }
 
 console.log("\ncomparability is a question about the workspace, not about the data");
@@ -195,6 +199,61 @@ console.log("\ncomparability is a question about the workspace, not about the da
   // The direction to be wrong in: one failed lookup must not blank every delta on the page.
   check("an unknown creation time reads as comparable", comparable(w, null));
   check("...and so does an unparseable one", comparable(w, "sometime last year"));
+}
+
+console.log("\nthe column grid is aligned to the epoch even when the window is not");
+{
+  // A window that ends at 14:37 — which is what "the last 24 hours" means at 14:37, and what the
+  // three assertions above never exercised because NOW happens to sit on the hour.
+  const odd = new Date("2026-08-19T14:37:11.500Z");
+  const w = resolveWindow("24h", odd, null);
+
+  check("the window itself is exact", w.to === odd.toISOString());
+  check("...and reaches back exactly a day", span(w.from, w.to) === DAY);
+  // The grid is what gets rounded, not the window.
+  check("the grid starts on a bucket boundary", Date.parse(w.bucketFrom) % w.bucketMs === 0);
+  check("...at or before the window's own start", Date.parse(w.bucketFrom) <= Date.parse(w.from));
+  check(
+    "...and within one bucket of it, so no whole empty column is prepended",
+    Date.parse(w.from) - Date.parse(w.bucketFrom) < w.bucketMs,
+  );
+  const starts = bucketStarts(w);
+  check("every column starts on a boundary", starts.every((s) => Date.parse(s) % w.bucketMs === 0));
+  check("and the grid covers the whole window", Date.parse(starts[starts.length - 1]!) + w.bucketMs >= Date.parse(w.to));
+
+  // THE DIVISION THIS FUNCTION EXISTS FOR: the GRID places, the QUERY decides membership. The grain
+  // cell holding the window's first rows begins at 14:00 while the window begins at 14:37, so a
+  // placement that re-checked the window would refuse that cell and take its rows off the chart
+  // while the total above the chart still counted them. It is placed instead.
+  const cellStart = w.bucketFrom;
+  check("the first grain cell's own start is before the window's", Date.parse(cellStart) < Date.parse(w.from));
+  check("...and it is still placed in the first column", columnFor(w, cellStart) === 0);
+  check("a moment just inside the window is in the first column too", columnFor(w, w.from) === 0);
+  // Outside the GRID has no column, and is not clamped onto an edge.
+  check("a moment before the grid has no column", columnFor(w, new Date(Date.parse(cellStart) - 1).toISOString()) === -1);
+  check("and the exclusive end has none either", columnFor(w, w.to) === -1);
+}
+
+console.log("\nthe grain always fits inside a column, on every range");
+{
+  const GRAIN_MS: Record<string, number> = { minute: MINUTE, hour: HOUR, day: DAY };
+  const spans: [string, number][] = [
+    ["an hour", HOUR], ["a day", DAY], ["a week", 7 * DAY], ["a month", 30 * DAY], ["a year", 365 * DAY],
+  ];
+  for (const [name, ms] of spans) {
+    const { bucketMs } = bucketFor(ms);
+    const g = grainFor(bucketMs);
+    // BOTH HALVES ARE NEEDED. A grain no coarser than the column keeps a cell from spanning two;
+    // a column that is a whole multiple of the grain keeps the epoch-aligned cells from straddling
+    // a boundary. Together they are what makes the fold exact rather than approximate.
+    check(
+      `${name}: ${g} cells fit inside ${bucketMs / MINUTE}m columns`,
+      GRAIN_MS[g]! <= bucketMs && bucketMs % GRAIN_MS[g]! === 0,
+    );
+  }
+  check("a grain key round-trips into the instant it names", grainInstant("hour", "2026-08-19T14") === "2026-08-19T14:00:00.000Z");
+  check("...for a day too", grainInstant("day", "2026-08-19") === "2026-08-19T00:00:00.000Z");
+  check("...and a minute", grainInstant("minute", "2026-08-19T14:37") === "2026-08-19T14:37:00.000Z");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

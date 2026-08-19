@@ -96,7 +96,7 @@ export async function seedActivity(db: Db, label: string): Promise<ActivityFixtu
   // A DAY OF WORK, INSIDE THE WINDOW EVERY ASSERTION BELOW RESOLVES. Each run is placed an hour
   // apart ending an hour before `ACTIVITY_NOW`, so every row is comfortably inside a 24h window and
   // none of them straddles a bucket edge — a fixture that landed rows on the boundary would make a
-  // failure here indistinguishable from an off-by-one in `bucketIndex`, which has its own suite.
+  // failure here indistinguishable from an off-by-one in `columnFor`, which has its own suite.
   const trace = new TraceStore(db);
   const billing = new BillingRepository(db);
   const runs: string[] = [];
@@ -301,5 +301,26 @@ export async function activitySuite(
   check(
     healthA.p95 !== null && healthB.p95 !== null && healthA.p95 !== healthB.p95,
     "and the percentiles are drawn from each workspace's own steps",
+  );
+
+  // --- module 6: the workspace pulse ------------------------------------------------------------
+  //
+  // The series is asserted against the CARDS ABOVE IT rather than against a hand-written number,
+  // because that is the property the band has to hold: a chart whose columns did not add up to the
+  // hero row would be two answers to one question on one screen. Doing it per workspace also makes
+  // a leak visible twice over — a crossed read inflates the series and breaks the equality at once.
+
+  const pulseA = await store.pulse(A.ctx, w);
+  const pulseB = await store.pulse(B.ctx, w);
+  const runsIn = (s: typeof pulseA): number => s.reduce((n, c) => n + c.runs, 0);
+  const usdIn = (s: typeof pulseA): number => Math.round(s.reduce((n, c) => n + c.usd, 0) * 100);
+
+  check(runsIn(pulseA) === A.runs.length, `A's series holds A's runs (${runsIn(pulseA)})`);
+  check(runsIn(pulseB) === B.runs.length, `B's series holds B's (${runsIn(pulseB)})`);
+  check(usdIn(pulseA) === cents(A.spendUsd), "and A's columns add up to A's own spend card");
+  check(usdIn(pulseB) === cents(B.spendUsd), "...and B's to B's");
+  check(
+    pulseA.length === pulseB.length && pulseA[0]!.at === pulseB[0]!.at,
+    "both are drawn on the same grid, because both were resolved from the same window",
   );
 }
