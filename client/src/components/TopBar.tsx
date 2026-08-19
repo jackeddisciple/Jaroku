@@ -19,6 +19,7 @@ import { useDeployStore } from "../store/deployStore.ts";
 import { sendCancelDeploy, sendSetOwnKeyForPlatform } from "../lib/socket.ts";
 import { isDeployInFlight } from "../types.ts";
 import { agentStatus } from "../lib/agentStatus.ts";
+import { fmtPercent } from "../lib/format.ts";
 import { ProviderMark, BRAND_COLOR, JarokuGlyph } from "../lib/icons.tsx";
 import { BRAND, ICON, TYPE } from "../lib/tokens.ts";
 
@@ -27,6 +28,7 @@ import { Chip } from "./Chip.tsx";
 import { GitBranchIcon, GithubIcon, KeyIcon, StopIcon } from "./panelIcons.tsx";
 import { useGithubStore } from "../store/githubStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
+import { useEvalStore } from "../store/evalStore.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { ShareIcon } from "./activityIcons.tsx";
 import { iconBtn, outlineBtn } from "./buttons.ts";
@@ -253,6 +255,51 @@ function Breadcrumb({ agentId }: { agentId: string }) {
   );
 }
 
+/**
+ * A ring and a percentage for the one thing in this product that has a real denominator.
+ *
+ * The chrome had no persistent progress readout at all — a run in flight said "Step 4" with no
+ * idea how many steps there are, because a graph does not know its own length, and a deploy
+ * reports named stages rather than a fraction. Inventing a percentage for either would be exactly
+ * the fabricated placeholder this product refuses everywhere else.
+ *
+ * An eval drain does have one: `total` and `done`, counted by the server. So that is what this
+ * shows, and it shows nothing at all the rest of the time — which is the honest version of a
+ * persistent status readout, and the same rule the GitHub badge follows about absence meaning
+ * there is nothing to do.
+ */
+function SyncRing() {
+  const progress = useEvalStore((s) => s.progress);
+  if (!progress || progress.total === 0) return null;
+  const ratio = Math.min(1, progress.done / progress.total);
+  const done = ratio >= 1;
+  // 2πr for r = 7, which is the circle drawn below. `strokeDasharray` walks it.
+  const circumference = 2 * Math.PI * 7;
+
+  return (
+    <span
+      className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted"
+      title={`Evaluating — ${progress.done} of ${progress.total} done${progress.failed > 0 ? `, ${progress.failed} failed` : ""}`}
+    >
+      <svg width={16} height={16} viewBox="0 0 16 16" className="-rotate-90 align-middle" aria-hidden>
+        <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth={1.75} className="text-hair" />
+        <circle
+          cx="8"
+          cy="8"
+          r="7"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.75}
+          strokeLinecap="round"
+          strokeDasharray={`${circumference * ratio} ${circumference}`}
+          className={done ? "text-ok" : "text-accent"}
+        />
+      </svg>
+      <span className="font-mono tabular-nums">{fmtPercent(ratio)}</span>
+    </span>
+  );
+}
+
 export function TopBar() {
   const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === s.activeAgentId));
   const runs = useTraceStore((s) => s.runs);
@@ -296,6 +343,7 @@ export function TopBar() {
       <span className="ml-auto min-w-0 shrink"><RunFigures /></span>
 
       <div className="flex shrink-0 items-center gap-2">
+        <SyncRing />
         {/* Which workspace this tab is in, and the way out of it. Furthest left of the right
             group because it is the widest scope on screen: everything to its right is a fact
             about one workspace, and this is which one. */}
