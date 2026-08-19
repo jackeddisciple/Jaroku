@@ -533,6 +533,24 @@ export function ArrowUpDownIcon(p: P) {
   return svg(p, <><path d="m21 16-4 4-4-4" /><path d="M17 20V4" /><path d="m3 8 4-4 4 4" /><path d="M7 4v16" /></>);
 }
 
+/**
+ * lucide:share — a box with an arrow leaving it. "Send this to somebody".
+ *
+ * NOT `activityIcons.ShareIcon`, which is a share-of-TOTAL mark: two nodes on a diagonal, which at
+ * 14px is indistinguishable from a percent sign. Two different meanings of the same English word,
+ * and the title bar wants this one.
+ */
+export function ShareOutIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" />
+      <path d="M16 6l-4-4-4 4" />
+      <path d="M12 2v14" />
+    </>,
+  );
+}
+
 /** lucide:external-link — a commit sha, a repo, a PR. Anything that leaves for github.com. */
 export function ExternalLinkIcon(p: P) {
   return svg(p, <><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6" /></>);

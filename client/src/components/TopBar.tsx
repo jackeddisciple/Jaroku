@@ -25,12 +25,11 @@ import { BRAND, ICON, TYPE } from "../lib/tokens.ts";
 
 import { Truncate } from "./Truncate.tsx";
 import { Chip } from "./Chip.tsx";
-import { GitBranchIcon, GithubIcon, KeyIcon, StopIcon } from "./panelIcons.tsx";
+import { GitBranchIcon, GithubIcon, KeyIcon, ShareOutIcon, StopIcon } from "./panelIcons.tsx";
 import { useGithubStore } from "../store/githubStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
-import { ShareIcon } from "./activityIcons.tsx";
 import { iconBtn, outlineBtn } from "./buttons.ts";
 import { RunFigures } from "./StatusBar.tsx";
 import { CheckboxField } from "./Checkbox.tsx";
@@ -357,7 +356,7 @@ export function TopBar() {
           aria-label="Share"
           className={iconBtn}
         >
-          <ShareIcon size={ICON.sm} />
+          <ShareOutIcon size={ICON.sm} />
         </button>
         {inFlight ? (
           // Same swap EvalRunBar makes: while something is running, the button that started it

@@ -760,7 +760,12 @@ export function Sidebar() {
           four different offsets: a hairline sits ABOVE a section's label and never between a label
           and its own rows. `sticky` on the header is what makes a single scroller readable — the
           heading you are under stays where you can see it. */}
-      <div className="scroll-fade min-h-0 flex-1 overflow-y-auto">
+      {/* NO `scroll-fade` HERE, deliberately. A top fade and a sticky header are the same pixels
+            arguing: the heading pins itself to the top edge and the mask then dims the thing it
+            pinned. The sticky headers are the stronger cue in this column — they say what you are
+            under as well as that there is more — so they win and the mask goes to the scrollers
+            that have no headings. */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {/* PINNED, above the rest of the list — §2's order for this column.
             Only when there is something pinned: an empty PINNED heading is the same noise as an
             empty section in the Threads view, and the same rule applies. Pinning is `P` on a
