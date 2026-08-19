@@ -1,0 +1,80 @@
+-- 051_activity — the access paths the Activity tab's range-bounded aggregates stand on.
+--
+-- NO COLUMNS AND NO TABLES, and as with 048 the absence is the decision rather than an omission.
+-- The Activity tab is ten aggregates over `runs`, `steps`, `usage_events`, `agent_versions`,
+-- `deployments`, `eval_runs`, `mcp_tools` and `audit_log`, every one of them bounded by one global
+-- date range. Not one of those aggregates wants a fact this schema does not already hold: spend is
+-- `usage_events.cost_usd`, volume is `usage_events.total_tokens`, health is `runs.status` and the
+-- step timings under it, the release log is `agent_versions` and `deployments`, and the tool rollup
+-- is `steps` where `type = 'tool_call'`. A column you can derive is a second copy of a fact, and the
+-- second copy is the one that goes stale — which on a dashboard means a number somebody screenshots.
+--
+-- `schema/events.md` IS UNTOUCHED, deliberately and per the specification. Nothing here is a trace
+-- event, nothing here changes one, and this tab records nothing: it reads.
+--
+-- WHAT IS ACTUALLY MISSING IS THREE ACCESS PATHS, all three of them the same shape — "everything in
+-- this workspace between two moments, newest first" — which is the one question this schema has
+-- never been asked before. Every existing index on these tables was built for a per-AGENT question,
+-- because until now every surface that read them was about one agent.
+--
+--   deployments (workspace_id, created_at DESC)
+--     The release timeline (§2 module 8) and the event feed both read every deploy in the workspace
+--     inside the range, chronologically. `deployments_ws_agent` is (workspace_id, agent_id,
+--     created_at DESC) — right for the per-agent Deploy panel, which is what it was built for, and
+--     wrong here: with no agent to fix, the planner has to walk every agent's slice and merge them.
+--     `deployments_ws_status` has no ordering column at all. This is the workspace's release LOG,
+--     and a log is ordered by time.
+--
+--   agent_versions (agent_id, created_at DESC)
+--     Version publishes, for the same timeline and the same feed. `agent_versions_agent_version` is
+--     (agent_id, version DESC), which orders by a NUMBER — correct for "which version is newest for
+--     this agent" and useless for "what was published across the workspace on Tuesday", because
+--     version 3 of one agent and version 3 of another say nothing about which came first.
+--
+--     `workspace_id` DOES NOT LEAD IT, AND CANNOT. This table has no `workspace_id` column: it hangs
+--     off `agents`, whose uuid is already workspace-scoped, which is exactly why every read of it in
+--     `AgentRepository` is scoped by a JOIN rather than by a WHERE. The index therefore leads with
+--     the column that IS the scope's proxy here. That is the CONTRIBUTING discipline honoured rather
+--     than waived: the rule is that the planner must apply the tenant bound first, and joining from
+--     an already-scoped `agents` and probing this index per agent does exactly that.
+--
+--   agent_versions (agent_id, undone_at DESC) WHERE undone_at IS NOT NULL
+--     The feed carries edits APPLIED and edits UNDONE, and they are two moments on one row: a
+--     version is published at `created_at` and taken back at `undone_at`, sometimes days apart, and
+--     the feed has to place each at its own time. Sorting the applied index by the wrong column
+--     would put an undo where its publish happened. PARTIAL, because an undone version is the rare
+--     case — most rows have a NULL here and belong in no index for this question — so the index is
+--     a fraction of the table's size and never touched by the write path that matters.
+--
+-- WHAT IS DELIBERATELY NOT HERE, and this is the larger half of the migration.
+--
+-- The four tables this tab reads hardest — `steps`, `runs`, `usage_events`, `audit_log` — get no
+-- index at all, and that is not a judgement this file is free to make. `migrate:check` REFUSES an
+-- unqualified `CREATE INDEX` on any of them: building one takes an ACCESS EXCLUSIVE lock for the
+-- whole build on the hottest write paths in the system, and a migration file cannot use CONCURRENTLY
+-- because the runner puts each file in one transaction. 044 declined an index for that reason and
+-- said so, 048 declined the same two and said so again, and this says it a third time rather than
+-- leaving the next reader to wonder why the busiest tables in the tab are the ones with nothing new.
+--
+-- It costs less than it looks like it costs, because every one of those reads is already bounded by
+-- a leading `workspace_id` index and then grouped:
+--
+--   runs          `runs_ws_started` (workspace_id, started_at DESC) is the range bound exactly.
+--                 The leaderboard and the health strip group what it returns; a grouping index would
+--                 buy the GROUP BY and not the scan, which is the smaller half.
+--   usage_events  `usage_events_ws_occurred` (workspace_id, occurred_at DESC), likewise, and it is
+--                 the same index `spendByAgent` and `spendSince` have always read.
+--   audit_log     `audit_log_workspace` (workspace_id, created_at DESC), likewise.
+--   steps         has NO time index and is never given one here. The tool and MCP rollup is bounded
+--                 through `runs` — the range picks the run ids off `runs_ws_started`, and
+--                 `steps_ws_run_seq` (workspace_id, run_id, seq) answers per run. That is one more
+--                 join than a time index would need and it is the only shape available on a
+--                 partitioned table whose write path must not stop.
+--
+-- If these turn out to be genuinely too slow, the answer is a materialised rollup designed on
+-- purpose with measurements in hand — which the specification explicitly declines to build in this
+-- session — and not an index snuck past a gate that exists to prevent an outage on deploy.
+CREATE INDEX deployments_ws_created ON deployments (workspace_id, created_at DESC);
+CREATE INDEX agent_versions_agent_created ON agent_versions (agent_id, created_at DESC);
+CREATE INDEX agent_versions_agent_undone ON agent_versions (agent_id, undone_at DESC)
+  WHERE undone_at IS NOT NULL;
