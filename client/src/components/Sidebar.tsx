@@ -58,7 +58,7 @@ type Filter = "all" | "running" | "deployed" | "synced" | "drafts" | "archived";
 function StatusGlyph({ status }: { status: RunStatus }) {
   switch (status) {
     case "running":
-      return <StatusDot state="pending" icon={LoaderIcon} pulse title="running" />;
+      return <StatusDot state="pending" icon={LoaderIcon} spin title="running" />;
     case "paused":
       return <StatusDot state="pending" icon={PauseIcon} title="paused — resumable" />;
     case "error":

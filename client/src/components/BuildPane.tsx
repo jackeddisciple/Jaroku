@@ -1206,7 +1206,7 @@ export function BuildPane({
                 this says what is going on regardless of whether anything has been typed. */}
             {moment.status && (
               <span className="inline-flex items-center gap-1.5 text-muted">
-                {busy && <StatusDot state="pending" icon={LoaderIcon} pulse size={ICON.xs} />}
+                {busy && <StatusDot state="pending" icon={LoaderIcon} spin size={ICON.xs} />}
                 {moment.status}
               </span>
             )}

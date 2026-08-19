@@ -87,6 +87,7 @@ export function StatusDot({
   state,
   size = ICON.sm - 2,
   pulse = false,
+  spin = false,
   title,
   color,
   icon,
@@ -94,6 +95,12 @@ export function StatusDot({
   state: BadgeState;
   size?: number;
   pulse?: boolean;
+  /**
+   * Turn the glyph rather than fade it. For `LoaderIcon`, which is drawn as three quarters of a
+   * circle — a shape that makes a promise about motion — and was being faded in and out instead,
+   * which is the one thing a spinner arc does not do.
+   */
+  spin?: boolean;
   title?: string;
   /** Override for a category accent — an audited tool is teal, not green. */
   color?: string;
@@ -108,10 +115,10 @@ export function StatusDot({
   return (
     <span
       title={title}
-      className={`inline-flex items-center ${pulse ? "animate-stream-pulse motion-reduce:animate-none" : ""}`}
+      className={`inline-flex items-center ${pulse && !spin ? "animate-stream-pulse motion-reduce:animate-none" : ""}`}
       style={{ color: color ?? STATUS[state] }}
     >
-      <Icon size={size} />
+      <Icon size={size} className={spin ? "animate-spin motion-reduce:animate-none" : undefined} />
     </span>
   );
 }
