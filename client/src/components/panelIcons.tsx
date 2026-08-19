@@ -25,6 +25,12 @@ type P = {
  * The one place SVG attributes are decided for the whole panel. Exported so composerIcons.tsx
  * draws through it too — two factories with two different stroke weights is how a pane ends up
  * with icons that are subtly different weights depending on which file they came from.
+ *
+ * `align-middle` is on the factory rather than on call sites because an inline SVG otherwise sits
+ * on the text baseline with the descender space still beneath it, which puts every glyph in the
+ * app about a pixel low against the text beside it. Correcting it here fixes all ~90 at once and
+ * removes the reason to keep adding local `mt-0.5` nudges, which is how one chevron ended up
+ * aligned differently from its three siblings.
  */
 export const svg = (
   { size = ICON.sm, strokeWidth = ICON.strokeWidth, className }: P,
@@ -39,7 +45,7 @@ export const svg = (
     strokeWidth={strokeWidth}
     strokeLinecap="round"
     strokeLinejoin="round"
-    className={className}
+    className={className ? `align-middle ${className}` : "align-middle"}
     aria-hidden
   >
     {children}

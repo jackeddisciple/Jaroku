@@ -205,7 +205,7 @@ function MenuItem({
           {detail && <span className="block text-[10px] text-faint">{detail}</span>}
         </span>
         {expand && (
-          <span className={`mt-0.5 shrink-0 text-faint transition-transform duration-fast ${open ? "rotate-90" : ""}`} aria-hidden>
+          <span className={`shrink-0 text-faint transition-transform duration-fast ${open ? "rotate-90" : ""}`} aria-hidden>
             <ChevronRightIcon size={ICON.xs} />
           </span>
         )}
