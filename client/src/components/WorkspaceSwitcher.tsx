@@ -163,7 +163,7 @@ export function WorkspaceSwitcher() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-1 w-72 overflow-hidden rounded-card border border-edge bg-panel shadow-overlay">
+        <div className="absolute right-0 z-30 mt-1 w-72 overflow-hidden rounded-card border border-edge bg-panel shadow-overlay">
           <div className="border-b border-hair px-3 py-2">
             <div className="truncate text-[12px] text-ink">{user.displayName || user.email}</div>
             <div className="truncate text-[11px] text-faint">{user.email}</div>

@@ -175,7 +175,7 @@ function Overflow({ item, onClose }: { item: InboxItemView; onClose: () => void 
   return (
     <div
       onClick={(e) => e.stopPropagation()}
-      className="absolute right-0 top-6 z-10 w-[184px] overflow-hidden py-1"
+      className="absolute right-0 top-6 z-30 w-[184px] overflow-hidden py-1"
       style={{
         borderRadius: RADIUS.card,
         border: `1px solid ${SURFACE.edge}`,

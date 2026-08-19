@@ -135,8 +135,8 @@ function Overflow({
           {/* A full-screen catcher rather than a document listener: it closes on any click outside,
               including one that would otherwise open a different card, and it disappears with the
               menu rather than outliving it. */}
-          <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
-          <div className="absolute right-0 top-full z-50 mt-1 w-52 rounded-card border border-edge bg-panel p-1 shadow-floating">
+          <div className="fixed inset-0 z-30" aria-hidden onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
+          <div className="absolute right-0 top-full z-30 mt-1 w-52 rounded-card border border-edge bg-panel p-1 shadow-floating">
             {archived
               ? item("Restore", ArchiveRestoreIcon, onRestore)
               : [

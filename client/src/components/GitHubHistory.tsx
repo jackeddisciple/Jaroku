@@ -186,7 +186,7 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
       )}
 
       {pending && (
-        <div className="absolute left-0 top-full z-40 mt-1 w-[300px] rounded-card border border-edge bg-panel p-2.5 shadow-floating">
+        <div className="absolute left-0 top-full z-30 mt-1 w-[300px] rounded-card border border-edge bg-panel p-2.5 shadow-floating">
           <div className="text-[12px] text-ink">
             {view.ahead} unpushed version{view.ahead === 1 ? "" : "s"}
           </div>

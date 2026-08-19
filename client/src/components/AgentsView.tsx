@@ -138,8 +138,8 @@ function FilterMenu({
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-card border border-edge bg-panel p-1 shadow-floating">
+          <div className="fixed inset-0 z-30" aria-hidden onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full z-30 mt-1 w-64 rounded-card border border-edge bg-panel p-1 shadow-floating">
             {row(
               "Status",
               (["healthy", "degraded", "failing", "unverified"] as const).map((s) => (

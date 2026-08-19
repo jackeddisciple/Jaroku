@@ -109,7 +109,7 @@ export function GitHubPanel() {
           it used to jump out from under them at the moment it changed. A transient message is a
           layer, not a row. */}
       {(error || notice) && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 px-4 pt-2">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 px-4 pt-2">
           <div
             role="status"
             className={`pointer-events-auto flex items-start gap-2 rounded-control border bg-panel px-2 py-1.5 text-[11px] leading-[1.5] shadow-floating ${
