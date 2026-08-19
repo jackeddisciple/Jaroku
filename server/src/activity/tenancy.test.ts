@@ -361,4 +361,25 @@ export async function activitySuite(
   );
   check(sharedA?.name === `${shared} (a)`, "each row is labelled from its own workspace's directory");
   check(sharedB?.name === `${shared} (b)`, "...on both sides");
+
+  // --- module 8: the model and provider mix ------------------------------------------------------
+  //
+  // BOTH WORKSPACES RUN THE SAME MODEL, for the reason both use the same agent slugs: two tenants on
+  // `claude-haiku-4-5` is the ordinary case, and a GROUP BY that lost its scope would merge them
+  // into one segment carrying both bills.
+
+  const mixA = await store.modelMix(A.ctx, w);
+  const mixB = await store.modelMix(B.ctx, w);
+  check(mixA.models.length === 1 && mixB.models.length === 1, "each workspace ran one model");
+  check(
+    mixA.models[0]!.model === mixB.models[0]!.model,
+    "...and it is the same model on both sides, which is what makes the next line an assertion",
+  );
+  check(cents(mixA.pricedUsd) === cents(A.spendUsd), `A's mix accounts for A's spend ($${mixA.pricedUsd.toFixed(2)})`);
+  check(cents(mixB.pricedUsd) === cents(B.spendUsd), `B's for B's ($${mixB.pricedUsd.toFixed(2)})`);
+  check(mixA.totalTokens === A.tokens && mixB.totalTokens === B.tokens, "and the volumes likewise");
+  check(
+    mixA.models[0]!.calls === A.runs.length && mixB.models[0]!.calls === B.runs.length,
+    "the call counts are each workspace's own",
+  );
 }

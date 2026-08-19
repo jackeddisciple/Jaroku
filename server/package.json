@@ -186,7 +186,8 @@
     "test:activity-spend": "tsx src/activity/spend.test.ts",
     "test:activity-health": "tsx src/activity/health.test.ts",
     "test:activity-pulse": "tsx src/activity/pulse.test.ts",
-    "test:activity-leaderboard": "tsx src/activity/leaderboard.test.ts"
+    "test:activity-leaderboard": "tsx src/activity/leaderboard.test.ts",
+    "test:activity-model-mix": "tsx src/activity/modelMix.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",

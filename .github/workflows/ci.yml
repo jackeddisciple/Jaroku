@@ -341,6 +341,13 @@ jobs:
           # to the strip above them: a table whose rows do not add up to the headline is the
           # fastest way to make somebody stop believing both.
           npm run test:activity-leaderboard
+          # §6's two shares, which disagree on purpose — a cheap model is most of the volume and a
+          # tenth of the bill — so a mix that reported one number would answer half the question.
+          # The load-bearing assertion is the DENOMINATOR: an unpriced model stays in the volume
+          # view and out of the spend one, and its zero stays out of the spend total, or the priced
+          # segments sum to all of a bar that is a fifth full and the gap reads as a model nobody
+          # named.
+          npm run test:activity-model-mix
 
       - name: cost, abuse and the data lifecycle
         working-directory: server

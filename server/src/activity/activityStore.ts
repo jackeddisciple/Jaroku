@@ -221,6 +221,45 @@ export interface LeaderboardRow {
   models: string[];
 }
 
+/**
+ * §6's mix: one model, and how much of the workspace's spend and volume it accounts for.
+ *
+ * WHY THIS EXISTS NOWHERE ELSE IN THE PRODUCT. The eval comparison answers "which provider is
+ * better on this dataset", which is a question about quality on a fixed set of examples. This
+ * answers "what are we actually spending on", which is a question about production. Different
+ * question, different data, and neither substitutes for the other.
+ *
+ * TWO SHARES, NOT ONE, and they disagree on purpose. A cheap model can be most of the volume and a
+ * tenth of the bill; an expensive one is the reverse. A single stacked bar would have to pick one
+ * and would be answering half the question — §6 asks for both views, toggleable, which is only
+ * meaningful if the two numbers are carried side by side.
+ *
+ * AN UNPRICED MODEL APPEARS IN THE VOLUME VIEW AND IS EXCLUDED FROM THE SPEND VIEW, labelled rather
+ * than dropped silently. Dropping it would make the volume view and the spend view disagree about
+ * which models the workspace even runs, and a reader comparing the two would conclude one of them
+ * is broken. `priced` is what the segment's label is drawn from.
+ */
+export interface ModelShare {
+  model: string;
+  provider: string;
+  /** USD attributed to this model. Zero and meaningless when `priced` is false. */
+  usd: number;
+  tokens: number;
+  /** How many usage rows named it. The honest denominator for "how often is this actually used". */
+  calls: number;
+  /** False when any row for this model recorded no cost. §6's label rather than a silent drop. */
+  priced: boolean;
+}
+
+/** §6's mix, with the two denominators its two views are drawn against. */
+export interface ModelMix {
+  models: ModelShare[];
+  /** Spend across PRICED models only — the denominator of the spend view. */
+  pricedUsd: number;
+  /** Volume across every model, priced or not — the denominator of the volume view. */
+  totalTokens: number;
+}
+
 export class ActivityStore {
   /** Shares the trace store's database: same file, single writer. See TraceStore.database(). */
   constructor(private db: Db) {}
@@ -791,6 +830,60 @@ export class ActivityStore {
     // sort by any column; this is only the order it arrives in, so a client that has not chosen yet
     // is already showing the useful one.
     return rows.sort((a, b) => b.usd - a.usd || b.runs - a.runs || a.agentId.localeCompare(b.agentId));
+  }
+
+  /**
+   * §6's model and provider mix. ONE statement.
+   *
+   * GROUPED BY (MODEL, PROVIDER) RATHER THAN BY MODEL ALONE. The same model id can arrive under two
+   * providers — a workspace running Claude on its own key and through the platform, or the same
+   * open-weights id served by two hosts — and folding them together would put one bar where there
+   * are two facts. It also means the provider is a column of the answer rather than something the
+   * client has to look up, which is what lets §6's brand logos be resolved without a second table.
+   *
+   * EVERY USAGE ROW IS HERE, INCLUDING THE ONES WITH NO RUN. A generation, a plan, a judge verdict
+   * and an explanation are model calls the workspace paid for, and the leaderboard cannot show them
+   * because they belong to no agent. This is the one module where they are visible, which is
+   * another reason it is not a per-agent breakdown wearing a different hat.
+   *
+   * A ROW WITH NO MODEL AT ALL IS DROPPED, and it is the only thing this method drops. Sandbox
+   * seconds and stored bytes are metered as usage and name no model, so a segment for them would be
+   * a bar in a MODEL mix labelled with nothing. They are still in the spend rollup's provider ring,
+   * which is where "what did we pay for" is answered — see `SpendRollup.byProvider`.
+   */
+  async modelMix(ctx: TenantContext, w: Window): Promise<ModelMix> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT model                                          AS model,
+              COALESCE(provider, '')                         AS provider,
+              SUM(cost_usd)                                  AS usd,
+              SUM(total_tokens)                              AS tokens,
+              COUNT(*)                                       AS calls,
+              COUNT(CASE WHEN cost_usd IS NULL THEN 1 END)   AS unpriced
+         FROM usage_events
+        WHERE workspace_id = ? AND occurred_at >= ? AND occurred_at < ?
+          AND model IS NOT NULL AND model <> ''
+        GROUP BY model, COALESCE(provider, '')`,
+      bounds(ctx, w),
+    );
+
+    const models: ModelShare[] = rows.map((r) => ({
+      model: String(r["model"]),
+      provider: String(r["provider"] ?? "") || "unknown",
+      usd: Number(r["usd"] ?? 0),
+      tokens: asInt(r["tokens"]),
+      calls: asInt(r["calls"]),
+      priced: asInt(r["unpriced"]) === 0,
+    }));
+
+    return {
+      models: models.sort((a, b) => b.usd - a.usd || b.tokens - a.tokens || a.model.localeCompare(b.model)),
+      // THE SPEND DENOMINATOR EXCLUDES THE UNPRICED, which is §2's "excluded from every ranking"
+      // applied to a share rather than to a row. Including their zero would leave the priced
+      // segments summing to less than the bar's width, and a reader would take the gap for a model
+      // nobody had named.
+      pricedUsd: models.filter((m) => m.priced).reduce((n, m) => n + m.usd, 0),
+      totalTokens: models.reduce((n, m) => n + m.tokens, 0),
+    };
   }
 }
 
