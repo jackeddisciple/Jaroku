@@ -33,6 +33,7 @@ import { StatusBadge } from "./StatusBadge.tsx";
 import { ShareIcon } from "./activityIcons.tsx";
 import { iconBtn, outlineBtn } from "./buttons.ts";
 import { RunFigures } from "./StatusBar.tsx";
+import { CheckboxField } from "./Checkbox.tsx";
 
 function StatusDot({ status }: { status: string }) {
   const color = status === "running" ? "bg-run" : status === "draft" ? "bg-faint" : "bg-ok";
@@ -142,27 +143,21 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
               Disabled with a stated reason rather than hidden when there is no Anthropic key: that
               is the same refusal the server makes, made here so the answer arrives before the
               click rather than as an error strip after it. */}
-          <label
-            className={`mt-3 flex items-start gap-2 border-t border-hair pt-2.5 text-[11px] ${
-              anthropicReady ? "cursor-pointer text-muted" : "cursor-not-allowed text-faint"
-            }`}
-          >
-            <input
-              type="checkbox"
-              className="mt-0.5 shrink-0"
+          <div className="mt-3 border-t border-hair pt-2.5">
+            <CheckboxField
+              align="start"
               checked={ownKeyForPlatform}
               disabled={!anthropicReady}
-              onChange={(e) => sendSetOwnKeyForPlatform(e.target.checked)}
-            />
-            <span className="min-w-0 flex-1">
+              onChange={() => sendSetOwnKeyForPlatform(!ownKeyForPlatform)}
+            >
               Pay for planning &amp; generation with my Anthropic key
               <span className="block text-faint">
                 {anthropicReady
                   ? "Off by default — Jaroku's own calls bill to us unless you say otherwise."
                   : "Needs an Anthropic key in this workspace — that is the key this would spend."}
               </span>
-            </span>
-          </label>
+            </CheckboxField>
+          </div>
 
           <button
             type="button"

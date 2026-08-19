@@ -33,6 +33,7 @@ import {
   AlertTriangleIcon, ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, CheckIcon, ExternalLinkIcon,
   RefreshIcon,
 } from "./panelIcons.tsx";
+import { CheckboxField } from "./Checkbox.tsx";
 
 /**
  * The stage vocabulary, client-side.
@@ -130,10 +131,11 @@ function VerdictLine({ view }: { view: GithubView }) {
           product's own record of how the agent got here and a default that collapsed it would be
           the feature undoing its own premise. */}
       {view.state === "ahead" && view.ahead > 1 && (
-        <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 pl-6 text-[11px] text-muted">
-          <input type="checkbox" checked={squash} onChange={(e) => setSquash(e.target.checked)} />
-          push as a single squashed commit
-        </label>
+        <div className="mt-1.5 pl-6">
+          <CheckboxField checked={squash} onChange={() => setSquash(!squash)}>
+            push as a single squashed commit
+          </CheckboxField>
+        </div>
       )}
     </div>
   );

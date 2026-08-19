@@ -42,6 +42,7 @@ import { Truncate } from "./Truncate.tsx";
 import {
   AlertTriangleIcon, CheckIcon, GlobeIcon, KeyIcon, RocketIcon, XIcon,
 } from "./panelIcons.tsx";
+import { CheckboxField } from "./Checkbox.tsx";
 
 /**
  * The stages of a deploy, in order, with the words used for each tense.
@@ -367,14 +368,9 @@ function DeployForm({
       ) : null}
 
       {(withheld.length > 0 || plan?.problems.some((p) => p.startsWith("not set on this machine"))) && (
-        <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted">
-          <input
-            type="checkbox"
-            checked={allowMissing}
-            onChange={(e) => setAllowMissing(e.target.checked)}
-          />
+        <CheckboxField checked={allowMissing} onChange={() => setAllowMissing(!allowMissing)}>
           Deploy anyway — I will set the rest in Railway myself
-        </label>
+        </CheckboxField>
       )}
 
       {plan?.warnings.map((w) => (
@@ -395,17 +391,13 @@ function DeployForm({
       )}
 
       <div className="flex items-center gap-2 border-t border-hair pt-3">
-        <label
-          className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted"
+        <CheckboxField
+          checked={publicEndpoint}
+          onChange={() => setPublicEndpoint(!publicEndpoint)}
           title="Anyone who finds the URL could run this agent on your provider key."
         >
-          <input
-            type="checkbox"
-            checked={publicEndpoint}
-            onChange={(e) => setPublicEndpoint(e.target.checked)}
-          />
           No bearer token
-        </label>
+        </CheckboxField>
         <button
           className="ml-auto rounded-control px-3 py-1.5 text-[12px] transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
           style={{ background: TEXT.ink, color: SURFACE.bg }}

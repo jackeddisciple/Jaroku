@@ -52,6 +52,7 @@ import { EmptyState, LoadingLine } from "./EmptyState.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { CheckIcon, GithubIcon, KebabIcon, SearchIcon, XIcon } from "./panelIcons.tsx";
 import { Select } from "./Select.tsx";
+import { CheckboxField } from "./Checkbox.tsx";
 
 export function GitHubPanel() {
   // Field by field rather than the whole store, for the reason DeployPanel gives at length: a
@@ -415,21 +416,17 @@ function RepoPicker({ agentId }: { agentId: string }) {
               placeholder="/ (repository root)"
               mono
             />
-            <label className="flex cursor-pointer items-start gap-2 text-[11px] text-muted">
-              <input
-                type="checkbox"
-                className="mt-0.5 shrink-0"
-                checked={includeArtifacts}
-                onChange={(e) => setIncludeArtifacts(e.target.checked)}
-              />
-              <span className="min-w-0 flex-1">
-                Include Dockerfile &amp; pyproject
-                <span className="block text-faint">
-                  What the deploy layer already synthesises for this agent, so the pushed repo is
-                  deploy-ready rather than source-only.
-                </span>
+            <CheckboxField
+              align="start"
+              checked={includeArtifacts}
+              onChange={() => setIncludeArtifacts(!includeArtifacts)}
+            >
+              Include Dockerfile &amp; pyproject
+              <span className="block text-faint">
+                What the deploy layer already synthesises for this agent, so the pushed repo is
+                deploy-ready rather than source-only.
               </span>
-            </label>
+            </CheckboxField>
             {/* Jaroku owns `jaroku/<slug>` and never writes to a default branch on its own — §3.1.
                 A user pointing this at `main` is their repository and their decision, and nothing
                 here proposes it. */}

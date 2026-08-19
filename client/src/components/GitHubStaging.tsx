@@ -32,6 +32,7 @@ import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
 import { ChevronDownIcon } from "./panelIcons.tsx";
+import { Checkbox } from "./Checkbox.tsx";
 
 /** `path\u0000index` — one ticked hunk. A set of these is the whole of the staging state. */
 type HunkKey = string;
@@ -236,17 +237,11 @@ function StagedFileRow({
   return (
     <div>
       <div className="flex items-center gap-2 text-[11px]">
-        <button
-          className={`inline-flex h-3 w-3 shrink-0 items-center justify-center rounded-[2px] border text-[9px] leading-none ${
-            state === "off" ? "border-hair text-transparent" : "border-ink/40 text-ink"
-          }`}
-          role="checkbox"
-          aria-checked={state === "partial" ? "mixed" : state === "on"}
-          aria-label={`stage ${file.path}`}
-          onClick={onToggleFile}
-        >
-          {state === "partial" ? "–" : "✓"}
-        </button>
+        <Checkbox
+          checked={state === "partial" ? "mixed" : state === "on"}
+          onChange={onToggleFile}
+          label={`stage ${file.path}`}
+        />
         <span
           className="inline-flex w-3 shrink-0 items-center justify-center"
           style={{ color: descriptor.accent }}
@@ -307,17 +302,7 @@ function HunkRow({
   return (
     <div className="rounded-control border border-hair">
       <div className="flex items-center gap-2 px-1.5 py-1 text-[11px]">
-        <button
-          className={`inline-flex h-3 w-3 shrink-0 items-center justify-center rounded-[2px] border text-[9px] leading-none ${
-            checked ? "border-ink/40 text-ink" : "border-hair text-transparent"
-          }`}
-          role="checkbox"
-          aria-checked={checked}
-          aria-label={`stage ${hunk.header}`}
-          onClick={onToggle}
-        >
-          ✓
-        </button>
+        <Checkbox checked={checked} onChange={onToggle} label={`stage ${hunk.header}`} />
         <button className="min-w-0 flex-1 text-left" onClick={() => setOpen((v) => !v)}>
           <Truncate className="font-mono text-faint" title={hunk.header}>{hunk.header}</Truncate>
         </button>
