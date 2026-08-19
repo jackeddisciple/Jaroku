@@ -13,6 +13,7 @@ import type { FileDiff } from "../types.ts";
 import type { ProposalTurn } from "../store/chatStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { sendApplyEdit, sendDiscardEdit, sendUndoEdit } from "../lib/socket.ts";
+import { fmtCost } from "../lib/format.ts";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { ChevronDownIcon } from "./composerIcons.tsx";
 import { DiffStat } from "./DiffStat.tsx";
@@ -360,7 +361,7 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
           </button>
           {turn.usage && (
             <span className="ml-auto text-faint text-[11px] tabular-nums">
-              ${turn.usage.cost_usd.toFixed(4)}
+              {fmtCost(turn.usage.cost_usd)}
               {turn.usage.cache_read_input_tokens > 0 && " · cache hit"}
             </span>
           )}

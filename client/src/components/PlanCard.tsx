@@ -18,6 +18,7 @@
 import { useState } from "react";
 import type { PlanTurn } from "../store/chatStore.ts";
 import { sendDiscardPlan, sendGenerate } from "../lib/socket.ts";
+import { fmtCost } from "../lib/format.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { ACCENT, ICON, TYPE } from "../lib/tokens.ts";
 import { noteKind } from "../lib/noteKind.ts";
@@ -675,7 +676,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
           <span className="text-faint text-[11px]">or say what to change</span>
           {turn.usage && (
             <span className="ml-auto font-mono text-faint text-[11px] tabular-nums">
-              ${turn.usage.cost_usd.toFixed(4)}
+              {fmtCost(turn.usage.cost_usd)}
             </span>
           )}
         </div>

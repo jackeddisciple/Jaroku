@@ -24,6 +24,7 @@ import {
 import { useEvalStore } from "../store/evalStore.ts";
 import { composerMoment } from "../lib/composerMoment.ts";
 import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
+import { fmtCost } from "../lib/format.ts";
 import { Chip } from "./Chip.tsx";
 import { ChoiceRow, type Choice } from "./ChoiceRow.tsx";
 import { DiffCard } from "./DiffCard.tsx";
@@ -126,10 +127,13 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
     // hardest one to read.
     stats.push({
       icon: <DollarSignIcon size={STAT_ICON} />,
-      value: (turn.usage.cost_usd + planCost).toFixed(4),
+      // Through `fmtCost`, like everywhere else. Written by hand it was always four decimals,
+      // so a sub-cent generation read as $0.0000 here and as $0.00000 through the helper two
+      // cards away — the same cost, shown two ways, one of them rounded to nothing.
+      value: fmtCost(turn.usage.cost_usd + planCost),
       title:
         planCost > 0
-          ? `$${turn.usage.cost_usd.toFixed(4)} to generate + $${planCost.toFixed(4)} to plan`
+          ? `${fmtCost(turn.usage.cost_usd)} to generate + ${fmtCost(planCost)} to plan`
           : undefined,
     });
     if (turn.usage.cache_read_input_tokens > 0) {
