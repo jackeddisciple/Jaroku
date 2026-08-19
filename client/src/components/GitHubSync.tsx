@@ -27,7 +27,7 @@ import { useGithubStore, type GithubProgress } from "../store/githubStore.ts";
 import type { GithubRefusal, GithubScanRefusal, GithubView } from "../types.ts";
 import { ActionRow, type ActionState } from "./ActionRow.tsx";
 import { SplitButton, type SplitAction } from "./SplitButton.tsx";
-import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
+import { outlineBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { Truncate } from "./Truncate.tsx";
 import {
   AlertTriangleIcon, ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, CheckIcon, ExternalLinkIcon,
@@ -323,7 +323,7 @@ function ForcePushConfirm({
           onChange={(e) => setTyped(e.target.value)}
         />
         <button
-          className={`${primaryBtn} !text-err`}
+          className={`${outlineBtn} !text-err`}
           // The client checks it so the button reads honestly; the SERVER checks it again before
           // anything reaches the network, which is the check that matters.
           disabled={typed.trim() !== view.agentSlug}
@@ -507,7 +507,7 @@ function ScanRefusalCard({ view, refusal }: { view: GithubView; refusal: GithubS
           </p>
           <div className="mt-1.5 flex items-center gap-2">
             <button
-              className={`${primaryBtn} ml-auto !text-err`}
+              className={`${outlineBtn} ml-auto !text-err`}
               onClick={() => sendPushGithub(view.agentId, { ignoreSecrets: true })}
             >
               Push anyway
@@ -581,7 +581,7 @@ function RefusalCard({ view, refusal }: { view: GithubView; refusal: GithubRefus
               onChange={(e) => setTyped(e.target.value)}
             />
             <button
-              className={`${primaryBtn} !text-err`}
+              className={`${outlineBtn} !text-err`}
               disabled={typed.trim() !== view.agentSlug}
               onClick={() => sendPullGithub(view.agentId, { force: true, confirmSlug: typed.trim() })}
             >

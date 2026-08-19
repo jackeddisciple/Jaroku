@@ -19,7 +19,18 @@
 // outside this pass and stays where it is.
 
 /**
- * The decision. Filled surface, ink text.
+ * The decision. Ink fill, background-coloured text — the one control on a card that is
+ * unmistakably the thing being asked.
+ *
+ * IT USED TO BE `bg-panel text-ink`, which is #18181b on a #0d0d0f page: a four percent lightness
+ * step, and therefore the *least* visible control on the card it appeared on. The weight named
+ * "primary" was quieter than the muted-text "Discard" beside it, which inverts the whole hierarchy
+ * — a card asking "apply this, or not?" was drawing the yes softer than the no. That recipe is
+ * still here, correctly named, as `outlineBtn`.
+ *
+ * Ink rather than an accent because the accent is spent on interaction — selection, links, focus,
+ * live iconography — and a filled button is not any of those. Ink fill is the app's loudest
+ * treatment and this is the one weight allowed to use it.
  *
  * `inline-flex items-center gap-1.5` for the same reason `secondaryBtn` has it: several call sites
  * pass an icon *and* a label, and without a flex context the glyph is a block that stacks above the
@@ -27,7 +38,16 @@
  * one line and "Connect GitHub" on the next.
  */
 export const primaryBtn =
-  "inline-flex items-center gap-1.5 rounded-control px-3 py-1.5 text-[12px] bg-panel text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+  "inline-flex items-center gap-1.5 rounded-control px-3 py-1.5 text-[12px] bg-ink text-bg font-medium hover:bg-ink/90 active:bg-ink/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+
+/**
+ * A real action that is not *the* action — the second button in a pair, or the primary of a card
+ * that is not the screen's centre. Filled one surface step, ink text.
+ *
+ * This is the recipe `primaryBtn` used to be. It was never a bad button; it was a bad *primary*.
+ */
+export const outlineBtn =
+  "inline-flex items-center gap-1.5 rounded-control px-3 py-1.5 text-[12px] bg-panel text-ink hover:bg-active active:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
 /**
  * The other answer. Same box as primary so the two sit level, but no surface until you hover —
