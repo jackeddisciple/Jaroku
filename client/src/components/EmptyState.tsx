@@ -8,18 +8,20 @@
 // What is added is presence, not decoration:
 //
 //   * a mark for the thing that is missing, so the panel says what it IS as well as what it lacks
-//   * a slow ambient glow behind it, on the `breathe` keyframe the graph nodes already idle on
 //   * one step of type hierarchy, so the title reads as a title
 //
-// The glow is a single radial stop at 6% alpha in the periwinkle the app already uses for state,
-// blurred wide. At that strength it is not a colour anybody can name — it is the difference
-// between a panel that is empty and a panel that is off. Anything more and it becomes the thing
-// you look at, which is exactly wrong for a surface whose whole job is to be replaced.
+// THERE USED TO BE A THIRD THING: a 340px radial glow in the periwinkle state accent, blurred
+// wide, breathing on a 4.2s loop behind the icon. It was argued for as "the difference between a
+// panel that is empty and a panel that is off", and the argument was good for one screen. The
+// problem is that this component is mounted at about twenty call sites, so the ornament was not
+// on one screen — it was a coloured, animated, purely decorative element rendered behind every
+// empty surface in the product, several of them visible at once on a first run. A palette that
+// spends its one rule on "colour means something, never decoration" cannot also do that.
 //
-// `motion-reduce` turns the idle off. An animation with no state change behind it is the first
-// thing that should stop when somebody has asked for less movement.
+// The onboarding hero keeps its halo, and that is not an inconsistency: a device used once at the
+// moment a product introduces itself is a moment; the same device used twenty times is wallpaper.
 
-import { ACCENT, ICON } from "../lib/tokens.ts";
+import { ICON } from "../lib/tokens.ts";
 
 export function EmptyState({
   title,
@@ -48,21 +50,6 @@ export function EmptyState({
         full ? "h-full" : "py-8"
       } ${className}`}
     >
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 flex items-center justify-center"
-      >
-        <div
-          className="animate-breathe rounded-full motion-reduce:animate-none"
-          style={{
-            width: full ? 340 : 180,
-            height: full ? 340 : 180,
-            background: `radial-gradient(circle, ${ACCENT.state}0f 0%, ${ACCENT.state}05 42%, transparent 70%)`,
-            filter: "blur(18px)",
-          }}
-        />
-      </div>
-
       <div className="relative">
         {Icon && (
           <div className="mb-2.5 flex justify-center text-faint" aria-hidden>
