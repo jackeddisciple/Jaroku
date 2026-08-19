@@ -8,6 +8,149 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.3.3 : The Activity Tab — What This Workspace Is Doing
+
+The fourth and last of the sidebar's destinations, and the only one that writes nothing. Threads is
+the conversation, Agents is the artifact, the Inbox is what is waiting on you, and this is the
+workspace itself: cross-agent, aggregate, historical, read-only.
+
+It inherits the leftover axis rather than defining its own, and that inheritance is the whole design.
+Everything per-agent already exists in the Agents detail pane. Everything actionable already exists in
+the Inbox. So Activity gets exactly what is left — and the hard consequence is enforced by what is
+absent rather than by a rule anybody has to remember: **the channel has no mutating command**. Every
+other tab's relay code carries a set of them; this one carries none, so the next person who wants a
+button that changes state has to add a command first and will find nothing to put it beside.
+
+Four tabs, four genuinely different layouts. Threads is rows, Agents is a card grid, the Inbox is a
+severity board, and this is a grid of cards each led by one large figure with the chart as texture
+behind it. Nothing here is a fifth list.
+
+### Added
+
+- **One window, resolved once, handed to every module.** There is no per-card range: 24h / 7d / 30d,
+  chosen in the header and remembered per workspace, and every card states its own window in its
+  context line so a screenshot is never ambiguous. That is not tidiness — cross-highlighting is only
+  coherent because all four participating modules are looking at the same seconds, and six aggregates
+  that each resolved their own window would be four lenses onto four moments.
+- **Ten aggregates, one grouped query per module, none of them moving with the number of agents.**
+  The leaderboard's statement count is asserted equal for one agent and for forty, the way the Agents
+  grid's is — a leaderboard is the most natural place in the product to write an N+1, because every
+  row wants a per-agent figure.
+- **Cost is summed from what each step actually spent, and there is still exactly one calculator.**
+  Every dollar on this tab is a SUM over the usage ledger that `pricing.costFor` wrote, over the same
+  `runtime/pricing.json` the Python interceptor reads. A crashed run still contributed cost, because
+  the row is written per step as the step arrives; the fixture leaves `runs.cost` at zero on purpose,
+  so a query that read the run-level field fails the suite rather than production. Cached tokens bill
+  at the cached rate. An unpriced model is *cost unknown*, is named and counted beside the floor, and
+  is excluded from every ranking — never a $0.
+- **Definitional care on the numbers that will be quoted.** A paused-and-resumed run is one run. A
+  branch is a first-class run that does **not** inherit its copied prefix's seconds — the join takes
+  only `seq > branch_from_seq`, which is exactly the boundary the copy was made at, or two runs carry
+  the same work into the same p95. Latency is summed step time, not wall clock, and the card says
+  which. Runs a restart or a cancellation closed out are their own slice: folding them into the
+  failure rate would report a deploy bouncing the server as the workspace's agents breaking.
+- **A unified feed that is a union, not a table.** Nine sources — runs, branches, publishes, edits and
+  their undos, deploys, evals, high-impact MCP calls, member events — derived every time from the rows
+  that are already the truth. An `activity_events` table would be a second copy of six tables, and the
+  second copy is the one that goes stale: a run cancelled or a version undone after the fact would
+  leave a feed row describing a world that had moved on.
+- **Keyset pagination, tested by inserting rows above the cursor mid-scroll.** That is what an offset
+  gets wrong and gets wrong silently — repeating rows it has shown and skipping ones it never will —
+  and this feed is written to on every run, every step and every deploy.
+- **§5's "MCP confirmations resolved" needed no new recording anywhere.** The confirmation gate raises
+  *inside* the tool, so a refusal is already on the step in the runtime's own sentence. Reading it
+  there rather than adding a write means the numbers reach history as well as today. `schema/events.md`
+  is untouched, no table gained a column, and no code path gained a write.
+- **The release timeline includes failed deploys**, because a release log that only shows successes is
+  a marketing page — and it is the view that makes "three agents went out on Tuesday and two of them
+  failed" visible at all, which the per-agent Deploy panel structurally cannot.
+- **Four numbers nothing else in the product reports**: the confirmation approve / deny / timeout split
+  on high-impact tools, the high-impact call count, the result-truncation rate, and reviewed connector
+  failures — v0.1.12's bug in aggregate, and a number that should be zero in a place somebody will
+  notice it is not.
+- **Polarity as data, next to each metric.** There is no global "up is bad": spend up is bad, tokens up
+  is neither, latency down is good, success down is bad. The badge renders from `goodWhen` rather than
+  from the arrow, and a delta with no comparable previous window renders `--` — never `0%`, never
+  `100%`. A workspace four days old has no previous thirty.
+- **Empty is not zero, per card.** A range with nothing in it renders `--` and a short line of context;
+  a range whose rows summed to nothing renders the real figure. That is why every aggregate carries an
+  event count beside its total — `usd === 0` is two different sentences and a card cannot tell them
+  apart from the number alone.
+- **Cross-highlighting through one hover subject in one small store.** Hovering a leaderboard row dims
+  everything that is not that agent, across the mix, the feed and the timeline; hovering a model
+  segment dims every row that did not run it. Nothing is clicked, nothing changes and nothing is
+  fetched — the payload already carries what the highlight needs, which is why those fields exist. The
+  highlight is a de-emphasis of everything else rather than a colour change on the target, so it works
+  in a palette this restrained; the transition drops under `prefers-reduced-motion` and the highlight
+  does not.
+- **A virtualised feed with no dependency**, driven by a suite at ten thousand rows rather than at
+  fifty. Overscan on both sides, a clamp at the end, and a fetch threshold in rows rather than pixels
+  so the same feed behaves the same on a laptop and a phone.
+- **Twelve icons from the HugeIcons free set**, read out of `@hugeicons/core-free-icons` and committed
+  as inline SVG at this app's one stroke weight. No runtime icon font, no hotlinking. `actionIcons.tsx`
+  is extended rather than duplicated: nine feed kinds map onto the eleven kinds that already exist, so
+  a confirmation row and the trace row that produced it read identically — same icon, same verb, same
+  accent. Two icons are simplified for legibility at 14px and both say so at their definition.
+- **A cache that is honest about being one.** Per (workspace, range), sixty-second life, the freshness
+  travelling with the value so a cached figure never presents as live, invalidated on the events that
+  move the numbers rather than on the timer alone, and the 24h range never cached at all. It also
+  single-flights: ten sockets connecting at once against a cold cache is ten identical thirty-day
+  scans, and a cache of *results* cannot prevent that, because by the time the first finishes the
+  other nine are already running. No materialised rollup table — that gets designed deliberately, with
+  measurements, or not at all.
+- **Amber appears nowhere on this tab.** Amber means running, and nothing on a historical dashboard is.
+
+### Verified
+
+- **Two workspaces, seeded with different data, and every module's figures asserted in both
+  directions.** Not one module — every module. Row-level security has bitten this project repeatedly
+  and *every single instance was an aggregate*; this tab is nothing but aggregates over exactly those
+  tables. Both workspaces deliberately share agent slugs, so a `GROUP BY` that lost its scope would
+  visibly merge rather than merely add.
+- **Nine suites**, wired into CI in a step of their own: the window, the four honesty rules, run health,
+  the pulse, the leaderboard's constant statement count, the model mix's two denominators, the feed's
+  keyset, the releases, the tool rollup, the team pulse, the cache, the payload, the icon join and the
+  feed virtualiser.
+- **The known-secret test, by the pattern `test:log-redaction` uses.** One credential, every route into
+  a payload tried against it — and the opposite direction too, because a suite that only proved secrets
+  leave would pass on a scrubber that redacted everything, and a redacted *model name* on the one tab
+  whose job is naming models deletes the answer.
+- **The cross-language markers are asserted against the runtime file.** The confirmation refusal and
+  the truncation marker are sentences `mcp_bridge.py` writes; if either changes there, a rate silently
+  becomes zero, so the suite reads the Python rather than a copy of the string.
+- **Opened in a browser against the running server.** The dashboard renders all nine modules with no
+  console errors; every empty card shows `--` and a line of context rather than a zero; the range
+  control drives every context line together; and a real generation appeared in the Releases timeline
+  and in the spend figure within a second of finishing.
+
+### Still owed
+
+- **Postgres with RLS, as the application role.** §6 calls this the single most important line in its
+  verification section, and it has not run here: there is no Postgres on this machine, so every suite
+  ran on SQLite only. The isolation harness is invoked from `test:tenancy`, which CI runs against a
+  real Postgres with the RLS suite beside it — so it will run on the next push, and it has not run
+  yet. Recorded plainly rather than implied, for the reason v0.2.6 recorded the Chrome extension gap.
+- **Two of §10's five columns are not attributable, and the card says so.** `runs`, `deployments` and
+  `eval_runs` carry no actor, and spend is attributed *through* runs, so nothing anywhere records who
+  started a run or who pressed deploy. The Team pulse shows the three that are recorded and states the
+  absence. A zero beside somebody's name would be a claim about that person; an absent column is a
+  claim about the schema, which is the true one. Fixing it means a column on `runs`, which is part of
+  the frozen event schema this tab does not touch.
+- **§5's member filter narrows to the sources that can answer it**, for the same reason. Filtering the
+  feed by a person returns publishes, edits and member events, and cannot return runs or deploys —
+  they are omitted rather than included unattributed, because a short list is better than one that
+  looks like an answer.
+- **A custom date range has no picker.** The range vocabulary, the storage, the clamping and the server
+  path all handle `custom`; the header offers it only when one is already remembered, because a
+  control that puts itself into a state whose own value is missing is worse than one that is absent.
+- **The by-hand pass is partial.** The dashboard, the range control, the empty states and a real
+  generation flowing into Releases were opened and looked at. What was not: the narrow-width fallback
+  at a phone size, the cross-highlight walked across all four modules with a pointer, and the
+  virtualiser scrolled through ten thousand real rows in a browser — the last of those is asserted by
+  a suite at that size, which is not the same thing as having watched it.
+
+---
+
 ## v0.3.2 : The Inbox Tab — What Is Waiting On You, and What Dies On Its Own
 
 The third of the four sidebar destinations, and the one that replaces Memory. v0.3.0 recorded Memory
