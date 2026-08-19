@@ -52,9 +52,14 @@ export const outlineBtn =
 /**
  * The other answer. Same box as primary so the two sit level, but no surface until you hover —
  * declining should be one step away, never one step *down*.
+ *
+ * It had no surface at *any* state before this, only a text-colour shift, which meant "Discard"
+ * beside "Apply" read as a caption rather than as the other half of a real decision. A ghost
+ * button still has to show its hit area on approach; that is what makes it a button rather than
+ * a word somebody happened to make clickable.
  */
 export const quietBtn =
-  "rounded-control px-3 py-1.5 text-[12px] text-muted hover:text-ink transition-colors";
+  "inline-flex items-center gap-1.5 rounded-control px-3 py-1.5 text-[12px] text-muted hover:bg-active hover:text-ink active:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
 /**
  * Not a decision. Same surface and radius as primary, one size down and muted until you reach for
