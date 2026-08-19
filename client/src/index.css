@@ -33,7 +33,17 @@
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
   }
-  /* Muted, restrained scrollbars — content floats, chrome recedes. */
+  /* Muted, restrained scrollbars — content floats, chrome recedes.
+
+     The `scrollbar-*` pair is the standard property and the webkit rules below are the fallback,
+     not the other way round. With only the webkit ones, Firefox drew the operating system's own
+     scrollbar on every one of the app's forty scroll regions — which undoes, on an entire
+     browser, the rule the six native <select>s were the only other violation of: nothing in this
+     product is drawn by the OS. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #26262b transparent;
+  }
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
@@ -41,6 +51,12 @@
   ::-webkit-scrollbar-thumb {
     background: #26262b;
     border-radius: 6px;
+  }
+  /* The thumb answers the pointer, like every other control. Ten pixels of permanently-lit chrome
+     on each of forty regions is a real share of a 280px sidebar, and a thumb that never responds
+     reads as a painted stripe rather than as something you can grab. */
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3a3a3f;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
