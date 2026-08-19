@@ -36,9 +36,15 @@ export function fmtUntil(iso: string): string {
   return `in ${Math.floor(h / 24)}d`;
 }
 
-/** Duration in ms → "820 ms" / "2.4s" / "1m 05s". */
+/**
+ * Duration in ms → "820ms" / "2.4s" / "1m 05s".
+ *
+ * ONE UNIT-SPACING CONVENTION: none. It had three inside one function — a space before `ms`, no
+ * space before `s`, and a zero-padded second half — so `820 ms` and `2.4s` appeared in the same
+ * trace column, one with a gap and one without, and neither was wrong on its own.
+ */
 export function fmtDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 1000) return `${Math.round(ms)}ms`;
   const s = ms / 1000;
   if (s < 60) return `${s.toFixed(1)}s`;
   const m = Math.floor(s / 60);
