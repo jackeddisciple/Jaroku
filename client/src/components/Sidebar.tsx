@@ -582,6 +582,7 @@ export function Sidebar() {
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
+  const [searching, setSearching] = useState(false);
   // Per AGENT rather than per workspace — §4. Different agents legitimately belong in different
   // repositories, and one repo per workspace would break the monorepo case the subdirectory field
   // exists for.
@@ -656,8 +657,49 @@ export function Sidebar() {
           on two words for the one control that is unmistakably a plus. It sits here now beside the
           column's own name, which is where a creation affordance goes. */}
       <div className="flex shrink-0 items-center gap-1 px-3 pt-3">
-        <span className={TYPE.panelLabel}>Agents</span>
-        <FilterMenu filter={filter} setFilter={setFilter} counts={counts} className="ml-auto" />
+        {/* THE FIELD IS A GLYPH UNTIL IT IS WANTED. It was a full row of its own beneath a full
+            row of `New Agent`, permanently open, on a column whose entire job is to be a list —
+            and a search box at rest is a control asking to be noticed for something nobody is
+            doing yet. Open it and it takes the row; leave it empty and it gives the row back. */}
+        {searching ? (
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-control bg-active px-2 py-0.5">
+            <span className="shrink-0 text-faint"><SearchIcon size={ICON.xs} /></span>
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onBlur={() => { if (!query) setSearching(false); }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") { setQuery(""); setSearching(false); }
+              }}
+              placeholder="search agents…"
+              className="min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none placeholder:text-faint"
+            />
+            {query && (
+              <button
+                onClick={() => { setQuery(""); setSearching(false); }}
+                title="Clear"
+                aria-label="Clear search"
+                className="shrink-0 text-faint transition-colors hover:text-ink"
+              >
+                <XIcon size={ICON.xs} />
+              </button>
+            )}
+          </div>
+        ) : (
+          <span className={TYPE.panelLabel}>Agents</span>
+        )}
+        {!searching && (
+          <button
+            onClick={() => setSearching(true)}
+            title="Search agents — ⌘K opens the palette"
+            aria-label="Search agents"
+            className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+          >
+            <SearchIcon size={ICON.sm} />
+          </button>
+        )}
+        <FilterMenu filter={filter} setFilter={setFilter} counts={counts} />
         <button
           onClick={() => selectAgent(null)}
           title="New agent"
@@ -670,19 +712,6 @@ export function Sidebar() {
         </button>
       </div>
 
-      {/* search */}
-      <div className="px-3 pt-2 shrink-0">
-        <div className="flex items-center gap-2 bg-active rounded-control px-2.5 py-1.5">
-          <span className="shrink-0 text-faint"><SearchIcon size={ICON.xs} /></span>
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search agents…"
-            className="flex-1 min-w-0 bg-transparent text-ink placeholder:text-faint text-[12px] outline-none"
-          />
-          <span className="text-faint text-[11px]">⌘K</span>
-        </div>
-      </div>
 
 
       {/* PINNED, above the rest of the list — §2's order for this column.
