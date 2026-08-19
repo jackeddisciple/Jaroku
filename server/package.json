@@ -192,7 +192,8 @@
     "test:activity-releases": "tsx src/activity/releases.test.ts",
     "test:activity-tools": "tsx src/activity/tools.test.ts",
     "test:activity-team": "tsx src/activity/team.test.ts",
-    "test:activity-cache": "tsx src/activity/cache.test.ts"
+    "test:activity-cache": "tsx src/activity/cache.test.ts",
+    "test:activity-payload": "tsx src/activity/payload.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",

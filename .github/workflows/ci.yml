@@ -382,6 +382,13 @@ jobs:
           # tenth caller await the first's work, and the clock is injected so a sixty-second TTL is
           # asserted rather than slept for.
           npm run test:activity-cache
+          # §6's own requirement, built the way `test:log-redaction` is: one known secret, and every
+          # route into a payload tried against it. A payload is a sink in exactly the sense a log is
+          # — stored, broadcast to every socket in the workspace, outliving what it describes — and
+          # this one carries a deploy's own error text from a process that had the credentials in
+          # its environment. Both directions are asserted: genuine secrets out, and v0.2.4's
+          # narrowing kept, because a redacted MODEL NAME on this tab deletes the answer.
+          npm run test:activity-payload
 
       - name: cost, abuse and the data lifecycle
         working-directory: server
