@@ -405,4 +405,19 @@ export async function activitySuite(
     filteredA.rows.every((r) => aIds.has(r.id)),
     "filtering by a slug both workspaces use still returns only this one's rows",
   );
+
+  // --- module 8: the release timeline ------------------------------------------------------------
+  //
+  // `agent_versions` HAS NO `workspace_id` OF ITS OWN. It hangs off `agents`, so its scope is the
+  // JOIN rather than a WHERE — which is the kind of enforcement a single-tenant test cannot see at
+  // all, and the reason the main suite's note about this repository says the same thing.
+
+  const relA = await store.releases(A.ctx, w);
+  const relB = await store.releases(B.ctx, w);
+  check(relA.every((e) => A.agents.includes(e.agentId)), "every release of A's is an agent of A's");
+  check(relB.every((e) => B.agents.includes(e.agentId)), "...and B's are B's");
+  check(
+    relA.every((e) => e.agentName.endsWith("(a)")),
+    "and each is labelled from its own workspace's directory",
+  );
 }

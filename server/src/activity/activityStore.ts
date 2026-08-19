@@ -269,6 +269,38 @@ export interface ModelMix {
   totalTokens: number;
 }
 
+/**
+ * §8's release timeline: one entry in the workspace's release log.
+ *
+ * WHY IT IS NOT THE FEED WITH A FILTER. The feed answers "what happened, in order"; this answers
+ * "what did we ship". They read some of the same rows and they are not the same view: the timeline
+ * pairs a PUBLISH with the DEPLOY that carried it, shows the version numbers side by side, and is
+ * read vertically to see that three agents went out on Tuesday and two of them failed. A filtered
+ * feed would give the same rows in the same order with none of that adjacency.
+ *
+ * WHY IT IS NOT THE PER-AGENT DEPLOY PANEL. That panel shows one agent's deployments, which is the
+ * question you ask when you are already looking at an agent. This is the workspace's release log —
+ * the view that makes a bad Tuesday visible at all.
+ *
+ * FAILED DEPLOYS ARE IN IT. §8: "a release log that only shows successes is a marketing page."
+ */
+export interface ReleaseEntry {
+  id: string;
+  at: string;
+  kind: "version" | "deploy";
+  agentId: string;
+  agentName: string;
+  /** The version published, or the version a deploy built from. Null for a deploy that recorded none. */
+  version: number | null;
+  /** Who published it. Null for a deploy, which records nobody — see `ACTOR_SOURCES`. */
+  actorUserId: string | null;
+  outcome: "ok" | "error" | "running";
+  /** For a version, what made it. For a deploy, where it went. */
+  detail: string;
+  /** A live deploy's URL. Names only — never a credential, and never a build log. */
+  url: string | null;
+}
+
 export class ActivityStore {
   /** Shares the trace store's database: same file, single writer. See TraceStore.database(). */
   constructor(private db: Db) {}
@@ -945,6 +977,94 @@ export class ActivityStore {
       // in a look-ahead pagination, and one that only shows up at a page boundary.
       next: hasMore && last ? { at: last.at, id: last.id } : null,
     };
+  }
+
+  /**
+   * §8's release timeline. TWO statements, plus the shared directory for the names.
+   *
+   * BOUNDED BY A COUNT AS WELL AS BY THE WINDOW, and unlike the feed it is not paginated. A release
+   * log is read by scanning down it, not by scrolling forever: a workspace that shipped four
+   * hundred times in a month has a problem the timeline cannot help with, and a card that tried to
+   * render all four hundred would be a second feed. The bound is stated rather than implicit, so a
+   * timeline that is truncated can say so.
+   *
+   * A VERSION WHOSE SOURCE IS `edit` IS NOT A RELEASE. An edit publishes a version — the feed shows
+   * it, and the version browser shows it — but nobody would call it a release, and putting every
+   * edit in the release log would bury the four things that actually went out this week under
+   * forty that did not.
+   *
+   * `env_keys` AND THE BUILD LOG ARE NOT HERE, deliberately. A deployment row carries the NAMES of
+   * the variables it was given (never the values, per migration 015's design) and its logs live in
+   * their own table; §6's payload discipline says this wire carries names, ids, counts and short
+   * summaries only, so the timeline carries the URL and the outcome and nothing else. A build log
+   * that reached this payload would be a redaction problem on a surface that gets screenshotted.
+   */
+  async releases(ctx: TenantContext, w: Window, limit = 60): Promise<ReleaseEntry[]> {
+    const q = this.q(ctx);
+    const cap = Math.max(1, Math.min(200, Math.trunc(limit)));
+
+    const versions = await q.all<Record<string, unknown>>(
+      `SELECT v.id AS id, v.created_at AS at, a.slug AS agent_id, v.version AS version,
+              v.created_by AS actor_user_id, v.source AS source
+         FROM agent_versions v
+         JOIN agents a ON a.id = v.agent_id
+        WHERE a.workspace_id = ? AND v.created_at >= ? AND v.created_at < ?
+          AND v.source <> 'edit'
+        ORDER BY v.created_at DESC
+        LIMIT ?`,
+      [...bounds(ctx, w), cap],
+    );
+
+    const deployments = await q.all<Record<string, unknown>>(
+      `SELECT id, created_at AS at, agent_id, version, status, target, url
+         FROM deployments
+        WHERE workspace_id = ? AND created_at >= ? AND created_at < ?
+        ORDER BY created_at DESC
+        LIMIT ?`,
+      [...bounds(ctx, w), cap],
+    );
+
+    const directory = await this.agentDirectory(ctx);
+    const name = (slug: string): string => directory.get(slug)?.name ?? slug;
+
+    const entries: ReleaseEntry[] = [
+      ...versions.map((r): ReleaseEntry => ({
+        id: `version:${String(r["id"])}`,
+        at: String(r["at"]),
+        kind: "version",
+        agentId: String(r["agent_id"]),
+        agentName: name(String(r["agent_id"])),
+        version: numberOrNull(r["version"]),
+        actorUserId: (r["actor_user_id"] as string | null) ?? null,
+        // A published version is a fact rather than an attempt: the validator is the gate on
+        // publishing, so a row that exists passed it. There is no failed publish to show.
+        outcome: "ok",
+        detail: String(r["source"] ?? "import"),
+        url: null,
+      })),
+      ...deployments.map((r): ReleaseEntry => {
+        const status = String(r["status"] ?? "");
+        return {
+          id: `deploy:${String(r["id"])}`,
+          at: String(r["at"]),
+          kind: "deploy",
+          agentId: String(r["agent_id"]),
+          agentName: name(String(r["agent_id"])),
+          version: numberOrNull(r["version"]),
+          actorUserId: null,
+          outcome: status === "live" ? "ok" : status === "failed" ? "error" : "running",
+          detail: String(r["target"] ?? ""),
+          // ONLY WHEN IT IS ACTUALLY SERVING. A URL on a failed deploy is a link to nothing, and
+          // one on a superseded deploy points at whatever is there now — which is a different
+          // release. The same guard the Agents card puts on its drift badge, for the same reason.
+          url: status === "live" ? ((r["url"] as string | null) ?? null) : null,
+        };
+      }),
+    ];
+
+    return entries
+      .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : a.id < b.id ? 1 : -1))
+      .slice(0, cap);
   }
 }
 

@@ -188,7 +188,8 @@
     "test:activity-pulse": "tsx src/activity/pulse.test.ts",
     "test:activity-leaderboard": "tsx src/activity/leaderboard.test.ts",
     "test:activity-model-mix": "tsx src/activity/modelMix.test.ts",
-    "test:activity-feed": "tsx src/activity/feed.test.ts"
+    "test:activity-feed": "tsx src/activity/feed.test.ts",
+    "test:activity-releases": "tsx src/activity/releases.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",

@@ -355,6 +355,12 @@ jobs:
           # a table, so nothing new is recorded for this tab and no feed row can disagree with the
           # trace it links to.
           npm run test:activity-feed
+          # §8 in one line: "include failed deploys — a release log that only shows successes is a
+          # marketing page". Filtering to what is live produces a tidier timeline that hides the
+          # Tuesday three agents went out and two of them failed, which is the exact view the
+          # per-agent Deploy panel cannot give. The URL is guarded the way the Agents card guards
+          # its drift badge: only on a deploy that is actually serving.
+          npm run test:activity-releases
 
       - name: cost, abuse and the data lifecycle
         working-directory: server
