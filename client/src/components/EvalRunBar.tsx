@@ -20,8 +20,8 @@ import { useTraceStore } from "../store/traceStore.ts";
 import { runProviders, useProviderStore } from "../store/providerStore.ts";
 import { sendCancelEval, sendEstimateEval, sendStartEval } from "../lib/socket.ts";
 import { fmtCost } from "../lib/format.ts";
-import { SURFACE, TEXT } from "../lib/tokens.ts";
 import { Chip } from "./Chip.tsx";
+import { primaryBtn } from "./buttons.ts";
 import type { EvalTarget } from "../types.ts";
 
 const key = (t: EvalTarget) => `${t.provider}/${t.model}`;
@@ -177,8 +177,7 @@ export function EvalRunBar() {
                 <button
                   onClick={confirmRun}
                   disabled={!(Number(ceiling) > 0)}
-                  className="rounded-control px-3 py-1 text-[11px] whitespace-nowrap transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
-                  style={{ background: TEXT.ink, color: SURFACE.bg }}
+                  className={`${primaryBtn} whitespace-nowrap`}
                 >
                   Run for real
                 </button>
@@ -210,8 +209,7 @@ export function EvalRunBar() {
             <button
               onClick={beginRun}
               disabled={!connected || !examples.length || !targets.length}
-              className="rounded-control px-3 py-1.5 text-[12px] whitespace-nowrap shrink-0 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
-              style={{ background: TEXT.ink, color: SURFACE.bg }}
+              className={`${primaryBtn} shrink-0 whitespace-nowrap`}
             >
               {needsConfirm ? "Estimate cost…" : "Run eval"}
             </button>

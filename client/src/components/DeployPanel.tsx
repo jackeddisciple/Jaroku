@@ -26,7 +26,7 @@ import {
   sendCancelDeploy, sendDeploy, sendForgetDeployment, sendListDeployments, sendLoadDeployLogs,
   sendPlanDeploy, sendSetRailwayToken, sendTestRailwayToken,
 } from "../lib/socket.ts";
-import { ACCENT, ICON, STATUS, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
+import { ACCENT, ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { fmtDuration } from "../lib/format.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useDeployStore, selectedDeployment } from "../store/deployStore.ts";
@@ -398,9 +398,11 @@ function DeployForm({
         >
           No bearer token
         </CheckboxField>
+        {/* Through `primaryBtn`, which is this exact treatment now. It was an inline copy of the
+            geometry — one of four in the client — from back when the shared weight named "primary"
+            was the quietest control on its own card. */}
         <button
-          className="ml-auto rounded-control px-3 py-1.5 text-[12px] transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
-          style={{ background: TEXT.ink, color: SURFACE.bg }}
+          className={`${primaryBtn} ml-auto`}
           disabled={!canDeploy}
           onClick={() =>
             sendDeploy({ agentId, provider, model, envKeys: chosen, allowMissing, publicEndpoint })
