@@ -26,7 +26,9 @@ import { CollapsibleRegion } from "./CollapsibleRegion.tsx";
 import { sendLoadAgentVersion, sendRestoreAgentVersion } from "../lib/socket.ts";
 import { fmtBytes } from "../lib/agentFormat.ts";
 import { relTime } from "../lib/format.ts";
-import { ACCENT, STATUS, TEXT } from "../lib/tokens.ts";
+import { ACCENT, ICON, STATUS, TEXT } from "../lib/tokens.ts";
+import { ArchiveRestoreIcon } from "./agentIcons.tsx";
+import { UndoIcon } from "./panelIcons.tsx";
 import type { AgentDetailView, AgentVersionView } from "../types.ts";
 
 /** What made a version, as one word and one colour. Borrowed, never invented. */
@@ -162,9 +164,9 @@ function VersionRow({
               // mechanism is the safety property.
               title={`Publish a new version pointing at v${version.version}'s files — nothing is rewritten`}
               aria-label={`Restore v${version.version}`}
-              className="rounded-control px-1.5 py-0.5 text-[11px] text-muted transition-colors hover:bg-active hover:text-ink"
+              className="rounded-control p-1 text-muted transition-colors hover:bg-active hover:text-ink"
             >
-              Restore
+              <ArchiveRestoreIcon size={ICON.xs} />
             </button>
           )}
         </div>
@@ -212,11 +214,15 @@ export function AgentVersions({ detail }: { detail: AgentDetailView }) {
                 <span className="text-[11px] text-ink">
                   v{Math.min(selection.from!, selection.to!)} → v{Math.max(selection.from!, selection.to!)}
                 </span>
+                {/* TWO WORDS OF CHROME AT THE END OF A ROW THAT ALREADY CARRIES THREE FACTS — a
+                    version number, a source and a timestamp — which is what pushed it to wrap. */}
                 <button
                   onClick={() => setSelection({ from: null, to: null })}
-                  className="ml-auto text-[11px] text-faint transition-colors hover:text-ink"
+                  title="Clear the comparison"
+                  aria-label="Clear the comparison"
+                  className="ml-auto rounded-control p-1 text-faint transition-colors hover:bg-active hover:text-ink"
                 >
-                  Clear
+                  <UndoIcon size={ICON.xs} />
                 </button>
               </div>
               {changes.length === 0 ? (
