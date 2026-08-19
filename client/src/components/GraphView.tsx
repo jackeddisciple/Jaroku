@@ -76,6 +76,19 @@ const RES_MIN_SEP = RES_D + 24;
 // edge is not really the right edge. Kept in step with StepDetailPanel's `w-[340px]`.
 const STEP_PANEL_W = 340;
 
+// Glyph sizes on the canvas. Deliberately off ICON's ladder and named here rather than written
+// out at three call sites: a node is a 72–96px card at 100% zoom, not a line of 12px text, so a
+// mark sized to sit level with type would vanish inside one. Each step is a proportion of the box
+// it lives in — the agent card's 46px icon well, the compact card's face, the resource circle.
+const NODE_ICON = {
+  /** Inside the wide agent card's icon well. */
+  agent: 24,
+  /** The compact trigger/tool/action/terminal card, where the glyph *is* the card's face. */
+  card: 28,
+  /** A resource circle, which is a brand mark at RES_D and reads as a logo. */
+  resource: 44,
+} as const;
+
 type FitOptions = Pick<FitViewOptions, "padding">;
 
 // ── palette (flat, n8n-ish) ───────────────────────────────────────────────────
@@ -216,7 +229,7 @@ function FlowNode({ data }: NodeProps) {
             className="flex items-center justify-center rounded-control shrink-0"
             style={{ width: 46, height: 46, background: ICON_BG, color: accent, border: `1px solid ${BORDER}` }}
           >
-            <Icon size={24} />
+            <Icon size={NODE_ICON.agent} />
           </span>
           <span className="flex flex-col min-w-0 leading-tight gap-1">
             <Truncate className="font-mono text-[13px] font-semibold text-ink">{d.title}</Truncate>
@@ -255,7 +268,7 @@ function FlowNode({ data }: NodeProps) {
         <AccentBar d={d} radius={RADIUS.card} />
         <StatusDot status={d.status} />
         <span style={{ color: accent }}>
-          <Icon size={28} />
+          <Icon size={NODE_ICON.card} />
         </span>
         {d.kind === "terminal" && <PlusChip style={{ left: CARD_W + 12, top: CARD_H / 2, transform: "translateY(-50%)" }} />}
       </div>
@@ -304,7 +317,7 @@ function ResourceNode({ data }: NodeProps) {
         className="flex items-center justify-center rounded-full"
         style={{ width: RES_D, height: RES_D, background: CARD_BG, border: `1px solid ${BORDER}` }}
       >
-        <Icon size={44} />
+        <Icon size={NODE_ICON.resource} />
       </div>
       <div className="absolute left-1/2 -translate-x-1/2 text-center" style={{ top: RES_D + 9, width: 112 }}>
         <Truncate fade="both" className="font-mono text-[11px] leading-tight text-ink">{d.label}</Truncate>

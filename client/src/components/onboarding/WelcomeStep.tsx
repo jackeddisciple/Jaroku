@@ -22,7 +22,7 @@
 
 import { useUiStore } from "../../store/uiStore.ts";
 import { JarokuGlyph } from "../../lib/icons.tsx";
-import { ICON } from "../../lib/tokens.ts";
+import { BRAND, ICON } from "../../lib/tokens.ts";
 import { LockIcon, ShieldCheckIcon, ZapIcon } from "../panelIcons.tsx";
 import { OnboardingSurface } from "./OnboardingSurface.tsx";
 import { PrimaryCta } from "./Cta.tsx";
@@ -64,7 +64,7 @@ export function WelcomeStep() {
               }}
             />
             <span className="relative text-ink">
-              <JarokuGlyph size={40} />
+              <JarokuGlyph size={BRAND.hero} />
             </span>
           </div>
         </Reveal>

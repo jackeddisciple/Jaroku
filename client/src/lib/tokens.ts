@@ -139,6 +139,24 @@ export const ICON = {
   strokeWidth: 1.75,
 } as const;
 
+/**
+ * The wordmark, which is the one glyph that is allowed off the icon ladder — it is a logo, not a
+ * control, and it is drawn to be read at a size rather than to sit level with 12px text.
+ *
+ * Three steps because the mark appears in three registers and no more: beside the app's own name
+ * in the chrome, as a screen's mark on sign-in and the onboarding composer, and as the first-run
+ * hero. It was 18 / 26 / 26 / 30 / 40 across five files before it was named, and the 30 was a
+ * fourth register nobody had decided on.
+ */
+export const BRAND = {
+  /** In the title bar, beside the app name. */
+  chrome: 18,
+  /** A screen's own mark — sign-in, the onboarding composer, an agent's thumbnail. */
+  screen: 26,
+  /** The first-run hero, and only there. */
+  hero: 40,
+} as const;
+
 // ── Type ────────────────────────────────────────────────────────────────────
 // Three sizes and three weights, and hierarchy comes from the WEIGHT.
 //

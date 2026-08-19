@@ -33,7 +33,7 @@ import { inputKey, useUiStore } from "../../store/uiStore.ts";
 import { selectAgent } from "../../lib/selection.ts";
 import { sendRun } from "../../lib/socket.ts";
 import { JarokuGlyph } from "../../lib/icons.tsx";
-import { ICON, SPACE_CLASS, STATUS, TYPE } from "../../lib/tokens.ts";
+import { BRAND, ICON, SPACE_CLASS, STATUS, TYPE } from "../../lib/tokens.ts";
 import { BuildPane } from "../BuildPane.tsx";
 import { ChevronRightIcon, PlayIcon, SparklesIcon, ZapIcon } from "../panelIcons.tsx";
 import { EXAMPLE_AGENT_ID, type OnboardingPhase } from "./useOnboarding.ts";
@@ -151,7 +151,7 @@ function BandHeading({
   return (
     <div className="flex flex-col items-center text-center">
       <span className="text-muted">
-        <JarokuGlyph size={26} />
+        <JarokuGlyph size={BRAND.screen} />
       </span>
       <h2 className="mt-3 flex items-center gap-2 text-[19px] font-semibold tracking-[-0.01em] text-ink">
         <span style={tone ? { color: tone } : undefined} className={tone ? undefined : "text-muted"}>

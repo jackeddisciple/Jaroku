@@ -20,7 +20,7 @@ import { sendCancelDeploy, sendSetOwnKeyForPlatform } from "../lib/socket.ts";
 import { isDeployInFlight } from "../types.ts";
 import { agentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark, BRAND_COLOR, JarokuGlyph } from "../lib/icons.tsx";
-import { ICON, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
+import { BRAND, ICON, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
 
 import { Truncate } from "./Truncate.tsx";
 import { Chip } from "./Chip.tsx";
@@ -234,7 +234,7 @@ export function TopBar() {
           Sized up from the inline default because it is now carrying the slot by itself, and
           labelled because the glyph is aria-hidden: the brand still has to reach a reader. */}
       <span role="img" aria-label="Jaroku" className="flex items-center text-ink">
-        <JarokuGlyph size={18} />
+        <JarokuGlyph size={BRAND.chrome} />
       </span>
 
       {/* active agent + status */}

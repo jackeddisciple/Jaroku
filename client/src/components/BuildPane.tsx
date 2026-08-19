@@ -210,7 +210,7 @@ function TurnRow({ marker, children }: { marker?: React.ReactNode; children: Rea
 function JarokuMark() {
   return (
     <span className="flex h-[18px] w-[18px] items-center justify-center text-muted">
-      <JarokuGlyph size={15} />
+      <JarokuGlyph size={ICON.md} />
     </span>
   );
 }
@@ -1082,7 +1082,7 @@ export function BuildPane({
                   disabled={busy}
                   title={c.hint}
                   reserveIcon
-                  icon={on ? <StatusDot state="ok" size={11} color={ACCENT.reviewed} /> : undefined}
+                  icon={on ? <StatusDot state="ok" size={ICON.badge} color={ACCENT.reviewed} /> : undefined}
                 >
                   {c.label}
                 </Chip>
@@ -1161,7 +1161,7 @@ export function BuildPane({
                       {/* Fixed-width slot so a control never resizes because you used it —
                           the same reason the connector chips reserve theirs. */}
                       <span className="inline-flex w-[11px] shrink-0 items-center justify-center" aria-hidden>
-                        {on && <StatusDot state="ok" size={11} color={ACCENT.mcp} />}
+                        {on && <StatusDot state="ok" size={ICON.badge} color={ACCENT.mcp} />}
                       </span>
                       <Truncate className="font-mono">{t.name}</Truncate>
                       {/* Which server it came from is not decoration: two servers can
@@ -1420,7 +1420,7 @@ export function BuildPane({
                 className="flex items-center justify-center rounded-full transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
                 style={{ width: 30, height: 30, background: TEXT.ink, color: SURFACE.bg }}
               >
-                <ArrowUpIcon size={15} />
+                <ArrowUpIcon size={ICON.sm} />
               </button>
             </div>
           </div>

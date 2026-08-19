@@ -24,7 +24,7 @@ import { artFor } from "../lib/agentArt.ts";
 import { ThumbnailMark } from "./agentIcons.tsx";
 import { sendRenameAgent } from "../lib/socket.ts";
 import { fmtCost, relTime } from "../lib/format.ts";
-import { ICON, TYPE } from "../lib/tokens.ts";
+import { BRAND, ICON, TYPE } from "../lib/tokens.ts";
 import type { AgentDetailView } from "../types.ts";
 
 /** One fact, as a label over a value. The `well` level of §9's three-level nesting. */
@@ -89,7 +89,7 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
       <div className="relative h-16 w-full overflow-hidden bg-active" aria-hidden>
         <img src={artFor(a.uuid)} alt="" decoding="async" className="h-full w-full object-cover" />
         <div className="absolute inset-0 flex items-center justify-center">
-          <ThumbnailMark size={30} />
+          <ThumbnailMark size={BRAND.screen} />
         </div>
       </div>
 

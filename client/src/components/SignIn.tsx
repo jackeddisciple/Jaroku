@@ -16,6 +16,7 @@ import { pendingInvite } from "../lib/invite.ts";
 import { restartSocket } from "../lib/socket.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { JarokuGlyph } from "../lib/icons.tsx";
+import { BRAND } from "../lib/tokens.ts";
 
 export function SignIn() {
   const message = useSessionStore((s) => s.message);
@@ -65,7 +66,7 @@ export function SignIn() {
   return (
     <div className="flex h-full items-center justify-center bg-void p-6">
       <div className="w-full max-w-sm rounded-modal border border-edge bg-bg p-8 shadow-overlay">
-        <JarokuGlyph size={26} />
+        <JarokuGlyph size={BRAND.screen} />
         <h1 className="mt-5 text-lg font-medium text-ink">Sign in to Jaroku</h1>
 
         {/* AN INVITATION SURVIVES THIS SCREEN, and saying so is the difference between a link that
