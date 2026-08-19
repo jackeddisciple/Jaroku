@@ -230,3 +230,78 @@ export function fileStatusFor(status: FileStatus): FileStatusDescriptor {
 
 /** Every registered status, for a legend or a test that asserts the vocabulary has not grown. */
 export const FILE_STATUSES = Object.keys(FILE_STATUS) as FileStatus[];
+
+// ── What happened in the workspace ──────────────────────────────────────────
+//
+// §5's feed and §8's timeline, mapped onto the vocabulary above rather than given one of their own.
+//
+// THE FEED'S NINE KINDS MAP ALMOST ENTIRELY ONTO THE ELEVEN ALREADY DEFINED, which is exactly what
+// §4 predicted and asked for: "the feed's event kinds map almost entirely onto the 11 kinds already
+// defined in two tenses — use the past tense here, since this tab is entirely historical". A run is
+// `generate`, a tool confirmation is `call`, a branch is `decide`, a deploy is `connect`. So this is
+// a JOIN, not a second registry, and a feed row reads "Called send_message" in the same voice the
+// trace two panels over already uses.
+//
+// PAST TENSE, ALWAYS. Every row on this tab describes something that has already happened, so the
+// caller never passes `state: "active"` and never gets `verbing`. A live-looking verb on a
+// historical dashboard is the same category error as amber on it — see §3.7.
+//
+// TWO KINDS NEEDED A VERB THE VOCABULARY DID NOT HAVE, and both are OVERRIDES rather than new
+// entries in `ActionKind`. "Published" and "Undid" are things you do to a VERSION, and the eleven
+// kinds are about what an AGENT did while running — adding two members to that union to describe
+// the control plane's own actions would blur what the vocabulary is for. `ActionRow` already takes
+// a `verb` prop for exactly this case, so the override is the mechanism rather than a workaround.
+
+/** §5's feed kinds and §8's timeline kinds, as one union. Mirrors the server's `FeedKind`. */
+export type FeedKind =
+  | "run"
+  | "branch"
+  | "version"
+  | "edit"
+  | "edit_undone"
+  | "deploy"
+  | "eval"
+  | "mcp_confirm"
+  | "member";
+
+/** How one feed row narrates itself: which existing action it is, and any verb that replaces it. */
+export interface FeedNarration {
+  kind: ActionKind;
+  /** Set only where the vocabulary's own past tense is not the right word. See the note above. */
+  verb?: string;
+}
+
+const FEED_NARRATION: Record<FeedKind, FeedNarration> = {
+  // A run is a model doing work, which is what `generate` has always meant here.
+  run: { kind: "generate", verb: "Ran" },
+  // A branch is a fork in the graph, and `decide` is the router's own mark.
+  branch: { kind: "decide", verb: "Branched" },
+  // A publish is code arriving on disk — `write`'s idea, with the word a version needs.
+  version: { kind: "write", verb: "Published" },
+  edit: { kind: "write", verb: "Edited" },
+  edit_undone: { kind: "update", verb: "Undid" },
+  // A deploy reaches outward, which is `connect`'s whole meaning: "reached a third-party server".
+  deploy: { kind: "connect", verb: "Deployed" },
+  eval: { kind: "search", verb: "Evaluated" },
+  // A confirmation IS a tool call — it is the call the gate stopped. Same icon, same verb, so the
+  // feed row and the trace row that produced it read identically.
+  mcp_confirm: { kind: "call" },
+  // A membership change is the workspace's own shape moving, which is `update`.
+  member: { kind: "update", verb: "Changed" },
+};
+
+/**
+ * How a feed or timeline row should narrate itself.
+ *
+ * RETURNS A DESCRIPTOR, so the caller renders it through `ActionRow` exactly as the trace does and
+ * cannot accidentally pick a different icon for the same idea. The verb override rides on the
+ * descriptor rather than being returned beside it, for the same reason.
+ */
+export function actionForFeedKind(kind: FeedKind): ActionDescriptor {
+  const narration = FEED_NARRATION[kind] ?? { kind: "update" as ActionKind };
+  const base = ACTION[narration.kind];
+  return narration.verb ? { ...base, verb: narration.verb } : base;
+}
+
+/** Every feed kind, for a legend or a filter rail that must not drift from this table. */
+export const FEED_KINDS = Object.keys(FEED_NARRATION) as FeedKind[];

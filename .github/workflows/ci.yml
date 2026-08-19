@@ -474,6 +474,13 @@ jobs:
           # polarity and every badge reads it. The other half is §3.5: unknown renders `--` for
           # every unit, never `0`, never `$0.00`, which is the rule v0.1.9 paid for once already.
           npm run test:activity-metrics
+          # §4's rule, which is not a thing anybody breaks on purpose: "extend actionIcons rather
+          # than defining a second icon for an action that already has one". A second registry is
+          # what happens when a new surface needs a verb the old table lacked and the easy fix is a
+          # table beside it. Nine feed kinds mapping onto the existing eleven is the claim, and the
+          # load-bearing assertion is that a confirmation row and the trace row that produced it
+          # read identically — same icon, same verb, same accent.
+          npm run test:action-icons
           npm run test:auth
           # The two ends of an invitation link. The failure it exists for is silent and partial: an
           # unencoded token produces a link that works for most secrets and fails for the ones with
