@@ -193,7 +193,7 @@ function ServerDetail({ server }: { server: McpServer }) {
               <input
                 type="password"
                 autoComplete="off"
-                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none placeholder:text-faint"
+                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
                 placeholder="bearer token or API key"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
@@ -358,7 +358,7 @@ export function McpPanel() {
           <div className="rounded-card border border-edge bg-panel p-2 shadow-raised">
             <input
               autoFocus
-              className="w-full rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none placeholder:text-faint"
+              className="w-full rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
               placeholder="https://example.com/mcp"
               value={endpoint}
               onChange={(e) => setEndpoint(e.target.value)}
@@ -366,7 +366,7 @@ export function McpPanel() {
             />
             <div className="mt-1.5 flex items-center gap-2">
               <input
-                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 text-[11px] text-ink outline-none placeholder:text-faint"
+                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
                 placeholder="name (optional)"
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
@@ -375,7 +375,7 @@ export function McpPanel() {
               <input
                 type="password"
                 autoComplete="off"
-                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none placeholder:text-faint"
+                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
                 placeholder="token (if it needs one)"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}

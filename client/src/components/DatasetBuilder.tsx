@@ -202,7 +202,7 @@ function RubricEditor({ datasetId }: { datasetId: string }) {
                   value={c.label}
                   onChange={(e) => edit(i, { label: e.target.value })}
                   placeholder="Name"
-                  className="min-w-0 flex-1 rounded-control bg-active px-2 py-1 text-[12px] text-ink placeholder:text-faint outline-none"
+                  className="min-w-0 flex-1 rounded-control bg-active px-2 py-1 text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
                 />
                 {/* THE ID IS NOT EDITABLE ONCE IT EXISTS. It is what a stored verdict's
                     per-criterion score is keyed by, so renaming it would orphan every score
@@ -217,7 +217,7 @@ function RubricEditor({ datasetId }: { datasetId: string }) {
                   onChange={(e) => edit(i, { weight: Number(e.target.value) })}
                   inputMode="decimal"
                   title="Relative weight"
-                  className="w-14 shrink-0 rounded-control bg-active px-1.5 py-1 font-mono text-[11px] text-ink outline-none"
+                  className="w-14 shrink-0 rounded-control bg-active px-1.5 py-1 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring"
                 />
                 <button
                   onClick={() => setDraft(criteria.filter((_, j) => j !== i))}
@@ -232,7 +232,7 @@ function RubricEditor({ datasetId }: { datasetId: string }) {
                 onChange={(e) => edit(i, { description: e.target.value })}
                 rows={2}
                 placeholder="What the judge should look for, phrased so that HIGHER is better."
-                className="mt-1 w-full resize-none rounded-control bg-active px-2 py-1 text-[11px] leading-[1.5] text-muted placeholder:text-faint outline-none"
+                className="mt-1 w-full resize-none rounded-control bg-active px-2 py-1 text-[11px] leading-[1.5] text-muted placeholder:text-faint outline-none focus-visible:shadow-focusring"
               />
             </div>
           ))}

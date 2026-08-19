@@ -303,7 +303,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
               }}
               // The click that lands in the field must not also select the agent underneath it.
               onClick={(e) => e.stopPropagation()}
-              className="min-w-0 flex-1 rounded-control bg-void px-1.5 py-0.5 text-[13px] text-ink outline-none"
+              className="min-w-0 flex-1 rounded-control bg-void px-1.5 py-0.5 text-[13px] text-ink outline-none focus-visible:shadow-focusring"
             />
           ) : (
             <Truncate className={active ? "text-accent" : "text-ink"} title={agent.name}>{agent.name}</Truncate>
@@ -708,7 +708,7 @@ export function Sidebar() {
                 if (e.key === "Escape") { setQuery(""); setSearching(false); }
               }}
               placeholder="search agents…"
-              className="min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none placeholder:text-faint"
+              className="min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
             />
             {query && (
               <button

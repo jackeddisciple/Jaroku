@@ -108,7 +108,7 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
             <span className="shrink-0 text-faint"><SearchIcon size={ICON.xs} /></span>
             <input
               autoFocus
-              className="min-w-0 flex-1 bg-transparent text-[11px] text-ink outline-none placeholder:text-faint"
+              className="min-w-0 flex-1 bg-transparent text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
               placeholder="Filter branches…"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
@@ -168,7 +168,7 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
           <div className="border-t border-hair p-1">
             <div className="flex items-center gap-1.5">
               <input
-                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none placeholder:text-faint"
+                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
                 placeholder="+ Create branch from current…"
                 value={creating}
                 onChange={(e) => setCreating(e.target.value)}

@@ -128,7 +128,7 @@ function CeilingControl({ ceilingUsd, planCeilingUsd }: { ceilingUsd: number | n
           if (e.key === "Enter") commit();
           if (e.key === "Escape") setEditing(false);
         }}
-        className="w-20 rounded-control border border-hair bg-void px-1.5 py-0.5 font-mono text-[11px] text-ink outline-none focus:border-edge"
+        className="w-20 rounded-control border border-hair bg-void px-1.5 py-0.5 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring focus:border-edge"
       />
       <button className={quietBtn} onClick={commit}>Save</button>
       {/* Only when there IS one to clear. Offering "use the plan's" while already on the plan's

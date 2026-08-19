@@ -248,7 +248,7 @@ function FilePicker({ view, onPick }: { view: GithubView; onPick: (path: string,
   return (
     <div className="space-y-1 py-1">
       <input
-        className="w-full rounded-control bg-bg px-1.5 py-1 font-mono text-[11px] text-ink outline-none placeholder:text-faint"
+        className="w-full rounded-control bg-bg px-1.5 py-1 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
         placeholder="tools/weather.py"
         value={path}
         onChange={(e) => setPath(e.target.value)}

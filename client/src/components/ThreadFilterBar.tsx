@@ -45,7 +45,7 @@ export function ThreadFilterBar({
           value={query}
           onChange={(e) => onQuery(e.target.value)}
           placeholder="filter…"
-          className="min-w-0 flex-1 bg-transparent text-[12px] text-ink placeholder:text-faint outline-none"
+          className="min-w-0 flex-1 bg-transparent text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
         />
         {query && (
           <button

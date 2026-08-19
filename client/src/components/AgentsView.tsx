@@ -76,7 +76,7 @@ function FirstAgentStart({ workspaceName }: { workspaceName: string | null }) {
               if (e.key === "Enter") start();
             }}
             placeholder="Describe an agent and Jaroku will build it"
-            className="min-w-0 flex-1 bg-transparent text-[13px] text-ink placeholder:text-faint outline-none"
+            className="min-w-0 flex-1 bg-transparent text-[13px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
           />
           <span className="shrink-0 text-[10px] text-faint">↵</span>
         </div>
@@ -356,7 +356,7 @@ export function AgentsView() {
             }}
             placeholder="Search agents…"
             aria-label="Search agents by name or slug"
-            className="min-w-0 flex-1 bg-transparent text-[12px] text-ink placeholder:text-faint outline-none"
+            className="min-w-0 flex-1 bg-transparent text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
           />
           {filters.query && (
             <button

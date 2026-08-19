@@ -143,7 +143,7 @@ function InlineForm({ item, action }: { item: InboxItemView; action: InboxAction
           inputMode={isCeiling ? "decimal" : undefined}
           placeholder={label}
           aria-label={label}
-          className="min-w-0 flex-1 bg-transparent text-[12px] text-ink placeholder:text-faint outline-none"
+          className="min-w-0 flex-1 bg-transparent text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
         />
         <button
           type="button"

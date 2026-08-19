@@ -69,7 +69,7 @@ function NewWorkspaceForm({ onDone }: { onDone: () => void }) {
         onChange={(e) => setName(e.target.value)}
         maxLength={64}
         placeholder="Workspace name"
-        className="w-full rounded-control border border-hair bg-void px-2 py-1.5 text-[12px] text-ink placeholder:text-faint outline-none focus:border-edge"
+        className="w-full rounded-control border border-hair bg-void px-2 py-1.5 text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
       />
       {/* THE KIND IS ASKED, NEVER DEFAULTED SILENTLY. It decides whether the workspace has a
           members list, roles and an author column at all, and it is not changeable afterwards —

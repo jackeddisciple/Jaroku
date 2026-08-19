@@ -1320,7 +1320,7 @@ export function BuildPane({
               }}
               rows={2}
               placeholder={moment.placeholder}
-              className="w-full resize-none bg-transparent text-ink placeholder:text-muted outline-none leading-[1.5] transition-opacity duration-200"
+              className="w-full resize-none bg-transparent text-ink placeholder:text-muted outline-none focus-visible:shadow-focusring leading-[1.5] transition-opacity duration-200"
               style={{
                 // Off the 11/12/13 ladder on purpose, and the only thing in the app that is. This
                 // is the sentence the user writes; it should be the largest text on the screen.

@@ -41,7 +41,7 @@ export function PrimaryCta({ children, onClick, autoFocus, kbd, title, className
       autoFocus={autoFocus}
       title={title}
       className={`group inline-flex items-center gap-2.5 rounded-control px-5 py-2.5 text-[13px]
-        font-medium outline-none transition-shadow duration-base ease-state
+        font-medium outline-none focus-visible:shadow-focusring transition-shadow duration-base ease-state
         hover:shadow-glow-cta focus-visible:shadow-focusring ${className}`}
       style={{ background: TEXT.ink, color: SURFACE.bg }}
     >
@@ -77,7 +77,7 @@ export function GhostCta({ children, onClick, autoFocus, kbd, title, className =
       autoFocus={autoFocus}
       title={title}
       className={`inline-flex items-center gap-2.5 rounded-control border border-edge px-5 py-2.5
-        text-[13px] font-medium text-ink outline-none transition-shadow duration-base ease-state
+        text-[13px] font-medium text-ink outline-none focus-visible:shadow-focusring transition-shadow duration-base ease-state
         hover:shadow-glow focus-visible:shadow-focusring ${className}`}
     >
       {children}

@@ -182,7 +182,7 @@ export function StagingRegion({ view }: { view: GithubView }) {
 
       {!whole && (
         <textarea
-          className="mt-2 h-16 w-full resize-none rounded-control bg-panel px-2 py-1.5 font-mono text-[11px] leading-[1.5] text-ink outline-none placeholder:text-faint"
+          className="mt-2 h-16 w-full resize-none rounded-control bg-panel px-2 py-1.5 font-mono text-[11px] leading-[1.5] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
           placeholder="What does this subset do? (a staged subset has no version instruction to borrow)"
           value={message}
           onChange={(e) => setMessage(e.target.value)}

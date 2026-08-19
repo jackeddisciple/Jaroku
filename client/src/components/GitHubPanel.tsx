@@ -323,7 +323,7 @@ function RepoPicker({ agentId }: { agentId: string }) {
           <div className="mt-1.5 pl-5">
             <div className="flex items-center gap-2">
               <input
-                className="min-w-0 flex-1 rounded-control bg-panel px-2 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-faint"
+                className="min-w-0 flex-1 rounded-control bg-panel px-2 py-1.5 font-mono text-[12px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="weather-agent"
@@ -364,7 +364,7 @@ function RepoPicker({ agentId }: { agentId: string }) {
             <div className="flex items-center gap-2 rounded-control bg-active px-2.5 py-1.5">
               <span className="shrink-0 text-faint"><SearchIcon size={ICON.xs} /></span>
               <input
-                className="min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none placeholder:text-faint"
+                className="min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
                 placeholder="Search your repos…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -490,7 +490,7 @@ function Field({
     <label className="flex items-center gap-2 text-[11px] text-muted">
       <span className="w-[86px] shrink-0">{label}</span>
       <input
-        className={`min-w-0 flex-1 rounded-control bg-panel px-2 py-1 text-[11px] text-ink outline-none placeholder:text-faint ${mono ? "font-mono" : ""}`}
+        className={`min-w-0 flex-1 rounded-control bg-panel px-2 py-1 text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint ${mono ? "font-mono" : ""}`}
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}

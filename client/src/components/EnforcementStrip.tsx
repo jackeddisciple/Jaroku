@@ -124,7 +124,7 @@ export function EnforcementStrip() {
                 maxLength={4000}
                 onChange={(e) => setNote(e.target.value)}
                 placeholder="What happened, from your side. This goes to whoever reviews the enforcement."
-                className="w-full rounded-control border border-hair bg-void px-2 py-1.5 text-[12px] text-ink placeholder:text-faint outline-none focus:border-edge"
+                className="w-full rounded-control border border-hair bg-void px-2 py-1.5 text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
               />
               <div className="mt-1 flex items-center gap-2">
                 <button

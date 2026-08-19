@@ -111,7 +111,7 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
                   if (e.key === "Escape") cancel();
                 }}
                 aria-label={`Rename ${a.name}`}
-                className="w-full rounded-control border border-edge bg-panel px-2 py-1 text-[13px] font-medium text-ink outline-none"
+                className="w-full rounded-control border border-edge bg-panel px-2 py-1 text-[13px] font-medium text-ink outline-none focus-visible:shadow-focusring"
               />
             ) : (
               <div className="flex min-w-0 items-center gap-1.5">

@@ -165,7 +165,7 @@ export function CommandPalette() {
           // A VISIBLE FIELD. It was transparent on the card, so the one control that is focused
           // the instant this opens had no box at all — you could see the placeholder and not the
           // thing you were typing into.
-          className="w-full border-b border-edge bg-bg px-4 py-3 text-[13px] text-ink outline-none placeholder:text-faint"
+          className="w-full border-b border-edge bg-bg px-4 py-3 text-[13px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
         />
         <Command.List className="max-h-[52vh] overflow-auto p-2">
           <Command.Empty className="px-3 py-6 text-center text-muted text-[12px]">No results.</Command.Empty>

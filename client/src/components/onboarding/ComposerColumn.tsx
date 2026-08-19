@@ -103,7 +103,7 @@ function ExampleRow({
       onClick={onPick}
       title={title}
       className="group flex w-full items-center gap-3 rounded-card border border-edge bg-panel/40 px-3 py-2.5
-        text-left outline-none transition-all duration-base ease-state
+        text-left outline-none focus-visible:shadow-focusring transition-all duration-base ease-state
         hover:bg-panel hover:shadow-glow focus-visible:bg-panel focus-visible:shadow-focusring"
     >
       <span

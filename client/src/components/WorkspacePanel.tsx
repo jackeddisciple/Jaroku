@@ -249,7 +249,7 @@ function MembersSection() {
             onChange={(e) => setEmail(e.target.value)}
             type="email"
             placeholder="colleague@example.com"
-            className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 text-[12px] text-ink placeholder:text-faint outline-none focus:border-edge"
+            className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
           />
           <Select
             value={role}
@@ -558,7 +558,7 @@ function DataSection() {
                 onChange={(e) => setConfirm(e.target.value)}
                 disabled={!canManage}
                 placeholder="Type the id above to confirm"
-                className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 font-mono text-[11px] text-ink placeholder:font-sans placeholder:text-faint outline-none focus:border-edge disabled:opacity-40"
+                className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 font-mono text-[11px] text-ink placeholder:font-sans placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge disabled:opacity-40"
               />
               <button
                 onClick={() => void destroy()}

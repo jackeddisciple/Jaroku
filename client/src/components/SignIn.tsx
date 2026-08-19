@@ -113,7 +113,7 @@ export function SignIn() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="mt-1 w-full rounded-control border border-edge bg-void px-3 py-2 text-[13px] text-ink outline-none focus:border-chrome"
+                className="mt-1 w-full rounded-control border border-edge bg-void px-3 py-2 text-[13px] text-ink outline-none focus-visible:shadow-focusring focus:border-chrome"
               />
             </label>
             <label className="block">
@@ -121,7 +121,7 @@ export function SignIn() {
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="mt-1 w-full rounded-control border border-edge bg-void px-3 py-2 text-[13px] text-ink outline-none focus:border-chrome"
+                className="mt-1 w-full rounded-control border border-edge bg-void px-3 py-2 text-[13px] text-ink outline-none focus-visible:shadow-focusring focus:border-chrome"
               />
             </label>
             {error && <p className="text-[11px] text-err">{error}</p>}
