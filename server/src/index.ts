@@ -20,6 +20,13 @@ import { TraceStore } from "./store.ts";
 // reconciliation of the body's id against the slot that produced it.
 import { runIdOf } from "./types.ts";
 import { migrate } from "./db/migrate.ts";
+import { ActivityStore, type MemberPulse, type PersonalSummary } from "./activity/activityStore.ts";
+import { ActivityCache, activityKey } from "./activity/cache.ts";
+import { isFeedKind, type FeedRow } from "./activity/feed.ts";
+import {
+  boundActor, boundIdentifier, boundList, boundNumber, boundText, boundUrl,
+} from "./activity/payload.ts";
+import { comparable, isActivityRange, resolveWindow, type Window } from "./activity/range.ts";
 import { describePartitions, ensurePartitions } from "./lifecycle/partitions.ts";
 import { RetentionSweeper, describeSweep } from "./lifecycle/retention.ts";
 import { openDb } from "./db/open.ts";
@@ -1068,6 +1075,97 @@ await deployStore.init();
 // and again whenever a generation, an apply or an undo changes what is on disk — those are
 // the only three things that do.
 const agentRepo = new AgentRepository(store.database());
+
+// --- the Activity tab -------------------------------------------------------------------------
+//
+// §1's LAST TAB, AND THE ONLY ONE THAT WRITES NOTHING. Every module on it is an aggregate over rows
+// five other features already produce, which is why there is one store, one cache and no reconciler,
+// no generator and no verbs. What this section wires is a read path: resolve one window, fan out six
+// aggregates, and send each answer as it lands.
+const activityStore = new ActivityStore(store.database());
+
+// §5.3's cache. Per (workspace, range), sixty-second life, 24h never cached, invalidated on the
+// events that move the figures rather than only by its own clock — see the file for all four rules
+// and for the single-flight that a cache of results cannot provide.
+const activityCache = new ActivityCache();
+
+/**
+ * Everything §1's header states, plus §2, §3 and §4's hero row and §6's pulse band.
+ *
+ * ONE FUNCTION FOR ALL FIVE, because they are one card row and one window: `spend`, `tokens`,
+ * `runHealth` and `pulse` are four statements this process issues together, and a client that had
+ * to ask four times would render its hero row in four frames.
+ */
+async function activitySummary(ctx: TenantContext, w: Window): Promise<unknown> {
+  const [workspace, spend, tokens, health, pulse] = await Promise.all([
+    activityStore.workspaceMeta(ctx),
+    activityStore.spend(ctx, w),
+    activityStore.tokens(ctx, w),
+    activityStore.runHealth(ctx, w),
+    activityStore.pulse(ctx, w),
+  ]);
+  return {
+    workspace: workspace
+      ? {
+          name: boundText(workspace.name),
+          kind: workspace.kind,
+          members: workspace.members,
+          created_at: workspace.createdAt,
+        }
+      : null,
+    // §3.3's "a delta with no comparable previous window renders --". Decided HERE, once, against
+    // the workspace's own age, rather than in each of the badges that would otherwise each need to
+    // know how old the workspace is.
+    comparable: comparable(w, workspace?.createdAt ?? null),
+    window: { from: w.from, to: w.to, previous_from: w.previousFrom, previous_to: w.previousTo },
+    spend: {
+      usd: spend.usd,
+      previous_usd: spend.previousUsd,
+      events: spend.events,
+      cost_known: spend.costKnown,
+      unpriced_events: spend.unpricedEvents,
+      unpriced_agents: spend.unpricedAgents,
+      // Names only, bounded, and through the identifier path — a model id is not prose and must
+      // survive intact, which is v0.2.4's narrowing. See `activity/payload.ts`.
+      unpriced_models: spend.unpricedModels.map(boundIdentifier),
+      budget_usd: spend.budgetUsd,
+      by_provider: boundList(
+        spend.byProvider.map((p) => ({
+          provider: boundIdentifier(p.provider), usd: p.usd, cost_known: p.costKnown,
+        })),
+        24,
+      ).rows,
+    },
+    tokens: {
+      total: tokens.total,
+      previous_total: tokens.previousTotal,
+      events: tokens.events,
+      cached: tokens.cached,
+      unsplit_tokens: tokens.unsplitTokens,
+    },
+    health,
+    pulse: pulse.map((c) => ({ at: c.at, runs: c.runs, errors: c.errors, usd: c.usd, tokens: c.tokens })),
+  };
+}
+
+/** §5's feed, bounded and redacted on the way out. */
+function feedRowPayload(row: FeedRow): unknown {
+  return {
+    id: row.id,
+    at: row.at,
+    kind: row.kind,
+    agent_id: row.agentId ? boundIdentifier(row.agentId) : null,
+    // An id, never an email — see `boundActor`.
+    actor_user_id: boundActor(row.actorUserId),
+    // PROSE, NOT AN IDENTIFIER. `object` carries an edit's instruction and a deploy's target, which
+    // are the two free-form strings on this wire — so they take the shorter bound and the flattening.
+    object: row.object ? boundText(row.object) : null,
+    outcome: row.outcome,
+    num: boundNumber(row.num),
+    target_type: row.targetType,
+    target_id: row.targetId,
+  };
+}
 
 // A WORKSPACE'S OWN PROVIDER KEYS.
 //
@@ -2672,6 +2770,221 @@ const relay = new WsRelay({
   // it, so §5.2's badge is right on frame one rather than after a round trip. A socket with no
   // person on it — the dev path — gets an empty board rather than somebody else's.
   listInbox: (ctx) => (ctx.actorUserId ? boardFor(ctx) : EMPTY_INBOX),
+  /**
+   * §5.5's `getActivity`: six aggregates for one range, each sent as it resolves.
+   *
+   * THE WINDOW IS RESOLVED ONCE, HERE, AND HANDED TO ALL SIX. That is §1's single global range made
+   * structural rather than remembered — six aggregates that each called `resolveWindow` would each
+   * get a window ending a few milliseconds apart, and §3.4's cross-highlight would be joining four
+   * lenses onto data from four moments.
+   *
+   * EACH GOES THROUGH THE CACHE UNDER ITS OWN KEY, so a slow leaderboard is cached apart from a fast
+   * hero row and one card's staleness is its own. The 24h range short-circuits every one of them —
+   * `Window.live` is read inside the cache, so the decision is made in `range.ts` and nowhere else.
+   *
+   * `Promise.all` OVER SIX INDEPENDENT SENDS, not a sequence: §3.6 says a slow leaderboard must not
+   * hold up the hero row, and awaiting them in order would make that exactly what happens. Each
+   * `emit` fires the moment its own aggregate resolves.
+   */
+  getActivity: async (ctx, cmd, emit) => {
+    const range = isActivityRange(cmd.range) ? cmd.range : "7d";
+    const custom = cmd.from && cmd.to ? { from: cmd.from, to: cmd.to } : null;
+    const w = resolveWindow(range, new Date(), custom);
+    const key = (part: string): string => `${activityKey(ctx.workspaceId, w.range, custom)}:${part}`;
+    // The RESOLVED range travels rather than the requested one: a malformed custom range falls back
+    // to 7d inside `resolveWindow`, and a client told "custom" would file a 7-day answer under a
+    // window it never receives an answer for.
+    const stamp = (f: { computedAt: string; live: boolean }): { range: string; computedAt: string; live: boolean } => ({
+      range: w.range,
+      computedAt: f.computedAt,
+      live: f.live,
+    });
+
+    const workspace = await activityStore.workspaceMeta(ctx);
+    const team = workspace?.kind === "team";
+
+    await Promise.all([
+      activityCache
+        .get(key("summary"), w.live, () => activitySummary(ctx, w))
+        .then((f) => emit({ type: "activitySummary", ...stamp(f), summary: f.value })),
+
+      activityCache
+        .get(key("leaderboard"), w.live, async () => ({
+          rows: await activityStore.leaderboard(ctx, w),
+          mix: await activityStore.modelMix(ctx, w),
+        }))
+        .then((cached) => {
+          const f = { computedAt: cached.computedAt, live: cached.live, value: cached.value.rows };
+          const mix = cached.value.mix;
+          const bounded = boundList(
+            f.value.map((r) => ({
+              agent_id: boundIdentifier(r.agentId),
+              name: boundText(r.name),
+              archived: r.archived,
+              runs: r.runs,
+              ok: r.ok,
+              failed: r.failed,
+              interrupted: r.interrupted,
+              success_rate: r.successRate,
+              usd: r.usd,
+              cost_known: r.costKnown,
+              p95: r.p95,
+              last_active: r.lastActive,
+              models: r.models.map(boundIdentifier),
+            })),
+          );
+          emit({
+            type: "activityLeaderboard",
+            ...stamp(f),
+            rows: bounded.rows,
+            truncated: bounded.truncated,
+            // §6's MIX RIDES THIS MESSAGE RATHER THAN ONE OF ITS OWN, and that is the specification's
+            // list of six kept rather than widened: `activityModelMix` is not one of them. This is
+            // the message it belongs with, because §3.4 joins the two — hovering a leaderboard row
+            // highlights that agent's slice in Model Mix, and hovering a segment highlights the rows
+            // using that model. Two messages would let a client hold a leaderboard from one moment
+            // beside a mix from another and light up rows for a model the mix no longer shows.
+            mix: {
+              models: mix.models.map((m) => ({
+                model: boundIdentifier(m.model),
+                provider: boundIdentifier(m.provider),
+                usd: m.usd,
+                tokens: m.tokens,
+                calls: m.calls,
+                priced: m.priced,
+              })),
+              priced_usd: mix.pricedUsd,
+              total_tokens: mix.totalTokens,
+            },
+          });
+        }),
+
+      activityCache
+        .get(key("releases"), w.live, () => activityStore.releases(ctx, w))
+        .then((f) =>
+          emit({
+            type: "activityReleases",
+            ...stamp(f),
+            entries: f.value.map((e) => ({
+              id: e.id,
+              at: e.at,
+              kind: e.kind,
+              agent_id: boundIdentifier(e.agentId),
+              agent_name: boundText(e.agentName),
+              version: e.version,
+              actor_user_id: boundActor(e.actorUserId),
+              outcome: e.outcome,
+              detail: boundText(e.detail),
+              // Through the URL path, which keeps http(s) and drops everything else — §1 says
+              // nothing on this tab changes state, and an href is the one field that could.
+              url: boundUrl(e.url),
+            })),
+          }),
+        ),
+
+      // The reviewed vocabulary comes from the catalogue the connector layer already loads, because
+      // it is a property of the INSTALL rather than of the tenant — see `toolUsage`.
+      activityCache
+        .get(key("tools"), w.live, () =>
+          activityStore.toolUsage(
+            ctx,
+            w,
+            loadConnectors(RUNTIME_DIR).flatMap((c) => c.tools.map((t) => t.name)),
+          ),
+        )
+        .then((f) => {
+          const bounded = boundList(
+            f.value.tools.map((t) => ({
+              name: boundIdentifier(t.name),
+              origin: t.origin,
+              server_id: t.serverId ? boundIdentifier(t.serverId) : null,
+              impact: t.impact,
+              calls: t.calls,
+              failures: t.failures,
+              truncated: t.truncated,
+            })),
+            60,
+          );
+          emit({
+            type: "activityToolUsage",
+            ...stamp(f),
+            usage: {
+              tools: bounded.rows,
+              tools_truncated: bounded.truncated,
+              high_impact_calls: f.value.highImpactCalls,
+              approved: f.value.approved,
+              denied: f.value.denied,
+              timed_out: f.value.timedOut,
+              truncated_calls: f.value.truncatedCalls,
+              total_calls: f.value.totalCalls,
+              reviewed_failures: f.value.reviewedFailures,
+            },
+          });
+        }),
+
+      // §10: one or the other by scope, never both. Decided here rather than in the client, because
+      // "do not show an empty Team card in a Personal workspace" is a fact about the workspace and
+      // the client would have to be told it anyway.
+      activityCache
+        .get<MemberPulse[] | PersonalSummary>(key(team ? "team" : "personal"), w.live, () =>
+          team ? activityStore.teamPulse(ctx, w) : activityStore.personalSummary(ctx, w),
+        )
+        .then((f) =>
+          emit({
+            type: "activityTeam",
+            ...stamp(f),
+            scope: team ? "team" : "personal",
+            members: team
+              ? (f.value as MemberPulse[]).map((m) => ({
+                  user_id: boundActor(m.userId),
+                  agents_created: m.agentsCreated,
+                  edits_applied: m.editsApplied,
+                  versions_published: m.versionsPublished,
+                  threads_started: m.threadsStarted,
+                }))
+              : [],
+            personal: team ? null : f.value,
+          }),
+        ),
+
+      // THE FEED'S FIRST PAGE RIDES THE SAME COMMAND, so opening the tab does not cost a second
+      // round trip before anything appears in the busiest module on the page. Every page after it
+      // is a `getActivityFeed` with a cursor. It is deliberately NOT cached: a keyset page is cheap,
+      // and a cached first page would go stale against a feed that is written to constantly.
+      activityStore.feed(ctx, w).then((page) =>
+        emit({
+          type: "activityFeed",
+          range: w.range,
+          rows: page.rows.map(feedRowPayload),
+          cursor: null,
+          next: page.next,
+        }),
+      ),
+    ]);
+  },
+  /** One page after the first. See the note on the feed inside `getActivity`. */
+  getActivityFeed: async (ctx, cmd) => {
+    const range = isActivityRange(cmd.range) ? cmd.range : "7d";
+    const custom = cmd.from && cmd.to ? { from: cmd.from, to: cmd.to } : null;
+    const w = resolveWindow(range, new Date(), custom);
+    const kinds = Array.isArray(cmd.kinds) ? cmd.kinds.filter(isFeedKind) : undefined;
+    const page = await activityStore.feed(
+      ctx,
+      w,
+      { kinds, agentId: cmd.agentId ?? null, actorUserId: cmd.actorUserId ?? null },
+      cmd.cursor ?? null,
+      cmd.limit,
+    );
+    return {
+      type: "activityFeed",
+      range: w.range,
+      rows: page.rows.map(feedRowPayload),
+      // Echoed back, so a client with two pages in flight can tell which request this answers —
+      // appending the wrong one is how a virtualised list duplicates rows.
+      cursor: cmd.cursor ?? null,
+      next: page.next,
+    };
+  },
   // §2.2's `unreviewed_failures` leaves when any one of its traces is opened, and this is the one
   // path into a trace from any of the four surfaces that offer one. The card resolves because the
   // work was done rather than because the card was pressed, which is Law 2 in one wire.
@@ -4745,6 +5058,18 @@ const pendingThreadBroadcasts = new Map<string, ReturnType<typeof setTimeout>>()
  * still broadcast directly. This is for the event-driven ones, which is most of them.
  */
 function scheduleListRefresh(ctx: TenantContext): void {
+  // §5.3's EVENT-BASED INVALIDATION, AND THIS IS WHY IT LIVES HERE RATHER THAN IN A LISTENER OF ITS
+  // OWN. Every call site of this function is exactly an event that moves an Activity figure — a run
+  // ending, a deploy transitioning, an eval finishing, an edit applied, a generation published —
+  // because those are the same events that change what the Threads list and the Agents grid say. A
+  // second set of hooks would be a second list to keep in step with this one, and the failure mode
+  // would be a dashboard a minute behind on exactly the workspace watching itself work.
+  //
+  // IMMEDIATE, NOT ON THE COALESCING TIMER BELOW. The broadcasts are debounced because sending four
+  // snapshots in a second is waste; dropping a cache entry four times in a second costs nothing, and
+  // waiting would leave the next reader served a figure this process already knows is stale.
+  activityCache.invalidate(ctx.workspaceId);
+
   const existing = pendingThreadBroadcasts.get(ctx.workspaceId);
   if (existing) clearTimeout(existing);
   const timer = setTimeout(() => {

@@ -125,6 +125,13 @@ const TENANT_CHANNELS = new Set([
   // one tenant's standing with the platform, and the reason on the row is the evidence that produced
   // it — delivered across the boundary it would tell one workspace that another is suspended.
   "enforcement",
+  // What the whole workspace is doing: what it spent, on which models, which of its agents are
+  // expensive and which are flaky, what it shipped and what failed, and which of its high-impact
+  // tool calls somebody refused. Every message on it is answered to the socket that ASKED rather
+  // than broadcast — a range is one person's choice of window — which is a stronger guarantee than
+  // scoping; it is in this list because the classification is about what the PAYLOAD is, and this
+  // payload is a month of one tenant's operations in one frame.
+  "activity",
 ]);
 
 /**
@@ -482,6 +489,11 @@ console.log("\nfired live, in A, and B receives none of it");
   relay.broadcastInboxDelta(ctxA, { type: "error", message: MARK });
   relay.broadcastEnforcement(ctxA, { type: "notice", message: MARK });
   relay.sendAudit(ctxA, ctxA.requestId, { type: "error", message: MARK });
+  // TO THE ASKER RATHER THAN BROADCAST, and this channel has nothing else. A range is one person's
+  // choice of window, so a broadcast would move a teammate's dashboard to a range they did not
+  // pick — see `sendActivity`. The suite fires the refusal, which is the only shape that is not an
+  // answer to a specific read.
+  relay.sendActivity(ctxA, ctxA.requestId, { type: "error", message: MARK });
   relay.sendMembers(ctxA, ctxA.requestId, { type: "notice", message: MARK });
   relay.broadcastAgentFiles(ctxA, "agent_a");
   await relay.broadcastAgentGraph(ctxA, "agent_a");

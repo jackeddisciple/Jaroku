@@ -1006,6 +1006,7 @@ export type ClientCommand =
   | McpCommand
   | ListInboxCommand
   | InboxCommand
+  | ActivityCommand
   | ListMcpServersCommand
   | ProviderCommand
   | ListProvidersCommand
@@ -1897,6 +1898,118 @@ export type InboxEvent =
   | { type: "error"; message: string; itemId?: string }
   | { type: "notice"; message: string; itemId?: string };
 
+// --- the Activity tab: what the whole workspace is doing ----------------------------------------
+//
+// ITS OWN CHANNEL, parallel to threads / agents / inbox / eval / mcp / deploy / github, and for the
+// reason each of those is not a field on another: what a workspace is doing is not a session, not an
+// artifact and not a queue of work. §5.5 asks for the established shape exactly, and this is it.
+//
+// SIX ANSWERS TO ONE COMMAND, WHICH IS THE ONE THING GENUINELY DIFFERENT HERE. Every other read on
+// this relay answers with one payload. §3.6 requires the opposite: "Cards fill independently as
+// their queries return — a slow leaderboard must not hold up the hero row." So `getActivity` sends
+// six messages as their aggregates resolve, and the client renders each card the moment its own
+// arrives. One combined payload would make the page as slow as its slowest query and would turn
+// §3.6's skeletons into decoration.
+//
+// EVERY ONE OF THEM CARRIES THE RANGE IT ANSWERS FOR, and that is not redundancy. Six messages
+// arriving out of order after somebody has changed the range is a page assembled from two windows —
+// the exact thing §1's single global range exists to prevent — so a client can drop what it did not
+// ask for. The freshness rides along for §5.3's reason: a cached figure must not present as live.
+//
+// THE FROZEN SCHEMA IS UNTOUCHED. Nothing here is a trace event and nothing here writes one; this
+// tab reads what is already recorded, which is §5.1 in one sentence.
+export type GetActivityCommand = {
+  cmd: "getActivity";
+  range?: string;
+  /** Both ends, for `range: "custom"`. Ignored otherwise. */
+  from?: string;
+  to?: string;
+};
+
+/** §5's feed, one keyset page. The only command on this channel that takes a cursor. */
+export type GetActivityFeedCommand = {
+  cmd: "getActivityFeed";
+  range?: string;
+  from?: string;
+  to?: string;
+  /** The last row of the page before this one. Absent for the first page. */
+  cursor?: { at: string; id: string };
+  kinds?: string[];
+  agentId?: string;
+  actorUserId?: string;
+  limit?: number;
+};
+
+export type ActivityCommand = GetActivityCommand | GetActivityFeedCommand;
+
+// BOTH ARE READS, AND THERE IS DELIBERATELY NO SET OF MUTATIONS BESIDE THEM. Every other tab on this
+// relay has one — `INBOX_COMMANDS`, `THREAD_COMMANDS`, `DEPLOY_COMMANDS` — because every other tab
+// has verbs. §1's hard consequence is that this one has none: "Nothing in Activity is
+// clickable-to-change. There are no actions, no dismissals, no resolves, no retries, no toggles that
+// mutate anything." The absence of that set is where the rule lives on the wire, so the next person
+// who adds a button that changes state has to add a command here first and will find nothing to put
+// it beside.
+
+/**
+ * What the six answers look like on the wire.
+ *
+ * `unknown` FOR THE ROWS RATHER THAN THE SERVER'S OWN TYPES, which is the choice every other list on
+ * this relay makes. The relay's job is to carry these to the socket that asked; restating a
+ * twelve-field leaderboard row here would be a second definition that the first change to a field
+ * makes wrong.
+ */
+export type ActivityEvent =
+  /** The hero row and the pulse band: spend, tokens, run health, the time series, the header. */
+  | { type: "activitySummary"; range: string; computedAt: string; live: boolean; summary: unknown }
+  /**
+   * §7's leaderboard AND §6's model mix, on one message.
+   *
+   * THE SPECIFICATION NAMES SIX SERVER MESSAGES AND `activityModelMix` IS NOT ONE OF THEM, so the
+   * mix rides the message it belongs with rather than the list being widened. §3.4 is why this is
+   * the right one: hovering a leaderboard row highlights that agent's slice in the mix, and hovering
+   * a segment highlights the rows using that model. Two messages would let a client hold a
+   * leaderboard from one moment beside a mix from another and light up rows for a model the mix no
+   * longer shows.
+   */
+  | {
+      type: "activityLeaderboard";
+      range: string;
+      computedAt: string;
+      live: boolean;
+      rows: unknown[];
+      truncated: boolean;
+      mix: unknown;
+    }
+  /**
+   * One keyset page of §5's feed.
+   *
+   * `cursor` IS ECHOED BACK — the cursor this page was ASKED for, not the one it offers. A client
+   * scrolling quickly has two pages in flight, and without it cannot tell which request an arriving
+   * page answers; appending the wrong one is how a virtualised list duplicates rows. `next` is the
+   * cursor for the page after this.
+   */
+  | {
+      type: "activityFeed";
+      range: string;
+      rows: unknown[];
+      cursor: { at: string; id: string } | null;
+      next: { at: string; id: string } | null;
+    }
+  | { type: "activityReleases"; range: string; computedAt: string; live: boolean; entries: unknown[] }
+  | { type: "activityToolUsage"; range: string; computedAt: string; live: boolean; usage: unknown }
+  /** §10: the team pulse OR the personal summary, never both. `scope` says which was sent. */
+  | {
+      type: "activityTeam";
+      range: string;
+      computedAt: string;
+      live: boolean;
+      scope: "team" | "personal";
+      members: unknown[];
+      personal: unknown;
+    }
+  | { type: "error"; message: string }
+  | { type: "notice"; message: string };
+
 // --- the Agents tab: one card per agent, and one agent in full ---------------------------------
 //
 // DERIVED FIELDS TRAVEL WITH THE ROW, exactly as they do on `ThreadView` and for the same reason.
@@ -2250,6 +2363,10 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // leave the card it was about still sitting there with nothing saying why.
   listInbox: "inbox", resolveInboxItem: "inbox", dismissInboxItem: "inbox",
   snoozeInboxItem: "inbox", undoInboxAction: "inbox", bulkInboxAction: "inbox",
+  // Both on `activity`, for the reason the thread and inbox commands are all on their own channels:
+  // the channel HAS an error shape, so a refusal about a range somebody picked lands on the card
+  // that asked rather than in the status bar with nothing saying which figure is missing.
+  getActivity: "activity", getActivityFeed: "activity",
   listDeployments: "deploy", planDeploy: "deploy", deploy: "deploy", cancelDeploy: "deploy",
   forgetDeployment: "deploy", loadDeployLogs: "deploy", setRailwayToken: "deploy",
   testRailwayToken: "deploy",
@@ -2436,6 +2553,25 @@ export interface RelayOptions {
    * are personal. That is why this cannot be memoised per workspace the way the agent grid is.
    */
   listInbox?: (ctx: TenantContext) => InboxSnapshotPayload | Promise<InboxSnapshotPayload>;
+  /**
+   * The Activity tab's six aggregates, for one range, answered to the socket that asked.
+   *
+   * `emit` RATHER THAN A RETURN VALUE, and that is §3.6 made structural. "Cards fill independently
+   * as their queries return — a slow leaderboard must not hold up the hero row." A function that
+   * returned a payload could only return it once everything had resolved, which is the opposite;
+   * this hands the caller a way to send each answer as its own aggregate finishes.
+   *
+   * ANSWERED LOCALLY, like `listInbox` and `listAgentGrid` beside it, because it is rows this
+   * process can already reach. Forwarding a read that six cards are waiting on behind the app's
+   * dispatch chain would buy nothing.
+   */
+  getActivity?: (
+    ctx: TenantContext,
+    cmd: GetActivityCommand,
+    emit: (event: ActivityEvent) => void,
+  ) => Promise<void>;
+  /** One keyset page of §5's feed. Separate because it is the one read a client asks for repeatedly. */
+  getActivityFeed?: (ctx: TenantContext, cmd: GetActivityFeedCommand) => Promise<ActivityEvent>;
   /**
    * One thread, for the client that asked to open it (§4.5).
    *
@@ -2906,6 +3042,32 @@ export class WsRelay {
               type: "inbox",
               ...((await this.opts.listInbox?.(ctx)) ?? EMPTY_INBOX_PAYLOAD),
             }), live);
+          } else if (msg.cmd === "getActivity") {
+            // SIX ANSWERS, EACH SENT AS ITS OWN AGGREGATE RESOLVES — see the option's note and §3.6.
+            // To the asking socket only: a range is one client's choice of window, and broadcasting
+            // it would move everybody else's dashboard to a range they did not pick.
+            const command = msg;
+            void withContext(async (ctx) => {
+              try {
+                await this.opts.getActivity?.(ctx, command, (event) =>
+                  this.sendTo(ws, { channel: "activity", ...event }));
+              } catch (err) {
+                // TO THIS SOCKET, on the channel that asked. A read that failed for one client is
+                // not news for the workspace, and a red strip across every open dashboard about a
+                // range nobody else picked is the failure `sendActivity`'s note describes.
+                this.sendTo(ws, {
+                  channel: "activity", type: "error", message: String((err as Error)?.message ?? err),
+                });
+              }
+            });
+          } else if (msg.cmd === "getActivityFeed") {
+            const command = msg;
+            void this.answer(ws, async (ctx) => ({
+              channel: "activity",
+              ...((await this.opts.getActivityFeed?.(ctx, command)) ?? {
+                type: "error", message: "the activity feed is not available",
+              }),
+            }), live);
           } else if (INBOX_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the store and the undo ledger and can answer with
             // a precise error on the "inbox" channel rather than dropping the message here.
@@ -3358,6 +3520,27 @@ export class WsRelay {
       if (session.context.workspaceId !== ctx.workspaceId) continue;
       if (session.context.requestId !== requestId) continue;
       this.sendTo(ws, { channel: "inbox", ...event });
+    }
+  }
+
+  /**
+   * Answer ONE client about the Activity tab — the socket whose command this is.
+   *
+   * THERE IS NO BROADCAST ON THIS CHANNEL, AND THAT IS THE DESIGN RATHER THAN AN OMISSION. Every
+   * other tab's channel has one because every other tab shows the same thing to everybody; here the
+   * payload answers a RANGE, and a range is one person's choice of window. A broadcast would move a
+   * teammate's dashboard to a range they did not pick, in the middle of them reading it.
+   *
+   * §5.5's live 24h path needs no broadcast either. The hero row "updates on the same broadcasts the
+   * rest of the app already emits" — a client watching the live range re-asks when it sees the
+   * history or agents snapshot it is already receiving, which is why this tab adds no new push.
+   */
+  sendActivity(ctx: TenantContext, requestId: string, event: ActivityEvent): void {
+    for (const [ws, session] of this.sessions) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (session.context.workspaceId !== ctx.workspaceId) continue;
+      if (session.context.requestId !== requestId) continue;
+      this.sendTo(ws, { channel: "activity", ...event });
     }
   }
 

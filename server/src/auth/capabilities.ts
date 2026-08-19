@@ -299,6 +299,20 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   undoInboxAction: "agent:write",
   bulkInboxAction: "agent:write",
 
+  // activity
+  //
+  // BOTH READS, AND §1 SAYS THERE WILL NEVER BE ANOTHER KIND. This tab is workspace-level,
+  // cross-agent, aggregate, historical and READ-ONLY — "clicking navigates, and hovering
+  // highlights, and that is the entire interaction vocabulary" — so `agent:read` is not a starting
+  // point that a later verb widens. Anything on this surface that wanted to change something would
+  // belong in the Inbox, which is where the actions are.
+  //
+  // `agent:read` RATHER THAN A CAPABILITY OF ITS OWN, for the reason the thread and inbox reads
+  // share theirs: a second gate in front of facts a member can already reach one at a time would be
+  // a role that can see a run but not a count of runs.
+  getActivity: "agent:read",
+  getActivityFeed: "agent:read",
+
   // eval
   listDatasets: "eval:read",
   loadDataset: "eval:read",
