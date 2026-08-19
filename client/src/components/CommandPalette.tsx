@@ -14,6 +14,7 @@ import { useUiStore } from "../store/uiStore.ts";
 import { runProviders, useProviderStore } from "../store/providerStore.ts";
 import { inputKey } from "../store/uiStore.ts";
 import { Truncate } from "./Truncate.tsx";
+import { chipClass } from "./Chip.tsx";
 import {
   sendCreateThread, sendListAgentGrid, sendListAgents, sendListProviders, sendListThreads, sendRun,
 } from "../lib/socket.ts";
@@ -169,7 +170,7 @@ export function CommandPalette() {
                 <Item
                   key={a.slug}
                   onSelect={run(() => openAgentDetail(a.slug))}
-                  kbd={a.health === "healthy" ? undefined : a.health}
+                  meta={a.health === "healthy" ? undefined : a.health}
                 >
                   <Truncate>{a.name}</Truncate>
                   <span className="shrink-0 font-mono text-[11px] text-faint">{a.slug}</span>
@@ -182,7 +183,7 @@ export function CommandPalette() {
                 // The row's own vocabulary, in one line: what it is called, and the one fact §4.3 puts
                 // beside it. A palette entry that showed only the title would make a person open two
                 // threads to find the one with the pending diff.
-                <Item key={t.id} onSelect={run(() => openThread(t))} kbd={relTime(t.last_activity_at)}>
+                <Item key={t.id} onSelect={run(() => openThread(t))} meta={relTime(t.last_activity_at)}>
                   <Truncate>{t.title}</Truncate>
                   {t.fragment && <span className="shrink-0 text-faint text-[11px]">{t.fragment}</span>}
                 </Item>
@@ -266,11 +267,21 @@ function Item({
   children,
   onSelect,
   kbd,
+  meta,
   disabled,
 }: {
   children: React.ReactNode;
-  onSelect: () => void;
+  /**
+   * A keyboard shortcut, and only that. Drawn as a keycap.
+   *
+   * IT USED TO TAKE ANYTHING. An agent's health word went in here, and so did a thread's relative
+   * timestamp — so the right-hand column read `⌘P` on one row and `degraded` or `26m ago` on the
+   * next, which teaches somebody scanning the palette that the column means nothing. A slot that
+   * accepts two kinds of thing ends up meaning neither.
+   */
   kbd?: string;
+  /** Trailing metadata — a state, a timestamp. Not a key, and drawn as prose. */
+  meta?: string;
   disabled?: boolean;
 }) {
   return (
@@ -280,7 +291,15 @@ function Item({
       className="flex items-center justify-between gap-3 px-3 py-2 rounded-control text-[13px] text-muted cursor-pointer data-[selected=true]:bg-active data-[selected=true]:text-ink data-[disabled=true]:opacity-40"
     >
       <span className="flex items-center gap-2 min-w-0">{children}</span>
-      {kbd && <span className="text-faint text-[11px] tabular-nums shrink-0">{kbd}</span>}
+      {meta && <span className="shrink-0 text-[11px] tabular-nums text-faint">{meta}</span>}
+      {/* A KEY LOOKS LIKE A KEY. Unstyled grey text reads as metadata, which is precisely the
+          confusion this slot was already in; the app has a chip primitive with a hairline for
+          exactly this shape of thing. */}
+      {kbd && (
+        <kbd className={`${chipClass({ size: "sm", mono: true, tone: "faint" })} shrink-0 shadow-[inset_0_0_0_1px_theme(colors.hair)]`}>
+          {kbd}
+        </kbd>
+      )}
     </Command.Item>
   );
 }
