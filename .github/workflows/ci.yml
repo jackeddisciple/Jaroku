@@ -375,6 +375,13 @@ jobs:
           # absent column is a claim about the schema, which is the true one. The streak has to end
           # TODAY, or it is a count of active days wearing the wrong word.
           npm run test:activity-team
+          # §5.3's cache and its four rules, plus the one that is not in the specification. Ten
+          # sockets connecting at once against a cold cache launch ten identical thirty-day scans
+          # in the same millisecond, and a cache of RESULTS cannot stop it — by the time the first
+          # finishes the other nine are running. Storing the in-flight promise is what makes the
+          # tenth caller await the first's work, and the clock is injected so a sixty-second TTL is
+          # asserted rather than slept for.
+          npm run test:activity-cache
 
       - name: cost, abuse and the data lifecycle
         working-directory: server
