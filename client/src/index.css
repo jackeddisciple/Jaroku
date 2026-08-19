@@ -62,11 +62,18 @@
     background: transparent;
   }
   /* Command palette group headings — style only the heading, so the label's text-transform
-     never cascades onto the item rows. */
+     never cascades onto the item rows.
+
+     THE SAME RECIPE AS `TYPE.panelLabel`, which is what this is: a panel's own name, in caps. It
+     was a FOURTH spelling of "small caps label" — 10px at 0.12em against the token file's 11px at
+     Tailwind's `tracking-wider` (0.05em) — which is the drift the radius scale was created to
+     stop, happening to type. The values are written out here because cmdk owns this element and a
+     class cannot reach it; they are copied from the token deliberately and belong with it. */
   [cmdk-group-heading] {
-    font-size: 10px;
+    font-size: 11px;
+    font-weight: 500;
     text-transform: uppercase;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.05em;
     color: #52525b;
     padding: 6px 12px 2px;
   }

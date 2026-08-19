@@ -479,7 +479,7 @@ function Section({
 }) {
   return (
     <div className="mt-4">
-      <div className="mb-1.5 text-[11px] uppercase tracking-wide text-faint">{title}</div>
+      <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-faint">{title}</div>
       {children.length === 0 ? (
         <div className="px-1 py-2 text-[12px] text-faint">{empty}</div>
       ) : (

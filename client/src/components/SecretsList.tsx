@@ -546,7 +546,7 @@ function Group({
 }) {
   return (
     <section className="space-y-1.5">
-      <h3 className="text-[10px] uppercase tracking-wide text-faint">{title}</h3>
+      <h3 className="text-[10px] font-medium uppercase tracking-wider text-faint">{title}</h3>
       {secrets.length === 0 ? (
         <p className="px-1 text-[11px] text-faint">{empty}</p>
       ) : (
