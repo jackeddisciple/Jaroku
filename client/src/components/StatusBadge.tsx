@@ -24,7 +24,14 @@ import { AlertTriangleIcon, CheckIcon, ClockIcon, XIcon } from "./panelIcons.tsx
 
 export type BadgeState = StatusName;
 
-const ICON_FOR: Record<BadgeState, (p: { size?: number }) => React.ReactElement> = {
+/**
+ * A glyph this component may draw. `className` is part of the signature because the state a mark
+ * is in is sometimes a *motion* — a loader turns — and the wrapper cannot animate the arc inside
+ * an SVG it does not own.
+ */
+type Glyph = (p: { size?: number; className?: string }) => React.ReactElement;
+
+const ICON_FOR: Record<BadgeState, Glyph> = {
   ok: CheckIcon,
   pending: ClockIcon,
   error: AlertTriangleIcon,
@@ -55,7 +62,7 @@ export function StatusBadge({
    * proceed" are both amber — the same urgency, different asks — and a clock would misdescribe
    * the second. The colour still carries the state; the icon narrows what kind.
    */
-  icon?: (p: { size?: number }) => React.ReactElement;
+  icon?: Glyph;
   /**
    * `fill` is a status: something happened to this thing. `outline` is a property: something is
    * true *of* it — a file being new is not an event in its life, it is what it is.
@@ -109,7 +116,7 @@ export function StatusDot({
    * and "running right now" are both amber and are not the same fact, and a clock misdescribes
    * the second — the colour still carries the state, the icon narrows what kind.
    */
-  icon?: (p: { size?: number }) => React.ReactElement;
+  icon?: Glyph;
 }) {
   const Icon = icon ?? ICON_FOR[state];
   return (
