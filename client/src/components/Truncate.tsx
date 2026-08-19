@@ -1,24 +1,23 @@
-// Text that runs out of room, ending by fading rather than by stopping.
+// Text that runs out of room.
 //
-// Twenty-two places in the client clip a name, a path or a description to one line, and every one
-// of them used Tailwind's `truncate`, which is `text-overflow: ellipsis`. Two problems with that
-// in this app specifically.
+// THREE TREATMENTS, CHOSEN BY WHAT THE TEXT IS.
 //
-// The ellipsis is a character, so it takes a character's worth of space at the exact point where
-// space has run out, and it sits in the type. In a column of agent names or file paths you get a
-// ragged edge of `…` marks that read as content — three dots are a real thing to see, and there
-// is nothing to see. A gradient reads as "this continues", which is what is actually true.
+//   prose  an ellipsis at the end. A name, a description, a title.
+//   path   middle truncation, keeping the filename and its extension whole (lib/truncatePath.ts).
+//   both   a gradient at both edges, for centred text, where neither end is "the end".
 //
-// And the cut is hard. `agents/support_bot/tools/order_lo…` gives you no sense of whether one
-// character was lost or forty; the fade says the string kept going without pretending to measure
-// how far.
+// PROSE USED TO FADE, AND THAT WAS THE MISTAKE. The argument was that a `…` takes a character's
+// worth of space at the exact point where space has run out, and that a gradient reads as "this
+// continues" — which is true in isolation. What it misses is that a fade is AMBIGUOUS with the
+// other thing this app does constantly: dimming. `text-faint`, `opacity-60` on an archived row,
+// `disabled:opacity-40`. So a faded tail reads as "this is de-emphasised" as readily as "this
+// keeps going", and the sidebar rendered `an agent that take` with no mark at all to say that a
+// word had been cut. An ellipsis is unambiguous, and it is unambiguous in one glyph.
 //
-// The fade is applied ONLY when the text actually overflows. Masking the last 28px of every
-// string would dim the end of every short label in the app, which is a worse artefact than the
-// ellipsis was — so the element measures itself and wears the mask only when it is clipped.
+// The mask survives for `both`, which is the one case an ellipsis genuinely cannot serve: centred
+// text overflows at BOTH ends, and `text-overflow` only ever marks one of them.
 //
-// `title` is unchanged wherever a caller already had one: the full string still belongs on hover,
-// and a fade is a hint that there is more, not a way of showing it.
+// `title` is unchanged wherever a caller already had one: the full string still belongs on hover.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { truncatePath } from "../lib/truncatePath.ts";
@@ -28,7 +27,7 @@ import { truncatePath } from "../lib/truncatePath.ts";
  * gradient rather than as a smudge at 12px type.
  */
 const FADE = {
-  /** The usual case: text starts at the left edge and runs out on the right. */
+  /** Kept so `fade="right"` call sites still type-check; prose now ends in an ellipsis instead. */
   right: "linear-gradient(to right, #000 calc(100% - 28px), transparent 100%)",
   /**
    * Centred text. `text-align: center` centres the line box, so an over-long string overflows
@@ -80,7 +79,9 @@ export function Truncate({
   const [budget, setBudget] = useState(0);
 
   const measure = (el: HTMLSpanElement, text: string): void => {
-    setClipped(el.scrollWidth > el.clientWidth + 1);
+    // Only `both` needs to know whether it is clipped — prose marks itself with an ellipsis and a
+    // path marks itself by being cut in the middle, so neither has anything to switch on.
+    if (fade === "both") setClipped(el.scrollWidth > el.clientWidth + 1);
     if (variant !== "path" || !text) return;
     // Against the FULL string, which is why `title` is the source rather than the rendered child:
     // measuring an already-truncated element would shrink the budget on every pass until nothing
@@ -124,11 +125,13 @@ export function Truncate({
       title={title ?? (variant === "path" && source ? source : undefined)}
       // `min-w-0` is what lets this shrink at all inside a flex row; without it the element is
       // sized by its content and never overflows, so nothing ever fades.
-      className={`block min-w-0 overflow-hidden whitespace-nowrap ${className}`}
-      // NO MASK ON A PATH. The two treatments are alternatives, not layers: a middle-truncated
-      // string already ends at a character somebody chose, and fading that end would dim the
-      // extension the truncation went out of its way to keep.
-      style={clipped && variant !== "path" ? { maskImage: FADE[fade], WebkitMaskImage: FADE[fade] } : undefined}
+      // `text-ellipsis` for prose, and nothing for a path — the two treatments are alternatives,
+      // not layers: a middle-truncated string already ends at a character somebody chose, and
+      // marking that end again would claim a second cut that is not there.
+      className={`block min-w-0 overflow-hidden whitespace-nowrap ${
+        variant === "path" || fade === "both" ? "" : "text-ellipsis"
+      } ${className}`}
+      style={clipped && fade === "both" ? { maskImage: FADE.both, WebkitMaskImage: FADE.both } : undefined}
     >
       {body}
     </span>
