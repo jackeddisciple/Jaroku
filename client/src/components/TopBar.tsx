@@ -24,8 +24,9 @@ import { BRAND, ICON, TYPE } from "../lib/tokens.ts";
 
 import { Truncate } from "./Truncate.tsx";
 import { Chip } from "./Chip.tsx";
-import { GithubIcon, KeyIcon, StopIcon } from "./panelIcons.tsx";
+import { GitBranchIcon, GithubIcon, KeyIcon, StopIcon } from "./panelIcons.tsx";
 import { useGithubStore } from "../store/githubStore.ts";
+import { useSessionStore } from "../store/sessionStore.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { ShareIcon } from "./activityIcons.tsx";
 import { iconBtn, outlineBtn } from "./buttons.ts";
@@ -219,6 +220,38 @@ function GithubChip({ agentId }: { agentId: string }) {
   );
 }
 
+/**
+ * Where you are, under what you are looking at: `workspace ⑂ branch`.
+ *
+ * TEN PIXELS AND FAINT, deliberately. It is not something to read — it is something to have
+ * already read by the time you wonder. Both halves are optional and the line disappears entirely
+ * when neither is known, because a breadcrumb with nothing in it is worse than none.
+ *
+ * It does not duplicate the GitHub chip beside it. The chip is a control that opens the branch
+ * switcher and names the repository; this is the sentence that says which workspace the agent
+ * above it belongs to, which nothing in the chrome said before.
+ */
+function Breadcrumb({ agentId }: { agentId: string }) {
+  const view = useGithubStore((s) => s.views[agentId]);
+  const workspaces = useSessionStore((s) => s.workspaces);
+  const workspaceId = useSessionStore((s) => s.workspaceId);
+  const workspace = workspaces.find((w) => w.id === workspaceId);
+  const branch = view?.link.branch;
+  if (!workspace && !branch) return null;
+  return (
+    <span className="flex min-w-0 items-center gap-1 text-[10px] text-faint">
+      {workspace && <Truncate className="min-w-0 max-w-[160px]">{workspace.name}</Truncate>}
+      {workspace && branch && <span aria-hidden>·</span>}
+      {branch && (
+        <>
+          <span className="shrink-0" aria-hidden><GitBranchIcon size={9} /></span>
+          <Truncate className="min-w-0 max-w-[140px]">{branch}</Truncate>
+        </>
+      )}
+    </span>
+  );
+}
+
 export function TopBar() {
   const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === s.activeAgentId));
   const runs = useTraceStore((s) => s.runs);
@@ -239,11 +272,18 @@ export function TopBar() {
         <JarokuGlyph size={BRAND.chrome} />
       </span>
 
-      {/* active agent + status */}
+      {/* active agent + status, as a two-line title block.
+          THE SECOND LINE IS THE CHEAPEST ORIENTATION CUE THERE IS and the app had none: nothing in
+          the chrome said, persistently, which workspace and which branch you were working in. The
+          workspace switcher on the right knows the first and the GitHub chip knows the second, but
+          both are controls you go and read rather than facts you are already looking at. */}
       {agent && (
         <>
           <span className="text-faint">·</span>
-          <Truncate className="max-w-[280px] text-[13px] text-ink" title={agent.name}>{agent.name}</Truncate>
+          <span className="flex min-w-0 flex-col justify-center leading-tight">
+            <Truncate className="max-w-[280px] text-[13px] text-ink" title={agent.name}>{agent.name}</Truncate>
+            <Breadcrumb agentId={agent.agent_id} />
+          </span>
           <StatusDot status={status} />
           <GithubChip agentId={agent.agent_id} />
         </>
