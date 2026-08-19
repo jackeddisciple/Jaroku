@@ -50,7 +50,11 @@ function PasscodeField(props: {
         disabled={props.disabled}
         value={props.value}
         onChange={(e) => props.onChange(e.target.value)}
-        className="w-full rounded-control bg-bg px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-faint focus:shadow-focusring disabled:opacity-40"
+        // A BORDER, BECAUSE THE FIELD WAS INVISIBLE UNTIL IT WAS FOCUSED. `bg-bg` on a `bg-bg`
+        // surface is the same colour, and the only thing that drew the box was the focus ring —
+        // so the Confirm label on the passcode gate appeared with nothing beneath it, on the one
+        // screen that stands between somebody and their credentials.
+        className="w-full rounded-control border border-hair bg-bg px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-faint focus:border-transparent focus:shadow-focusring disabled:opacity-40"
       />
     </div>
   );
