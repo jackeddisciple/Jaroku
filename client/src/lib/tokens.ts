@@ -106,6 +106,12 @@ export const SURFACE = {
   edge: "#2a2a30",
   /** Chrome: scrollbar thumbs, control dividers. */
   chrome: "#26262b",
+  /**
+   * The brightest neutral the app draws: a seam under the pointer, a scrollbar thumb being
+   * dragged. One step above `chrome`, and the top of the greyscale — anything lighter is ink.
+   * It was a hex literal in App.tsx, the only resize-handle colour not in this file.
+   */
+  grip: "#3a3a3f",
 } as const;
 
 export const TEXT = {

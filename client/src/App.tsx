@@ -23,6 +23,23 @@ import { useSessionStore } from "./store/sessionStore.ts";
 import { useTraceStore } from "./store/traceStore.ts";
 import { useUiStore } from "./store/uiStore.ts";
 
+/**
+ * The seam between two panes.
+ *
+ * A HAIRLINE THAT IS PAINTED 1px AND HIT AT 5px. It was a flat `w-[3px] bg-hair` bar, which is
+ * three times wider than every border in the system and therefore read as a drawn column rather
+ * than as the join between two surfaces — while still being a small target to grab. Separating
+ * what the eye gets from what the pointer gets fixes both at once: the line is one pixel, the
+ * element around it is five.
+ */
+function PaneDivider() {
+  return (
+    <PanelResizeHandle className="group relative w-[5px] shrink-0">
+      <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-hair transition-colors duration-fast group-hover:bg-grip" />
+    </PanelResizeHandle>
+  );
+}
+
 export function App() {
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const connected = useTraceStore((s) => s.connection === "open");
@@ -130,7 +147,7 @@ export function App() {
                   <Sidebar />
                 </div>
               </Panel>
-              <PanelResizeHandle className="w-[3px] bg-hair transition-colors duration-fast hover:bg-[#3a3a3f]" />
+              <PaneDivider />
             </>
           )}
           <Panel order={2}>
@@ -154,7 +171,7 @@ export function App() {
                   </Panel>
                   {mountRightPanel && (
                     <>
-                      <PanelResizeHandle className="w-[3px] bg-hair transition-colors duration-fast hover:bg-[#3a3a3f]" />
+                      <PaneDivider />
                       <Panel defaultSize={55} minSize={32} order={2}>
                         <div className="h-full animate-panel-in motion-reduce:animate-none">
                           <RightPanel />
