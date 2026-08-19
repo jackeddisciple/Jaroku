@@ -21,7 +21,6 @@ import { AgentTagRow } from "./AgentTagRow.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
 import { ThumbnailMark, ArchiveIcon, ArchiveRestoreIcon, CopyIcon, DownloadIcon } from "./agentIcons.tsx";
 import { AlertTriangleIcon, GitForkIcon, KebabIcon, PencilIcon, PlusIcon } from "./panelIcons.tsx";
-import { artFor } from "../lib/agentArt.ts";
 import { agentContextMarkdown } from "../lib/agentContext.ts";
 import { absTime, fmtCost, relTime } from "../lib/format.ts";
 import { ICON, STATUS, TEXT, TYPE } from "../lib/tokens.ts";
@@ -31,45 +30,6 @@ import type { AgentDensity } from "../lib/agentFilter.ts";
 
 /** §5.2's footer word, from the bucket the server already resolved. */
 const ACTIVITY_LABEL = { quiet: "Quiet", steady: "Steady", high: "High" } as const;
-
-/**
- * The gradient, the mark, and the pulse.
- *
- * `stream-pulse`, NEVER `animate-pulse`. v0.2.2 removed the latter from all nine live elements in
- * this app because fading a live element to 50% reads as disabled — which is the opposite of what a
- * working agent's thumbnail should say. `motion-reduce` turns it off entirely: an ambient animation
- * with no state change behind it is the first thing that should stop when somebody has asked for
- * less movement.
- *
- * THE IMAGE IS NOT LAZY. A grid of forty cards is forty ~50KB thumbnails, and `loading="lazy"` on a
- * card that is one scroll away means a person watching the grid sees them arrive one at a time —
- * which reads as the page failing rather than as an optimisation. `decoding="async"` is the half of
- * this that genuinely helps, because it keeps the decode off the frame that lays the grid out.
- */
-function Thumbnail({ agent, height, working }: { agent: AgentCardView; height: number; working: boolean }) {
-  return (
-    <div
-      className="relative w-full shrink-0 overflow-hidden bg-active"
-      style={{ height }}
-      aria-hidden
-    >
-      <img
-        src={artFor(agent.uuid)}
-        alt=""
-        decoding="async"
-        className={`h-full w-full object-cover ${working ? "animate-stream-pulse motion-reduce:animate-none" : ""}`}
-      />
-      {/* The mark sits centred on the thumbnail, as the reference draws it. */}
-      <div className="absolute inset-0 flex items-center justify-center">
-        <ThumbnailMark size={height > 90 ? 34 : 26} />
-      </div>
-      {/* An archived card is greyed rather than hidden — §4 shows it behind a filter with a restore
-          action, and a full-colour thumbnail would make the row look live. A wash over the image
-          rather than an opacity on the card, so the TEXT below stays legible. */}
-      {agent.archived_at && <div className="absolute inset-0 bg-bg/60" />}
-    </div>
-  );
-}
 
 /** §5.2's overflow menu: Fork · Rename · Export current version · Archive. */
 function Overflow({
@@ -220,11 +180,23 @@ export function AgentCard({
         focused ? "border-edge shadow-glow" : "border-hair hover:border-edge hover:shadow-glow"
       } ${agent.archived_at ? "opacity-70" : ""}`}
     >
-      <Thumbnail agent={agent} height={compact ? 64 : 104} working={working} />
-
       <div className={`flex min-w-0 flex-1 flex-col ${compact ? "gap-1.5 p-2.5" : "gap-2 p-3"}`}>
         {/* Title, slug, and the actions that belong to the card rather than to the grid. */}
         <div className="flex min-w-0 items-start gap-2">
+          {/* THE MARK, IN THE TITLE ROW. It used to sit centred on a 104px full-bleed generated
+              gradient at the head of every card — about forty percent of the card's height, in
+              full colour, carrying no information: three cards on screen meant three landscape
+              gradients and three copies of the same centred logo. A palette whose rule is that
+              colour means something cannot spend its largest area on art.
+
+              The mark itself is worth keeping. It says "this is an agent" in one glyph, and at
+              16px in the title row it does that without being the thing you look at first. */}
+          <span
+            className={`mt-px shrink-0 text-faint ${working ? "animate-stream-pulse motion-reduce:animate-none" : ""}`}
+            aria-hidden
+          >
+            <ThumbnailMark size={ICON.md} />
+          </span>
           <div className="min-w-0 flex-1">
             <Truncate className={TYPE.title} title={agent.name}>
               {agent.name}
