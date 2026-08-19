@@ -116,6 +116,16 @@ export const SPACE_CLASS = {
 
 export const ICON = {
   /**
+   * Inside a chip or a badge. The one size below `xs`, and a real role rather than a rounding
+   * error: a badge's glyph sits inside a box whose height is set by 10px caps text, so `xs` fills
+   * it edge to edge and reads as an icon with a label stuck to it rather than as one mark.
+   *
+   * Named because it was already in use — a bare `size={10}` at a dozen call sites, StatusBadge's
+   * included — and an unnamed size in use twelve times is a step of the ladder whether or not the
+   * ladder admits it.
+   */
+  badge: 10,
+  /**
    * Subordinate to a line of text — a note's lock, a disclosure chevron, a file's type, a stat's
    * glyph. These qualify what is beside them rather than anchoring it, and at `sm` they compete
    * with the thing they are qualifying. The number was being written out by hand at half a dozen

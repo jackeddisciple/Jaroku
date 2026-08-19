@@ -291,7 +291,7 @@ export function GitHubAttachChips({
           size="sm"
           tone="muted"
           mono
-          icon={<GithubIcon size={10} />}
+          icon={<GithubIcon size={ICON.badge} />}
           className="max-w-[240px]"
         >
           <Truncate variant={a.kind === "file" ? "path" : "prose"} className="min-w-0">
@@ -303,7 +303,7 @@ export function GitHubAttachChips({
             onClick={() => onRemove(attachmentId(a))}
             aria-label={`Remove ${attachmentLabel(a)}`}
           >
-            <XIcon size={10} />
+            <XIcon size={ICON.badge} />
           </button>
         </Chip>
       ))}

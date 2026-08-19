@@ -73,7 +73,7 @@ export function StatusBadge({
   // Geometry comes from Chip — a status badge is a chip whose label happens to be a state, and
   // it has to sit level with the file-reference chip two pixels away from it.
   return (
-    <Chip caps size="sm" variant={variant} color={color} title={title} icon={<Icon size={10} />}>
+    <Chip caps size="sm" variant={variant} color={color} title={title} icon={<Icon size={ICON.badge} />}>
       {label}
     </Chip>
   );

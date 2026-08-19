@@ -86,7 +86,7 @@ export function ScanHistoryRegion({ view }: { view: GithubView }) {
             findings.map((f) => (
               <div key={`${f.created_at} ${f.path} ${f.rule}`} className="flex items-start gap-2 text-[11px]">
                 <span className={`mt-[2px] shrink-0 ${f.overridden ? "text-err" : "text-muted"}`}>
-                  <XIcon size={10} />
+                  <XIcon size={ICON.badge} />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block font-mono text-muted">

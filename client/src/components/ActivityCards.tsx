@@ -497,7 +497,7 @@ export function ToolUsageCard() {
               aria-label={expanded ? "Collapse the tool list" : "Expand the tool list"}
               aria-expanded={expanded}
             >
-              <ExpandIcon size={10} />
+              <ExpandIcon size={ICON.badge} />
               {expanded ? "fewer" : `${usage.tools.length - 5} more`}
             </button>
           )}

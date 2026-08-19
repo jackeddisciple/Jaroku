@@ -20,7 +20,7 @@ import { sendCancelDeploy, sendSetOwnKeyForPlatform } from "../lib/socket.ts";
 import { isDeployInFlight } from "../types.ts";
 import { agentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark, BRAND_COLOR, JarokuGlyph } from "../lib/icons.tsx";
-import { SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
+import { ICON, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
 
 import { Truncate } from "./Truncate.tsx";
 import { Chip } from "./Chip.tsx";
@@ -201,7 +201,7 @@ function GithubChip({ agentId }: { agentId: string }) {
       tone="faint"
       mono
       variant="bare"
-      icon={<GithubIcon size={10} />}
+      icon={<GithubIcon size={ICON.badge} />}
       onClick={openGithubBranches}
       title={`${view.link.repo_full_name} · ${view.link.branch} — open the branch switcher`}
       className="max-w-[320px]"

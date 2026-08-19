@@ -147,7 +147,7 @@ export function EventFeedCard() {
                 }`}
               >
                 <span style={{ color: on ? action.accent : undefined }} aria-hidden>
-                  <action.Icon size={10} />
+                  <action.Icon size={ICON.badge} />
                 </span>
                 {action.verb}
               </button>

@@ -285,7 +285,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
               tone="faint"
               mono
               variant="bare"
-              icon={<ProviderMark provider={agent.default_provider} size={10} />}
+              icon={<ProviderMark provider={agent.default_provider} size={ICON.badge} />}
             >
               {agent.default_provider}
             </Chip>
@@ -297,7 +297,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
             {/* Where its code lives, for the same reason the URL below is here: a list that says
                 "synced" without saying where makes you open the tab to find out. */}
             {github && (
-              <Chip size="sm" tone="faint" mono variant="bare" icon={<GithubIcon size={10} />} title={github.verdict}>
+              <Chip size="sm" tone="faint" mono variant="bare" icon={<GithubIcon size={ICON.badge} />} title={github.verdict}>
                 {github.link.repo_full_name}
               </Chip>
             )}
@@ -309,7 +309,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
                 tone="faint"
                 mono
                 variant="bare"
-                icon={<span style={{ color: STATUS.ok }}><GlobeIcon size={10} /></span>}
+                icon={<span style={{ color: STATUS.ok }}><GlobeIcon size={ICON.badge} /></span>}
               >
                 {agent.deployment.url.replace(/^https?:\/\//, "")}
               </Chip>

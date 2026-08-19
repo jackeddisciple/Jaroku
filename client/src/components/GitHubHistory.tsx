@@ -599,7 +599,7 @@ export function HistoryRegion({ view }: { view: GithubView }) {
                   style={{ color: e.kind === "force_override" ? STATUS.error : STATUS.pending }}
                   aria-hidden
                 >
-                  <XIcon size={10} />
+                  <XIcon size={ICON.badge} />
                 </span>
                 <span className="min-w-0 flex-1 text-muted">
                   <span className="text-ink">{e.kind === "force_override" ? "overridden" : e.outcome}</span>{" "}

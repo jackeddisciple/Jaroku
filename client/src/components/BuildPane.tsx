@@ -313,7 +313,7 @@ function ModelSelector({
               {/* The provider's own mark on its group, so the menu is scanned by logo the way
                   the chip that opened it is read by logo. */}
               <div className={`flex items-center gap-1.5 px-2 pb-1 pt-0.5 ${TYPE.sectionLabel}`}>
-                <ProviderMark provider={p.id} size={10} />
+                <ProviderMark provider={p.id} size={ICON.badge} />
                 {p.label}
                 {/* THE WAY OUT, ATTACHED TO THE PROVIDER IT IS ABOUT. The models below are disabled
                     with a reason, which is right — a model that vanishes reads as unsupported — but
