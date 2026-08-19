@@ -1365,8 +1365,13 @@ export function BuildPane({
           </div>
 
           <div className="mt-3 flex items-center justify-between">
-            {/* left — bare mic + model selector, no boxes */}
-            <div className="flex items-center gap-3.5">
+            {/* left — the glyphs that put something INTO the message: voice, attached context,
+                and (in test mode) saving the input as an eval case. No boxes.
+
+                ONE GAP FOR BOTH GROUPS. This was 14px on the left and 10px on the right — two icon
+                groups in the same row at two different rhythms, which reads as one of them being
+                slightly wrong without it being obvious which. */}
+            <div className="flex items-center gap-2.5">
               <button
                 type="button"
                 onClick={voice.toggle}
@@ -1384,10 +1389,9 @@ export function BuildPane({
               >
                 <MicIcon size={ICON.md} />
               </button>
-              {/* Beside the mic and before the model chip: it is an input to the message, like
-                  the mic, rather than a setting for how the message is handled. */}
+              {/* Beside the mic: it is an input to the message, like the mic, rather than a
+                  setting for how the message is handled. */}
               <GitHubAttachMenu view={github.view} onAttach={github.attach} />
-              <ModelSelector provider={provider} model={model} setProvider={setProvider} setModel={setModel} />
               {/* Test mode only: the input IS an eval example, so promotion belongs here
                   rather than in the Evals tab — that's where a case earns its place. */}
               {composerMode === "test" && activeAgentId && (
@@ -1402,7 +1406,7 @@ export function BuildPane({
                   }
                   className="text-muted hover:text-ink transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                 >
-                  <SaveToDatasetIcon size={16} />
+                  <SaveToDatasetIcon size={ICON.md} />
                 </button>
               )}
               {promoted && (
@@ -1414,8 +1418,12 @@ export function BuildPane({
               )}
             </div>
 
-            {/* right — the mode toggle and the one filled control on this screen */}
+            {/* right — how the message is HANDLED, and the one filled control on this screen.
+                The model selector belongs on this side: the glyphs opposite add content, and this
+                decides what the content is sent to. It sat among them, which put a setting in the
+                row of inputs. */}
             <div className="flex items-center gap-2.5">
+              <ModelSelector provider={provider} model={model} setProvider={setProvider} setModel={setModel} />
               {/* Two chips in a track. Same geometry as every other chip in the app, overridden
                   only where a segmented control genuinely differs from a chip strip: the radius
                   is a pill because the segments sit inside one.
