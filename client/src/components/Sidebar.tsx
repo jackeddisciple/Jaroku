@@ -14,7 +14,7 @@ import { selectAgent, selectRun } from "../lib/selection.ts";
 import {
   sendArchiveAgent, sendLoadHistory, sendLoadRun, sendRenameAgent, sendRestoreAgent,
 } from "../lib/socket.ts";
-import { ICON, STATUS, TYPE } from "../lib/tokens.ts";
+import { ICON, STATUS, SURFACE, TYPE } from "../lib/tokens.ts";
 import { useUiStore, type NavDestination } from "../store/uiStore.ts";
 import { useGithubStore } from "../store/githubStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
@@ -23,10 +23,9 @@ import { useSessionStore } from "../store/sessionStore.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
-import { ThreadGlyph } from "./ThreadGlyph.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import {
-  ActivityIcon, ChevronRightIcon, GitForkIcon, GithubIcon, GlobeIcon, HashIcon, InboxIcon,
+  ActivityIcon, GitForkIcon, GithubIcon, GlobeIcon, HashIcon, InboxIcon,
   LoaderIcon, PauseIcon, PencilIcon, PlusIcon, SearchIcon, SettingsIcon, SparklesIcon, XIcon,
 } from "./panelIcons.tsx";
 
@@ -346,7 +345,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
  * it is the same fact — this is what the panel to the right is showing. A second visual vocabulary for
  * "current" in one column would make the two compete.
  */
-function NavButtons() {
+function NavRail() {
   /**
    * `navSection`, NOT `navView` — §2's fourth rule.
    *
@@ -372,50 +371,58 @@ function NavButtons() {
   const waiting = useInboxStore((s) => s.counts.badge);
 
   return (
-    <div className="shrink-0 px-3 pt-3">
+    <div className="flex w-10 shrink-0 flex-col items-center gap-0.5 py-2">
       {NAV_DESTINATIONS.map(({ id, label, icon: Icon }) => {
         const active = navSection === id;
+        const badge = id === "inbox" ? waiting : id === "threads" ? needsYou : 0;
+        const badgeTitle =
+          id === "inbox"
+            ? `${waiting} item${waiting === 1 ? "" : "s"} blocked or waiting on a decision`
+            : `${needsYou} thread${needsYou === 1 ? "" : "s"} waiting on you`;
         return (
           <button
             key={id}
             onClick={() => openNav(id)}
-            className={`relative flex w-full items-center gap-2 rounded-control px-3 py-1.5 text-left text-[13px] transition-colors ${
-              active ? "bg-active text-ink" : "text-muted hover:bg-active/50 hover:text-ink"
+            // The tooltip IS the label. Four words of chrome bought nothing that a glyph plus a
+            // name on hover does not, and they cost a hundred pixels of the column the agent list
+            // is trying to use.
+            title={label}
+            aria-label={label}
+            aria-current={active ? "page" : undefined}
+            className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+              active ? "bg-active text-accent" : "text-muted hover:bg-active/40 hover:text-ink"
             }`}
           >
-            {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
-            <Icon size={ICON.sm} />
-            {label}
-            {/* The same amber ◆ the rows use, so the badge needs no vocabulary of its own. Present only
-                when there is something to say — and `tabular-nums` so a count going from 9 to 10 does
-                not shift the glyph beside it. */}
-            {/* NEUTRAL, NOT AMBER. The Threads badge beside this one is amber because ◆ means "waiting
-                on you" there and amber is that surface's own vocabulary; on the Inbox amber would
-                mean RUNNING, which is the one thing v0.2.2's wordmark pass established it may never
-                be borrowed for. Ink at tabular width is the whole treatment. */}
-            {id === "inbox" && waiting > 0 && (
+            <Icon size={ICON.md} />
+            {/* Present only when there is something to say, and `tabular-nums` so a count going
+                from 9 to 10 does not shift the glyph beside it. Neutral rather than amber on the
+                Inbox: amber means RUNNING in this palette, which is the one thing v0.2.2's
+                wordmark pass established it may never be borrowed for. */}
+            {badge > 0 && (
               <span
-                className="ml-auto shrink-0 rounded-chip px-1 text-[10px] tabular-nums text-ink"
-                style={{ background: "#26262b" }}
-                title={`${waiting} item${waiting === 1 ? "" : "s"} blocked or waiting on a decision`}
+                title={badgeTitle}
+                className={`absolute -right-0.5 -top-0.5 min-w-[13px] rounded-chip px-0.5 text-center text-[10px] leading-[13px] tabular-nums ${
+                  id === "threads" ? "text-run" : "text-ink"
+                }`}
+                style={id === "threads" ? undefined : { background: SURFACE.chrome }}
               >
-                {waiting}
-              </span>
-            )}
-            {id === "threads" && needsYou > 0 && (
-              <span
-                className="ml-auto flex shrink-0 items-center gap-1 text-[10px] tabular-nums"
-                style={{ color: STATUS.pending }}
-                title={`${needsYou} thread${needsYou === 1 ? "" : "s"} waiting on you`}
-              >
-                <ThreadGlyph status="needs_you" />
-                {needsYou}
+                {badge}
               </span>
             )}
           </button>
         );
       })}
-      <div className="mt-2 border-t border-hair" />
+
+      {/* THE FOOT OF THE RAIL. A bare gear, where a `⚙ Settings ›` row used to spend a whole line
+          on one word and a chevron that pointed at nothing navigable. */}
+      <button
+        onClick={() => useUiStore.getState().setProviderPanel(true)}
+        title="Provider keys"
+        aria-label="Provider keys"
+        className="mt-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-active/40 hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+      >
+        <SettingsIcon size={ICON.md} />
+      </button>
     </div>
   );
 }
@@ -545,13 +552,14 @@ export function Sidebar() {
   );
 
   return (
-    <div className="flex h-full flex-col bg-bg">
-      {/* §2's four destinations, above everything else the sidebar holds.
-          The sidebar itself never collapses and never hides: clicking one of these replaces the
-          centre pane and the right panel with one full-width view and leaves this column exactly as
-          it is, selection included. */}
-      <NavButtons />
-
+    // rail | column. §2's four destinations become the rail — the sidebar itself still never
+    // collapses and never hides, and clicking one still replaces the centre pane and the right
+    // panel with one full-width view while leaving this column exactly as it is, selection
+    // included. What changes is that they cost forty pixels of width instead of a hundred pixels
+    // of height plus a divider, and the column beside them belongs entirely to the list.
+    <div className="flex h-full bg-bg">
+      <NavRail />
+      <div className="flex min-w-0 flex-1 flex-col border-l border-hair">
       {/* New Agent */}
       <div className="px-3 pt-3 shrink-0">
         <button
@@ -659,19 +667,12 @@ export function Sidebar() {
         )}
       </div>
 
-      {/* bottom-anchored: settings + user/plan */}
-      <div className="shrink-0 space-y-1 border-t border-hair px-3 py-2.5">
-        {/* Was a dead affordance. It now opens the one thing this app actually has settings for
-            — the provider keys — which is also where onboarding told a user to come back to. */}
-        <button
-          onClick={() => useUiStore.getState().setProviderPanel(true)}
-          title="Provider keys"
-          className="w-full flex items-center gap-2 text-[12px] text-muted hover:text-ink transition-colors px-2 py-1.5"
-        >
-          <SettingsIcon size={ICON.sm} /> Settings
-          <span className="ml-auto text-faint"><ChevronRightIcon size={ICON.xs} /></span>
-        </button>
+      {/* bottom-anchored: who is signed in, and what this workspace is paying. Settings moved to
+          the foot of the rail — a gear is the whole control, and the row it used to sit in spent a
+          line on one word plus a chevron that pointed at nothing navigable. */}
+      <div className="shrink-0 border-t border-hair px-3 py-2.5">
         <AccountRow />
+        </div>
       </div>
     </div>
   );
