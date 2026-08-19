@@ -37,6 +37,7 @@
 
 import { asInt, type Db, type Queryable } from "../db/db.ts";
 import type { TenantContext } from "../db/tenant.ts";
+import { TraceStore } from "../store.ts";
 import type { Window } from "./range.ts";
 
 /**
@@ -119,6 +120,45 @@ export interface TokenVolume {
   cached: number;
   /** Tokens on rows that recorded no split at all. See the note above — this is not zero-cached. */
   unsplitTokens: number;
+}
+
+/**
+ * §4's run health strip: how the workspace's runs went, across every agent in it.
+ *
+ * FOUR OUTCOMES, NOT TWO, and the third is the whole reason this shape is not a pair of counters.
+ * A run that a restart killed, or that somebody cancelled, writes `status = 'error'` on its row —
+ * correctly, because it did not complete — and folding it into a FAILURE RATE would report the
+ * server bouncing as the agents being broken. §4 forbids that silently and asks for either its own
+ * slice or an exclusion that says so; this is the slice.
+ *
+ * `successRate` IS OVER SETTLED RUNS ONLY. A run still executing has no outcome, and counting it as
+ * anything makes the rate drift while nothing has happened. `runs` is every run in the window
+ * because that is what "total runs" means, and the two numbers are deliberately not the same
+ * denominator — the card says which it is showing.
+ */
+export interface RunHealth {
+  /** Every run started in the window, whatever became of it. */
+  runs: number;
+  ok: number;
+  /** Runs that failed on their own account. Excludes the slice below. */
+  failed: number;
+  /** Runs a restart or a cancellation closed out. §4's distinct outcome. */
+  interrupted: number;
+  running: number;
+  paused: number;
+  /** `ok / (ok + failed)`, or null when nothing has settled. Never 0, which would claim total failure. */
+  successRate: number | null;
+  previousSuccessRate: number | null;
+  /**
+   * Per-run latency, in milliseconds, nearest-rank.
+   *
+   * SUMMED STEP TIME, NOT WALL CLOCK, which §4 requires the card to say out loud. The two differ by
+   * exactly the thing this product is built to allow: a run paused at a boundary for four hours and
+   * resumed has four hours of wall clock and perhaps nine seconds of work in it, and a p95 drawn
+   * from `ended_at - started_at` would report that as the slowest run of the month.
+   */
+  p50: number | null;
+  p95: number | null;
 }
 
 export class ActivityStore {
@@ -368,6 +408,127 @@ export class ActivityStore {
       unsplitTokens: asInt(row?.["unsplit"]),
     };
   }
+
+  /**
+   * §4's run health strip. ONE statement, and its cost does not move with the number of agents.
+   *
+   * THREE THINGS THIS QUERY GETS RIGHT THAT THE OBVIOUS ONE DOES NOT, each of them a sentence in §4
+   * and each of them invisible in a screenshot:
+   *
+   * A PAUSED-AND-RESUMED RUN IS ONE RUN. That falls out of counting `runs` rows rather than
+   * `run_start` events: resuming continues under the same run identity and emits no new start, so
+   * there is only ever one row to count. It is asserted anyway, because the tempting alternative —
+   * counting distinct `run_id` in `steps`, or counting `run_start` in a feed — would double it, and
+   * this is the surface where that number gets quoted.
+   *
+   * A BRANCH COUNTS AS ONE RUN AND DOES NOT CARRY ITS INHERITED PREFIX. `copyRunPrefix` copies the
+   * parent's steps up to the branch point into the child under fresh ids, so a naive SUM over a
+   * branch's steps charges it for work its parent already did — and both runs then appear in the
+   * p95 carrying the same seconds. The join therefore takes only `seq > branch_from_seq` for a run
+   * that has one, which is exactly the boundary `branchRun` passes to the copy.
+   *
+   * AN INTERRUPTED RUN IS NOT A FAILED ONE. The two sentinels come from `TraceStore` rather than
+   * being spelled out here — see their note there.
+   *
+   * THE PERCENTILES ARE COMPUTED IN SQL, unlike the Agents grid's, and the reason is the window
+   * rather than a preference. `agentHealth.percentiles` takes the last ~20 runs of one agent, which
+   * is twenty numbers; this is every run in the workspace over as much as thirty days, which is
+   * tens of thousands, and reading them into this process to sort them would put the size of a
+   * month's history into one cached payload's memory. The arithmetic is deliberately the SAME
+   * nearest-rank rule — `ceil(q × n)`, written in integer division so both dialects agree and
+   * neither needs a `ceil` this SQLite build may not have — so a p95 here and a p95 on an agent
+   * card mean the same thing.
+   */
+  async runHealth(ctx: TenantContext, w: Window): Promise<RunHealth> {
+    const row = await this.q(ctx).get<Record<string, unknown>>(
+      `WITH per_run AS (
+         SELECT r.id                                          AS run_id,
+                r.status                                      AS status,
+                r.error                                       AS error,
+                CASE WHEN r.started_at >= ? THEN 1 ELSE 0 END AS cur,
+                SUM(s.latency_ms)                             AS latency_ms
+           FROM runs r
+           LEFT JOIN steps s
+             ON s.workspace_id = r.workspace_id
+            AND s.run_id = r.id
+            -- The branch's own work only. See the note above.
+            AND (r.branch_from_seq IS NULL OR s.seq > r.branch_from_seq)
+          WHERE r.workspace_id = ? AND r.started_at >= ? AND r.started_at < ?
+          GROUP BY r.id, r.status, r.error, cur
+       ),
+       settled AS (
+         SELECT latency_ms FROM per_run
+          WHERE cur = 1 AND latency_ms IS NOT NULL AND status IN ('completed', 'error')
+       ),
+       ranked AS (
+         SELECT latency_ms,
+                ROW_NUMBER() OVER (ORDER BY latency_ms) AS rn,
+                COUNT(*)     OVER ()                    AS n
+           FROM settled
+       )
+       SELECT
+         (SELECT COUNT(*) FROM per_run WHERE cur = 1)                                   AS runs,
+         (SELECT COUNT(*) FROM per_run WHERE cur = 1 AND status = 'completed')          AS ok,
+         (SELECT COUNT(*) FROM per_run WHERE cur = 1 AND status = 'error'
+                 AND (error IS NULL OR (error <> ? AND error <> ?)))                    AS failed,
+         (SELECT COUNT(*) FROM per_run WHERE cur = 1 AND status = 'error'
+                 AND (error = ? OR error = ?))                                          AS interrupted,
+         (SELECT COUNT(*) FROM per_run WHERE cur = 1 AND status = 'running')            AS running,
+         (SELECT COUNT(*) FROM per_run WHERE cur = 1 AND status = 'paused')             AS paused,
+         (SELECT COUNT(*) FROM per_run WHERE cur = 0 AND status = 'completed')          AS prev_ok,
+         (SELECT COUNT(*) FROM per_run WHERE cur = 0 AND status = 'error'
+                 AND (error IS NULL OR (error <> ? AND error <> ?)))                    AS prev_failed,
+         -- Nearest-rank, in integer division: ceil(n/2) and ceil(95n/100).
+         (SELECT MIN(latency_ms) FROM ranked WHERE rn = (n + 1) / 2)                    AS p50,
+         (SELECT MIN(latency_ms) FROM ranked WHERE rn = (95 * n + 99) / 100)            AS p95`,
+      [
+        w.from,
+        ctx.workspaceId,
+        w.previousFrom,
+        w.to,
+        TraceStore.INTERRUPTED_BY_RESTART,
+        TraceStore.CANCELLED_BY_USER,
+        TraceStore.INTERRUPTED_BY_RESTART,
+        TraceStore.CANCELLED_BY_USER,
+        TraceStore.INTERRUPTED_BY_RESTART,
+        TraceStore.CANCELLED_BY_USER,
+      ],
+    );
+
+    const ok = asInt(row?.["ok"]);
+    const failed = asInt(row?.["failed"]);
+    const prevOk = asInt(row?.["prev_ok"]);
+    const prevFailed = asInt(row?.["prev_failed"]);
+
+    return {
+      runs: asInt(row?.["runs"]),
+      ok,
+      failed,
+      interrupted: asInt(row?.["interrupted"]),
+      running: asInt(row?.["running"]),
+      paused: asInt(row?.["paused"]),
+      // NULL RATHER THAN ZERO WHEN NOTHING HAS SETTLED. §3.5 again, and here it is the difference
+      // between "no run has finished yet" and "every run failed" — two sentences a card must never
+      // confuse, on a figure people quote.
+      successRate: rate(ok, failed),
+      previousSuccessRate: rate(prevOk, prevFailed),
+      p50: numberOrNull(row?.["p50"]),
+      p95: numberOrNull(row?.["p95"]),
+    };
+  }
+}
+
+/** `ok / settled`, or null when nothing settled. Never 0 for an empty denominator. */
+function rate(ok: number, failed: number): number | null {
+  const settled = ok + failed;
+  return settled === 0 ? null : ok / settled;
+}
+
+/** A numeric column that is genuinely allowed to be absent. Unknown is not zero. */
+function numberOrNull(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
 /**

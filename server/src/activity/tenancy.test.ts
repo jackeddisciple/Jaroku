@@ -273,4 +273,33 @@ export async function activitySuite(
   check(tokensA.total !== A.tokens + B.tokens, "...and not both workspaces' tokens under A's name");
   check(tokensA.cached === A.cachedTokens, "and the cached split is scoped too");
   check(tokensB.cached === B.cachedTokens, "...on both sides");
+
+  // --- module 4: run health --------------------------------------------------------------------
+  //
+  // The fixture gives each workspace a different number of runs and one failure apiece, so a health
+  // strip that read across the boundary would show A a total it cannot account for and a rate
+  // computed from somebody else's failures.
+
+  const healthA = await store.runHealth(A.ctx, w);
+  const healthB = await store.runHealth(B.ctx, w);
+  check(healthA.runs === A.runs.length, `A's run count is A's (${healthA.runs})`);
+  check(healthB.runs === B.runs.length, `B's run count is B's (${healthB.runs})`);
+  check(
+    healthA.runs !== A.runs.length + B.runs.length,
+    "...and not the pair, which is what an unscoped COUNT returns",
+  );
+  check(healthA.failed === 1 && healthB.failed === 1, "each sees one failure — its own");
+  check(
+    healthA.successRate === (A.runs.length - 1) / A.runs.length,
+    `A's rate is over A's runs (${healthA.successRate})`,
+  );
+  check(
+    healthB.successRate === (B.runs.length - 1) / B.runs.length,
+    `B's rate is over B's (${healthB.successRate})`,
+  );
+  // The latencies differ between the two fixtures, so a p95 that crossed would visibly move.
+  check(
+    healthA.p95 !== null && healthB.p95 !== null && healthA.p95 !== healthB.p95,
+    "and the percentiles are drawn from each workspace's own steps",
+  );
 }

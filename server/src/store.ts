@@ -274,6 +274,25 @@ export class TraceStore {
    * database — the same caveat the eval and deploy reconciliations beside it already carry,
    * and the same place it has to be solved: a lease naming the process that owns the run.
    */
+  /**
+   * The error text a restart reconciliation writes, and the one a cancellation writes.
+   *
+   * EXPORTED BECAUSE A SECOND READER EXISTS NOW. The Activity tab's run-health strip has to tell a
+   * run that FAILED from a run that never reached a verdict — §4 is explicit that interrupted runs
+   * are a distinct outcome and must not be folded into the failure rate silently — and the only
+   * thing on the row that distinguishes them is this sentence. A copy of the string in the
+   * dashboard's WHERE clause would be a copy that survives the day somebody rewords this one, and
+   * the symptom would be a failure rate that silently jumped.
+   *
+   * TWO OF THEM, BECAUSE THERE ARE TWO WAYS TO NOT FINISH FOR A REASON THAT IS NOT THE AGENT'S. A
+   * restart killed the subprocess; a person pressed cancel. Neither is evidence that the agent is
+   * broken, which is the only thing a failure rate is read for. Both still write `status = 'error'`
+   * here, and that stays true — the row means "this did not complete", and the reason lives in the
+   * text beside it.
+   */
+  static readonly INTERRUPTED_BY_RESTART = "interrupted by a server restart";
+  static readonly CANCELLED_BY_USER = "cancelled by user";
+
   async reconcileInterruptedRuns(ctx: TenantContext): Promise<string[]> {
     const rows = await this.q(ctx).all<{ id: string }>(
       `SELECT id FROM runs WHERE workspace_id = ? AND status = 'running'`,
@@ -283,7 +302,7 @@ export class TraceStore {
       await this.q(ctx).run(
         `UPDATE runs SET status = 'error', ended_at = ?, error = ?
           WHERE id = ? AND workspace_id = ? AND status = 'running'`,
-        [new Date().toISOString(), "interrupted by a server restart", r.id, ctx.workspaceId],
+        [new Date().toISOString(), TraceStore.INTERRUPTED_BY_RESTART, r.id, ctx.workspaceId],
       );
     }
     return rows.map((r) => r.id);
@@ -299,7 +318,7 @@ export class TraceStore {
     await this.q(ctx).run(
       `UPDATE runs SET status = 'error', ended_at = ?, error = ?
         WHERE id = ? AND workspace_id = ? AND status != 'completed'`,
-      [new Date().toISOString(), "cancelled by user", runId, ctx.workspaceId],
+      [new Date().toISOString(), TraceStore.CANCELLED_BY_USER, runId, ctx.workspaceId],
     );
   }
 

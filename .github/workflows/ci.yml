@@ -320,6 +320,12 @@ jobs:
           # and cost is summed from what was spent, never from `runs.cost`. The fixture leaves that
           # column at zero on purpose, so a query that read it fails here rather than in production.
           npm run test:activity-spend
+          # §4's definitional care, which matters because these figures get quoted. A paused-and-
+          # resumed run is ONE run; a branch is one run that does not inherit its copied prefix's
+          # seconds; a run a restart or a cancellation closed out is not a failure. Every one of
+          # those is a count that looks right until you know the case, and the last of them would
+          # report a deploy bouncing the server as the workspace's agents being broken.
+          npm run test:activity-health
 
       - name: cost, abuse and the data lifecycle
         working-directory: server
