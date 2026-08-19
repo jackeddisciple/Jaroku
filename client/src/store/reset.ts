@@ -19,6 +19,7 @@
 // looks empty in the devtools panel somebody happens to open, and the field nobody looked at
 // still holds the last tenant's data.
 
+import { useActivityStore } from "./activityStore.ts";
 import { useAgentGridStore } from "./agentGridStore.ts";
 import { useAuditStore } from "./auditStore.ts";
 import { useBillingStore } from "./billingStore.ts";
@@ -61,6 +62,17 @@ interface Resettable {
  *   onboarding and then switched workspace would be sent back to the welcome screen.
  */
 export const WORKSPACE_STORES: Record<string, Resettable> = {
+  // A month of one workspace's operations in one object: what it spent and on which models, which of
+  // its agents are expensive and which are flaky, what it shipped and what failed, and which of its
+  // high-impact tool calls somebody refused. Held across a switch it would put one tenant's whole
+  // operating picture under another tenant's name — and the leaderboard's rows would offer to
+  // navigate to agents the new workspace cannot see.
+  //
+  // THE RANGE ITSELF IS NOT IN HERE, and that is not an oversight: it lives in `localStorage`, keyed
+  // by workspace, because it is a per-person view preference rather than workspace data — the same
+  // argument `uiStore`'s exclusion note makes. Resetting the store restores its default and the view
+  // reads the remembered one for the workspace being switched TO.
+  activityStore: useActivityStore as unknown as Resettable,
   // The Agents grid, and whichever agent record is open in the detail view. Every card carries the
   // workspace's own agent names, the last error one of its runs produced, and — most of all — the
   // NAMES of the credentials each agent is missing. Held across a switch it would show one tenant's

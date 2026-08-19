@@ -20,6 +20,7 @@ import { useAuditStore } from "../store/auditStore.ts";
 import { useEnforcementStore } from "../store/enforcementStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { useInboxStore } from "../store/inboxStore.ts";
+import { useActivityStore } from "../store/activityStore.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { resetWorkspaceStores } from "../store/reset.ts";
 import { INPUT_KEY_PREFIX, useUiStore } from "../store/uiStore.ts";
@@ -431,6 +432,31 @@ function dispatch(msg: ServerMessage): void {
         i.setUndo(msg.token ? { token: msg.token, action: msg.action, changed: msg.changed, at: Date.now() } : null);
       } else if (msg.type === "error") i.setError(msg.message);
       else if (msg.type === "notice") console.info("[inbox]", msg.message);
+      break;
+    }
+    case "activity": {
+      // SIX ANSWERS TO ONE COMMAND, and each one is filed the moment it lands. §3.6: "Cards fill
+      // independently as their queries return — a slow leaderboard must not hold up the hero row."
+      //
+      // THE STORE DROPS ANYTHING FOR A WINDOW IT HAS MOVED OFF, which is why every message carries
+      // its range and why that check lives in the store rather than here: six replies can arrive in
+      // any order, and a page assembled from two windows is the one thing §1's single global range
+      // exists to prevent.
+      const a = useActivityStore.getState();
+      if (msg.type === "activitySummary") {
+        a.applySummary(msg.range, { computedAt: msg.computedAt, live: msg.live }, msg.summary);
+      } else if (msg.type === "activityLeaderboard") {
+        a.applyLeaderboard(msg.range, { computedAt: msg.computedAt, live: msg.live }, msg.rows, msg.truncated, msg.mix);
+      } else if (msg.type === "activityReleases") {
+        a.applyReleases(msg.range, { computedAt: msg.computedAt, live: msg.live }, msg.entries);
+      } else if (msg.type === "activityToolUsage") {
+        a.applyTools(msg.range, { computedAt: msg.computedAt, live: msg.live }, msg.usage);
+      } else if (msg.type === "activityTeam") {
+        a.applyTeam(msg.range, { computedAt: msg.computedAt, live: msg.live }, msg.scope, msg.members, msg.personal);
+      } else if (msg.type === "activityFeed") {
+        a.applyFeed(msg.range, msg.rows, msg.cursor, msg.next);
+      } else if (msg.type === "error") a.setError(msg.message);
+      else if (msg.type === "notice") console.info("[activity]", msg.message);
       break;
     }
     case "threads": {
@@ -1493,6 +1519,47 @@ export function sendCommitGithub(agentId: string, message: string, push = true):
 /** Ask for the board again. A full-snapshot channel's way of checking it is not stale. */
 export function sendListInbox(): void {
   send({ cmd: "listInbox" });
+}
+
+/**
+ * §5.5's `getActivity`: ask for one window, receive six answers.
+ *
+ * THE RANGE COMES FROM THE STORE rather than from the caller, for the reason `activeThread()` above
+ * is read here rather than passed: "which window am I looking at" is a fact about the app's state,
+ * not an argument a card knows — and every caller forgetting it is exactly how six modules end up
+ * describing different windows.
+ */
+export function sendGetActivity(): void {
+  const { range, custom } = useActivityStore.getState();
+  send({ cmd: "getActivity", range, from: custom?.from, to: custom?.to });
+}
+
+/**
+ * One page of §5's feed, after the first.
+ *
+ * THE CURSOR IS PASSED BACK EXACTLY AS IT ARRIVED, never rebuilt from the last row on screen. A
+ * virtualiser can have rows mounted that the store has since replaced, and a cursor derived from
+ * what is rendered rather than from what was received is a cursor for a page boundary that may not
+ * exist any more.
+ */
+export function sendGetActivityFeed(filters?: {
+  kinds?: string[];
+  agentId?: string | null;
+  actorUserId?: string | null;
+}): void {
+  const s = useActivityStore.getState();
+  if (s.feedLoading) return;
+  s.feedRequested();
+  send({
+    cmd: "getActivityFeed",
+    range: s.range,
+    from: s.custom?.from,
+    to: s.custom?.to,
+    cursor: s.feedNext ?? undefined,
+    kinds: filters?.kinds,
+    agentId: filters?.agentId ?? undefined,
+    actorUserId: filters?.actorUserId ?? undefined,
+  });
 }
 
 export function sendResolveInboxItem(itemId: string): boolean {

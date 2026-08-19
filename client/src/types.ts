@@ -1555,6 +1555,7 @@ export type GithubMessage =
   | { channel: "github"; type: "notice"; message: string; agentId?: string };
 
 export type ServerMessage =
+  | ActivityMessage
   | SessionMessage
   | MemberMessage
   | ThreadMessage
@@ -1610,6 +1611,22 @@ export type ServerMessage =
 // --- client → server commands ---
 
 export type ClientCommand =
+  /**
+   * Activity (§5.5). Two READS and nothing else, which is §1's hard consequence in the type
+   * system: "Nothing in Activity is clickable-to-change." Every other tab's commands include verbs;
+   * the absence of one here is where that rule lives on the wire.
+   */
+  | { cmd: "getActivity"; range: string; from?: string; to?: string }
+  | {
+      cmd: "getActivityFeed";
+      range: string;
+      from?: string;
+      to?: string;
+      cursor?: FeedCursor;
+      kinds?: string[];
+      agentId?: string;
+      actorUserId?: string;
+    }
   // Membership. `acceptInvite` is deliberately absent: the accepter is not a member yet, so
   // they have no socket scoped to the workspace they are joining — it is POST /v1/invites/accept.
   // Threads (§7.1). The two reads are answered to this client alone; the four mutations come back
@@ -2048,3 +2065,229 @@ export type ExplainSubject =
   | { kind: "step"; step: { name: string; type: string; seq: number; error: string | null; input: unknown; output: unknown } }
   | { kind: "node"; nodeId: string }
   | { kind: "agent" };
+
+// --- the Activity tab (§1–§10) ------------------------------------------------------------------
+//
+// EVERY SHAPE HERE IS SNAKE_CASE, matching the wire rather than the client's own camelCase. That is
+// the convention every other payload in this file follows, and the reason is the same: these are
+// what the server SENT, and a client type that renamed the fields would be a second definition of
+// the payload that the first change to it makes wrong.
+
+// Re-exported so a component importing an Activity type does not need three modules for one card.
+// The FEED KIND comes from `lib/actionIcons.tsx` rather than being restated here, which is §4's
+// rule in the type system: the vocabulary that decides a row's icon and its verb is the same one
+// that decides what kinds exist, and two lists would be two things to keep in step.
+export type { ActivityRange } from "./lib/activityRange.ts";
+export type { FeedKind } from "./lib/actionIcons.tsx";
+import type { FeedKind } from "./lib/actionIcons.tsx";
+
+/** The keyset cursor §5.2 requires. Both halves — see the server's `FeedRow.id`. */
+export interface FeedCursor {
+  at: string;
+  id: string;
+}
+
+/** §1's header: who this workspace is, and how many people are in it. */
+export interface ActivityWorkspace {
+  name: string;
+  kind: string;
+  members: number;
+  created_at: string;
+}
+
+/** §2's rollup. `usd` is a FLOOR whenever `cost_known` is false — see the server's `SpendRollup`. */
+export interface ActivitySpend {
+  usd: number;
+  previous_usd: number | null;
+  /** §3.5's empty-is-not-zero: no rows renders `--`, rows that summed to nothing render `$0.00`. */
+  events: number;
+  cost_known: boolean;
+  unpriced_events: number;
+  unpriced_agents: number;
+  unpriced_models: string[];
+  budget_usd: number | null;
+  by_provider: { provider: string; usd: number; cost_known: boolean }[];
+}
+
+/** §3's volume. `unsplit_tokens` is why a cached figure of zero is not "none cached". */
+export interface ActivityTokens {
+  total: number;
+  previous_total: number | null;
+  events: number;
+  cached: number;
+  unsplit_tokens: number;
+}
+
+/** §4's strip. `interrupted` is its own slice, never folded into `failed`. */
+export interface ActivityHealth {
+  runs: number;
+  ok: number;
+  failed: number;
+  interrupted: number;
+  running: number;
+  paused: number;
+  success_rate: number | null;
+  previous_success_rate: number | null;
+  p50: number | null;
+  p95: number | null;
+}
+
+/** One column of §3.1's pulse band. The columns sum to the hero row above them. */
+export interface ActivityPulseColumn {
+  at: string;
+  runs: number;
+  errors: number;
+  usd: number;
+  tokens: number;
+}
+
+export interface ActivitySummary {
+  workspace: ActivityWorkspace | null;
+  /** §3.3: false when the workspace is younger than the previous window, so deltas render `--`. */
+  comparable: boolean;
+  window: { from: string; to: string; previous_from: string; previous_to: string };
+  spend: ActivitySpend;
+  tokens: ActivityTokens;
+  health: ActivityHealth;
+  pulse: ActivityPulseColumn[];
+}
+
+/** §7's row. `models` exists for §3.4's hover and is not rendered. */
+export interface ActivityLeaderboardRow {
+  agent_id: string;
+  name: string;
+  archived: boolean;
+  runs: number;
+  ok: number;
+  failed: number;
+  interrupted: number;
+  success_rate: number | null;
+  usd: number;
+  cost_known: boolean;
+  p95: number | null;
+  last_active: string | null;
+  models: string[];
+}
+
+/** §6's mix. Two denominators, because the two views answer different questions. */
+export interface ActivityModelMix {
+  models: {
+    model: string;
+    provider: string;
+    usd: number;
+    tokens: number;
+    calls: number;
+    /** False for a model with no pricing entry: in the volume view, out of the spend view. */
+    priced: boolean;
+  }[];
+  priced_usd: number;
+  total_tokens: number;
+}
+
+/** §8's timeline entry. Failed deploys are in it — a log of successes is a marketing page. */
+export interface ActivityReleaseEntry {
+  id: string;
+  at: string;
+  kind: "version" | "deploy";
+  agent_id: string;
+  agent_name: string;
+  version: number | null;
+  actor_user_id: string | null;
+  outcome: "ok" | "error" | "running";
+  detail: string;
+  url: string | null;
+}
+
+/** §9's rollup, and the four numbers nothing else in the product reports. */
+export interface ActivityToolUsage {
+  tools: {
+    name: string;
+    origin: "reviewed" | "mcp" | "bespoke";
+    server_id: string | null;
+    impact: "high" | "low" | null;
+    calls: number;
+    failures: number;
+    truncated: number;
+  }[];
+  tools_truncated: boolean;
+  high_impact_calls: number;
+  approved: number;
+  denied: number;
+  timed_out: number;
+  truncated_calls: number;
+  total_calls: number;
+  reviewed_failures: number;
+}
+
+/** §10's Team pulse. Three columns, because two of the five are not attributable — see the server. */
+export interface ActivityTeamMember {
+  user_id: string | null;
+  agents_created: number;
+  edits_applied: number;
+  versions_published: number;
+  threads_started: number;
+}
+
+/** §10's personal summary, rendered INSTEAD of the team card and never beside it. */
+export interface ActivityPersonalSummary {
+  mostActiveAgent: { agentId: string; name: string; runs: number } | null;
+  runs: number;
+  usd: number;
+  costKnown: boolean;
+  streakDays: number;
+}
+
+/** §5's feed row, in the pieces `ActionRow` assembles a sentence from. */
+export interface ActivityFeedRow {
+  id: string;
+  at: string;
+  kind: FeedKind;
+  agent_id: string | null;
+  actor_user_id: string | null;
+  object: string | null;
+  outcome: "ok" | "error" | "refused" | "running" | null;
+  num: number | null;
+  target_type: "run" | "version" | "deploy" | "eval" | "step" | "workspace";
+  target_id: string;
+}
+
+/**
+ * The activity channel.
+ *
+ * SIX MESSAGES FOR ONE COMMAND, which is the one thing genuinely different about this channel — §3.6
+ * requires each card to fill as its own query returns. Every one carries `range`, so a client can
+ * drop an answer for a window it has already moved off; that is §1's single global range surviving
+ * the fact that six replies can arrive in any order.
+ */
+export type ActivityMessage =
+  | {
+      channel: "activity"; type: "activitySummary";
+      range: string; computedAt: string; live: boolean; summary: ActivitySummary;
+    }
+  | {
+      channel: "activity"; type: "activityLeaderboard";
+      range: string; computedAt: string; live: boolean;
+      rows: ActivityLeaderboardRow[]; truncated: boolean; mix: ActivityModelMix;
+    }
+  | {
+      channel: "activity"; type: "activityFeed";
+      range: string; rows: ActivityFeedRow[];
+      cursor: FeedCursor | null; next: FeedCursor | null;
+    }
+  | {
+      channel: "activity"; type: "activityReleases";
+      range: string; computedAt: string; live: boolean; entries: ActivityReleaseEntry[];
+    }
+  | {
+      channel: "activity"; type: "activityToolUsage";
+      range: string; computedAt: string; live: boolean; usage: ActivityToolUsage;
+    }
+  | {
+      channel: "activity"; type: "activityTeam";
+      range: string; computedAt: string; live: boolean;
+      scope: "team" | "personal";
+      members: ActivityTeamMember[];
+      personal: ActivityPersonalSummary | null;
+    }
+  | { channel: "activity"; type: "error"; message: string }
+  | { channel: "activity"; type: "notice"; message: string };
