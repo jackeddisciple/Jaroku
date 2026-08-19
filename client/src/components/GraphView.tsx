@@ -42,7 +42,7 @@ import { useGraphStore } from "../store/graphStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { sendLoadAgentGraph } from "../lib/socket.ts";
-import { ICON, RADIUS } from "../lib/tokens.ts";
+import { ICON, INTERACTION, RADIUS } from "../lib/tokens.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { GitBranchIcon, PlusIcon, XIcon } from "./panelIcons.tsx";
@@ -101,7 +101,7 @@ const BORDER = "#2a2a30"; // thin, subtle card outline (no colour, no glow)
 const DIAMOND = "#6c6c78";
 const EDGE = "#4c4c56";
 const EDGE_DASH = "#5a5a66";
-const SEL = "#6b8afd"; // selection accent (left bar only)
+const SEL = INTERACTION.accent; // selection accent (left bar only) — the app's, not the canvas's own
 const AMBER = "#f59e0b"; // running/active accent (left bar only)
 const PULSE = "#8aa0ff"; // transient click micro-interaction highlight
 

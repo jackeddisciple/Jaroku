@@ -40,6 +40,34 @@ export const ACCENT = {
 
 export type AccentName = keyof typeof ACCENT;
 
+/**
+ * The interaction accent. One colour, four jobs, and nothing else.
+ *
+ * The palette above spends four accents on *categories* and had none at all on interaction:
+ * selection, active tabs, links and focus were carried by a three percent lightness shift from
+ * `bg` to `active` plus, on some rows, a 2px off-white bar. Which meant "which session am I in"
+ * was the hardest question the sidebar answered, and a focus ring was a grey ring on a grey
+ * control on a near-black page. Spending colour on what a thing *is* and none on what you are
+ * *doing* is backwards for an app somebody drives with a keyboard.
+ *
+ * The four sanctioned uses, and there is no fifth:
+ *   1. the active/selected row or tab
+ *   2. sync and live iconography — the thing that is happening right now
+ *   3. links
+ *   4. focus rings
+ *
+ * Never decorative. Never a category. A blue badge on a non-interactive label is precisely what
+ * makes an accent unusable for selection later, because the eye stops reading blue as "this one".
+ *
+ * The value is GraphView's existing `SEL`, so the canvas's selection colour and the app's are one
+ * decision rather than two that happen to look alike.
+ */
+export const INTERACTION = {
+  accent: "#6b8afd",
+  /** The same hue at the alpha a fill or a ring wants, where the solid colour would shout. */
+  soft: "rgba(107,138,253,0.16)",
+} as const;
+
 /** Status colours. Unchanged from doc §4.2 — restated here so a consumer needs one import,
  *  not two. These answer "how is it doing", never "what kind of thing is this". */
 export const STATUS = {

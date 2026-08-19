@@ -21,6 +21,11 @@ export default {
         // Chrome. Both were hardcoded in several places before they were named.
         edge: "#2a2a30", // card border — raised without reading as a visible box
         chrome: "#26262b", // scrollbar thumbs, control dividers
+        // The one interaction accent (see INTERACTION in src/lib/tokens.ts for why one and why
+        // this one). Four uses and no fifth: the selected row or tab, live/sync iconography,
+        // links, focus rings. Never decoration, never a category — a blue on a non-interactive
+        // badge is what makes an accent unusable for selection later.
+        accent: "#6b8afd",
         // Status colors — reserved exclusively for meaning, never decoration.
         ok: "#22c55e",
         err: "#ef4444",
