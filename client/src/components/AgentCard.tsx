@@ -23,7 +23,7 @@ import { ThumbnailMark, ArchiveIcon, ArchiveRestoreIcon, CopyIcon, DownloadIcon 
 import { GitForkIcon, KebabIcon, PencilIcon, PlusIcon } from "./panelIcons.tsx";
 import { artFor } from "../lib/agentArt.ts";
 import { agentContextMarkdown } from "../lib/agentContext.ts";
-import { relTime, fmtCost } from "../lib/format.ts";
+import { absTime, fmtCost, relTime } from "../lib/format.ts";
 import { ICON, STATUS, TEXT, TYPE } from "../lib/tokens.ts";
 import { spendFor, useAgentGridStore } from "../store/agentGridStore.ts";
 import type { AgentCardView } from "../types.ts";
@@ -354,7 +354,7 @@ export function AgentCard({
           {agent.last_run_at && (
             <>
               <span aria-hidden>·</span>
-              <span title={agent.last_run_at}>{relTime(agent.last_run_at)}</span>
+              <span title={absTime(agent.last_run_at)}>{relTime(agent.last_run_at)}</span>
             </>
           )}
           {/* Team workspaces only. In a personal one this is a picture of the only person who could

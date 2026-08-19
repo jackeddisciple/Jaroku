@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { orderedRuns, useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import type { AgentSummary, RunSummary, RunStatus } from "../types.ts";
-import { relTime } from "../lib/format.ts";
+import { absTime, relTime } from "../lib/format.ts";
 import { agentStatus, type AgentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark } from "../lib/icons.tsx";
 import { selectAgent, selectRun } from "../lib/selection.ts";
@@ -130,7 +130,7 @@ function RunRow({ run }: { run: RunSummary }) {
           {run.parent_run_id != null && run.branch_from_seq != null && (
             <span title="branched from this step">@{run.branch_from_seq}</span>
           )}
-          <span title={new Date(run.started_at).toLocaleString()}>{relTime(run.started_at)}</span>
+          <span title={absTime(run.started_at)}>{relTime(run.started_at)}</span>
         </span>
       </div>
     </button>
@@ -322,7 +322,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
           {last && (
             <span
               className={`shrink-0 text-[11px] tabular-nums text-faint ${github?.badge ? "" : "ml-auto"}`}
-              title={new Date(last.started_at).toLocaleString()}
+              title={absTime(last.started_at)}
             >
               {relTime(last.started_at)}
             </span>

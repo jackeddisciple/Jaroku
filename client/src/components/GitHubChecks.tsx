@@ -21,7 +21,7 @@ import { useEvalStore } from "../store/evalStore.ts";
 import { useGithubStore } from "../store/githubStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { sendListDatasets, sendListScanFindings, sendSetAgentCiConfig } from "../lib/socket.ts";
-import { fmtPercent, relTime } from "../lib/format.ts";
+import { absTime, fmtPercent, relTime } from "../lib/format.ts";
 import { ICON } from "../lib/tokens.ts";
 import { RegionLabel } from "./GitHubSync.tsx";
 import { CheckIcon, XIcon } from "./panelIcons.tsx";
@@ -97,7 +97,7 @@ export function ScanHistoryRegion({ view }: { view: GithubView }) {
                     {f.overridden ? " · pushed anyway" : " · refused"}
                   </span>
                 </span>
-                <span className="shrink-0 text-faint">{relTime(f.created_at)}</span>
+                <span className="shrink-0 text-faint" title={absTime(f.created_at)}>{relTime(f.created_at)}</span>
               </div>
             ))
           )}
@@ -209,7 +209,7 @@ export function ChecksRegion({ view }: { view: GithubView }) {
               <span className="text-muted">
                 #{latest.prNumber} · {latest.passRate == null ? "unscored" : fmtPercent(latest.passRate, "share")}
               </span>
-              <span className="text-faint">{relTime(latest.createdAt)}</span>
+              <span className="text-faint" title={absTime(latest.createdAt)}>{relTime(latest.createdAt)}</span>
             </div>
           )}
         </div>

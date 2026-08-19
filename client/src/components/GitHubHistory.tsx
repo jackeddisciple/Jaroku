@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   sendCreateGithubBranch, sendOpenGithubPr, sendShadowRunGithub, sendSwitchGithubBranch,
 } from "../lib/socket.ts";
-import { relTime } from "../lib/format.ts";
+import { absTime, relTime } from "../lib/format.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { ICON, STATUS } from "../lib/tokens.ts";
 import type { GithubView } from "../types.ts";
@@ -605,7 +605,7 @@ export function HistoryRegion({ view }: { view: GithubView }) {
                   <span className="text-ink">{e.kind === "force_override" ? "overridden" : e.outcome}</span>{" "}
                   {e.detail}
                 </span>
-                <span className="shrink-0 text-faint">{relTime(e.created_at)}</span>
+                <span className="shrink-0 text-faint" title={absTime(e.created_at)}>{relTime(e.created_at)}</span>
               </div>
             ))}
         </div>

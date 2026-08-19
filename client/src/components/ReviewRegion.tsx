@@ -18,7 +18,7 @@
 // the region a list of things somebody thinks they have dealt with.
 
 import { ICON } from "../lib/tokens.ts";
-import { relTime } from "../lib/format.ts";
+import { absTime, relTime } from "../lib/format.ts";
 import { sendResolveReviewComment } from "../lib/socket.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import type { GithubReviewRow, GithubView } from "../types.ts";
@@ -78,7 +78,7 @@ function ReviewCard({ view, comment }: { view: GithubView; comment: GithubReview
             {comment.path}{comment.line === null ? "" : `:${comment.line}`}
           </Truncate>
         )}
-        <span className="ml-auto shrink-0 text-faint">{relTime(comment.createdAt)}</span>
+        <span className="ml-auto shrink-0 text-faint" title={absTime(comment.createdAt)}>{relTime(comment.createdAt)}</span>
       </div>
 
       {/* The reviewer's own words, quoted rather than paraphrased and never edited. */}

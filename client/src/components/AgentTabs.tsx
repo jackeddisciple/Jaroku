@@ -28,7 +28,7 @@ import {
 import { openThreadAgent } from "../lib/threadNav.ts";
 import { selectRun } from "../lib/selection.ts";
 import { fmtCostPerRun } from "../lib/agentFormat.ts";
-import { fmtLatency, relTime } from "../lib/format.ts";
+import { absTime, fmtLatency, relTime } from "../lib/format.ts";
 import { ACCENT, ICON, STATUS, TEXT, TYPE } from "../lib/tokens.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
@@ -361,7 +361,7 @@ function Evals({ detail }: { detail: AgentDetailView }) {
         <Section label="Last eval">
           <div className="flex min-w-0 items-center gap-2 rounded-control border border-hair px-2.5 py-2">
             <span className="text-[12px] text-ink">{last.status}</span>
-            <span className="text-[11px] text-faint">{relTime(last.started_at)}</span>
+            <span className="text-[11px] text-faint" title={absTime(last.started_at)}>{relTime(last.started_at)}</span>
             {/* THE WINNING PROVIDER IS THE AGGREGATE'S ANSWER AND IS NOT RE-DERIVED HERE. §6 asks for
                 it, and the eval dashboard computes it from per-leg scores; a second computation would
                 be a second answer to "which provider won", and the two would disagree the first time
@@ -422,7 +422,7 @@ function ThreadsAndRuns({ detail }: { detail: AgentDetailView }) {
                 {t.archived && (
                   <span className="shrink-0 text-[10px] uppercase tracking-wider text-faint">archived</span>
                 )}
-                <span className="shrink-0 text-[10px] text-faint">{relTime(t.last_activity_at)}</span>
+                <span className="shrink-0 text-[10px] text-faint" title={absTime(t.last_activity_at)}>{relTime(t.last_activity_at)}</span>
               </button>
             ))}
           </div>
@@ -456,7 +456,7 @@ function ThreadsAndRuns({ detail }: { detail: AgentDetailView }) {
                   aria-hidden
                 />
                 <Truncate className="min-w-0 flex-1 font-mono text-[11px] text-muted">{r.model}</Truncate>
-                <span className="shrink-0 text-[10px] text-faint">{relTime(r.started_at)}</span>
+                <span className="shrink-0 text-[10px] text-faint" title={absTime(r.started_at)}>{relTime(r.started_at)}</span>
               </button>
             ))}
           </div>

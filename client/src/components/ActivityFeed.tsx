@@ -23,7 +23,7 @@ import { FEED_KINDS, actionForFeedKind, type FeedKind } from "../lib/actionIcons
 import { RANGE_PROSE } from "../lib/activityRange.ts";
 import { EMPTY_FIGURE } from "../lib/activityMetrics.ts";
 import { FEED_ROW_HEIGHT, feedWindow, shouldFetchMore } from "../lib/feedWindow.ts";
-import { relTime } from "../lib/format.ts";
+import { absTime, relTime } from "../lib/format.ts";
 import { selectAgent, selectRun } from "../lib/selection.ts";
 import { sendGetActivityFeed, sendLoadRun } from "../lib/socket.ts";
 import { ICON, STATUS } from "../lib/tokens.ts";
@@ -209,7 +209,7 @@ export function EventFeedCard() {
                           {r.outcome === "refused" && <span style={{ color: STATUS.error }}> refused</span>}
                         </span>
                       }
-                      trailing={<span className="text-faint">{relTime(r.at)}</span>}
+                      trailing={<span className="text-faint" title={absTime(r.at)}>{relTime(r.at)}</span>}
                       title={navigationHint(r.target_type)}
                       onClick={() => open(r, needsLoad, closeNav)}
                     />

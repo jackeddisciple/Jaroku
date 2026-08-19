@@ -22,7 +22,7 @@
 
 import { ELEVATION, ICON, MOTION, RADIUS, SURFACE, TEXT } from "../lib/tokens.ts";
 import { ageFraction } from "../lib/inboxBoard.ts";
-import { relTime } from "../lib/format.ts";
+import { absTime, relTime } from "../lib/format.ts";
 import { INBOX_ICON } from "./inboxIcons.tsx";
 import { InboxCardActions } from "./InboxCardActions.tsx";
 import { InboxEvidence } from "./InboxEvidence.tsx";
@@ -193,7 +193,7 @@ export function InboxCard({
       {/* The context line: what it is about, and how long it has been waiting. Indented to the
           subject's column, so the icon gutter stays a gutter. */}
       <div className="ml-6 mt-0.5 flex items-center gap-1.5 text-[11px] text-muted">
-        <span className="text-faint">{relTime(item.first_seen_at)}</span>
+        <span className="text-faint" title={absTime(item.first_seen_at)}>{relTime(item.first_seen_at)}</span>
         {item.snoozed_until && (
           <>
             <span className="text-faint">·</span>

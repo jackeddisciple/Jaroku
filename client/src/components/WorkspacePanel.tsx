@@ -29,7 +29,7 @@ import { useAuditStore } from "../store/auditStore.ts";
 import { useMemberStore, type Invite, type Member } from "../store/memberStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore, type WorkspaceSection } from "../store/uiStore.ts";
-import { fmtUntil, relTime } from "../lib/format.ts";
+import { absTime, fmtUntil, relTime } from "../lib/format.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
@@ -399,7 +399,7 @@ function AuditSection() {
                     reconciliation, a webhook. Named as such rather than left blank, because "nobody
                     did this" and "we do not know who did this" are different answers. */}
                 {!who && !e.actor_user_id && <span className="text-[11px] text-faint">the server</span>}
-                <span className="ml-auto shrink-0 text-[11px] text-faint">{relTime(e.created_at)}</span>
+                <span className="ml-auto shrink-0 text-[11px] text-faint" title={absTime(e.created_at)}>{relTime(e.created_at)}</span>
               </div>
               {(e.target_type || detail || e.ip) && (
                 <div className="mt-0.5 break-words font-mono text-[10px] leading-[1.5] text-faint">

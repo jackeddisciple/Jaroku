@@ -18,7 +18,7 @@ import { useMemo, useState } from "react";
 import { EMPTY_FIGURE, formatMetric } from "../lib/activityMetrics.ts";
 import { RANGE_PROSE } from "../lib/activityRange.ts";
 import { actionForFeedKind } from "../lib/actionIcons.tsx";
-import { relTime } from "../lib/format.ts";
+import { absTime, relTime } from "../lib/format.ts";
 import { selectAgent } from "../lib/selection.ts";
 import { ICON, MOTION, STATUS, TEXT } from "../lib/tokens.ts";
 import { dimmedBy, useActivityStore } from "../store/activityStore.ts";
@@ -180,7 +180,7 @@ export function LeaderboardCard() {
                     {formatMetric("ms", r.p95)}
                   </td>
                   <td className="py-1.5 text-right text-[11px] tabular-nums text-faint">
-                    {r.last_active ? relTime(r.last_active) : EMPTY_FIGURE}
+                    <span title={r.last_active ? absTime(r.last_active) : undefined}>{r.last_active ? relTime(r.last_active) : EMPTY_FIGURE}</span>
                   </td>
                 </tr>
               ))}
@@ -379,7 +379,7 @@ export function ReleasesCard() {
                   {e.version !== null && (
                     <span className="shrink-0 font-mono text-[10px] tabular-nums text-faint">v{e.version}</span>
                   )}
-                  <span className="shrink-0 text-[10px] tabular-nums text-faint">{relTime(e.at)}</span>
+                  <span className="shrink-0 text-[10px] tabular-nums text-faint" title={absTime(e.at)}>{relTime(e.at)}</span>
                 </div>
                 <div className="ml-[18px] text-[10px] text-muted">
                   {action.verb.toLowerCase()} · {e.detail}
