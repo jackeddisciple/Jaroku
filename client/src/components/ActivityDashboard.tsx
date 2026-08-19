@@ -20,19 +20,20 @@
 // `md:grid-cols-2`: the exception is expressed by the ABSENCE of a breakpoint rather than by a
 // media query that has to be remembered.
 
+import { ActivityHero, PulseBand } from "./ActivityHero.tsx";
 import { ActivityView } from "./ActivityView.tsx";
 
 export function ActivityDashboard() {
   return (
     <ActivityView>
-      {/* The hero row. Three numbers, always three across — see §3.8. The cards themselves land in
-          the commit after this one; the grid is what has to exist first, so that when they arrive
-          they arrive into their final positions rather than into a layout that moves under them. */}
-      <div className="grid grid-cols-3 gap-4" data-activity-region="hero" />
+      {/* The hero row. Three numbers, always three across — see §3.8. */}
+      <div className="grid grid-cols-3 gap-4">
+        <ActivityHero />
+      </div>
 
       {/* The wide band. One row, full width, because a time series read against a two-thirds column
           is a time series with half the resolution. */}
-      <div data-activity-region="pulse" />
+      <PulseBand />
 
       {/* Three pairs, in §3.1's order. `md:` and not `lg:`: the breakpoint that matters here is the
           one where two cards of numbers stop fitting side by side, which is well below a laptop. */}
