@@ -161,8 +161,11 @@ console.log("\nthe colour law, checked rather than commented");
     seen.get("idle")?.tone === "grey" && seen.get("archived")?.tone === "grey");
   check("Live is green, which is the only thing green means",
     seen.get("live")?.tone === "green");
-  check("New and Forked are blue, which is the only thing blue means",
-    seen.get("new")?.tone === "blue" && seen.get("forked")?.tone === "blue");
+  // Blue left this file entirely. It is the interaction accent now — selection, links, focus —
+  // and a non-interactive label wearing it is what makes an accent unusable for selection later.
+  // These two describe an agent rather than reporting a state somebody acts on, so they are grey.
+  check("New and Forked are grey, because they describe rather than report",
+    seen.get("new")?.tone === "grey" && seen.get("forked")?.tone === "grey");
 
   check("every tag carries a sentence for its tooltip and its accessible name",
     [...seen.values()].every((t) => t.title.length > 0));

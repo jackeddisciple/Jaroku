@@ -38,7 +38,7 @@ export const TAG_FAMILIES = ["attention", "runtime", "deploy", "health", "lifecy
 export type TagFamily = (typeof TAG_FAMILIES)[number];
 
 /** The five colours, and nothing else. A sixth meaning is a question, not a hex value. */
-export type TagTone = "blue" | "amber" | "rose" | "green" | "grey";
+export type TagTone = "amber" | "rose" | "green" | "grey";
 
 export interface AgentTag {
   /** Stable within a row, for React keys and for a test that names one. */
@@ -55,12 +55,20 @@ export interface AgentTag {
  *
  * BORROWED, NEVER INVENTED. Amber, rose and green are `STATUS.pending`, `STATUS.error` and
  * `STATUS.ok` — the three the whole app already means those things by — and grey is `TEXT.faint`,
- * which is what "inert" already looks like everywhere else. Blue is the trace's own `llm_call`
- * foreground rather than a new hue: it is the only cool blue this palette has, it is already
- * informational, and adding a sixth would be exactly the thing §5.4 says to ask about first.
+ * which is what "inert" already looks like everywhere else.
+ *
+ * THERE WAS A FIFTH, AND IT HAD TO GO. `blue` carried `Forked` and `New`, and it was the only blue
+ * anywhere in the product — so the loudest cool colour on screen was spent on two labels that are
+ * not interactive, not a status, and not something anybody acts on. That is the exact collision
+ * that makes an accent unusable for selection later: once the eye has learned that blue means "this
+ * agent is a week old", it stops reading blue as "this is the row you are in". Blue is now the
+ * interaction accent and nothing else claims it.
+ *
+ * The rule that replaced it: semantic colour only where the tag IS a state somebody acts on —
+ * running, failing, live — and grayscale for every tag that merely describes. `Forked` and `New`
+ * describe.
  */
 export const TAG_COLOR: Record<TagTone, string> = {
-  blue: "#7fa9db",
   amber: STATUS.pending,
   rose: STATUS.error,
   green: STATUS.ok,
@@ -215,13 +223,13 @@ export function agentTags(a: TagInput, now = Date.now()): AgentTag[] {
   if (a.archived_at) {
     out.push({ id: "archived", label: "Archived", family: "lifecycle", tone: "grey", title: "Put away. Restore it to bring it back." });
   } else if (a.forked_from) {
-    out.push({ id: "forked", label: "Forked", family: "lifecycle", tone: "blue", title: `Copied from ${a.forked_from}` });
+    out.push({ id: "forked", label: "forked", family: "lifecycle", tone: "grey", title: `Copied from ${a.forked_from}` });
   } else if (a.current_version <= 1 && a.version_source === null) {
     // DRAFT IS "NOTHING PUBLISHED", not "nothing run". An agent whose row exists and whose version
     // has no manifest behind it is a generation that has not finished or a project nobody imported.
     out.push({ id: "draft", label: "Draft", family: "lifecycle", tone: "grey", title: "Nothing has been published for this agent yet" });
   } else if (isNew(a, now)) {
-    out.push({ id: "new", label: "New", family: "lifecycle", tone: "blue", title: "Created in the last week, or not run yet" });
+    out.push({ id: "new", label: "new", family: "lifecycle", tone: "grey", title: "Created in the last week, or not run yet" });
   }
 
   return out;
