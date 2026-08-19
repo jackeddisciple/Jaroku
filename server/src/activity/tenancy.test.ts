@@ -24,6 +24,9 @@ import type { Db } from "../db/db.ts";
 import { IdentityRepository } from "../db/repositories/identity.ts";
 import { newRequestId, systemContext, systemContextFor, type TenantContext } from "../db/tenant.ts";
 import { AgentRepository } from "../db/repositories/agents.ts";
+import { BillingRepository } from "../db/repositories/billing.ts";
+import { TraceStore } from "../store.ts";
+import type { Run, Step } from "../types.ts";
 import { ActivityStore } from "./activityStore.ts";
 import { resolveWindow, type Window } from "./range.ts";
 
@@ -45,10 +48,28 @@ export interface ActivityFixture {
   agents: string[];
   /** How many agents this workspace has. Differs between A and B on purpose. */
   agentCount: number;
+  /** What this workspace spent inside the window, to the cent. */
+  spendUsd: number;
+  /** How many tokens it moved inside the window. */
+  tokens: number;
+  /** How many of those were cache reads, on the rows that recorded a split. */
+  cachedTokens: number;
+  /** Run ids, in the order they were created. The first of them ended in error. */
+  runs: string[];
 }
 
-/** How many agents each label gets. Different numbers, so a leaked row changes a count. */
-const AGENT_COUNT: Record<string, number> = { a: 2, b: 3 };
+/**
+ * The shape of one workspace's day, per label.
+ *
+ * EVERY NUMBER DIFFERS BETWEEN A AND B, and that is the assertion's whole mechanism rather than
+ * decoration. An isolation suite whose two tenants hold the same data cannot tell a correctly
+ * scoped aggregate from one that reads everything and happens to halve — and "happens to halve" is
+ * precisely what a two-workspace test database produces.
+ */
+const SHAPE: Record<string, { agents: number; runs: number; usd: number; tokens: number; cached: number }> = {
+  a: { agents: 2, runs: 3, usd: 0.75, tokens: 300, cached: 100 },
+  b: { agents: 3, runs: 5, usd: 2.25, tokens: 700, cached: 250 },
+};
 
 export async function seedActivity(db: Db, label: string): Promise<ActivityFixture> {
   const identity = new IdentityRepository(db);
@@ -59,9 +80,9 @@ export async function seedActivity(db: Db, label: string): Promise<ActivityFixtu
   const ctx = systemContextFor(ws.id, newRequestId());
   const agentRepo = new AgentRepository(db);
 
-  const count = AGENT_COUNT[label] ?? 2;
+  const shape = SHAPE[label] ?? SHAPE["a"]!;
   const agents: string[] = [];
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < shape.agents; i++) {
     // THE SAME SLUGS IN BOTH WORKSPACES, on purpose and for the reason the main suite shares an MCP
     // server id: `support_bot` is what two tenants who both generated a support bot actually
     // produce, and migration 008's `UNIQUE (workspace_id, slug)` is what makes it possible. A suite
@@ -72,7 +93,75 @@ export async function seedActivity(db: Db, label: string): Promise<ActivityFixtu
     agents.push(slug);
   }
 
-  return { ctx, label, agents, agentCount: count };
+  // A DAY OF WORK, INSIDE THE WINDOW EVERY ASSERTION BELOW RESOLVES. Each run is placed an hour
+  // apart ending an hour before `ACTIVITY_NOW`, so every row is comfortably inside a 24h window and
+  // none of them straddles a bucket edge — a fixture that landed rows on the boundary would make a
+  // failure here indistinguishable from an off-by-one in `bucketIndex`, which has its own suite.
+  const trace = new TraceStore(db);
+  const billing = new BillingRepository(db);
+  const runs: string[] = [];
+  const perRunUsd = shape.usd / shape.runs;
+  const perRunTokens = Math.round(shape.tokens / shape.runs);
+  const perRunCached = Math.round(shape.cached / shape.runs);
+
+  for (let i = 0; i < shape.runs; i++) {
+    const runId = randomUUID();
+    const at = new Date(ACTIVITY_NOW.getTime() - (i + 1) * 3_600_000).toISOString();
+    const ended = new Date(Date.parse(at) + 2_000).toISOString();
+    // ONE RUN IN EACH WORKSPACE ENDS IN ERROR, because the crashed-run rule is the one §2 says must
+    // not be reintroduced: a run that died still spent money on the steps it completed.
+    const failed = i === 0;
+    const run: Run = {
+      id: runId,
+      agent_id: agents[i % agents.length]!,
+      provider: "anthropic",
+      model: "claude-haiku-4-5",
+      status: failed ? "error" : "completed",
+      started_at: at,
+      ended_at: ended,
+      // DELIBERATELY ZERO ON THE RUN ROW, and this is the fixture's sharpest edge. Nothing on this
+      // tab may read `runs.cost`; a fixture that filled it would let a query that did read it pass
+      // every assertion below.
+      cost: 0,
+      tokens: 0,
+      error: failed ? "boom" : null,
+    };
+    await trace.upsertRun(ctx, run);
+
+    const step: Step = {
+      id: randomUUID(), run_id: runId, seq: 0, type: "llm_call", name: "call_model",
+      input: { q: label }, output: { a: label }, state_before: null, state_after: null,
+      tokens: perRunTokens, cost: perRunUsd, latency_ms: 500 + i * 100, error: null,
+      parent_step_id: null, started_at: at,
+    };
+    await trace.insertStep(ctx, step);
+
+    await billing.record(ctx, {
+      kind: "llm.provider",
+      idempotencyKey: `activity-${label}-${runId}`,
+      runId,
+      provider: "anthropic",
+      model: "claude-haiku-4-5",
+      inputTokens: perRunTokens - perRunCached,
+      outputTokens: 0,
+      cachedInputTokens: perRunCached,
+      totalTokens: perRunTokens,
+      costUsd: perRunUsd,
+      occurredAt: at,
+    });
+    runs.push(runId);
+  }
+
+  return {
+    ctx,
+    label,
+    agents,
+    agentCount: shape.agents,
+    spendUsd: perRunUsd * shape.runs,
+    tokens: perRunTokens * shape.runs,
+    cachedTokens: perRunCached * shape.runs,
+    runs,
+  };
 }
 
 /**
@@ -91,6 +180,7 @@ export async function activitySuite(
   const A = await seedActivity(db, "a");
   const B = await seedActivity(db, "b");
   const store = new ActivityStore(db);
+  const w: Window = resolveWindow("24h", ACTIVITY_NOW, null);
 
   // --- the directory every other module resolves its names through -----------------------------
   //
@@ -153,4 +243,34 @@ export async function activitySuite(
     (await store.agentDirectory(nowhere)).size === 0,
     "...and its directory is empty rather than everybody's",
   );
+
+  // --- module 2: spend ------------------------------------------------------------------------
+
+  const spendA = await store.spend(A.ctx, w);
+  const spendB = await store.spend(B.ctx, w);
+  const cents = (n: number): number => Math.round(n * 100);
+
+  check(cents(spendA.usd) === cents(A.spendUsd), `A's spend is A's ($${spendA.usd.toFixed(2)})`);
+  check(cents(spendB.usd) === cents(B.spendUsd), `B's spend is B's ($${spendB.usd.toFixed(2)})`);
+  // The assertion that catches the bug this file exists for: an unscoped SUM returns the pair.
+  check(
+    cents(spendA.usd) !== cents(A.spendUsd + B.spendUsd),
+    "...and neither is the sum of both, which is what an unscoped SUM returns",
+  );
+  check(spendA.events === A.runs.length, "A counts only its own usage rows");
+  check(spendB.events === B.runs.length, "B counts only its own");
+  check(
+    spendA.byProvider.reduce((n, p) => n + cents(p.usd), 0) === cents(A.spendUsd),
+    "the provider split adds up to A's own total and no further",
+  );
+
+  // --- module 3: token volume -----------------------------------------------------------------
+
+  const tokensA = await store.tokens(A.ctx, w);
+  const tokensB = await store.tokens(B.ctx, w);
+  check(tokensA.total === A.tokens, `A's volume is A's (${tokensA.total})`);
+  check(tokensB.total === B.tokens, `B's volume is B's (${tokensB.total})`);
+  check(tokensA.total !== A.tokens + B.tokens, "...and not both workspaces' tokens under A's name");
+  check(tokensA.cached === A.cachedTokens, "and the cached split is scoped too");
+  check(tokensB.cached === B.cachedTokens, "...on both sides");
 }

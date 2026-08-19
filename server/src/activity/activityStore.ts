@@ -59,6 +59,68 @@ export interface AgentRef {
   archived: boolean;
 }
 
+/**
+ * §2's rollup: what the workspace spent in the range, against what it may spend.
+ *
+ * `usd` IS A FLOOR WHENEVER `costKnown` IS FALSE, and the pair travels together for the reason
+ * `SpendTotals` in the billing repository makes them travel together: SUM skips NULLs, so a
+ * workspace with one unpriced model would otherwise be shown a confident total that is short. §2
+ * asks for `$12.40 · 2 agents unpriced` rather than a number that quietly omits them, and the two
+ * counts below are what a card needs to write that sentence.
+ */
+export interface SpendRollup {
+  /** USD in the window. A floor when `costKnown` is false. */
+  usd: number;
+  /**
+   * How many usage rows the window held at all.
+   *
+   * §3.5's EMPTY-IS-NOT-ZERO, AS A FIELD RATHER THAN AS A GUESS. `usd === 0` is two completely
+   * different sentences — "nothing was billed here" and "everything billed here was free" — and a
+   * card cannot tell them apart from the total. Zero rows renders `--`; rows that summed to nothing
+   * renders `$0.00`, which is a real figure about a real week.
+   */
+  events: number;
+  /** The same for the previous equivalent window, for §3.3's delta. Null when there was nothing. */
+  previousUsd: number | null;
+  /** Usage rows in the window whose cost could not be computed. */
+  unpricedEvents: number;
+  /** The models behind those rows, by name. Names only — see §6's payload discipline. */
+  unpricedModels: string[];
+  /** How many distinct agents have incomplete spend because of them. §2's `2 agents unpriced`. */
+  unpricedAgents: number;
+  costKnown: boolean;
+  /** §2's ring: spend against budget. Null when this workspace has set no ceiling of its own. */
+  budgetUsd: number | null;
+  /** The provider split the ring's segments are drawn from, largest first. */
+  byProvider: { provider: string; usd: number; costKnown: boolean }[];
+}
+
+/**
+ * §3's volume: how many tokens moved, and how many of them were cache reads.
+ *
+ * THE SPLIT IS HONEST ABOUT ITS OWN COVERAGE, which is the whole difficulty of this module. A usage
+ * row records `cached_input_tokens` only when the caller HAD a split to record — `meterModelCall`
+ * does, because the Anthropic SDK reports cache reads separately, and `meterStep` does not, because
+ * the frozen event schema puts one `tokens` number on a step and no breakdown under it. So a null
+ * there means "not broken out", NOT "none cached", and reporting `cached: 0` across a workspace
+ * whose agents all run through `meterStep` would be a confident zero about a figure nobody measured
+ * — the same false-zero this product has now fixed twice.
+ *
+ * `unsplitTokens` is therefore carried beside the split, and a card whose entire volume is unsplit
+ * renders §3.5's `--` for the cached figure rather than a zero. Fresh is deliberately NOT a field:
+ * it is `total - cached` and a second stored copy of a subtraction is a second thing to disagree.
+ */
+export interface TokenVolume {
+  total: number;
+  /** How many usage rows the window held. §3.5's empty-is-not-zero — see `SpendRollup.events`. */
+  events: number;
+  previousTotal: number | null;
+  /** Tokens read from cache, across rows that recorded a split. */
+  cached: number;
+  /** Tokens on rows that recorded no split at all. See the note above — this is not zero-cached. */
+  unsplitTokens: number;
+}
+
 export class ActivityStore {
   /** Shares the trace store's database: same file, single writer. See TraceStore.database(). */
   constructor(private db: Db) {}
@@ -150,6 +212,160 @@ export class ActivityStore {
       kind: String(row["kind"]),
       createdAt: String(row["created_at"]),
       members: asInt(row["members"]),
+    };
+  }
+
+  /**
+   * §2's spend rollup. Three statements, and the count does not move with the number of agents.
+   *
+   * ONE SCAN COVERS BOTH WINDOWS. The bound runs from `previousFrom` to `to` — the current window
+   * and the one before it, contiguous by construction — and a `CASE WHEN occurred_at >= from`
+   * separates them inside the aggregate. Two queries would read the same index twice and, worse,
+   * could disagree about the boundary between them: a row at exactly `from` counted by both, or by
+   * neither, is a run that appears twice on a dashboard or not at all.
+   *
+   * `SUM(CASE WHEN … THEN cost_usd ELSE 0 END)` AND NOT `COALESCE(cost_usd, 0)`. The difference is
+   * the whole unpriced rule: a NULL cost passes through the CASE as NULL, SUM skips it, and the
+   * total is a floor that the unpriced count beside it declares. Coalescing would price an unknown
+   * model at zero, which is the exact bug v0.1.9 shipped and which §2 forbids by name.
+   *
+   * THE UNPRICED TEST IS `cost_usd IS NULL`, WHICH IS WHAT WAS RECORDED, not `isPriced(model)` asked
+   * of today's table. A ledger row records what was known when the money was spent. Re-pricing
+   * history against the current `pricing.json` would silently rewrite a past total the day somebody
+   * adds an entry — a number that changed without anything happening, on a page whose figures get
+   * screenshotted and quoted.
+   *
+   * A CRASHED RUN'S SPEND IS COUNTED, and it is counted because of where these rows come from
+   * rather than because of anything this query does. `runs.cost` is written by `run_end`, which a
+   * run that died mid-graph never emits; `usage_events` is written per STEP as the step arrives, so
+   * the completed steps of a crashed run hold real spend and are here. Reading the run-level field
+   * instead is the shipped bug §2 says not to reintroduce, and the reason this file never touches
+   * it is that there is no join to `runs` in this statement at all.
+   */
+  async spend(ctx: TenantContext, w: Window): Promise<SpendRollup> {
+    const q = this.q(ctx);
+
+    const totals = await q.get<Record<string, unknown>>(
+      `SELECT
+         SUM(CASE WHEN occurred_at >= ? THEN cost_usd END)                       AS usd,
+         SUM(CASE WHEN occurred_at <  ? THEN cost_usd END)                       AS prev_usd,
+         COUNT(CASE WHEN occurred_at >= ? THEN 1 END)                            AS events,
+         COUNT(CASE WHEN occurred_at <  ? THEN 1 END)                            AS prev_events,
+         COUNT(CASE WHEN occurred_at >= ? AND cost_usd IS NULL THEN 1 END)       AS unpriced
+       FROM usage_events
+       WHERE workspace_id = ? AND occurred_at >= ? AND occurred_at < ?`,
+      [w.from, w.from, w.from, w.from, w.from, ctx.workspaceId, w.previousFrom, w.to],
+    );
+
+    // The models behind the unpriced rows, and how many agents they leave short. GROUPED BY MODEL
+    // RATHER THAN LISTED PER ROW: a workspace running one unpriced model for a week has thousands
+    // of rows and one name to show, and §6 bounds this payload to names and counts.
+    //
+    // The join to `runs` is LEFT and carries the workspace on both sides, exactly as `spendByAgent`
+    // does: a usage row with no run — a generation, a plan, a judge verdict — is real money and
+    // must not be dropped from the count of what is unpriced.
+    const unpriced = await q.all<Record<string, unknown>>(
+      `SELECT u.model AS model, COUNT(DISTINCT r.agent_id) AS agents
+         FROM usage_events u
+         LEFT JOIN runs r ON r.id = u.run_id AND r.workspace_id = u.workspace_id
+        WHERE u.workspace_id = ? AND u.occurred_at >= ? AND u.occurred_at < ?
+          AND u.cost_usd IS NULL
+        GROUP BY u.model`,
+      bounds(ctx, w),
+    );
+
+    // §2's provider split, for the ring's segments. `provider` and not `model`: the ring answers
+    // "who are we paying", and Model Mix (§6) answers "what are we running" — two questions, and
+    // putting eleven model ids on a ring gauge would answer neither.
+    const providers = await q.all<Record<string, unknown>>(
+      `SELECT COALESCE(provider, '') AS provider,
+              SUM(cost_usd) AS usd,
+              COUNT(CASE WHEN cost_usd IS NULL THEN 1 END) AS unpriced
+         FROM usage_events
+        WHERE workspace_id = ? AND occurred_at >= ? AND occurred_at < ?
+        GROUP BY COALESCE(provider, '')`,
+      bounds(ctx, w),
+    );
+
+    const balance = await q.get<{ ceiling_usd: unknown }>(
+      `SELECT ceiling_usd FROM workspace_balances WHERE workspace_id = ?`,
+      [ctx.workspaceId],
+    );
+
+    const unpricedModels = unpriced
+      .map((r) => String(r["model"] ?? ""))
+      .filter((m) => m.length > 0)
+      .sort();
+    // The union across models rather than the sum of their per-model counts: one agent running two
+    // unpriced models is one agent short, not two. A DISTINCT per group cannot see across groups,
+    // so the maximum is the honest floor available from this shape — and it is a floor that is
+    // correct in the ordinary case of a single unpriced model.
+    const unpricedAgents = unpriced.reduce((n, r) => Math.max(n, asInt(r["agents"])), 0);
+    const events = asInt(totals?.["events"]);
+    const previousEvents = asInt(totals?.["prev_events"]);
+
+    return {
+      usd: Number(totals?.["usd"] ?? 0),
+      // NULL, NOT ZERO, WHEN THE PREVIOUS WINDOW HELD NOTHING AT ALL. §3.3's delta against a
+      // genuine zero is undefined, and reporting `$0.00` for a window nobody billed would make the
+      // badge read `+100%` for the first dollar a workspace ever spends.
+      previousUsd: previousEvents === 0 ? null : Number(totals?.["prev_usd"] ?? 0),
+      unpricedEvents: asInt(totals?.["unpriced"]),
+      unpricedModels,
+      unpricedAgents,
+      costKnown: asInt(totals?.["unpriced"]) === 0,
+      budgetUsd:
+        balance?.ceiling_usd === null || balance?.ceiling_usd === undefined
+          ? null
+          : Number(balance.ceiling_usd),
+      events,
+      byProvider: providers
+        .map((r) => ({
+          // An empty provider is a row nothing named one on — storage, sandbox seconds. It is real
+          // money and belongs in the ring, so it is labelled rather than dropped.
+          provider: String(r["provider"] ?? "") || "platform",
+          usd: Number(r["usd"] ?? 0),
+          costKnown: asInt(r["unpriced"]) === 0,
+        }))
+        .sort((a, b) => b.usd - a.usd),
+    };
+  }
+
+  /**
+   * §3's token volume, with the cached split. One statement, both windows.
+   *
+   * `total_tokens` IS THE COLUMN, and it is the derived one the billing repository writes: a caller
+   * that gave a split has already said what the total is, so the row carries the sum rather than
+   * asking for it twice. Summing `input + output + cached` here instead would be a second
+   * derivation of a number the ledger already holds, and the two would part company on the first
+   * row that recorded a total and no split — which is every row `meterStep` writes.
+   *
+   * THE CACHED SUM COALESCES AND THE UNSPLIT SUM DOES NOT, and that asymmetry is the point. Cache
+   * reads add up across the rows that have them, so a NULL there contributes nothing to the sum;
+   * but a row with a NULL split is not a row with no cache, it is a row nobody measured, and its
+   * tokens are counted separately so the card can say how much of the volume the split covers. See
+   * `TokenVolume`.
+   */
+  async tokens(ctx: TenantContext, w: Window): Promise<TokenVolume> {
+    const row = await this.q(ctx).get<Record<string, unknown>>(
+      `SELECT
+         SUM(CASE WHEN occurred_at >= ? THEN total_tokens END)                        AS total,
+         COUNT(CASE WHEN occurred_at >= ? THEN 1 END)                                 AS events,
+         SUM(CASE WHEN occurred_at <  ? THEN total_tokens END)                        AS prev_total,
+         COUNT(CASE WHEN occurred_at <  ? THEN 1 END)                                 AS prev_events,
+         SUM(CASE WHEN occurred_at >= ? THEN COALESCE(cached_input_tokens, 0) END)    AS cached,
+         SUM(CASE WHEN occurred_at >= ? AND cached_input_tokens IS NULL
+                  THEN total_tokens END)                                              AS unsplit
+       FROM usage_events
+       WHERE workspace_id = ? AND occurred_at >= ? AND occurred_at < ?`,
+      [w.from, w.from, w.from, w.from, w.from, w.from, ctx.workspaceId, w.previousFrom, w.to],
+    );
+    return {
+      total: asInt(row?.["total"]),
+      events: asInt(row?.["events"]),
+      previousTotal: asInt(row?.["prev_events"]) === 0 ? null : asInt(row?.["prev_total"]),
+      cached: asInt(row?.["cached"]),
+      unsplitTokens: asInt(row?.["unsplit"]),
     };
   }
 }

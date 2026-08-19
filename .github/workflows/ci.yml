@@ -313,6 +313,13 @@ jobs:
           # nobody could name. Cross-highlighting is only coherent because all four modules share
           # this, so a drift here is four modules quietly describing different days.
           npm run test:activity-range
+          # §2's four honesty rules, every one of which is a bug this product has already shipped
+          # once and every one of which fails SILENTLY — the number is present, plausible and wrong
+          # on a card built to be screenshotted. A crashed run still spent money on its completed
+          # steps; cache reads bill at the cached rate; an unpriced model is unknown and never $0;
+          # and cost is summed from what was spent, never from `runs.cost`. The fixture leaves that
+          # column at zero on purpose, so a query that read it fails here rather than in production.
+          npm run test:activity-spend
 
       - name: cost, abuse and the data lifecycle
         working-directory: server
