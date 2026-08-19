@@ -68,10 +68,21 @@ export function fmtLatency(ms: number | null | undefined): string {
   return fmtDuration(ms);
 }
 
-/** 0..1 → "67%". */
-export function fmtPercent(ratio: number | null | undefined): string {
+/**
+ * 0..1 → "67%" for a share, "47.2%" for progress.
+ *
+ * TWO PRECISIONS, BECAUSE THEY ANSWER DIFFERENT QUESTIONS. A share of a total is read as a
+ * proportion and a decimal on it is noise. A progress readout is watched while it moves, and a
+ * figure that only advances in whole steps reads as coarse and, on a long drain, as stuck — next
+ * to four-decimal costs on the same strip.
+ */
+export function fmtPercent(
+  ratio: number | null | undefined,
+  precision: "share" | "progress" = "progress",
+): string {
   if (ratio == null) return "—";
-  return `${Math.round(ratio * 100)}%`;
+  const pct = ratio * 100;
+  return precision === "share" ? `${Math.round(pct)}%` : `${pct.toFixed(1)}%`;
 }
 
 export function jsonPretty(v: unknown): string {

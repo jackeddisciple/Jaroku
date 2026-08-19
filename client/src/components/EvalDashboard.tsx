@@ -164,7 +164,7 @@ export function ComparisonTable({
                     {p.succeeded}/{p.total}
                   </span>
                   {p.failed > 0 && (
-                    <span className="text-faint text-[10px] ml-1">{fmtPercent(p.successRate)}</span>
+                    <span className="text-faint text-[10px] ml-1">{fmtPercent(p.successRate, "share")}</span>
                   )}
                 </td>
               </tr>

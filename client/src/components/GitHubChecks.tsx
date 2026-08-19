@@ -207,7 +207,7 @@ export function ChecksRegion({ view }: { view: GithubView }) {
                 {latest.conclusion === "failure" ? <XIcon size={ICON.xs} /> : <CheckIcon size={ICON.xs} />}
               </span>
               <span className="text-muted">
-                #{latest.prNumber} · {latest.passRate == null ? "unscored" : fmtPercent(latest.passRate)}
+                #{latest.prNumber} · {latest.passRate == null ? "unscored" : fmtPercent(latest.passRate, "share")}
               </span>
               <span className="text-faint">{relTime(latest.createdAt)}</span>
             </div>
