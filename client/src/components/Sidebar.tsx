@@ -488,6 +488,29 @@ function AccountRow() {
 }
 
 /**
+ * A section's heading inside the sidebar's one scroller.
+ *
+ * ONE RULE, STATED ONCE. The column drew four dividers at four different top margins — 8px after
+ * the nav, 4px after the pinned group, none on the Runs header, none on the footer — which reads
+ * as a rhythm error down a 280px column even when nobody can say which line is wrong. The rule is:
+ * a hairline sits above a section's label, never between a label and its own rows.
+ *
+ * Sticky, because a single scroller needs its headings to stay put. `bg-bg` rather than
+ * transparent for the same reason: a sticky header that rows scroll through is worse than no
+ * header at all.
+ */
+function SectionHeader({ label, count, first = false }: { label: string; count: number; first?: boolean }) {
+  return (
+    <div
+      className={`sticky top-0 z-10 flex items-center bg-bg px-4 py-1.5 ${first ? "" : "mt-1 border-t border-hair"}`}
+    >
+      <span className={TYPE.panelLabel}>{label}</span>
+      <span className="ml-auto text-[11px] tabular-nums text-faint">{count}</span>
+    </div>
+  );
+}
+
+/**
  * The six status filters, behind one funnel.
  *
  * THEY WERE SIX TEXT TABS IN A NON-WRAPPING ROW, and at the sidebar's default width the row
@@ -724,23 +747,31 @@ export function Sidebar() {
 
 
 
-      {/* PINNED, above the rest of the list — §2's order for this column.
-          Only when there is something pinned: an empty PINNED heading is the same noise as an empty
-          section in the Threads view, and the same rule applies. Pinning is `P` on a selected thread,
-          which pins that thread's AGENT — see uiStore's pins for why it is per person and not shared. */}
-      {pinned.length > 0 && (
-        <div className="shrink-0">
-          <div className="flex items-center px-4 pt-2 pb-1">
-            <span className={TYPE.panelLabel}>Pinned</span>
-            <span className="ml-auto text-faint text-[11px]">{pinned.length}</span>
-          </div>
-          {pinned.map((a) => <AgentRow key={`pinned-${a.agent_id}`} agent={a} />)}
-          <div className="mt-1 border-t border-hair" />
-        </div>
-      )}
+      {/* ONE SCROLLER, WITH THE SECTION HEADINGS PINNED TO IT.
+          There were two: the agent list capped at `max-h-[38%]` with its own `overflow-auto`, and
+          the runs list below it on `flex-1` with another. Two independently scrolling regions in
+          one 280px column, which also meant two ten-pixel scrollbars stacked vertically inside it
+          — and a 38% cap that decides how many agents you may see regardless of how many runs
+          there are to look at.
 
-      {/* agent list */}
-      <div className="max-h-[38%] overflow-auto shrink-0">
+          The section rule is one rule now, and it is stated once here rather than four times at
+          four different offsets: a hairline sits ABOVE a section's label and never between a label
+          and its own rows. `sticky` on the header is what makes a single scroller readable — the
+          heading you are under stays where you can see it. */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* PINNED, above the rest of the list — §2's order for this column.
+            Only when there is something pinned: an empty PINNED heading is the same noise as an
+            empty section in the Threads view, and the same rule applies. Pinning is `P` on a
+            selected thread, which pins that thread's AGENT — see uiStore's pins for why it is per
+            person and not shared. */}
+        {pinned.length > 0 && (
+          <>
+            <SectionHeader label="Pinned" count={pinned.length} first />
+            {pinned.map((a) => <AgentRow key={`pinned-${a.agent_id}`} agent={a} />)}
+          </>
+        )}
+
+        {pinned.length > 0 && <SectionHeader label="All agents" count={visible.length} />}
         {visible.length === 0 ? (
           <EmptyState
             size="inline"
@@ -755,14 +786,9 @@ export function Sidebar() {
         ) : (
           visible.map((a) => <AgentRow key={a.agent_id} agent={a} />)
         )}
-      </div>
 
-      {/* runs — how you re-open a past trace */}
-      <div className="mt-1 flex shrink-0 items-center border-t border-hair px-4 py-2">
-        <span className={TYPE.panelLabel}>Runs</span>
-        <span className="ml-auto text-faint text-[11px]">{runList.length}</span>
-      </div>
-      <div className="flex-1 overflow-auto">
+        {/* runs — how you re-open a past trace */}
+        <SectionHeader label="Runs" count={runList.length} />
         {runList.length === 0 ? (
           <EmptyState size="inline" icon={ActivityIcon} title="No runs yet" />
         ) : (
