@@ -9,10 +9,19 @@ const DOT: Record<string, string> = {
   connecting: "bg-run",
   closed: "bg-err",
 };
+// ONE WORD ON SCREEN, THE SENTENCE ON HOVER. `disconnected — retrying…` is a sentence set in a
+// code font in the app's chrome, and it was the widest thing in the strip at exactly the moment
+// the product had least to say. The state is a colour and a word; what the product is doing about
+// it is a detail, and a detail belongs in a tooltip.
 const LABEL: Record<string, string> = {
   open: "connected",
-  connecting: "connecting…",
-  closed: "disconnected — retrying…",
+  connecting: "connecting",
+  closed: "disconnected",
+};
+const DETAIL: Record<string, string> = {
+  open: "Connected to the server",
+  connecting: "Connecting to the server…",
+  closed: "Disconnected — retrying",
 };
 
 export function StatusBar() {
@@ -46,9 +55,17 @@ export function StatusBar() {
 
   return (
     <div className="flex h-7 shrink-0 items-center gap-3 border-t border-hair px-4 font-mono text-[11px] text-muted tabular-nums">
-      <span className="flex items-center gap-1.5">
-        <span className={`w-2 h-2 rounded-full ${DOT[connection]}`} />
-        {LABEL[connection]}
+      {/* The dot moves while it is connecting. Every other in-flight mark in this app pulses —
+          the agent dot, the run glyph, the deploy chip — and this one indicator, the one that says
+          whether any of the others can update at all, was static in all three states with only its
+          colour changing. */}
+      <span className="flex items-center gap-1.5 font-sans" title={DETAIL[connection]}>
+        <span
+          className={`h-1.5 w-1.5 rounded-full ${DOT[connection]} ${
+            connection === "connecting" ? "animate-stream-pulse motion-reduce:animate-none" : ""
+          }`}
+        />
+        <span className="text-[10px] text-faint">{LABEL[connection]}</span>
       </span>
       {run && (
         <>
