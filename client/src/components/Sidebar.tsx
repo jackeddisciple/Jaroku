@@ -3,7 +3,7 @@
 // Bottom-anchored: Settings and the user/plan chip. Restraint-first: rows float on the panel,
 // separated by spacing and a thin accent on the active one — never boxed.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { orderedRuns, useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import type { AgentSummary, RunSummary, RunStatus } from "../types.ts";
@@ -24,6 +24,7 @@ import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { EmptyState } from "./EmptyState.tsx";
+import { FilterIcon } from "./agentIcons.tsx";
 import {
   ActivityIcon, GitForkIcon, GithubIcon, GlobeIcon, HashIcon, InboxIcon,
   LoaderIcon, PauseIcon, PencilIcon, PlusIcon, SearchIcon, SettingsIcon, SparklesIcon, XIcon,
@@ -476,6 +477,105 @@ function AccountRow() {
   );
 }
 
+/**
+ * The six status filters, behind one funnel.
+ *
+ * THEY WERE SIX TEXT TABS IN A NON-WRAPPING ROW, and at the sidebar's default width the row
+ * overflowed its own pane: `Synced` was cut mid-word at the edge and `Drafts` was not on screen at
+ * all. A control row that clips two of its own options at the width it ships at has failed before
+ * any question of style is asked — and widening the words was never the fix, because the pane is
+ * resizable and there is no width at which six labels and a list both fit comfortably.
+ *
+ * The funnel carries the current choice: it is muted with no dot while the filter is `all`, and
+ * accented with the count beside it otherwise, so the state is legible without opening anything.
+ * Nothing is removed — the same six, in the same order, with the same counts and the same rule
+ * about Archived appearing only when there is something in it.
+ */
+function FilterMenu({
+  filter,
+  setFilter,
+  counts,
+  className = "",
+}: {
+  filter: Filter;
+  setFilter: (f: Filter) => void;
+  counts: Record<"running" | "deployed" | "synced" | "drafts" | "archived", number>;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const entries: { id: Filter; label: string; count?: number }[] = [
+    { id: "all", label: "All" },
+    { id: "running", label: "Running", count: counts.running },
+    { id: "deployed", label: "Deployed", count: counts.deployed },
+    { id: "synced", label: "Synced", count: counts.synced },
+    { id: "drafts", label: "Drafts", count: counts.drafts },
+  ];
+  // Only when there is something in it. An Archived entry on a workspace that has never archived
+  // anything leads to an empty state, which is the same noise an empty section is in Threads.
+  if (counts.archived > 0) entries.push({ id: "archived", label: "Archived", count: counts.archived });
+
+  const current = entries.find((e) => e.id === filter);
+  const filtering = filter !== "all";
+
+  return (
+    <div ref={ref} className={`relative ${className}`}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title={filtering ? `Filtered: ${current?.label}` : "Filter agents"}
+        aria-label={filtering ? `Filtered: ${current?.label}` : "Filter agents"}
+        aria-expanded={open}
+        className={`flex h-6 shrink-0 items-center gap-1 rounded-control px-1 transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+          filtering || open ? "bg-active text-accent" : "text-muted hover:bg-active hover:text-ink"
+        }`}
+      >
+        <FilterIcon size={ICON.sm} />
+        {filtering && current?.count != null && (
+          <span className="text-[10px] tabular-nums">{current.count}</span>
+        )}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-30 mt-1 min-w-[170px] rounded-card border border-edge bg-panel p-1 shadow-floating">
+          {entries.map((e) => (
+            <button
+              key={e.id}
+              onClick={() => {
+                setFilter(e.id);
+                setOpen(false);
+              }}
+              className={`flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-[12px] transition-colors duration-fast ${
+                filter === e.id ? "bg-active text-ink" : "text-muted hover:bg-active/40 hover:text-ink"
+              }`}
+            >
+              {e.label}
+              {e.count != null && e.count > 0 && (
+                <span className="ml-auto text-[11px] tabular-nums text-faint">{e.count}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Sidebar() {
   const runs = useTraceStore((s) => s.runs);
   const agents = useBuildStore((s) => s.agents);
@@ -542,14 +642,6 @@ export function Sidebar() {
   // How wide the window is, and whether the server says there is anything behind it.
   const historyWindow = useTraceStore((st) => st.historyWindow);
   const historyComplete = useTraceStore((st) => st.historyComplete);
-  const tab = (id: Filter, label: string, count?: number) => (
-    <button
-      onClick={() => setFilter(id)}
-      className={`text-[11px] px-2 py-1 rounded-control transition-colors ${filter === id ? "bg-active text-ink" : "text-muted hover:text-ink"}`}
-    >
-      {label}{count != null && count > 0 && <span className="ml-1 text-faint">{count}</span>}
-    </button>
-  );
 
   return (
     // rail | column. §2's four destinations become the rail — the sidebar itself still never
@@ -565,11 +657,12 @@ export function Sidebar() {
           column's own name, which is where a creation affordance goes. */}
       <div className="flex shrink-0 items-center gap-1 px-3 pt-3">
         <span className={TYPE.panelLabel}>Agents</span>
+        <FilterMenu filter={filter} setFilter={setFilter} counts={counts} className="ml-auto" />
         <button
           onClick={() => selectAgent(null)}
           title="New agent"
           aria-label="New agent"
-          className={`ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
             activeAgentId === null ? "bg-active text-accent" : "text-muted hover:bg-active hover:text-ink"
           }`}
         >
@@ -591,18 +684,6 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* filter tabs */}
-      <div className="flex items-center gap-1 px-3 pt-2 pb-1 shrink-0">
-        {tab("all", "All")}
-        {tab("running", "Running", counts.running)}
-        {tab("deployed", "Deployed", counts.deployed)}
-        {tab("synced", "Synced", counts.synced)}
-        {tab("drafts", "Drafts", counts.drafts)}
-        {/* Only when there is something in it. An Archived tab on a workspace that has never
-            archived anything is a tab that leads to an empty state, which is the same noise an empty
-            section is in the Threads view. */}
-        {counts.archived > 0 && tab("archived", "Archived", counts.archived)}
-      </div>
 
       {/* PINNED, above the rest of the list — §2's order for this column.
           Only when there is something pinned: an empty PINNED heading is the same noise as an empty
