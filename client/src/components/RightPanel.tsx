@@ -29,11 +29,16 @@ import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { ICON } from "../lib/tokens.ts";
 import {
   ActivityIcon,
+  AlertTriangleIcon,
+  ArrowDownIcon,
+  ArrowUpDownIcon,
+  ArrowUpIcon,
   DollarSignIcon,
   GitBranchIcon,
   GithubIcon,
   KeyIcon,
   PlugIcon,
+  RefreshIcon,
   RocketIcon,
   SparklesIcon,
   WrenchIcon,
@@ -74,6 +79,43 @@ const TABS: { id: RightTab; label: string; Icon: (p: { size?: number }) => React
   { id: "github", label: "GitHub", Icon: GithubIcon },
   { id: "usage", label: "Usage", Icon: DollarSignIcon },
 ];
+
+/**
+ * The GitHub tab's badge, drawn.
+ *
+ * The server decides what the badge SAYS — `githubSync.badgeFor` owns the state table, and a
+ * second opinion here about what ↕ means is exactly what that comment warns against. What it does
+ * not get to decide is how the mark is drawn: it was arriving as literal `⟳ ⚠ ↕ ↑ ↓` characters
+ * set in the text font, so the one mark in this rail that is not a real icon rendered at the
+ * font's weight rather than at ICON.strokeWidth, beside nine glyphs that do.
+ *
+ * So: the leading character picks a glyph and the numeric tail stays text. The tone is unchanged —
+ * amber for anything in flight, the error tone for a stopped state, and diverged is deliberately
+ * NOT amber, because it is not something working, it is something waiting for a person.
+ */
+function GithubBadge({ badge, syncing }: { badge: string; syncing: boolean }) {
+  const head = badge[0] ?? "";
+  const count = badge.slice(1);
+  const Glyph =
+    head === "⟳" ? RefreshIcon
+      : head === "⚠" ? AlertTriangleIcon
+      : head === "↕" ? ArrowUpDownIcon
+      : head === "↑" ? ArrowUpIcon
+      : ArrowDownIcon;
+  const tone = head === "⟳" ? "text-run" : head === "⚠" || head === "↕" ? "text-err" : "text-muted";
+  return (
+    <span
+      title={`GitHub: ${badge}`}
+      className={`absolute -right-1 -top-1 inline-flex items-center rounded-chip bg-bg px-0.5 leading-none ${tone}`}
+    >
+      {/* The circular arrow IS the spinner — it is drawn as three quarters of a turn for exactly
+          that reason, and a refresh mark that does not turn while something is refreshing is the
+          one glyph in the app whose shape makes a promise its motion breaks. */}
+      <Glyph size={ICON.badge} className={syncing ? "animate-spin motion-reduce:animate-none" : undefined} />
+      {count && <span className="font-mono text-[10px] tabular-nums">{count}</span>}
+    </span>
+  );
+}
 
 export function RightPanel() {
   const rightTab = useUiStore((s) => s.rightTab);
@@ -229,14 +271,7 @@ export function RightPanel() {
                   amber, deliberately: it is not something working, it is something waiting for a
                   person, and wearing the running colour would make it read as progress. */}
               {t.id === "github" && githubBadge ? (
-                <span
-                  title={`GitHub: ${githubBadge}`}
-                  className={`absolute -right-0.5 -top-0.5 font-mono text-[10px] leading-none tabular-nums ${
-                    githubBadge === "⟳" ? "text-run" : githubBadge === "⚠" || githubBadge === "↕" ? "text-err" : "text-muted"
-                  }`}
-                >
-                  {githubBadge}
-                </span>
+                <GithubBadge badge={githubBadge} syncing={githubBadge === "⟳"} />
               ) : null}
               {t.id === "secrets" && secretsNeedAttention ? (
                 <span
