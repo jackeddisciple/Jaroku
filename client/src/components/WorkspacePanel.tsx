@@ -33,7 +33,7 @@ import { fmtUntil, relTime } from "../lib/format.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
-import { EmptyState } from "./EmptyState.tsx";
+import { EmptyState, LoadingLine } from "./EmptyState.tsx";
 import { Truncate } from "./Truncate.tsx";
 import {
   ActivityIcon, AlertTriangleIcon, CheckIcon, UserCircleIcon, XIcon,
@@ -283,12 +283,14 @@ function MembersSection() {
           <span className={TYPE.panelLabel}>Members</span>
           <span className="ml-auto text-[11px] text-faint">{members.length}</span>
         </div>
-        {members.length === 0 ? (
+        {!loaded ? (
+          <LoadingLine />
+        ) : members.length === 0 ? (
           <EmptyState
             size="inline"
             icon={UserCircleIcon}
-            title={loaded ? "Nobody here yet" : "Loading…"}
-            hint={loaded && canManage ? "Invite somebody above." : undefined}
+            title="Nobody here yet"
+            hint={canManage ? "Invite somebody above." : undefined}
           />
         ) : (
           members.map((m) => (
@@ -375,16 +377,14 @@ function AuditSection() {
         <span className="ml-auto text-[11px] text-faint">{entries.length}</span>
       </div>
       {error && <p className="mb-2 text-[11px] text-err">{error}</p>}
-      {entries.length === 0 ? (
+      {!loaded ? (
+        <LoadingLine />
+      ) : entries.length === 0 ? (
         <EmptyState
           size="inline"
           icon={ActivityIcon}
-          title={loaded ? "Nothing recorded yet" : "Loading…"}
-          hint={
-            loaded
-              ? "Membership changes, credential reveals, push overrides, exports and deletions land here."
-              : undefined
-          }
+          title="Nothing recorded yet"
+          hint="Membership changes, credential reveals, push overrides, exports and deletions land here."
         />
       ) : (
         entries.map((e) => {

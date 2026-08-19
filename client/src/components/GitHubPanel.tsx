@@ -48,7 +48,7 @@ import { ChecksRegion, ScanHistoryRegion } from "./GitHubChecks.tsx";
 import { GraphCanvas } from "./GraphCanvas.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
-import { EmptyState } from "./EmptyState.tsx";
+import { EmptyState, LoadingLine } from "./EmptyState.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { CheckIcon, GithubIcon, KebabIcon, SearchIcon, XIcon } from "./panelIcons.tsx";
 
@@ -97,7 +97,7 @@ export function GitHubPanel() {
   if (!loaded) {
     // Not a spinner: "we have not been told yet" is a real state, and showing the connect screen
     // before the first snapshot would invite somebody to link an agent that is already linked.
-    return <EmptyState icon={GithubIcon} title="Loading…" />;
+    return <LoadingLine />;
   }
 
   return (

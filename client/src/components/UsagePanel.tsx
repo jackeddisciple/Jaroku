@@ -27,11 +27,11 @@ import { sendLoadUsage, sendLoadRun, sendSetSpendCeiling } from "../lib/socket.t
 import { startCheckout } from "../lib/workspaceApi.ts";
 import { fmtCost, fmtTokens } from "../lib/format.ts";
 import { ICON, STATUS, TEXT } from "../lib/tokens.ts";
-import { EmptyState } from "./EmptyState.tsx";
+import { EmptyState, LoadingLine } from "./EmptyState.tsx";
 import { quietBtn, secondaryBtn } from "./buttons.ts";
 import { download, usageStem, usageToCsv } from "../lib/evalExport.ts";
 import {
-  AlertTriangleIcon, ChevronDownIcon, ChevronRightIcon, DatabaseIcon, InfoIcon,
+  AlertTriangleIcon, ChevronDownIcon, ChevronRightIcon, InfoIcon,
 } from "./panelIcons.tsx";
 
 /** A date somebody reads, from an ISO timestamp. Never the time — a period boundary is a day. */
@@ -331,11 +331,7 @@ export function UsagePanel() {
 
   if (!loaded && !error) {
     return (
-      <EmptyState
-        title="Loading usage"
-        hint="What this workspace has spent this period, and against which limits."
-        icon={DatabaseIcon}
-      />
+      <LoadingLine label="Loading usage…" />
     );
   }
   if (error) {

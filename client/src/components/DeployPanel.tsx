@@ -36,7 +36,7 @@ import { isDeployInFlight } from "../types.ts";
 import { ActionRow, type ActionState } from "./ActionRow.tsx";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
-import { EmptyState } from "./EmptyState.tsx";
+import { EmptyState, LoadingLine } from "./EmptyState.tsx";
 import { StatusDot, type BadgeState } from "./StatusBadge.tsx";
 import { Truncate } from "./Truncate.tsx";
 import {
@@ -128,7 +128,7 @@ export function DeployPanel() {
   if (!loaded) {
     // Not a spinner: "we have not been told yet" is a real state, and claiming nothing is
     // deployed before the first snapshot would be a lie the sidebar then repeats.
-    return <EmptyState icon={RocketIcon} title="Loading deployments…" />;
+    return <LoadingLine label="Loading deployments…" />;
   }
 
   return (

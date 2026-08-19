@@ -22,6 +22,7 @@
 // moment a product introduces itself is a moment; the same device used twenty times is wallpaper.
 
 import { ICON } from "../lib/tokens.ts";
+import { LoaderIcon } from "./panelIcons.tsx";
 
 export function EmptyState({
   title,
@@ -81,7 +82,7 @@ export function EmptyState({
       <div className="relative">
         {Icon && (
           <div className="mb-2.5 flex justify-center text-faint" aria-hidden>
-            <Icon size={full ? 22 : ICON.md} />
+            <Icon size={ICON.md} />
           </div>
         )}
         <div className={`font-medium text-ink ${full ? "text-[13px]" : "text-[12px]"}`}>{title}</div>
@@ -89,6 +90,29 @@ export function EmptyState({
           <div className="mx-auto mt-1 max-w-[38ch] text-[12px] leading-[1.55] text-muted">{hint}</div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Waiting for a fetch that will land in a moment.
+ *
+ * FIVE PANELS EXPRESSED THIS AS AN `EmptyState` WHOSE TITLE WAS THE WORD `Loading…` — a
+ * full-height centred illustration for a state that lives for 200ms, appearing and vanishing
+ * every time somebody opened a tab. That is the most jarring transition in the app, and it is
+ * saying the wrong thing besides: an empty state describes a surface with nothing to show, and
+ * this surface has something to show and has not received it yet.
+ *
+ * One line, one turning glyph. The arc is `LoaderIcon`, which is drawn as three quarters of a
+ * circle precisely so it can rotate.
+ */
+export function LoadingLine({ label = "Loading…" }: { label?: string }) {
+  return (
+    <div role="status" className="flex items-center gap-2 px-4 py-3 text-[12px] text-muted">
+      <span className="shrink-0 text-faint" aria-hidden>
+        <LoaderIcon size={ICON.xs} className="animate-spin motion-reduce:animate-none" />
+      </span>
+      {label}
     </div>
   );
 }
