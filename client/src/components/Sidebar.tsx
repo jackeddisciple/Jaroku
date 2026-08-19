@@ -560,15 +560,20 @@ export function Sidebar() {
     <div className="flex h-full bg-bg">
       <NavRail />
       <div className="flex min-w-0 flex-1 flex-col border-l border-hair">
-      {/* New Agent */}
-      <div className="px-3 pt-3 shrink-0">
+      {/* THE COLUMN'S HEADER ROW. `+ New Agent` was a full-width text button spending a whole row
+          on two words for the one control that is unmistakably a plus. It sits here now beside the
+          column's own name, which is where a creation affordance goes. */}
+      <div className="flex shrink-0 items-center gap-1 px-3 pt-3">
+        <span className={TYPE.panelLabel}>Agents</span>
         <button
           onClick={() => selectAgent(null)}
-          className={`w-full text-left text-[13px] rounded-control px-3 py-2 transition-colors flex items-center gap-2 ${
-            activeAgentId === null ? "bg-active text-ink" : "text-muted hover:bg-active/50 hover:text-ink"
+          title="New agent"
+          aria-label="New agent"
+          className={`ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+            activeAgentId === null ? "bg-active text-accent" : "text-muted hover:bg-active hover:text-ink"
           }`}
         >
-          <PlusIcon size={ICON.sm} /> New Agent
+          <PlusIcon size={ICON.sm} />
         </button>
       </div>
 
