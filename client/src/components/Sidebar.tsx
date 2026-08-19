@@ -9,12 +9,12 @@ import { useBuildStore } from "../store/buildStore.ts";
 import type { AgentSummary, RunSummary, RunStatus } from "../types.ts";
 import { relTime } from "../lib/format.ts";
 import { agentStatus, type AgentStatus } from "../lib/agentStatus.ts";
-import { ProviderMark, ConnectorDot } from "../lib/icons.tsx";
+import { ProviderMark } from "../lib/icons.tsx";
 import { selectAgent, selectRun } from "../lib/selection.ts";
 import {
   sendArchiveAgent, sendLoadHistory, sendLoadRun, sendRenameAgent, sendRestoreAgent,
 } from "../lib/socket.ts";
-import { ICON, STATUS, SURFACE, TYPE } from "../lib/tokens.ts";
+import { ICON, SURFACE, TYPE } from "../lib/tokens.ts";
 import { useUiStore, type NavDestination } from "../store/uiStore.ts";
 import { useGithubStore } from "../store/githubStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
@@ -26,7 +26,7 @@ import { StatusDot } from "./StatusBadge.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { ArchiveRestoreIcon, FilterIcon } from "./agentIcons.tsx";
 import {
-  ActivityIcon, GitForkIcon, GithubIcon, GlobeIcon, HashIcon, InboxIcon,
+  ActivityIcon, GitForkIcon, HashIcon, InboxIcon,
   LoaderIcon, PauseIcon, PencilIcon, PlusIcon, SearchIcon, SettingsIcon, SparklesIcon, XIcon,
 } from "./panelIcons.tsx";
 
@@ -228,6 +228,20 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
     setRenaming(false);
   };
 
+  // Everything the old second line said, as one sentence. Assembled from what is true rather than
+  // from a fixed template, so an agent with no connectors and no repository does not advertise two
+  // empty fields.
+  const detail = [
+    agent.default_provider,
+    agent.connectors.length > 0 ? agent.connectors.join(", ") : null,
+    github ? `${github.link.repo_full_name} — ${github.verdict}` : null,
+    agent.deployment?.status === "live" && agent.deployment.url
+      ? agent.deployment.url.replace(/^https?:\/\//, "")
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     // A DIV WRAPPING TWO BUTTONS rather than one button wrapping everything, which is what it was:
     // a control inside a control is invalid markup and un-clickable in practice, so the row's own
@@ -243,83 +257,64 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
       }}
     >
       {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
-      <div className="flex items-start gap-1 px-4 py-2.5">
-        <button onClick={() => selectAgent(agent.agent_id)} className="min-w-0 flex-1 text-left">
-          <div className="flex items-center gap-2">
-            {agent.runnable ? (
-              <AgentDot status={status} />
-            ) : (
-              <StatusDot state="error" icon={XIcon} title="missing agent.py" />
-            )}
-            {renaming ? (
-              <input
-                autoFocus
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onBlur={commit}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") commit();
-                  if (e.key === "Escape") setRenaming(false);
-                }}
-                // The click that lands in the field must not also select the agent underneath it.
-                onClick={(e) => e.stopPropagation()}
-                className="min-w-0 flex-1 rounded-control bg-void px-1.5 py-0.5 text-[13px] text-ink outline-none"
-              />
-            ) : (
-              <Truncate className={active ? "text-accent" : "text-ink"} title={agent.name}>{agent.name}</Truncate>
-            )}
-            {archived && <Chip size="sm" tone="faint" variant="bare">archived</Chip>}
-            {github?.badge && (
-              <span
-                className={`ml-auto shrink-0 font-mono text-[10px] tabular-nums ${
-                  github.badge === "↕" || github.badge === "⚠" ? "text-err" : "text-faint"
-                }`}
-                title={github.verdict}
-              >
-                {github.badge}
-              </span>
-            )}
-            {last && <span className={`text-faint text-[11px] shrink-0 ${github?.badge ? "" : "ml-auto"}`}>{relTime(last.started_at)}</span>}
-          </div>
-          {/* A provider and a connector are both names of things this agent is wired to — the same
-              kind of label the plan card puts on a reviewed tool. Bare rather than filled: a row of
-              four filled chips under every agent would out-weigh the agent's own name above it. */}
-          <div className="mt-0.5 pl-2 flex flex-wrap items-center gap-0.5">
-            <Chip
-              size="sm"
-              tone="faint"
-              mono
-              variant="bare"
-              icon={<ProviderMark provider={agent.default_provider} size={ICON.badge} />}
+      <div className="flex items-center gap-1 px-4 py-2">
+        <button
+          onClick={() => selectAgent(agent.agent_id)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          // WHAT THE SECOND LINE USED TO SAY. The row carried a wrapping chip strip under the
+          // name — provider, every connector, the repository and the deploy URL — which is four
+          // or more chips that could wrap to a third line, on the app's primary list, at two to
+          // three times the height of the row it is a list of. The facts are not gone; they are
+          // where a fact you consult belongs, rather than where a fact you scan belongs.
+          title={detail}
+        >
+          {agent.runnable ? (
+            <AgentDot status={status} />
+          ) : (
+            <StatusDot state="error" icon={XIcon} title="missing agent.py" />
+          )}
+          {/* The provider's mark rides inline before the name instead of as a chip beneath it —
+              it is one glyph, it is always present, and it is the one thing on the old second
+              line that reads at a glance. */}
+          <span className="shrink-0 text-faint" aria-hidden>
+            <ProviderMark provider={agent.default_provider} size={ICON.badge} />
+          </span>
+          {renaming ? (
+            <input
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commit}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commit();
+                if (e.key === "Escape") setRenaming(false);
+              }}
+              // The click that lands in the field must not also select the agent underneath it.
+              onClick={(e) => e.stopPropagation()}
+              className="min-w-0 flex-1 rounded-control bg-void px-1.5 py-0.5 text-[13px] text-ink outline-none"
+            />
+          ) : (
+            <Truncate className={active ? "text-accent" : "text-ink"} title={agent.name}>{agent.name}</Truncate>
+          )}
+          {archived && <Chip size="sm" tone="faint" variant="bare">archived</Chip>}
+          {github?.badge && (
+            <span
+              className={`ml-auto shrink-0 font-mono text-[10px] tabular-nums ${
+                github.badge === "↕" || github.badge === "⚠" ? "text-err" : "text-faint"
+              }`}
+              title={github.verdict}
             >
-              {agent.default_provider}
-            </Chip>
-            {agent.connectors.map((c) => (
-              <Chip key={c} size="sm" tone="faint" mono variant="bare" icon={<ConnectorDot id={c} />}>
-                {c}
-              </Chip>
-            ))}
-            {/* Where its code lives, for the same reason the URL below is here: a list that says
-                "synced" without saying where makes you open the tab to find out. */}
-            {github && (
-              <Chip size="sm" tone="faint" mono variant="bare" icon={<GithubIcon size={ICON.badge} />} title={github.verdict}>
-                {github.link.repo_full_name}
-              </Chip>
-            )}
-            {/* Where it is serving, not just that it is. A URL is the whole point of a deploy, and
-                an agent list that says "deployed" without saying where makes you go and look. */}
-            {agent.deployment?.status === "live" && agent.deployment.url && (
-              <Chip
-                size="sm"
-                tone="faint"
-                mono
-                variant="bare"
-                icon={<span style={{ color: STATUS.ok }}><GlobeIcon size={ICON.badge} /></span>}
-              >
-                {agent.deployment.url.replace(/^https?:\/\//, "")}
-              </Chip>
-            )}
-          </div>
+              {github.badge}
+            </span>
+          )}
+          {last && (
+            <span
+              className={`shrink-0 text-[11px] tabular-nums text-faint ${github?.badge ? "" : "ml-auto"}`}
+              title={new Date(last.started_at).toLocaleString()}
+            >
+              {relTime(last.started_at)}
+            </span>
+          )}
         </button>
         <AgentActions
           agent={agent}
