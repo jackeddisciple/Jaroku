@@ -25,6 +25,7 @@ import { absTime, fmtPercent, relTime } from "../lib/format.ts";
 import { ICON } from "../lib/tokens.ts";
 import { RegionLabel } from "./GitHubSync.tsx";
 import { CheckIcon, XIcon } from "./panelIcons.tsx";
+import { Select } from "./Select.tsx";
 import type { GithubProviderPolicy, GithubView } from "../types.ts";
 
 /** §B.1.3's three positions, in the words that describe what each one lets happen. */
@@ -151,25 +152,23 @@ export function ChecksRegion({ view }: { view: GithubView }) {
           {/* THE DATASET IS THE SWITCH. There is no separate "enable" toggle, because there is
               nothing to enable without one — and two controls where one decides would let somebody
               turn checks on and have nothing happen. */}
-          <label className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-[11px] text-muted">Dataset</span>
-            <select
+            <Select
               value={ci?.datasetId ?? ""}
               disabled={!connected}
-              onChange={(e) =>
-                sendSetAgentCiConfig(view.agentId, { datasetId: e.target.value === "" ? null : e.target.value })
-              }
-              className="min-w-0 flex-1 rounded-control border border-hair bg-panel px-2 py-1 text-[12px] text-ink outline-none disabled:opacity-40"
-            >
-              <option value="">Off — post nothing</option>
-              {datasets.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                  {d.example_count != null ? ` (${d.example_count})` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
+              onChange={(v) => sendSetAgentCiConfig(view.agentId, { datasetId: v === "" ? null : v })}
+              ariaLabel="Dataset the checks run"
+              className="min-w-0 flex-1"
+              options={[
+                { value: "", label: "Off — post nothing" },
+                ...datasets.map((d) => ({
+                  value: d.id,
+                  label: `${d.name}${d.example_count != null ? ` (${d.example_count})` : ""}`,
+                })),
+              ]}
+            />
+          </div>
           {datasets.length === 0 && (
             <p className="text-[11px] text-faint">
               This agent has no datasets yet — build one in Evals and it will appear here.

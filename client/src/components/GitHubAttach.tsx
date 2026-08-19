@@ -31,6 +31,7 @@ import type { ActiveTrigger, TriggerKind } from "../lib/composerTriggers.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { ChevronRightIcon, GithubIcon, PlusIcon, XIcon } from "./panelIcons.tsx";
+import { Select } from "./Select.tsx";
 
 /** A stable identity for an attachment, so the same thing cannot be attached twice. */
 export function attachmentId(a: GithubAttachment): string {
@@ -255,15 +256,13 @@ function FilePicker({ view, onPick }: { view: GithubView; onPick: (path: string,
           if (e.key === "Enter" && path.trim()) onPick(path.trim(), refName);
         }}
       />
-      <select
-        className="w-full rounded-control bg-bg px-1.5 py-1 font-mono text-[11px] text-ink outline-none"
+      <Select
+        mono
         value={refName}
-        onChange={(e) => setRefName(e.target.value)}
-      >
-        {view.branches.map((b) => (
-          <option key={b.name} value={b.name}>{b.name}</option>
-        ))}
-      </select>
+        onChange={setRefName}
+        ariaLabel="Branch"
+        options={view.branches.map((b) => ({ value: b.name, label: b.name }))}
+      />
     </div>
   );
 }

@@ -38,6 +38,7 @@ import { Truncate } from "./Truncate.tsx";
 import {
   ActivityIcon, AlertTriangleIcon, CheckIcon, UserCircleIcon, XIcon,
 } from "./panelIcons.tsx";
+import { Select } from "./Select.tsx";
 
 const SECTIONS: { id: WorkspaceSection; label: string }[] = [
   { id: "members", label: "Members" },
@@ -131,16 +132,15 @@ function MemberRow({ member, canManage, isSelf }: { member: Member; canManage: b
           current role is one element saying what is true and offering the change; a label plus an
           "Edit" button is two, and the second one only ever opens the first. */}
       {canManage ? (
-        <select
+        <Select
           value={member.role}
-          onChange={(e) => sendSetMemberRole(member.user_id, e.target.value)}
-          className="shrink-0 rounded-control border border-hair bg-panel px-1.5 py-1 text-[11px] text-ink outline-none"
+          onChange={(v) => sendSetMemberRole(member.user_id, v)}
           title={ROLES.find((r) => r.id === member.role)?.what}
-        >
-          {ROLES.map((r) => (
-            <option key={r.id} value={r.id}>{r.label}</option>
-          ))}
-        </select>
+          ariaLabel={`Role for ${member.display_name || member.email}`}
+          align="right"
+          className="w-[104px] shrink-0"
+          options={ROLES.map((r) => ({ value: r.id, label: r.label, detail: r.what }))}
+        />
       ) : (
         <Chip size="sm" tone="faint">{member.role}</Chip>
       )}
@@ -251,15 +251,13 @@ function MembersSection() {
             placeholder="colleague@example.com"
             className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 text-[12px] text-ink placeholder:text-faint outline-none focus:border-edge"
           />
-          <select
+          <Select
             value={role}
-            onChange={(e) => setRole(e.target.value)}
-            className="rounded-control border border-hair bg-panel px-2 py-1.5 text-[12px] text-ink outline-none"
-          >
-            {ROLES.map((r) => (
-              <option key={r.id} value={r.id}>{r.label}</option>
-            ))}
-          </select>
+            onChange={setRole}
+            ariaLabel="Role for the invitation"
+            className="w-[104px] shrink-0"
+            options={ROLES.map((r) => ({ value: r.id, label: r.label, detail: r.what }))}
+          />
           <button type="submit" className={primaryBtn} disabled={email.trim().length === 0}>
             Invite
           </button>

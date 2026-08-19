@@ -20,6 +20,7 @@ import { EmptyState } from "./EmptyState.tsx";
 import { useAgentKeys } from "./useAgentKeys.ts";
 import { FilterIcon, GridIcon, RowsIcon, ICON as AGENT_ICON } from "./agentIcons.tsx";
 import { PlusIcon, RefreshIcon, SearchIcon, SparklesIcon, XIcon } from "./panelIcons.tsx";
+import { Select } from "./Select.tsx";
 import {
   AGENT_SORTS, NO_FILTERS, SORT_LABEL, connectorOptions, describeFilters, hasActiveFilters,
   visibleAgents, type AgentDensity, type AgentFilterState, type AgentSort,
@@ -380,19 +381,15 @@ export function AgentsView() {
         {/* SORT AS A SELECT, WHICH IS THE ONE PLACE THIS TAB USES ONE. §8's rule is that every row
             action, tab, filter and overflow entry is an icon — and four mutually exclusive orders
             with names ("Last active", "7-day spend") are not four icons anybody could name. */}
-        <select
+        <Select
           value={sort}
-          onChange={(e) => setSort(e.target.value as AgentSort)}
-          aria-label="Sort the grid"
+          onChange={(v) => setSort(v)}
+          ariaLabel="Sort the grid"
           title="Sort the grid"
-          className="shrink-0 rounded-control border border-hair bg-panel px-2 py-1 text-[12px] text-muted outline-none transition-colors hover:border-edge hover:text-ink"
-        >
-          {AGENT_SORTS.map((s) => (
-            <option key={s} value={s}>
-              {SORT_LABEL[s]}
-            </option>
-          ))}
-        </select>
+          align="right"
+          className="w-[150px] shrink-0"
+          options={AGENT_SORTS.map((s) => ({ value: s, label: SORT_LABEL[s] }))}
+        />
 
         {/* §4's density toggle. Two icon-only controls, each with a label and a tooltip. */}
         <div className="flex shrink-0 items-center rounded-control border border-hair">

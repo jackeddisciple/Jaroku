@@ -51,6 +51,7 @@ import { Chip } from "./Chip.tsx";
 import { EmptyState, LoadingLine } from "./EmptyState.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { CheckIcon, GithubIcon, KebabIcon, SearchIcon, XIcon } from "./panelIcons.tsx";
+import { Select } from "./Select.tsx";
 
 export function GitHubPanel() {
   // Field by field rather than the whole store, for the reason DeployPanel gives at length: a
@@ -326,14 +327,17 @@ function RepoPicker({ agentId }: { agentId: string }) {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="weather-agent"
               />
-              <select
-                className="rounded-control bg-panel px-2 py-1.5 text-[11px] text-ink outline-none"
+              <Select
                 value={isPrivate ? "private" : "public"}
-                onChange={(e) => setPrivate(e.target.value === "private")}
-              >
-                <option value="private">Private</option>
-                <option value="public">Public</option>
-              </select>
+                onChange={(v) => setPrivate(v === "private")}
+                ariaLabel="Repository visibility"
+                align="right"
+                className="w-[110px] shrink-0"
+                options={[
+                  { value: "private", label: "Private" },
+                  { value: "public", label: "Public" },
+                ]}
+              />
             </div>
             <div className="mt-1 flex items-center gap-2 font-mono text-[11px] text-faint">
               <Truncate title={`github.com/${accountLogin}/${trimmedName}`}>
