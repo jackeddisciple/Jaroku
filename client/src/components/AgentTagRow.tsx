@@ -17,7 +17,11 @@ import { TAG_COLOR, agentTagRow, type AgentTag, type TagInput } from "../lib/age
 
 function Tag({ tag }: { tag: AgentTag }) {
   return (
-    <Chip size="sm" color={TAG_COLOR[tag.tone]} title={tag.title} className="shrink-0">
+    // `caps`, like every other badge in the app. Tag labels were authored Title Case while
+    // StatusBadge's are authored lowercase and uppercased by the chip — so `Idle` rendered in
+    // title case beside `CONNECTED` in uppercase, one row apart, two badge systems and two
+    // casings. The labels are lowercase at the source now and the transform is the chip's.
+    <Chip caps size="sm" color={TAG_COLOR[tag.tone]} title={tag.title} className="shrink-0">
       {tag.label}
     </Chip>
   );

@@ -138,7 +138,7 @@ export function agentTags(a: TagInput, now = Date.now()): AgentTag[] {
   } else if (a.high_impact_tools > 0) {
     out.push({
       id: "high-impact",
-      label: "High-impact tools",
+      label: "high-impact tools",
       family: "attention",
       tone: "rose",
       title:
@@ -150,7 +150,7 @@ export function agentTags(a: TagInput, now = Date.now()): AgentTag[] {
     // as one would be the same lie `creation_cost` is forbidden from telling.
     out.push({
       id: "cost-unknown",
-      label: "Cost unknown",
+      label: "cost unknown",
       family: "attention",
       tone: "rose",
       title: "Something here ran on a model with no price entry, so the spend figure is a floor",
@@ -163,15 +163,15 @@ export function agentTags(a: TagInput, now = Date.now()): AgentTag[] {
   // colour law and `Paused` is a run that has stopped and is asking — which is not runtime activity,
   // whatever it is. Amber on a paused run would say something is happening when nothing is.
   if (a.runtime === "running") {
-    out.push({ id: "running", label: "Running", family: "runtime", tone: "amber", title: "A run is in flight" });
+    out.push({ id: "running", label: "running", family: "runtime", tone: "amber", title: "A run is in flight" });
   } else if (a.runtime === "generating") {
-    out.push({ id: "generating", label: "Generating", family: "runtime", tone: "amber", title: "Jaroku is writing this agent's files" });
+    out.push({ id: "generating", label: "generating", family: "runtime", tone: "amber", title: "Jaroku is writing this agent's files" });
   } else if (a.runtime === "deploying") {
-    out.push({ id: "deploying", label: "Deploying", family: "runtime", tone: "amber", title: "A deployment is building or releasing" });
+    out.push({ id: "deploying", label: "deploying", family: "runtime", tone: "amber", title: "A deployment is building or releasing" });
   } else if (a.runtime === "paused") {
-    out.push({ id: "paused", label: "Paused", family: "runtime", tone: "grey", title: "A run is halted mid-graph, waiting on you" });
+    out.push({ id: "paused", label: "paused", family: "runtime", tone: "grey", title: "A run is halted mid-graph, waiting on you" });
   } else {
-    out.push({ id: "idle", label: "Idle", family: "runtime", tone: "grey", title: "Nothing is running" });
+    out.push({ id: "idle", label: "idle", family: "runtime", tone: "grey", title: "Nothing is running" });
   }
 
   // ── Deploy ───────────────────────────────────────────────────────────────────────────────
@@ -191,7 +191,7 @@ export function agentTags(a: TagInput, now = Date.now()): AgentTag[] {
   } else if (a.deployment?.status === "live") {
     out.push({
       id: "live",
-      label: "Live",
+      label: "live",
       family: "deploy",
       tone: "green",
       title: a.deployment.url ? `Serving at ${a.deployment.url}` : "Serving on a public URL",
@@ -206,13 +206,13 @@ export function agentTags(a: TagInput, now = Date.now()): AgentTag[] {
   // slot on it would push a real signal into the overflow chip on precisely the agents that are fine.
   // The Health tab states it in full, and the sparkline beside it shows the evidence.
   if (a.health === "failing") {
-    out.push({ id: "failing", label: "Failing", family: "health", tone: "rose", title: "Its recent runs are failing" });
+    out.push({ id: "failing", label: "failing", family: "health", tone: "rose", title: "Its recent runs are failing" });
   } else if (a.health === "degraded") {
-    out.push({ id: "degraded", label: "Degraded", family: "health", tone: "rose", title: "Some of its recent runs failed" });
+    out.push({ id: "degraded", label: "degraded", family: "health", tone: "rose", title: "Some of its recent runs failed" });
   } else if (a.health === "unverified") {
     out.push({
       id: "unverified",
-      label: "Unverified",
+      label: "unverified",
       family: "health",
       tone: "grey",
       title: "Its live version was published as-is and never went through the validator",
@@ -221,13 +221,13 @@ export function agentTags(a: TagInput, now = Date.now()): AgentTag[] {
 
   // ── Lifecycle, last, because the problem always outranks the novelty ──────────────────────
   if (a.archived_at) {
-    out.push({ id: "archived", label: "Archived", family: "lifecycle", tone: "grey", title: "Put away. Restore it to bring it back." });
+    out.push({ id: "archived", label: "archived", family: "lifecycle", tone: "grey", title: "Put away. Restore it to bring it back." });
   } else if (a.forked_from) {
     out.push({ id: "forked", label: "forked", family: "lifecycle", tone: "grey", title: `Copied from ${a.forked_from}` });
   } else if (a.current_version <= 1 && a.version_source === null) {
     // DRAFT IS "NOTHING PUBLISHED", not "nothing run". An agent whose row exists and whose version
     // has no manifest behind it is a generation that has not finished or a project nobody imported.
-    out.push({ id: "draft", label: "Draft", family: "lifecycle", tone: "grey", title: "Nothing has been published for this agent yet" });
+    out.push({ id: "draft", label: "draft", family: "lifecycle", tone: "grey", title: "Nothing has been published for this agent yet" });
   } else if (isNew(a, now)) {
     out.push({ id: "new", label: "new", family: "lifecycle", tone: "grey", title: "Created in the last week, or not run yet" });
   }
