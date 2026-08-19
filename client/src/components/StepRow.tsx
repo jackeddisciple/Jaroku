@@ -55,8 +55,11 @@ export function StepRow({ step }: { step: Step }) {
           step.error ? "bg-err" : selected ? "bg-run" : "bg-[#3f3f46]"
         }`}
       />
-      {/* 2px left accent when this step is the sync focus (never a full-color fill) */}
-      {selected && <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-run rounded-full" />}
+      {/* The same selection mark the other six lists use — inset 4px top and bottom, square, ink.
+          It was full height, rounded, and AMBER, which is the running colour: the one list in the
+          app that diverged was also the one using "this is executing" to mean "this is the row you
+          picked", inside the panel where the distinction matters most. */}
+      {selected && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-ink" />}
       <ActionRow
         action={actionForStep(step)}
         state={step.error ? "error" : "done"}
