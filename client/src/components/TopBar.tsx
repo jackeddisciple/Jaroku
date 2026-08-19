@@ -30,6 +30,7 @@ import { useSessionStore } from "../store/sessionStore.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { ShareIcon } from "./activityIcons.tsx";
 import { iconBtn, outlineBtn } from "./buttons.ts";
+import { RunFigures } from "./StatusBar.tsx";
 
 function StatusDot({ status }: { status: string }) {
   const color = status === "running" ? "bg-run" : status === "draft" ? "bg-faint" : "bg-ok";
@@ -289,7 +290,12 @@ export function TopBar() {
         </>
       )}
 
-      <div className="ml-auto flex items-center gap-2">
+      {/* WHAT THE RUN IS DOING, WHILE IT DOES IT — promoted out of the bottom strip. It sits
+          against the left group rather than in the right one because it belongs to the agent
+          named beside it, not to the workspace controls. */}
+      <span className="ml-auto min-w-0 shrink"><RunFigures /></span>
+
+      <div className="flex shrink-0 items-center gap-2">
         {/* Which workspace this tab is in, and the way out of it. Furthest left of the right
             group because it is the widest scope on screen: everything to its right is a fact
             about one workspace, and this is which one. */}
