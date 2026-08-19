@@ -1,6 +1,19 @@
 // Small display helpers. Copy style from jarokudoc.md §11: short, factual, present tense
 // ("Worked for 4m 29s", "Edited 3 files"). Numbers never lie — cost/token math stays exact.
 
+/**
+ * How long ago: "just now" / "42s ago" / "9m ago" / "3h ago" / "5d ago" — and then a date.
+ *
+ * IT USED TO HAVE NO CEILING, so a nine-month-old run rendered as `274d ago`, which is arithmetic
+ * the reader has to undo before it means anything. Past a week the calendar date is the useful
+ * fact and the elapsed time is not: nobody asks how many days ago something was in March.
+ *
+ * The year appears only when it is not this one. A date carrying a year every time would be four
+ * characters of noise on the ninety-nine percent of rows that are from this year, and its absence
+ * is unambiguous — an unqualified `19 Aug` can only mean the most recent one.
+ */
+const WEEK_S = 7 * 24 * 60 * 60;
+
 export function relTime(iso: string): string {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return "";
@@ -11,7 +24,21 @@ export function relTime(iso: string): string {
   if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
+  if (s < WEEK_S) return `${Math.floor(h / 24)}d ago`;
+  const d = new Date(t);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
+}
+
+/** The exact moment, for the `title` on any element rendering `relTime`. */
+export function absTime(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "";
+  return new Date(t).toLocaleString();
 }
 
 /**
