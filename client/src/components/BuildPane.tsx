@@ -1265,9 +1265,11 @@ export function BuildPane({
             it is a form field that happens to be focusable. In the three-column app the composer
             is one of several places to look and it goes back to a hairline and a shadow. */}
         <div
-          className={`rounded-modal border border-edge bg-panel transition-shadow duration-fast
+          // ON THE GRID, AND IN CLASSES. It was `padding: "14px 16px 12px"` as an inline style —
+          // the only inline padding in the app, on the app's most important control, off the 4px
+          // grid on two of its three axes.
+          className={`rounded-modal border border-edge bg-panel p-4 pb-3 transition-shadow duration-fast
             focus-within:shadow-focusring ${standalone ? "shadow-glow" : "shadow-raised"}`}
-          style={{ padding: "14px 16px 12px" }}
         >
           {/* Attached GitHub context, above the input. Above rather than below because it is
               part of the message being composed, and a chip under the send button would read as
@@ -1329,11 +1331,12 @@ export function BuildPane({
               }}
               rows={2}
               placeholder={moment.placeholder}
-              className="w-full resize-none bg-transparent text-ink placeholder:text-muted outline-none focus-visible:shadow-focusring leading-[1.5] transition-opacity duration-200"
+              // 14px, in a class. It is still deliberately off the 11/12/13 chrome ladder — this
+              // is the sentence the user writes and it should be the largest text on the screen —
+              // but a half-pixel size that exists once, as an inline style, is a value nobody can
+              // maintain or match.
+              className="w-full resize-none bg-transparent text-[14px] leading-[1.5] text-ink outline-none transition-opacity duration-base placeholder:text-muted focus-visible:shadow-focusring"
               style={{
-                // Off the 11/12/13 ladder on purpose, and the only thing in the app that is. This
-                // is the sentence the user writes; it should be the largest text on the screen.
-                fontSize: "14.5px",
                 minHeight: "44px",
                 maxHeight: "200px",
                 overflowY: "auto",
