@@ -24,7 +24,7 @@ import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { EmptyState } from "./EmptyState.tsx";
-import { FilterIcon } from "./agentIcons.tsx";
+import { ArchiveRestoreIcon, FilterIcon } from "./agentIcons.tsx";
 import {
   ActivityIcon, GitForkIcon, GithubIcon, GlobeIcon, HashIcon, InboxIcon,
   LoaderIcon, PauseIcon, PencilIcon, PlusIcon, SearchIcon, SettingsIcon, SparklesIcon, XIcon,
@@ -147,13 +147,18 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
   const archived = Boolean(agent.archived_at);
 
   if (archived) {
+    // A GLYPH, LIKE THE OTHER TWO ACTIONS ON THIS ROW. It was the word `Restore` while a live row
+    // ended in an icon-only pencil and X — so the same list switched between a text affordance and
+    // an icon affordance depending on row state, which is visible the moment an archived row sits
+    // among live ones.
     return (
       <button
         onClick={() => sendRestoreAgent(agent.agent_id)}
         title="Bring this agent back"
-        className="shrink-0 rounded-control px-1.5 py-0.5 text-[11px] text-muted transition-colors hover:bg-active hover:text-ink"
+        aria-label="Restore this agent"
+        className="shrink-0 rounded-control p-1 text-muted transition-colors hover:bg-active hover:text-ink"
       >
-        Restore
+        <ArchiveRestoreIcon size={ICON.xs} />
       </button>
     );
   }
