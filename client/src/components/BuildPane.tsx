@@ -47,7 +47,7 @@ import {
 import { useMcpStore, allMcpTools } from "../store/mcpStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { firstUnresolvedTurnId } from "../lib/threadResume.ts";
-import { ACCENT, ICON, STATUS, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
+import { ACCENT, ICON, INTERACTION, STATUS, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
 import { JarokuGlyph, ProviderMark } from "../lib/icons.tsx";
 import { displayTitle, fullTitle } from "../lib/title.ts";
 import { useStreamedText } from "../lib/useStreamedText.ts";
@@ -1382,13 +1382,18 @@ export function BuildPane({
               )}
             </div>
 
-            {/* right — the only two solid elements: mode toggle + send circle */}
+            {/* right — the mode toggle and the one filled control on this screen */}
             <div className="flex items-center gap-2.5">
               {/* Two chips in a track. Same geometry as every other chip in the app, overridden
                   only where a segmented control genuinely differs from a chip strip: the radius
-                  is a pill because the segments sit inside one, and the selected segment is
-                  ink-on-inverted rather than the usual tinted fill — this control chooses where
-                  ⌘↵ goes, which is the same weight of decision as the send button beside it. */}
+                  is a pill because the segments sit inside one.
+
+                  THE ACTIVE SEGMENT USED TO BE INK-FILLED, on the argument that choosing where ⌘↵
+                  goes is the same weight of decision as pressing send. It is not — it is a mode,
+                  and a mode is a state rather than an act. The cost of the argument was three
+                  ink-filled controls on the default screen at once (Deploy, this, and send), where
+                  the rule is one per view. Panel surface with an accent label: unmistakably the
+                  chosen one, without competing with the thing you press. */}
               <div className="flex items-center rounded-full bg-active p-0.5">
                 {(["chat", "test"] as const).map((m) => {
                   const active = composerMode === m;
@@ -1398,8 +1403,8 @@ export function BuildPane({
                       size="lg"
                       onClick={() => setComposerMode(m)}
                       variant={active ? "fill" : "bare"}
-                      color={active ? SURFACE.bg : undefined}
-                      background={active ? TEXT.ink : undefined}
+                      color={active ? INTERACTION.accent : undefined}
+                      background={active ? SURFACE.panel : undefined}
                       className="!rounded-full"
                       title={
                         m === "chat"
