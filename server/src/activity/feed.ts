@@ -429,6 +429,21 @@ export function pageSize(requested: number | undefined): number {
   return Math.max(1, Math.min(FEED_PAGE_MAX, Math.trunc(requested as number)));
 }
 
+/**
+ * The marker `mcp_bridge.sanitize` appends when a tool's result hits the size cap.
+ *
+ * A CROSS-LANGUAGE COUPLING, NAMED AS ONE. §9 asks for a truncation rate and nothing records
+ * truncation in a column — the Python runtime writes this sentence into the result the model reads,
+ * and that sentence is the whole of the evidence. §5.1 freezes the schema, so no column is being
+ * added for it, which leaves matching the string.
+ *
+ * The risk is stated rather than hidden: if the phrase changes on the Python side, this rate
+ * silently becomes zero. `test:activity-tools` therefore asserts the marker against the value the
+ * runtime file actually contains rather than against a copy of it here, so the two cannot drift
+ * without a suite going red.
+ */
+export const TRUNCATION_MARKER = "[truncated by Jaroku:";
+
 /** Whether a step's error is the confirmation gate's refusal. Exported for the tool rollup. */
 export function isConfirmationRefusal(error: string | null | undefined): boolean {
   return typeof error === "string" && error.includes(NOT_APPROVED);

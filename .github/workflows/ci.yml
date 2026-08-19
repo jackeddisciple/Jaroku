@@ -361,6 +361,13 @@ jobs:
           # per-agent Deploy panel cannot give. The URL is guarded the way the Agents card guards
           # its drift badge: only on a deploy that is actually serving.
           npm run test:activity-releases
+          # §9's four numbers, none of which has a column. The confirmation rates are read off the
+          # steps the gate raised on — nothing records a confirmation being answered — and the
+          # truncation rate off a marker the Python runtime writes into the result. Both are
+          # cross-language couplings, so the suite asserts the strings against the runtime's own
+          # mcp_bridge.py rather than against a copy: if a phrase changes there, a rate silently becomes
+          # zero, and this is what goes red instead.
+          npm run test:activity-tools
 
       - name: cost, abuse and the data lifecycle
         working-directory: server

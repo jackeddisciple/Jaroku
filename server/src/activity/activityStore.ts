@@ -40,6 +40,8 @@ import type { TenantContext } from "../db/tenant.ts";
 import { TraceStore } from "../store.ts";
 import {
   FEED_PAGE_DEFAULT,
+  NOT_APPROVED,
+  TRUNCATION_MARKER,
   feedQuery,
   pageSize,
   type FeedCursor,
@@ -299,6 +301,64 @@ export interface ReleaseEntry {
   detail: string;
   /** A live deploy's URL. Names only — never a credential, and never a build log. */
   url: string | null;
+}
+
+/**
+ * §9's per-tool row: how often a tool was called across every agent, and how it went.
+ *
+ * PROVENANCE TRAVELS WITH IT, because §9 is explicit that "a reviewed connector and an unread server
+ * tool must never look alike here either". `reviewed` and `mcp` are two different origins with two
+ * different trust stories, and a rollup that listed them in one undifferentiated column would be
+ * the one surface in the product where that distinction is dropped.
+ */
+export interface ToolRow {
+  name: string;
+  /** Where the tool came from. `bespoke` is code a model wrote for one agent. */
+  origin: "reviewed" | "mcp" | "bespoke";
+  /** The MCP server it belongs to, for a tool that has one. */
+  serverId: string | null;
+  /** Its classification, for an MCP tool. `impact_override` wins where a workspace set one. */
+  impact: "high" | "low" | null;
+  calls: number;
+  failures: number;
+  /** Calls whose result hit the size cap. §9's truncation rate, per tool. */
+  truncated: number;
+}
+
+/**
+ * §9's rollup: call counts, and the four numbers nothing else in the product reports.
+ *
+ * THE CONFIRMATION RATES ARE READ OFF THE STEPS THE GATE RAISED ON, not off a table. Nothing records
+ * a confirmation being answered — the gate lives inside `mcp_bridge.py`, raises `ToolNotApproved`
+ * when it is refused, and returns silently when it is not — so the step IS the record: an error
+ * carrying the runtime's own "was not approved" sentence is a refusal, and a high-impact call
+ * without one went through. That makes the numbers available for history as well as for today,
+ * which a new write would not.
+ *
+ * A DENIAL AND A TIMEOUT ARE BOTH REFUSALS AND ARE STILL COUNTED APART. §9 says both count as a
+ * refusal, "which is already how the runtime treats them" — so the RATE is over their sum. They are
+ * reported separately anyway, because "nobody was there" and "somebody said no" call for different
+ * next steps, which is exactly why `mcp_bridge.py` raises two different sentences.
+ */
+export interface ToolUsage {
+  tools: ToolRow[];
+  /** Calls to tools classified high-impact, in the range. §9's own figure. */
+  highImpactCalls: number;
+  approved: number;
+  denied: number;
+  timedOut: number;
+  /** Calls whose result hit the size cap, across every tool. */
+  truncatedCalls: number;
+  /** Every tool call in the range — the denominator the truncation rate is over. */
+  totalCalls: number;
+  /**
+   * Failures of REVIEWED connector tools. §9, and v0.1.12's bug in aggregate.
+   *
+   * "Trust in reviewed code depends on failures being loud, and v0.1.12 fixed a bug where a reviewed
+   * connector's failures had no route to the user at all." This is the workspace-level view of that:
+   * a number that should be zero, in a place somebody will notice it is not.
+   */
+  reviewedFailures: number;
 }
 
 export class ActivityStore {
@@ -1065,6 +1125,102 @@ export class ActivityStore {
     return entries
       .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : a.id < b.id ? 1 : -1))
       .slice(0, cap);
+  }
+
+  /**
+   * §9's tool and MCP usage rollup. ONE statement.
+   *
+   * `reviewedTools` IS A PARAMETER RATHER THAN A QUERY, because the reviewed vocabulary is not in
+   * the database at all: it is `runtime/tool_templates/catalog.json`, which the connector layer
+   * already loads and which is a property of the INSTALL rather than of the tenant. A store method
+   * that read a file to answer a question about rows would be a store method with a filesystem
+   * dependency, and the caller already holds the catalogue.
+   *
+   * THE THREE ORIGINS ARE DECIDED HERE AND NOT BY THE STEP. A step records a tool's NAME and
+   * nothing about where it came from, so provenance is a lookup: a name in the MCP registry is an
+   * MCP tool, a name in the catalogue is a reviewed connector, and anything else is bespoke code a
+   * model wrote for one agent. A tool granted by an MCP server AND present in the catalogue would
+   * be a name collision the manifest builder already refuses, so MCP is checked first and the
+   * ambiguity cannot arrive here.
+   *
+   * THE TRUNCATION MARKER IS A STRING THE PYTHON RUNTIME WRITES. `mcp_bridge.sanitize` appends
+   * "[truncated by Jaroku: N more characters were returned]" when a result passes the size cap, and
+   * that sentence is the only record that it happened — there is no column and, per §5.1, no new one
+   * is being added. Matching it is a cross-language coupling and it is named as such: if the phrase
+   * changes there, this rate silently becomes zero, which is why `test:activity-tools` asserts the
+   * marker against the value the runtime actually produces rather than against a copy of it.
+   */
+  async toolUsage(
+    ctx: TenantContext,
+    w: Window,
+    reviewedTools: readonly string[] = [],
+  ): Promise<ToolUsage> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT s.name                                                        AS name,
+              t.server_id                                                   AS server_id,
+              COALESCE(t.impact_override, t.impact)                         AS impact,
+              COUNT(*)                                                      AS calls,
+              COUNT(CASE WHEN s.error IS NOT NULL THEN 1 END)               AS failures,
+              COUNT(CASE WHEN s.error LIKE ? THEN 1 END)                    AS refused,
+              COUNT(CASE WHEN s.error LIKE ? THEN 1 END)                    AS denied,
+              COUNT(CASE WHEN s.error LIKE ? THEN 1 END)                    AS timed_out,
+              COUNT(CASE WHEN s.output LIKE ? THEN 1 END)                   AS truncated
+         FROM steps s
+         LEFT JOIN mcp_tools t ON t.workspace_id = s.workspace_id AND t.name = s.name
+        WHERE s.workspace_id = ? AND s.type = 'tool_call'
+          AND s.started_at >= ? AND s.started_at < ?
+        GROUP BY s.name, t.server_id, COALESCE(t.impact_override, t.impact)`,
+      [
+        `%${NOT_APPROVED}%`,
+        "%you declined this call%",
+        "%nobody confirmed it within%",
+        `%${TRUNCATION_MARKER}%`,
+        ...bounds(ctx, w),
+      ],
+    );
+
+    const reviewed = new Set(reviewedTools);
+    const tools: ToolRow[] = [];
+    const totals = {
+      highImpactCalls: 0, approved: 0, denied: 0, timedOut: 0,
+      truncatedCalls: 0, totalCalls: 0, reviewedFailures: 0,
+    };
+
+    for (const r of rows) {
+      const name = String(r["name"] ?? "");
+      const serverId = (r["server_id"] as string | null) ?? null;
+      const impactRaw = (r["impact"] as string | null) ?? null;
+      const impact = impactRaw === "high" ? "high" : impactRaw === "low" ? "low" : null;
+      const origin: ToolRow["origin"] = serverId ? "mcp" : reviewed.has(name) ? "reviewed" : "bespoke";
+      const calls = asInt(r["calls"]);
+      const failures = asInt(r["failures"]);
+      const denied = asInt(r["denied"]);
+      const timedOut = asInt(r["timed_out"]);
+      const refused = asInt(r["refused"]);
+      const truncated = asInt(r["truncated"]);
+
+      tools.push({ name, origin, serverId, impact, calls, failures, truncated });
+
+      totals.totalCalls += calls;
+      totals.truncatedCalls += truncated;
+      totals.denied += denied;
+      totals.timedOut += timedOut;
+      if (impact === "high") {
+        totals.highImpactCalls += calls;
+        // WHAT WAS APPROVED IS WHAT WAS NOT REFUSED. There is no positive record of an approval —
+        // the gate returns silently — so approvals are the high-impact calls that ran. `refused`
+        // rather than `denied + timedOut`, because the runtime has a third refusal sentence for an
+        // answer it could not read, and a rate that ignored it would count a garbled verdict as
+        // consent.
+        totals.approved += Math.max(0, calls - refused);
+      }
+      if (origin === "reviewed") totals.reviewedFailures += failures;
+    }
+
+    return {
+      tools: tools.sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name)),
+      ...totals,
+    };
   }
 }
 

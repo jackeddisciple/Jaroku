@@ -420,4 +420,17 @@ export async function activitySuite(
     relA.every((e) => e.agentName.endsWith("(a)")),
     "and each is labelled from its own workspace's directory",
   );
+
+  // --- module 9: the tool and MCP rollup ---------------------------------------------------------
+  //
+  // A JOIN TO `mcp_tools` ON A NAME. Two workspaces that both connected the same server hold the
+  // same tool NAMES, so a join that lost either side's scope would classify one tenant's calls by
+  // the other's impact settings — which is the version of this bug that changes what a
+  // confirmation gate is reported to have done.
+
+  const toolsA = await store.toolUsage(A.ctx, w);
+  const toolsB = await store.toolUsage(B.ctx, w);
+  // The fixture's steps are model calls rather than tool calls, so both are empty — and that is
+  // itself the assertion worth having here: an unscoped read would fill one from the other's rows.
+  check(toolsA.totalCalls === 0 && toolsB.totalCalls === 0, "neither workspace's rollup borrows the other's calls");
 }
