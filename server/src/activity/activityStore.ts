@@ -361,6 +361,60 @@ export interface ToolUsage {
   reviewedFailures: number;
 }
 
+/**
+ * §10's Team pulse: one member's contribution to the range.
+ *
+ * THREE COLUMNS AND NOT FIVE, AND THE ABSENCE IS THE HONEST PART. §10 asks for "agents created,
+ * edits applied, deploys, runs, spend attributed". Three of those five are attributable in this
+ * schema and two are not: `deployments`, `eval_runs` and `runs` carry no actor column, so there is
+ * no row anywhere that says who started a run or who pressed deploy. `runs` in particular is part of
+ * the frozen event schema, which §5.1 says this tab does not touch — and spend is attributed
+ * THROUGH runs, so it inherits the same silence.
+ *
+ * SO THE CARD SHOWS WHAT IS RECORDED AND SAYS WHAT IS NOT, rather than showing a zero in a column
+ * nothing can ever fill. A "0 deploys" beside somebody's name is a claim about that person; an
+ * absent column is a claim about the schema, which is the true one. This is recorded in the release
+ * notes as a gap rather than papered over.
+ */
+export interface MemberPulse {
+  userId: string;
+  agentsCreated: number;
+  /** Versions published whose source is `edit`. */
+  editsApplied: number;
+  /** Versions published by any other route: a generation, an import, a deploy's build. */
+  versionsPublished: number;
+  /** Build sessions started. `threads.created_by` is the one session-level attribution there is. */
+  threadsStarted: number;
+}
+
+/**
+ * §10's personal summary: the same range, for a workspace of one.
+ *
+ * RENDERED INSTEAD OF THE TEAM CARD, NEVER BESIDE IT. §10: "Render one or the other by scope; do
+ * not show an empty Team card in a Personal workspace." A per-member table in a workspace with one
+ * member is a table with one row and a column header explaining who that is.
+ */
+export interface PersonalSummary {
+  /** The agent with the most runs in the range. Null when nothing ran. */
+  mostActiveAgent: { agentId: string; name: string; runs: number } | null;
+  runs: number;
+  usd: number;
+  costKnown: boolean;
+  /**
+   * Consecutive days ending today on which at least one run started. §10's "simple streak".
+   *
+   * ENDING TODAY, WHICH IS WHAT MAKES IT A STREAK. A count of active days in the range would be a
+   * different and less interesting number — "you used this 9 times this month" — and would not
+   * break, which is the only thing a streak is for. A day with no runs ends it, and the count is
+   * zero rather than a fraction of one.
+   *
+   * BOUNDED BY THE WINDOW like everything else on this page. A 24-hour range can show a streak of
+   * at most one, which is correct: every figure here describes the same window, and a streak that
+   * reached outside it would be the one number on the screen answering a different question.
+   */
+  streakDays: number;
+}
+
 export class ActivityStore {
   /** Shares the trace store's database: same file, single writer. See TraceStore.database(). */
   constructor(private db: Db) {}
@@ -1220,6 +1274,127 @@ export class ActivityStore {
     return {
       tools: tools.sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name)),
       ...totals,
+    };
+  }
+
+  /**
+   * §10's Team pulse. ONE statement, and it does not move with the number of members.
+   *
+   * A UNION OF FOUR COUNTS RATHER THAN FOUR QUERIES, and rather than a join. The four facts live in
+   * two tables with no relationship to each other, so a join would be a cross product; four queries
+   * would be four scans to fill one card. The union produces one row per (member, kind) and the
+   * fold below turns that into one row per member.
+   *
+   * MEMBERS WITH NOTHING TO SHOW ARE ABSENT, exactly as the leaderboard omits agents that did not
+   * run. §3.5 again: a row of zeros beside somebody's name is a statement about that person, and
+   * "did not use Jaroku this week" is not what a contribution card is for.
+   */
+  async teamPulse(ctx: TenantContext, w: Window): Promise<MemberPulse[]> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT actor AS actor, kind AS kind, COUNT(*) AS n FROM (
+         SELECT created_by AS actor, 'agent' AS kind
+           FROM agents
+          WHERE workspace_id = ? AND created_at >= ? AND created_at < ?
+            AND created_by IS NOT NULL AND deleted_at IS NULL
+         UNION ALL
+         SELECT v.created_by AS actor,
+                CASE WHEN v.source = 'edit' THEN 'edit' ELSE 'version' END AS kind
+           FROM agent_versions v
+           JOIN agents a ON a.id = v.agent_id
+          WHERE a.workspace_id = ? AND v.created_at >= ? AND v.created_at < ?
+            AND v.created_by IS NOT NULL
+         UNION ALL
+         SELECT created_by AS actor, 'thread' AS kind
+           FROM threads
+          WHERE workspace_id = ? AND created_at >= ? AND created_at < ?
+            AND created_by IS NOT NULL
+       ) contributions
+       GROUP BY actor, kind`,
+      [...bounds(ctx, w), ...bounds(ctx, w), ...bounds(ctx, w)],
+    );
+
+    const byUser = new Map<string, MemberPulse>();
+    for (const r of rows) {
+      const userId = String(r["actor"] ?? "");
+      if (!userId) continue;
+      const at = byUser.get(userId) ?? {
+        userId, agentsCreated: 0, editsApplied: 0, versionsPublished: 0, threadsStarted: 0,
+      };
+      const n = asInt(r["n"]);
+      const kind = String(r["kind"]);
+      if (kind === "agent") at.agentsCreated += n;
+      else if (kind === "edit") at.editsApplied += n;
+      else if (kind === "version") at.versionsPublished += n;
+      else if (kind === "thread") at.threadsStarted += n;
+      byUser.set(userId, at);
+    }
+
+    return [...byUser.values()].sort(
+      (a, b) =>
+        b.agentsCreated + b.editsApplied + b.versionsPublished + b.threadsStarted -
+          (a.agentsCreated + a.editsApplied + a.versionsPublished + a.threadsStarted) ||
+        a.userId.localeCompare(b.userId),
+    );
+  }
+
+  /**
+   * §10's personal summary. TWO statements plus the shared directory.
+   *
+   * THE STREAK IS COMPUTED FROM DAY KEYS, in the same `substr` grain the pulse uses and for the same
+   * dialect reason. What comes back is at most 366 rows — one per day the workspace ran anything —
+   * and the consecutive-day walk happens here, where it can be read.
+   *
+   * "TODAY" IS THE WINDOW'S END, not the process's clock. Every figure on this page describes one
+   * window; a streak measured against `new Date()` would be the only number on the screen answering
+   * a slightly different question, and would change under a client that had the page open at
+   * midnight while nothing else did.
+   */
+  async personalSummary(ctx: TenantContext, w: Window): Promise<PersonalSummary> {
+    const q = this.q(ctx);
+
+    const byAgent = await q.all<Record<string, unknown>>(
+      `SELECT agent_id, COUNT(*) AS runs
+         FROM runs
+        WHERE workspace_id = ? AND started_at >= ? AND started_at < ?
+        GROUP BY agent_id
+        ORDER BY COUNT(*) DESC, agent_id ASC
+        LIMIT 1`,
+      bounds(ctx, w),
+    );
+
+    const days = await q.all<Record<string, unknown>>(
+      `SELECT DISTINCT SUBSTR(started_at, 1, 10) AS day
+         FROM runs
+        WHERE workspace_id = ? AND started_at >= ? AND started_at < ?`,
+      bounds(ctx, w),
+    );
+
+    const spend = await this.spend(ctx, w);
+    const health = await this.runHealth(ctx, w);
+    const directory = await this.agentDirectory(ctx);
+
+    const active = new Set(days.map((r) => String(r["day"])));
+    let streak = 0;
+    // Walk back from the window's last day. `toISOString().slice(0, 10)` is the same key `SUBSTR`
+    // produced, which is only true because both are UTC — the reason every timestamp in this
+    // schema is stored as an ISO-8601 UTC string in the first place.
+    for (let day = new Date(Date.parse(w.to) - 1); ; day = new Date(day.getTime() - 86_400_000)) {
+      const key = day.toISOString().slice(0, 10);
+      if (!active.has(key)) break;
+      streak++;
+      if (Date.parse(key) < Date.parse(w.from.slice(0, 10))) break;
+    }
+
+    const top = byAgent[0];
+    const topSlug = top ? String(top["agent_id"] ?? "") : "";
+    return {
+      mostActiveAgent: top
+        ? { agentId: topSlug, name: directory.get(topSlug)?.name ?? topSlug, runs: asInt(top["runs"]) }
+        : null,
+      runs: health.runs,
+      usd: spend.usd,
+      costKnown: spend.costKnown,
+      streakDays: streak,
     };
   }
 }

@@ -433,4 +433,27 @@ export async function activitySuite(
   // The fixture's steps are model calls rather than tool calls, so both are empty — and that is
   // itself the assertion worth having here: an unscoped read would fill one from the other's rows.
   check(toolsA.totalCalls === 0 && toolsB.totalCalls === 0, "neither workspace's rollup borrows the other's calls");
+
+  // --- module 10: the team pulse and the personal summary ----------------------------------------
+
+  const teamA = await store.teamPulse(A.ctx, w);
+  const teamB = await store.teamPulse(B.ctx, w);
+  check(
+    !teamA.some((m) => teamB.some((n) => n.userId === m.userId)),
+    "no member of A's pulse appears in B's",
+  );
+
+  const meA = await store.personalSummary(A.ctx, w);
+  const meB = await store.personalSummary(B.ctx, w);
+  check(meA.runs === A.runs.length, `A's personal summary counts A's runs (${meA.runs})`);
+  check(meB.runs === B.runs.length, `B's counts B's (${meB.runs})`);
+  check(cents(meA.usd) === cents(A.spendUsd), "and A's spend is A's");
+  check(
+    meA.mostActiveAgent !== null && A.agents.includes(meA.mostActiveAgent.agentId),
+    "the most active agent is one of this workspace's own",
+  );
+  check(
+    meA.mostActiveAgent?.name.endsWith("(a)") === true,
+    "...named from this workspace's directory, not the other's",
+  );
 }

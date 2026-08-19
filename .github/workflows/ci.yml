@@ -368,6 +368,13 @@ jobs:
           # mcp_bridge.py rather than against a copy: if a phrase changes there, a rate silently becomes
           # zero, and this is what goes red instead.
           npm run test:activity-tools
+          # §10, and the suite asserts an ABSENCE as well as the numbers. Three of the five columns
+          # the specification names are attributable in this schema and two are not — nothing
+          # records who started a run or who pressed deploy — so the card shows what is recorded
+          # and says what is not. A zero beside somebody's name is a claim about that person; an
+          # absent column is a claim about the schema, which is the true one. The streak has to end
+          # TODAY, or it is a count of active days wearing the wrong word.
+          npm run test:activity-team
 
       - name: cost, abuse and the data lifecycle
         working-directory: server
