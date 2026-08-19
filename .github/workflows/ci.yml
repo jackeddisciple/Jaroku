@@ -300,6 +300,20 @@ jobs:
           # process that had the credentials in its environment.
           npm run test:inbox-payload
 
+      # THE ACTIVITY DESTINATION, the fourth and last of the sidebar's tabs, in a step of its own
+      # from its first suite — the same reason the three steps above are separate rather than
+      # appended to whichever step had room. A reader looking for "what covers Activity" finds it
+      # here, and a suite added to this feature has an obvious place to go.
+      - name: the activity destination
+        working-directory: server
+        run: |
+          # The one window every figure on the tab describes. Pure, because every rule in it looks
+          # right in a screenshot and is wrong in the case nobody had: a previous window that reaches
+          # back before the workspace existed, a custom range somebody inverted, a bucket boundary
+          # nobody could name. Cross-highlighting is only coherent because all four modules share
+          # this, so a drift here is four modules quietly describing different days.
+          npm run test:activity-range
+
       - name: cost, abuse and the data lifecycle
         working-directory: server
         run: |
@@ -377,6 +391,13 @@ jobs:
           # the period a triage surface is about — invisible; the tray never renders a negative
           # duration; and a shift-click range works upwards, which is the half nobody tries first.
           npm run test:inbox-board
+          # THE ACTIVITY TAB'S METRIC REGISTRY, which is the same kind of thing again. §3.3 is
+          # explicit that there is no global "up is bad" rule and that applying one would make the
+          # page lie — spend up is bad, tokens up is neutral, latency down is good — so the only
+          # thing between this dashboard and a wrong verdict is that each metric declares its own
+          # polarity and every badge reads it. The other half is §3.5: unknown renders `--` for
+          # every unit, never `0`, never `$0.00`, which is the rule v0.1.9 paid for once already.
+          npm run test:activity-metrics
           npm run test:auth
           # The two ends of an invitation link. The failure it exists for is silent and partial: an
           # unencoded token produces a link that works for most secrets and fails for the ones with

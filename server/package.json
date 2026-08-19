@@ -181,7 +181,8 @@
     "test:inbox-derive": "tsx src/inbox/derive.test.ts",
     "test:inbox-snapshot": "tsx src/inbox/snapshot.test.ts",
     "test:inbox-actions": "tsx src/inbox/actions.test.ts",
-    "test:inbox-payload": "tsx src/inbox/payload.test.ts"
+    "test:inbox-payload": "tsx src/inbox/payload.test.ts",
+    "test:activity-range": "tsx src/activity/range.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",

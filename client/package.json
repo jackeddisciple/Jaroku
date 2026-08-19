@@ -31,7 +31,8 @@
     "test:agent-tags": "tsx src/lib/agentTags.test.ts",
     "test:agent-filter": "tsx src/lib/agentFilter.test.ts",
     "test:agent-context": "tsx src/lib/agentContext.test.ts",
-    "test:inbox-board": "tsx src/lib/inboxBoard.test.ts"
+    "test:inbox-board": "tsx src/lib/inboxBoard.test.ts",
+    "test:activity-metrics": "tsx src/lib/activityMetrics.test.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
