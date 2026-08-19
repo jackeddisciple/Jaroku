@@ -114,6 +114,25 @@ export const SURFACE = {
   grip: "#3a3a3f",
 } as const;
 
+/**
+ * Segments of a share-of-total bar, in order.
+ *
+ * A NEUTRAL RAMP, AND ONE COPY OF IT. Two surfaces drew provider shares — the Activity hero's
+ * spend strip and the Model mix card — and each had its own hardcoded palette handing Anthropic
+ * `#c98a5e` and Groq `#c99a52`, both within a few degrees of `STATUS.pending`. So a workspace
+ * using one model painted a full-width amber bar under the word SPEND, which reads as a warning
+ * or as something in flight rather than as a proportion, on the one page built to be quiet.
+ *
+ * Share is categorical, not semantic: no segment means anything is wrong or anything is
+ * happening. Five steps of neutral lightness keep adjacent segments apart inside one bar — which
+ * is all a share chart needs — and none of them can be mistaken for a state. Every one of these
+ * surfaces names its series in a row beneath the bar, which is what lets the bar be quiet.
+ */
+export const SHARE_RAMP = ["#8b8b96", "#6f6f7a", "#565661", "#42424b", "#33333a"] as const;
+
+/** The order series are assigned ramp steps in, so two surfaces colour one provider alike. */
+export const SHARE_ORDER = ["anthropic", "openai", "google", "together", "groq"] as const;
+
 export const TEXT = {
   ink: "#e4e4e7",
   muted: "#71717a",

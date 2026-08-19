@@ -20,7 +20,7 @@ import { RANGE_PROSE } from "../lib/activityRange.ts";
 import { actionForFeedKind } from "../lib/actionIcons.tsx";
 import { absTime, relTime } from "../lib/format.ts";
 import { selectAgent } from "../lib/selection.ts";
-import { ICON, MOTION, STATUS, TEXT } from "../lib/tokens.ts";
+import { ICON, MOTION, SHARE_ORDER, SHARE_RAMP, STATUS, TEXT } from "../lib/tokens.ts";
 import { dimmedBy, useActivityStore } from "../store/activityStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { Card, CardSkeleton } from "./ActivityView.tsx";
@@ -324,12 +324,9 @@ export function ModelMixCard() {
  * stacked bar — which is all a share chart needs — and none of them can be mistaken for a state.
  * The row beneath the bar names every series anyway, which is why the bar is allowed to be quiet.
  */
-const MIX_RAMP = ["#8b8b96", "#6f6f7a", "#565661", "#42424b", "#33333a"] as const;
-
 function modelHue(provider: string): string {
-  const order = ["anthropic", "openai", "google", "together", "groq"];
-  const at = order.indexOf(provider.toLowerCase());
-  return at === -1 ? TEXT.faint : MIX_RAMP[at % MIX_RAMP.length]!;
+  const at = SHARE_ORDER.indexOf(provider.toLowerCase() as (typeof SHARE_ORDER)[number]);
+  return at === -1 ? TEXT.faint : SHARE_RAMP[at % SHARE_RAMP.length]!;
 }
 
 // --- §8: the release timeline -------------------------------------------------------------------

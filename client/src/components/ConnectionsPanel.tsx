@@ -29,7 +29,7 @@ import {
 import { sendConnectConnector, sendDisconnectConnector, sendListConnections } from "../lib/socket.ts";
 import { ICON, TEXT } from "../lib/tokens.ts";
 import { EmptyState } from "./EmptyState.tsx";
-import { iconBtn, primaryBtn, quietBtn } from "./buttons.ts";
+import { iconBtn, outlineBtn, quietBtn } from "./buttons.ts";
 import { StatusDot } from "./StatusBadge.tsx";
 import {
   AlertTriangleIcon, CheckIcon, LockIcon, PlugIcon, RefreshIcon, ShieldCheckIcon, XIcon,
@@ -164,8 +164,11 @@ function ConnectionRow({ connection }: { connection: ConnectionView }) {
             </button>
           </>
         ) : (
+          /* OUTLINE, NOT THE FILL. There is one of these per connector, so a filled weight here
+             is two or three ink-white buttons stacked down one panel — and the rule is one filled
+             action per view. Connecting is a real action; it is not the screen's only one. */
           <button
-            className={primaryBtn}
+            className={outlineBtn}
             onClick={() => {
               useConnectionStore.getState().startConnecting(connection.connectorId);
               sendConnectConnector(connection.connectorId, "/");

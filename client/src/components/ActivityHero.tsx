@@ -19,7 +19,7 @@ import { Card, CardSkeleton } from "./ActivityView.tsx";
 import { MixIcon, PulseIcon, RingIcon } from "./activityIcons.tsx";
 import { EMPTY_FIGURE, formatMetric } from "../lib/activityMetrics.ts";
 import { RANGE_PROSE } from "../lib/activityRange.ts";
-import { STATUS, TEXT } from "../lib/tokens.ts";
+import { SHARE_ORDER, SHARE_RAMP, STATUS, TEXT } from "../lib/tokens.ts";
 import { useActivityStore } from "../store/activityStore.ts";
 import { ActivityIcon } from "./panelIcons.tsx";
 
@@ -356,14 +356,8 @@ function PulseBand() {
  * one.
  */
 function providerHue(provider: string): string {
-  const palette: Record<string, string> = {
-    anthropic: "#c98a5e",
-    openai: "#5eb99a",
-    google: "#7fa9db",
-    together: "#a98cc4",
-    groq: "#c99a52",
-  };
-  return palette[provider.toLowerCase()] ?? TEXT.faint;
+  const at = SHARE_ORDER.indexOf(provider.toLowerCase() as (typeof SHARE_ORDER)[number]);
+  return at === -1 ? TEXT.faint : SHARE_RAMP[at % SHARE_RAMP.length]!;
 }
 
 /** §3.1's hero row. Always three across — §3.8's one exception to the narrow-width stack. */
