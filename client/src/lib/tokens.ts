@@ -279,6 +279,36 @@ export const ELEVATION = {
 
 export type ElevationName = keyof typeof ELEVATION;
 
+/**
+ * Depth's other axis: what is in front of what.
+ *
+ * ELEVATION says how far off the page a surface looks. This says which surface wins when two
+ * overlap, and there was no scale for it at all — the client picked `z-10`, `z-20`, `z-30`,
+ * `z-40` and `z-50` per component, by eye. Which is how an inbox row's overflow menu ended up at
+ * `z-10`, BELOW the two panel layers it opens over, while an agent card's menu sat at `z-50`,
+ * ABOVE the full-screen code drawer.
+ *
+ * Six steps, named for what lives at each. A number is chosen by asking what kind of thing this
+ * is, never by asking what it needs to beat today.
+ *
+ * The values are Tailwind's own `z-*` steps, so a call site can write the class and stay on the
+ * scale. This exists to be the place the question is answered, and to be quotable in a comment.
+ */
+export const LAYER = {
+  /** In the flow. Everything, unless it is one of the five below. */
+  content: 0,
+  /** Pinned to an edge of its own scroller: a sticky section header, a column head. */
+  sticky: 10,
+  /** A pane sliding over its own column, or a notice strip layered above one. */
+  panel: 20,
+  /** A dropdown, a popover, a context menu — and the scrim that dismisses it. */
+  menu: 30,
+  /** A full-surface drawer over the shell, with the page dimmed behind it. */
+  overlay: 40,
+  /** A modal that must be answered. The top, and nothing shares it. */
+  modal: 50,
+} as const;
+
 /** Border colours that pair with each elevation. `edge` is the default; `hair` recedes further. */
 export const ELEVATION_BORDER = {
   flat: "#1e1e22",
