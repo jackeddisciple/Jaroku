@@ -31,10 +31,15 @@ import { useUiStore } from "./store/uiStore.ts";
  * than as the join between two surfaces — while still being a small target to grab. Separating
  * what the eye gets from what the pointer gets fixes both at once: the line is one pixel, the
  * element around it is five.
+ *
+ * `cursor-col-resize` at rest, because react-resizable-panels only injects a cursor once a drag
+ * is already underway — so a divider you have not yet grabbed showed the ordinary arrow, and the
+ * only way to find out it was draggable was to try. An affordance that appears after you commit
+ * to the action is not an affordance.
  */
 function PaneDivider() {
   return (
-    <PanelResizeHandle className="group relative w-[5px] shrink-0">
+    <PanelResizeHandle className="group relative w-[5px] shrink-0 cursor-col-resize">
       <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-hair transition-colors duration-fast group-hover:bg-grip" />
     </PanelResizeHandle>
   );
