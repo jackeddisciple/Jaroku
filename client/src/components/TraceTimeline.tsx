@@ -123,6 +123,7 @@ export function TraceTimeline() {
       <div className="flex-1 overflow-auto px-6 pb-4">
         {steps.length === 0 ? (
           <EmptyState
+            size="line"
             icon={ActivityIcon}
             title="No trace yet"
             hint="Run the agent below and every LLM call, tool call and routing decision it makes streams in here."

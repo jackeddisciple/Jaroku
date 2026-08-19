@@ -151,6 +151,7 @@ export function EvalsPanel() {
             </>
           ) : (
             <EmptyState
+              size="line"
               icon={DatabaseIcon}
               title="No results yet"
               hint="Pick providers under the dataset and run it — quality, cost and latency land here side by side."

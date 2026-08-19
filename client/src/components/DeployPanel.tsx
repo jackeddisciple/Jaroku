@@ -209,6 +209,7 @@ export function DeployPanel() {
           />
         ) : (
           <EmptyState
+            size="line"
             icon={RocketIcon}
             title="Nothing deployed yet"
             hint="Select an agent, then deploy it to your own Railway account."

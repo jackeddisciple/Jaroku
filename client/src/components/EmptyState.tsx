@@ -30,7 +30,15 @@ export function EmptyState({
   /**
    * `full` fills its panel and centres. `inline` sits in the flow at the size of a couple of
    * rows — for a narrow column like the sidebar, where a full-height centred block would push
-   * everything else off screen.
+   * everything else off screen. `line` is one muted sentence in the flow, with whatever action
+   * it has at the end of it.
+   *
+   * `line` IS THE RIGHT DEFAULT FOR A PANEL THAT WILL HOLD CONTENT SHORTLY, and most of the
+   * twenty call sites are that: "No trace yet" is not a state of the product, it is the ten
+   * seconds before a run starts. A full-height centred illustration for a condition that clears
+   * itself is a screen announcing its own emptiness. The full treatment is for a genuinely
+   * first-run surface — a workspace with no agents at all — where there really is nothing yet
+   * and somebody needs to be told what this panel is for.
    */
   size = "full",
   className = "",
@@ -39,11 +47,31 @@ export function EmptyState({
   hint?: React.ReactNode;
   /** A mark for the missing thing, from the app's one icon set. */
   icon?: (p: { size?: number }) => React.ReactElement;
-  size?: "full" | "inline";
+  size?: "full" | "inline" | "line";
   className?: string;
 }) {
   const Icon = icon;
   const full = size === "full";
+
+  if (size === "line") {
+    return (
+      <div className={`flex items-baseline gap-2 px-4 py-3 text-[12px] leading-[1.5] text-muted ${className}`}>
+        {Icon && (
+          <span className="shrink-0 text-faint" aria-hidden>
+            <Icon size={ICON.xs} />
+          </span>
+        )}
+        <span className="min-w-0">
+          {title}
+          {/* An em dash rather than a line break: the action belongs at the end of the sentence,
+              which is what makes this a sentence with an action rather than a panel with a
+              button in it. */}
+          {hint ? <> — {hint}</> : null}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`relative flex items-center justify-center overflow-hidden px-6 text-center ${
