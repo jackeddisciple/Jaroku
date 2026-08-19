@@ -271,6 +271,7 @@ function Item({
   disabled,
 }: {
   children: React.ReactNode;
+  onSelect: () => void;
   /**
    * A keyboard shortcut, and only that. Drawn as a keycap.
    *
