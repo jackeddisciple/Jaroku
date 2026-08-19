@@ -334,6 +334,13 @@ jobs:
           # partial first column's rows silently, which is what this suite caught while it was
           # being written.
           npm run test:activity-pulse
+          # §5.2 in one assertion: the statement count for a leaderboard load is the same for one
+          # agent as for forty. A leaderboard is the most natural place in the whole product to
+          # write an N+1 — every row wants a per-agent figure — and an N+1 here is invisible in
+          # review and instantly visible in a real workspace. The rest of the suite holds the rows
+          # to the strip above them: a table whose rows do not add up to the headline is the
+          # fastest way to make somebody stop believing both.
+          npm run test:activity-leaderboard
 
       - name: cost, abuse and the data lifecycle
         working-directory: server

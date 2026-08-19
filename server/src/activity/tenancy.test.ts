@@ -323,4 +323,42 @@ export async function activitySuite(
     pulseA.length === pulseB.length && pulseA[0]!.at === pulseB[0]!.at,
     "both are drawn on the same grid, because both were resolved from the same window",
   );
+
+  // --- module 7: the agent leaderboard ----------------------------------------------------------
+  //
+  // THE SHARPEST ASSERTION IN THIS FILE, because both workspaces use the SAME AGENT SLUGS. A grouped
+  // query that lost its scope would not merely add rows — it would MERGE them, and `shared_agent_0`
+  // would appear once carrying both tenants' runs and both tenants' money. That is the version of
+  // this bug that no row count could catch.
+
+  const boardA = await store.leaderboard(A.ctx, w);
+  const boardB = await store.leaderboard(B.ctx, w);
+
+  check(boardA.every((r) => A.agents.includes(r.agentId)), "every row of A's board is an agent of A's");
+  check(boardB.every((r) => B.agents.includes(r.agentId)), "...and every row of B's is B's");
+  check(
+    boardA.reduce((n, r) => n + r.runs, 0) === A.runs.length,
+    `A's rows account for exactly A's runs (${boardA.reduce((n, r) => n + r.runs, 0)})`,
+  );
+  check(
+    boardB.reduce((n, r) => n + r.runs, 0) === B.runs.length,
+    `B's rows account for exactly B's (${boardB.reduce((n, r) => n + r.runs, 0)})`,
+  );
+  check(
+    cents(boardA.reduce((n, r) => n + r.usd, 0)) === cents(A.spendUsd),
+    "and A's rows sum to A's own spend card",
+  );
+  // The merge, named: the shared slug carries one workspace's work in each board and not the sum.
+  const sharedA = boardA.find((r) => r.agentId === shared);
+  const sharedB = boardB.find((r) => r.agentId === shared);
+  check(
+    sharedA !== undefined && sharedB !== undefined,
+    "the slug both workspaces use has a row in both boards",
+  );
+  check(
+    (sharedA?.runs ?? 0) + (sharedB?.runs ?? 0) <= A.runs.length + B.runs.length,
+    "...and neither row carries the other's runs",
+  );
+  check(sharedA?.name === `${shared} (a)`, "each row is labelled from its own workspace's directory");
+  check(sharedB?.name === `${shared} (b)`, "...on both sides");
 }

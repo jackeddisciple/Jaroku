@@ -189,6 +189,38 @@ export interface PulseColumn {
   tokens: number;
 }
 
+/**
+ * §7's leaderboard row: one agent, comparable against every other.
+ *
+ * WHY A TABLE AND NOT MORE CARDS. The Agents tab is a card grid, and cards cannot be ranked against
+ * each other — you cannot read forty of them and say which is expensive. This is the surface that
+ * answers the two questions a grid structurally cannot: which agent costs the most, and which one
+ * is flaky. Everything here is therefore a COLUMN, comparable down its own length.
+ *
+ * `models` RIDES ALONG FOR §3.4'S CROSS-HIGHLIGHT, not for display. Hovering a Model Mix segment
+ * has to dim every leaderboard row that does not use that model, and the alternative to carrying
+ * the list is the client asking the server on hover — which §3.4 forbids in one sentence: "Nothing
+ * is clicked. Nothing changes. Nothing is fetched."
+ */
+export interface LeaderboardRow {
+  agentId: string;
+  name: string;
+  archived: boolean;
+  runs: number;
+  ok: number;
+  failed: number;
+  interrupted: number;
+  successRate: number | null;
+  usd: number;
+  /** False when this agent ran an unpriced model, so its spend is a floor. §2's rule, per row. */
+  costKnown: boolean;
+  p95: number | null;
+  /** The most recent run of this agent INSIDE the window. Null when it did not run in it. */
+  lastActive: string | null;
+  /** Distinct models this agent ran in the window. For the hover, not for the eye. */
+  models: string[];
+}
+
 export class ActivityStore {
   /** Shares the trace store's database: same file, single writer. See TraceStore.database(). */
   constructor(private db: Db) {}
@@ -618,6 +650,147 @@ export class ActivityStore {
       });
     }
     return series;
+  }
+
+  /**
+   * §7's leaderboard. THREE statements, and none of them moves with the number of agents.
+   *
+   * THAT LAST CLAUSE IS THE POINT AND IT HAS A TEST. `test:activity-leaderboard` counts the
+   * statements this method issues for one agent and for forty and asserts the two counts are equal
+   * — exactly as `test:agent-grid` does for the Agents grid, and for the same reason: an N+1 here
+   * is invisible in review and instantly visible in a real workspace. A leaderboard is the most
+   * natural place in the product to write one, because every row wants a per-agent figure.
+   *
+   * THE FIRST STATEMENT IS THE RUN HALF, and it is the health strip's query grouped one level
+   * coarser — same per-run CTE, same branch-prefix rule, same nearest-rank arithmetic, same
+   * interrupted-is-not-failed split. That repetition is deliberate rather than lazy: the two
+   * modules must agree, and the only way to guarantee that is for the row's rule and the strip's
+   * rule to be the same expression. A leaderboard whose success rates did not average to the
+   * headline rate would be the fastest way to make somebody stop believing both.
+   *
+   * THE SECOND IS THE MONEY HALF, grouped by (agent, model) rather than by agent alone. One query
+   * then answers two questions — what each agent spent, and which models each agent ran — and the
+   * second of those is what §3.4's cross-highlight needs in the payload rather than on hover.
+   *
+   * THE THIRD IS THE DIRECTORY, which is the one read here that is not an aggregate: a row needs a
+   * NAME, and the run table holds only a slug. It is a whole-workspace read rather than a lookup
+   * per row, which is the same reason it exists at all — see `agentDirectory`.
+   *
+   * AN AGENT WITH NO RUNS IN THE WINDOW IS NOT A ROW. §3.5 again: a leaderboard padded with agents
+   * at `0 runs / $0.00` is a table whose top half is noise, and worse, it renders zeros for agents
+   * that were simply not used. The Agents tab is where every agent appears; this is where the ones
+   * that did something are ranked.
+   */
+  async leaderboard(ctx: TenantContext, w: Window): Promise<LeaderboardRow[]> {
+    const q = this.q(ctx);
+
+    const runRows = await q.all<Record<string, unknown>>(
+      `WITH per_run AS (
+         SELECT r.agent_id       AS agent_id,
+                r.id             AS run_id,
+                r.status         AS status,
+                r.error          AS error,
+                r.started_at     AS started_at,
+                SUM(s.latency_ms) AS latency_ms
+           FROM runs r
+           LEFT JOIN steps s
+             ON s.workspace_id = r.workspace_id
+            AND s.run_id = r.id
+            -- The branch's own work only, exactly as the health strip does it.
+            AND (r.branch_from_seq IS NULL OR s.seq > r.branch_from_seq)
+          WHERE r.workspace_id = ? AND r.started_at >= ? AND r.started_at < ?
+          GROUP BY r.agent_id, r.id, r.status, r.error, r.started_at
+       ),
+       ranked AS (
+         SELECT agent_id, latency_ms,
+                ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY latency_ms) AS rn,
+                COUNT(*)     OVER (PARTITION BY agent_id)                     AS n
+           FROM per_run
+          WHERE latency_ms IS NOT NULL AND status IN ('completed', 'error')
+       ),
+       pct AS (
+         SELECT agent_id, MIN(CASE WHEN rn = (95 * n + 99) / 100 THEN latency_ms END) AS p95
+           FROM ranked GROUP BY agent_id
+       )
+       SELECT p.agent_id                                              AS agent_id,
+              COUNT(*)                                                AS runs,
+              COUNT(CASE WHEN p.status = 'completed' THEN 1 END)      AS ok,
+              COUNT(CASE WHEN p.status = 'error'
+                          AND (p.error IS NULL
+                               OR (p.error <> ? AND p.error <> ?)) THEN 1 END) AS failed,
+              COUNT(CASE WHEN p.status = 'error'
+                          AND (p.error = ? OR p.error = ?) THEN 1 END)         AS interrupted,
+              MAX(p.started_at)                                       AS last_active,
+              MAX(pct.p95)                                            AS p95
+         FROM per_run p
+         LEFT JOIN pct ON pct.agent_id = p.agent_id
+        GROUP BY p.agent_id`,
+      [
+        ...bounds(ctx, w),
+        TraceStore.INTERRUPTED_BY_RESTART,
+        TraceStore.CANCELLED_BY_USER,
+        TraceStore.INTERRUPTED_BY_RESTART,
+        TraceStore.CANCELLED_BY_USER,
+      ],
+    );
+
+    // The money half. INNER-joined to `runs` on purpose, unlike the spend rollup's LEFT join: a
+    // usage row with no run is real money and belongs in the workspace total, but it belongs to no
+    // AGENT and a leaderboard row for it would be a row nobody could click.
+    const moneyRows = await q.all<Record<string, unknown>>(
+      `SELECT r.agent_id                                  AS agent_id,
+              u.model                                     AS model,
+              SUM(u.cost_usd)                             AS usd,
+              COUNT(CASE WHEN u.cost_usd IS NULL THEN 1 END) AS unpriced
+         FROM usage_events u
+         JOIN runs r ON r.id = u.run_id AND r.workspace_id = u.workspace_id
+        WHERE u.workspace_id = ? AND u.occurred_at >= ? AND u.occurred_at < ?
+        GROUP BY r.agent_id, u.model`,
+      bounds(ctx, w),
+    );
+
+    const money = new Map<string, { usd: number; unpriced: number; models: Set<string> }>();
+    for (const r of moneyRows) {
+      const agentId = String(r["agent_id"] ?? "");
+      if (!agentId) continue;
+      const at = money.get(agentId) ?? { usd: 0, unpriced: 0, models: new Set<string>() };
+      at.usd += Number(r["usd"] ?? 0);
+      at.unpriced += asInt(r["unpriced"]);
+      const model = String(r["model"] ?? "");
+      if (model) at.models.add(model);
+      money.set(agentId, at);
+    }
+
+    const directory = await this.agentDirectory(ctx);
+    const rows: LeaderboardRow[] = runRows.map((r) => {
+      const agentId = String(r["agent_id"] ?? "");
+      const spent = money.get(agentId);
+      const ok = asInt(r["ok"]);
+      const failed = asInt(r["failed"]);
+      const ref = directory.get(agentId);
+      return {
+        agentId,
+        // An agent whose row has since been swept still has runs pointing at its slug, and the
+        // slug is a name somebody recognises. Falling back to it beats an empty cell.
+        name: ref?.name ?? agentId,
+        archived: ref?.archived ?? false,
+        runs: asInt(r["runs"]),
+        ok,
+        failed,
+        interrupted: asInt(r["interrupted"]),
+        successRate: rate(ok, failed),
+        usd: spent?.usd ?? 0,
+        costKnown: (spent?.unpriced ?? 0) === 0,
+        p95: numberOrNull(r["p95"]),
+        lastActive: (r["last_active"] as string | null) ?? null,
+        models: [...(spent?.models ?? [])].sort(),
+      };
+    });
+
+    // Most expensive first, which is the question §7 says a card grid cannot answer. The client may
+    // sort by any column; this is only the order it arrives in, so a client that has not chosen yet
+    // is already showing the useful one.
+    return rows.sort((a, b) => b.usd - a.usd || b.runs - a.runs || a.agentId.localeCompare(b.agentId));
   }
 }
 

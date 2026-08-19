@@ -17,7 +17,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { openTestSqlite, testContext } from "./db/testDb.ts";
+import { countingDb, openTestSqlite, testContext } from "./db/testDb.ts";
 import { AgentRepository } from "./db/repositories/agents.ts";
 import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
 import { BillingRepository } from "./db/repositories/billing.ts";
@@ -34,39 +34,9 @@ const check = (name: string, ok: boolean, detail = ""): void => {
   else { fail++; console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ""}`); }
 };
 
-/**
- * A `Db` that counts the statements that pass through it.
- *
- * A WRAPPER RATHER THAN A DRIVER FLAG, because what has to be counted is what the repositories
- * ACTUALLY send — including the ones a `forWorkspace` handle issues, which is every read the grid
- * makes. Wrapping `forWorkspace` as well as the top-level methods is the whole trick: a counter that
- * only saw the outer object would have counted zero and passed forever.
- */
-function counting(db: Db): { db: Db; count: () => number; reset: () => void } {
-  let n = 0;
-  const wrapQ = (q: Queryable): Queryable => ({
-    // `dialect` is forwarded rather than omitted: it is part of `Queryable`, and a hydrator that
-    // reads it to decide how to parse a json column would otherwise get `undefined` and take the
-    // wrong branch — a counter that changed how rows are READ would be measuring a different query.
-    dialect: q.dialect,
-    get: <T>(sql: string, params?: readonly unknown[]) => { n++; return q.get<T>(sql, params); },
-    all: <T>(sql: string, params?: readonly unknown[]) => { n++; return q.all<T>(sql, params); },
-    run: (sql: string, params?: readonly unknown[]): Promise<WriteResult> => { n++; return q.run(sql, params); },
-    exec: (sql: string) => { n++; return q.exec(sql); },
-  });
-  const wrapped = {
-    ...db,
-    dialect: db.dialect,
-    get: <T>(sql: string, params?: readonly unknown[]) => { n++; return db.get<T>(sql, params); },
-    all: <T>(sql: string, params?: readonly unknown[]) => { n++; return db.all<T>(sql, params); },
-    run: (sql: string, params?: readonly unknown[]) => { n++; return db.run(sql, params); },
-    exec: (sql: string) => { n++; return db.exec(sql); },
-    forWorkspace: (workspaceId: string) => wrapQ(db.forWorkspace(workspaceId)),
-    scoped: <T>(workspaceId: string, fn: (tx: Queryable) => Promise<T>) =>
-      db.scoped(workspaceId, (tx) => fn(wrapQ(tx))),
-  } as unknown as Db;
-  return { db: wrapped, count: () => n, reset: () => { n = 0; } };
-}
+// The statement counter now lives in `db/testDb.ts`, because the Activity tab's leaderboard
+// asserts the same property and this file runs its whole suite at module scope — so a helper
+// exported from here could not be imported without executing it.
 
 /**
  * The grid's reads, in the same shape and the same order `agentGridSnapshot` issues them.
@@ -139,7 +109,7 @@ async function seedAgent(
 
 {
   const raw = await openTestSqlite();
-  const meter = counting(raw);
+  const meter = countingDb(raw);
   const db = meter.db;
   try {
     const agents = new AgentRepository(db);

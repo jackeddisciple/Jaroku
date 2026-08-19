@@ -8,6 +8,7 @@
 
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Db, Queryable, WriteResult } from "./db.ts";
 import { PostgresDb } from "./postgres.ts";
 import { PG_URL_ENV } from "./open.ts";
 import { migrate } from "./migrate.ts";
@@ -108,6 +109,55 @@ export async function withScratchPostgres<T>(
     });
     await admin.close();
   }
+}
+
+/**
+ * A `Db` that counts the statements that pass through it.
+ *
+ * HERE RATHER THAN INSIDE A SUITE, because a second aggregate now needs it and the first one's copy
+ * cannot be imported: `agentGrid.test.ts` runs its whole suite at module scope, so importing a
+ * helper out of it would execute the suite. The property both of them assert is the same one —
+ * "the same number of statements for one agent as for forty" — and it deserves one implementation.
+ *
+ * A WRAPPER RATHER THAN A DRIVER FLAG, because what has to be counted is what the repositories
+ * ACTUALLY send, including the statements a `forWorkspace` handle issues — which is every read an
+ * aggregate makes. Wrapping `forWorkspace` as well as the top-level methods is the whole trick: a
+ * counter that only saw the outer object would count zero and pass forever.
+ */
+export function countingDb(db: Db): { db: Db; count: () => number; reset: () => void } {
+  let n = 0;
+  const wrapQ = (q: Queryable): Queryable => ({
+    // `dialect` is forwarded rather than omitted: it is part of `Queryable`, and a hydrator that
+    // reads it to decide how to parse a json column would otherwise get `undefined` and take the
+    // wrong branch — a counter that changed how rows are READ would be measuring a different query.
+    dialect: q.dialect,
+    get: <T>(sql: string, params?: readonly unknown[]) => { n++; return q.get<T>(sql, params); },
+    all: <T>(sql: string, params?: readonly unknown[]) => { n++; return q.all<T>(sql, params); },
+    run: (sql: string, params?: readonly unknown[]): Promise<WriteResult> => { n++; return q.run(sql, params); },
+    exec: (sql: string) => { n++; return q.exec(sql); },
+  });
+  // EVERY METHOD IS FORWARDED BY NAME, and the spread that used to stand in for most of them is
+  // gone. A `Db` is a class instance, so its methods live on the prototype and `{...db}` copies
+  // none of them — which was invisible while the only caller went through `forWorkspace`, and
+  // became `this.db.transaction is not a function` the moment a second suite wrapped a repository
+  // that opens a transaction. A counter that silently removes half the interface is worse than no
+  // counter, so the list is explicit and the compiler checks it.
+  const wrapped: Db = {
+    dialect: db.dialect,
+    get: <T>(sql: string, params?: readonly unknown[]) => { n++; return db.get<T>(sql, params); },
+    all: <T>(sql: string, params?: readonly unknown[]) => { n++; return db.all<T>(sql, params); },
+    run: (sql: string, params?: readonly unknown[]) => { n++; return db.run(sql, params); },
+    exec: (sql: string) => { n++; return db.exec(sql); },
+    forWorkspace: (workspaceId: string) => wrapQ(db.forWorkspace(workspaceId)),
+    scoped: <T>(workspaceId: string, fn: (tx: Queryable) => Promise<T>) =>
+      db.scoped(workspaceId, (tx) => fn(wrapQ(tx))),
+    transaction: <T>(fn: (tx: Queryable) => Promise<T>) => db.transaction((tx) => fn(wrapQ(tx))),
+    asPlatform: <T>(fn: (tx: Queryable) => Promise<T>) => db.asPlatform((tx) => fn(wrapQ(tx))),
+    withAdvisoryLock: <T>(key: number, fn: () => Promise<T>) => db.withAdvisoryLock(key, fn),
+    migrationTarget: () => db.migrationTarget(),
+    close: () => db.close(),
+  };
+  return { db: wrapped, count: () => n, reset: () => { n = 0; } };
 }
 
 /** Point a connection string at a different database, leaving everything else alone. */
