@@ -101,25 +101,35 @@ function RunRow({ run }: { run: RunSummary }) {
       className={`relative w-full text-left px-4 py-2 transition-colors ${active ? "bg-active" : "hover:bg-active/40"}`}
     >
       {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
-      {/* Branches (debug depth) are indented under the run they forked from, with a fork mark. */}
-      <div className={`flex items-center gap-2 ${run.parent_run_id ? "pl-3" : ""}`}>
+      {/* ONE LINE, FIGURES RIGHT-ALIGNED AND MONO — the form `StepRow` already proves works for
+          exactly this data, two panels over. It was two lines: a title line, then a second line
+          carrying a provider chip, a step count and a branch marker at a third indent.
+
+          Branches (debug depth) are indented under the run they forked from, with a fork mark. The
+          indent is ONE step now. It used to be three values inside one row — 12px on line one,
+          28px on line two, against 16px for an unbranched row's line two — so the two halves of a
+          single branched row began at different left edges from each other and from their parent.
+          A 1px connector in the gutter does what indentation alone cannot at 16px: say the row
+          below belongs to the row above even when the parent has scrolled off. */}
+      <div className={`relative flex items-center gap-2 ${run.parent_run_id ? "pl-4" : ""}`}>
         {run.parent_run_id && (
-          <span className="shrink-0 text-faint" title="branch">
-            <GitForkIcon size={ICON.xs} />
-          </span>
+          <>
+            <span className="absolute left-[7px] top-0 bottom-0 w-px bg-hair" aria-hidden />
+            <span className="relative shrink-0 bg-inherit text-faint" title="branch">
+              <GitForkIcon size={ICON.xs} />
+            </span>
+          </>
         )}
         <StatusGlyph status={run.status} />
         <Truncate className={`text-[12px] ${active ? "text-accent" : "text-ink"}`} title={run.agent_id}>{run.agent_id}</Truncate>
-        <span className="ml-auto text-faint text-[11px] shrink-0">{relTime(run.started_at)}</span>
-      </div>
-      <div className={`mt-0.5 text-[11px] text-muted flex items-center gap-1.5 ${run.parent_run_id ? "pl-7" : "pl-4"}`}>
-        {/* The same bare chip the agent row uses for the same fact, so a run and the agent it
-            belongs to name their provider identically. */}
-        <Chip size="sm" tone="faint" mono variant="bare">{run.provider}</Chip>
-        {run.step_count != null && <><span className="text-faint">·</span><span>{run.step_count} steps</span></>}
-        {run.parent_run_id != null && run.branch_from_seq != null && (
-          <><span className="text-faint">·</span><span className="text-faint">branch @{run.branch_from_seq}</span></>
-        )}
+        <span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[11px] tabular-nums text-faint">
+          <span>{run.provider}</span>
+          {run.step_count != null && <span>{run.step_count} steps</span>}
+          {run.parent_run_id != null && run.branch_from_seq != null && (
+            <span title="branched from this step">@{run.branch_from_seq}</span>
+          )}
+          <span title={new Date(run.started_at).toLocaleString()}>{relTime(run.started_at)}</span>
+        </span>
       </div>
     </button>
   );
