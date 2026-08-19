@@ -382,4 +382,27 @@ export async function activitySuite(
     mixA.models[0]!.calls === A.runs.length && mixB.models[0]!.calls === B.runs.length,
     "the call counts are each workspace's own",
   );
+
+  // --- module 5: the event feed ------------------------------------------------------------------
+  //
+  // NINE SOURCES, NINE CHANCES TO FORGET A SCOPE. This is the module where a single missing
+  // `workspace_id` is least visible: the union still returns rows, still sorts, still paginates —
+  // it just quietly includes somebody else's, in the middle of a scroll.
+
+  const feedA = await store.feed(A.ctx, w, {}, null, 200);
+  const feedB = await store.feed(B.ctx, w, {}, null, 200);
+  const aIds = new Set(A.runs.map((id) => `run:${id}`));
+  const bIds = new Set(B.runs.map((id) => `run:${id}`));
+
+  check(feedA.rows.length === A.runs.length, `A's feed holds A's ${A.runs.length} rows`);
+  check(feedB.rows.length === B.runs.length, `B's holds B's ${B.runs.length}`);
+  check(feedA.rows.every((r) => aIds.has(r.id)), "every row in A's feed is a row of A's");
+  check(feedB.rows.every((r) => bIds.has(r.id)), "...and every row in B's is B's");
+  check(!feedA.rows.some((r) => bIds.has(r.id)), "and none of B's rows appears in A's scroll");
+  // The agent filter crosses the same boundary, on a slug both workspaces use.
+  const filteredA = await store.feed(A.ctx, w, { agentId: shared }, null, 200);
+  check(
+    filteredA.rows.every((r) => aIds.has(r.id)),
+    "filtering by a slug both workspaces use still returns only this one's rows",
+  );
 }

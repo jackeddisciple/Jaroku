@@ -39,6 +39,15 @@ import { asInt, type Db, type Queryable } from "../db/db.ts";
 import type { TenantContext } from "../db/tenant.ts";
 import { TraceStore } from "../store.ts";
 import {
+  FEED_PAGE_DEFAULT,
+  feedQuery,
+  pageSize,
+  type FeedCursor,
+  type FeedFilters,
+  type FeedPage,
+  type FeedRow,
+} from "./feed.ts";
+import {
   GRAIN_PREFIX,
   columnFor,
   bucketStarts,
@@ -883,6 +892,58 @@ export class ActivityStore {
       // nobody had named.
       pricedUsd: models.filter((m) => m.priced).reduce((n, m) => n + m.usd, 0),
       totalTokens: models.reduce((n, m) => n + m.tokens, 0),
+    };
+  }
+
+  /**
+   * §5's unified event feed, one keyset page. ONE statement, whatever the filters.
+   *
+   * THE UNION AND ITS PARAMETERS ARE BUILT IN `feed.ts`, deliberately outside this class, so the
+   * part that is easy to get wrong — the order of nine branches' bound values — can be read and
+   * reasoned about without a database in front of you. What stays here is the scope: the workspace
+   * id goes into every branch from the context, and `feedQuery` cannot be called without one.
+   *
+   * A NULL QUERY IS AN EMPTY PAGE, NOT AN ERROR. "Deploys by Ada" in a workspace whose deploy rows
+   * record no actor filters every source out, and the honest answer is a page with nothing on it —
+   * see `ACTOR_SOURCES` for why that combination exists at all.
+   */
+  async feed(
+    ctx: TenantContext,
+    w: Window,
+    filters: FeedFilters = {},
+    cursor: FeedCursor | null = null,
+    limit = FEED_PAGE_DEFAULT,
+  ): Promise<FeedPage> {
+    const size = pageSize(limit);
+    const built = feedQuery(ctx, w, filters, cursor, size);
+    if (!built) return { rows: [], next: null };
+
+    const rows = await this.q(ctx).all<Record<string, unknown>>(built.sql, built.params);
+    // One more than asked for was fetched, so "is there another page" is answered by whether it
+    // arrived rather than by a second scan. The extra row is dropped, never rendered.
+    const page = rows.slice(0, size);
+    const hasMore = rows.length > size;
+
+    const out: FeedRow[] = page.map((r) => ({
+      id: String(r["feed_id"]),
+      at: String(r["at"]),
+      kind: String(r["kind"]) as FeedRow["kind"],
+      agentId: (r["agent_id"] as string | null) ?? null,
+      actorUserId: (r["actor_user_id"] as string | null) ?? null,
+      object: (r["object"] as string | null) ?? null,
+      outcome: (r["outcome"] as FeedRow["outcome"]) ?? null,
+      num: numberOrNull(r["num"]),
+      targetType: String(r["target_type"]) as FeedRow["targetType"],
+      targetId: String(r["target_id"] ?? ""),
+    }));
+
+    const last = out[out.length - 1];
+    return {
+      rows: out,
+      // THE CURSOR IS THE LAST ROW THIS PAGE ACTUALLY RETURNED, not the extra one that proved there
+      // is more. Taking the extra row's key would skip it on the next page — the classic off-by-one
+      // in a look-ahead pagination, and one that only shows up at a page boundary.
+      next: hasMore && last ? { at: last.at, id: last.id } : null,
     };
   }
 }

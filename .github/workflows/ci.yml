@@ -348,6 +348,13 @@ jobs:
           # segments sum to all of a bar that is a fifth full and the gap reads as a model nobody
           # named.
           npm run test:activity-model-mix
+          # §5.2's keyset, tested the only way it can be: scroll a page, INSERT ROWS ABOVE THE
+          # CURSOR, scroll again. That is what an offset gets wrong and gets wrong silently — by
+          # repeating rows it already showed and skipping ones it never will — and this feed is
+          # written to on every run, every deploy and every step. The union is derived rather than
+          # a table, so nothing new is recorded for this tab and no feed row can disagree with the
+          # trace it links to.
+          npm run test:activity-feed
 
       - name: cost, abuse and the data lifecycle
         working-directory: server

@@ -526,7 +526,7 @@ const SCOPED_API: Record<string, string[]> = {
   // row-level-security class of bug, because it is nothing but aggregates over exactly the tables
   // every previous instance of that bug was in — so every method on it is listed here from the
   // commit it lands in, and `activity/tenancy.test.ts` is what exercises them.
-  ActivityStore: ["agentDirectory", "workspaceMeta", "spend", "tokens", "runHealth", "pulse", "leaderboard", "modelMix"],
+  ActivityStore: ["agentDirectory", "workspaceMeta", "spend", "tokens", "runHealth", "pulse", "leaderboard", "modelMix", "feed"],
   // `sweep` is deliberately absent: it deletes EXPIRED rows across every workspace, which is
   // maintenance rather than a scoped operation, and asserting it "cannot reach another
   // workspace" would be asserting the opposite of what it is for. tickets.test.ts covers it.
