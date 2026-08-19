@@ -50,6 +50,16 @@ export function absTime(iso: string): string {
  * stops working at a stated time (an invitation, a presigned download, a token), and the useful
  * fact is how long is left, including that the answer is "none".
  */
+/**
+ * Whether `fmtUntil` would say "expired". For the call sites that need to give a dead deadline the
+ * error tone — a revoked invitation rendered in the same faint grey as one with a week left, which
+ * is the one case where the two states look identical and mean opposite things.
+ */
+export function isExpired(iso: string): boolean {
+  const t = Date.parse(iso);
+  return !Number.isNaN(t) && t - Date.now() <= 0;
+}
+
 export function fmtUntil(iso: string): string {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return "";

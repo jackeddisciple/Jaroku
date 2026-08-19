@@ -29,7 +29,7 @@ import { useAuditStore } from "../store/auditStore.ts";
 import { useMemberStore, type Invite, type Member } from "../store/memberStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore, type WorkspaceSection } from "../store/uiStore.ts";
-import { absTime, fmtUntil, relTime } from "../lib/format.ts";
+import { absTime, fmtUntil, isExpired, relTime } from "../lib/format.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
@@ -100,7 +100,7 @@ function InviteLink() {
               {copied ? <CheckIcon size={ICON.xs} /> : null}
               {copied ? "Copied" : "Copy link"}
             </button>
-            <span className="text-[11px] text-faint">expires {fmtUntil(link.expiresAt)}</span>
+            <span className={`text-[11px] ${isExpired(link.expiresAt) ? "text-err" : "text-faint"}`}>expires {fmtUntil(link.expiresAt)}</span>
             <button className={`${quietBtn} ml-auto`} onClick={dismiss}>Dismiss</button>
           </div>
         </div>
@@ -178,7 +178,7 @@ function InviteRow({ invite, canManage }: { invite: Invite; canManage: boolean }
       <span className="shrink-0 text-faint"><UserCircleIcon size={ICON.sm} /></span>
       <div className="min-w-0 flex-1">
         <Truncate className="text-[12px] text-muted" title={invite.email}>{invite.email}</Truncate>
-        <span className="text-[11px] text-faint">invited · expires {fmtUntil(invite.expires_at)}</span>
+        <span className={`text-[11px] ${isExpired(invite.expires_at) ? "text-err" : "text-faint"}`}>invited · expires {fmtUntil(invite.expires_at)}</span>
       </div>
       <Chip size="sm" tone="faint">{invite.role}</Chip>
       {canManage && (
@@ -522,7 +522,7 @@ function DataSection() {
               >
                 Download {(exportState.bytes / 1_000_000).toFixed(1)} MB
               </a>
-              <span className="text-[11px] text-faint">link expires {fmtUntil(exportState.expiresAt)}</span>
+              <span className={`text-[11px] ${isExpired(exportState.expiresAt) ? "text-err" : "text-faint"}`}>link expires {fmtUntil(exportState.expiresAt)}</span>
             </>
           )}
         </div>
