@@ -21,7 +21,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ICON } from "../lib/tokens.ts";
-import { ChevronDownIcon } from "./panelIcons.tsx";
+import { AlertTriangleIcon, ChevronDownIcon } from "./panelIcons.tsx";
 
 export interface SplitAction {
   id: string;
@@ -149,7 +149,11 @@ function MenuRow({ action, onDone }: { action: SplitAction; onDone: () => void }
         {action.label}
         {/* The warning mark rides with the label rather than replacing it, so the row is still a
             verb somebody can read at a glance. */}
-        {action.danger && <span className="ml-auto shrink-0 text-[10px]" aria-hidden>⚠</span>}
+        {action.danger && (
+          <span className="ml-auto shrink-0 text-err" aria-hidden>
+            <AlertTriangleIcon size={ICON.xs} />
+          </span>
+        )}
       </button>
       {/* §A.2 inside the menu too: a dimmed row with no explanation is the same silent failure a
           dimmed button is, and a menu is where somebody has gone LOOKING for the action. */}

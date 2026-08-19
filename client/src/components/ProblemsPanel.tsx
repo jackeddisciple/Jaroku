@@ -20,6 +20,8 @@ import { sendDiagnoseFile } from "../lib/socket.ts";
 import { diagnosticsFor, useDiagnosticsStore } from "../store/diagnosticsStore.ts";
 import type { Diagnostic } from "../types.ts";
 import { Truncate } from "./Truncate.tsx";
+import { ICON } from "../lib/tokens.ts";
+import { AlertTriangleIcon } from "./panelIcons.tsx";
 
 /**
  * §B.3.1's number, restated on this side of the wire.
@@ -109,7 +111,7 @@ export function ProblemsPanel({
                 diagnostic is none of those: nothing has failed, nothing is blocked, and the same
                 file may commit cleanly. Borrowing a status colour would say something the surface
                 is explicitly not allowed to say. */}
-            <span className="shrink-0 text-muted" aria-hidden>⚠</span>
+            <span className="shrink-0 text-muted" aria-hidden><AlertTriangleIcon size={ICON.xs} /></span>
             <span className="shrink-0 font-mono text-faint tabular-nums">
               {d.line}
               {d.column === undefined ? "" : `:${d.column}`}
@@ -153,10 +155,11 @@ export function DiagnosticGutter({
       {lines.map((line) => (
         <span
           key={line}
-          className="absolute left-0 text-[10px] text-muted"
+          className="absolute left-0 text-muted"
           style={{ top: (line - 1) * lineHeightPx }}
+          aria-hidden
         >
-          ⚠
+          <AlertTriangleIcon size={ICON.badge} />
         </span>
       ))}
     </div>

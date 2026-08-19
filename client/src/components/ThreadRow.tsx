@@ -36,6 +36,8 @@ import { useSessionStore } from "../store/sessionStore.ts";
 import type { ThreadView } from "../types.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
+import { ICON } from "../lib/tokens.ts";
+import { AlertTriangleIcon } from "./panelIcons.tsx";
 
 /**
  * Who opened the thread, in a Team workspace only (§4.3).
@@ -295,7 +297,8 @@ export function ThreadRow({
             style={{ color: STATUS.pending }}
             title={`${thread.agent_active} threads on this agent are blocked or running`}
           >
-            ⚠ {thread.agent_active} active
+            <span className="mr-1 inline-flex align-middle" aria-hidden><AlertTriangleIcon size={ICON.badge} /></span>
+            {thread.agent_active} active
           </span>
         )}
         {thread.fragment && (

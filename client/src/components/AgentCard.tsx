@@ -20,7 +20,7 @@ import { Truncate } from "./Truncate.tsx";
 import { AgentTagRow } from "./AgentTagRow.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
 import { ThumbnailMark, ArchiveIcon, ArchiveRestoreIcon, CopyIcon, DownloadIcon } from "./agentIcons.tsx";
-import { GitForkIcon, KebabIcon, PencilIcon, PlusIcon } from "./panelIcons.tsx";
+import { AlertTriangleIcon, GitForkIcon, KebabIcon, PencilIcon, PlusIcon } from "./panelIcons.tsx";
 import { artFor } from "../lib/agentArt.ts";
 import { agentContextMarkdown } from "../lib/agentContext.ts";
 import { absTime, fmtCost, relTime } from "../lib/format.ts";
@@ -298,7 +298,10 @@ export function AgentCard({
             style={{ color: STATUS.error }}
             title={`No credential is configured for ${agent.missing_env.join(", ")}`}
           >
-            <span aria-hidden>⚠</span>
+            {/* A REAL GLYPH ON THE LINE THIS CARD CALLS ITS MOST IMPORTANT. It was the font
+                character ⚠, which inherits the text weight rather than ICON.strokeWidth — the
+                one mark on the card that was not drawn by the icon system. */}
+            <span className="shrink-0" aria-hidden><AlertTriangleIcon size={ICON.badge} /></span>
             <Truncate className="min-w-0">
               {agent.missing_env.length === 1
                 ? `1 credential missing — ${agent.missing_env[0]}`
