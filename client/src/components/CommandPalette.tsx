@@ -143,8 +143,15 @@ export function CommandPalette() {
       onOpenChange={setOpen}
       label="Command palette"
       className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh]"
-      overlayClassName="fixed inset-0 bg-black/50"
-      contentClassName="relative w-[min(560px,92vw)] bg-panel rounded-modal overflow-hidden border border-edge shadow-overlay"
+      // THE CARD HAD NO PERCEPTIBLE EDGE. `bg-panel` behind a `black/50` scrim over a `#0d0d0f`
+      // page lands within a couple of percent of the dimmed background it floats on, so the app's
+      // primary navigation surface read as unbordered text hanging in space — a contrast problem
+      // rather than a markup one, since every class it needed was already declared.
+      //
+      // The scrim goes to the app's own `void` at a real opacity, and the card comes up a step. A
+      // modal earns the strongest dim in the app: nothing behind it is meant to be read.
+      overlayClassName="fixed inset-0 bg-void/80"
+      contentClassName="relative w-[min(560px,92vw)] bg-active rounded-modal overflow-hidden border border-edge shadow-overlay"
     >
       <Command loop>
         <Command.Input
@@ -155,7 +162,10 @@ export function CommandPalette() {
               : mode === "agents" ? "Go to agent…"
               : "Type a command or search…"
           }
-          className="w-full bg-transparent text-ink placeholder:text-faint px-4 py-3 outline-none text-[13px] border-b border-hair"
+          // A VISIBLE FIELD. It was transparent on the card, so the one control that is focused
+          // the instant this opens had no box at all — you could see the placeholder and not the
+          // thing you were typing into.
+          className="w-full border-b border-edge bg-bg px-4 py-3 text-[13px] text-ink outline-none placeholder:text-faint"
         />
         <Command.List className="max-h-[52vh] overflow-auto p-2">
           <Command.Empty className="px-3 py-6 text-center text-muted text-[12px]">No results.</Command.Empty>
