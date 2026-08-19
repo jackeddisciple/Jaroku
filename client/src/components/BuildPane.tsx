@@ -25,7 +25,7 @@ import { useEvalStore } from "../store/evalStore.ts";
 import { composerMoment } from "../lib/composerMoment.ts";
 import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
 import { fmtCost } from "../lib/format.ts";
-import { Chip } from "./Chip.tsx";
+import { Chip, chipClass } from "./Chip.tsx";
 import { ChoiceRow, type Choice } from "./ChoiceRow.tsx";
 import { DiffCard } from "./DiffCard.tsx";
 import { EmptyState } from "./EmptyState.tsx";
@@ -1231,9 +1231,21 @@ export function BuildPane({
               </Chip>
             )}
             {/* Chat mode only: in Test mode ⌘↵ runs the agent, and the intent router has no say
-                in it — a hint claiming otherwise would be the composer misdescribing itself. */}
+                in it — a hint claiming otherwise would be the composer misdescribing itself.
+
+                A KEYCAP AND THE VERB. It was the sentence `⌘↵ will plan a new agent`, right-aligned
+                directly above an input — which is a line of chrome in the one place a placeholder
+                should be doing the talking. And the chord was two font characters set inline, while
+                the command palette three keystrokes away draws its own keys as bordered caps: the
+                app has a primitive for exactly this shape of thing and two call sites went around
+                it. */}
             {composerMode === "chat" && text.trim() && (
-              <span className="ml-auto text-faint">⌘↵ will {routeLabel(intent)}</span>
+              <span className="ml-auto flex items-center gap-1.5 text-faint">
+                <kbd className={`${chipClass({ size: "sm", mono: true, tone: "faint" })} shadow-[inset_0_0_0_1px_theme(colors.hair)]`}>
+                  ⌘↵
+                </kbd>
+                {routeLabel(intent)}
+              </span>
             )}
           </div>
         )}
