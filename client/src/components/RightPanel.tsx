@@ -177,13 +177,39 @@ export function RightPanel() {
         <StepDetailPanel />
       </div>
 
-      <div className="flex w-10 shrink-0 flex-col items-center gap-0.5 border-l border-hair py-2">
+      {/* A TABLIST, AND REACHABLE THE WAY ONE IS. Ten plain buttons meant ten Tab presses to cross
+          the rail and no announcement of which one was chosen; the pattern is one stop for the
+          whole set, arrows to move inside it. `roving` is the index Tab lands on — the selected
+          cell, so returning to the rail returns you where you were. */}
+      <div
+        role="tablist"
+        aria-label="Panel"
+        aria-orientation="vertical"
+        onKeyDown={(e) => {
+          const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+          if (!step) return;
+          e.preventDefault();
+          const at = visible.findIndex((t) => t.id === tab);
+          const next = visible[(at + step + visible.length) % visible.length];
+          if (next) setTab(next.id);
+        }}
+        className="flex w-10 shrink-0 flex-col items-center gap-0.5 border-l border-hair py-2"
+      >
         {visible.map((t) => {
           const active = tab === t.id;
           return (
             <button
               key={t.id}
               type="button"
+              role="tab"
+              aria-selected={active}
+              tabIndex={active ? 0 : -1}
+              ref={(el) => {
+                // Focus follows selection only while the rail already has it — an arrow press
+                // should move the focus ring with the choice, but a click from the trace pane
+                // must not yank focus out of what somebody was reading.
+                if (active && el && el.parentElement?.contains(document.activeElement)) el.focus();
+              }}
               // The tooltip is not decoration here — it is the label. A glyph nobody can name is
               // a worse control than the word it replaced, so every cell in this rail carries
               // both a title for the pointer and a name for assistive tech.
