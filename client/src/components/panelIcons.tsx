@@ -19,6 +19,16 @@ type P = {
   /** Only for the rare case an icon sits against much larger type. Prefer leaving it alone. */
   strokeWidth?: number;
   className?: string;
+  /**
+   * An accessible name for the rare icon that *is* the whole content of a control and has nowhere
+   * else to carry one. Passing it flips the glyph out of `aria-hidden` and into `role="img"`.
+   *
+   * Decorative is the default and stays the default: an icon beside a word is noise to a screen
+   * reader, and the label belongs on the button. But `aria-hidden` was unconditional before this,
+   * which meant an icon-only control's name could *only* come from a title on the button — and
+   * that is the structural reason so many of them had no name at all.
+   */
+  label?: string;
 };
 
 /**
@@ -33,7 +43,7 @@ type P = {
  * aligned differently from its three siblings.
  */
 export const svg = (
-  { size = ICON.sm, strokeWidth = ICON.strokeWidth, className }: P,
+  { size = ICON.sm, strokeWidth = ICON.strokeWidth, className, label }: P,
   children: React.ReactNode,
 ) => (
   <svg
@@ -46,8 +56,11 @@ export const svg = (
     strokeLinecap="round"
     strokeLinejoin="round"
     className={className ? `align-middle ${className}` : "align-middle"}
-    aria-hidden
+    role={label ? "img" : undefined}
+    aria-label={label}
+    aria-hidden={label ? undefined : true}
   >
+    {label && <title>{label}</title>}
     {children}
   </svg>
 );
