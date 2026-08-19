@@ -175,13 +175,19 @@ export function InboxCard({
         transitionTimingFunction: MOTION.ease,
       }}
     >
-      {/* §4.3: ROSE APPEARS ONCE, and this is it. Two pixels on the left edge of a blocking card. */}
-      {item.severity === "blocking" && (
-        <span className="absolute inset-y-0 left-0 w-[2px]" style={{ background: ROSE }} aria-hidden />
-      )}
-
+      {/* §4.3: ROSE APPEARS ONCE, and this is it — but on the GLYPH, not on the container's edge.
+          It was a two-pixel stripe down the card's left side, which is the one place this palette
+          never puts colour: a tinted container edge reads as a property of the box, and severity is
+          a property of the thing inside it. Tinting the mark says the same thing in the same
+          colour, in the place the eye is already going to read what the card is about. It also
+          stops the stripe from colliding with the selection bar the six other lists in this app
+          draw at exactly those coordinates. */}
       <div className="flex items-start gap-2">
-        <span className="mt-px shrink-0 text-muted" aria-hidden>
+        <span
+          className="mt-px shrink-0"
+          style={{ color: item.severity === "blocking" ? ROSE : undefined }}
+          aria-hidden
+        >
           <Icon size={ICON.sm} />
         </span>
         <Truncate className={`min-w-0 flex-1 text-ink ${size.title}`} title={item.subject}>
