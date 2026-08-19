@@ -128,11 +128,11 @@ export function composerMoment(s: ComposerSituation): ComposerMoment {
   }
 
   if (!s.agentName) {
-    return {
-      placeholder:
-        "Describe the agent you want — e.g. “a support agent that reads Gmail, looks up orders in Postgres, and drafts replies”",
-      status: null,
-    };
+    // SIX WORDS, NOT A WORKED EXAMPLE. The example ran to twenty-two words and wrapped to two
+    // lines inside the input, which makes an empty field look pre-filled — the one thing a
+    // placeholder must not do. The example itself is not lost: it belongs in the empty state
+    // above the composer, where it can be read rather than typed over.
+    return { placeholder: "Describe an agent — ⌘↵ to send", status: null };
   }
   return { placeholder: `Describe a change to ${agent} — ⌘↵ to send`, status: null };
 }

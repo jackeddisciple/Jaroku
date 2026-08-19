@@ -1032,7 +1032,16 @@ export function BuildPane({
             <EmptyState
               icon={SparklesIcon}
               title="Describe the agent you want"
-              hint="You’ll get a short plan first — its tools, state and graph — to approve or correct. Nothing is generated until you do."
+              // The worked example lives here now, where it can be read. It used to be inside the
+              // placeholder — twenty-two words wrapping to two lines in an empty input, which is
+              // what makes an empty field look pre-filled.
+              hint={
+                <>
+                  e.g. “a support agent that reads Gmail, looks up orders in Postgres, and drafts
+                  replies”. You’ll get a short plan first — its tools, state and graph — to approve
+                  or correct. Nothing is generated until you do.
+                </>
+              }
             />
           ) : (
             <EmptyState
