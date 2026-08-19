@@ -175,9 +175,27 @@ export function ThreadRow({
   };
 
   return (
+    // A BUTTON IN EVERYTHING BUT TAG NAME. It cannot be a real <button> — it contains an <input>
+    // during a rename and two action buttons on hover, and a control inside a control is invalid
+    // markup and unclickable in practice, which is the same reason the sidebar's agent row is a
+    // div wrapping two buttons. But it was a bare div with a pointer cursor and nothing else, so
+    // the app's primary list was the one list unreachable by keyboard while its two siblings in
+    // the sidebar were both real buttons.
     <div
+      role="button"
+      tabIndex={editing ? -1 : 0}
       onClick={() => { if (!editing) onOpen(); }}
-      className={`group relative cursor-pointer px-5 py-2 transition-colors ${
+      onKeyDown={(e) => {
+        if (editing) return;
+        if (e.key === "Enter" || e.key === " ") {
+          // Only when the row itself has focus. The list's j/k/Enter handlers own the keyboard
+          // while the cursor is theirs, and a row that also answered Enter would open twice.
+          if (e.target !== e.currentTarget) return;
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      className={`group relative cursor-pointer px-5 py-2 transition-colors focus-visible:outline-none focus-visible:shadow-focusring ${
         selected ? "bg-active" : "hover:bg-active/40"
       }`}
     >
