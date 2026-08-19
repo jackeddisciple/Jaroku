@@ -21,6 +21,8 @@
 // media query that has to be remembered.
 
 import { LeaderboardCard, ModelMixCard, ReleasesCard, ToolUsageCard } from "./ActivityCards.tsx";
+import { EventFeedCard } from "./ActivityFeed.tsx";
+import { TeamPulseCard } from "./ActivityTeam.tsx";
 import { ActivityHero, PulseBand } from "./ActivityHero.tsx";
 import { ActivityView } from "./ActivityView.tsx";
 
@@ -42,11 +44,13 @@ export function ActivityDashboard() {
         <LeaderboardCard />
         <ModelMixCard />
       </div>
-      <div className="grid gap-4 md:grid-cols-2" data-activity-region="feed">
+      <div className="grid gap-4 md:grid-cols-2">
+        <EventFeedCard />
         <ReleasesCard />
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         <ToolUsageCard />
+        <TeamPulseCard />
       </div>
     </ActivityView>
   );

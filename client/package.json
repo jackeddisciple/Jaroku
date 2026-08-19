@@ -33,7 +33,8 @@
     "test:agent-context": "tsx src/lib/agentContext.test.ts",
     "test:inbox-board": "tsx src/lib/inboxBoard.test.ts",
     "test:activity-metrics": "tsx src/lib/activityMetrics.test.ts",
-    "test:action-icons": "tsx src/lib/actionIcons.test.ts"
+    "test:action-icons": "tsx src/lib/actionIcons.test.ts",
+    "test:feed-window": "tsx src/lib/feedWindow.test.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",

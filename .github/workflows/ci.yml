@@ -481,6 +481,13 @@ jobs:
           # load-bearing assertion is that a confirmation row and the trace row that produced it
           # read identically — same icon, same verb, same accent.
           npm run test:action-icons
+          # §6 asks for the feed virtualiser to be checked "at ten thousand rows, not at fifty", and
+          # the reason it names the number is that fifty rows pass every version of this code
+          # including the one that renders all of them. The three things the naive window gets wrong
+          # are all here: overscan on one side only (scrolling up flickers, which is the direction
+          # nobody tests), no clamp at the end (empty rows that read as "more is coming"), and a
+          # pixel fetch threshold that is eight rows on a desktop and two on a phone.
+          npm run test:feed-window
           npm run test:auth
           # The two ends of an invitation link. The failure it exists for is silent and partial: an
           # unencoded token produces a link that works for most secrets and fails for the ones with
