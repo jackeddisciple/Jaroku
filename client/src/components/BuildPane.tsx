@@ -1350,7 +1350,7 @@ export function BuildPane({
                   voice.listening ? "text-run animate-stream-pulse motion-reduce:animate-none" : "text-muted hover:text-ink"
                 }`}
               >
-                <MicIcon size={17} />
+                <MicIcon size={ICON.md} />
               </button>
               {/* Beside the mic and before the model chip: it is an input to the message, like
                   the mic, rather than a setting for how the message is handled. */}
