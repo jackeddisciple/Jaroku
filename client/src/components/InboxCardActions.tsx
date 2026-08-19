@@ -25,7 +25,7 @@ import {
 } from "./InboxActions.tsx";
 import { actionIconFor } from "./inboxActionIcons.tsx";
 import { sendDismissInboxItem, sendResolveInboxItem, sendSnoozeInboxItem } from "../lib/socket.ts";
-import { ICON, RADIUS, SURFACE } from "../lib/tokens.ts";
+import { ICON } from "../lib/tokens.ts";
 import { KebabIcon, XIcon } from "./panelIcons.tsx";
 import type { InboxActionName, InboxItemView, SnoozeDuration } from "../types.ts";
 
@@ -175,13 +175,11 @@ function Overflow({ item, onClose }: { item: InboxItemView; onClose: () => void 
   return (
     <div
       onClick={(e) => e.stopPropagation()}
-      className="absolute right-0 top-6 z-30 w-[184px] overflow-hidden py-1"
-      style={{
-        borderRadius: RADIUS.card,
-        border: `1px solid ${SURFACE.edge}`,
-        background: SURFACE.panel,
-        boxShadow: "0 2px 6px rgba(0,0,0,0.35), 0 12px 28px -8px rgba(0,0,0,0.55)",
-      }}
+      // CLASSES, LIKE THE OTHER TEN MENUS. This one was built with inline styles, and its
+      // `boxShadow` was a byte-identical copy of `ELEVATION.floating` written out by hand — a
+      // token that would silently stop matching the moment the token changed, on the one surface
+      // where "does this look like the other menus" is the whole question.
+      className="absolute right-0 top-6 z-30 w-[184px] overflow-hidden rounded-card border border-edge bg-panel py-1 shadow-floating"
     >
       {snoozing ? (
         // §7: labels stay where a label genuinely carries meaning, and the snooze duration menu is
