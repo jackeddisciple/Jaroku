@@ -463,7 +463,7 @@ function AccountRow() {
       {/* Only when the session carries one. A chip is a claim about what the workspace is paying,
           and inventing a default for it is how the hardcoded `Free` got there in the first place. */}
       {workspace?.plan?.label && (
-        <Chip caps size="sm" tone="faint" className="ml-auto">{workspace.plan.label}</Chip>
+        <Chip caps size="sm" tone="faint" className="ml-auto shrink-0">{workspace.plan.label}</Chip>
       )}
     </button>
   );

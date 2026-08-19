@@ -132,7 +132,11 @@ export function chipClass({
     inline ? PAD_Y_INLINE[size] : PAD_Y[size],
     TONE[tone],
     mono ? "font-mono" : "",
-    caps ? "font-medium uppercase tracking-wider" : "",
+    // A CAPS CHIP NEVER BREAKS. It is a status word read at a glance — three to twelve characters,
+    // uppercase, tracked out — and the rule below is written for long unbreakable identifiers,
+    // which is the opposite kind of content. Left to that rule, the sidebar's plan badge rendered
+    // `FREE` as `FR` over `EE` in the account row on the default screen.
+    caps ? "font-medium uppercase tracking-wider whitespace-nowrap" : "",
     // Chips hold names that can be long and unbreakable — a tool id, a file path, an endpoint.
     // Breaking inside one beats overflowing the row it sits in.
     "[overflow-wrap:anywhere]",
