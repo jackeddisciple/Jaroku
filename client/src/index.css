@@ -27,9 +27,13 @@
      the app says is sentences, and only identifiers, paths and figures are literally code. */
   /* The page is the surface the app floats ON, not the app. The shell in App.tsx carries `bg`;
      everything visible out here is the few pixels of inset around it. */
+  /* 12px, because that is what the app actually renders. The base was 13px while the census found
+     432 elements overriding to 11px and 171 to 12px against 36 at 13 — so the default described
+     almost nothing on screen, and every component carried a size class to escape it. Setting the
+     base to the common case makes 13px the opt-in it should be: a row title, a card's name. */
   body {
     @apply bg-void text-ink font-sans;
-    font-size: 13px;
+    font-size: 12px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
   }
