@@ -24,9 +24,11 @@ import { BRAND, ICON, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
 
 import { Truncate } from "./Truncate.tsx";
 import { Chip } from "./Chip.tsx";
-import { GithubIcon, KeyIcon } from "./panelIcons.tsx";
+import { GithubIcon, KeyIcon, StopIcon } from "./panelIcons.tsx";
 import { useGithubStore } from "../store/githubStore.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
+import { ShareIcon } from "./activityIcons.tsx";
+import { iconBtn } from "./buttons.ts";
 
 function StatusDot({ status }: { status: string }) {
   const color = status === "running" ? "bg-run" : status === "draft" ? "bg-faint" : "bg-ok";
@@ -256,21 +258,26 @@ export function TopBar() {
         {/* The provider chip, now also the way in to the keys behind it. */}
         <ProviderMenu provider={provider} model={model} />
 
+        {/* A GLYPH. The title bar carries no other word, and "Share" was the only text button in
+            it — a five-letter label on a control whose mark is unambiguous, sitting in the one
+            strip that is on screen on every surface of the app. */}
         <button
-          title="Sharing isn't available yet"
-          className="text-[12px] text-muted hover:text-ink rounded-control px-2.5 py-1 transition-colors"
+          title="Share — not available yet"
+          aria-label="Share"
+          className={iconBtn}
         >
-          Share
+          <ShareIcon size={ICON.sm} />
         </button>
         {inFlight ? (
           // Same swap EvalRunBar makes: while something is running, the button that started it
           // becomes the one that stops it, rather than sitting there disabled and useless.
           <button
-            title={`Deploying ${inFlight.agent_id} — click to cancel`}
-            className="rounded-control px-3 py-1 text-[12px] text-err transition-colors hover:bg-active"
+            title={`Cancel deploy — ${inFlight.agent_id}`}
+            aria-label={`Cancel deploy — ${inFlight.agent_id}`}
+            className={`${iconBtn} text-err hover:text-err`}
             onClick={() => sendCancelDeploy(inFlight.id)}
           >
-            Cancel deploy
+            <StopIcon size={ICON.sm} />
           </button>
         ) : (
           <button
