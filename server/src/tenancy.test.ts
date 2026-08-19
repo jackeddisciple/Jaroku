@@ -55,6 +55,7 @@ import { hashState, newPkce, newState } from "./oauth/pkce.ts";
 import { authEnvKeyFor } from "./envWriter.ts";
 import { BillingRepository } from "./db/repositories/billing.ts";
 import { attackSuite } from "./auth/attacks.test.ts";
+import { activitySuite } from "./activity/tenancy.test.ts";
 import { FsObjectStore } from "./storage/fsObjectStore.ts";
 import { ProjectStore } from "./storage/projectStore.ts";
 import { agentVersionKey, workspacePrefix } from "./storage/keys.ts";
@@ -372,6 +373,16 @@ async function suite(label: string, db: Db): Promise<void> {
   check((await trace.getRun(B.ctx, forgedRunId)) === undefined, "a forged workspace_id does not place a row in B");
   check((await trace.getRun(A.ctx, forgedRunId)) !== undefined, "...it lands in the caller's own workspace");
 
+  // --- the Activity tab's aggregates -------------------------------------------
+  //
+  // ITS OWN FILE, INVOKED FROM HERE, exactly as `attackSuite` is and for the reason this suite's
+  // header gives: a second script somebody can forget to run is not a gate. §5.4 asks for two
+  // workspaces seeded with DIFFERENT data and every module's figures for A asserted unaffected by
+  // B's, which needs a fixture unlike the one above — busy, uneven, and sharing agent slugs so a
+  // GROUP BY that crossed the boundary would visibly collide.
+
+  await activitySuite(db, check, label);
+
   // --- the sentinel ------------------------------------------------------------
 
   await attackSuite(db, check, label);
@@ -511,6 +522,11 @@ const SCOPED_API: Record<string, string[]> = {
     "record", "setPayload", "listOpen", "listForUser", "get", "byKey", "resolve", "reopen",
     "setUserState", "userState", "resolvedSince",
   ],
+  // The Activity tab's aggregates. §5.4 calls this the highest-risk surface in the product for the
+  // row-level-security class of bug, because it is nothing but aggregates over exactly the tables
+  // every previous instance of that bug was in — so every method on it is listed here from the
+  // commit it lands in, and `activity/tenancy.test.ts` is what exercises them.
+  ActivityStore: ["agentDirectory", "workspaceMeta"],
   // `sweep` is deliberately absent: it deletes EXPIRED rows across every workspace, which is
   // maintenance rather than a scoped operation, and asserting it "cannot reach another
   // workspace" would be asserting the opposite of what it is for. tickets.test.ts covers it.
@@ -580,7 +596,13 @@ const SCOPED_API: Record<string, string[]> = {
  */
 function readSuiteSource(): string {
   const here = fileURLToPath(import.meta.url);
-  return [here, join(dirname(here), "auth", "attacks.test.ts")]
+  return [
+    here,
+    join(dirname(here), "auth", "attacks.test.ts"),
+    // And the Activity tab's isolation pass, which lives beside the aggregates it exercises for
+    // the same reason the attack suite lives beside the tokens it forges.
+    join(dirname(here), "activity", "tenancy.test.ts"),
+  ]
     .map((f) => readFileSync(f, "utf8"))
     .join("\n");
 }

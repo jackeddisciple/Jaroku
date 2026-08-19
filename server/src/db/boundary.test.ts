@@ -92,6 +92,12 @@ const SCOPED_MODULES = [
   // touches many workspaces, and the only thing standing between "loop the workspaces and scope each
   // pass" and "run once as the server" is that no method on this class can be called without a scope.
   "inbox/inboxStore.ts",
+  // The Activity tab's aggregates. The rule matters here as much as it does anywhere in this list:
+  // §5.4 calls this the highest-risk surface in the product for the RLS class of bug, because every
+  // previous instance of it was an aggregate over exactly the tables this file reads — and the only
+  // thing standing between "one grouped query per module, scoped" and "one grouped query per
+  // module, everybody's" is that no method on the class can be called without a scope.
+  "activity/activityStore.ts",
   "db/repositories/agents.ts",
   "db/repositories/secretRefs.ts",
   "db/repositories/secretUsages.ts",
