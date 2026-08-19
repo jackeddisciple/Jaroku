@@ -207,6 +207,27 @@ export function AgentCard({
               {agent.slug}
             </Truncate>
           </div>
+          {/* §5.2's primary action, ON THE CARD, and now a glyph beside the other two rather than
+              a full-width outlined button under everything. Absent for an archived agent, which §4
+              requires: an agent that has been put away should not be offering work.
+
+              A full-width button per card is the heaviest per-item affordance there is, and the
+              grid renders three across — so three cards meant three outlined bars of equal weight
+              competing with the three agent names above them. */}
+          {!agent.archived_at && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNewThread();
+              }}
+              title={`Start a new thread on ${agent.name}`}
+              aria-label={`Start a new thread on ${agent.name}`}
+              className="shrink-0 rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active hover:text-ink"
+            >
+              <PlusIcon size={ICON.sm} />
+            </button>
+          )}
           <button
             type="button"
             onClick={(e) => {
@@ -346,21 +367,6 @@ export function AgentCard({
           )}
         </div>
 
-        {/* §5.2's primary action, ON THE CARD. Absent for an archived agent, which §4 requires: an
-            agent that has been put away should not be offering work. */}
-        {!agent.archived_at && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onNewThread();
-            }}
-            className="flex items-center justify-center gap-1.5 rounded-control border border-hair px-2 py-1.5 text-[12px] text-muted transition-colors duration-fast hover:border-edge hover:bg-active hover:text-ink"
-            title={`Start a new thread on ${agent.name}`}
-          >
-            <PlusIcon size={ICON.xs} /> New thread
-          </button>
-        )}
       </div>
     </div>
   );
