@@ -21,6 +21,7 @@ import { useAgentKeys } from "./useAgentKeys.ts";
 import { FilterIcon, GridIcon, RowsIcon, ICON as AGENT_ICON } from "./agentIcons.tsx";
 import { PlusIcon, RefreshIcon, SearchIcon, SparklesIcon, XIcon } from "./panelIcons.tsx";
 import { Select } from "./Select.tsx";
+import { Truncate } from "./Truncate.tsx";
 import {
   AGENT_SORTS, NO_FILTERS, SORT_LABEL, connectorOptions, describeFilters, hasActiveFilters,
   visibleAgents, type AgentDensity, type AgentFilterState, type AgentSort,
@@ -334,8 +335,16 @@ export function AgentsView() {
             workspace switcher two clicks away makes "which workspace am I looking at" a real
             question. It falls back to the section name before the session lands rather than
             rendering a placeholder that flashes into somebody else's workspace. */}
-        <span className={TYPE.panelLabel}>{workspaceName ?? "Agents"}</span>
-        <span className="text-faint text-[11px] tabular-nums">{cards.filter((c) => !c.archived_at).length}</span>
+        {/* A NAME IS NOT A CAPS LABEL. This went through `TYPE.panelLabel` — uppercase, tracked
+            out — which is the right treatment for `RUNS` or `PINNED` and the wrong one for an
+            arbitrary-length string somebody chose. A workspace named after an email address
+            rendered as ADARSHHCHOUDHARY20@GMAIL.COM: the widest and loudest text on the screen,
+            in a treatment reserved for six-character headings, on an identifier rather than a
+            heading. Title case at title size, like every other page name in the product. */}
+        <Truncate className="max-w-[320px] text-[13px] font-medium text-ink" title={workspaceName ?? undefined}>
+          {workspaceName ?? "Agents"}
+        </Truncate>
+        <span className="text-[11px] tabular-nums text-faint">{cards.filter((c) => !c.archived_at).length}</span>
         {workspaceName && <span className="text-[11px] text-faint">agents</span>}
         {!connected && (
           <span className="text-[11px] text-muted" title="Changes here need a connection">
