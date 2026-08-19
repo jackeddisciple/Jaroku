@@ -53,7 +53,10 @@ export default {
         raised: "0 1px 2px rgba(0,0,0,0.4)",
         floating: "0 2px 6px rgba(0,0,0,0.35), 0 12px 28px -8px rgba(0,0,0,0.55)",
         overlay: "0 4px 12px rgba(0,0,0,0.4), 0 28px 64px -16px rgba(0,0,0,0.7)",
-        focusring: "0 0 0 1px #3a3a44, 0 0 0 4px rgba(58,58,68,0.28)",
+        // Mirrors FOCUS_RING in src/lib/tokens.ts. The accent, not a grey — a grey ring on a grey
+        // control on a near-black page is very nearly nothing, and "where am I" is the question a
+        // keyboard user asks most.
+        focusring: "0 0 0 1px #6b8afd, 0 0 0 4px rgba(107,138,253,0.16)",
         // Lift by light rather than by dark — mirrors GLOW in src/lib/tokens.ts. A shadow says
         // "this is above the page"; a glow says "this is the one you are on", which is what a
         // hovered or keyboard-reached control needs to say.

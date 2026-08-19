@@ -281,8 +281,14 @@ export const ELEVATION_BORDER = {
   overlay: SURFACE.edge,
 } as const;
 
-/** The focus ring. One value, so a focused input and a focused button are the same idea. */
-export const FOCUS_RING = "0 0 0 1px #3a3a44, 0 0 0 4px rgba(58,58,68,0.28)";
+/**
+ * The focus ring. One value, so a focused input and a focused button are the same idea.
+ *
+ * The accent, because a focus ring is one of the four things the accent is for. It was a neutral
+ * grey — #3a3a44 with a grey halo — which on a grey control on a #0d0d0f page is very nearly
+ * nothing, and "where am I" is the one question a keyboard user asks constantly.
+ */
+export const FOCUS_RING = `0 0 0 1px ${INTERACTION.accent}, 0 0 0 4px ${INTERACTION.soft}`;
 
 /**
  * Lift by light. The other half of ELEVATION, and the half a near-black app actually needs.
