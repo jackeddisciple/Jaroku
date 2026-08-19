@@ -127,7 +127,7 @@ function LeftRail({
               active ? "bg-active text-ink" : "text-muted hover:bg-active/50 hover:text-ink"
             }`}
           >
-            {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-ink" />}
+            {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
             {INBOX_FILTER_LABEL[f]}
             {/* A ZERO RENDERS NOTHING, matching the empty-sections discipline the whole app follows:
                 a count of 0 beside a chip is noise, and the chip staying in place is what keeps the

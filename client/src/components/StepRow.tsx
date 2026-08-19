@@ -59,7 +59,7 @@ export function StepRow({ step }: { step: Step }) {
           It was full height, rounded, and AMBER, which is the running colour: the one list in the
           app that diverged was also the one using "this is executing" to mean "this is the row you
           picked", inside the panel where the distinction matters most. */}
-      {selected && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-ink" />}
+      {selected && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
       <ActionRow
         action={actionForStep(step)}
         state={step.error ? "error" : "done"}

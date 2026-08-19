@@ -199,7 +199,7 @@ export function ThreadRow({
         selected ? "bg-active" : "hover:bg-active/40"
       }`}
     >
-      {selected && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-ink" />}
+      {selected && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
 
       {/* line 1: glyph, title, time */}
       <div className="flex items-center gap-2">

@@ -100,7 +100,7 @@ function RunRow({ run }: { run: RunSummary }) {
       onClick={() => { if (needsLoad(run.id)) sendLoadRun(run.id); selectRun(run.id); }}
       className={`relative w-full text-left px-4 py-2 transition-colors ${active ? "bg-active" : "hover:bg-active/40"}`}
     >
-      {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-ink" />}
+      {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
       {/* Branches (debug depth) are indented under the run they forked from, with a fork mark. */}
       <div className={`flex items-center gap-2 ${run.parent_run_id ? "pl-3" : ""}`}>
         {run.parent_run_id && (
@@ -109,7 +109,7 @@ function RunRow({ run }: { run: RunSummary }) {
           </span>
         )}
         <StatusGlyph status={run.status} />
-        <Truncate className="text-ink text-[12px]" title={run.agent_id}>{run.agent_id}</Truncate>
+        <Truncate className={`text-[12px] ${active ? "text-accent" : "text-ink"}`} title={run.agent_id}>{run.agent_id}</Truncate>
         <span className="ml-auto text-faint text-[11px] shrink-0">{relTime(run.started_at)}</span>
       </div>
       <div className={`mt-0.5 text-[11px] text-muted flex items-center gap-1.5 ${run.parent_run_id ? "pl-7" : "pl-4"}`}>
@@ -237,7 +237,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
         setRenaming(true);
       }}
     >
-      {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-ink" />}
+      {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
       <div className="flex items-start gap-1 px-4 py-2.5">
         <button onClick={() => selectAgent(agent.agent_id)} className="min-w-0 flex-1 text-left">
           <div className="flex items-center gap-2">
@@ -261,7 +261,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
                 className="min-w-0 flex-1 rounded-control bg-void px-1.5 py-0.5 text-[13px] text-ink outline-none"
               />
             ) : (
-              <Truncate className="text-ink" title={agent.name}>{agent.name}</Truncate>
+              <Truncate className={active ? "text-accent" : "text-ink"} title={agent.name}>{agent.name}</Truncate>
             )}
             {archived && <Chip size="sm" tone="faint" variant="bare">archived</Chip>}
             {github?.badge && (
@@ -383,7 +383,7 @@ function NavButtons() {
               active ? "bg-active text-ink" : "text-muted hover:bg-active/50 hover:text-ink"
             }`}
           >
-            {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-ink" />}
+            {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
             <Icon size={ICON.sm} />
             {label}
             {/* The same amber ◆ the rows use, so the badge needs no vocabulary of its own. Present only

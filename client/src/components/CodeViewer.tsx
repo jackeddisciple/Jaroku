@@ -66,7 +66,7 @@ function FileRail() {
               active ? "bg-active text-ink" : "text-muted hover:text-ink"
             }`}
           >
-            {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-ink" />}
+            {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
             {f.path === streamingFile && (
               <StatusDot state="pending" pulse size={ICON.xs} title="Still writing" />
             )}
