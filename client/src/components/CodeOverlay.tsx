@@ -36,7 +36,11 @@ export function CodeOverlay() {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-stretch justify-end bg-black/50" onClick={() => setOpen(false)}>
+    // ONE BACKDROP, ONE OPACITY — `void`, the colour the app itself sits on. There were three
+// values across four overlays (black/50 here and in the palette, black/60 on the MCP modal,
+// void/70 on the workspace panel), so the page darkened by a different amount depending on
+// which control you had pressed.
+<div className="fixed inset-0 z-40 flex items-stretch justify-end bg-void/80" onClick={() => setOpen(false)}>
       <div
         className="w-[min(880px,80vw)] bg-bg flex flex-col border-l border-edge shadow-overlay animate-slide-in motion-reduce:animate-none"
         onClick={(e) => e.stopPropagation()}

@@ -600,7 +600,7 @@ export function WorkspacePanel() {
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-start justify-center bg-void/70 p-8"
+      className="fixed inset-0 z-40 flex items-start justify-center bg-void/80 p-8"
       // Dismissed by the backdrop as well as by Escape. Nothing here is a form somebody is
       // halfway through except the invite box, and that costs an email address to retype.
       onMouseDown={(e) => {

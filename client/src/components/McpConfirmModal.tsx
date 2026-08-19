@@ -107,7 +107,7 @@ export function McpConfirmModal() {
 
   return (
     // No click-to-dismiss on the scrim, for the same reason Escape denies rather than closes.
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-void/80 p-6">
       <div
         role="alertdialog"
         aria-modal="true"
