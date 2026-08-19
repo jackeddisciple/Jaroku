@@ -63,9 +63,17 @@ export function Figure({
   return (
     <div className="relative">
       <div className="flex items-baseline gap-2">
+        {/* 18px for a hero figure, not 26. The rule this product's typography is built on is that
+            hierarchy comes from WEIGHT and COLOUR, not from scale — and a 26px number (30px on the
+            hero card) was the loudest element in the entire application, three of them filling a
+            third of the viewport to say three things.
+
+            `leading-none` for the hero ONLY. At inline size it collided with the caption's own
+            `mt-1.5` below: zero line-height removes the descender space, so the two lines sat a
+            pixel closer than every other label/value pair on the page. */}
         <span
-          className={`font-mono tabular-nums leading-none text-ink ${
-            size === "hero" ? "text-[26px]" : "text-[15px]"
+          className={`font-mono tabular-nums text-ink ${
+            size === "hero" ? "text-[18px] leading-none" : "text-[15px]"
           }`}
           // The figure is the thing a screenshot is taken of, so it carries its own full precision
           // for anybody who hovers — the displayed form is shortened past a thousand.
