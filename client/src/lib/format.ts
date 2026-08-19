@@ -57,9 +57,36 @@ export function fmtCost(cost: number | null | undefined): string {
   return `$${cost < 0.01 ? cost.toFixed(5) : cost.toFixed(4)}`;
 }
 
-export function fmtTokens(tokens: number | null | undefined): string {
+/**
+ * A count, shortened past a thousand: "999" / "11.6k" / "1.2M".
+ *
+ * THE ONE PLACE THE THRESHOLD AND THE SUFFIXES ARE DECIDED. There were two implementations of
+ * this idea — this one and `activityMetrics.tokens` — so the same quantity read as `11,646 tok`
+ * in the Usage panel and `11.6K` in the Activity hero, one screen apart. One decimal is kept so
+ * `1.2M` and `1.9M` are different numbers on screen, and nobody reads the last three digits of
+ * 4,182,993 tokens anyway.
+ */
+export function shortCount(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(Math.round(value));
+}
+
+/**
+ * A token count, with the unit where the unit goes: after the number, once.
+ *
+ * TWO FORMS, THE SAME SPLIT COST AND PERCENT USE. `exact` is for an itemised row somebody is
+ * reading as a figure — a usage line, a per-step total — where the digits are the point. `short`
+ * is for a summary somebody is reading as a size. Which one a surface wants is a property of the
+ * surface, not of the number.
+ */
+export function fmtTokens(
+  tokens: number | null | undefined,
+  form: "exact" | "short" = "exact",
+): string {
   if (tokens == null) return "—";
-  return `${tokens.toLocaleString()} tok`;
+  return `${form === "short" ? shortCount(tokens) : tokens.toLocaleString()} tok`;
 }
 
 /** Latency in ms, or an em dash when there isn't one. Null is "no measurement", not 0. */

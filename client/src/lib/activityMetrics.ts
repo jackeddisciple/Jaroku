@@ -11,7 +11,7 @@
 // component asks what tone to draw and never asks what the number means.
 //
 // EMPTY IS NOT ZERO, AND IT IS DECLARED HERE TOO (§3.5). A new workspace, or a range with nothing in
-// it, renders `--` and a short line of context — never `0`, never `$0.00`, never a chart axis
+// it, renders an em dash and a short line of context — never `0`, never `$0.00`, never a chart axis
 // implying a flat line at zero. That is the same rule v0.1.9 established when an unpriced model
 // rendered as a false `$0`, and on a dashboard it matters more, because every figure here will be
 // screenshotted and quoted. A formatter that coerced null to zero would undo it silently, so `null`
@@ -21,6 +21,8 @@
 // obviously right in a screenshot and is wrong in the case nobody had that day: a delta against a
 // previous window of zero, a percentage of a percentage, a token count that has to stay legible at
 // four digits and at nine.
+
+import { shortCount } from "./format.ts";
 
 /** What a figure is measured in. The unit decides the formatter, never the component. */
 export type MetricUnit = "usd" | "tokens" | "count" | "percent" | "ms";
@@ -158,17 +160,16 @@ function usd(value: number): string {
 }
 
 /**
- * How a token count is written.
+ * How a token count is written here: shortened, because the hero row is three figures across and a
+ * nine-digit number makes the other two illegible on a phone.
  *
- * SHORTENED PAST A THOUSAND, because the hero row is three figures across and a nine-digit number
- * makes the other two illegible on a phone — and nobody reads the last three digits of 4,182,993
- * tokens anyway. One decimal place is kept so `1.2M` and `1.9M` are different numbers on screen.
+ * THE ARITHMETIC IS `format.shortCount` NOW. It was a second implementation of the same idea with
+ * a different suffix case, which is how the same quantity came to read as `11.6K` on this tab and
+ * `11,646 tok` in the Usage panel one screen away. What stays local is the decision that this
+ * surface wants the short form and no unit suffix — the caption under each figure names the unit.
  */
 function tokens(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return String(Math.round(value));
+  return shortCount(value);
 }
 
 /** Milliseconds, in the unit a person would say out loud. */
@@ -186,7 +187,10 @@ function duration(ms: number): string {
  * Every caller goes through this, which is what makes the rule hold rather than be remembered at
  * eleven call sites.
  */
-export const EMPTY_FIGURE = "--";
+// THE SAME CHARACTER `format.ts` RETURNS FOR A MISSING VALUE. It was a pair of hyphens against
+// that module's em dash, and both appear on the Activity tab at the same size — two different
+// characters meaning exactly the same thing, a few pixels apart.
+export const EMPTY_FIGURE = "—";
 
 export function formatMetric(unit: MetricUnit, value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return EMPTY_FIGURE;

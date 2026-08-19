@@ -88,7 +88,9 @@ console.log("\nfigures stay legible at both ends of their range");
   check("very large money is thousands", formatMetric("usd", 250_000) === "$250k");
 
   check("small token counts are exact", formatMetric("tokens", 842) === "842");
-  check("thousands are shortened", formatMetric("tokens", 35_300) === "35.3K");
+  // Lowercase `k`, matching the money formatter two lines above it and `format.shortCount`, which
+  // both figures now go through. It was `K` here and `k` there, in one file.
+  check("thousands are shortened", formatMetric("tokens", 35_300) === "35.3k");
   check("millions are shortened", formatMetric("tokens", 4_182_993) === "4.2M");
 
   check("a rate is whole percents", formatMetric("percent", 0.9412) === "94%");
