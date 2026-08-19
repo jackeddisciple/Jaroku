@@ -51,10 +51,17 @@ export function StatusBar() {
   const deployStage = useDeployStore((s) => (deploying ? (s.stage[deploying.id] ?? null) : null));
   const live = useDeployStore((s) => s.deployments.filter((d) => d.status === "live").length);
 
-  const sep = <span className="text-hair">|</span>;
+  // A MIDDLE DOT, NOT A PIPE. A `|` drawn in the divider colour is a glyph doing a border's job:
+  // it sits on the text baseline at the font's own weight, so seven of them down a strip read as
+  // a set of drawn rules that are all very slightly the wrong height.
+  const sep = <span className="text-faint" aria-hidden>·</span>;
 
   return (
-    <div className="flex h-7 shrink-0 items-center gap-3 border-t border-hair px-4 font-mono text-[11px] text-muted tabular-nums">
+    // `font-sans` on the strip, `font-mono` on the figures. The whole row used to be code font —
+    // including the words `connected`, `connecting…` and `deploying <agent>`, which are English.
+    // Monospace is what marks something as an identifier; setting sentences in it removes the one
+    // signal it carries.
+    <div className="flex h-7 shrink-0 items-center gap-3 border-t border-hair px-4 text-[11px] text-muted">
       {/* The dot moves while it is connecting. Every other in-flight mark in this app pulses —
           the agent dot, the run glyph, the deploy chip — and this one indicator, the one that says
           whether any of the others can update at all, was static in all three states with only its
@@ -70,17 +77,22 @@ export function StatusBar() {
       {run && (
         <>
           {sep}
-          <span>{run.provider}/{run.model}</span>
+          {/* The one variable-width element in the row, and the only one that may shrink. A long
+              model id used to push the cost and the duration off the right edge, because the strip
+              is a flex row with no `min-w-0` anywhere in it. */}
+          <span className="min-w-0 truncate font-mono" title={`${run.provider}/${run.model}`}>
+            {run.provider}/{run.model}
+          </span>
           {sep}
           <span>{run.status}</span>
           {sep}
-          <span>Step {count}</span>
+          <span className="shrink-0 font-mono tabular-nums">Step {count}</span>
           {sep}
-          <span>{fmtTokens(tokens)}</span>
+          <span className="shrink-0 font-mono tabular-nums">{fmtTokens(tokens)}</span>
           {sep}
-          <span>{fmtCost(cost)}</span>
+          <span className="shrink-0 font-mono tabular-nums">{fmtCost(cost)}</span>
           {sep}
-          <span>{fmtDuration(duration)}</span>
+          <span className="shrink-0 font-mono tabular-nums">{fmtDuration(duration)}</span>
         </>
       )}
       {/* A deploy is the one thing that happens outside this machine, and it can be running
@@ -88,13 +100,13 @@ export function StatusBar() {
           so it never pushes the run's own figures around. */}
       {deploying && (
         <>
-          <span className="ml-auto text-run">deploying {deploying.agent_id}</span>
+          <span className="ml-auto shrink-0 text-run">deploying <span className="font-mono">{deploying.agent_id}</span></span>
           {sep}
-          <span className="text-run">{deployStage ?? deploying.status}</span>
+          <span className="shrink-0 text-run">{deployStage ?? deploying.status}</span>
         </>
       )}
       {!deploying && live > 0 && (
-        <span className="ml-auto">{live} deployed</span>
+        <span className="ml-auto shrink-0"><span className="font-mono tabular-nums">{live}</span> deployed</span>
       )}
     </div>
   );
