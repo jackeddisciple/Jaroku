@@ -415,14 +415,18 @@ function NoProviderKeyBanner() {
   const setRightTab = useUiStore((s) => s.setRightTab);
   if (!loaded || providers.some((p) => p.configured)) return null;
   return (
-    <div className="mb-2 flex items-center gap-2 rounded-control border border-hair px-2.5 py-1.5 text-[11px] text-muted">
-      <PlugIcon size={ICON.xs} />
+    // NO BOX. This is already the app's best empty-state pattern — a mark, a muted sentence, and
+    // an action at the end of it — and it was wrapped in a bordered container, which turns prose
+    // in the flow into a banner you have to dismiss in your head before reading what is under it.
+    // Dropping the border is the entire difference between the two.
+    <div className="mb-2 flex items-center gap-2 px-0.5 text-[11px] text-muted">
+      <span className="shrink-0 text-faint" aria-hidden><PlugIcon size={ICON.xs} /></span>
       <span className="min-w-0 flex-1">
         No provider key in this workspace yet — runs use the free dry-run model until you add one.
       </span>
       <button
         type="button"
-        className="shrink-0 text-ink underline-offset-2 hover:underline"
+        className="shrink-0 font-medium text-ink underline-offset-2 hover:underline"
         onClick={() => setRightTab("secrets")}
       >
         Add a key
