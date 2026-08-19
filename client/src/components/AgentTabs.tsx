@@ -17,6 +17,7 @@
 
 import { useState } from "react";
 import { Chip } from "./Chip.tsx";
+import { iconBtn } from "./buttons.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { McpBadge, HighImpactBadge } from "./McpBadge.tsx";
 import { Truncate } from "./Truncate.tsx";
@@ -309,12 +310,19 @@ function Deploy({ detail }: { detail: AgentDetailView }) {
           three and already targets the existing Railway service rather than creating a project. §1
           puts the trace, the plan and the diff out of scope for this tab on the same grounds: a
           second copy of a control is a second set of promises about what it does. */}
-      <button
-        onClick={() => setTab("deploy")}
-        className="flex w-full items-center justify-center gap-1.5 rounded-control border border-hair px-2 py-1.5 text-[12px] text-muted transition-colors hover:border-edge hover:bg-active hover:text-ink"
-      >
-        <RocketIcon size={ICON.xs} /> Redeploy, cancel or read the build log
-      </button>
+      {/* THE GLYPH IS THE BUTTON. Its label was a sentence — `Redeploy, cancel or read the build
+          log` — the longest button label in the product, on a full-width control, saying three
+          things none of which happen here. The sentence is the tooltip; the rocket is the door. */}
+      <div className="flex">
+        <button
+          onClick={() => setTab("deploy")}
+          className={iconBtn}
+          title="Redeploy, cancel or read the build log"
+          aria-label="Redeploy, cancel or read the build log"
+        >
+          <RocketIcon size={ICON.md} />
+        </button>
+      </div>
     </div>
   );
 }

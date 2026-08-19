@@ -28,7 +28,8 @@ import { startCheckout } from "../lib/workspaceApi.ts";
 import { fmtCost, fmtTokens } from "../lib/format.ts";
 import { ICON, STATUS, TEXT } from "../lib/tokens.ts";
 import { EmptyState, LoadingLine } from "./EmptyState.tsx";
-import { quietBtn, secondaryBtn } from "./buttons.ts";
+import { ExportIcon } from "./activityIcons.tsx";
+import { iconBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { download, usageStem, usageToCsv } from "../lib/evalExport.ts";
 import {
   AlertTriangleIcon, ChevronDownIcon, ChevronRightIcon, InfoIcon,
@@ -350,11 +351,15 @@ export function UsagePanel() {
           {/* The same rule as the eval exports, on the newest surface: every caveat on this
               page survives into the file. See usageToCsv — an unpriced row is an empty cell
               with `cost_known: no` beside it, never a zero somebody sums. */}
+          {/* The glyph exists in `activityIcons.tsx` and was unused here — two words of chrome in
+              a panel header, on the one control in it whose mark is unambiguous. */}
           <button
-            className={quietBtn}
+            className={iconBtn}
+            title="Export CSV"
+            aria-label="Export CSV"
             onClick={() => download(`${usageStem(usage)}.csv`, usageToCsv(usage), "text/csv")}
           >
-            Export CSV
+            <ExportIcon size={ICON.sm} />
           </button>
         </div>
       </div>

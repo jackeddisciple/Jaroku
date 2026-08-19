@@ -29,11 +29,12 @@ import {
 import { sendConnectConnector, sendDisconnectConnector, sendListConnections } from "../lib/socket.ts";
 import { ICON, TEXT } from "../lib/tokens.ts";
 import { EmptyState } from "./EmptyState.tsx";
-import { primaryBtn, quietBtn } from "./buttons.ts";
+import { iconBtn, primaryBtn, quietBtn } from "./buttons.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
 import {
   AlertTriangleIcon, CheckIcon, LockIcon, PlugIcon, RefreshIcon, ShieldCheckIcon, XIcon,
 } from "./panelIcons.tsx";
+import { UnpluggedIcon } from "./inboxIcons.tsx";
 import type { ConnectionView } from "../types.ts";
 
 /** What each status means, in the words somebody would use to decide what to do next. */
@@ -142,12 +143,15 @@ function ConnectionRow({ connection }: { connection: ConnectionView }) {
                 Reconnect
               </span>
             </button>
+            {/* An unplug glyph, which already exists in `inboxIcons.tsx`. The sentence stays as
+                the tooltip: it is a real consequence and it is too long to be a label. */}
             <button
-              className={quietBtn}
+              className={iconBtn}
               onClick={() => sendDisconnectConnector(connection.connectorId)}
-              title="Hand the grant back and forget the credentials. Agents using it will report it at their next tool call."
+              title="Disconnect — hand the grant back and forget the credentials. Agents using it will report it at their next tool call."
+              aria-label={`Disconnect ${connection.label}`}
             >
-              Disconnect
+              <UnpluggedIcon size={ICON.sm} />
             </button>
           </>
         ) : (
@@ -221,18 +225,31 @@ export function ConnectionsPanel() {
   return (
     <div className="space-y-3">
       {error ? (
-        <div className="rounded-control border border-line px-3 py-2 text-[12px] text-ink">
-          {error}
-          <button className={quietBtn} onClick={() => useConnectionStore.getState().setError(null)}>
-            Dismiss
+        /* ONE DISMISSAL TREATMENT. These were the word `Dismiss`, twice, while `GitHubPanel`'s
+            notice strip — the same idea, one panel over — closes with an XIcon. Two vocabularies
+            for "close this transient message" is one of them being wrong. */
+        <div className="flex items-start gap-2 rounded-control border border-line px-3 py-2 text-[12px] text-ink">
+          <span className="min-w-0 flex-1">{error}</span>
+          <button
+            className={`${iconBtn} shrink-0`}
+            title="Dismiss"
+            aria-label="Dismiss"
+            onClick={() => useConnectionStore.getState().setError(null)}
+          >
+            <XIcon size={ICON.xs} />
           </button>
         </div>
       ) : null}
       {notice ? (
-        <div className="rounded-control border border-line px-3 py-2 text-[12px]" style={{ color: TEXT.muted }}>
-          {notice}
-          <button className={quietBtn} onClick={() => useConnectionStore.getState().setNotice(null)}>
-            Dismiss
+        <div className="flex items-start gap-2 rounded-control border border-line px-3 py-2 text-[12px]" style={{ color: TEXT.muted }}>
+          <span className="min-w-0 flex-1">{notice}</span>
+          <button
+            className={`${iconBtn} shrink-0`}
+            title="Dismiss"
+            aria-label="Dismiss"
+            onClick={() => useConnectionStore.getState().setNotice(null)}
+          >
+            <XIcon size={ICON.xs} />
           </button>
         </div>
       ) : null}
