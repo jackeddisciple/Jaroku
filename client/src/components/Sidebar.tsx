@@ -26,7 +26,7 @@ import { StatusDot } from "./StatusBadge.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { ArchiveRestoreIcon, FilterIcon } from "./agentIcons.tsx";
 import {
-  ActivityIcon, GitForkIcon, HashIcon, InboxIcon,
+  ActivityIcon, CheckIcon, GitForkIcon, GlobeIcon, HashIcon, InboxIcon, RocketIcon,
   LoaderIcon, PauseIcon, PencilIcon, PlusIcon, SearchIcon, SettingsIcon, SparklesIcon, XIcon,
 } from "./panelIcons.tsx";
 
@@ -68,26 +68,28 @@ function StatusGlyph({ status }: { status: RunStatus }) {
   }
 }
 
-// Two states pulse: a local run and a deploy in flight. Both mean "this is changing right
-// now", which is the only thing the animation is ever allowed to mean.
-const DOT_COLOR: Record<AgentStatus, string> = {
-  running: "bg-run",
-  deploying: "bg-run",
-  draft: "bg-faint",
-  deployed: "bg-ok",
-  ran: "bg-ok",
-};
-
+// FIVE STATES, FIVE MARKS. It was five states and TWO colours: `running` and `deploying` were
+// both a pulsing amber dot, `deployed` and `ran` were both a static green one — so two of the four
+// live states were indistinguishable at a glance and the only way to tell them apart was to hover
+// for the tooltip.
+//
+// The colour still carries how it is doing; the glyph narrows what kind, which is exactly the
+// escape hatch `StatusDot` was given for this and which `StatusGlyph` above already uses for runs.
+// Two states move, and both mean "this is changing right now", which is the only thing motion is
+// ever allowed to mean here.
 function AgentDot({ status }: { status: AgentStatus }) {
-  const moving = status === "running" || status === "deploying";
-  return (
-    <span
-      title={status}
-      className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT_COLOR[status]} ${
-        moving ? "animate-stream-pulse motion-reduce:animate-none" : ""
-      }`}
-    />
-  );
+  switch (status) {
+    case "running":
+      return <StatusDot state="pending" icon={LoaderIcon} spin size={ICON.xs} title="running" />;
+    case "deploying":
+      return <StatusDot state="pending" icon={RocketIcon} pulse size={ICON.xs} title="deploying" />;
+    case "deployed":
+      return <StatusDot state="ok" icon={GlobeIcon} size={ICON.xs} title="deployed" />;
+    case "ran":
+      return <StatusDot state="ok" icon={CheckIcon} size={ICON.xs} title="ran" />;
+    case "draft":
+      return <span title="draft" className="h-1.5 w-1.5 shrink-0 rounded-full bg-faint" />;
+  }
 }
 
 function RunRow({ run }: { run: RunSummary }) {
