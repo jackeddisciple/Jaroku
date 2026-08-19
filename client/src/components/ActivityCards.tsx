@@ -309,16 +309,27 @@ export function ModelMixCard() {
 }
 
 /** A provider's hue in the mix. See `ActivityHero`'s note — colour is spent here and almost nowhere. */
+/**
+ * The colour a provider's slice of the mix is drawn in.
+ *
+ * A NEUTRAL RAMP, NOT BORROWED STATUS HUES. It used to hand each provider a saturated colour —
+ * `#c98a5e` for Anthropic, `#c99a52` for Groq — both of which are within a few degrees of
+ * `STATUS.pending`, the colour this palette reserves for "running". A workspace using one model
+ * therefore rendered a full-width, 100%-filled amber bar under the words "Model mix", which reads
+ * as a warning or as something in flight rather than as a share of spend. `tokens.ts` says amber
+ * "is spoken for" and this was the surface spending it.
+ *
+ * Share-of-total is categorical, not semantic: no slice means anything is wrong or anything is
+ * happening. Five steps of neutral lightness keep adjacent segments distinguishable inside one
+ * stacked bar — which is all a share chart needs — and none of them can be mistaken for a state.
+ * The row beneath the bar names every series anyway, which is why the bar is allowed to be quiet.
+ */
+const MIX_RAMP = ["#8b8b96", "#6f6f7a", "#565661", "#42424b", "#33333a"] as const;
+
 function modelHue(provider: string): string {
-  const palette: Record<string, string> = {
-    anthropic: "#c98a5e",
-    openai: "#5eb99a",
-    google: "#7fa9db",
-    together: "#a98cc4",
-    groq: "#c99a52",
-    nobody: TEXT.faint,
-  };
-  return palette[provider.toLowerCase()] ?? TEXT.faint;
+  const order = ["anthropic", "openai", "google", "together", "groq"];
+  const at = order.indexOf(provider.toLowerCase());
+  return at === -1 ? TEXT.faint : MIX_RAMP[at % MIX_RAMP.length]!;
 }
 
 // --- §8: the release timeline -------------------------------------------------------------------
