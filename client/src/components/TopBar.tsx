@@ -106,7 +106,7 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
         </Chip>
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-2 w-[440px] max-w-[calc(100vw-2rem)] rounded-card border border-edge bg-panel p-3 shadow-floating">
+        <div className="absolute right-0 top-full z-30 mt-1 w-[440px] max-w-[calc(100vw-2rem)] animate-slide-in rounded-card border border-edge bg-panel p-3 shadow-floating motion-reduce:animate-none">
           <div className={TYPE.sectionLabel}>Provider keys</div>
           <p className="mt-1 text-[11px] leading-[1.55] text-faint">
             Kept in Secrets with every other credential, behind the passcode. Never logged, never
@@ -328,14 +328,16 @@ export function TopBar() {
             <Breadcrumb agentId={agent.agent_id} />
           </span>
           <StatusDot status={status} />
-          <GithubChip agentId={agent.agent_id} />
+          {/* Hidden below ~1280px. It is the widest element in the bar and the one whose fact —
+              which repository, which branch — is now also on the breadcrumb two lines above it. */}
+          <span className="hidden xl:inline-flex"><GithubChip agentId={agent.agent_id} /></span>
         </>
       )}
 
       {/* WHAT THE RUN IS DOING, WHILE IT DOES IT — promoted out of the bottom strip. It sits
           against the left group rather than in the right one because it belongs to the agent
           named beside it, not to the workspace controls. */}
-      <span className="ml-auto min-w-0 shrink"><RunFigures /></span>
+      <span className="ml-auto hidden min-w-0 shrink lg:block"><RunFigures /></span>
 
       <div className="flex shrink-0 items-center gap-2">
         <SyncRing />

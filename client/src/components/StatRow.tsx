@@ -16,8 +16,13 @@ export type Stat = {
   icon: React.ReactNode;
   /** The figure. Monospace and tabular — this is the thing being compared. */
   value: string;
-  /** Unit or noun, in prose. Optional: "$0.0151" needs no noun, "6 files" does. */
+  /**
+   * Unit or noun. Shown as the figure's tooltip, and on screen only when `keepLabel` says the
+   * figure is ambiguous without it.
+   */
   label?: string;
+  /** Render `label` beside the value. For a count whose unit cannot be inferred from its glyph. */
+  keepLabel?: boolean;
   /** Hover explanation, for figures whose meaning is not obvious from the glyph. */
   title?: string;
   /** Secondary stats recede — a cache hit is worth reporting, not worth leading with. */
@@ -30,19 +35,26 @@ export type Stat = {
  */
 export function StatRow({ leading, stats }: { leading?: React.ReactNode; stats: Stat[] }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[11px]">
+    // `gap-x-3` rather than `gap-x-3.5`: fourteen pixels is off the four-pixel grid and appeared
+    // nowhere else in the client.
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
       {leading}
       {stats.map((s, i) => (
         <span
           key={i}
-          title={s.title}
+          // THE LABEL IS THE TOOLTIP NOW. A glyph plus a value plus a word, four times over, is a
+          // set of labelled form fields; a glyph plus a value is a chip row you read at a glance —
+          // and the glyph is already the label, which is the whole reason each figure has one.
+          // `output tokens` and `cached` were the words that went; `files` stays, because a bare
+          // `3` beside a document mark could be three of anything.
+          title={s.title ?? s.label}
           className={`inline-flex items-center gap-1.5 ${s.dim ? "text-faint" : "text-muted"}`}
         >
           <span className="shrink-0 flex items-center opacity-70" aria-hidden>
             {s.icon}
           </span>
           <span className="font-mono tabular-nums">{s.value}</span>
-          {s.label && <span>{s.label}</span>}
+          {s.label && s.keepLabel && <span>{s.label}</span>}
         </span>
       ))}
     </div>

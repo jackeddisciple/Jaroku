@@ -38,6 +38,7 @@ import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { ICON } from "../lib/tokens.ts";
 import { AlertTriangleIcon } from "./panelIcons.tsx";
+import { ArchiveIcon, ArchiveRestoreIcon } from "./agentIcons.tsx";
 
 /**
  * Who opened the thread, in a Team workspace only (§4.3).
@@ -348,28 +349,40 @@ export function ThreadRow({
             <button
               onClick={(e) => { e.stopPropagation(); onArchive(); }}
               disabled={!connected}
-              title={connected ? "Archive this thread (E)" : "Reconnecting — this needs a connection"}
-              className="rounded-control px-1.5 py-0.5 text-[10px] text-faint transition-colors hover:bg-active hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+              title={connected ? "Archive this thread — E" : "Reconnecting — this needs a connection"}
+              aria-label="Archive this thread"
+              className="inline-flex items-center gap-1 rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
             >
-              Archive
+              <ArchiveIcon size={ICON.xs} />
+              {/* THE KEY, BESIDE THE ACTION. `e` archives and always has; the sidebar teaches ⌘K
+                  exactly this way and no list action in the app did. */}
+              <kbd className="font-mono text-[9px] leading-none text-faint">E</kbd>
             </button>
           ) : (
             <button
               onClick={(e) => { e.stopPropagation(); onRestore(); }}
               disabled={!connected}
-              title={connected ? "Put this thread back in the list" : "Reconnecting — this needs a connection"}
-              className="rounded-control px-1.5 py-0.5 text-[10px] text-faint transition-colors hover:bg-active hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+              title={connected ? "Put this thread back in the list — E" : "Reconnecting — this needs a connection"}
+              aria-label="Restore this thread"
+              className="inline-flex items-center gap-1 rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
             >
-              Restore
+              <ArchiveRestoreIcon size={ICON.xs} />
+              <kbd className="font-mono text-[9px] leading-none text-faint">E</kbd>
             </button>
           )}
         </span>
       </div>
 
       {/* line 3: the last thing the USER said. Their intent is what makes a thread recognisable;
-          Jaroku's reply is not (§4.3). Absent rather than empty when nobody has said anything. */}
+          Jaroku's reply is not (§4.3). Absent rather than empty when nobody has said anything.
+
+          ON HOVER, AND ONLY THEN. Three lines at ~55px per row means seven threads fill a viewport
+          that should hold twenty — and this line is the one of the three you consult rather than
+          scan: the title and the agent are what you are looking for, and the quote is what
+          confirms it once you have. `hidden group-hover:block` rather than a height animation,
+          because a row that grows under the pointer moves the row below it. */}
       {thread.preview && (
-        <div className="mt-0.5 pl-5">
+        <div className="mt-0.5 hidden pl-5 group-hover:block">
           <Truncate className="text-[11px] italic text-faint" title={thread.preview}>
             “{thread.preview}”
           </Truncate>

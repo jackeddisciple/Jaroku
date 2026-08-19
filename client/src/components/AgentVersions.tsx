@@ -152,7 +152,7 @@ function VersionRow({
             onClick={onOpenFiles}
             title={`Browse the files of v${version.version}`}
             aria-label={`Browse the files of v${version.version}`}
-            className="rounded-control px-1.5 py-0.5 text-[11px] text-muted transition-colors hover:bg-active hover:text-ink"
+            className="rounded-control px-1.5 py-0.5 text-[11px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
           >
             Files
           </button>
@@ -164,7 +164,7 @@ function VersionRow({
               // mechanism is the safety property.
               title={`Publish a new version pointing at v${version.version}'s files — nothing is rewritten`}
               aria-label={`Restore v${version.version}`}
-              className="rounded-control p-1 text-muted transition-colors hover:bg-active hover:text-ink"
+              className="rounded-control p-1 text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
             >
               <ArchiveRestoreIcon size={ICON.xs} />
             </button>
@@ -220,7 +220,7 @@ export function AgentVersions({ detail }: { detail: AgentDetailView }) {
                   onClick={() => setSelection({ from: null, to: null })}
                   title="Clear the comparison"
                   aria-label="Clear the comparison"
-                  className="ml-auto rounded-control p-1 text-faint transition-colors hover:bg-active hover:text-ink"
+                  className="ml-auto rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
                 >
                   <UndoIcon size={ICON.xs} />
                 </button>

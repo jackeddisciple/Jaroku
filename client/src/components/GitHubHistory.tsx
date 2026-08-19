@@ -29,7 +29,7 @@ import { RegionLabel } from "./GitHubSync.tsx";
 import { DiffStat } from "./DiffStat.tsx";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
-import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
+import { iconBtn, primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import {
   CheckIcon, ChevronDownIcon, ExternalLinkIcon, GitPullRequestIcon, SearchIcon, XIcon,
 } from "./panelIcons.tsx";
@@ -103,13 +103,13 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-[280px] rounded-card border border-edge bg-panel p-1 shadow-floating">
+        <div className="absolute left-0 top-full z-30 mt-1 w-[280px] animate-slide-in rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none">
           <div className="flex items-center gap-1.5 border-b border-hair px-2 py-1.5">
             <span className="shrink-0 text-faint"><SearchIcon size={ICON.xs} /></span>
             <input
               autoFocus
               className="min-w-0 flex-1 bg-transparent text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
-              placeholder="Filter branches…"
+              placeholder="filter branches…"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             />
@@ -186,7 +186,7 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
       )}
 
       {pending && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-[300px] rounded-card border border-edge bg-panel p-2.5 shadow-floating">
+        <div className="absolute left-0 top-full z-30 mt-1 w-[300px] animate-slide-in rounded-card border border-edge bg-panel p-2.5 shadow-floating motion-reduce:animate-none">
           <div className="text-[12px] text-ink">
             {view.ahead} unpushed version{view.ahead === 1 ? "" : "s"}
           </div>
@@ -393,8 +393,16 @@ export function PullRequestCard({ view }: { view: GithubView }) {
       <section>
         <RegionLabel>Pull request</RegionLabel>
         <div className="mt-1.5 flex items-center gap-2">
-          <button className={secondaryBtn} onClick={() => sendOpenGithubPr(view.agentId)}>
-            <GitPullRequestIcon size={ICON.xs} /> Open PR to resolve
+          {/* THE GLYPH ALONE. The sentence beside it already carries the meaning — "Resolving on
+              GitHub keeps both histories" — and a label repeating what the prose next to it says
+              is the one place a mark never needs words. */}
+          <button
+            className={iconBtn}
+            title="Open a pull request to resolve this"
+            aria-label="Open a pull request to resolve this"
+            onClick={() => sendOpenGithubPr(view.agentId)}
+          >
+            <GitPullRequestIcon size={ICON.sm} />
           </button>
           <span className="text-[11px] text-faint">
             Resolving on GitHub keeps both histories.
@@ -538,7 +546,7 @@ export function HistoryRegion({ view }: { view: GithubView }) {
                   <Truncate className="min-w-0 flex-1 text-[12px] text-ink" title={row.summary}>
                     {row.summary}
                   </Truncate>
-                  <span className="shrink-0 text-[11px] text-faint">{relTime(row.at)}</span>
+                  <span className="w-[68px] shrink-0 text-right text-[11px] tabular-nums text-faint" title={absTime(row.at)}>{relTime(row.at)}</span>
                 </span>
                 <span className="mt-0.5 block text-[11px] text-muted">
                   {row.sha && row.url ? (
@@ -567,7 +575,7 @@ export function HistoryRegion({ view }: { view: GithubView }) {
                   <Truncate className="min-w-0 flex-1 text-[12px] text-muted" title={row.message}>
                     {row.message}
                   </Truncate>
-                  <span className="shrink-0 text-[11px] text-faint">{relTime(row.at)}</span>
+                  <span className="w-[68px] shrink-0 text-right text-[11px] tabular-nums text-faint" title={absTime(row.at)}>{relTime(row.at)}</span>
                 </span>
                 <a
                   href={row.url}

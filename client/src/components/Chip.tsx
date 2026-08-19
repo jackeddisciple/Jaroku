@@ -34,9 +34,12 @@ const SIZE: Record<ChipSize, string> = {
   lg: "gap-1.5 px-2.5 text-[12px]",
 };
 
+// ON THE GRID. `py-[3px]` was an arbitrary pixel between two grid steps, and 2/3/4 across three
+// sizes is a difference nobody can see and every chip in the app inherits. Two steps: a badge
+// riding on a line of text, and a chip that owns its row. The font size carries the rest.
 const PAD_Y: Record<ChipSize, string> = {
-  sm: "py-[2px]",
-  md: "py-[3px]",
+  sm: "py-0.5",
+  md: "py-1",
   lg: "py-1",
 };
 
@@ -188,7 +191,12 @@ export function Chip({
   const cls = [
     chipClass({ size, tone: color ? tone : effectiveTone, mono, caps, inline, interactive }),
     !color && !background && effectiveVariant === "fill" ? "bg-active" : "",
+    // A SELECTED CHIP STILL ANSWERS THE POINTER. It only got a hover response while unselected,
+    // so the connector chips and the Chat/Test segments went dead the moment they were chosen —
+    // and those are exactly the chips somebody clicks twice.
     interactive && !selected ? "hover:text-ink" : "",
+    interactive && selected ? "hover:brightness-125" : "",
+    interactive ? "active:brightness-110" : "",
     disabled ? "opacity-50 cursor-not-allowed" : "",
     className,
   ]
@@ -211,7 +219,7 @@ export function Chip({
 
   if (interactive) {
     return (
-      <button type="button" onClick={onClick} disabled={disabled} title={title} className={cls} style={surface}>
+      <button type="button" onClick={onClick} disabled={disabled} aria-disabled={disabled} title={title} className={cls} style={surface}>
         {body}
       </button>
     );

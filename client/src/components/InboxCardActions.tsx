@@ -66,7 +66,7 @@ function IconButton({
         e.stopPropagation();
         onClick();
       }}
-      className={`rounded-control p-1 transition-colors hover:bg-active ${
+      className={`rounded-control p-1 transition-colors hover:bg-active active:bg-chrome ${
         danger ? "text-faint hover:text-err" : "text-faint hover:text-ink"
       }`}
     >
@@ -149,7 +149,7 @@ function InlineForm({ item, action }: { item: InboxItemView; action: InboxAction
           type="button"
           onClick={() => void submit()}
           disabled={busy || !value.trim()}
-          className="shrink-0 rounded-control px-2 py-0.5 text-[11px] text-muted transition-colors hover:bg-active hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+          className="shrink-0 rounded-control px-2 py-0.5 text-[11px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
         >
           {busy ? "Saving…" : "Save"}
         </button>
@@ -179,7 +179,7 @@ function Overflow({ item, onClose }: { item: InboxItemView; onClose: () => void 
       // `boxShadow` was a byte-identical copy of `ELEVATION.floating` written out by hand — a
       // token that would silently stop matching the moment the token changed, on the one surface
       // where "does this look like the other menus" is the whole question.
-      className="absolute right-0 top-6 z-30 w-[184px] overflow-hidden rounded-card border border-edge bg-panel py-1 shadow-floating"
+      className="absolute right-0 top-6 z-30 mt-1 w-[184px] animate-slide-in overflow-hidden rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none"
     >
       {snoozing ? (
         // §7: labels stay where a label genuinely carries meaning, and the snooze duration menu is
@@ -191,7 +191,7 @@ function Overflow({ item, onClose }: { item: InboxItemView; onClose: () => void 
               sendSnoozeInboxItem(item.id, choice.id);
               onClose();
             }}
-            className="block w-full px-3 py-1.5 text-left text-[12px] text-muted transition-colors hover:bg-active hover:text-ink"
+            className="block w-full px-3 py-1.5 text-left text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
           >
             {choice.label}
           </button>
@@ -205,14 +205,14 @@ function Overflow({ item, onClose }: { item: InboxItemView; onClose: () => void 
                 runAction(action, item);
                 onClose();
               }}
-              className="block w-full px-3 py-1.5 text-left text-[12px] text-muted transition-colors hover:bg-active hover:text-ink"
+              className="block w-full px-3 py-1.5 text-left text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
             >
               {ACTION_LABEL[action]}
             </button>
           ))}
           <button
             onClick={() => setSnoozing(true)}
-            className="block w-full px-3 py-1.5 text-left text-[12px] text-muted transition-colors hover:bg-active hover:text-ink"
+            className="block w-full px-3 py-1.5 text-left text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
           >
             Snooze…
           </button>
@@ -225,7 +225,7 @@ function Overflow({ item, onClose }: { item: InboxItemView; onClose: () => void 
               sendResolveInboxItem(item.id);
               onClose();
             }}
-            className="block w-full px-3 py-1.5 text-left text-[12px] text-muted transition-colors hover:bg-active hover:text-ink"
+            className="block w-full px-3 py-1.5 text-left text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
           >
             Mark as done
           </button>

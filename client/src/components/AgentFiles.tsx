@@ -150,7 +150,7 @@ export function AgentFiles({ detail }: { detail: AgentDetailView }) {
               onClick={() => downloadVersion(slug, showing.version, files)}
               title={`Export ${slug} v${showing.version} as markdown`}
               aria-label={`Export ${slug} v${showing.version}`}
-              className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active hover:text-ink"
+              className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
             >
               <DownloadIcon size={ICON.xs} />
             </button>
@@ -163,7 +163,7 @@ export function AgentFiles({ detail }: { detail: AgentDetailView }) {
             // jump when the real ones land.
             <div className="space-y-1 px-2">
               {[0, 1, 2, 3].map((i) => (
-                <div key={i} className="h-4 rounded bg-active/70" style={{ width: `${70 - i * 9}%` }} />
+                <div key={i} className="h-4 rounded-chip bg-active" style={{ width: `${70 - i * 9}%` }} />
               ))}
             </div>
           ) : (

@@ -168,7 +168,7 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
         onClick={() => sendRestoreAgent(agent.agent_id)}
         title="Bring this agent back"
         aria-label="Restore this agent"
-        className="shrink-0 rounded-control p-1 text-muted transition-colors hover:bg-active hover:text-ink"
+        className="shrink-0 rounded-control p-1 text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
       >
         <ArchiveRestoreIcon size={ICON.xs} />
       </button>
@@ -180,7 +180,7 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
       <button
         onClick={onRename}
         title="Rename (double-click the row)"
-        className="rounded-control p-1 text-faint transition-colors hover:bg-active hover:text-ink"
+        className="rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
       >
         <PencilIcon size={ICON.xs} />
       </button>
@@ -203,7 +203,7 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
           // reaching for a control on the product's central object is entitled to know that before
           // they press it rather than after.
           title="Archive — nothing is deleted; its versions, runs and threads stay"
-          className="rounded-control p-1 text-faint transition-colors hover:bg-active hover:text-ink"
+          className="rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
         >
           <XIcon size={ICON.xs} />
         </button>
@@ -473,7 +473,7 @@ function AccountRow() {
     <button
       onClick={() => openWorkspacePanel("members")}
       title={`${user.email}${workspace ? ` — ${workspace.role} of ${workspace.name}` : ""}`}
-      className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-active"
+      className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-active active:bg-chrome"
     >
       {/* The first letter of whoever is actually here, uppercased. */}
       <span className="flex h-5 w-5 items-center justify-center rounded-control bg-active text-[11px] text-ink">
@@ -578,7 +578,7 @@ function FilterMenu({
         aria-label={filtering ? `Filtered: ${current?.label}` : "Filter agents"}
         aria-expanded={open}
         className={`flex h-6 shrink-0 items-center gap-1 rounded-control px-1 transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-          filtering || open ? "bg-active text-accent" : "text-muted hover:bg-active hover:text-ink"
+          filtering || open ? "bg-active text-accent" : "text-muted hover:bg-active active:bg-chrome hover:text-ink"
         }`}
       >
         <FilterIcon size={ICON.sm} />
@@ -587,7 +587,7 @@ function FilterMenu({
         )}
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 min-w-[170px] rounded-card border border-edge bg-panel p-1 shadow-floating">
+        <div className="absolute right-0 top-full z-30 mt-1 min-w-[170px] animate-slide-in rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none">
           {entries.map((e) => (
             <button
               key={e.id}
@@ -729,7 +729,7 @@ export function Sidebar() {
             onClick={() => setSearching(true)}
             title="Search agents — ⌘K opens the palette"
             aria-label="Search agents"
-            className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+            className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
           >
             <SearchIcon size={ICON.sm} />
           </button>
@@ -740,7 +740,7 @@ export function Sidebar() {
           title="New agent"
           aria-label="New agent"
           className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-            activeAgentId === null ? "bg-active text-accent" : "text-muted hover:bg-active hover:text-ink"
+            activeAgentId === null ? "bg-active text-accent" : "text-muted hover:bg-active active:bg-chrome hover:text-ink"
           }`}
         >
           <PlusIcon size={ICON.sm} />
@@ -760,7 +760,7 @@ export function Sidebar() {
           four different offsets: a hairline sits ABOVE a section's label and never between a label
           and its own rows. `sticky` on the header is what makes a single scroller readable — the
           heading you are under stays where you can see it. */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="scroll-fade min-h-0 flex-1 overflow-y-auto">
         {/* PINNED, above the rest of the list — §2's order for this column.
             Only when there is something pinned: an empty PINNED heading is the same noise as an
             empty section in the Threads view, and the same rule applies. Pinning is `P` on a

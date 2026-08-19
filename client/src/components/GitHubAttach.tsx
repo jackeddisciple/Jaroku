@@ -122,7 +122,7 @@ export function GitHubAttachMenu({
       {open && (
         // Opens UPWARD, like the model selector beside it: the composer is at the bottom of the
         // column and a menu opening down would be a menu off the screen.
-        <div className="absolute bottom-full left-0 z-30 mb-2 min-w-[260px] rounded-card border border-edge bg-panel p-1 shadow-floating">
+        <div className="absolute bottom-full left-0 z-30 mb-1 min-w-[260px] animate-slide-in rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none">
           <div className="px-2 pb-1 pt-0.5 text-[10px] uppercase tracking-wider text-faint">
             Attach from {view.link.repo_full_name}
           </div>

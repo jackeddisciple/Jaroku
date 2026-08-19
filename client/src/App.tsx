@@ -126,7 +126,11 @@ export function App() {
     // shadow, so the three columns read as a lifted object with edges — which is what they are
     // once this is wrapped as a desktop window, and is worth the eight pixels in a browser tab
     // too. The layout inside is untouched: same PanelGroup, same sizes, same resize handles.
-    <div className="h-full bg-void p-2">
+    // `min-w-[900px]` and a horizontal scroll below it. The shell had no minimum at all, and the
+    // pane minimums are PERCENTAGES — at a 1000px window the sidebar's `minSize={14}` is 140px,
+    // narrower than its own rows plus their padding, which is why its filter row used to clip. The
+    // clipping was the symptom; a percentage floor on a fixed-content column is the cause.
+    <div className="h-full min-w-[900px] overflow-x-auto bg-void p-2">
       <div className="flex h-full flex-col overflow-hidden rounded-modal border border-edge bg-bg shadow-overlay">
         {/* top bar */}
         <TopBar />
@@ -152,7 +156,7 @@ export function App() {
         <PanelGroup direction="horizontal" autoSaveId="jaroku-layout-v4" className="flex-1 min-h-0">
           {mountSidebar && (
             <>
-              <Panel defaultSize={20} minSize={14} maxSize={34} order={1}>
+              <Panel defaultSize={20} minSize={16} maxSize={34} order={1}>
                 <div className="h-full animate-panel-in motion-reduce:animate-none">
                   <Sidebar />
                 </div>

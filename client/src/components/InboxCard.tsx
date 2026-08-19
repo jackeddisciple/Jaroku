@@ -159,7 +159,7 @@ export function InboxCard({
     <div
       data-inbox-item={item.id}
       onClick={onClick}
-      className={`relative overflow-hidden text-left transition-all motion-reduce:transition-none ${size.pad} ${
+      className={`relative overflow-hidden text-left transition-[max-height,opacity,margin] motion-reduce:transition-none ${size.pad} ${
         leaving ? "pointer-events-none opacity-0" : "opacity-100"
       }`}
       style={{

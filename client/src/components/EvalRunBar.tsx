@@ -201,7 +201,7 @@ export function EvalRunBar() {
           {running ? (
             <button
               onClick={() => progress && sendCancelEval(progress.evalId)}
-              className="rounded-control px-3 py-1.5 text-[12px] text-err hover:bg-active transition-colors whitespace-nowrap"
+              className="rounded-control px-3 py-1.5 text-[12px] text-err hover:bg-active active:bg-chrome transition-colors whitespace-nowrap"
             >
               Cancel
             </button>

@@ -33,6 +33,8 @@ import { Truncate } from "./Truncate.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
 import { ChevronDownIcon } from "./panelIcons.tsx";
 import { Checkbox } from "./Checkbox.tsx";
+import { iconBtn } from "./buttons.ts";
+import { RowsIcon } from "./agentIcons.tsx";
 
 /** `path\u0000index` — one ticked hunk. A set of these is the whole of the staging state. */
 type HunkKey = string;
@@ -181,12 +183,21 @@ export function StagingRegion({ view }: { view: GithubView }) {
       )}
 
       {!whole && (
+        // THE EXPLANATION IS HELPER TEXT, NOT THE PLACEHOLDER. It used to read "What does this
+        // subset do? (a staged subset has no version instruction to borrow)" — a full sentence
+        // plus a parenthetical, inside a field that erases itself on the first keystroke, which is
+        // exactly when the instruction is needed.
         <textarea
           className="mt-2 h-16 w-full resize-none rounded-control bg-panel px-2 py-1.5 font-mono text-[11px] leading-[1.5] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
-          placeholder="What does this subset do? (a staged subset has no version instruction to borrow)"
+          placeholder="what does this subset do?"
           value={message}
           onChange={(e) => setMessage(e.target.value)}
         />
+      )}
+      {!whole && (
+        <p className="mt-1 text-[10px] text-faint">
+          A staged subset has no version instruction to borrow.
+        </p>
       )}
 
       <div className="mt-2 flex items-center gap-2">
@@ -247,6 +258,11 @@ function StagedFileRow({
           style={{ color: descriptor.accent }}
           role="img"
           aria-label={descriptor.label}
+          title={
+            file.status === "deleted"
+              ? "removed — all or nothing, there is no half of this"
+              : descriptor.label
+          }
         >
           <descriptor.Icon size={ICON.xs} />
         </span>
@@ -257,7 +273,11 @@ function StagedFileRow({
         <DiffStat additions={file.additions} deletions={file.deletions} className="shrink-0" />
         {file.hunks.length > 1 && (
           <button
-            className={quietBtn}
+            // `iconBtn`, not `quietBtn`. The quiet weight's padding is sized for a word, so this
+            // disclosure was a ~44px control holding a 12px chevron and breaking the row rhythm
+            // around it.
+            className={iconBtn}
+            title={open ? "Hide hunks" : "Show hunks"}
             aria-expanded={open}
             aria-label={open ? "hide hunks" : "show hunks"}
             onClick={onToggleOpen}
@@ -271,9 +291,10 @@ function StagedFileRow({
 
       {/* A deletion has no hunks and says so, rather than offering a checkbox that would mean half
           of a file existing. That is what git's own `add -p` decides about one too. */}
-      {file.status === "deleted" && (
-        <p className="ml-5 mt-0.5 text-[11px] text-faint">removed — all or nothing, there is no half of this</p>
-      )}
+      {/* THE SENTENCE IS THE TOOLTIP. It was a second LINE under the row — and this panel's whole
+          value is a scannable column of one-line file rows, which a paragraph per deleted file
+          breaks. The fact is on the row's own status mark, where somebody wondering why there is
+          no checkbox will look. */}
 
       {open && file.hunks.length > 1 && (
         <div className="ml-5 mt-1 space-y-1">
@@ -429,7 +450,12 @@ export function RestackRegion({ view }: { view: GithubView }) {
                 failed ? "border border-err/40 bg-err/5" : "border border-transparent"
               } ${dragging === index ? "opacity-50" : ""}`}
             >
-              <span className="shrink-0 cursor-grab text-faint" aria-hidden>≡</span>
+              {/* `active:cursor-grabbing`, and a real glyph. A grab cursor that never becomes a
+                  grabbing one tells you a thing is draggable and then never confirms the drag
+                  started — and `≡` was a font character where the icon set has a rows mark. */}
+              <span className="shrink-0 cursor-grab text-faint active:cursor-grabbing" aria-hidden>
+                <RowsIcon size={ICON.xs} />
+              </span>
               <span className="w-8 shrink-0 text-right font-mono text-faint">
                 v{head?.version ?? "?"}
               </span>

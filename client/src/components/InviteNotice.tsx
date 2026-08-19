@@ -32,7 +32,7 @@ export function InviteNotice() {
         <button
           onClick={() => dismiss(null)}
           title="Dismiss"
-          className="shrink-0 rounded-control px-1 py-0.5 text-faint transition-colors hover:bg-active hover:text-ink"
+          className="shrink-0 rounded-control px-1 py-0.5 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
         >
           <XIcon size={ICON.xs} />
         </button>

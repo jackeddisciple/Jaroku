@@ -123,7 +123,7 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
                   onClick={() => setRenaming(true)}
                   title="Rename this agent — the slug does not change"
                   aria-label={`Rename ${a.name}`}
-                  className="shrink-0 rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active hover:text-ink"
+                  className="shrink-0 rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
                 >
                   <PencilIcon size={ICON.xs} />
                 </button>

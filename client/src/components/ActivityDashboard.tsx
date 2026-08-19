@@ -38,17 +38,20 @@ export function ActivityDashboard() {
           is a time series with half the resolution. */}
       <PulseBand />
 
-      {/* Three pairs, in §3.1's order. `md:` and not `lg:`: the breakpoint that matters here is the
-          one where two cards of numbers stop fitting side by side, which is well below a laptop. */}
-      <div className="grid gap-4 md:grid-cols-2">
+      {/* Three pairs, in §3.1's order.
+          AUTO-FIT, NOT A VIEWPORT BREAKPOINT. `md:grid-cols-2` fires on WINDOW width, and this grid
+          lives inside a resizable centre pane — so on a wide monitor with the pane dragged narrow
+          it went two-column inside 500px, which is the breakpoint measuring the wrong box. A
+          minmax track asks the container instead, and needs no breakpoint at all. */}
+      <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">
         <LeaderboardCard />
         <ModelMixCard />
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">
         <EventFeedCard />
         <ReleasesCard />
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">
         <ToolUsageCard />
         <TeamPulseCard />
       </div>

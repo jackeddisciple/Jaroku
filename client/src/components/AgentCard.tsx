@@ -23,7 +23,7 @@ import { ThumbnailMark, ArchiveIcon, ArchiveRestoreIcon, CopyIcon, DownloadIcon 
 import { AlertTriangleIcon, GitForkIcon, KebabIcon, PencilIcon, PlusIcon } from "./panelIcons.tsx";
 import { agentContextMarkdown } from "../lib/agentContext.ts";
 import { absTime, fmtCost, relTime } from "../lib/format.ts";
-import { ICON, STATUS, TEXT, TYPE } from "../lib/tokens.ts";
+import { ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { spendFor, useAgentGridStore } from "../store/agentGridStore.ts";
 import type { AgentCardView } from "../types.ts";
 import type { AgentDensity } from "../lib/agentFilter.ts";
@@ -64,7 +64,7 @@ function Overflow({
         setOpen(false);
         onPick();
       }}
-      className={`flex w-full items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-[12px] transition-colors duration-fast hover:bg-active ${
+      className={`flex w-full items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-[12px] transition-colors duration-fast hover:bg-active active:bg-chrome ${
         danger ? "text-err hover:text-err" : "text-muted hover:text-ink"
       }`}
     >
@@ -86,7 +86,7 @@ function Overflow({
         title="More actions"
         aria-label={`More actions for ${agent.name}`}
         aria-expanded={open}
-        className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active hover:text-ink"
+        className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
       >
         <KebabIcon size={ICON.sm} />
       </button>
@@ -96,7 +96,7 @@ function Overflow({
               including one that would otherwise open a different card, and it disappears with the
               menu rather than outliving it. */}
           <div className="fixed inset-0 z-30" aria-hidden onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
-          <div className="absolute right-0 top-full z-30 mt-1 w-52 rounded-card border border-edge bg-panel p-1 shadow-floating">
+          <div className="absolute right-0 top-full z-30 mt-1 w-52 animate-slide-in rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none">
             {archived
               ? item("Restore", ArchiveRestoreIcon, onRestore)
               : [
@@ -223,7 +223,7 @@ export function AgentCard({
               }}
               title={`Start a new thread on ${agent.name}`}
               aria-label={`Start a new thread on ${agent.name}`}
-              className="shrink-0 rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active hover:text-ink"
+              className="shrink-0 rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
             >
               <PlusIcon size={ICON.sm} />
             </button>
@@ -236,7 +236,7 @@ export function AgentCard({
             }}
             title={copied ? "Copied" : "Copy this agent's context as markdown"}
             aria-label={`Copy ${agent.name}'s context`}
-            className="shrink-0 rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active hover:text-ink"
+            className="shrink-0 rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
           >
             <CopyIcon size={ICON.sm} />
           </button>
@@ -357,10 +357,15 @@ export function AgentCard({
               have made it, which is a pixel spent saying nothing. */}
           {creatorInitial && (
             <span
-              className="ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-active text-[9px] font-medium"
-              style={{ color: TEXT.muted }}
+              // THE ACCOUNT ROW'S TREATMENT. This was a 16px circle with a 9px muted initial
+              // against the sidebar's 20px rounded square with an 11px ink one — two
+              // initial-avatars in one app at two shapes, two sizes and two ink levels. And it
+              // was `aria-hidden` while carrying a `title`, so the tooltip sat on an element
+              // removed from the accessibility tree and reached nobody.
+              className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-active text-[11px] text-ink"
               title="Who created this agent"
-              aria-hidden
+              role="img"
+              aria-label="Who created this agent"
             >
               {creatorInitial}
             </span>

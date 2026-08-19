@@ -76,7 +76,7 @@ function FirstAgentStart({ workspaceName }: { workspaceName: string | null }) {
               e.stopPropagation();
               if (e.key === "Enter") start();
             }}
-            placeholder="Describe an agent and Jaroku will build it"
+            placeholder="describe an agent"
             className="min-w-0 flex-1 bg-transparent text-[13px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
           />
           <span className="shrink-0 text-[10px] text-faint">↵</span>
@@ -132,7 +132,7 @@ function FilterMenu({
         aria-label="Filter the grid"
         aria-expanded={open}
         className={`flex items-center gap-1.5 rounded-control px-2 py-1.5 text-[12px] transition-colors duration-fast ${
-          active > 0 ? "bg-active text-ink" : "text-muted hover:bg-active hover:text-ink"
+          active > 0 ? "bg-active text-ink" : "text-muted hover:bg-active active:bg-chrome hover:text-ink"
         }`}
       >
         <FilterIcon size={ICON.sm} />
@@ -141,7 +141,7 @@ function FilterMenu({
       {open && (
         <>
           <div className="fixed inset-0 z-30" aria-hidden onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-30 mt-1 w-64 rounded-card border border-edge bg-panel p-1 shadow-floating">
+          <div className="absolute left-0 top-full z-30 mt-1 w-64 animate-slide-in rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none">
             {row(
               "Status",
               (["healthy", "degraded", "failing", "unverified"] as const).map((s) => (
@@ -363,7 +363,7 @@ export function AgentsView() {
               e.stopPropagation();
               if (e.key === "Escape") setFilters((f) => ({ ...f, query: "" }));
             }}
-            placeholder="Search agents…"
+            placeholder="search agents…"
             aria-label="Search agents by name or slug"
             className="min-w-0 flex-1 bg-transparent text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
           />
@@ -427,7 +427,7 @@ export function AgentsView() {
         <button
           onClick={() => sendListAgentGrid()}
           disabled={!connected}
-          className="shrink-0 rounded-control p-1.5 text-faint transition-colors hover:bg-active hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+          className="shrink-0 rounded-control p-1.5 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
           title="Ask for the grid again"
           aria-label="Ask for the grid again"
         >
@@ -443,10 +443,11 @@ export function AgentsView() {
             useUiStore.getState().focusChat();
           }}
           disabled={!connected}
-          className="flex shrink-0 items-center gap-1.5 rounded-control px-2.5 py-1.5 text-[12px] text-muted transition-colors hover:bg-active hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
           title={connected ? "Describe a new agent in the composer" : "Reconnecting — a new agent needs a connection"}
+          aria-label="New agent"
         >
-          <PlusIcon size={12} /> New agent
+          <PlusIcon size={ICON.sm} />
         </button>
       </div>
 
@@ -475,9 +476,9 @@ export function AgentsView() {
               <div key={i} className="overflow-hidden rounded-card border border-hair bg-panel">
                 <div className="h-[104px] w-full bg-active" />
                 <div className="space-y-2 p-3">
-                  <div className="h-3 w-1/2 rounded bg-active" />
-                  <div className="h-2.5 w-1/3 rounded bg-active/70" />
-                  <div className="h-2.5 w-3/4 rounded bg-active/70" />
+                  <div className="h-3 w-1/2 rounded-chip bg-active" />
+                  <div className="h-2.5 w-1/3 rounded-chip bg-active" />
+                  <div className="h-2.5 w-3/4 rounded-chip bg-active" />
                 </div>
               </div>
             ))}

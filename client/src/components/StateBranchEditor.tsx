@@ -104,14 +104,14 @@ export function StateBranchEditor({ step }: { step: Step }) {
           onClick={() => branch(true)}
           disabled={dirtyKeys.length === 0}
           className="flex-1 rounded-control py-1.5 text-[12px] border border-hair text-ink
-            enabled:hover:bg-active disabled:opacity-40 disabled:cursor-not-allowed"
+            enabled:hover:bg-active active:bg-chrome disabled:opacity-40 disabled:cursor-not-allowed"
           title={dirtyKeys.length === 0 ? "Edit a field to branch with changes" : "Fork a new run with these edits"}
         >
           Branch with edits{dirtyKeys.length ? ` (${dirtyKeys.length})` : ""}
         </button>
         <button
           onClick={() => branch(false)}
-          className="rounded-control px-3 py-1.5 text-[12px] border border-hair text-muted hover:bg-active hover:text-ink"
+          className="rounded-control px-3 py-1.5 text-[12px] border border-hair text-muted hover:bg-active active:bg-chrome hover:text-ink"
           title="Fork a new run from this checkpoint without changes"
         >
           Re-run from here

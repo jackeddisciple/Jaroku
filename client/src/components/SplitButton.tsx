@@ -85,7 +85,7 @@ export function SplitButton({
       <span className="inline-flex overflow-hidden rounded-control bg-panel">
         <button
           type="button"
-          className="px-3 py-1.5 text-[12px] text-ink transition-colors hover:bg-active disabled:cursor-not-allowed disabled:opacity-40"
+          className="px-3 py-1.5 text-[12px] text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
           disabled={!primary || primaryBlocked}
           title={primary?.title}
           onClick={() => primary?.onSelect()}
@@ -99,7 +99,7 @@ export function SplitButton({
           aria-haspopup="menu"
           aria-expanded={open}
           aria-label="More sync actions"
-          className="px-1.5 py-1.5 text-muted transition-colors hover:bg-active hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+          className="px-1.5 py-1.5 text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
           disabled={disabled}
           onClick={() => setOpen((v) => !v)}
         >
@@ -112,7 +112,7 @@ export function SplitButton({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full z-30 mt-1 min-w-[170px] rounded-card border border-edge bg-panel p-1 shadow-floating"
+          className="absolute right-0 top-full z-30 mt-1 min-w-[170px] animate-slide-in rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none"
         >
           {everyday.map((a) => <MenuRow key={a.id} action={a} onDone={() => setOpen(false)} />)}
           {dangerous.length > 0 && (
@@ -142,7 +142,7 @@ function MenuRow({ action, onDone }: { action: SplitAction; onDone: () => void }
         }}
         className={`flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-[12px] transition-colors duration-fast disabled:cursor-not-allowed ${
           action.danger
-            ? "text-err hover:bg-active disabled:opacity-40"
+            ? "text-err hover:bg-active active:bg-chrome disabled:opacity-40"
             : "text-muted hover:bg-active/40 hover:text-ink disabled:opacity-40"
         }`}
       >

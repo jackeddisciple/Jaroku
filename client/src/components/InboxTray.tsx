@@ -102,7 +102,7 @@ export function InboxTray({
                 onClick={() => sendSnoozeInboxItem(item.id, "hour")}
                 title="Bring it back in an hour instead"
                 aria-label={`Bring ${item.subject} back in an hour instead`}
-                className="shrink-0 rounded-control px-1.5 py-0.5 text-[10px] text-faint transition-colors hover:bg-active hover:text-ink"
+                className="shrink-0 rounded-control px-1.5 py-0.5 text-[10px] text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
               >
                 1h
               </button>

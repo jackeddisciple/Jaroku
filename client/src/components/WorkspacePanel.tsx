@@ -114,8 +114,21 @@ function MemberRow({ member, canManage, isSelf }: { member: Member; canManage: b
   const [confirmRemove, setConfirmRemove] = useState(false);
 
   return (
-    <div className="flex items-center gap-2 border-b border-hair px-1 py-2 last:border-b-0">
-      <span className="shrink-0 text-faint"><UserCircleIcon size={ICON.sm} /></span>
+    // NO PER-ROW RULE. This was the only list in the app with a divider between every row, and
+    // the members list is the one screen entirely about people — whitespace groups them the way
+    // every other list here does.
+    //
+    // AND A REAL INITIAL. The rows drew a generic `UserCircleIcon` — the same anonymous glyph for
+    // everybody — on the one screen where several people appear at once. The 20px rounded square
+    // is the account row's treatment, which is the canonical one; the card's 16px circle at 9px
+    // muted was the third.
+    <div className="flex items-center gap-2 rounded-control px-1 py-2 transition-colors hover:bg-active/40">
+      <span
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-active text-[11px] text-ink"
+        aria-hidden
+      >
+        {(member.display_name || member.email || "?").trim().charAt(0).toUpperCase()}
+      </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <Truncate className="text-[12px] text-ink" title={member.email}>
@@ -162,7 +175,7 @@ function MemberRow({ member, canManage, isSelf }: { member: Member; canManage: b
           <button
             onClick={() => setConfirmRemove(true)}
             title={isSelf ? "Leave this workspace" : `Remove ${member.email}`}
-            className="shrink-0 rounded-control px-1.5 py-1 text-[11px] text-faint transition-colors hover:bg-active hover:text-err"
+            className="shrink-0 rounded-control px-1.5 py-1 text-[11px] text-faint transition-colors hover:bg-active active:bg-chrome hover:text-err"
           >
             <XIcon size={ICON.xs} />
           </button>
@@ -185,7 +198,7 @@ function InviteRow({ invite, canManage }: { invite: Invite; canManage: boolean }
         <button
           onClick={() => sendRevokeInvite(invite.id)}
           title="Revoke this invitation"
-          className="shrink-0 rounded-control px-1.5 py-1 text-[11px] text-faint transition-colors hover:bg-active hover:text-err"
+          className="shrink-0 rounded-control px-1.5 py-1 text-[11px] text-faint transition-colors hover:bg-active active:bg-chrome hover:text-err"
         >
           <XIcon size={ICON.xs} />
         </button>
@@ -557,7 +570,7 @@ function DataSection() {
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
                 disabled={!canManage}
-                placeholder="Type the id above to confirm"
+                placeholder="type the id above to confirm"
                 className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 font-mono text-[11px] text-ink placeholder:font-sans placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge disabled:opacity-40"
               />
               <button
@@ -626,8 +639,8 @@ export function WorkspacePanel() {
           </div>
           <button
             onClick={close}
-            title="Close (Escape)"
-            className="ml-auto rounded-control px-1.5 py-1 text-faint transition-colors hover:bg-active hover:text-ink"
+            title="Close (Esc)"
+            className="ml-auto rounded-control px-1.5 py-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
           >
             <XIcon size={ICON.sm} />
           </button>

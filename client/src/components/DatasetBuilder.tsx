@@ -30,7 +30,9 @@ import { ICON } from "../lib/tokens.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { EmptyState } from "./EmptyState.tsx";
-import { ChevronDownIcon, ChevronRightIcon, DatabaseIcon, XIcon } from "./panelIcons.tsx";
+import { ChevronDownIcon, ChevronRightIcon, DatabaseIcon, PencilIcon, PlusIcon, UndoIcon, XIcon } from "./panelIcons.tsx";
+import { DownloadIcon } from "./agentIcons.tsx";
+import { TrashIcon } from "./inboxIcons.tsx";
 import type { DatasetExample, RubricCriterion } from "../types.ts";
 
 /** An input/expected pair, editable in place. Commits on blur; Escape reverts. */
@@ -201,7 +203,7 @@ function RubricEditor({ datasetId }: { datasetId: string }) {
                 <input
                   value={c.label}
                   onChange={(e) => edit(i, { label: e.target.value })}
-                  placeholder="Name"
+                  placeholder="name"
                   className="min-w-0 flex-1 rounded-control bg-active px-2 py-1 text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
                 />
                 {/* THE ID IS NOT EDITABLE ONCE IT EXISTS. It is what a stored verdict's
@@ -231,7 +233,7 @@ function RubricEditor({ datasetId }: { datasetId: string }) {
                 value={c.description}
                 onChange={(e) => edit(i, { description: e.target.value })}
                 rows={2}
-                placeholder="What the judge should look for, phrased so that HIGHER is better."
+                placeholder="what the judge should look for, phrased so a higher score is better"
                 className="mt-1 w-full resize-none rounded-control bg-active px-2 py-1 text-[11px] leading-[1.5] text-muted placeholder:text-faint outline-none focus-visible:shadow-focusring"
               />
             </div>
@@ -264,9 +266,11 @@ function RubricEditor({ datasetId }: { datasetId: string }) {
             {dirty && (
               <button
                 onClick={() => setDraft(null)}
-                className="px-1 text-[11px] text-faint transition-colors hover:text-ink"
+                title="Revert to the saved rubric"
+                aria-label="Revert to the saved rubric"
+                className="rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
               >
-                Revert
+                <UndoIcon size={ICON.xs} />
               </button>
             )}
           </div>
@@ -366,18 +370,29 @@ export function DatasetBuilder() {
       </div>
 
       {selected && (
-        <div className="px-4 pb-2 shrink-0 flex items-center gap-3 text-[11px]">
+        /* THE DENSEST TEXT-BUTTON CLUSTER IN THE APP, as a glyph row. Five words-as-buttons in
+            one strip — Rename, Import CSV, Delete dataset, plus Revert and Add nearby — read as a
+            form toolbar rather than as the actions on a dataset. Every mark here already existed
+            in the icon set; the words are the tooltips. */
+        <div className="flex shrink-0 items-center gap-1 px-4 pb-2">
           <button
             onClick={() => {
               const name = window.prompt("Rename dataset", selected.name);
               if (name && name.trim()) sendRenameDataset(selected.id, name.trim());
             }}
-            className="text-faint hover:text-ink transition-colors"
+            title="Rename this dataset"
+            aria-label="Rename this dataset"
+            className="rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
           >
-            Rename
+            <PencilIcon size={ICON.xs} />
           </button>
-          <button onClick={() => fileRef.current?.click()} className="text-faint hover:text-ink transition-colors">
-            Import CSV
+          <button
+            onClick={() => fileRef.current?.click()}
+            title="Import examples from a CSV"
+            aria-label="Import examples from a CSV"
+            className="rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
+          >
+            <DownloadIcon size={ICON.xs} className="rotate-180" />
           </button>
           <input
             ref={fileRef}
@@ -392,9 +407,11 @@ export function DatasetBuilder() {
           />
           <button
             onClick={() => sendDeleteDataset(selected.id, activeAgentId)}
-            className="text-faint hover:text-err transition-colors ml-auto"
+            title="Delete this dataset"
+            aria-label="Delete this dataset"
+            className="ml-auto rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-err"
           >
-            Delete dataset
+            <TrashIcon size={ICON.xs} />
           </button>
         </div>
       )}
@@ -408,6 +425,8 @@ export function DatasetBuilder() {
           <span className={error ? "text-err" : "text-muted"}>{error ?? importNote}</span>
           <button
             onClick={() => { setError(null); setImportNote(null); }}
+            title="Dismiss"
+            aria-label="Dismiss"
             className="shrink-0 text-faint transition-colors duration-fast hover:text-ink"
           >
             <XIcon size={ICON.xs} />
@@ -444,15 +463,17 @@ export function DatasetBuilder() {
             onChange={(e) => setNewInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addExample(); } }}
             disabled={!connected}
-            placeholder="Add an input the agent should handle…"
+            placeholder="an input the agent should handle"
             className="flex-1 bg-panel text-ink placeholder:text-faint rounded-control px-2.5 py-1.5 text-[12px] outline-none focus:shadow-focusring disabled:opacity-50"
           />
           <button
             onClick={addExample}
             disabled={!connected || !newInput.trim()}
-            className="rounded-control px-2.5 py-1.5 text-[12px] bg-active text-ink transition-opacity disabled:opacity-30"
+            title="Add this example"
+            aria-label="Add this example"
+            className="rounded-control bg-active p-1.5 text-ink transition-opacity disabled:opacity-30"
           >
-            Add
+            <PlusIcon size={ICON.sm} />
           </button>
         </div>
       )}

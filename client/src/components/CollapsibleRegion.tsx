@@ -25,7 +25,7 @@
 // THE WHOLE HEADER IS THE TARGET, not the chevron. A 12px glyph is a hard thing to hit, the row is
 // already there, and every other disclosure in this app toggles from its label.
 
-import { ICON } from "../lib/tokens.ts";
+import { ICON, TYPE } from "../lib/tokens.ts";
 import { ChevronDownIcon } from "./panelIcons.tsx";
 
 export function CollapsibleRegion({
@@ -57,11 +57,16 @@ export function CollapsibleRegion({
           type="button"
           onClick={onToggle}
           aria-expanded={open}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          title={open ? `Hide ${label}` : `Show ${label}`}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-control text-left focus-visible:outline-none focus-visible:shadow-focusring"
         >
-          <span className="min-w-0 text-[11px] font-medium uppercase tracking-wider text-muted">
+          {/* THE TOKEN, not a copy of it. This string was a verbatim duplicate of
+              `TYPE.sectionLabel` — in the one component whose entire job is to be the reusable
+              panel header, which is the last file in the client that should be hardcoding the
+              header treatment. */}
+          <h3 className={`min-w-0 ${TYPE.sectionLabel}`}>
             {label}
-          </span>
+          </h3>
           {/* Right-aligned, tabular, and only when there is a count to show. */}
           {count !== undefined && (
             <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-faint">

@@ -138,7 +138,7 @@ function Section({
             label the rest of the card is aligned to. Rotation rather than two glyphs: the same
             mark turning is what says these are two states of one thing. */}
         <span
-          className={`ml-auto shrink-0 flex items-center text-faint transition-transform duration-150 group-hover:text-muted ${
+          className={`ml-auto shrink-0 flex items-center text-faint transition-transform duration-fast group-hover:text-muted ${
             open ? "" : "-rotate-90"
           }`}
           aria-hidden

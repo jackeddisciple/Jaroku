@@ -30,7 +30,7 @@ import { sendConnectConnector, sendDisconnectConnector, sendListConnections } fr
 import { ICON, TEXT } from "../lib/tokens.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { iconBtn, primaryBtn, quietBtn } from "./buttons.ts";
-import { StatusBadge } from "./StatusBadge.tsx";
+import { StatusDot } from "./StatusBadge.tsx";
 import {
   AlertTriangleIcon, CheckIcon, LockIcon, PlugIcon, RefreshIcon, ShieldCheckIcon, XIcon,
 } from "./panelIcons.tsx";
@@ -54,19 +54,24 @@ function ConnectionRow({ connection }: { connection: ConnectionView }) {
   const needsReconnect = connection.status === "reauth_required";
 
   return (
-    <div className="rounded-control border border-line px-3 py-2.5 space-y-2">
+    <div className="rounded-control px-2 py-2 transition-colors hover:bg-active/30">
       <div className="flex items-start gap-2">
         <span className="mt-0.5 shrink-0" style={{ color: TEXT.muted }}>
           <PlugIcon size={ICON.sm} />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[13px] text-ink">{connection.label}</span>
-            <StatusBadge
-              state={status.state}
-              label={CONNECTION_STATUS_LABEL[connection.status] ?? connection.status}
-              icon={status.icon}
-            />
+            <span className="text-[12px] text-ink">{connection.label}</span>
+            {/* A DOT AND A WORD, NOT A CAPS PILL. `not connected` rendered as an outlined
+                uppercase badge beside the service's name — caps, plus an outline, plus the card's
+                own border, which made the ABSENCE of a connection the loudest element on it. A
+                binary state is a coloured dot and a lowercase label; that is what a dot is for. */}
+            <span className="inline-flex shrink-0 items-center gap-1.5">
+              <StatusDot state={status.state} icon={status.icon} size={ICON.badge} />
+              <span className="text-[10px] text-faint">
+                {CONNECTION_STATUS_LABEL[connection.status] ?? connection.status}
+              </span>
+            </span>
             {/* WHOSE ACCOUNT. Not a tooltip: a workspace with two Google accounts connected at
                 different times has no other way to tell which mailbox its agents are reading,
                 and "disconnect the wrong one" is a coin flip without this. */}
@@ -90,19 +95,23 @@ function ConnectionRow({ connection }: { connection: ConnectionView }) {
             </p>
           ) : null}
 
-          {/* WHAT CONNECTING MEANS, IN SENTENCES, BEFORE THE BUTTON. Shown while it is still a
-              decision rather than after it has been made. */}
+          {/* WHAT CONNECTING MEANS, BEFORE THE BUTTON — as ONE muted line rather than four
+              bulleted ones. Two connectors used to fill the entire panel: a bordered card each,
+              with a caps status pill and four lines of prose describing what each can and cannot
+              do. The prose is still here and still shown while it is a decision rather than after
+              it has been made; it is a sentence instead of a list, and the full text is on hover
+              when it runs past the row. */}
           {!connected ? (
-            <ul className="mt-1.5 space-y-0.5">
-              {connection.consent.map((line) => (
-                <li key={line} className="flex items-start gap-1.5 text-[12px]" style={{ color: TEXT.muted }}>
-                  <span className="mt-0.5 shrink-0">
-                    <ShieldCheckIcon size={ICON.xs} />
-                  </span>
-                  <span>{line}</span>
-                </li>
-              ))}
-            </ul>
+            <p
+              className="mt-1 flex items-start gap-1.5 text-[11px]"
+              style={{ color: TEXT.muted }}
+              title={connection.consent.join(" · ")}
+            >
+              <span className="mt-0.5 shrink-0">
+                <ShieldCheckIcon size={ICON.xs} />
+              </span>
+              <span className="min-w-0">{connection.consent.join(" · ")}</span>
+            </p>
           ) : null}
 
           {/* AND THE EXACT LIST, SECOND. What was GRANTED, which may be less than was asked for. */}

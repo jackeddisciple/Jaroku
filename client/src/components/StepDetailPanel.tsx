@@ -1,4 +1,4 @@
-// Step Details — the slide-in overlay from the right (doc §4.1, not a permanent column). Opens
+// Step details — the slide-in overlay from the right (doc §4.1, not a permanent column). Opens
 // when a step is "expanded" (row click or Enter); shows the overview key-values, then the
 // step's input / output / state diff and the One-Click Fix button. Reuses StepDetail for the
 // body so there's a single source of truth for how a step renders.
@@ -58,14 +58,14 @@ export function StepDetailPanel() {
   return (
     <div
       className={`absolute top-0 right-0 bottom-0 w-[340px] max-w-[85%] bg-panel z-20 flex flex-col
-        border-l border-edge shadow-floating transition-transform duration-150 ease-out
+        border-l border-edge shadow-floating transition-transform duration-base ease-state
         ${open ? "translate-x-0" : "translate-x-full pointer-events-none"}`}
       aria-hidden={!open}
     >
       {step && (
         <>
           <div className="flex items-center gap-2 px-4 py-3 shrink-0">
-            <span className={TYPE.panelLabel}>Step Details</span>
+            <span className={TYPE.panelLabel}>Step details</span>
             <button
               onClick={() => setExpandedStep(null)}
               className="ml-auto text-muted hover:text-ink transition-colors duration-fast"

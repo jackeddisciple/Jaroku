@@ -75,7 +75,7 @@ export function InboxUndoToast() {
       {undo.changed > 1 && <span className="text-faint">{undo.changed} items</span>}
       <button
         onClick={() => sendUndoInboxAction(undo.token)}
-        className="ml-auto rounded-control px-2 py-0.5 text-[11px] text-muted transition-colors hover:bg-active hover:text-ink"
+        className="ml-auto rounded-control px-2 py-0.5 text-[11px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
       >
         Undo
       </button>

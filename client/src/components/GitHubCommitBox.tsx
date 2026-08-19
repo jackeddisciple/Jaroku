@@ -91,7 +91,7 @@ export function GitHubCommitBox({ view }: { view: GithubView }) {
       <textarea
         rows={4}
         className="w-full resize-y rounded-control bg-panel px-2.5 py-2 text-[12px] leading-[1.55] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
-        placeholder="What changed, and why"
+        placeholder="what changed, and why"
         value={message}
         onChange={(e) => {
           setMessage(e.target.value);
@@ -138,7 +138,7 @@ export function GitHubCommitBox({ view }: { view: GithubView }) {
               competing for attention. */}
           <span className="inline-flex overflow-hidden rounded-control bg-panel">
             <button
-              className="px-3 py-1.5 text-[12px] text-ink transition-colors hover:bg-active disabled:cursor-not-allowed disabled:opacity-40"
+              className="px-3 py-1.5 text-[12px] text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
               disabled={Boolean(commitState.reason)}
               onClick={() => commit(false)}
             >
@@ -148,7 +148,7 @@ export function GitHubCommitBox({ view }: { view: GithubView }) {
             {/* ICON-ONLY, and the same ↑ the tab badge already uses for "ahead". The glyph carries
                 the meaning once learned; the tooltip carries it for the first few uses. */}
             <button
-              className="px-2.5 py-1.5 text-ink transition-colors hover:bg-active disabled:cursor-not-allowed disabled:opacity-40"
+              className="px-2.5 py-1.5 text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
               disabled={Boolean(pushState.reason)}
               onClick={() => commit(true)}
               title="push after commit — ⌘⇧↵"

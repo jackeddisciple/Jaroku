@@ -123,19 +123,28 @@ export function EnforcementStrip() {
                 value={note}
                 maxLength={4000}
                 onChange={(e) => setNote(e.target.value)}
-                placeholder="What happened, from your side. This goes to whoever reviews the enforcement."
+                placeholder="what happened, from your side"
                 className="w-full rounded-control border border-hair bg-void px-2 py-1.5 text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
               />
+              {/* ONE ACTION AND A DISMISS. Two text buttons inside a strip that is already a
+                  full-width interruption is the interruption interrupting itself; `Appeal` is the
+                  verb, and backing out is the X every other transient message in this app closes
+                  with. */}
               <div className="mt-1 flex items-center gap-2">
                 <button
                   onClick={submit}
                   disabled={note.trim().length === 0}
-                  className="rounded-control bg-panel px-2.5 py-1 text-[11px] text-ink transition-colors hover:bg-active disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-control bg-panel px-2.5 py-1 text-[11px] text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  Send appeal
+                  Appeal
                 </button>
-                <button onClick={() => setOpen(false)} className="px-1 text-[11px] text-muted hover:text-ink">
-                  Cancel
+                <button
+                  onClick={() => setOpen(false)}
+                  title="Cancel"
+                  aria-label="Cancel"
+                  className="rounded-control p-1 text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
+                >
+                  <XIcon size={ICON.xs} />
                 </button>
                 <span className="text-[11px] text-faint">
                   One note, not a conversation. It changes no limit by itself.
@@ -160,7 +169,7 @@ export function EnforcementStrip() {
             // dismiss that edited the state would be the UI telling itself the enforcement is over.
             onClick={() => setDismissed(true)}
             title="Hide until the next reconnect"
-            className="shrink-0 rounded-control px-1 py-0.5 text-faint transition-colors hover:bg-active hover:text-ink"
+            className="shrink-0 rounded-control px-1 py-0.5 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
           >
             <XIcon size={ICON.xs} />
           </button>

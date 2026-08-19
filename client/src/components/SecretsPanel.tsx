@@ -346,7 +346,7 @@ function AddForm({ initialName = "", onDone }: { initialName?: string; onDone: (
       <div className="flex items-center gap-2">
         <input
           autoFocus
-          placeholder="NAME"
+          placeholder="name"
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="min-w-0 flex-1 rounded-control bg-bg px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-faint focus:shadow-focusring"

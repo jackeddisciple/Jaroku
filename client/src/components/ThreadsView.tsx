@@ -70,7 +70,7 @@ function FirstThreadStart({ workspaceName }: { workspaceName: string | null }) {
               e.stopPropagation();
               if (e.key === "Enter") start();
             }}
-            placeholder="Describe an agent to start your first thread."
+            placeholder="describe an agent"
             className="min-w-0 flex-1 bg-transparent text-[13px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
           />
           <span className="shrink-0 text-[10px] text-faint">↵</span>
@@ -109,7 +109,7 @@ function ArchiveNotice() {
           sendRestoreThread(notice.threadId);
           dismiss();
         }}
-        className="ml-auto rounded-control px-2 py-0.5 text-[11px] text-muted transition-colors hover:bg-active hover:text-ink"
+        className="ml-auto rounded-control px-2 py-0.5 text-[11px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
       >
         Undo
       </button>
@@ -209,18 +209,19 @@ export function ThreadsView() {
         <button
           onClick={() => sendListThreads()}
           disabled={!connected}
-          className="ml-auto rounded-control p-1.5 text-faint transition-colors hover:bg-active hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+          className="ml-auto rounded-control p-1.5 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
           title="Ask for the list again"
         >
-          <RefreshIcon size={12} />
+          <RefreshIcon size={ICON.sm} />
         </button>
         <button
           onClick={() => sendCreateThread()}
           disabled={!connected}
-          className="flex items-center gap-1.5 rounded-control px-2.5 py-1.5 text-[12px] text-muted transition-colors hover:bg-active hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+          className="flex h-7 w-7 items-center justify-center rounded-control text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
           title={connected ? "New thread" : "Reconnecting — a new thread needs a connection"}
+          aria-label="New thread"
         >
-          <PlusIcon size={12} /> New thread
+          <PlusIcon size={ICON.sm} />
         </button>
       </div>
 
@@ -251,9 +252,9 @@ export function ThreadsView() {
               <div key={i} className="px-5 py-2">
                 <div className="flex items-center gap-2">
                   <span className="h-3 w-3 shrink-0 rounded-full bg-active" />
-                  <span className="h-3 flex-1 rounded bg-active" style={{ maxWidth: `${52 - i * 8}%` }} />
+                  <span className="h-3 flex-1 rounded-chip bg-active" style={{ maxWidth: `${52 - i * 8}%` }} />
                 </div>
-                <div className="mt-1.5 ml-5 h-2.5 w-1/3 rounded bg-active/70" />
+                <div className="mt-1.5 ml-5 h-2.5 w-1/3 rounded-chip bg-active" />
               </div>
             ))}
           </div>
@@ -280,10 +281,13 @@ export function ThreadsView() {
                 {/* The header carries the count and a rule out to the right edge, as §4.1's wireframe
                     draws it. An empty section is not here at all — `groupThreads` does not return one
                     — so there is no "0 items" to render and no placeholder to decide the shape of. */}
-                <div className="flex items-center gap-3 px-5 pt-3 pb-1">
-                  <span className="text-[10px] font-medium tracking-wider text-faint">{section.label}</span>
+                {/* ONE HEADER GRAMMAR: label, count, then the rule out to the edge. The rule used
+                    to run BETWEEN the label and its count here and AFTER the count on the Inbox
+                    board — the same header, two orders, two views apart. */}
+                <div className="flex items-center gap-2 px-5 pb-1 pt-3">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-faint">{section.label}</span>
+                  <span className="text-[10px] tabular-nums text-faint">{section.threads.length}</span>
                   <span className="h-px flex-1 bg-hair" />
-                  <span className="text-[10px] text-faint tabular-nums">{section.threads.length}</span>
                 </div>
                 {section.threads.map((t) => (
                   <ThreadRow

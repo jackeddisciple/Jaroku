@@ -49,7 +49,7 @@ function StepRail({ current }: { current: SurfaceStep }) {
                 it becomes current means the rail is readable at a glance without reading it. */}
             <span
               aria-hidden
-              className={`h-[2px] rounded-full transition-all duration-base ease-state ${
+              className={`h-[2px] rounded-full transition-[width,background-color] duration-base ease-state ${
                 here ? "w-6 bg-ink" : done ? "w-3 bg-muted" : "w-3 bg-chrome"
               }`}
             />

@@ -68,7 +68,7 @@ function NewWorkspaceForm({ onDone }: { onDone: () => void }) {
         value={name}
         onChange={(e) => setName(e.target.value)}
         maxLength={64}
-        placeholder="Workspace name"
+        placeholder="workspace name"
         className="w-full rounded-control border border-hair bg-void px-2 py-1.5 text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
       />
       {/* THE KIND IS ASKED, NEVER DEFAULTED SILENTLY. It decides whether the workspace has a
@@ -95,7 +95,7 @@ function NewWorkspaceForm({ onDone }: { onDone: () => void }) {
         <button
           type="submit"
           disabled={busy || name.trim().length === 0}
-          className="rounded-control bg-panel px-2.5 py-1 text-[11px] text-ink transition-colors hover:bg-active disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-control bg-panel px-2.5 py-1 text-[11px] text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
         >
           {busy ? "Creating…" : "Create"}
         </button>
@@ -148,7 +148,7 @@ export function WorkspaceSwitcher() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 rounded-control px-2 py-1 text-[12px] text-muted transition-colors hover:bg-active hover:text-ink"
+        className="flex items-center gap-2 rounded-control px-2 py-1 text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
         title={`${user.email} — ${current?.role ?? ""}`}
       >
         <span className="max-w-[14ch] truncate text-ink">{current?.name ?? "workspace"}</span>
@@ -163,7 +163,7 @@ export function WorkspaceSwitcher() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-30 mt-1 w-72 overflow-hidden rounded-card border border-edge bg-panel shadow-overlay">
+        <div className="absolute right-0 z-30 mt-1 w-72 animate-slide-in overflow-hidden rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none">
           <div className="border-b border-hair px-3 py-2">
             <div className="truncate text-[12px] text-ink">{user.displayName || user.email}</div>
             <div className="truncate text-[11px] text-faint">{user.email}</div>
@@ -177,7 +177,7 @@ export function WorkspaceSwitcher() {
                   setOpen(false);
                   switchWorkspace(w.id);
                 }}
-                className="flex w-full items-center justify-between px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-active"
+                className="flex w-full items-center justify-between px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-active active:bg-chrome"
               >
                 <span className="min-w-0 flex-1">
                   <span className={`block truncate ${w.id === workspaceId ? "text-ink" : "text-muted"}`}>
@@ -201,7 +201,7 @@ export function WorkspaceSwitcher() {
               setOpen(false);
               openWorkspacePanel("members");
             }}
-            className="flex w-full items-center gap-2 border-t border-hair px-3 py-2 text-left text-[12px] text-muted transition-colors hover:bg-active hover:text-ink"
+            className="flex w-full items-center gap-2 border-t border-hair px-3 py-2 text-left text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
           >
             <UserCircleIcon size={ICON.xs} /> Members and invitations
           </button>
@@ -211,7 +211,7 @@ export function WorkspaceSwitcher() {
           ) : (
             <button
               onClick={() => setCreating(true)}
-              className="flex w-full items-center gap-2 border-t border-hair px-3 py-2 text-left text-[12px] text-muted transition-colors hover:bg-active hover:text-ink"
+              className="flex w-full items-center gap-2 border-t border-hair px-3 py-2 text-left text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
             >
               <PlusIcon size={ICON.xs} /> New workspace
             </button>
@@ -222,7 +222,7 @@ export function WorkspaceSwitcher() {
               setOpen(false);
               signOut();
             }}
-            className="w-full border-t border-hair px-3 py-2 text-left text-[12px] text-muted transition-colors hover:bg-active hover:text-ink"
+            className="w-full border-t border-hair px-3 py-2 text-left text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
           >
             Sign out
           </button>

@@ -17,7 +17,7 @@
 
 import { useState } from "react";
 import { Chip } from "./Chip.tsx";
-import { iconBtn } from "./buttons.ts";
+import { iconBtn, tabBtn } from "./buttons.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { McpBadge, HighImpactBadge } from "./McpBadge.tsx";
 import { Truncate } from "./Truncate.tsx";
@@ -385,7 +385,7 @@ function Evals({ detail }: { detail: AgentDetailView }) {
 
       <button
         onClick={() => setTab("evals")}
-        className="flex w-full items-center justify-center gap-1.5 rounded-control border border-hair px-2 py-1.5 text-[12px] text-muted transition-colors hover:border-edge hover:bg-active hover:text-ink"
+        className="flex w-full items-center justify-center gap-1.5 rounded-control border border-hair px-2 py-1.5 text-[12px] text-muted transition-colors hover:border-edge hover:bg-active active:bg-chrome hover:text-ink"
       >
         <DatabaseIcon size={ICON.xs} /> Run an eval
       </button>
@@ -495,9 +495,11 @@ export function AgentTabs({ detail }: { detail: AgentDetailView }) {
             title={label}
             aria-label={label}
             aria-pressed={tab === id}
-            className={`flex shrink-0 items-center gap-1.5 rounded-control px-2.5 py-1.5 text-[12px] transition-colors duration-fast ${
-              tab === id ? "bg-active text-ink" : "text-muted hover:text-ink"
-            }`}
+            // THE SHARED TAB RECIPE. This was a third tab implementation inside one right-hand
+            // panel, with its own padding and its own idea of what active looks like — and
+            // "active" was `bg-active`, which is also the row-hover colour, so a chosen tab and a
+            // hovered tab were the same fill.
+            className={`${tabBtn(tab === id)} shrink-0`}
           >
             <Icon size={ICON.sm} />
             <span className="whitespace-nowrap">{label}</span>

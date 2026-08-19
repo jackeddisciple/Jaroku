@@ -14,7 +14,10 @@ import { orderedFiles, useBuildStore } from "../store/buildStore.ts";
 import { ICON } from "../lib/tokens.ts";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
-import { LockIcon } from "./panelIcons.tsx";
+import { CheckIcon, ChevronDownIcon, LockIcon } from "./panelIcons.tsx";
+import { CopyIcon } from "./agentIcons.tsx";
+import { iconForPath } from "./fileIcons.tsx";
+import { iconBtn } from "./buttons.ts";
 import { ProblemsPanel, useDiagnostics, useLiveDiagnostics } from "./ProblemsPanel.tsx";
 
 const LANGS = ["python", "json", "markdown", "toml"] as const;
@@ -70,7 +73,16 @@ function FileRail() {
             {f.path === streamingFile && (
               <StatusDot state="pending" pulse size={ICON.xs} title="Still writing" />
             )}
-            <Truncate className="flex-1">{f.path}</Truncate>
+            {/* THE TYPE GLYPH. `iconForPath` exists to do exactly this and is used by `FileList`
+                and `GitHubStaging`; this was the one file list in the app that skipped it, so it
+                was also the one where every row began with the same nothing. */}
+            {(() => {
+              const TypeIcon = iconForPath(f.path);
+              return (
+                <span className="shrink-0 text-faint" aria-hidden><TypeIcon size={ICON.xs} /></span>
+              );
+            })()}
+            <Truncate variant="path" className="flex-1 font-mono">{f.path}</Truncate>
             {/* Was a `⌀` character. A reviewed template is locked, and the app has a lock. */}
             {f.readOnly && (
               <span className="shrink-0 text-faint" title="Read-only — a reviewed template">
@@ -89,6 +101,8 @@ export function CodeViewer() {
   const file = useBuildStore((s) => (s.activeFile ? s.files[s.activeFile] : undefined));
   const agentId = useBuildStore((s) => s.activeAgentId);
   const [html, setHtml] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [wrapped, setWrapped] = useState(false);
 
   const content = file?.content ?? "";
   const complete = file?.complete ?? false;
@@ -122,9 +136,9 @@ export function CodeViewer() {
 
   if (!file) {
     return (
-      <div className="flex h-full items-center justify-center px-6 text-[12px] text-muted">
-        Select a file to view it.
-      </div>
+      // Inline, at the top of the pane. A full-height centred sentence for a condition that
+      // clears the moment somebody clicks a row is a screen announcing its own emptiness.
+      <div className="px-6 py-3 text-[12px] text-muted">Select a file to view it.</div>
     );
   }
 
@@ -139,12 +153,16 @@ export function CodeViewer() {
               refuses to save. The flag arrives on the file from the server — the block list is
               §3.3's, not a second one computed here, for the reason a block list a browser owns is
               a block list an attacker owns. */}
+          {/* THE LOCK, not the word. The file rail ninety lines above says this same fact with
+              `LockIcon`; one component was carrying one fact in two vocabularies. */}
           {file.readOnly && (
             <span
-              className="text-faint text-[11px] shrink-0"
+              className="shrink-0 text-faint"
+              role="img"
+              aria-label="Read-only"
               title="Reviewed code Jaroku keeps read-only. The edit loop cannot touch it and neither can this view."
             >
-              read-only
+              <LockIcon size={ICON.xs} />
             </span>
           )}
           {!complete && <span className="shrink-0 animate-stream-pulse text-[11px] text-run motion-reduce:animate-none">writing…</span>}
@@ -153,12 +171,61 @@ export function CodeViewer() {
           </span>
         </div>
 
-        <div className="flex-1 overflow-auto px-6 py-4 text-[12px] leading-relaxed">
-          {html ? (
-            <div className="shiki-host [&_pre]:!bg-transparent" dangerouslySetInnerHTML={{ __html: html }} />
-          ) : (
-            <pre className="whitespace-pre text-ink">{content}</pre>
-          )}
+        {/* A DISCRETE OBJECT, NOT THE BACKGROUND OF A DRAWER. The code was a full-bleed pane
+            sitting flush in the overlay with no border of its own — so the thing you came to read
+            had no edges, while every card in the conversation two panes over does.
+
+            The gutter is the other half. A code viewer with no line numbers cannot answer "line
+            42", which is what every diagnostic under it is addressed to; the numbers are faint,
+            mono and `select-none` so copying the code does not copy them.
+
+            `leading-[1.5]` rather than Tailwind's `leading-relaxed` (1.625): the rhythm this app
+            names is 1.5, and code should be visibly TIGHTER than prose, not looser. */}
+        <div className="scroll-fade min-h-0 flex-1 overflow-auto p-3">
+          <div className="min-h-full overflow-hidden rounded-card border border-hair bg-panel">
+            <div className="flex items-center gap-1 border-b border-hair px-2 py-1">
+              <span className="font-mono text-[10px] text-faint">{lang}</span>
+              <button
+                className={`${iconBtn} ml-auto`}
+                title={copied ? "Copied" : "Copy this file"}
+                aria-label="Copy this file"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(content).then(
+                    () => { setCopied(true); window.setTimeout(() => setCopied(false), 1400); },
+                    () => setCopied(false),
+                  );
+                }}
+              >
+                {copied ? <CheckIcon size={ICON.xs} /> : <CopyIcon size={ICON.xs} />}
+              </button>
+              <button
+                className={iconBtn}
+                title={wrapped ? "Stop wrapping long lines" : "Wrap long lines"}
+                aria-label={wrapped ? "Stop wrapping long lines" : "Wrap long lines"}
+                aria-pressed={wrapped}
+                onClick={() => setWrapped((v) => !v)}
+              >
+                <ChevronDownIcon size={ICON.xs} />
+              </button>
+            </div>
+            <div className="flex min-w-0 text-[12px] leading-[1.5]">
+              <div
+                className="shrink-0 select-none border-r border-hair px-2 py-3 text-right font-mono text-[11px] leading-[1.5] text-faint"
+                aria-hidden
+              >
+                {content.split("\n").map((_, i) => (
+                  <div key={i}>{i + 1}</div>
+                ))}
+              </div>
+              <div className={`min-w-0 flex-1 overflow-x-auto px-3 py-3 ${wrapped ? "whitespace-pre-wrap" : ""}`}>
+                {html ? (
+                  <div className="shiki-host [&_pre]:!bg-transparent" dangerouslySetInnerHTML={{ __html: html }} />
+                ) : (
+                  <pre className={wrapped ? "whitespace-pre-wrap text-ink" : "whitespace-pre text-ink"}>{content}</pre>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Under the code rather than over it. §B.3's mock puts PROBLEMS at the foot of the pane,

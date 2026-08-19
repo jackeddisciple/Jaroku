@@ -57,7 +57,8 @@ import { useInboxDrag } from "./useInboxDrag.ts";
 import { selectOnClick, useInboxKeys } from "./useInboxKeys.ts";
 import { InboxUndoToast } from "./InboxUndoToast.tsx";
 import { sendSnoozeInboxItem } from "../lib/socket.ts";
-import { RefreshIcon } from "./panelIcons.tsx";
+import { ClockIcon, InboxIcon, RefreshIcon } from "./panelIcons.tsx";
+import { AlertIcon, PersonIcon, ShieldIcon, SparkIcon } from "./inboxIcons.tsx";
 import type { InboxItemView, InboxSeverity } from "../types.ts";
 
 /**
@@ -113,35 +114,50 @@ function LeftRail({
   };
 
   return (
-    <div className="w-[168px] shrink-0 border-r border-hair px-3 py-3">
+    // A FORTY-PIXEL RAIL, not a 150px column of five words. Six labels to filter three columns of
+    // cards is the ratio a rail exists to fix, and every glyph it needs already exists in
+    // `inboxIcons.tsx`. The count rides as a badge on the mark, which is where the reference puts
+    // its own `99+`.
+    //
+    // The by-agent list keeps its own column, and only when there is one: an agent's NAME is the
+    // whole content of those rows and there is no glyph for it. So the common case — no agent
+    // filter — is forty pixels rather than a hundred and sixty-eight.
+    <>
+    <div className="flex w-10 shrink-0 flex-col items-center gap-0.5 border-r border-hair py-3">
       {INBOX_FILTERS.map((f) => {
         // §2.4: the Team chip does not exist in a Personal workspace. Absent rather than greyed,
         // because a disabled control invites somebody to work out how to enable it.
         if (f === "team" && !team) return null;
         const active = filter === f;
+        const Icon = FILTER_ICON[f];
         return (
           <button
             key={f}
             onClick={() => onFilter(f)}
-            className={`relative flex w-full items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-[12px] transition-colors ${
-              active ? "bg-active text-ink" : "text-muted hover:bg-active/50 hover:text-ink"
+            title={INBOX_FILTER_LABEL[f]}
+            aria-label={INBOX_FILTER_LABEL[f]}
+            aria-pressed={active}
+            className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+              active ? "bg-active text-accent" : "text-muted hover:bg-active/40 hover:text-ink"
             }`}
           >
-            {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
-            {INBOX_FILTER_LABEL[f]}
+            <Icon size={ICON.md} />
             {/* A ZERO RENDERS NOTHING, matching the empty-sections discipline the whole app follows:
                 a count of 0 beside a chip is noise, and the chip staying in place is what keeps the
                 keyboard's 1–6 a stable address. */}
             {value[f] > 0 && (
-              <span className="ml-auto text-[11px] tabular-nums text-faint">{value[f]}</span>
+              <span className="absolute -right-0.5 -top-0.5 rounded-chip bg-bg px-0.5 text-[10px] leading-[13px] tabular-nums text-faint">
+                {value[f]}
+              </span>
             )}
           </button>
         );
       })}
+    </div>
 
       {agents.length > 0 && (
-        <>
-          <div className="mt-4 mb-1 px-2.5">
+        <div className="w-[140px] shrink-0 border-r border-hair px-2 py-3">
+          <div className="mb-1 px-1.5">
             <span className={TYPE.panelLabel}>By agent</span>
           </div>
           {agents.map((a) => {
@@ -162,11 +178,28 @@ function LeftRail({
               </button>
             );
           })}
-        </>
+        </div>
       )}
-    </div>
+    </>
   );
 }
+
+/**
+ * A mark per filter, from the set this surface already draws its cards with.
+ *
+ * `all` is the tray it all lands in, `blocking` is the alert the blocking cards carry, `attention`
+ * is the shield, `proposals` is the spark a proposal card leads with, `team` is a person, and
+ * `snoozed` is a clock. Each one is the glyph a card of that kind already wears, which is what
+ * makes the rail readable without its labels.
+ */
+const FILTER_ICON: Record<InboxFilter, (p: { size?: number }) => React.ReactElement> = {
+  all: InboxIcon,
+  blocking: AlertIcon,
+  attention: ShieldIcon,
+  proposals: SparkIcon,
+  team: PersonIcon,
+  snoozed: ClockIcon,
+};
 
 /** One column: a header that carries its own count, and its cards. */
 function Column({
@@ -211,7 +244,7 @@ function Column({
       }`}
     >
       <div className="flex shrink-0 items-center gap-2 px-1 pb-2">
-        <span className="text-[10px] font-medium tracking-wider text-faint">{COLUMN_LABEL[severity]}</span>
+        <span className="text-[10px] font-medium uppercase tracking-wider text-faint">{COLUMN_LABEL[severity]}</span>
         <span className="text-[10px] tabular-nums text-faint">{items.length}</span>
         <span className="h-px flex-1 bg-hair" />
       </div>
@@ -429,7 +462,7 @@ export function InboxView() {
         <button
           onClick={() => sendListInbox()}
           disabled={!connected}
-          className="ml-auto rounded-control p-1.5 text-faint transition-colors hover:bg-active hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+          className="ml-auto rounded-control p-1.5 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
           title="Ask for the board again"
         >
           <RefreshIcon size={ICON.xs} />
@@ -451,7 +484,7 @@ export function InboxView() {
             <div className="flex gap-4">
               {[64, 44, 32].map((h, i) => (
                 <div key={i} className="flex-1 space-y-2">
-                  <div className="h-2.5 w-24 rounded bg-active" />
+                  <div className="h-2.5 w-24 rounded-chip bg-active" />
                   <div className="rounded-card bg-active/60" style={{ height: h }} />
                   <div className="rounded-card bg-active/40" style={{ height: h }} />
                 </div>

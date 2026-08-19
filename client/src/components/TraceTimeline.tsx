@@ -120,7 +120,7 @@ export function TraceTimeline() {
       </div>
 
       {/* timeline body */}
-      <div className="flex-1 overflow-auto px-6 pb-4">
+      <div className="scroll-fade flex-1 overflow-auto px-6 pb-4">
         {steps.length === 0 ? (
           <EmptyState
             size="line"

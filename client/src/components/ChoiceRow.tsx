@@ -70,9 +70,9 @@ export function ChoiceRow({
               onClick={c.onPick}
               disabled={c.disabled}
               title={c.title}
-              className={`group flex min-w-[128px] flex-1 items-start gap-2 rounded-control border px-2.5 py-2 text-left transition-all duration-fast ease-state hover:-translate-y-px hover:shadow-raised disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-none motion-reduce:hover:translate-y-0 ${
+              className={`group flex min-w-[128px] flex-1 items-start gap-2 rounded-control border px-2.5 py-2 text-left transition-[transform,box-shadow,border-color,color] duration-fast ease-state hover:-translate-y-px hover:shadow-raised disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-none motion-reduce:hover:translate-y-0 ${
                 c.primary
-                  ? "border-edge bg-panel hover:bg-active"
+                  ? "border-edge bg-panel hover:bg-active active:bg-chrome"
                   : "border-hair hover:border-edge hover:bg-active/40"
               }`}
             >

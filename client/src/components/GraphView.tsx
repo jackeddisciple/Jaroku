@@ -608,7 +608,7 @@ function NodeInspector({ nodeId, ntype, onClose }: { nodeId: string; ntype: stri
     <div className="absolute top-2 right-2 bottom-2 w-64 bg-panel rounded-card border border-edge p-3 overflow-auto text-[12px] shadow-floating">
       <div className="flex items-center justify-between mb-3">
         <Truncate className="text-ink" title={nodeId}>{nodeId}</Truncate>
-        <button className="text-muted transition-colors duration-fast hover:text-ink" onClick={onClose}>
+        <button className="text-muted transition-colors duration-fast hover:text-ink" title="Close (Esc)" aria-label="Close" onClick={onClose}>
           <XIcon size={ICON.sm} />
         </button>
       </div>
@@ -863,7 +863,12 @@ export function GraphView() {
 
   if (!activeAgentId) return <Empty title="No agent selected" hint="Pick one in the sidebar and its compiled topology is introspected and drawn here." />;
   if (loading && !graph) return <GraphSkeleton />;
-  if (graph?.error) return <Empty title="Graph unavailable" hint={graph.error} />;
+  // THE PATH IS NOT PROSE. This branch rendered the server's raw message as centred sans text —
+  // which for the common failure is a 120-character object-store key with two UUIDs in it,
+  // wrapping across four lines in the middle of the pane. One muted sentence, and the key itself
+  // set in mono and middle-truncated by the same component every other path in the app goes
+  // through, with the whole string on hover.
+  if (graph?.error) return <Empty title="No graph for this version yet" detail={graph.error} />;
   if (!graph?.nodes?.length) return <Empty title="No graph to show" hint="This agent’s build_graph() produced no nodes." />;
 
   return (
@@ -933,10 +938,22 @@ export function GraphView() {
   );
 }
 
-function Empty({ title, hint }: { title: string; hint?: string }) {
+function Empty({ title, hint, detail }: { title: string; hint?: string; detail?: string }) {
   return (
     <div className="graph-canvas h-full">
-      <EmptyState icon={GitBranchIcon} title={title} hint={hint} />
+      <EmptyState
+        icon={GitBranchIcon}
+        title={title}
+        hint={
+          detail ? (
+            <Truncate variant="path" className="mx-auto max-w-full font-mono text-[11px] text-faint" title={detail}>
+              {detail}
+            </Truncate>
+          ) : (
+            hint
+          )
+        }
+      />
     </div>
   );
 }

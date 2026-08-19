@@ -157,6 +157,8 @@ export function DeployPanel() {
             <span className="min-w-0 flex-1 break-words">{error ?? notice}</span>
             <button
               className="shrink-0 text-faint hover:text-ink"
+              title="Dismiss"
+              aria-label="Dismiss"
               onClick={() => (error ? setError(null) : setNotice(null))}
             >
               <XIcon size={ICON.xs} />
@@ -550,7 +552,7 @@ function DeployDetail({ deployment }: { deployment: Deployment }) {
       <div className="mt-3 flex items-center gap-2 border-t border-hair pt-3">
         {running ? (
           <button
-            className="rounded-control px-3 py-1.5 text-[12px] text-err transition-colors hover:bg-active"
+            className="rounded-control px-3 py-1.5 text-[12px] text-err transition-colors hover:bg-active active:bg-chrome"
             onClick={() => sendCancelDeploy(deployment.id)}
           >
             Cancel deploy
@@ -590,7 +592,7 @@ function ServeTokenCard({ onDismiss }: { onDismiss: () => void }) {
         <div className="flex items-center gap-2">
           <span style={{ color: STATUS.ok }}><KeyIcon size={ICON.sm} /></span>
           <span className="text-[12px] font-medium text-ink">Your endpoint's bearer token</span>
-          <button className="ml-auto text-faint hover:text-ink" onClick={onDismiss}>
+          <button className="ml-auto text-faint hover:text-ink" title="Dismiss" aria-label="Dismiss" onClick={onDismiss}>
             <XIcon size={ICON.xs} />
           </button>
         </div>
@@ -660,7 +662,7 @@ function RailwayTokenRow({ configured }: { configured: boolean }) {
               type="password"
               autoComplete="off"
               className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
-              placeholder="Railway account token"
+              placeholder="railway account token"
               value={token}
               onChange={(e) => setToken(e.target.value)}
               onKeyDown={(e) => {

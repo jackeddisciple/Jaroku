@@ -17,7 +17,8 @@ import { EvalRunBar } from "./EvalRunBar.tsx";
 import { relTime } from "../lib/format.ts";
 import { Chip } from "./Chip.tsx";
 import { EmptyState } from "./EmptyState.tsx";
-import { DatabaseIcon } from "./panelIcons.tsx";
+import { ActivityIcon, DatabaseIcon } from "./panelIcons.tsx";
+import { ICON } from "../lib/tokens.ts";
 
 type Mode = "dataset" | "results";
 
@@ -70,22 +71,31 @@ export function EvalsPanel() {
     );
   }
 
-  const tab = (m: Mode, label: string) => (
+  // A TWO-SEGMENT ICON TOGGLE, NOT A SECOND ROW OF TEXT TABS.
+  //
+  // This used to be `Dataset` / `Results` as words on their own row, directly beneath the right
+  // panel's own ten-word tab strip — two stacked tab strips in two different visual languages,
+  // which was the densest chrome in the product. The strip above is a glyph rail now, and this is
+  // two glyphs: a database for what goes in, a chart for what came out.
+  const tab = (m: Mode, label: string, Icon: (p: { size?: number }) => React.ReactElement) => (
     <button
       onClick={() => setMode(m)}
-      className={`px-2.5 py-1 text-[12px] rounded-control transition-colors ${
-        mode === m ? "bg-active text-ink" : "text-muted hover:text-ink"
+      title={label}
+      aria-label={label}
+      aria-pressed={mode === m}
+      className={`flex h-7 w-7 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+        mode === m ? "bg-active text-accent" : "text-muted hover:bg-active/40 hover:text-ink"
       }`}
     >
-      {label}
+      <Icon size={ICON.sm} />
     </button>
   );
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-1 border-b border-hair px-4 pb-2 pt-1">
-        {tab("dataset", "Dataset")}
-        {tab("results", "Results")}
+        {tab("dataset", "Dataset", DatabaseIcon)}
+        {tab("results", "Results", ActivityIcon)}
         {running && (
           <span className="ml-2 text-[11px] text-run animate-stream-pulse motion-reduce:animate-none">
             {progress.scoring && progress.status ? "scoring…" : `running ${progress.done}/${progress.total}`}
@@ -128,7 +138,7 @@ export function EvalsPanel() {
                     if (shown < evals.length) setShown(shown + 12);
                     else sendListEvals(selectedDatasetId ?? undefined, Math.min(evalsWindow * 2, 500));
                   }}
-                  className="rounded-control px-2 py-1 text-[11px] text-muted transition-colors hover:bg-active hover:text-ink"
+                  className="rounded-control px-2 py-1 text-[11px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
                 >
                   older…
                 </button>

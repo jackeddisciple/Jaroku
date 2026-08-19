@@ -30,6 +30,7 @@ import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { StatusBadge, StatusDot } from "./StatusBadge.tsx";
 import {
   AlertTriangleIcon, EyeIcon, KeyIcon, PlugIcon, PlusIcon, RefreshIcon, ShieldAlertIcon,
+  ChevronDownIcon,
   UserCircleIcon, XIcon,
 } from "./panelIcons.tsx";
 import type { McpServer, McpTool } from "../types.ts";
@@ -90,8 +91,21 @@ function ToolRow({ tool, serverId }: { tool: McpTool; serverId: string }) {
           </p>
 
           <div className="mt-1 flex items-center gap-2">
-            <button className={quietBtn + " !px-0 !text-[11px]"} onClick={() => setOpen((v) => !v)}>
-              {open ? "hide schema" : "schema"}
+            {/* The chevron carries open-vs-closed; the word stays because "schema" is a noun
+                nobody can glyph. It was `hide schema` / `schema` — the state spelled out, which is
+                the second of the two word-disclosures in this client. */}
+            <button
+              className={quietBtn + " !px-0 !text-[11px]"}
+              onClick={() => setOpen((v) => !v)}
+              aria-expanded={open}
+            >
+              <span
+                className={`text-faint transition-transform duration-fast ${open ? "" : "-rotate-90"}`}
+                aria-hidden
+              >
+                <ChevronDownIcon size={ICON.xs} />
+              </span>
+              schema
             </button>
             <span className="text-faint">·</span>
             {/* Both directions, always. Raising is how you gate something the heuristic read
@@ -318,6 +332,8 @@ export function McpPanel() {
             error ? "border-err/30 text-err" : "border-hair text-muted"}`}>
             <span className="min-w-0 flex-1 break-words">{error ?? notice}</span>
             <button className="shrink-0 text-faint hover:text-ink"
+              title="Dismiss"
+              aria-label="Dismiss"
               onClick={() => (error ? setError(null) : setNotice(null))}>
               <XIcon size={ICON.xs} />
             </button>

@@ -111,10 +111,10 @@ export function GitHubPanel() {
           it used to jump out from under them at the moment it changed. A transient message is a
           layer, not a row. */}
       {(error || notice) && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 px-4 pt-2">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 animate-slide-in px-4 pt-2 motion-reduce:animate-none">
           <div
             role="status"
-            className={`pointer-events-auto flex items-start gap-2 rounded-control border bg-panel px-2 py-1.5 text-[11px] leading-[1.5] shadow-floating ${
+            className={`pointer-events-auto flex items-start gap-2 rounded-card border bg-panel px-2 py-1.5 text-[11px] leading-[1.5] shadow-floating ${
               error ? "border-err/30 text-err" : "border-hair text-muted"
             }`}
           >
@@ -365,7 +365,7 @@ function RepoPicker({ agentId }: { agentId: string }) {
               <span className="shrink-0 text-faint"><SearchIcon size={ICON.xs} /></span>
               <input
                 className="min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
-                placeholder="Search your repos…"
+                placeholder="search your repos…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />

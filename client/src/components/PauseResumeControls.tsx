@@ -43,7 +43,7 @@ export function PauseResumeControls() {
   ) : (
     <button
       onClick={() => setConfirming(true)}
-      className={`${base} border-hair text-muted hover:bg-active hover:text-err`}
+      className={`${base} border-hair text-muted hover:bg-active active:bg-chrome hover:text-err`}
       title="Stop the run — nothing is left to resume from"
     >
       <StopIcon size={ICON.xs} /> Stop
@@ -57,7 +57,7 @@ export function PauseResumeControls() {
       {status === "running" ? (
         <button
           onClick={() => sendPauseRun(activeRunId)}
-          className={`${base} border-hair text-run hover:bg-active`}
+          className={`${base} border-hair text-run hover:bg-active active:bg-chrome`}
           title="Pause at the next step boundary"
         >
           <PauseIcon size={ICON.xs} /> Pause
@@ -65,7 +65,7 @@ export function PauseResumeControls() {
       ) : (
         <button
           onClick={() => sendResumeRun(activeRunId)}
-          className={`${base} border-hair text-ok hover:bg-active`}
+          className={`${base} border-hair text-ok hover:bg-active active:bg-chrome`}
           title="Resume from the durable checkpoint"
         >
           <PlayIcon size={ICON.xs} /> Resume

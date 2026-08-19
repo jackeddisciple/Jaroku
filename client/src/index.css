@@ -65,6 +65,19 @@
   ::-webkit-scrollbar-track {
     background: transparent;
   }
+  /* A SCROLL REGION THAT SAYS IT CONTINUES.
+     The client's only mask was `Truncate`'s horizontal fade; every vertical scroller cut hard at
+     both edges. `mask-image` rather than a gradient overlay, because an overlay has to know the
+     surface colour behind it and these regions sit on three different ones. Opt-in with a class,
+     so a region whose first row must be pixel-crisp (a table header, a sticky label) can decline.
+
+     16px, matching the 28px horizontal fade's intent at the smaller vertical rhythm: enough to
+     read as a gradient, short enough not to dim a whole row. */
+  .scroll-fade {
+    mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  }
+
   /* Command palette group headings — style only the heading, so the label's text-transform
      never cascades onto the item rows.
 

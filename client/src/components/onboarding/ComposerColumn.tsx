@@ -103,7 +103,7 @@ function ExampleRow({
       onClick={onPick}
       title={title}
       className="group flex w-full items-center gap-3 rounded-card border border-edge bg-panel/40 px-3 py-2.5
-        text-left outline-none focus-visible:shadow-focusring transition-all duration-base ease-state
+        text-left outline-none focus-visible:shadow-focusring transition-[background-color,box-shadow,color] duration-base ease-state
         hover:bg-panel hover:shadow-glow focus-visible:bg-panel focus-visible:shadow-focusring"
     >
       <span
@@ -117,7 +117,7 @@ function ExampleRow({
       </span>
       <span className="shrink-0 text-[11px] text-faint">{hint}</span>
       <span
-        className="shrink-0 -translate-x-1 text-faint opacity-0 transition-all duration-base ease-state
+        className="shrink-0 -translate-x-1 text-faint opacity-0 transition-[transform,opacity,color] duration-base ease-state
           group-hover:translate-x-0 group-hover:opacity-100
           group-focus-visible:translate-x-0 group-focus-visible:opacity-100
           motion-reduce:transition-none"

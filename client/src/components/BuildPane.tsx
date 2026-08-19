@@ -24,7 +24,7 @@ import {
 import { useEvalStore } from "../store/evalStore.ts";
 import { composerMoment } from "../lib/composerMoment.ts";
 import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
-import { fmtCost } from "../lib/format.ts";
+import { fmtCost, fmtTokens } from "../lib/format.ts";
 import { Chip, chipClass } from "./Chip.tsx";
 import { ChoiceRow, type Choice } from "./ChoiceRow.tsx";
 import { DiffCard } from "./DiffCard.tsx";
@@ -114,12 +114,13 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
       icon: <FileIcon size={STAT_ICON} />,
       value: String(turn.files.length),
       label: turn.files.length === 1 ? "file" : "files",
+      keepLabel: true,
     },
   ];
   if (turn.usage) {
     stats.push({
       icon: <HashIcon size={STAT_ICON} />,
-      value: turn.usage.output_tokens.toLocaleString(),
+      value: fmtTokens(turn.usage.output_tokens, "short"),
       label: "output tokens",
     });
     // The cost shown is the total the user actually paid — planning included. Leading with the
@@ -139,7 +140,7 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
     if (turn.usage.cache_read_input_tokens > 0) {
       stats.push({
         icon: <ZapIcon size={STAT_ICON} />,
-        value: turn.usage.cache_read_input_tokens.toLocaleString(),
+        value: fmtTokens(turn.usage.cache_read_input_tokens, "short"),
         label: "cached",
         title: "Prompt prefix was reused — these input tokens were not charged at full rate",
         dim: true,
@@ -147,7 +148,18 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
     }
   }
   return (
-    <StatRow leading={<span className="text-ok text-[12px]">Generated</span>} stats={stats} />
+    // A DOT, THEN THE WORD. The line led with `Generated` in green and no mark at all, while
+    // every other "this finished" in the app is a coloured glyph. The dot is the status; the word
+    // is what happened.
+    <StatRow
+      leading={
+        <span className="inline-flex items-center gap-1.5 text-[12px] text-ok">
+          <StatusDot state="ok" size={ICON.badge} />
+          Generated
+        </span>
+      }
+      stats={stats}
+    />
   );
 }
 
@@ -311,7 +323,7 @@ function ModelSelector({
         </span>
       </Chip>
       {open && (
-        <div className="absolute bottom-full mb-2 left-0 z-30 min-w-[190px] rounded-card bg-panel border border-edge shadow-floating p-1">
+        <div className="absolute bottom-full left-0 z-30 mb-1 min-w-[190px] animate-slide-in rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none">
           {catalogue.map((p) => (
             <div key={p.id} className="mt-1 first:mt-0">
               {/* The provider's own mark on its group, so the menu is scanned by logo the way
@@ -1157,7 +1169,16 @@ export function BuildPane({
                   {selectedMcp.length} selected
                 </span>
               )}
-              <span className="text-faint">{mcpOpen ? "hide" : "choose"}</span>
+              {/* A CHEVRON, NOT A WORD. Disclosure had five vocabularies in this client and two
+                  of them were English — which is the icon-first rule inverted, on the one control
+                  whose whole meaning is a direction. Down when open, ninety degrees when closed,
+                  the same as every tree and section disclosure here. */}
+              <span
+                className={`text-faint transition-transform duration-fast ${mcpOpen ? "" : "-rotate-90"}`}
+                aria-hidden
+              >
+                <ChevronDownIcon size={ICON.xs} />
+              </span>
             </button>
 
             {mcpOpen && (
@@ -1351,7 +1372,7 @@ export function BuildPane({
               }}
             />
             <div
-              className="absolute inset-0 transition-opacity duration-200"
+              className="absolute inset-0 transition-opacity duration-base"
               style={{ opacity: showWave ? 1 : 0, pointerEvents: "none" }}
               aria-hidden={!showWave}
             >
