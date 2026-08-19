@@ -184,7 +184,7 @@ export function InboxCard({
           draw at exactly those coordinates. */}
       <div className="flex items-start gap-2">
         <span
-          className="mt-px shrink-0"
+          className="mt-px shrink-0 text-muted"
           style={{ color: item.severity === "blocking" ? ROSE : undefined }}
           aria-hidden
         >
