@@ -81,6 +81,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             marker::first_launch_state,
             status::backend_status,
+            sidecar::restart_backend,
             deeplink::drain_deep_links,
             secrets::secret_get,
             secrets::secret_set,
@@ -93,7 +94,7 @@ pub fn run() {
     // `--config src-tauri/tauri.updater.conf.json` is what turns it on; see updater.rs.
     //
     // It REPLACES the handler above rather than adding to it, because a builder takes one. That
-    // is why `with_updater` restates the six names.
+    // is why `with_updater` restates the seven names.
     with_updater(builder)
         .setup(|app| {
             // 0 — THE LOG, BEFORE ANYTHING THAT COULD HAVE SOMETHING TO SAY.
@@ -230,7 +231,12 @@ pub fn run() {
                 // would not start would be taking down the only surface capable of explaining
                 // the problem — which is the surface that is now told, rather than left to infer
                 // it from a socket that never opens.
-                status::announce(&handle, status::Phase::Started, None);
+                //
+                // THE `Started` PHASE IS ANNOUNCED BY THE SPAWN ITSELF, not here. It was here in
+                // the first draft, and the log showed why that was wrong: the announcement landed
+                // thirteen seconds before the process existed, because resolving the sidecar and
+                // spawning it is slow on a cold filesystem. A phase that is true thirteen seconds
+                // early is a phase that lies during the only window anybody is watching.
                 let launch = sidecar::Launch { app_dir: app_dir.clone(), env: env.clone() };
                 if let Err(err) = sidecar::start(&handle, launch) {
                     fail(&handle, err);
@@ -284,13 +290,14 @@ pub fn run() {
 /// configuration nobody builds by default, which is the worst place to put one — so the whole
 /// registration moves here, where each branch is an ordinary expression.
 ///
-/// The command list is spelled twice as a result. That is the cost, it is six names, and the
+/// The command list is spelled twice as a result. That is the cost, it is seven names, and the
 /// duplication is visible in one function rather than hidden in a macro.
 #[cfg(feature = "updater")]
 fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder.plugin(tauri_plugin_updater::Builder::new().build()).invoke_handler(tauri::generate_handler![
         marker::first_launch_state,
         status::backend_status,
+        sidecar::restart_backend,
         deeplink::drain_deep_links,
         secrets::secret_get,
         secrets::secret_set,

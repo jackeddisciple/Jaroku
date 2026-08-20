@@ -84,11 +84,22 @@ pub struct Backend {
     stopping: AtomicBool,
     /// The port the backend is on, and therefore the port the page has been told about.
     port: AtomicU16,
+    /// Whether a supervisor loop is running. Guards `restart` against starting a second one,
+    /// which would be two supervisors spawning two backends onto one port and one database.
+    supervising: AtomicBool,
+    /// What to start, kept so `restart` has something to start. Absent until the first `start`.
+    launch: Mutex<Option<Launch>>,
 }
 
 impl Backend {
     pub fn new(port: u16) -> Self {
-        Self { child: Mutex::new(None), stopping: AtomicBool::new(false), port: AtomicU16::new(port) }
+        Self {
+            child: Mutex::new(None),
+            stopping: AtomicBool::new(false),
+            port: AtomicU16::new(port),
+            supervising: AtomicBool::new(false),
+            launch: Mutex::new(None),
+        }
     }
 
     /// The port in force. Read by `status.rs` when it tells the page where to connect.
@@ -146,13 +157,52 @@ pub fn start(app: &AppHandle, launch: Launch) -> Result<(), String> {
             missing.display()
         ));
     }
+    // Kept so `restart` has something to start. Assembling a second one there would be a second
+    // place that decides what the backend's environment is.
+    if let Ok(mut slot) = app.state::<Backend>().launch.lock() {
+        *slot = Some(launch.clone());
+    }
     let handle = app.clone();
     tauri::async_runtime::spawn(async move { supervise(handle, launch).await });
     Ok(())
 }
 
+/// Start the backend again after the supervisor gave up. Answers what to tell the person asking.
+///
+/// THE ONLY RECOVERY THAT DOES NOT INVOLVE QUITTING. Three consecutive failures stop the loop —
+/// deliberately, because a backend that cannot bind or cannot open its database fails identically
+/// every time and a loop around it is a busy wait that hides the error. But the condition is
+/// often transient in a way the shell cannot see: the port was held by something that has since
+/// closed, a disk was full, a virus scanner had the payload open. So the person watching gets to
+/// say "try that again" rather than being told to quit and reopen.
+///
+/// REFUSING WHILE ONE IS ALREADY RUNNING IS THE LOAD-BEARING PART. Two supervisors would mean two
+/// backends racing for one port and writing one SQLite database from two processes, which is
+/// precisely what the single-instance plugin exists upstream to prevent.
+#[tauri::command]
+pub fn restart_backend(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<Backend>();
+    if state.supervising.load(Ordering::SeqCst) {
+        return Err("Jaroku's backend is already starting.".into());
+    }
+    let launch = match state.launch.lock() {
+        Ok(slot) => slot.clone(),
+        Err(_) => None,
+    };
+    let Some(launch) = launch else {
+        return Err("There is nothing to start: this launch never got as far as a backend.".into());
+    };
+    logs::say("restarting the backend because somebody asked");
+    state.stopping.store(false, Ordering::SeqCst);
+    start(&app, launch)
+}
+
 async fn supervise(app: AppHandle, launch: Launch) {
     let mut failures: u32 = 0;
+    app.state::<Backend>().supervising.store(true, Ordering::SeqCst);
+    // Every `return` below is a place the loop ends, and each one has to clear this or a later
+    // `restart_backend` would refuse forever. A guard rather than four assignments.
+    let _running = Supervising(app.clone());
 
     loop {
         let started = Instant::now();
@@ -269,6 +319,19 @@ async fn supervise(app: AppHandle, launch: Launch) {
     }
 }
 
+/// Clears the supervising flag however the loop ends, including a panic.
+///
+/// A drop guard rather than an assignment before each `return`, because there are four of those
+/// and the failure mode of missing one is a `restart_backend` that refuses for the life of the
+/// application with "already starting" — about a supervisor that stopped an hour ago.
+struct Supervising(AppHandle);
+
+impl Drop for Supervising {
+    fn drop(&mut self) {
+        self.0.state::<Backend>().supervising.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Settle which port this attempt gets, and answer whether there is one at all.
 ///
 /// PREFERRING THE PORT ALREADY IN FORCE is what makes this cheap and invisible on the ordinary
@@ -341,6 +404,9 @@ fn spawn_once(
     if let Ok(mut slot) = app.state::<Backend>().child.lock() {
         *slot = Some(child);
     }
+    // AND THE PAGE IS TOLD HERE, because here is where it became true. There is now a backend
+    // process, on a port this attempt resolved, and the status carries both.
+    status::announce(app, status::Phase::Started, None);
     Ok(events)
 }
 

@@ -12,17 +12,39 @@
 // recoverable state is how a screen like this stops being believed. In a browser it never renders
 // at all, because nothing there ever sets a host status.
 //
-// THE THREE THINGS IT OFFERS ARE THE THREE THAT EXIST. Retry, which re-runs whatever the caller
-// was waiting on. The log's path, because the whole story is in it and the shell wrote it down.
-// And quit-and-reopen, which is stated as a sentence rather than offered as a button: the button
-// would need shell permission this application deliberately does not grant its own webview, and a
-// control that cannot do what it says is worse than an instruction that can.
+// THE THREE THINGS IT OFFERS ARE THE THREE THAT EXIST. A retry that actually starts the backend
+// again rather than merely re-asking a dead port a question — the supervisor stops after three
+// consecutive failures on purpose, and the condition is often transient in a way it cannot see, so
+// the person watching is the one who gets to say "try that again". The log's path, because the
+// whole story is in it and the shell wrote it down. And quit-and-reopen, which is stated as a
+// sentence rather than offered as a button: the button would need shell permission this
+// application deliberately does not grant its own webview, and a control that cannot do what it
+// says is worse than an instruction that can.
 
 import { useState } from "react";
-import type { BackendStatus } from "../lib/hostBackend.ts";
+import { restartBackend, type BackendStatus } from "../lib/hostBackend.ts";
 
 export function BackendFailure({ status, onRetry }: { status: BackendStatus; onRetry?: () => void }) {
   const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+
+  const retry = async (): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    setRefusal(null);
+    const problem = await restartBackend();
+    if (problem) {
+      setRefusal(problem);
+      setBusy(false);
+      return;
+    }
+    // The button stays busy. The next status the shell sends is what ends this panel — either it
+    // starts and the phase moves off `failed`, or it fails again and the message changes. A
+    // button that re-enabled itself immediately would invite a second press into a start that is
+    // still in flight, which is the one thing the shell refuses.
+    onRetry?.();
+  };
 
   const copyPath = async (): Promise<void> => {
     if (!status.logPath) return;
@@ -47,16 +69,16 @@ export function BackendFailure({ status, onRetry }: { status: BackendStatus; onR
         Quitting Jaroku from the tray and opening it again starts it over. If it keeps happening, the log below has
         every step of the launch in it.
       </p>
+      {refusal && <p className="text-[11px] text-err">{refusal}</p>}
       <div className="flex flex-wrap items-center gap-2">
-        {onRetry && (
-          <button
-            type="button"
-            onClick={onRetry}
-            className="rounded-control border border-edge px-2.5 py-1 text-[11px] text-ink outline-none hover:border-chrome focus-visible:shadow-focusring"
-          >
-            Try again
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => void retry()}
+          disabled={busy}
+          className="rounded-control border border-edge px-2.5 py-1 text-[11px] text-ink outline-none hover:border-chrome focus-visible:shadow-focusring disabled:opacity-50"
+        >
+          {busy ? "Starting…" : "Start it again"}
+        </button>
         {status.logPath && (
           <button
             type="button"

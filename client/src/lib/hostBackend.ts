@@ -93,6 +93,27 @@ function bridge(): TauriBridge | undefined {
  * The socket URL on every status is applied here rather than by the caller, so a moved port is
  * corrected by the fact of the status arriving rather than by somebody remembering to.
  */
+/**
+ * Ask the host to start its backend again. Answers null on success, or a sentence to render.
+ *
+ * A HOST THAT CANNOT DO THIS ANSWERS SO, rather than the caller branching on whether it is inside
+ * one. In a browser there is no backend to restart and nothing that could have stopped one, so the
+ * sentence says that and the button that called it was never rendered anyway — the failure panel
+ * only exists under a host.
+ */
+export async function restartBackend(): Promise<string | null> {
+  const invoke = bridge()?.core?.invoke;
+  if (!invoke) return "This build has no backend of its own to restart.";
+  try {
+    await invoke("restart_backend");
+    return null;
+  } catch (err) {
+    // The shell's own refusal — "already starting", "nothing to start" — which is a sentence
+    // somebody can act on rather than a stack trace.
+    return String((err as { message?: string })?.message ?? err);
+  }
+}
+
 export function onBackendStatus(handler: (status: BackendStatus) => void): () => void {
   const tauri = bridge();
   if (!tauri?.event?.listen) return () => {};
