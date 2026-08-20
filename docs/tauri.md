@@ -23,11 +23,14 @@ package produces anything the shell needs.
   ┌─────────────────────────────────────────────────────────────────────┐
   │  Tauri shell  (src-tauri/, Rust)                                    │
   │                                                                     │
+  │   logs.rs       everything said  →  ~/.jaroku/logs/desktop.log      │
   │   ports.rs      4317, or the next free port above it                │
   │   window.rs     the window, and an init script carrying that port   │
   │   payload.rs    server/ + runtime/  →  ~/.jaroku/app                │
   │   python.rs     uv + CPython + wheels  →  ~/.jaroku/python          │
   │   sidecar.rs    node tsx server/src/index.ts, supervised            │
+  │   tree.rs       …and everything it spawns, ended with it            │
+  │   status.rs     what the shell is doing  →  the page                │
   │   deeplink.rs   jaroku://  →  an event, or a queue                  │
   │   secrets.rs    the session token  →  the OS credential store       │
   └───────────────────────────┬─────────────────────────────────────────┘
@@ -53,7 +56,7 @@ does in a browser, gets there through the same three-request exchange — token,
 and the relay cannot tell the difference. `npm run test:desktop-smoke` proves that by spawning the
 real server and driving the whole exchange over a real socket.
 
-### The frontend has exactly two Tauri-aware modules
+### The frontend has exactly three Tauri-aware modules
 
 Everything else in `client/` is identical in a browser and in the app.
 
@@ -61,12 +64,19 @@ Everything else in `client/` is identical in a browser and in the app.
 |---|---|
 | `client/src/lib/sessionVault.ts` | `localStorage`, byte for byte what `auth.ts` did before |
 | `client/src/lib/deepLink.ts` | `onDeepLink` returns a no-op unsubscribe and nothing is ever delivered |
+| `client/src/lib/hostBackend.ts` | `onBackendStatus` returns a no-op unsubscribe and no status ever arrives |
 
-`client/src/lib/hostConfig.ts` is a third file added by this work and is deliberately **not** one
-of them: it reads a value any host may write onto the global object before the bundle loads, it
-mentions no Tauri and imports none, and absent a host it falls through to `VITE_JAROKU_WS` and
-then to `ws://localhost:4317`. Both Tauri-aware modules reach the shell through `window.__TAURI__`
+`client/src/lib/hostConfig.ts` is a fourth file and is deliberately **not** one of them: it reads a
+value any host may write onto the global object before the bundle loads, it mentions no Tauri and
+imports none, and absent a host it falls through to `VITE_JAROKU_WS` and then to
+`ws://localhost:4317`. All three Tauri-aware modules reach the shell through `window.__TAURI__`
 rather than `@tauri-apps/api`, so neither `package.json` nor a browser build gains a dependency.
+
+`hostConfig`'s value is a **seed rather than a constant**. A host that merely serves a page can
+freeze the address it serves it at; a host that supervises the backend cannot, because a restart
+that finds the old port taken has to move. So the injected object stays frozen and a correction
+arrives beside it on every backend status, through the same validation — and both readers,
+the socket and every HTTP surface, resolve per call rather than at module load.
 
 ### Where things live at runtime
 
@@ -83,6 +93,7 @@ megabytes and call itself freshly installed.
 | `keys/` | the object-signing, run-token and local-issuer keys |
 | `jaroku.db` | the database, deliberately outside `app/` — see below |
 | `app-initialized` | the first-launch marker |
+| `logs/desktop.log` | what the shell and the backend said, with one rolled backup beside it |
 
 **The payload is extracted rather than run in place** because all three bundles are read-only in
 normal use — Program Files, a signed `.app`, an AppImage's mount — and Jaroku writes inside
@@ -276,11 +287,54 @@ visibility, which would faithfully reopen Jaroku invisible every time.
 database from two processes.
 
 **The port is 4317 unless something holds it**, and then the next free one above. The resolved port
-reaches the page as `window.__JAROKU_CONFIG__.wsUrl` before its first module evaluates.
+reaches the page as `window.__JAROKU_CONFIG__.wsUrl` before its first module evaluates, and is
+re-resolved before every start attempt — preferring the one already in force, so an ordinary
+restart moves nothing. "Holds it" means what the backend means by it: `is_free` binds both
+wildcards, the way `http.listen(port)` does, and then asks whether anything answers on either
+loopback. A probe that bound `127.0.0.1` reported a port free that a wildcard listener was already
+holding, which is a bind Windows permits and was the largest single cause of the freezes this
+wrapper had.
 
 **A crashed backend is restarted three times** with 0.5s, 2s and 8s between attempts. The budget
 resets once a start has stayed up for a minute. After three consecutive failures the shell stops
-and says so; the window stays open and reports itself disconnected, which is the truth.
+and **tells the page**, which renders the reason, the log's path and a retry rather than a
+connection strip that will never connect.
+
+**Quitting ends the backend and everything it spawned.** The process the shell holds is tsx's
+launcher, not the server — tsx re-executes Node with its own loader as a child — so a kill of the
+child left the real backend running with the port bound and the database open, and the next launch
+found 4317 taken by a Jaroku nobody could see. On Windows the sidecar is bound to a job object
+with kill-on-close, which also covers the shell being killed from Task Manager. On macOS and Linux
+`SIGTERM` reaches the server through tsx's own signal relay and the drain runs as it always did.
+
+**Everything the shell and the backend say goes to `~/.jaroku/logs/desktop.log`.** That is where
+to look first when a launch goes wrong; see below.
+
+---
+
+## When a launch goes wrong
+
+**Read `~/.jaroku/logs/desktop.log`** — `%APPDATA%\jaroku\logs\desktop.log` on Windows. It carries
+the shell's own decisions and the whole of the backend's stdout and stderr, timestamped to the
+millisecond, in every build. The boot lines naming the database, the object store, the origin
+allowlist and the listening port are all in it, exactly as `npm run dev` prints them.
+
+For a startup ordering problem — the class of bug where something is not ready yet — set
+
+```bash
+JAROKU_DESKTOP_DEBUG=1
+```
+
+before launching. That adds the verbose half: the port probe's answer, every supervision
+transition, the argument vector and pid of each spawn, the names of the environment the backend is
+given, and a millisecond clock on each startup step measured from the window appearing. It is off
+in a release build and on in a debug one. It is a variable the shell **reads**; it is never put
+into the backend's environment, and `test:desktop-contract` asserts that.
+
+The window says which failure it is. `backend stopped` in the status strip, or a panel on the
+sign-in screen carrying the shell's own sentence and the log's path, means the supervisor has
+given up — quitting from the tray and reopening starts it over. `disconnected` means the ordinary
+retry loop, which recovers on its own.
 
 ---
 
@@ -500,12 +554,24 @@ pair that must not exist in this repository.
 
 ## Known limitations
 
-**Shutdown is graceful on Unix and not on Windows.** `sidecar.rs` sends SIGTERM, which
-`server/src/index.ts` handles by draining its trace-ingest chain before exiting. Windows has no
-equivalent for a console-less child — every portable kill resolves to `TerminateProcess` — so the
-drain does not run there, and the last few events of a run that was in flight at the moment of
-quitting can be lost. Fixing it properly means a shutdown route on a server this wrapper is not
-allowed to change.
+**Shutdown is graceful on Unix and not on Windows.** `sidecar.rs` sends SIGTERM, which tsx relays
+to the server and `server/src/index.ts` handles by draining its trace-ingest chain before exiting.
+Windows has no equivalent for a console-less child — every portable kill resolves to
+`TerminateProcess` — so the drain does not run there, and the last few events of a run that was in
+flight at the moment of quitting can be lost. Fixing it properly means a shutdown route on a
+server this wrapper is not allowed to change.
+
+What *is* fixed is that the backend now actually stops. It did not before: the kill reached tsx's
+launcher and the server it had spawned went on running, which is the wrapper's own bug rather than
+the platform's. See `src/tree.rs`.
+
+**The bundled uv reaches an agent run through a workaround, not through the obvious PATH.**
+`processManager.ts` and `sandbox/codeCheck.ts` spawn uv with `/opt/homebrew/bin:` prepended to
+`PATH`, which is a `:` separator and a macOS path — on Windows that corrupts the first entry
+rather than adding one, and the first entry is the one this shell just added. `python.rs` puts a
+sacrificial entry in front of its own so the real one survives intact, and says so where it does
+it. The two-line fix belongs in the server; it is written up in
+`docs/tauri-stabilization-report.md` and has not been made.
 
 **The first launch is slow and large.** Roughly 85 MB of payload and 180 MB of Python runtime are
 copied out of the bundle, and then `uv sync` builds a virtualenv. The window opens first and the
@@ -522,8 +588,16 @@ Linux the copied Node is linked against the build machine's glibc, which becomes
 
 **`payload.rs` looks for the staged tree in two places.** `bundle.resources` accepts both an array
 and a source-to-destination map, and the two put the tree in different places relative to the
-resource directory. Whichever exists is used. Once a bundle has actually been built, delete the
-branch that turns out to be wrong.
+resource directory. Whichever exists is used. An installed NSIS build resolves to
+`resource_dir()/resources/app`, so the array form — the one this configuration uses — is the live
+branch. The other is kept until a macOS and a Linux bundle have been installed and looked at.
+
+**Symlinks in the staged trees are not extracted.** `mirror()` walks with `file_type()` and copies
+files and directories only, deliberately — following a link out of the payload is how an extractor
+writes outside the directory it was given. The staged Python tree contains one: uv's
+`cpython-3.12-…` alias pointing at the versioned interpreter directory. It does not arrive, and
+nothing needs it — uv resolves the versioned directory and the venv builds without it. Worth
+knowing before somebody goes looking for a missing alias.
 
 **Deep links on Linux depend on a desktop entry.** The `.deb` installs one and the scheme works;
 an AppImage run from a download folder has not registered anything with the desktop environment,
