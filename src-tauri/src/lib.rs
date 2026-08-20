@@ -295,14 +295,30 @@ fn environment(port: u16) -> HashMap<String, String> {
     // neither is in that list. Without this the window opens, signs nobody in, and reports a
     // socket that will not connect — which looks like a broken backend and is a missing string.
     //
-    // BOTH SPELLINGS ON EVERY PLATFORM, rather than one per `cfg`. They are the same
-    // application on two engines, an allowlist entry costs nothing, and a `cfg` here would be a
-    // build that is correct on the machine it was compiled on and silently wrong the day
-    // WebView2 or WKWebView changes which one it sends. The development origins are NOT added:
-    // a packaged app has no Vite, and the smallest list that works is the one to ship.
+    // ALL THREE SPELLINGS, and the third one is here because its absence shipped a build that
+    // could not be signed into.
+    //
+    // WKWebView serves the app from `tauri://localhost`. WebView2 cannot use a custom scheme and
+    // serves it from `tauri.localhost` over **https** — `http` only when a build opts into
+    // `dangerousUseHttpScheme`, which this one does not. The first version of this line carried
+    // the custom scheme and the http variant, which is every spelling except the one Windows
+    // actually uses.
+    //
+    // WHAT THAT LOOKED LIKE, because it is worth writing down: nothing errored. The request
+    // reached the server and was answered 200 — an origin that is not on the list is not refused,
+    // it is answered without an `access-control-allow-origin`, and the BROWSER drops the response.
+    // So `localIssuerAvailable()` saw a rejected fetch, its `catch` returned false, and the
+    // sign-in screen rendered its "this server uses an external identity provider" branch, which
+    // has no form in it. A packaged app that opened, looked right, and could not be signed into,
+    // with a clean server log underneath it.
+    //
+    // Listed rather than `cfg`-ed per platform for the same reason as before: an entry costs
+    // nothing, and a `cfg` is a build that is correct on the machine it was compiled on and
+    // silently wrong the day an engine changes which one it sends. Which is precisely what this
+    // comment is about.
     env.insert(
         "JAROKU_ALLOWED_ORIGINS".into(),
-        "tauri://localhost,http://tauri.localhost".into(),
+        "tauri://localhost,https://tauri.localhost,http://tauri.localhost".into(),
     );
 
     // Packaged. The payload under `~/.jaroku/app` is rewritten by every upgrade, so nothing a
