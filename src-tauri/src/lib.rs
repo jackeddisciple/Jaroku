@@ -12,6 +12,7 @@
 
 mod deeplink;
 mod marker;
+mod menu;
 mod paths;
 mod payload;
 mod ports;
@@ -64,6 +65,13 @@ pub fn run() {
                 )
             })?;
             app.manage(sidecar::Backend::new(port));
+
+            // 1a — THE MENU BAR, which exists on macOS and nowhere else. Before the window,
+            // because on macOS the menu belongs to the APPLICATION rather than to a window and
+            // is what a user sees at the top of the screen for the moment before one appears.
+            // See menu.rs on why the Edit menu is load-bearing rather than conventional.
+            #[cfg(target_os = "macos")]
+            menu::install(&app.handle())?;
 
             // 1b — THE `jaroku://` SCHEME, before the window rather than after it. A URL that
             // STARTED this application is delivered during startup, and the queue that catches
