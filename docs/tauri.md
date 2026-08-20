@@ -312,17 +312,56 @@ AppImage that refuses to start on Debian 12. And there are **two macOS runners r
 universal binary**, because a universal build needs a universal Node to sit beside the universal
 Rust binary and the Node release channel does not publish one.
 
-### What a tester has to do, because nothing is signed
+### Getting it onto a tester's machine
 
-This is the friction to expect, and it is entirely removed by the certificates described under
-[Code signing](#code-signing).
+**The one-line install is the path to send people**, and on macOS it is the only free one that
+ends in a working application:
 
-- **macOS** — the download is quarantined. Right-click → *Open* offers a button that a plain
-  double-click does not; or `xattr -dr com.apple.quarantine /Applications/Jaroku.app`.
+```
+curl -fsSL https://raw.githubusercontent.com/jackeddisciple/Jaroku/main/scripts/install.sh | sh
+```
+
+It resolves the latest release, picks the asset for the architecture it is running on, and
+installs — `/Applications` on macOS, `~/.local/bin` on Linux.
+
+**Why a browser download is worse than a curl one on macOS.** A browser attaches
+`com.apple.quarantine` to what it downloads, and Gatekeeper refuses to open a quarantined app
+signed by no certificate. `curl` attaches nothing — the attribute exists to mark files that
+arrived through a program acting on a web page's behalf, and a person typing a command is not
+that. Same bytes, and only one of the two opens on a double-click afterwards.
+
+**Ad-hoc signing is what makes the unsigned build runnable at all.** An arm64 Mach-O binary must
+carry a signature to execute; Apple silicon has no unsigned execution path. Without one, an
+M-series Mac reports *"Jaroku is damaged and can't be opened"* — which reads as a corrupt
+download rather than a policy decision. The release workflow signs with the ad-hoc identity `-`,
+which satisfies the loader without satisfying Gatekeeper: the app runs, and the warnings remain.
+
+By hand, per platform:
+
+- **macOS** — right-click → *Open* the first time. A plain double-click offers no way through.
 - **Windows** — SmartScreen warns that the publisher is unknown: *More info* → *Run anyway*.
-  Code-signing removes the warning; SmartScreen reputation then builds over time.
-- **Linux** — `chmod +x` the AppImage. Neither package is signed, so a repository would need to
-  sign it on your behalf.
+- **Linux** — `chmod +x` the AppImage.
+
+### The only way to a true double-click on macOS
+
+There isn't a free one, and it is worth being plain about that rather than working around it
+forever. Zero-warning installation on macOS requires **the Apple Developer Program, $99/year**:
+
+1. Enrol at [developer.apple.com](https://developer.apple.com/programs/) — approval usually
+   takes a day or two.
+2. Create a **Developer ID Application** certificate (not "Mac App Distribution" — that one is
+   for the App Store and cannot sign a directly-distributed app).
+3. Add `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`,
+   `APPLE_PASSWORD` (an app-specific password) and `APPLE_TEAM_ID` to the repository's Actions
+   secrets, and set them on the `tauri-action` step in place of the ad-hoc `-`.
+
+Everything else is already in place: `entitlements.plist` carries the four the hardened runtime
+needs for a bundled Node and CPython, and Tauri notarises automatically once those variables are
+present. After that a tester downloads the `.dmg` in a browser, double-clicks, drags to
+Applications, and it opens — no terminal, no right-click, no instructions.
+
+Windows has an equivalent: an OV or EV code-signing certificate removes the SmartScreen warning,
+though only an EV one removes it immediately.
 
 ### Expect a large download
 

@@ -116,6 +116,20 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # AD-HOC SIGNING ON macOS, AND IT IS NOT COSMETIC. An arm64 Mach-O binary must carry a
+          # signature to execute at all — Apple silicon has no "unsigned" execution path the way
+          # Intel did. An unsigned `.app` downloaded to an M-series Mac therefore fails with
+          # *"Jaroku is damaged and can't be opened. You should move it to the Trash."*, which
+          # reads as a corrupt download and is where a beta tester gives up.
+          #
+          # `-` is the ad-hoc identity: a signature with no certificate behind it. It does not
+          # satisfy Gatekeeper and does not remove a single warning — what it does is turn an
+          # app that CANNOT RUN into one that runs after right-click → Open. That is the whole
+          # difference between a build friends can try and a build they cannot.
+          #
+          # A real Developer ID certificate replaces this and removes the warnings entirely; see
+          # "Code signing" in docs/tauri.md. Empty on the other two runners, which ignore it.
+          APPLE_SIGNING_IDENTITY: ${{ startsWith(matrix.platform, 'macos') && '-' || '' }}
         with:
           args: --target ${{ matrix.target }}
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}-dev', github.run_number) }}
@@ -126,13 +140,16 @@ jobs:
             Desktop builds of Jaroku. Nothing here is code-signed yet, so each platform needs one
             extra step the first time — see below.
 
-            **macOS** — the download is quarantined because it is unsigned. Either right-click the
-            app and choose *Open* (the dialog then offers a button that the plain double-click does
-            not), or clear the flag directly:
+            **macOS — use the one-line install.** A browser marks its downloads as quarantined and
+            Gatekeeper then refuses an app signed by no certificate. `curl` sets no such mark, so
+            this installs a build that opens with an ordinary double-click afterwards:
             ```
-            xattr -dr com.apple.quarantine /Applications/Jaroku.app
+            curl -fsSL https://raw.githubusercontent.com/jackeddisciple/Jaroku/main/scripts/install.sh | sh
             ```
-            Pick the Apple-silicon build for an M-series Mac and the Intel one otherwise.
+            It picks the right build for Apple silicon or Intel, copies it to `/Applications` and
+            opens it. If you would rather take the `.dmg` below by hand, you can — but then macOS
+            needs right-click → *Open* the first time, because a plain double-click on a
+            quarantined unsigned app offers no way through.
 
             **Windows** — SmartScreen will warn that the publisher is unknown. *More info* →
             *Run anyway*. The installer does not need administrator: it installs for the current
