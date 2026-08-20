@@ -7,8 +7,9 @@
   "scripts": {
     "tauri": "tauri",
     "tauri:icons": "node scripts/tauri/gen-icons.mjs",
+    "tauri:payload": "node scripts/tauri/prepare-payload.mjs",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "npm run tauri:payload && tauri build"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4"

@@ -110,6 +110,26 @@ fn environment(port: u16) -> HashMap<String, String> {
         return env;
     }
 
+    // THE ORIGIN ALLOWLIST, WHICH IS THE ONE VARIABLE A PACKAGED BUILD CANNOT DO WITHOUT.
+    //
+    // WebSockets are not covered by CORS, so `auth/origin.ts` checks the `Origin` header on the
+    // upgrade and the same policy answers CORS for the HTTP half — the session exchange, the
+    // ticket, the export. Its development default is the Vite and relay origins, which is
+    // exactly right for `npm run dev` and exactly wrong here: a packaged webview's origin is
+    // `tauri://localhost` on macOS and Linux and `http://tauri.localhost` on Windows, and
+    // neither is in that list. Without this the window opens, signs nobody in, and reports a
+    // socket that will not connect — which looks like a broken backend and is a missing string.
+    //
+    // BOTH SPELLINGS ON EVERY PLATFORM, rather than one per `cfg`. They are the same
+    // application on two engines, an allowlist entry costs nothing, and a `cfg` here would be a
+    // build that is correct on the machine it was compiled on and silently wrong the day
+    // WebView2 or WKWebView changes which one it sends. The development origins are NOT added:
+    // a packaged app has no Vite, and the smallest list that works is the one to ship.
+    env.insert(
+        "JAROKU_ALLOWED_ORIGINS".into(),
+        "tauri://localhost,http://tauri.localhost".into(),
+    );
+
     // Packaged. The payload under `~/.jaroku/app` is rewritten by every upgrade, so nothing a
     // user would mind losing may live inside it — see payload.rs on why extraction never deletes.
     // The database and the three signing keys are exactly that kind of thing, and each already
