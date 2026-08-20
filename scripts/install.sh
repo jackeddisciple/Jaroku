@@ -37,15 +37,15 @@ ARCH="$(uname -m)"
 case "$OS" in
   Darwin)
     case "$ARCH" in
-      arm64)  PATTERN='aarch64.dmg' ; WHICH="Apple silicon" ;;
-      x86_64) PATTERN='x64.dmg'     ; WHICH="Intel" ;;
+      arm64)  PATTERN='Jaroku-macos-arm64.dmg' ; WHICH="Apple silicon" ;;
+      x86_64) PATTERN='Jaroku-macos-intel.dmg' ; WHICH="Intel" ;;
       *) die "Unrecognised Mac architecture: $ARCH" ;;
     esac ;;
   Linux)
     case "$ARCH" in
-      x86_64|amd64) PATTERN='amd64.AppImage' ; WHICH="x86-64" ;;
-      aarch64|arm64) PATTERN='aarch64.AppImage' ; WHICH="arm64" ;;
-      *) die "Unrecognised Linux architecture: $ARCH" ;;
+      x86_64|amd64) PATTERN='Jaroku-linux-x86_64.AppImage' ; WHICH="x86-64" ;;
+      *) die "Unrecognised Linux architecture: $ARCH.
+The release publishes an x86-64 AppImage; there is no arm64 Linux runner in the workflow yet." ;;
     esac ;;
   *) die "This script installs Jaroku on macOS and Linux. On Windows, download the .exe from https://github.com/$REPO/releases/latest" ;;
 esac

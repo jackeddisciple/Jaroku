@@ -312,6 +312,43 @@ AppImage that refuses to start on Debian 12. And there are **two macOS runners r
 universal binary**, because a universal build needs a universal Node to sit beside the universal
 Rust binary and the Node release channel does not publish one.
 
+### When the landing page is the only front door
+
+A landing page is a front door, not a file server: the bytes still need an origin, and GitHub
+Releases is a good one — CDN-backed, free, 2 GB per asset, and it never appears in the user's
+journey if your buttons link straight at it. Nobody browses to a repository; they click Download
+on your site and a file arrives.
+
+**Every artefact is therefore published twice.** Tauri names its output after the version —
+`Jaroku_0.3.3_aarch64.dmg` — which is right for an archive and useless for a button, because
+every release would break every link on the site. The workflow uploads a second copy under a name
+that never changes, so a download button can point at one URL for the life of the product:
+
+| Button | URL |
+|---|---|
+| macOS (Apple silicon) | `…/releases/latest/download/Jaroku-macos-arm64.dmg` |
+| macOS (Intel) | `…/releases/latest/download/Jaroku-macos-intel.dmg` |
+| Windows | `…/releases/latest/download/Jaroku-windows-x64-setup.exe` |
+| Linux (AppImage) | `…/releases/latest/download/Jaroku-linux-x86_64.AppImage` |
+| Linux (Debian/Ubuntu) | `…/releases/latest/download/Jaroku-linux-amd64.deb` |
+
+all prefixed `https://github.com/jackeddisciple/Jaroku`. The versioned originals stay beside them,
+which is what somebody wants when they need a specific release rather than the current one.
+
+**Put a redirect on your own domain in front of those.** `jaroku.dev/download/mac-arm` →  `302` →
+the GitHub URL costs one route and buys three things the direct link cannot: the address stays
+yours if the origin ever moves, the analytics are yours, and one `/download` route can read the
+`User-Agent` and pick the platform so the page needs a single button instead of five. Serving the
+files yourself is the other option — R2 charges nothing for egress — and it costs about 1.6 GB of
+storage per release, which is worth knowing before it is four releases old.
+
+**The updater endpoint belongs on that domain too.** `src-tauri/tauri.updater.conf.json` holds a
+`.invalid` placeholder precisely so it cannot resolve until somebody decides; a landing page means
+that decision is made, and the value becomes something like
+`https://jaroku.dev/updates/{{target}}/{{arch}}/{{current_version}}`. That endpoint answers either
+`204 No Content` or the small JSON manifest Tauri's updater expects — it can be a static file per
+target, regenerated on release, rather than a service.
+
 ### Getting it onto a tester's machine
 
 **The one-line install is the path to send people**, and on macOS it is the only free one that

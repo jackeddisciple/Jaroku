@@ -162,3 +162,47 @@ jobs:
             **First launch takes a minute.** The app unpacks a Node runtime and a complete Python
             environment into your home directory so that nothing has to be installed separately.
             Every launch after that is immediate.
+
+      # STABLE FILENAMES, BECAUSE A LANDING PAGE CANNOT LINK TO A MOVING TARGET.
+      #
+      # Tauri names its output after the version — `Jaroku_0.3.3_aarch64.dmg` — which is correct
+      # for an archive and useless for a download button: every release would break every link on
+      # the site, and `releases/latest/download/<name>` only works if you already know the name.
+      # So each artefact is uploaded a second time under a name that never changes, and a button
+      # can point at one URL for the life of the product:
+      #
+      #   https://github.com/OWNER/REPO/releases/latest/download/Jaroku-macos-arm64.dmg
+      #
+      # `--clobber` because a re-run of a build must replace its own upload rather than fail on
+      # finding one already there. The versioned originals stay: they are what somebody wants when
+      # they need a specific release rather than the current one.
+      - name: Publish under stable filenames
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}-dev', github.run_number) }}
+        run: |
+          set -eu
+          case "${{ matrix.platform }}" in
+            macos-14)       find_glob='*.dmg'      ; stable='Jaroku-macos-arm64.dmg' ;;
+            macos-13)       find_glob='*.dmg'      ; stable='Jaroku-macos-intel.dmg' ;;
+            windows-latest) find_glob='*-setup.exe'; stable='Jaroku-windows-x64-setup.exe' ;;
+            ubuntu-22.04)   find_glob=''           ; stable='' ;;
+          esac
+
+          upload() {
+            cp "$1" "${RUNNER_TEMP}/$2"
+            gh release upload "$TAG" "${RUNNER_TEMP}/$2" --clobber --repo "${{ github.repository }}"
+            echo "uploaded $2"
+          }
+
+          BUNDLE="src-tauri/target/${{ matrix.target }}/release/bundle"
+          if [ "${{ matrix.platform }}" = "ubuntu-22.04" ]; then
+            # Two artefacts on this one, so it is spelled out rather than squeezed into the case.
+            found="$(find "$BUNDLE" -name '*.AppImage' | head -n1)"; [ -n "$found" ] && upload "$found" "Jaroku-linux-x86_64.AppImage"
+            found="$(find "$BUNDLE" -name '*.deb' | head -n1)";      [ -n "$found" ] && upload "$found" "Jaroku-linux-amd64.deb"
+          else
+            found="$(find "$BUNDLE" -name "$find_glob" | head -n1)"
+            [ -n "$found" ] || { echo "no artefact matching $find_glob under $BUNDLE"; exit 1; }
+            upload "$found" "$stable"
+          fi
