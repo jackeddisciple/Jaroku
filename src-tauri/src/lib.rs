@@ -20,6 +20,7 @@ mod python;
 mod secrets;
 mod sidecar;
 mod tray;
+mod updater;
 mod window;
 
 use std::collections::HashMap;
@@ -28,7 +29,7 @@ use std::path::PathBuf;
 use tauri::{Manager, RunEvent};
 
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // SINGLE INSTANCE, AND IT MUST BE THE FIRST PLUGIN REGISTERED. Tauri says so, and the
         // reason is that its whole job happens before the rest of the application exists: a
         // second launch has to be detected and handed off while there is still time to exit
@@ -79,7 +80,16 @@ pub fn run() {
             secrets::secret_get,
             secrets::secret_set,
             secrets::secret_delete,
-        ])
+        ]);
+
+    // OFF BY DEFAULT AND BUILT ON PURPOSE. The updater needs a signing key pair to build at all —
+    // the public half in the configuration, the private half signing each release — and this
+    // repository has neither and must never hold the second. `--features updater` together with
+    // `--config src-tauri/tauri.updater.conf.json` is what turns it on; see updater.rs.
+    //
+    // It REPLACES the handler above rather than adding to it, because a builder takes one. That
+    // is why `with_updater` restates the five names.
+    with_updater(builder)
         .setup(|app| {
             // 1 — THE PORT, FIRST, because everything after it is told the answer rather than
             // asked to guess. 4317 unless something already holds it; see ports.rs.
@@ -183,6 +193,12 @@ pub fn run() {
                     eprintln!("[jaroku] this machine is not fully set up: {err}");
                 }
 
+                // Whether a newer version exists, asked once and thirty seconds from now — see
+                // updater.rs on why it waits rather than racing the extraction and the backend
+                // for the same disk and network a first launch needs.
+                #[cfg(feature = "updater")]
+                updater::check_on_launch(&handle);
+
                 // LAST, AND DELIBERATELY AFTER THE BACKEND. Building the virtualenv is the slow
                 // half of a first launch and the only half nothing needs immediately: `uv run`
                 // syncs the environment itself before it runs anything, so a run started while
@@ -204,6 +220,35 @@ pub fn run() {
                 sidecar::stop(app);
             }
         });
+}
+
+/// The updater, folded in only when it was built.
+///
+/// A REBINDING RATHER THAN A `#[cfg]` INSIDE THE CHAIN, and that is not style. `generate_handler!`
+/// takes a list of paths and a conditional attribute inside it is not something the macro is
+/// specified to accept, and a `#[cfg]` block used as the tail expression of a `.plugin({ … })`
+/// argument is two statements where one value is needed. Both of those are compile errors in the
+/// configuration nobody builds by default, which is the worst place to put one — so the whole
+/// registration moves here, where each branch is an ordinary expression.
+///
+/// The command list is spelled twice as a result. That is the cost, it is five names, and the
+/// duplication is visible in one function rather than hidden in a macro.
+#[cfg(feature = "updater")]
+fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder.plugin(tauri_plugin_updater::Builder::new().build()).invoke_handler(tauri::generate_handler![
+        marker::first_launch_state,
+        deeplink::drain_deep_links,
+        secrets::secret_get,
+        secrets::secret_set,
+        secrets::secret_delete,
+        updater::check_for_update,
+        updater::install_update,
+    ])
+}
+
+#[cfg(not(feature = "updater"))]
+fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder
 }
 
 /// The repository this binary was compiled in, which is what a development run uses as its

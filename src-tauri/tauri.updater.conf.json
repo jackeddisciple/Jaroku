@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://REPLACE-THIS-BEFORE-RELEASING.invalid/updates/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "pubkey": "REPLACE-THIS-WITH-THE-OUTPUT-OF-tauri-signer-generate",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}
