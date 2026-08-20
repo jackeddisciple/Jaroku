@@ -69,3 +69,16 @@ server/.devauth.json
 # The key that signs run tokens locally — same reasoning as .objectkey, one level up the
 # stack: see server/src/sandbox/runTokens.ts.
 server/.runtokenkey
+
+# The desktop wrapper's build output and its staged payloads.
+#
+# `target/` is Rust's, `gen/` is Tauri's generated schemas and platform projects. The other two
+# are the reason this block is longer than one line: `binaries/` holds the Node runtime staged as
+# a Tauri sidecar and `resources/` holds the Python runtime staged for the bundle, and both are
+# HUNDREDS OF MEGABYTES OF SOMEBODY ELSE'S RELEASE ARTEFACTS. They are produced by
+# scripts/tauri/prepare-*.mjs from a pinned version, so they are reproducible rather than
+# precious — which is exactly the thing a repository should not be carrying.
+src-tauri/target/
+src-tauri/gen/
+src-tauri/binaries/
+src-tauri/resources/

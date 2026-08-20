@@ -1,0 +1,16 @@
+{
+  "name": "jaroku-desktop",
+  "private": true,
+  "version": "0.3.3",
+  "type": "module",
+  "description": "The desktop wrapper's scripts. Jaroku itself is server/ and client/, and both still run on their own — see docs/tauri.md.",
+  "scripts": {
+    "tauri": "tauri",
+    "tauri:icons": "node scripts/tauri/gen-icons.mjs",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Jaroku",
+  "version": "0.3.3",
+  "identifier": "app.jaroku.desktop",
+  "build": {
+    "beforeDevCommand": "npm --prefix client run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm --prefix client run build",
+    "frontendDist": "../client/dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Jaroku",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 680,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:* ws://127.0.0.1:* http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Build, run and debug LangGraph agents",
+    "longDescription": "Jaroku is a workbench for LangGraph agents: describe one and watch it generate, run it and read the trace step by step, branch a run from any checkpoint, compare providers, and deploy what works."
+  }
+}

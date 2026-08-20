@@ -1,0 +1,59 @@
+# The desktop wrapper's own crate. It lives INSIDE this repository rather than beside it,
+# because everything it wraps — the Node server, the Vite client, the Python runtime — is here,
+# and a wrapper in a second repository is a wrapper that goes one release out of date and then
+# stays there.
+#
+# NOTHING IN THIS CRATE IS ALLOWED TO BE THE ONLY WAY TO RUN JAROKU. `cd server && npm run dev`
+# and `cd client && npm run dev` are the development path and stay exactly as they are; this
+# crate is a second way to start the same two processes, not a replacement for the first. The
+# rule is enforced by what is absent: no file under server/ or client/ imports anything from
+# here, and there is no build step in either package that produces something this crate needs.
+[package]
+name = "jaroku"
+# THE PRODUCT'S VERSION, from CHANGELOG.md, and deliberately not server/package.json's 0.1.0 —
+# that number has not moved since v0.0.1 and names the Node package rather than the product. The
+# updater compares this against what the manifest advertises, so it has to be the number a user
+# would recognise as "the version of Jaroku I am running".
+version = "0.3.3"
+description = "Jaroku, as a desktop application"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+# Tauri v2's mobile targets require the app to be a library with a `run` entry point; the desktop
+# binary in src/main.rs is a four-line shim over it. Keeping that shape now costs nothing and is
+# the difference between a mobile target being a decision and being a rewrite.
+name = "jaroku_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-window-state = "2"
+# THE SESSION TOKEN'S HOME, and the reason this is `keyring` rather than `tauri-plugin-store`:
+# the store plugin is a JSON file under the app's data directory, which is a plain file that any
+# process running as this user can read. A bearer token that opens every workspace the account
+# belongs to does not belong in one. `keyring` is macOS Keychain, Windows Credential Manager and
+# the Secret Service on Linux — see src/secrets.rs for what happens where there is no such
+# service, which is a real case on a headless Linux box.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The updater is behind a feature because a build of it needs a signing key pair that does not
+# exist in this repository and must never exist in one. See src/updater.rs and docs/tauri.md.
+tauri-plugin-updater = { version = "2", optional = true }
+
+[features]
+default = []
+updater = ["dep:tauri-plugin-updater"]
+
+[profile.release]
+# A desktop bundle ships the binary; the debug symbols in it are megabytes nobody reads.
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
