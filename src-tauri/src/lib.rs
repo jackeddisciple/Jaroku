@@ -10,6 +10,7 @@
 //
 // THE ORDER IN `setup` IS LOAD-BEARING and each step says why where it happens.
 
+mod deeplink;
 mod marker;
 mod paths;
 mod payload;
@@ -26,7 +27,8 @@ use tauri::{Manager, RunEvent};
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![marker::first_launch_state])
+        .plugin(tauri_plugin_deep_link::init())
+        .invoke_handler(tauri::generate_handler![marker::first_launch_state, deeplink::drain_deep_links])
         .setup(|app| {
             // 1 — THE PORT, FIRST, because everything after it is told the answer rather than
             // asked to guess. 4317 unless something already holds it; see ports.rs.
@@ -39,6 +41,12 @@ pub fn run() {
                 )
             })?;
             app.manage(sidecar::Backend::new(port));
+
+            // 1b — THE `jaroku://` SCHEME, before the window rather than after it. A URL that
+            // STARTED this application is delivered during startup, and the queue that catches
+            // one has to exist before anything can hand it over. See deeplink.rs on the three
+            // states an application can be in when a link arrives.
+            deeplink::init(&app.handle());
 
             // 2 — THE WINDOW, BEFORE THE BACKEND, and the ordering is the whole reason step 3
             // is asynchronous. A first launch has a payload to extract, which is a hundred

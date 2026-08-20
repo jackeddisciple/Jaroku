@@ -19,8 +19,13 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "externalBin": ["binaries/jaroku-node"],
-    "resources": ["resources/app", "resources/python"],
+    "externalBin": [
+      "binaries/jaroku-node"
+    ],
+    "resources": [
+      "resources/app",
+      "resources/python"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -31,5 +36,14 @@
     "category": "DeveloperTool",
     "shortDescription": "Build, run and debug LangGraph agents",
     "longDescription": "Jaroku is a workbench for LangGraph agents: describe one and watch it generate, run it and read the trace step by step, branch a run from any checkpoint, compare providers, and deploy what works."
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "jaroku"
+        ]
+      }
+    }
   }
 }

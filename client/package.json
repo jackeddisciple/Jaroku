@@ -19,6 +19,7 @@
     "test:csv": "tsx src/lib/csv.test.ts",
     "test:auth": "tsx src/lib/auth.test.ts",
     "test:host-config": "tsx src/lib/hostConfig.test.ts",
+    "test:deep-link": "tsx src/lib/deepLink.test.ts",
     "test:invite": "tsx src/lib/invite.test.ts",
     "test:reset": "tsx src/store/reset.test.ts",
     "test:thread-store": "tsx src/store/threadStore.test.ts",

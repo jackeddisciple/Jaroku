@@ -497,6 +497,13 @@ jobs:
           # answers, whose symptom reads as "the backend is down" and sends whoever is debugging
           # it to the wrong half of the system.
           npm run test:host-config
+          # `jaroku://`, parsed in the client rather than in the desktop shell — a rule that can
+          # only be exercised by building and launching a desktop app is a rule nobody exercises.
+          # Every URL it sees came from OUTSIDE the application, since any program on the machine
+          # can open one, so the interesting half of the suite is refusals. Two of them exist
+          # because the platform URL parser was checked rather than trusted: it resolves `..`
+          # away for `jaroku://host/path` and does NOT for the slashless form or for `..%2f`.
+          npm run test:deep-link
           # The two ends of an invitation link. The failure it exists for is silent and partial: an
           # unencoded token produces a link that works for most secrets and fails for the ones with
           # a `+` or a `/` in them, with "that invitation is not valid" as the only symptom.
