@@ -116,7 +116,7 @@ pub fn run() {
                     ports::DEFAULT_PORT + 32
                 )
             })?;
-            app.manage(sidecar::Backend::new());
+            app.manage(sidecar::Backend::new(port));
 
             // 1a — THE MENU BAR, which exists on macOS and nowhere else. Before the window,
             // because on macOS the menu belongs to the APPLICATION rather than to a window and
@@ -186,7 +186,7 @@ pub fn run() {
                 // here, so the variables the sidecar starts with are the same ones the Python
                 // warm-up below runs against — two assemblies would be two chances to configure
                 // uv one way for a run and another way for the environment that run needs.
-                let mut env = environment(port);
+                let mut env = environment();
                 env.extend(python::environment());
                 // NAMES, NEVER VALUES, which is the same rule the server's own log sink follows —
                 // this environment carries the paths to three signing keys, and a log somebody
@@ -316,12 +316,17 @@ fn repo_dir() -> PathBuf {
 /// Jaroku never learns it is inside a desktop app. A variable that had to be invented here would
 /// be a change to the server wearing a disguise.
 ///
-/// IN DEVELOPMENT ONLY THE PORT IS SET. The developer's `server/jaroku.db`, `server/.objectkey`
-/// and `runtime/.env` are the ones `npm run dev` uses, and pointing the app at a private copy of
-/// each would mean the two ways of starting the same server disagreed about what data exists.
-fn environment(port: u16) -> HashMap<String, String> {
+/// IN DEVELOPMENT NOTHING BUT THE PORT IS SET. The developer's `server/jaroku.db`,
+/// `server/.objectkey` and `runtime/.env` are the ones `npm run dev` uses, and pointing the app at
+/// a private copy of each would mean the two ways of starting the same server disagreed about what
+/// data exists.
+///
+/// `JAROKU_PORT` IS NOT HERE, AND IT USED TO BE. It is the one variable that is not settled once:
+/// `sidecar.rs` re-resolves it before every start attempt, so it is layered on at spawn time from
+/// the one place that knows the current answer. A copy in this map would be the copy that goes
+/// stale the first time a restart has to move.
+fn environment() -> HashMap<String, String> {
     let mut env = HashMap::new();
-    env.insert("JAROKU_PORT".into(), port.to_string());
     if tauri::is_dev() {
         return env;
     }

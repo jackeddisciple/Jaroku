@@ -21,7 +21,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -29,7 +29,7 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
-use crate::logs;
+use crate::{logs, ports};
 
 /// The sidecar's name in `tauri.conf.json`'s `bundle.externalBin`. Tauri appends the target
 /// triple to it on disk; this is the name without one.
@@ -62,31 +62,38 @@ const HEALTHY_AFTER: Duration = Duration::from_secs(60);
 #[cfg(unix)]
 const DRAIN_GRACE: Duration = Duration::from_secs(3);
 
-/// What the shell holds on to about the running backend, which is two things and deliberately
-/// not three.
+/// What the shell holds on to about the running backend.
 ///
-/// THE PORT IS NOT IN HERE, and an earlier draft had it. Nothing ever read it: the resolved port
-/// reaches the backend as `JAROKU_PORT` in `Launch.env` and reaches the page as the
-/// initialisation script `window.rs` writes, and a third copy on this struct would have been a
-/// field whose only property is that it can disagree with the other two. A value nothing imports
-/// is worse than no value at all.
+/// THE PORT IS IN HERE NOW, AND AN EARLIER DRAFT WAS RIGHT TO ASK WHY. The argument for leaving
+/// it out was that a third copy of one decision is a third thing that can disagree — the backend
+/// reads it from `JAROKU_PORT`, the page reads it from the initialisation script, and a field
+/// here would be a value nothing imports.
+///
+/// What that argument missed is that the port is not a decision taken once. `ports.rs` proves a
+/// port free and then hands it to a process that binds it a moment later, and in that gap it can
+/// be lost — and it WAS lost, routinely, to the backend the previous session left running. The
+/// supervisor re-used the same number on all three restarts, so one lost race was three identical
+/// failures and then a dead app. Re-resolving means the port can change between attempts, which
+/// means there has to be somewhere it lives that both the next attempt and the page can read.
+/// This is that place, it is the ONE authority, and the other two are told rather than asked.
 pub struct Backend {
     child: Mutex<Option<CommandChild>>,
     /// Set before a deliberate stop, and read by the supervisor to tell "we quit it" from "it
     /// died". Without this every clean shutdown would look like a crash and be restarted into
     /// the closing application.
     stopping: AtomicBool,
+    /// The port the backend is on, and therefore the port the page has been told about.
+    port: AtomicU16,
 }
 
 impl Backend {
-    pub fn new() -> Self {
-        Self { child: Mutex::new(None), stopping: AtomicBool::new(false) }
+    pub fn new(port: u16) -> Self {
+        Self { child: Mutex::new(None), stopping: AtomicBool::new(false), port: AtomicU16::new(port) }
     }
-}
 
-impl Default for Backend {
-    fn default() -> Self {
-        Self::new()
+    /// The port in force. Read by `status.rs` when it tells the page where to connect.
+    pub fn port(&self) -> u16 {
+        self.port.load(Ordering::SeqCst)
     }
 }
 
@@ -103,6 +110,10 @@ pub struct Launch {
     pub app_dir: PathBuf,
     /// Variables layered over the inherited environment. Every one is documented in the README's
     /// configuration table; none is invented here.
+    ///
+    /// `JAROKU_PORT` IS DELIBERATELY NOT ONE OF THEM. It is added per attempt from `Backend`, for
+    /// the reason that struct gives: a port baked in here is a port every restart re-uses, which
+    /// is what turned one lost race into three identical failures.
     pub env: HashMap<String, String>,
 }
 
@@ -145,6 +156,15 @@ async fn supervise(app: AppHandle, launch: Launch) {
 
     loop {
         let started = Instant::now();
+        // THE PORT, RE-RESOLVED BEFORE EVERY ATTEMPT INCLUDING THE FIRST. `ports.rs` says the
+        // window between proving a port free and a child binding it cannot be closed portably,
+        // and that what makes losing that race survivable is one restart rather than a dead app.
+        // This is where that stopped being a claim. `first_free` prefers the port already in
+        // force, so the ordinary restart keeps the number the page was told and nothing else has
+        // to happen; only a port that has genuinely been taken moves, and that move is announced.
+        if !resolve_port(&app) {
+            logs::say("there is no port for the backend to listen on");
+        }
         match spawn_once(&app, &launch) {
             Err(err) => {
                 // A spawn that never produced a process. Counted the same as a crash: the causes
@@ -218,16 +238,42 @@ async fn supervise(app: AppHandle, launch: Launch) {
     }
 }
 
+/// Settle which port this attempt gets, and answer whether there is one at all.
+///
+/// PREFERRING THE PORT ALREADY IN FORCE is what makes this cheap and invisible on the ordinary
+/// restart: a backend that crashed on a bug releases its port on the way out, so the probe finds
+/// it free and nothing moves. The page's socket URL, the log lines somebody is reading and the
+/// number in the README all stay the one they were.
+fn resolve_port(app: &AppHandle) -> bool {
+    let state = app.state::<Backend>();
+    let current = state.port();
+    let Some(resolved) = ports::first_free(current) else { return false };
+    if resolved != current {
+        // SAID OUT LOUD, because a moved port is the difference between "the backend is down" and
+        // "the backend is one port up", and those look identical from a window that cannot
+        // connect. `status.rs` carries the same fact to the page.
+        logs::say(format!("the backend moves from port {current} to {resolved}"));
+        state.port.store(resolved, Ordering::SeqCst);
+    }
+    true
+}
+
 fn spawn_once(
     app: &AppHandle,
     launch: &Launch,
 ) -> Result<tauri::async_runtime::Receiver<CommandEvent>, String> {
+    // THE ONE VARIABLE THAT IS NOT IN `Launch.env`. Everything else about a launch is fixed for
+    // the life of the application; the port is settled per attempt, so it is layered on here
+    // rather than baked in there.
+    let mut env = launch.env.clone();
+    env.insert("JAROKU_PORT".into(), app.state::<Backend>().port().to_string());
+
     let command = app
         .shell()
         .sidecar(SIDECAR)
         .map_err(|e| e.to_string())?
         .current_dir(&launch.app_dir)
-        .envs(launch.env.clone())
+        .envs(env)
         .args([
             // tsx by path rather than by name. `npm run dev` reaches it through node_modules/.bin,
             // which is a shell shim this process has no shell to run — and on Windows that shim is
