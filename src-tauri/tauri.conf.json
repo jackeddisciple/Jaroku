@@ -18,7 +18,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "app",
+      "dmg"
+    ],
     "externalBin": [
       "binaries/jaroku-node"
     ],
@@ -35,7 +38,27 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Build, run and debug LangGraph agents",
-    "longDescription": "Jaroku is a workbench for LangGraph agents: describe one and watch it generate, run it and read the trace step by step, branch a run from any checkpoint, compare providers, and deploy what works."
+    "longDescription": "Jaroku is a workbench for LangGraph agents: describe one and watch it generate, run it and read the trace step by step, branch a run from any checkpoint, compare providers, and deploy what works.",
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "entitlements": "entitlements.plist",
+      "signingIdentity": null,
+      "providerShortName": null,
+      "dmg": {
+        "appPosition": {
+          "x": 180,
+          "y": 220
+        },
+        "applicationFolderPosition": {
+          "x": 480,
+          "y": 220
+        },
+        "windowSize": {
+          "width": 660,
+          "height": 420
+        }
+      }
+    }
   },
   "plugins": {
     "deep-link": {

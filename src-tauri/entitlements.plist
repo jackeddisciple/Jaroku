@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The entitlements a NOTARISED build needs, and every one of them is here because of something
+  this application actually carries rather than as a precaution.
+
+  Notarisation requires the hardened runtime, and the hardened runtime's defaults are written for
+  an application that is one signed binary. Jaroku's bundle is not: it ships a Node runtime as a
+  Tauri sidecar and, under `~/.jaroku`, a standalone CPython that uv extracts and a tree of wheels
+  containing compiled extension modules — pydantic-core, orjson, tiktoken, zstandard. Each
+  entitlement below is what one of those needs.
+
+  WITHOUT allow-jit AND allow-unsigned-executable-memory, V8 cannot allocate the pages it compiles
+  JavaScript into and the Node sidecar dies at startup. That is not a Jaroku decision; it is what
+  a JavaScript engine is.
+
+  WITHOUT disable-library-validation, the Python interpreter cannot load an extension module
+  signed by a different team — which is every wheel on PyPI, because they are signed by nobody.
+  This is the entitlement to be uncomfortable about, and it is unavoidable for any application
+  that runs a Python it did not compile. It is scoped by the fact that the interpreter only ever
+  loads what `runtime/uv.lock` pins.
+
+  WITHOUT allow-dyld-environment-variables, uv cannot set the interpreter's own library paths when
+  it builds the environment.
+
+  There is deliberately NO App Sandbox entitlement here. Jaroku runs code the user asked it to
+  generate, writes to a directory of its own choosing and spawns processes; a sandboxed build
+  would need a temporary exception for each of those, which is a longer list making a weaker
+  claim. This is a developer tool distributed outside the Mac App Store, and the honest posture is
+  hardened-and-notarised rather than sandboxed-with-holes.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+</dict>
+</plist>
