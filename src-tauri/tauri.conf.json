@@ -21,7 +21,9 @@
     "targets": [
       "app",
       "dmg",
-      "nsis"
+      "nsis",
+      "deb",
+      "appimage"
     ],
     "externalBin": [
       "binaries/jaroku-node"
@@ -74,6 +76,18 @@
           "English"
         ],
         "displayLanguageSelector": false
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libayatana-appindicator3-1"
+        ]
+      },
+      "appimage": {
+        "bundleMediaFramework": false
       }
     }
   },
