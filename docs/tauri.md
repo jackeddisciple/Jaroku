@@ -284,21 +284,61 @@ and says so; the window stays open and reports itself disconnected, which is the
 
 ---
 
+## What has been run, and what has not
+
+**The distinction this section is for**: `tauri dev` short-circuits three of the shell's biggest
+code paths, because in development the working tree *is* the payload. So "the app runs" and "the
+bundle works" are different claims, and only the first has been earned.
+
+### Verified by running it (Windows, rustc 1.97.1)
+
+- `cargo check` and a full `cargo build` — **no errors, no warnings**. `Cargo.lock` is committed.
+- The window opens, titled `Jaroku`.
+- The Node sidecar spawns and the relay answers: `[relay] http+ws listening on http://localhost:4317`,
+  `/healthz` → `{"ok":true}`.
+- Development runs the **working tree**: the boot line names `server\jaroku.db` and
+  `runtime\.objects`, not a copy.
+- `jaroku://` registers at runtime, and a URL fired from the operating system arrives:
+  `Start-Process "jaroku://test"` → `[jaroku] received jaroku://test/`. Windows appends the
+  trailing slash; the parser reads it as `action=test, path=[]`.
+- **Single instance**: one `jaroku.exe` before a second launch, one after.
+- `marker::mark` wrote `%APPDATA%\jarokupp-initialized` — `{"at":"…Z","version":"0.3.3"}` — after
+  creating `runtime/.checkpoints` and proving it writable. That also exercises `paths::jaroku_home()`
+  on Windows and the hand-written UTC arithmetic in `marker.rs`.
+- The tray was created; a failure would have logged and left the close button quitting.
+
+### Not run yet
+
+**No bundle has been produced.** `npm run tauri:build` has not been executed, and dev mode returns
+early from `payload::ensure`, `python::ensure` and `python::warm` — so **extraction is the largest
+unexercised path in this wrapper**. The staging scripts themselves *are* verified: the staged
+payload was booted as a subprocess and driven through a real socket, and the staged Python built a
+virtualenv with the network off and ran the fixture agent emitting `schema_version: 1`. What has
+not happened is Tauri putting those two directories inside a bundle and the shell copying them out
+again.
+
+**Only Windows.** macOS and Linux have not been built or launched. That means the macOS menu bar,
+the entitlements, the `.dmg`, the `.deb`, the AppImage, and SIGTERM shutdown are all unexercised —
+and SIGTERM is the one that only *exists* off Windows.
+
+**The credential store round trip.** `secrets.rs` compiles and its allowlist is unit-tested, but
+nothing has signed in through the packaged app, so no token has actually been written to Windows
+Credential Manager. The client half is covered by `test:session-vault`, which proves the token
+never reaches `localStorage` when a host is present.
+
+**The packaged origin allowlist.** Development used the *development* default, because the webview
+loads from Vite's `http://localhost:5173`. The `tauri://localhost` path is asserted against the
+server's own `resolveOriginPolicy` in `test:desktop-contract` but has not been exercised by a real
+socket.
+
+**`cargo test` needs the app stopped.** The build script copies the sidecar into `target/debug/`,
+and Windows locks a running executable's file — so `cargo test` fails with `PermissionDenied`
+while `tauri dev` is up. Stop the app first.
+
+**The updater** has never been built or pointed at an endpoint, by design: it needs a signing key
+pair that must not exist in this repository.
+
 ## Known limitations
-
-**The Rust has never been compiled.** This is the honest headline and it is first for that reason.
-There is no Rust toolchain on the machine this wrapper was written on, so `cargo check`,
-`tauri dev` and `tauri build` have not run against it. Everything reachable from TypeScript and
-from a shell *was* exercised — the staged payload was booted and driven through a real socket, the
-bundled Python built a virtualenv with the network off and ran the fixture agent emitting
-`schema_version: 1`, and two suites in CI hold the seams — but the shell's own supervision,
-restart backoff, extraction, tray, menu and deep-link delivery are asserted by reading and by
-structure, not by running. Treat the first `cargo check` as part of this work rather than after it.
-
-**Consequently, three deliverables are configured and unverified**: that double-launching focuses
-the existing window, that the OS credential store round-trips a token, and that a `jaroku://test`
-URL reaches the page. The parsing half of the last one is verified (`test:deep-link`); the
-delivery half is not.
 
 **Shutdown is graceful on Unix and not on Windows.** `sidecar.rs` sends SIGTERM, which
 `server/src/index.ts` handles by draining its trace-ingest chain before exiting. Windows has no
@@ -319,10 +359,6 @@ specification, and this work provides only the marker they will read.
 pin both with `JAROKU_NODE_BINARY` and `JAROKU_UV_BINARY`; the versions actually used are written
 into `payload.json` and `python.json` so an installed app can be asked rather than guessed at. On
 Linux the copied Node is linked against the build machine's glibc, which becomes the app's floor.
-
-**`Cargo.lock` is not committed**, because it cannot be generated without cargo. Generate and
-commit it on the first machine that has a toolchain; a Rust application without one has no
-reproducible build.
 
 **`payload.rs` looks for the staged tree in two places.** `bundle.resources` accepts both an array
 and a source-to-destination map, and the two put the tree in different places relative to the

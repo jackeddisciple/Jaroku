@@ -217,7 +217,9 @@ starts the same two processes inside a desktop shell — the same `server/src/in
 working tree, the same Vite bundle, the same localhost WebSocket between them. It is a host rather
 than a port: nothing under `server/` or `client/` imports from it, and the two commands above stay
 the development path. See [docs/tauri.md](docs/tauri.md) for the architecture, the per-platform
-builds, where code-signing certificates go, and what has and has not been verified.
+builds, where code-signing certificates go, and a section separating what has been run from what
+has not — `tauri dev` and `tauri build` exercise different halves of the shell, and only the first
+has been earned so far.
 
 ---
 
