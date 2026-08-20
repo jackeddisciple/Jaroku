@@ -504,6 +504,14 @@ jobs:
           # because the platform URL parser was checked rather than trusted: it resolves `..`
           # away for `jaroku://host/path` and does NOT for the slashless form or for `..%2f`.
           npm run test:deep-link
+          # WHERE THE SESSION TOKEN GOES, and the assertion the suite exists for is where it does
+          # NOT. Under a host with an OS credential store the token must never touch
+          # localStorage, and a mirror is the easy implementation that leaves the protection
+          # notional while making it look real — the keychain fills up correctly and the token is
+          # still in a file any program running as this user can open. So the suite installs a
+          # localStorage that records every write and asserts it stays empty for the whole host
+          # section, while checking the round trips to the store really happened.
+          npm run test:session-vault
           # The two ends of an invitation link. The failure it exists for is silent and partial: an
           # unencoded token produces a link that works for most secrets and fails for the ones with
           # a `+` or a `/` in them, with "that invitation is not valid" as the only symptom.

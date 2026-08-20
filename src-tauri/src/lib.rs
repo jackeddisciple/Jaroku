@@ -16,6 +16,7 @@ mod paths;
 mod payload;
 mod ports;
 mod python;
+mod secrets;
 mod sidecar;
 mod window;
 
@@ -44,7 +45,13 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![marker::first_launch_state, deeplink::drain_deep_links])
+        .invoke_handler(tauri::generate_handler![
+            marker::first_launch_state,
+            deeplink::drain_deep_links,
+            secrets::secret_get,
+            secrets::secret_set,
+            secrets::secret_delete,
+        ])
         .setup(|app| {
             // 1 — THE PORT, FIRST, because everything after it is told the answer rather than
             // asked to guess. 4317 unless something already holds it; see ports.rs.

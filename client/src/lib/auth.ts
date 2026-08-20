@@ -18,10 +18,18 @@
 // from memory or mint a fresh one through the same API. The mitigation that matters is the
 // Content-Security-Policy in Session 8, not the storage choice.
 //
+// THAT ARGUMENT IS ABOUT A BROWSER, and it stops holding in a desktop application, where local
+// storage is a file on a disk any program running as this user can open. So the four accessors
+// below go through `sessionVault.ts`, which is `localStorage` in a browser — byte for byte what
+// this file did before — and the operating system's own credential store under a host that has
+// one. The KEYS stay here, because this module is what they belong to and because `test:reset`
+// audits every `jaroku.*` key in the client source and should keep finding them where they are.
+//
 // Nothing here is provider-specific. Swapping in Clerk's SDK means changing `acquireToken`,
 // and the two functions below it do not know the difference.
 
 import { hostWsUrl } from "./hostConfig.ts";
+import { hydrate as hydrateVault, read as readVault, write as writeVault } from "./sessionVault.ts";
 
 /**
  * Read a Vite build-time variable, safely.
@@ -115,41 +123,33 @@ export class AuthFailure extends Error {
   }
 }
 
+/**
+ * Load the session out of whatever is storing it, before anything reads it.
+ *
+ * A NO-OP IN A BROWSER, where `localStorage` is already synchronous and there is nothing to
+ * load. It exists for the host case: a credential store is asynchronous, the four accessors
+ * below are not and cannot become so, and the gap is closed by filling a cache once before the
+ * first render. `main.tsx` awaits this; nothing else needs to know it happened.
+ */
+export function hydrateSession(): Promise<void> {
+  return hydrateVault([TOKEN_KEY, WORKSPACE_KEY]);
+}
+
 export function storedToken(): string | null {
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    // Private browsing, or storage disabled. Not fatal: the session lives in memory for as
-    // long as the tab does, and a reload asks again.
-    return null;
-  }
+  return readVault(TOKEN_KEY);
 }
 
 export function storeToken(token: string | null): void {
-  try {
-    if (token === null) localStorage.removeItem(TOKEN_KEY);
-    else localStorage.setItem(TOKEN_KEY, token);
-  } catch {
-    /* see storedToken */
-  }
+  writeVault(TOKEN_KEY, token);
 }
 
 /** The workspace this browser was last in, so a reload lands where it left off. */
 export function storedWorkspace(): string | null {
-  try {
-    return localStorage.getItem(WORKSPACE_KEY);
-  } catch {
-    return null;
-  }
+  return readVault(WORKSPACE_KEY);
 }
 
 export function storeWorkspace(id: string | null): void {
-  try {
-    if (id === null) localStorage.removeItem(WORKSPACE_KEY);
-    else localStorage.setItem(WORKSPACE_KEY, id);
-  } catch {
-    /* see storedToken */
-  }
+  writeVault(WORKSPACE_KEY, id);
 }
 
 async function post<T>(path: string, body: unknown, token?: string | null): Promise<T> {
