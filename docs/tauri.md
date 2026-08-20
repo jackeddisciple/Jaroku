@@ -457,6 +457,28 @@ This is the half `tauri dev` cannot reach, and all of it ran:
   — persisted at `schema_version: 1`, through a Python the user never installed.
 - **Tenancy held in the fresh install.** A new account's personal workspace was empty; the agent
   was visible only in the workspace that owns it.
+- **Signing in through the window**, typed into the form rather than posted by a script, and then
+  a prompt sent through the composer.
+
+### Three bugs a packaged build found that no suite could
+
+None of these is in the wrapper. All three are cases the desktop app reaches and a browser never
+does, which is the argument for shipping one at all.
+
+1. **The startup run has emitted nothing since v0.2.17.** `jaroku_runner` honours
+   `JAROKU_RUN_ID`; the hand-written fixture minted its own, so the control plane's run-id
+   reconciliation dropped every event of the boot run. Reproduces under `npm run dev` too.
+2. **The first prompt in a new workspace was invisible.** A conversation is keyed by thread and
+   the first prompt names no session, so the server minted one; the store filed the turns under
+   it and the screen went on reading `pending`. A plan card and a refusal were equally invisible.
+   A fresh install makes it certain, because there is no key, so the plan always fails.
+3. **The sign-in screen treated "not listening yet" as "no local issuer"** and rendered a branch
+   with no form on it. Only reachable because the shell opens the window before the backend.
+
+The first two are Jaroku's and are fixed here; the third is the wrapper's and is fixed in
+`localIssuerAvailable`. What they share is that every suite was green throughout — the failures
+lived in the wiring between a shell, a browser engine and a server, which is precisely where no
+unit test looks.
 
 ### Not run yet
 
