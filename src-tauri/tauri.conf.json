@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm --prefix client run dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm --prefix client run build",
+    "beforeBuildCommand": "npm --prefix client run build && npm run tauri:payload",
     "frontendDist": "../client/dist"
   },
   "app": {
