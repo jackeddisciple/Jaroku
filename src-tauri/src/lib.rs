@@ -101,20 +101,20 @@ pub fn run() {
                     ports::DEFAULT_PORT + 32
                 )
             })?;
-            app.manage(sidecar::Backend::new(port));
+            app.manage(sidecar::Backend::new());
 
             // 1a — THE MENU BAR, which exists on macOS and nowhere else. Before the window,
             // because on macOS the menu belongs to the APPLICATION rather than to a window and
             // is what a user sees at the top of the screen for the moment before one appears.
             // See menu.rs on why the Edit menu is load-bearing rather than conventional.
             #[cfg(target_os = "macos")]
-            menu::install(&app.handle())?;
+            menu::install(app.handle())?;
 
             // 1b — THE `jaroku://` SCHEME, before the window rather than after it. A URL that
             // STARTED this application is delivered during startup, and the queue that catches
             // one has to exist before anything can hand it over. See deeplink.rs on the three
             // states an application can be in when a link arrives.
-            deeplink::init(&app.handle());
+            deeplink::init(app.handle());
 
             // 2 — THE WINDOW, BEFORE THE BACKEND, and the ordering is the whole reason step 3
             // is asynchronous. A first launch has a payload to extract, which is a hundred
@@ -128,13 +128,13 @@ pub fn run() {
             // runs, and an initialisation script can only be attached at creation. That script is
             // how the resolved port reaches the bundle BEFORE its first module evaluates — see
             // window.rs, and client/src/lib/hostConfig.ts for the side that reads it.
-            window::open(&app.handle(), port)?;
+            window::open(app.handle(), port)?;
 
             // 2a — THE TRAY, immediately after the window it controls. Whether the close button
             // hides or quits is decided by whether this succeeded: a window hidden with nothing
             // to bring it back is worse than a run cancelled by a quit. See tray.rs.
-            if tray::install(&app.handle()).unwrap_or(false) {
-                tray::hide_on_close(&app.handle());
+            if tray::install(app.handle()).unwrap_or(false) {
+                tray::hide_on_close(app.handle());
             }
 
             // 3 — EXTRACT, THEN START. Not on the main thread: `payload::ensure` is file I/O

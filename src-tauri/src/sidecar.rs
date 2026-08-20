@@ -21,7 +21,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -54,28 +54,31 @@ const HEALTHY_AFTER: Duration = Duration::from_secs(60);
 /// visibly ran. Three seconds is that two plus room for the exit itself.
 const DRAIN_GRACE: Duration = Duration::from_secs(3);
 
+/// What the shell holds on to about the running backend, which is two things and deliberately
+/// not three.
+///
+/// THE PORT IS NOT IN HERE, and an earlier draft had it. Nothing ever read it: the resolved port
+/// reaches the backend as `JAROKU_PORT` in `Launch.env` and reaches the page as the
+/// initialisation script `window.rs` writes, and a third copy on this struct would have been a
+/// field whose only property is that it can disagree with the other two. A value nothing imports
+/// is worse than no value at all.
 pub struct Backend {
     child: Mutex<Option<CommandChild>>,
     /// Set before a deliberate stop, and read by the supervisor to tell "we quit it" from "it
     /// died". Without this every clean shutdown would look like a crash and be restarted into
     /// the closing application.
     stopping: AtomicBool,
-    port: AtomicU16,
 }
 
 impl Backend {
-    pub fn new(port: u16) -> Self {
-        Self { child: Mutex::new(None), stopping: AtomicBool::new(false), port: AtomicU16::new(port) }
+    pub fn new() -> Self {
+        Self { child: Mutex::new(None), stopping: AtomicBool::new(false) }
     }
+}
 
-    /// The port the backend was told to listen on. Read by the webview's runtime configuration
-    /// and by anything that needs to talk to it, so there is one answer rather than two defaults.
-    pub fn port(&self) -> u16 {
-        self.port.load(Ordering::SeqCst)
-    }
-
-    pub fn set_port(&self, port: u16) {
-        self.port.store(port, Ordering::SeqCst);
+impl Default for Backend {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -155,7 +158,10 @@ async fn supervise(app: AppHandle, launch: Launch) {
                         CommandEvent::Stderr(line) => eprint!("{}", String::from_utf8_lossy(&line)),
                         CommandEvent::Error(err) => eprintln!("[jaroku] backend error: {err}"),
                         CommandEvent::Terminated(status) => {
-                            app.state::<Backend>().child.lock().ok().and_then(|mut c| c.take());
+                            // `let _ =` because the taken child is deliberately dropped here: the
+                            // process is already gone, and what this line is for is emptying the
+                            // slot so `stop` does not later try to signal a pid nobody owns.
+                            let _ = app.state::<Backend>().child.lock().ok().and_then(|mut c| c.take());
                             eprintln!(
                                 "[jaroku] the backend exited (code {:?}, signal {:?})",
                                 status.code, status.signal

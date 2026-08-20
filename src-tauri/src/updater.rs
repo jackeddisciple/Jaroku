@@ -83,7 +83,11 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
     // skipped — and an update that lost the end of a run somebody watched would be a strange
     // thing to have gone to this much trouble over.
     crate::sidecar::stop(&app);
-    app.restart();
+    // NO SEMICOLON. `restart` returns `!` — it replaces this process and does not come back — and
+    // as a statement it would leave the function falling off the end without the `Result` it
+    // promises. As the tail expression the never type coerces to it, which is both what compiles
+    // and what is true.
+    app.restart()
 }
 
 /// Check once, shortly after launch.
