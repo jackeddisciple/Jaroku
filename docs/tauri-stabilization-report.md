@@ -6,17 +6,25 @@ enumerated. This is what was actually wrong, what caused each freeze, what chang
 still owed.
 
 **The headline.** There was one freeze with five contributing causes, and they compose into
-exactly the "sometimes it works" shape the report described. The chain is:
+exactly the "sometimes it works" shape the brief described. The chain is:
 
 1. **Quitting Jaroku on Windows did not stop the backend.** The process the shell holds is tsx's
    launcher; the server is the child it spawns, and killing a process does not kill its children.
-2. **So the next launch often found port 4317 held** by the previous session's server, which was
+2. **So a later launch could find port 4317 held** by the previous session's server, which was
    still listening and still holding the database.
 3. **The port probe could not see it.** It bound `127.0.0.1`; Node binds the wildcard, and Windows
    lets both succeed. The port was reported free when it was not.
-4. **The backend was then handed a port it could not bind**, threw `EADDRINUSE` from a `listen`
-   with no error handler, and exited — three times, because the supervisor re-used the same port
-   on every restart.
+4. **The backend was then handed a port it could not bind**, and died on it — three times, because
+   the supervisor re-used the same port on every restart. Reproduced directly by starting the
+   server with `JAROKU_PORT=4317` against a held port:
+
+   ```
+   [uncaughtException] Error: listen EADDRINUSE: address already in use :::4317
+       at new WsRelay (server/src/wsRelay.ts:2810:15)
+   ```
+
+   `listen` has no error handler, so the conflict is fatal rather than a message, and the process
+   exits 1. Note `:::4317` — the IPv6 wildcard, which is the bind the probe in (3) could not see.
 5. **None of that was visible.** Every diagnostic went to a standard stream a packaged Windows app
    does not have, and the window rendered `disconnected — retrying` because "the socket did not
    open" is the only thing the page could observe.
@@ -547,6 +555,34 @@ fixed here. What the two runs did about it differed completely:
 That is the clearest single answer to "is the desktop app as reliable as the web version": on the
 one unplanned crash that happened during the parity pass, it recovered and the browser did not.
 
+### An agent, made end to end in the packaged app
+
+Not a fixture and not a replay. Driven over the same socket the window uses, from the same
+`tauri://localhost` origin, against the backend the window is connected to — and into the
+workspace an already-open window was watching, so the window rendered every step of it live with
+nothing reloaded.
+
+| Step | Result |
+|---|---|
+| Brief → plan | 2.8s, a real Claude call, one tool: `get_weather` |
+| Plan → generate | 21.6s, 7 files — `agent.py`, `tools/weather.py`, `prompts/system.md`, `.env.example`, `README.md` and two `__init__.py` |
+| Cost | $0.01231 for plan + generation |
+| Graph, introspected from the compiled object | 5 nodes, 5 edges — `__start__ → agent → tools → update_weather → __end__`, through the bundled CPython |
+| Run, on `anthropic/claude-haiku-4-5` | completed, 8 steps, 1,657 tokens, $0.00242, 7.5s |
+| The steps | `state_update`, `llm_call ChatAnthropic`, `router should_continue`, `state_update tools`, **`tool_call get_weather`**, `state_update`, `llm_call ChatAnthropic`, `router` — all four step types, persisted at `schema_version: 1` |
+| The window | Agents list, RUNS ×2, the whole trace, and the header reading `anthropic/claude-haiku-4-5 · completed · Step 8 · 1,657 tok · $0.00242 · 7.5s` |
+
+Every other tab answered on the same session: Code (9 files), Agents detail, Evals, Datasets,
+MCP, Inbox, Threads, Activity. Deploy answered `railwayConfigured: false`, which is this
+machine's missing Railway token rather than a fault — the deploy path is reachable and refuses
+for the honest reason.
+
+**The one thing a fresh packaged install cannot do is generate**, and that is by design rather
+than a defect: `runtime/.env` is gitignored, so the payload carries no provider key and the app
+says `ANTHROPIC_API_KEY is not set (expected in runtime/.env)`. Setting one — through the app's
+own Secrets surface or by writing that file, which is what the dotenv secret store *is* — is the
+first thing a new install needs.
+
 ### The desktop-specific failure paths, which have no web counterpart
 
 | Scenario | Before | After |
@@ -560,6 +596,37 @@ The failure panel was photographed rather than reasoned about. It renders the sh
 sentence, the log's path, **Start it again** and **Copy log path** — and it arrived as a *live*
 event on a page that had mounted while the backend was still healthy, which is what proves the
 event path rather than only the snapshot one.
+
+---
+
+## The suites
+
+Every suite in both packages was run, not a selection.
+
+**Client — 31 of 31 pass.** Two are new: `test:host-backend` (what a host may tell the page about
+its backend, and the snapshot-versus-event ordering the failed launches depend on) and the
+cross-module section added to `test:host-config` (a host that moves the port has to move the
+socket **and** every HTTP surface — the regression test for the `http.ts` bug).
+
+**Server — 166 of 175 pass, and none of the nine is this pass's.**
+
+- **Two are skips**, not failures: `test:shape-parity` and `test:rls` both need Postgres, which
+  this machine does not have. The same gap the v0.3.3 release notes record.
+- **Two are a Windows exit race**, not a failure: `test:jwt` and `test:deploy-store` both print
+  `ALL CORRECT` and then hit `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)` from libuv
+  during teardown. Both pass; only the exit is untidy.
+- **Five genuinely fail**, and all five fail identically at the pre-pass commit `14336ad`. Checked
+  rather than argued: a worktree at that commit, the same dependencies, the same five suites, the
+  same five failures — `test:controlplane-http-python`, `test:env-writer`,
+  `test:activity-health`, `test:activity-feed`, `test:activity-team`. The only `server/src` files
+  this pass touched are the two desktop suites, and nothing in the activity, env-writer or
+  control-plane modules imports either. They are pre-existing and are not fixed here.
+
+**Rust — 16 of 16 pass**, including the new `ports.rs` regression test that binds a port the way
+the backend binds one and asserts the probe sees it. That suite fails against the old
+implementation, which is the whole point of it.
+
+**CI** gained `test:desktop-supervisor` and `test:host-backend`.
 
 ---
 
