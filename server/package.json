@@ -41,6 +41,8 @@
     "test:agent-files": "tsx src/agentFiles.test.ts",
     "test:tenancy": "tsx src/tenancy.test.ts",
     "test:acceptance": "tsx src/acceptance.test.ts",
+    "test:desktop-contract": "tsx src/desktopContract.test.ts",
+    "test:desktop-smoke": "tsx src/desktopSmoke.test.ts",
     "test:relay": "tsx src/wsRelay.test.ts",
     "test:channels": "tsx src/channels.test.ts",
     "test:http": "tsx src/http/router.test.ts",

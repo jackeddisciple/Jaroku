@@ -390,6 +390,34 @@ jobs:
           # narrowing kept, because a redacted MODEL NAME on this tab deletes the answer.
           npm run test:activity-payload
 
+      # THE DESKTOP WRAPPER, in a step of its own from its first two suites — the same reason the
+      # four destination steps above are separate rather than appended to whichever step had room.
+      # A reader looking for "what covers the desktop app" finds it here.
+      #
+      # NEITHER SUITE NEEDS RUST, AND THAT IS THE POINT OF BOTH. The wrapper is Rust, its
+      # configuration is JSON, and the half that runs in a page is TypeScript — so every
+      # interesting failure is at a seam between two of those, where nothing typechecks anything.
+      # An event name spelled one way in deeplink.rs and another in deepLink.ts compiles, passes
+      # every existing check, and produces a feature that silently does nothing.
+      - name: the desktop wrapper
+        working-directory: server
+        run: |
+          # The seams, read as text across three languages: the scheme, the event name, the
+          # sidecar's name and argument vector, the port default, the credential keys, the window
+          # label. Its load-bearing assertion is the last one — every environment variable the
+          # shell sets is grepped for in the server's own source, because the rule this work was
+          # done under is that the wrapper adapts to Jaroku, and a variable invented in the shell
+          # would be a change to the server wearing a disguise.
+          npm run test:desktop-contract
+          # And the live half: index.ts spawned as a SUBPROCESS with the shell's own argument
+          # vector and environment, then driven through the three-request exchange and a real
+          # socket. It found the gap it exists for while it was being written — a packaged
+          # webview's origin is tauri://localhost and the development allowlist has never heard
+          # of it, which nothing typechecks and whose symptom is a window that opens and never
+          # connects. The refusal beside it is what stops the assertion passing on a server that
+          # admits everybody.
+          npm run test:desktop-smoke
+
       - name: cost, abuse and the data lifecycle
         working-directory: server
         run: |
