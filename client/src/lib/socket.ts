@@ -123,6 +123,27 @@ function dispatch(msg: ServerMessage): void {
       // Every one of these is handed the whole message, so the session on the envelope reaches the
       // store that files the turn. A tab that did not send the command learns which thread the work
       // belongs to from here and nowhere else.
+      //
+      // AND IT HAS TO BE *SELECTED*, NOT MERELY FILED, WHICH IS WHAT THIS BLOCK IS FOR.
+      //
+      // A conversation is keyed by thread — `threadFor` reads `threads[activeThreadId]`, and with
+      // no active thread it reads `pending`. Sending a plan without naming a session is legal and
+      // is what the FIRST prompt of a new workspace does: there is no thread yet, so the server
+      // makes one and names it on the envelope. The store then files the turns under that id
+      // correctly, and the screen goes on reading `pending` — so the plan card, and any refusal
+      // in its place, is written into a conversation nothing is displaying.
+      //
+      // What that looked like: type the first thing you ever type into Jaroku, press send, and
+      // the text disappears and NOTHING happens. No card, no error, no spinner. It reproduces
+      // every time on a fresh install, because a fresh install has no provider key, so the plan
+      // fails and the failure is filed exactly as invisibly as a success would have been.
+      //
+      // Only when this tab has no thread open: adopting one while somebody is looking at another
+      // conversation would yank them out of it, and a broadcast from a teammate's work would move
+      // their view. The narrow case is the one that is broken.
+      if (msg.threadId && !useThreadStore.getState().activeThreadId) {
+        useThreadStore.getState().selectThread(msg.threadId);
+      }
       switch (msg.type) {
         case "started": b.startGeneration(msg.prompt); c.genStarted(msg); break;
         case "file_start": b.fileStart(msg.path); break;
