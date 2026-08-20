@@ -2314,6 +2314,10 @@ npm run test:thread-binding   # ownership from the items, liveness from the owne
 npm run test:agent-lifecycle  # archive leaves the pickers and nothing else; a rename survives the sync
 npm run test:thread-title     # the cut: one line, at a word boundary, saying it was cut
 npm run test:thread-archive   # the ABSENCE: 208 source files audited for a path that deletes one
+
+# the desktop wrapper — see docs/tauri.md
+npm run test:desktop-contract # the seams between Rust, JSON and TypeScript, read as text
+npm run test:desktop-smoke    # index.ts spawned the way the shell spawns it, driven over a real socket
 ```
 
 ```bash
@@ -2338,6 +2342,9 @@ npm run test:thread-groups   # §4.2's two sorting rules, and the input it must 
 npm run test:thread-filter   # the five chips and the text match, over one list
 npm run test:thread-resume   # which turn §4.5 opens at, and the hint the row shows for it
 npm run test:thread-archive  # what §3.4's notice names, and the archive that gets none
+npm run test:host-config     # what a HOST may tell this bundle, and the four shapes it may not
+npm run test:deep-link       # jaroku:// as untrusted input; the refusals are the interesting half
+npm run test:session-vault   # localStorage in a browser, the keychain under a host, never both
 ```
 
 The client's test scripts invoke `../server/node_modules/.bin/tsx`, so install the server's
