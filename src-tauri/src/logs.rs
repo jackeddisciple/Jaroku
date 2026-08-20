@@ -156,15 +156,6 @@ fn write_line(tag: &str, line: &str) {
     let _ = file.flush();
 }
 
-/// Where the log is, for a surface that offers to show it. `None` on a machine with no home.
-///
-/// A command rather than a value injected into the page, for the reason `first_launch_state` is
-/// one: the answer depends on the machine rather than on the build, and a page told at load time
-/// would be a page holding a path nothing ever checked.
-#[tauri::command]
-pub fn log_path() -> Option<String> {
-    path().map(|p| p.to_string_lossy().into_owned())
-}
 
 #[cfg(test)]
 mod tests {

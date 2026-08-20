@@ -80,7 +80,6 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             marker::first_launch_state,
-            logs::log_path,
             status::backend_status,
             deeplink::drain_deep_links,
             secrets::secret_get,
@@ -94,7 +93,7 @@ pub fn run() {
     // `--config src-tauri/tauri.updater.conf.json` is what turns it on; see updater.rs.
     //
     // It REPLACES the handler above rather than adding to it, because a builder takes one. That
-    // is why `with_updater` restates the seven names.
+    // is why `with_updater` restates the six names.
     with_updater(builder)
         .setup(|app| {
             // 0 — THE LOG, BEFORE ANYTHING THAT COULD HAVE SOMETHING TO SAY.
@@ -285,13 +284,12 @@ pub fn run() {
 /// configuration nobody builds by default, which is the worst place to put one — so the whole
 /// registration moves here, where each branch is an ordinary expression.
 ///
-/// The command list is spelled twice as a result. That is the cost, it is seven names, and the
+/// The command list is spelled twice as a result. That is the cost, it is six names, and the
 /// duplication is visible in one function rather than hidden in a macro.
 #[cfg(feature = "updater")]
 fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder.plugin(tauri_plugin_updater::Builder::new().build()).invoke_handler(tauri::generate_handler![
         marker::first_launch_state,
-        logs::log_path,
         status::backend_status,
         deeplink::drain_deep_links,
         secrets::secret_get,
