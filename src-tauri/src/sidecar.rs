@@ -29,7 +29,7 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
-use crate::{logs, ports};
+use crate::{logs, ports, tree};
 
 /// The sidecar's name in `tauri.conf.json`'s `bundle.externalBin`. Tauri appends the target
 /// triple to it on disk; this is the name without one.
@@ -231,6 +231,14 @@ async fn supervise(app: AppHandle, launch: Launch) {
             return;
         }
 
+        // ANYTHING LEFT OF THE GENERATION THAT JUST DIED, ENDED BEFORE THE NEXT ONE IS STARTED.
+        // The process the supervisor watches is tsx's launcher, and the launcher exiting does not
+        // mean the server it spawned exited — a crash in the launcher, or a kill that only
+        // reached it, leaves a backend holding the port the replacement is about to ask for. This
+        // runs before the backoff rather than after it, so the wait is also the operating system's
+        // chance to release the port.
+        tree::terminate();
+
         let wait = BACKOFF[failures as usize];
         failures += 1;
         logs::say(format!("restarting the backend in {wait:?} (attempt {failures} of {MAX_RESTARTS})"));
@@ -283,6 +291,11 @@ fn spawn_once(
         ]);
 
     let (events, child) = command.spawn().map_err(|e| e.to_string())?;
+    // BOUND TO THIS APPLICATION BEFORE ANYTHING ELSE HAPPENS. The process just spawned is tsx's
+    // launcher, not the server; the server is the child it is about to create. Adopting the
+    // launcher now is what puts that child in the same group, which is what makes quitting — and
+    // crashing — actually end the backend. See tree.rs.
+    tree::adopt(child.pid());
     // THE ARGUMENT VECTOR AND THE PID, RECORDED. Two of the three failures a packaged build
     // actually has are visible in this one line: a payload extracted somewhere other than where
     // the launch points, and a port the backend was told to take that it cannot have. Neither is
@@ -305,11 +318,20 @@ fn spawn_once(
 /// THE TWO PLATFORMS DO NOT GET THE SAME TREATMENT, and the difference is recorded rather than
 /// hidden. On Unix this sends SIGTERM, which is the signal `server/src/index.ts` installs a
 /// handler for: pools stop, the ingest chain drains, the store closes, the process exits itself.
+/// It reaches the real server rather than tsx's launcher because tsx relays `SIGINT` and `SIGTERM`
+/// to its child and escalates after five seconds — which is a fact about a dependency and is
+/// therefore checked in `tsx/dist/cli.mjs` rather than believed.
+///
 /// On Windows there is no equivalent — a console-less child cannot be sent a control event and
 /// `TerminateProcess` is what any kill resolves to — so the drain does not run there, and the
-/// consequence is that the last few events of a run that was in flight at the moment of quitting
-/// can be lost. That is a real limitation, it is in docs/tauri.md, and it is not one this wrapper
-/// can fix without adding a shutdown route to a server it is not allowed to change.
+/// consequence is that the last few events of a run in flight at the moment of quitting can be
+/// lost. That is a real limitation and it is in docs/tauri.md.
+///
+/// WHAT IS NEW HERE IS THAT IT NOW ENDS THE RIGHT PROCESS. `child` is tsx's launcher; the server
+/// is its child, and killing the launcher used to leave the server running with the port bound
+/// and the database open, which is how the next launch found 4317 taken. `tree::terminate` ends
+/// the group instead — see tree.rs for why this is a job object rather than a walk of the process
+/// table.
 pub fn stop(app: &AppHandle) {
     let state = app.state::<Backend>();
     state.stopping.store(true, Ordering::SeqCst);
@@ -341,4 +363,7 @@ pub fn stop(app: &AppHandle) {
 
     // Windows always, and Unix only when the polite request went unanswered.
     let _ = child.kill();
+    // AND EVERYTHING IT SPAWNED. On Windows this is the line that actually ends the server; on
+    // every other platform it is nothing at all, because the signal above reached it.
+    tree::terminate();
 }

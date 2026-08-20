@@ -71,3 +71,15 @@ panic = "abort"
 # sidecar.rs says so where the asymmetry lives.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# JOB OBJECTS, WHICH ARE WHAT WINDOWS HAS INSTEAD OF A PROCESS GROUP. `tsx` is a launcher: the
+# process this shell holds is not the server, it is the thing that spawns the server. So a kill of
+# the child left the backend running with the port and the database still open, which is where the
+# intermittent freeze came from — see src/tree.rs, which is the only file that uses this.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }

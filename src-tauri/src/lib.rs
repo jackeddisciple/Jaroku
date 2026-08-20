@@ -22,6 +22,7 @@ mod python;
 mod secrets;
 mod sidecar;
 mod tray;
+mod tree;
 mod updater;
 mod window;
 
