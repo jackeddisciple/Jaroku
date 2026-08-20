@@ -11,6 +11,7 @@
 // THE ORDER IN `setup` IS LOAD-BEARING and each step says why where it happens.
 
 mod paths;
+mod payload;
 mod ports;
 mod sidecar;
 mod window;
@@ -36,26 +37,47 @@ pub fn run() {
             })?;
             app.manage(sidecar::Backend::new(port));
 
-            // 2 — THE BACKEND. Started here rather than lazily on the first socket attempt: the
-            // client connects as soon as it has a session, and a backend that starts in response
-            // to that would make every launch begin with a failed connection and a retry.
-            let launch = sidecar::Launch { app_dir: app_dir(&app.handle()), env: environment(port) };
-            if let Err(err) = sidecar::start(&app.handle(), launch) {
-                // NOT a panic, and not a dialog. The window opens, the socket fails to connect,
-                // and the client's own disconnected state says so — which is a state this product
-                // already has, already renders and already recovers from. A shell that killed
-                // itself here would take the only surface capable of explaining the problem.
-                eprintln!("[jaroku] {err}");
-            }
-
-            // 3 — THE WINDOW, LAST, because it is the only step that needs the answers the two
-            // above produced. It is built here rather than declared in `tauri.conf.json`, and
-            // the reason is narrow and load-bearing: a window declared in the configuration is
-            // created before `setup` runs, and an initialisation script can only be attached at
-            // creation. That script is how the resolved port reaches the bundle BEFORE its first
-            // module evaluates — see window.rs, and see client/src/lib/hostConfig.ts for the
-            // side that reads it.
+            // 2 — THE WINDOW, BEFORE THE BACKEND, and the ordering is the whole reason step 3
+            // is asynchronous. A first launch has a payload to extract, which is a hundred
+            // megabytes of copying; extracting it before the window existed would mean staring
+            // at nothing for several seconds with no way to tell a slow launch from a hung one.
+            // Opened first, the client's own connecting state does the explaining — a state this
+            // product already has, already renders and already recovers from.
+            //
+            // The window is built here rather than declared in `tauri.conf.json` for a narrow
+            // and load-bearing reason: a window in the configuration is created before `setup`
+            // runs, and an initialisation script can only be attached at creation. That script is
+            // how the resolved port reaches the bundle BEFORE its first module evaluates — see
+            // window.rs, and client/src/lib/hostConfig.ts for the side that reads it.
             window::open(&app.handle(), port)?;
+
+            // 3 — EXTRACT, THEN START. Not on the main thread: `payload::ensure` is file I/O
+            // measured in a hundred megabytes on the launch after an install or an upgrade, and
+            // on every other launch it is one file read and returns immediately.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let prepared = tauri::async_runtime::spawn_blocking({
+                    let handle = handle.clone();
+                    move || payload::ensure(&handle)
+                })
+                .await;
+
+                let app_dir = match prepared {
+                    Ok(Ok(Some(dir))) => dir,
+                    // Development: nothing was extracted because nothing needed to be, and the
+                    // working tree is what runs.
+                    Ok(Ok(None)) => repo_dir(),
+                    Ok(Err(err)) => return eprintln!("[jaroku] {err}"),
+                    Err(err) => return eprintln!("[jaroku] the extraction task failed: {err}"),
+                };
+
+                // NOT a panic, and not a dialog. A shell that killed itself over a backend that
+                // would not start would be taking down the only surface capable of explaining
+                // the problem.
+                if let Err(err) = sidecar::start(&handle, sidecar::Launch { app_dir, env: environment(port) }) {
+                    eprintln!("[jaroku] {err}");
+                }
+            });
 
             Ok(())
         })
@@ -73,24 +95,21 @@ pub fn run() {
         });
 }
 
-/// The directory holding `server/` and `runtime/` as siblings.
+/// The repository this binary was compiled in, which is what a development run uses as its
+/// `app_dir`.
 ///
-/// TWO ANSWERS, AND THE DEVELOPMENT ONE IS THE POINT. Under `npm run tauri:dev` this is the
-/// repository itself, so the server that runs is the working tree: an edit restarts it through
-/// tsx exactly as it would in a terminal, generated agents land in the `runtime/agents/` the
-/// developer can open, and the database is `server/jaroku.db` with everything already in it. A
-/// development mode that ran a copy would be a second environment to keep in sync, and the first
-/// bug it hid would be one that only reproduces in the one nobody can attach a debugger to.
+/// THE DEVELOPMENT ANSWER IS THE POINT. Under `npm run tauri:dev` the server that runs is the
+/// working tree: an edit restarts it through tsx exactly as it would in a terminal, generated
+/// agents land in the `runtime/agents/` the developer can open, and the database is
+/// `server/jaroku.db` with everything already in it. A development mode that ran a copy would be
+/// a second environment to keep in sync, and the first bug it hid would be one that only
+/// reproduces in the one nobody can attach a debugger to.
 ///
 /// `CARGO_MANIFEST_DIR` is a compile-time constant naming `src-tauri/`, so its parent is the
 /// repository root. It is read only on the development branch, where the binary and the source
 /// tree are the same checkout by definition.
-fn app_dir(app: &tauri::AppHandle) -> PathBuf {
-    if tauri::is_dev() {
-        return PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().map(PathBuf::from).unwrap_or_default();
-    }
-    let _ = app;
-    paths::jaroku_home().map(|home| home.join("app")).unwrap_or_default()
+fn repo_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().map(PathBuf::from).unwrap_or_default()
 }
 
 /// The variables the backend is started with.
