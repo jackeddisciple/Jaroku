@@ -14,7 +14,7 @@
 // three columns; going under it is a state the product supports and is not a state a desktop
 // window should open in.
 
-use tauri::{AppHandle, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// The label everything else refers to this window by — the capability file, the tray's
 /// show-and-focus, the single-instance handler, and the window-state plugin's stored geometry.
@@ -32,6 +32,23 @@ pub fn open(app: &AppHandle, port: u16) -> Result<(), Box<dyn std::error::Error>
         .initialization_script(&host_config(port))
         .build()?;
     Ok(())
+}
+
+/// Bring the existing window to the front.
+///
+/// THREE CALLS AND NOT ONE, because the ways a window can be out of the way are three different
+/// states and each has its own undo. A minimised window is not hidden and a hidden window is not
+/// unfocused; calling `set_focus` on a minimised window on Windows raises a taskbar flash and
+/// nothing else, which is the failure that reads as "the second launch did nothing".
+///
+/// Two callers, deliberately sharing one: a second launch of the application, and a `jaroku://`
+/// link arriving while the window is behind something. Both are somebody asking for Jaroku and
+/// expecting to see it.
+pub fn focus_existing(app: &AppHandle) {
+    let Some(main) = app.get_webview_window(MAIN) else { return };
+    let _ = main.unminimize();
+    let _ = main.show();
+    let _ = main.set_focus();
 }
 
 /// The script that runs before the bundle does.

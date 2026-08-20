@@ -74,7 +74,7 @@ pub fn init(app: &AppHandle) {
 pub fn deliver(app: &AppHandle, url: &str) {
     println!("[jaroku] received {url}");
 
-    let Some(main) = app.get_webview_window(window::MAIN) else {
+    if app.get_webview_window(window::MAIN).is_none() {
         if let Some(pending) = app.try_state::<Pending>() {
             if let Ok(mut queue) = pending.0.lock() {
                 // Bounded, because this queue is fed by anything on the machine that can open a
@@ -88,15 +88,13 @@ pub fn deliver(app: &AppHandle, url: &str) {
             }
         }
         return;
-    };
+    }
 
     // Forward, then bring the window out. In that order: emitting first means the page has
     // already begun whatever the link asked for by the time it is looked at, rather than
     // appearing and then doing something a moment later.
     let _ = app.emit(EVENT, url);
-    let _ = main.unminimize();
-    let _ = main.show();
-    let _ = main.set_focus();
+    window::focus_existing(app);
 }
 
 /// Hand the page whatever arrived before it existed, and empty the queue.

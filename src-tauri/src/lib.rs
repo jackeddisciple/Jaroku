@@ -26,6 +26,22 @@ use tauri::{Manager, RunEvent};
 
 pub fn run() {
     tauri::Builder::default()
+        // SINGLE INSTANCE, AND IT MUST BE THE FIRST PLUGIN REGISTERED. Tauri says so, and the
+        // reason is that its whole job happens before the rest of the application exists: a
+        // second launch has to be detected and handed off while there is still time to exit
+        // quietly rather than after a window, a webview and a second Node backend have been
+        // built. That last one is the real cost here — this is not a tidiness feature. Two
+        // instances would mean two supervisors racing for port 4317, the loser walking up the
+        // scan to 4318, and two servers writing to one SQLite database from two processes.
+        //
+        // The callback runs in the ORIGINAL process, with the second one's argv. All it does is
+        // bring the window forward: a `jaroku://` URL in that argv — which is how Windows and
+        // Linux deliver a link to an application that was not running — is handed to the
+        // deep-link plugin by this plugin's own `deep-link` feature, so there is nothing to parse
+        // here and nothing to keep in step with deeplink.rs.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            window::focus_existing(app);
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![marker::first_launch_state, deeplink::drain_deep_links])
