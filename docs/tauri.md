@@ -284,6 +284,54 @@ and says so; the window stays open and reports itself disconnected, which is the
 
 ---
 
+## Distribution
+
+**There is no landing page and none is needed.** GitHub Releases is a download page: four
+artefacts, a description, and a URL you can send to a tester. `.github/workflows/release.yml`
+builds all four and attaches them.
+
+```bash
+git tag v0.3.4 && git push origin v0.3.4     # cuts a release
+# or run the workflow by hand from the Actions tab to test the pipeline without a tag
+```
+
+It publishes as a **draft**. Three of four platforms succeeding is exactly the case where an
+automatic publish is worst, so somebody presses the button after checking all four arrived.
+
+| Runner | Produces | For |
+|---|---|---|
+| `macos-14` | `.dmg`, `.app` | Apple silicon |
+| `macos-13` | `.dmg`, `.app` | Intel Macs |
+| `ubuntu-22.04` | `.deb`, `.AppImage` | Debian/Ubuntu, and everything else |
+| `windows-latest` | `-setup.exe` (NSIS) | Windows, per-user, no administrator |
+
+Two of those rows are decisions rather than defaults. **Ubuntu is pinned to 22.04** because the
+Node binary this bundle ships is dynamically linked against the build machine's glibc, which
+therefore becomes the application's floor — `ubuntu-latest` is 24.04 and would produce an
+AppImage that refuses to start on Debian 12. And there are **two macOS runners rather than one
+universal binary**, because a universal build needs a universal Node to sit beside the universal
+Rust binary and the Node release channel does not publish one.
+
+### What a tester has to do, because nothing is signed
+
+This is the friction to expect, and it is entirely removed by the certificates described under
+[Code signing](#code-signing).
+
+- **macOS** — the download is quarantined. Right-click → *Open* offers a button that a plain
+  double-click does not; or `xattr -dr com.apple.quarantine /Applications/Jaroku.app`.
+- **Windows** — SmartScreen warns that the publisher is unknown: *More info* → *Run anyway*.
+  Code-signing removes the warning; SmartScreen reputation then builds over time.
+- **Linux** — `chmod +x` the AppImage. Neither package is signed, so a repository would need to
+  sign it on your behalf.
+
+### Expect a large download
+
+Roughly **350–400 MB per platform**, and almost all of it is the Python runtime: a standalone
+CPython, uv, and every wheel `runtime/uv.lock` pins. That is the price of the decision that a
+user installs nothing — no Python, no uv, no `pip install`, no version conflict with whatever
+else is on their machine. GitHub Releases caps a single asset at 2 GB, so there is plenty of
+room, but a tester on a slow connection should be told the number in advance.
+
 ## What has been run, and what has not
 
 **The distinction this section is for**: `tauri dev` short-circuits three of the shell's biggest

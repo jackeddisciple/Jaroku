@@ -1,0 +1,147 @@
+# Building the desktop app for all three platforms, and publishing it where people can get it.
+#
+# WHY THIS IS A WORKFLOW AND NOT A SCRIPT SOMEBODY RUNS. Tauri does not cross-compile: a `.dmg`
+# is built on macOS, a `.deb` on Linux, an `.exe` on Windows, and there is no flag that changes
+# that. Worse, the two staging scripts are host-specific by design — `prepare-payload.mjs` copies
+# the machine's own Node binary and `prepare-python.mjs` downloads a CPython for the machine's own
+# platform — so a bundle is not merely BUILT per platform, it is ASSEMBLED per platform. One
+# machine cannot produce the set. Four runners can.
+#
+# UBUNTU IS PINNED TO 22.04 AND THAT IS NOT LAZINESS ABOUT UPGRADING. The Node binary this bundle
+# ships is dynamically linked against the build machine's glibc, so the build machine's glibc
+# becomes the application's floor. 22.04 is glibc 2.35; `ubuntu-latest` is 24.04 and 2.39, which
+# would produce an AppImage that refuses to start on Debian 12 and every LTS older than last year.
+# The oldest runner that can still build is the right one, and this is the line that says so.
+#
+# TWO macOS RUNNERS, NOT A UNIVERSAL BINARY. `--target universal-apple-darwin` is the tidier
+# answer and cannot work here: it would need a universal Node to sit beside a universal Rust
+# binary, and the Node release channel does not publish one. Two artefacts, each honest about
+# which chip it is for.
+#
+# NOTHING HERE IS SIGNED. See the `Distribution` section of docs/tauri.md for what a tester has to
+# do about that on each platform, and `Code signing` for where the certificates go when they exist.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  # So a build can be exercised without cutting a tag — the failure mode this guards against is
+  # discovering that the macOS runner cannot stage a payload on the day you wanted to ship.
+  workflow_dispatch:
+
+jobs:
+  bundle:
+    permissions:
+      contents: write
+
+    strategy:
+      # NEVER fail-fast. A macOS build that breaks must not cancel a Linux build that would have
+      # succeeded — the whole point of a release run is to learn about all three at once.
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-14
+            target: aarch64-apple-darwin
+            label: macOS (Apple silicon)
+          - platform: macos-13
+            target: x86_64-apple-darwin
+            label: macOS (Intel)
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            label: Linux
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: Windows
+
+    runs-on: ${{ matrix.platform }}
+    name: ${{ matrix.label }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # webkit2gtk is the webview, and libayatana-appindicator is the TRAY — which on Linux is
+      # also the only way to quit the application, because the close button hides it so a run in
+      # flight is not cancelled. Without it the app still works and silently loses that feature,
+      # which is the kind of degradation a build machine should not be allowed to introduce.
+      - name: Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            file
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # The Rust dependency tree is ~400 crates and a cold build is fifteen minutes. Keyed by
+      # platform so the four runners never share an incompatible cache.
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+
+      # uv is what `prepare-python.mjs` STAGES — the bundle ships it, so the runner needs one to
+      # copy and to resolve the lock file with.
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm --prefix server ci
+          npm --prefix client ci
+
+      # THE PAYLOAD, before Tauri is invoked. `tauri build` does not know about these; the
+      # `tauri:build` script chains them locally and this does the same thing one step at a time
+      # so a failure names which half broke.
+      - name: Stage the Node payload
+        run: npm run tauri:payload
+
+      - name: Stage the Python runtime
+        run: npm run tauri:python
+
+      # A draft, deliberately. It gives somebody the chance to read the notes and check the four
+      # artefacts arrived before anybody can download a release that is missing one — three of the
+      # four platforms succeeding is exactly the case where an automatic publish is worst.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --target ${{ matrix.target }}
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}-dev', github.run_number) }}
+          releaseName: "Jaroku ${{ github.ref_type == 'tag' && github.ref_name || format('build {0}', github.run_number) }}"
+          releaseDraft: true
+          prerelease: true
+          releaseBody: |
+            Desktop builds of Jaroku. Nothing here is code-signed yet, so each platform needs one
+            extra step the first time — see below.
+
+            **macOS** — the download is quarantined because it is unsigned. Either right-click the
+            app and choose *Open* (the dialog then offers a button that the plain double-click does
+            not), or clear the flag directly:
+            ```
+            xattr -dr com.apple.quarantine /Applications/Jaroku.app
+            ```
+            Pick the Apple-silicon build for an M-series Mac and the Intel one otherwise.
+
+            **Windows** — SmartScreen will warn that the publisher is unknown. *More info* →
+            *Run anyway*. The installer does not need administrator: it installs for the current
+            user only.
+
+            **Linux** — the `.deb` for Debian and Ubuntu, the `.AppImage` for anything else
+            (`chmod +x` it first). The AppImage cannot register the `jaroku://` URL scheme unless a
+            desktop entry is installed, which is a property of AppImage rather than of this build.
+
+            **First launch takes a minute.** The app unpacks a Node runtime and a complete Python
+            environment into your home directory so that nothing has to be installed separately.
+            Every launch after that is immediate.
