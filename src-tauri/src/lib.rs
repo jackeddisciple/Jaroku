@@ -47,6 +47,32 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_deep_link::init())
+        // WINDOW GEOMETRY ACROSS LAUNCHES, and the flag list is the whole of the decision.
+        //
+        // POSITION, SIZE and MAXIMIZED are what somebody arranges on purpose: a Jaroku window is
+        // three columns of trace, conversation and graph, and the width somebody chose for that
+        // is a preference rather than an accident. Restoring it is the difference between an
+        // application and a window that opens wherever it likes every morning.
+        //
+        // VISIBLE IS DELIBERATELY NOT IN THE LIST, and leaving it in would be a launch bug rather
+        // than a preference. tray.rs makes the close button HIDE the window so a run in flight is
+        // not cancelled — so "hidden" is the state this application is in every time somebody
+        // closes it, and a plugin that restored visibility would faithfully reopen Jaroku
+        // invisible, with a tray icon as the only evidence it had started at all. The two
+        // features are one design and this is where they meet.
+        //
+        // DECORATIONS and FULLSCREEN are out for a smaller reason: neither is something a user
+        // sets here, and a remembered fullscreen is the state that is hardest to get out of if it
+        // was entered by accident.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+                )
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             marker::first_launch_state,
             deeplink::drain_deep_links,
