@@ -139,7 +139,18 @@ def main() -> int:
     model, provider, model_name = build_model(provider, model_name)
     app = build_graph(model)
 
-    run = Run(id=str(uuid.uuid4()), agent_id="test_agent",
+    # THE SERVER'S ID WHEN THERE IS ONE, and a fresh one when this is being run by hand.
+    #
+    # `jaroku_runner.__main__` has always done this and the fixture never did, which was invisible
+    # until v0.2.17 made the control plane reconcile a trace event's OWN run id against the pool
+    # slot that produced it — a sandbox holding a valid run token could otherwise flip another
+    # run in the same workspace to `completed`. That guard is right, and the fixture was the one
+    # thing in the product that could not satisfy it: it minted a uuid nobody had heard of, so
+    # every event it emitted was dropped at ingest and the startup run the README promises —
+    # "so you see a live trace immediately" — has been silently producing nothing ever since.
+    #
+    # Same precedence as the runner: the environment first, a new id only when nothing set one.
+    run = Run(id=os.environ.get("JAROKU_RUN_ID") or str(uuid.uuid4()), agent_id="test_agent",
               provider=provider, model=model_name)
     # Passing the compiled graph lets the tracer identify conditional edges exactly
     # (graph.builder.branches) instead of inferring them.

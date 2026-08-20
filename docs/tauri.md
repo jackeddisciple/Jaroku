@@ -400,13 +400,16 @@ Applications, and it opens — no terminal, no right-click, no instructions.
 Windows has an equivalent: an OV or EV code-signing certificate removes the SmartScreen warning,
 though only an EV one removes it immediately.
 
-### Expect a large download
+### The download is smaller than the install
 
-Roughly **350–400 MB per platform**, and almost all of it is the Python runtime: a standalone
-CPython, uv, and every wheel `runtime/uv.lock` pins. That is the price of the decision that a
-user installs nothing — no Python, no uv, no `pip install`, no version conflict with whatever
-else is on their machine. GitHub Releases caps a single asset at 2 GB, so there is plenty of
-room, but a tester on a slow connection should be told the number in advance.
+**78 MB for the Windows installer, which expands to 365 MB on disk.** The payload is a Node
+runtime, a `node_modules` tree, a standalone CPython and every wheel `runtime/uv.lock` pins —
+source-heavy, and NSIS's LZMA compresses it about 4.5:1. Expect the other platforms to land in
+the same range.
+
+That 365 MB is the price of the decision that a user installs nothing: no Python, no uv, no
+`pip install`, no version conflict with whatever else is on their machine. The number worth
+quoting to a tester is the download, not the install.
 
 ## What has been run, and what has not
 
@@ -431,29 +434,40 @@ bundle works" are different claims, and only the first has been earned.
   on Windows and the hand-written UTC arithmetic in `marker.rs`.
 - The tray was created; a failure would have logged and left the close button quitting.
 
-### Not run yet
+### Verified in the packaged app (Windows, installed from the NSIS build)
 
-**No bundle has been produced.** `npm run tauri:build` has not been executed, and dev mode returns
-early from `payload::ensure`, `python::ensure` and `python::warm` — so **extraction is the largest
-unexercised path in this wrapper**. The staging scripts themselves *are* verified: the staged
-payload was booted as a subprocess and driven through a real socket, and the staged Python built a
-virtualenv with the network off and ran the fixture agent emitting `schema_version: 1`. What has
-not happened is Tauri putting those two directories inside a bundle and the shell copying them out
-again.
+This is the half `tauri dev` cannot reach, and all of it ran:
+
+- **The installer** — `Jaroku_0.3.3_x64-setup.exe`, 78 MB, per-user, no administrator prompt. It
+  installs to `%LOCALAPPDATA%\Jaroku` with `jaroku.exe`, `jaroku-node.exe` (the sidecar, renamed
+  by Tauri from its target-triple name) and both resource trees intact.
+- **Extraction ran.** `payload::ensure` wrote `%APPDATA%\jarokupp` with `server/` and `runtime/`
+  as siblings and stamped it; `python::ensure` wrote `%APPDATA%\jaroku\python`.
+- **`python::warm` built the virtualenv** at `%APPDATA%\jarokuenv` from the bundled wheel
+  cache — no pip, no system Python, nothing installed by the user.
+- **The packaged origin allowlist is the one in use.** The boot line reads
+  `[auth] origin allowlist: tauri://localhost, http://tauri.localhost`, not `(development
+  default)`. That is the gap found by hand before any bundle existed, now closed by one.
+- **Every path moved to its packaged location**: the database at `%APPDATA%\jaroku\jaroku.db`,
+  the local issuer's key under `keys/`, the object store and checkpoints inside the extracted
+  payload.
+- **An agent ran end to end.** Signing in through the local issuer from the `tauri://localhost`
+  origin, opening a socket with a ticket, and dispatching `{ cmd: "run", agentId: "example_agent" }`
+  produced **30 steps across all four types** — `state_update`, `llm_call`, `router`, `tool_call`
+  — persisted at `schema_version: 1`, through a Python the user never installed.
+- **Tenancy held in the fresh install.** A new account's personal workspace was empty; the agent
+  was visible only in the workspace that owns it.
+
+### Not run yet
 
 **Only Windows.** macOS and Linux have not been built or launched. That means the macOS menu bar,
 the entitlements, the `.dmg`, the `.deb`, the AppImage, and SIGTERM shutdown are all unexercised —
 and SIGTERM is the one that only *exists* off Windows.
 
 **The credential store round trip.** `secrets.rs` compiles and its allowlist is unit-tested, but
-nothing has signed in through the packaged app, so no token has actually been written to Windows
-Credential Manager. The client half is covered by `test:session-vault`, which proves the token
-never reaches `localStorage` when a host is present.
-
-**The packaged origin allowlist.** Development used the *development* default, because the webview
-loads from Vite's `http://localhost:5173`. The `tauri://localhost` path is asserted against the
-server's own `resolveOriginPolicy` in `test:desktop-contract` but has not been exercised by a real
-socket.
+nobody has signed in *through the window*, so no token has been written to Windows Credential
+Manager by the app itself. The client half is covered by `test:session-vault`, which proves the
+token never reaches `localStorage` when a host is present.
 
 **`cargo test` needs the app stopped.** The build script copies the sidecar into `target/debug/`,
 and Windows locks a running executable's file — so `cargo test` fails with `PermissionDenied`
