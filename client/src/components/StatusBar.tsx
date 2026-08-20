@@ -3,6 +3,7 @@ import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import { fmtCost, fmtDuration, fmtTokens } from "../lib/format.ts";
 import { useDeployStore } from "../store/deployStore.ts";
 import { isDeployInFlight } from "../types.ts";
+import { backendHasFailed, useHostStore } from "../store/hostStore.ts";
 
 const DOT: Record<string, string> = {
   open: "bg-ok",
@@ -18,6 +19,10 @@ const LABEL: Record<string, string> = {
   connecting: "connecting",
   closed: "disconnected",
 };
+/** The hover sentence when the shell has given up and did not say why. It always says why, so
+ *  this is the fallback that should never render — named rather than inlined so a reader can tell
+ *  it apart from the three below, which are about this tab rather than about the backend. */
+const BACKEND_STOPPED = "Jaroku's backend is not running";
 const DETAIL: Record<string, string> = {
   open: "Connected to the server",
   connecting: "Connecting to the server…",
@@ -95,6 +100,12 @@ export function StatusBar() {
   const deploying = useDeployStore((s) => s.deployments.find((d) => isDeployInFlight(d.status)));
   const deployStage = useDeployStore((s) => (deploying ? (s.stage[deploying.id] ?? null) : null));
   const live = useDeployStore((s) => s.deployments.filter((d) => d.status === "live").length);
+  // WHAT THE HOST KNOWS THAT THIS TAB DOES NOT. Null in a browser, and null under the desktop
+  // shell too until something goes wrong. `disconnected — retrying` is the truth about what this
+  // tab is doing and a lie about what is going to happen, and the difference between the two is
+  // only visible from the process that started the backend.
+  const backend = useHostStore((s) => s.status);
+  const failed = backendHasFailed(backend);
 
   const sep = <span className="text-faint" aria-hidden>·</span>;
 
@@ -104,13 +115,18 @@ export function StatusBar() {
           the agent dot, the run glyph, the deploy chip — and this one indicator, the one that says
           whether any of the others can update at all, was static in all three states with only its
           colour changing. */}
-      <span className="flex items-center gap-1.5" title={DETAIL[connection]}>
+      <span className="flex items-center gap-1.5" title={failed ? (backend?.message ?? BACKEND_STOPPED) : DETAIL[connection]}>
         <span
-          className={`h-1.5 w-1.5 rounded-full ${DOT[connection]} ${
-            connection === "connecting" ? "animate-stream-pulse motion-reduce:animate-none" : ""
+          className={`h-1.5 w-1.5 rounded-full ${failed ? "bg-err" : DOT[connection]} ${
+            !failed && connection === "connecting" ? "animate-stream-pulse motion-reduce:animate-none" : ""
           }`}
         />
-        <span className="text-[10px] text-faint">{LABEL[connection]}</span>
+        {/* THE ONE WORD CHANGES WHEN RETRYING IS NOT WHAT IS HAPPENING. Everything about this
+            strip's design — a colour and a word, the sentence on hover — is kept; what changes is
+            that the word stops claiming a recovery that the shell has already given up on. */}
+        <span className={`text-[10px] ${failed ? "text-err" : "text-faint"}`}>
+          {failed ? "backend stopped" : LABEL[connection]}
+        </span>
       </span>
 
       {/* A deploy is the one thing that happens outside this machine, and it can be running

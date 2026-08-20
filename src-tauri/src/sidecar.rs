@@ -29,7 +29,7 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
-use crate::{logs, ports, tree};
+use crate::{logs, ports, status, tree};
 
 /// The sidecar's name in `tauri.conf.json`'s `bundle.externalBin`. Tauri appends the target
 /// triple to it on disk; this is the name without one.
@@ -163,7 +163,13 @@ async fn supervise(app: AppHandle, launch: Launch) {
         // force, so the ordinary restart keeps the number the page was told and nothing else has
         // to happen; only a port that has genuinely been taken moves, and that move is announced.
         if !resolve_port(&app) {
-            logs::say("there is no port for the backend to listen on");
+            let message = format!(
+                "every port from {} upwards is in use, so Jaroku's backend has nowhere to listen",
+                ports::DEFAULT_PORT
+            );
+            logs::say(&message);
+            status::announce(&app, status::Phase::Failed, Some(message));
+            return;
         }
         match spawn_once(&app, &launch) {
             Err(err) => {
@@ -225,9 +231,21 @@ async fn supervise(app: AppHandle, launch: Launch) {
         if failures >= MAX_RESTARTS {
             logs::say(format!(
                 "the backend has failed {MAX_RESTARTS} times in a row and will not be restarted \
-                 again. The window stays open and will report itself disconnected, which is the \
-                 truth; the reason is in the lines above this one."
+                 again. The reason is in the lines above this one."
             ));
+            // AND THE WINDOW IS TOLD. It used to be left to "report itself disconnected, which is
+            // the truth" — and it is the truth in the same way that "the light is off" is the
+            // truth about a house with no electricity. Disconnected is a state this app recovers
+            // from on its own, so rendering it here trained somebody to wait for a reconnection
+            // that was never coming.
+            status::announce(
+                &app,
+                status::Phase::Failed,
+                Some(format!(
+                    "Jaroku's backend stopped {MAX_RESTARTS} times in a row and is not being \
+                     started again."
+                )),
+            );
             return;
         }
 
@@ -242,6 +260,11 @@ async fn supervise(app: AppHandle, launch: Launch) {
         let wait = BACKOFF[failures as usize];
         failures += 1;
         logs::say(format!("restarting the backend in {wait:?} (attempt {failures} of {MAX_RESTARTS})"));
+        status::announce(
+            &app,
+            status::Phase::Restarting,
+            Some(format!("Jaroku's backend stopped. Starting it again — attempt {failures} of {MAX_RESTARTS}.")),
+        );
         tokio::time::sleep(wait).await;
     }
 }
@@ -262,6 +285,14 @@ fn resolve_port(app: &AppHandle) -> bool {
         // connect. `status.rs` carries the same fact to the page.
         logs::say(format!("the backend moves from port {current} to {resolved}"));
         state.port.store(resolved, Ordering::SeqCst);
+        // The page is holding the old number. Every status carries the current socket URL, so
+        // saying anything at all here is what corrects it — and `Restarting` is the honest phase,
+        // because that is exactly what is happening.
+        status::announce(
+            app,
+            status::Phase::Restarting,
+            Some(format!("Port {current} was taken, so Jaroku's backend is moving to {resolved}.")),
+        );
     }
     true
 }

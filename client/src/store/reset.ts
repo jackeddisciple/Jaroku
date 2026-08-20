@@ -131,8 +131,17 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
   traceStore: useTraceStore as unknown as Resettable,
 };
 
-/** Stores that hold nothing a workspace owns. Named, so the omission is a decision. */
-export const NOT_WORKSPACE_SCOPED = ["sessionStore", "uiStore"] as const;
+/**
+ * Stores that hold nothing a workspace owns. Named, so the omission is a decision.
+ *
+ * `hostStore` is the third, and the argument is a different one from the other two. It holds what
+ * the process that started this application says about the backend it supervises: which phase it
+ * is in, why it stopped, where its log is. None of that belongs to a workspace, a session or an
+ * account — it belongs to the MACHINE, and it is equally true a millisecond after a switch as a
+ * millisecond before. Resetting it would blank a failure notice at the exact moment somebody was
+ * reading one, and would do so on the switch that failure had just made impossible.
+ */
+export const NOT_WORKSPACE_SCOPED = ["sessionStore", "uiStore", "hostStore"] as const;
 
 /**
  * Empty every store that holds a workspace's data.

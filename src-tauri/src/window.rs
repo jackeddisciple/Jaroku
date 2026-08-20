@@ -63,8 +63,18 @@ pub fn focus_existing(app: &AppHandle) {
 /// `TcpListener` — but this string is executed as script in the application's own context, and
 /// "the input is trusted" is the sentence that precedes most injection bugs.
 fn host_config(port: u16) -> String {
-    let url = serde_json::Value::String(format!("ws://localhost:{port}"));
+    let url = serde_json::Value::String(ws_url(port));
     format!("window.__JAROKU_CONFIG__ = Object.freeze({{ wsUrl: {url} }});")
+}
+
+/// The socket URL for a port, spelled once.
+///
+/// Two callers now — the script above, and `status.rs`, which carries the current URL on every
+/// status it sends because the port can move after the script has run. Two spellings of one
+/// address is exactly the kind of duplication that stays correct until somebody adds a `wss` case
+/// to one of them.
+pub fn ws_url(port: u16) -> String {
+    format!("ws://localhost:{port}")
 }
 
 #[cfg(test)]

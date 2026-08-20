@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import { App } from "./App.tsx";
 import { onDeepLink } from "./lib/deepLink.ts";
+import { onBackendStatus } from "./lib/hostBackend.ts";
+import { useHostStore } from "./store/hostStore.ts";
 import { hydrateSession } from "./lib/auth.ts";
 
 // `jaroku://` links, subscribed to here rather than inside a component.
@@ -20,6 +22,21 @@ import { hydrateSession } from "./lib/auth.ts";
 // did not recognise. In a browser this call does nothing at all and returns a no-op.
 onDeepLink((link) => {
   console.log(`[jaroku] deep link: ${link.action}${link.path.map((s) => `/${s}`).join("")}`);
+});
+
+// WHAT THE HOST SAYS ABOUT ITS BACKEND, subscribed here for the same reason and one more.
+//
+// The reason it shares: the shell settles its status during startup, which is before React has
+// mounted anything, so a subscriber that lived inside a component would miss the status on
+// exactly the launches that failed early — and those are the launches this exists for.
+//
+// The reason of its own: this is also where the socket URL gets corrected. The shell re-resolves
+// the backend's port when a restart finds the old one taken, every status carries the current
+// one, and `onBackendStatus` applies it. A subscription that unmounted would be a page still
+// pointed at a port nothing is listening on.
+onBackendStatus((status) => {
+  useHostStore.getState().setStatus(status);
+  console.log(`[jaroku] backend ${status.phase}${status.message ? `: ${status.message}` : ""}`);
 });
 
 // THE SESSION IS LOADED BEFORE THE FIRST RENDER, and this is the only reason `main.tsx` is not

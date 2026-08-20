@@ -15,6 +15,8 @@ import { devSignIn, localIssuerAvailable } from "../lib/auth.ts";
 import { pendingInvite } from "../lib/invite.ts";
 import { restartSocket } from "../lib/socket.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
+import { backendHasFailed, useHostStore } from "../store/hostStore.ts";
+import { BackendFailure } from "./BackendFailure.tsx";
 import { JarokuGlyph } from "../lib/icons.tsx";
 import { BRAND } from "../lib/tokens.ts";
 
@@ -32,10 +34,24 @@ export function SignIn() {
   // this screen stops being rendered.
   const [invited] = useState(() => pendingInvite() !== null);
 
+  // WHAT THE HOST SAYS, WHICH OUTRANKS THE CHECK BELOW. In a browser this is null forever and
+  // nothing here changes. Under the desktop shell it is the difference between "this server has
+  // no local issuer" and "there is no server" — two states this screen used to render
+  // identically, as a panel with no form on it and no way forward.
+  const backend = useHostStore((s) => s.status);
+  const backendFailed = backendHasFailed(backend);
+
   // Ask the server which kind it is. Until the answer arrives neither branch is rendered:
   // flashing a dev form at somebody who needs a real provider is worse than a blank moment.
+  //
+  // `attempt` is what makes the retry real. The check is bounded — it waits about ninety seconds
+  // for a backend that is still starting and then answers — so on a launch that took longer, or
+  // one the shell has since recovered from, the screen was permanently stuck on an answer that
+  // had stopped being true. Re-running it is the whole of the recovery, and it costs one request.
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let live = true;
+    setChecked(false);
     void localIssuerAvailable().then((available) => {
       if (!live) return;
       setLocalIssuer(available);
@@ -44,7 +60,7 @@ export function SignIn() {
     return () => {
       live = false;
     };
-  }, [setLocalIssuer]);
+  }, [setLocalIssuer, attempt]);
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
@@ -85,19 +101,38 @@ export function SignIn() {
           <p className="mt-3 rounded-control border border-edge bg-void px-3 py-2 text-[12px] text-muted">{message}</p>
         )}
 
-        {!checked && <p className="mt-6 text-[13px] text-muted">Checking how this server signs people in…</p>}
+        {/* THE HOST'S VERDICT COMES FIRST, and every branch below is guarded on it. The check
+            those branches read asks the SERVER a question, and there is no server — so it will
+            time out and then render "this server uses an external identity provider", which is a
+            confident, wrong, dead-ended answer to a question nobody could have answered. */}
+        {backendFailed && backend && <BackendFailure status={backend} onRetry={() => setAttempt((n) => n + 1)} />}
 
-        {checked && !localIssuer && (
+        {!backendFailed && !checked && (
+          <p className="mt-6 text-[13px] text-muted">Checking how this server signs people in…</p>
+        )}
+
+        {!backendFailed && checked && !localIssuer && (
           <div className="mt-5 space-y-3 text-[13px] text-muted">
             <p>This server verifies tokens against an external identity provider.</p>
             <p className="text-[11px]">
               Sign in there and this tab will pick the session up. The server has no sign-in form of its own —
               it never sees a password, only a token it can verify.
             </p>
+            {/* A WAY OUT OF THE ANSWER THAT IS WRONG MOST OFTEN. This branch is correct for a
+                hosted deployment and is also what a server that was merely slow to start produces,
+                because the check is bounded and answers once. It used to be a screen with nothing
+                on it to press. */}
+            <button
+              type="button"
+              onClick={() => setAttempt((n) => n + 1)}
+              className="rounded-control border border-edge px-2.5 py-1 text-[11px] text-muted outline-none hover:border-chrome hover:text-ink focus-visible:shadow-focusring"
+            >
+              Check again
+            </button>
           </div>
         )}
 
-        {checked && localIssuer && (
+        {!backendFailed && checked && localIssuer && (
           <form onSubmit={submit} className="mt-5 space-y-3">
             <p className="text-[11px] leading-relaxed text-muted">
               This server is running its own local issuer. The token it mints is real and is verified exactly

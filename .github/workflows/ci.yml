@@ -525,6 +525,14 @@ jobs:
           # answers, whose symptom reads as "the backend is down" and sends whoever is debugging
           # it to the wrong half of the system.
           npm run test:host-config
+          # And what a host says while the page is already open, which is the half that was
+          # missing. Every way a desktop launch can fail reached the page as one fact — the socket
+          # did not open — so it rendered "disconnected, retrying" for five different causes, in
+          # none of which anything was going to answer. The interesting assertions are the
+          # refusals, for the reason above, and the ORDERING: the shell settles its status before
+          # React mounts, so on exactly the launches this exists for an event alone reaches
+          # nobody, while a snapshot alone can arrive after and overwrite a recovery.
+          npm run test:host-backend
           # `jaroku://`, parsed in the client rather than in the desktop shell — a rule that can
           # only be exercised by building and launching a desktop app is a rule nobody exercises.
           # Every URL it sees came from OUTSIDE the application, since any program on the machine

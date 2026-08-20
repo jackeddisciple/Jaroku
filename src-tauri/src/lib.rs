@@ -21,6 +21,7 @@ mod ports;
 mod python;
 mod secrets;
 mod sidecar;
+mod status;
 mod tray;
 mod tree;
 mod updater;
@@ -80,6 +81,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             marker::first_launch_state,
             logs::log_path,
+            status::backend_status,
             deeplink::drain_deep_links,
             secrets::secret_get,
             secrets::secret_set,
@@ -92,7 +94,7 @@ pub fn run() {
     // `--config src-tauri/tauri.updater.conf.json` is what turns it on; see updater.rs.
     //
     // It REPLACES the handler above rather than adding to it, because a builder takes one. That
-    // is why `with_updater` restates the six names.
+    // is why `with_updater` restates the seven names.
     with_updater(builder)
         .setup(|app| {
             // 0 — THE LOG, BEFORE ANYTHING THAT COULD HAVE SOMETHING TO SAY.
@@ -118,15 +120,20 @@ pub fn run() {
                 )
             })?;
             app.manage(sidecar::Backend::new(port));
+            // 1a — THE STATUS THE PAGE READS, before the window that reads it. Everything below
+            // this line can fail, and until it exists a failure has nothing to tell anybody
+            // through. See status.rs on why "the socket will not open" was the only thing the
+            // page could ever say, in every one of the very different cases.
+            status::init(app.handle(), port);
 
-            // 1a — THE MENU BAR, which exists on macOS and nowhere else. Before the window,
+            // 1b — THE MENU BAR, which exists on macOS and nowhere else. Before the window,
             // because on macOS the menu belongs to the APPLICATION rather than to a window and
             // is what a user sees at the top of the screen for the moment before one appears.
             // See menu.rs on why the Edit menu is load-bearing rather than conventional.
             #[cfg(target_os = "macos")]
             menu::install(app.handle())?;
 
-            // 1b — THE `jaroku://` SCHEME, before the window rather than after it. A URL that
+            // 1c — THE `jaroku://` SCHEME, before the window rather than after it. A URL that
             // STARTED this application is delivered during startup, and the queue that catches
             // one has to exist before anything can hand it over. See deeplink.rs on the three
             // states an application can be in when a link arrives.
@@ -179,8 +186,12 @@ pub fn run() {
                     // Development: nothing was extracted because nothing needed to be, and the
                     // working tree is what runs.
                     Ok(Ok(None)) => repo_dir(),
-                    Ok(Err(err)) => return logs::say(err),
-                    Err(err) => return logs::say(format!("the extraction task failed: {err}")),
+                    // BOTH OF THESE USED TO `return` INTO SILENCE. An extraction that fails ends
+                    // this task, so the backend is never started, so the page connects to nothing
+                    // — and until now the only difference between that and a slow launch was a
+                    // line printed to a stream that does not exist. Named on screen instead.
+                    Ok(Err(err)) => return fail(&handle, err),
+                    Err(err) => return fail(&handle, format!("the extraction task failed: {err}")),
                 };
 
                 // The environment the backend and everything it spawns will see. Assembled once,
@@ -218,10 +229,12 @@ pub fn run() {
 
                 // NOT a panic, and not a dialog. A shell that killed itself over a backend that
                 // would not start would be taking down the only surface capable of explaining
-                // the problem.
+                // the problem — which is the surface that is now told, rather than left to infer
+                // it from a socket that never opens.
+                status::announce(&handle, status::Phase::Started, None);
                 let launch = sidecar::Launch { app_dir: app_dir.clone(), env: env.clone() };
                 if let Err(err) = sidecar::start(&handle, launch) {
-                    logs::say(err);
+                    fail(&handle, err);
                 }
 
                 // THE MARKER, once the runtime is on disk and the checkpoint directory has been
@@ -272,13 +285,14 @@ pub fn run() {
 /// configuration nobody builds by default, which is the worst place to put one — so the whole
 /// registration moves here, where each branch is an ordinary expression.
 ///
-/// The command list is spelled twice as a result. That is the cost, it is six names, and the
+/// The command list is spelled twice as a result. That is the cost, it is seven names, and the
 /// duplication is visible in one function rather than hidden in a macro.
 #[cfg(feature = "updater")]
 fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder.plugin(tauri_plugin_updater::Builder::new().build()).invoke_handler(tauri::generate_handler![
         marker::first_launch_state,
         logs::log_path,
+        status::backend_status,
         deeplink::drain_deep_links,
         secrets::secret_get,
         secrets::secret_set,
@@ -291,6 +305,17 @@ fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
 #[cfg(not(feature = "updater"))]
 fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder
+}
+
+/// Record a failure and put it on screen, in that order.
+///
+/// One function rather than the pair of calls at each site, because the two halves must not be
+/// able to drift: a failure that is logged and not announced is the freeze this whole pass is
+/// about, and a failure announced and not logged is one nobody can diagnose afterwards.
+fn fail(app: &tauri::AppHandle, message: impl Into<String>) {
+    let message = message.into();
+    logs::say(&message);
+    status::announce(app, status::Phase::Failed, Some(message));
 }
 
 /// The repository this binary was compiled in, which is what a development run uses as its
