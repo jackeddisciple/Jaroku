@@ -19,6 +19,7 @@ mod ports;
 mod python;
 mod secrets;
 mod sidecar;
+mod tray;
 mod window;
 
 use std::collections::HashMap;
@@ -92,6 +93,13 @@ pub fn run() {
             // how the resolved port reaches the bundle BEFORE its first module evaluates — see
             // window.rs, and client/src/lib/hostConfig.ts for the side that reads it.
             window::open(&app.handle(), port)?;
+
+            // 2a — THE TRAY, immediately after the window it controls. Whether the close button
+            // hides or quits is decided by whether this succeeded: a window hidden with nothing
+            // to bring it back is worse than a run cancelled by a quit. See tray.rs.
+            if tray::install(&app.handle()).unwrap_or(false) {
+                tray::hide_on_close(&app.handle());
+            }
 
             // 3 — EXTRACT, THEN START. Not on the main thread: `payload::ensure` is file I/O
             // measured in a hundred megabytes on the launch after an install or an upgrade, and
