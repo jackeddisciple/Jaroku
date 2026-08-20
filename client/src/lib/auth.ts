@@ -180,13 +180,44 @@ async function post<T>(path: string, body: unknown, token?: string | null): Prom
   throw new AuthFailure(message || res.statusText, res.status, res.status >= 500 || res.status === 429);
 }
 
-/** Whether this server has a local issuer — i.e. whether the dev sign-in exists at all. */
+/**
+ * Whether this server has a local issuer — i.e. whether the dev sign-in exists at all.
+ *
+ * UNREACHABLE IS NOT AN ANSWER, and treating it as one shipped a sign-in screen with no form on
+ * it. This function used to return `false` on a thrown fetch, which is the same collapse
+ * `AuthFailure.retryable` exists to prevent, in the other direction: "there is no local issuer"
+ * and "nothing is listening yet" are different facts, and only the first is a reason to render
+ * the external-provider branch — a screen with nothing to click, reached permanently, because
+ * the check runs once at mount.
+ *
+ * IT WAS UNREACHABLE FOR A GOOD REASON. In a browser you start the server and then open the
+ * page, so the very first request cannot precede the listener. The desktop shell inverts that:
+ * it opens the window BEFORE starting the backend, on purpose, so that a first launch — which
+ * unpacks a Node runtime and a Python environment before anything can listen — shows a window
+ * with a state in it rather than nothing at all. The cost of that choice is exactly this: for
+ * the first few seconds there is no server, and a client that mistook that for a verdict got
+ * stuck on it.
+ *
+ * So: retry while the request cannot be made, and answer the moment one is. An HTTP response of
+ * any kind is a real answer — 200 means the issuer is there, 404 means it is not — and neither
+ * is retried. The caller renders "Checking how this server signs people in…" throughout, which
+ * is the honest description of what is happening.
+ */
 export async function localIssuerAvailable(): Promise<boolean> {
-  try {
-    const res = await fetch(`${BASE}/v1/auth/jwks.json`);
-    return res.ok;
-  } catch {
-    return false;
+  // Roughly ninety seconds in total, which is longer than any backend start this has to survive
+  // and short enough that a genuinely absent server eventually says so rather than spinning for
+  // ever. Bounded rather than infinite: a screen that never resolves is its own kind of stuck.
+  const waits = [250, 250, 500, 500, 1000, 1000, 2000, 2000, 2000, 3000, 3000, 3000, 5000, 5000, 5000, 5000, 5000,
+                 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetch(`${BASE}/v1/auth/jwks.json`);
+      return res.ok;
+    } catch {
+      // The request never reached a server. Not a verdict — see above.
+      if (attempt >= waits.length) return false;
+      await new Promise((resolve) => setTimeout(resolve, waits[attempt]));
+    }
   }
 }
 

@@ -142,6 +142,28 @@ console.log("\nrequests");
   check((await localIssuerAvailable()) === false, "a 404 on the JWKS route means no local issuer");
   reply = { status: 200, body: { keys: [] } };
   check((await localIssuerAvailable()) === true, "...and a 200 means there is one");
+
+  // UNREACHABLE IS NOT AN ANSWER, and this is the assertion that says so.
+  //
+  // The desktop shell opens its window BEFORE starting the backend — deliberately, so a first
+  // launch that has to unpack a runtime shows a window with a state in it rather than nothing.
+  // The cost is that the very first request can precede the listener. A client that read
+  // "connection refused" as "there is no local issuer" rendered the external-provider branch,
+  // which has no form on it, and the check runs once at mount — so it stayed there. A packaged
+  // app that opened, looked correct, and could not be signed into.
+  const before = calls.length;
+  let refusals = 2;
+  reply = new Error("Failed to fetch");
+  const pending = localIssuerAvailable();
+  // Let it fail twice, then start answering.
+  const settle = setInterval(() => {
+    if (--refusals <= 0) {
+      reply = { status: 200, body: { keys: [] } };
+      clearInterval(settle);
+    }
+  }, 60);
+  check(await pending, "a server that is not listening YET is waited for rather than written off");
+  check(calls.length > before + 1, `...having asked more than once (${calls.length - before} attempts)`);
 }
 
 console.log("\nstorage");
