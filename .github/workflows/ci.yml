@@ -417,6 +417,17 @@ jobs:
           # connects. The refusal beside it is what stops the assertion passing on a server that
           # admits everybody.
           npm run test:desktop-smoke
+          # And the supervisor, which is the half neither of the other two could see. The largest
+          # single cause of the desktop app freezing was that `ports.rs` proved a port free by
+          # binding `127.0.0.1` while `wsRelay.ts` binds the wildcard — two claims Windows lets
+          # both succeed — so a port a previous session's backend was still holding read as free,
+          # and the supervisor then re-used that same number on all three restarts. This suite
+          # binds real sockets to demonstrate the platform behaviour on whatever runner it is on,
+          # then asserts the Rust asks the question the relay asks, resolves it per attempt, and
+          # ends the process TREE rather than the launcher tsx spawns the server from. The crate
+          # has better tests for all of it and they cannot run here: `tauri-build` needs a staged
+          # Node sidecar that `git ls-files` does not track.
+          npm run test:desktop-supervisor
 
       - name: cost, abuse and the data lifecycle
         working-directory: server
