@@ -25,9 +25,12 @@ The orphan from (1) dies on its own eventually — its stdout pipe is gone, so t
 writes takes it down — which is why a slow relaunch worked and a fast one did not. That is the
 whole of the intermittency.
 
-Beside that chain, two independent defects were found: four HTTP surfaces in the client that never
-consulted the host's port at all, and a `PATH` bug that has meant the bundled Python toolchain has
-never been reachable from an agent run on Windows.
+Beside that chain, three independent defects were found: four HTTP surfaces in the client that
+never consulted the host's port at all; a `PATH` bug that has meant the bundled Python toolchain
+has never been reachable from an agent run on Windows; and a packaging hole where `tauri build`
+run on its own ships whatever was staged last — which is how the bundle built during this pass
+came to carry a `runtime/test_agent` from before that morning's fix, with a symptom that looked
+exactly like a bug somebody had already closed.
 
 ---
 
@@ -91,10 +94,16 @@ Two things were wrong around it.
 **`client/src/lib/http.ts` computed its own origin and never asked `hostConfig`.** It read
 `VITE_JAROKU_WS` and fell back to `ws://localhost:4317`. `auth.ts` — which owns the socket URL and
 the sign-in exchange — reads the host's value correctly. So on any launch where the shell moved the
-port, the socket and the whole auth exchange went to the real backend while the Secrets group, the
-Stripe checkout, the workspace export and the workspace deletion went to port 4317: nothing at all,
-or, worse, whatever else was holding it. A window that signed in, connected, streamed a run, and
-then failed at four specific surfaces for no visible reason.
+port, the socket and the whole auth exchange went to the real backend while everything routed
+through `apiRequest` went to port 4317: nothing at all, or, worse, whatever else was holding it. A
+window that signed in, connected, streamed a run, and then failed at four specific surfaces for no
+visible reason.
+
+Those four, exactly: the **Secrets** group and its elevation (`lib/secrets.ts` → `SecretsGate`,
+`SecretsList`, `SecretsPanel`), the **workspace export**, the **workspace deletion** and the
+**billing checkout** (`lib/workspaceApi.ts` → `WorkspacePanel`, `UsagePanel`). Everything else in
+the product is a socket command and was never affected, which is why the symptom was so localised
+and so hard to attribute.
 
 **Fixed** — see [Fix 5](#fix-5--one-origin-resolved-per-call).
 
@@ -154,8 +163,16 @@ directory directly and the venv built without it.
 
 Not applicable on the platform this was reproduced on, and stated rather than glossed. A per-user
 NSIS install to `%LOCALAPPDATA%` is not sandboxed; Windows imposes no file, network or
-process-spawn restrictions on it, and nothing in the Windows Event Log corresponded to any of the
-failures reproduced here — every one of them was explained by the application's own code.
+process-spawn restrictions on it. Checked rather than assumed: the Windows Application event log
+across the whole window in which the failures were deliberately reproduced contains **nothing**
+mentioning Jaroku. Every failure reproduced here was explained by the application's own code, and
+none of them needed an OS-level denial to happen.
+
+One adjacent thing was checked because it produces the same complaint — "the app opens and there
+is nothing there". `tauri-plugin-window-state` restores a saved position, and a window restored
+onto a monitor that has since been unplugged is invisible with no way back. Version 2.4.1 guards
+it: `lib.rs` walks `available_monitors()` and only restores a position that `intersects` one.
+Not a defect here.
 
 `src-tauri/entitlements.plist` carries the four the hardened runtime needs for a bundled Node and a
 CPython loading unsigned wheels, and its reasoning is sound. **It has never been exercised**: no
@@ -386,9 +403,37 @@ Every status carries the current socket URL, so a moved port corrects itself by 
 status arriving.
 
 On screen: the status strip says `backend stopped` in red instead of `disconnected`, and the
-sign-in screen renders the shell's own sentence, the log's path, a copy button and a retry, instead
-of the external-identity-provider branch that has no form on it. In a browser none of this ever
-renders, because nothing there sets a host status.
+sign-in screen renders the shell's own sentence, the log's path, a copy button and **Start it
+again**, instead of the external-identity-provider branch that has no form on it. In a browser
+none of this ever renders, because nothing there sets a host status.
+
+The retry is a real restart rather than a re-check. The supervisor stops after three consecutive
+failures on purpose — a backend that cannot bind or cannot open its database fails identically
+every time, and a loop around it is a busy wait that hides the error — but the condition is often
+transient in a way the shell cannot see, so the person watching gets to decide. `restart_backend`
+refuses while a start is already in flight, because two supervisors would be two backends racing
+for one port and writing one SQLite database, which is what the single-instance plugin exists
+upstream to prevent.
+
+### Fix 9 — a bundle cannot be built from a payload nobody re-staged
+
+`src-tauri/tauri.conf.json`.
+
+Found by reading the log of the app this pass built. Every event of its boot run was dropped, with
+the runner minting its own id instead of honouring `JAROKU_RUN_ID` — a bug fixed that morning in
+the working tree. The bundle carried a `runtime/test_agent` from before the fix, because
+`tauri build` knows nothing about the staging scripts: only the `tauri:build` npm script chains
+them, so a build run any other way silently packages whatever `src-tauri/resources/app` last
+contained.
+
+`beforeBuildCommand` stages the payload now, so the build cannot ship a stale one. The Python
+runtime stays an explicit step — it moves only when `runtime/uv.lock` or the uv binary does, and
+staging it copies an interpreter and resolves a lock file. `release.yml` still runs both by name,
+which is what makes a failure say which half broke.
+
+Worth stating plainly: this one was **not** a wrapper defect and it produced a symptom
+indistinguishable from one. It is the reason a packaged build is worth reading the log of rather
+than trusting.
 
 ### Fix 8 — the sign-in check is no longer a dead end
 
@@ -425,19 +470,96 @@ server is at fault is genuine, and the rule was to report before changing. The w
 it today, and the workaround is documented at its own code and pinned by a test — but the
 workaround is load-bearing until the two lines are fixed, and it should not be.
 
-**One thing I noticed and did not act on, because it is out of scope for a stabilisation pass.**
-`server/src/wsRelay.ts:2810` calls `this.http.listen(opts.port, …)` with no `error` handler, so a
-port conflict surfaces as an uncaught exception rather than a message. Everything in this pass
-makes that unreachable from the desktop app, and it is still the reason the original failure was so
-opaque. A one-line `this.http.on("error", …)` would turn it into a sentence. It also binds the
-wildcard rather than loopback, which means the backend a desktop user starts is reachable from
-their network — worth a look, and squarely a server decision rather than a wrapper one.
+**`explain` on an agent that is not in the database crashes the backend.** Found during the parity
+pass and reproduced in `npm run dev`, so it is Jaroku's rather than the wrapper's:
+
+```
+[unhandledRejection] TypeError: Cannot read properties of undefined (reading 'kind')
+    at buildExplainContext (server/src/index.ts:8612:15)
+```
+
+An unhandled rejection ends the process, so one bad `explain` takes the whole server down —
+in a browser that is a dead tab until somebody restarts a terminal. Not touched here.
+
+**Two smaller things I noticed and did not act on**, because they are server decisions rather than
+wrapper ones. `server/src/wsRelay.ts:2810` calls `this.http.listen(opts.port, …)` with no `error`
+handler, so a port conflict surfaces as an uncaught exception rather than a message — everything
+in this pass makes that unreachable from the desktop app, and it is still the reason the original
+failure was so opaque; a one-line `this.http.on("error", …)` would turn it into a sentence. And it
+binds the wildcard rather than loopback, which means the backend a desktop user starts is
+reachable from their network.
 
 ---
 
 ## Phase 4 — parity with `npm run dev`
 
-_Filled in after the fixes, against a real packaged build._
+Done as a pass rather than assumed. The same script drives both targets, differing only in the
+port it talks to and the `Origin` it sends — `tauri://localhost` for the packaged app,
+`http://localhost:5173` for a browser — because that header is the one thing the server treats
+differently between them, and it is where the previous release's sign-in bug lived.
+
+### The desktop app, against a real installed bundle
+
+Installed build, `%LOCALAPPDATA%\Jaroku`, payload extracted to `%APPDATA%\jaroku`.
+
+| Flow | Result |
+|---|---|
+| Launch → main screen | Window at 3.1s, extraction 21.6s (upgrade) or 8ms (ordinary), backend listening |
+| CORS from the packaged origin | `access-control-allow-origin: tauri://localhost` on every request |
+| Sign-in — token, session, ticket | All three, `adarsh@jaroku.test`, 2 workspaces |
+| Socket opens, first snapshot unbidden | 8 channels: history, agents, mcp, providers, deploy, threads, inbox, members |
+| Threads / Agents / Inbox / Activity | All four answered |
+| Code / Graph / Trace / Evals / MCP / Providers / Deploy | All seven answered |
+| Running an agent, Trace updating live | 17 frames — `run_start`, 15 × `step`, `run_end` — in 3.2s |
+| The graph, introspected through the bundled Python | Answered in ~4s, a real `uv run` |
+| Composer → a question streamed back | `reply` frames |
+| The boot run the README promises | 13 steps persisted |
+
+### The same script against `npm run dev`
+
+`cd server && npm run dev`, origin `http://localhost:5173`, development allowlist. **Every flow
+above passed identically**, with the same channel set, the same live trace delivery and the same
+streamed reply. The only differences are the two that are supposed to differ: the database
+(`server/jaroku.db` rather than `%APPDATA%\jaroku\jaroku.db`) and the origin the server names
+back. Nothing behaved differently because it was inside a window.
+
+**And one thing behaved better inside it.** Both targets hit the same server crash during the
+composer flow:
+
+```
+[unhandledRejection] TypeError: Cannot read properties of undefined (reading 'kind')
+    at buildExplainContext (server/src/index.ts:8612:15)
+    at explainAgent (server/src/index.ts:8648:23)
+```
+
+Asking `explain` about an agent that is on disk but not in the database takes the whole Node
+process down. It is Jaroku's bug rather than the wrapper's — it reproduces in `npm run dev`
+exactly as it does in the app, which is how it was attributed — and it is noted below rather than
+fixed here. What the two runs did about it differed completely:
+
+- **`npm run dev`**: the process exited. The terminal shows the stack. Somebody has to notice and
+  restart it.
+- **The desktop app**: the supervisor saw the exit, ended the process tree, re-resolved the port,
+  restarted, and the backend was serving again **five seconds later** — with every step of it
+  timestamped in the log. Before this pass the same event would have left the window saying
+  `disconnected — retrying` while a launcher process quietly held the port the restart needed.
+
+That is the clearest single answer to "is the desktop app as reliable as the web version": on the
+one unplanned crash that happened during the parity pass, it recovered and the browser did not.
+
+### The desktop-specific failure paths, which have no web counterpart
+
+| Scenario | Before | After |
+|---|---|---|
+| Kill `jaroku.exe` | Both node processes survived, port bound, `/healthz` still 200 | Nothing survives, port released, `/healthz` refused |
+| Launch with a wildcard listener on 4317 | No backend at all; three silent failures; the page hammered the foreign listener | `port 4317 is already in use, so the backend gets 4318`; backend on 4318; the webview followed; the foreign listener received nothing |
+| Backend killed four times in a row | Window said `disconnected — retrying`, forever | Three restarts at 0.5s/2s/8s, then a panel naming the reason, the log's path and a way to start it again |
+| A backend that crashed on its own | Same, and invisible | Caught live during this pass: exit → tree ended → port re-resolved → restarted → serving again in 5s, every step logged |
+
+The failure panel was photographed rather than reasoned about. It renders the shell's own
+sentence, the log's path, **Start it again** and **Copy log path** — and it arrived as a *live*
+event on a page that had mounted while the backend was still healthy, which is what proves the
+event path rather than only the snapshot one.
 
 ---
 
@@ -452,12 +574,20 @@ Stated plainly rather than implied.
 - **The credential-store round trip** still has not been driven end to end by hand under the new
   build.
 - **The first-launch path was not re-exercised from empty.** `%APPDATA%\jaroku` already existed on
-  this machine, so extraction took its "already at this stamp" branch. The slow first launch — a
-  hundred megabytes of payload plus a Python runtime plus a venv build — is the one case where the
-  new `preparing` phase matters most, and it has not been watched from nothing.
+  this machine. The *upgrade* path was exercised for real — a changed payload stamp, 21.6 seconds
+  of re-extraction, the new tree in place and the boot run correct afterwards — but a launch from
+  nothing, which also builds the virtualenv, has not been watched. That is the one case where the
+  new `preparing` phase matters most.
 - **The graceful quit path was exercised by killing the shell rather than by pressing Quit in the
   tray.** Both reach the same code on Windows (`TerminateProcess` and then the job), and the job's
   kill-on-close covers the harsher of the two, so the weaker path is the one that was tested — but
   nobody has clicked the tray item.
+- **The failure panel's "Start it again" was built and typechecked but not pressed.** The panel
+  itself was photographed rendering in the packaged app, and `restart_backend` is asserted on both
+  sides of its seam by `test:desktop-contract` — but nobody has clicked the button and watched a
+  backend come back from it.
+- **The window was checked by screenshot rather than driven.** Every flow in the parity table was
+  driven over a real socket against the packaged backend, which proves the backend half and the
+  protocol half. What a person clicking through the four tabs sees was not walked by hand.
 - **`server/src/wsRelay.ts` binds the wildcard**, so a desktop user's backend is reachable from
   their network. Out of scope here and worth a decision.
