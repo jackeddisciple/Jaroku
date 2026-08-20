@@ -13,6 +13,7 @@
 mod paths;
 mod ports;
 mod sidecar;
+mod window;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -46,6 +47,15 @@ pub fn run() {
                 // itself here would take the only surface capable of explaining the problem.
                 eprintln!("[jaroku] {err}");
             }
+
+            // 3 — THE WINDOW, LAST, because it is the only step that needs the answers the two
+            // above produced. It is built here rather than declared in `tauri.conf.json`, and
+            // the reason is narrow and load-bearing: a window declared in the configuration is
+            // created before `setup` runs, and an initialisation script can only be attached at
+            // creation. That script is how the resolved port reaches the bundle BEFORE its first
+            // module evaluates — see window.rs, and see client/src/lib/hostConfig.ts for the
+            // side that reads it.
+            window::open(&app.handle(), port)?;
 
             Ok(())
         })

@@ -489,6 +489,14 @@ jobs:
           # pixel fetch threshold that is eight rows on a desktop and two on a phone.
           npm run test:feed-window
           npm run test:auth
+          # What a HOST may tell this bundle at runtime, which is one fact — where the backend
+          # actually ended up listening — and every assertion in it is a refusal. A host that
+          # says nothing, a host that says something malformed and a host that is not there have
+          # to produce the same outcome, because that outcome is the build-time default and the
+          # build-time default is a working application. Anything else is a socket URL nothing
+          # answers, whose symptom reads as "the backend is down" and sends whoever is debugging
+          # it to the wrong half of the system.
+          npm run test:host-config
           # The two ends of an invitation link. The failure it exists for is silent and partial: an
           # unencoded token produces a link that works for most secrets and fails for the ones with
           # a `+` or a `/` in them, with "that invitation is not valid" as the only symptom.

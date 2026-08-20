@@ -21,6 +21,8 @@
 // Nothing here is provider-specific. Swapping in Clerk's SDK means changing `acquireToken`,
 // and the two functions below it do not know the difference.
 
+import { hostWsUrl } from "./hostConfig.ts";
+
 /**
  * Read a Vite build-time variable, safely.
  *
@@ -34,12 +36,20 @@ function viteEnv(name: string): string | undefined {
   return env?.[name];
 }
 
-const BASE = viteEnv("VITE_JAROKU_API") ?? inferBase();
+const BASE = viteEnv("VITE_JAROKU_API") ?? wsOrigin().replace(/^ws/, "http");
 
-/** The API origin, derived from the socket URL so one variable configures both. */
-function inferBase(): string {
-  const ws = viteEnv("VITE_JAROKU_WS") ?? "ws://localhost:4317";
-  return ws.replace(/^ws/, "http").replace(/\/+$/, "");
+/**
+ * The relay's WebSocket origin, from the most specific source that has an answer.
+ *
+ * THE HOST WINS, and that ordering is the whole point rather than a detail. A host is a process
+ * that started the backend and therefore KNOWS which port it got; `VITE_JAROKU_WS` is a constant
+ * somebody baked in at build time and cannot know that 4317 was taken on this particular
+ * machine. Preferring the constant would mean a desktop launch that had to move the port spent
+ * the session failing to reach a backend that was running one port up. With no host — every
+ * browser, every `npm run dev`, every deployment — this is exactly the expression it replaced.
+ */
+function wsOrigin(): string {
+  return hostWsUrl() ?? (viteEnv("VITE_JAROKU_WS") ?? "ws://localhost:4317").replace(/\/+$/, "");
 }
 
 const TOKEN_KEY = "jaroku.token";
@@ -248,6 +258,8 @@ export async function acceptInvite(
 
 /** The socket URL, with a ticket on it. The only place a credential goes in a query string. */
 export function socketUrl(ticket: string): string {
-  const base = viteEnv("VITE_JAROKU_WS") ?? "ws://localhost:4317";
-  return `${base.replace(/\/+$/, "")}/?ticket=${encodeURIComponent(ticket)}`;
+  // Resolved per call rather than read from the module-level `BASE` above. The two are the same
+  // origin by construction, but `BASE` has already been rewritten to http:// — deriving the
+  // socket URL back from it would mean spelling that rewrite twice and in opposite directions.
+  return `${wsOrigin()}/?ticket=${encodeURIComponent(ticket)}`;
 }
