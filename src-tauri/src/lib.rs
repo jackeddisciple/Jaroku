@@ -11,6 +11,7 @@
 // THE ORDER IN `setup` IS LOAD-BEARING and each step is written down where it happens.
 
 mod paths;
+mod ports;
 
 pub fn run() {
     tauri::Builder::default()
