@@ -29,9 +29,10 @@ use tauri::{AppHandle, Manager};
 
 use crate::paths;
 
-/// What the staging script wrote beside the payload. Only `digest` is compared; the rest is here
-/// so that an installed app can answer "which Node is this, and which build" from a file rather
-/// than from a guess.
+/// What the staging script wrote beside the payload: the digest, the app version, the Node
+/// version and the target triple. It is compared whole rather than field by field — see
+/// `read_stamp` — and it is also the file an installed app is asked "which build is this, and
+/// which Node is inside it", which is a question that otherwise has only guesses for answers.
 const STAMP: &str = "payload.json";
 
 /// Where the bundle put the staged tree.
@@ -49,10 +50,23 @@ fn staged(app: &AppHandle) -> Option<PathBuf> {
         .find(|dir| dir.join(STAMP).is_file())
 }
 
-fn read_stamp(dir: &Path) -> Option<String> {
-    let text = fs::read_to_string(dir.join(STAMP)).ok()?;
+fn read_stamp(dir: &Path, name: &str) -> Option<String> {
+    let text = fs::read_to_string(dir.join(name)).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-    value.get("digest")?.as_str().map(str::to_owned)
+    // Whatever the stamp file contains, compared as one string. The payload stamp carries a
+    // digest over path-and-size; the Python stamp carries the uv and interpreter versions it was
+    // built from. Neither module needs to know the other's shape to answer "is this the same
+    // one", which is the only question either of them asks.
+    Some(text.trim().to_owned()).filter(|_| value.is_object())
+}
+
+/// Whether `to` already holds exactly what `from` is offering. Shared with python.rs, which asks
+/// the identical question about a different stamp file.
+pub fn same_stamp(from: &Path, to: &Path, name: &str) -> bool {
+    match read_stamp(from, name) {
+        Some(wanted) => read_stamp(to, name).as_deref() == Some(wanted.as_str()),
+        None => false,
+    }
 }
 
 /// Put the payload where the backend can be started from, and answer where that is.
@@ -76,8 +90,10 @@ pub fn ensure(app: &AppHandle) -> Result<Option<PathBuf>, String> {
     })?;
     let to = home.join("app");
 
-    let wanted = read_stamp(&from).ok_or_else(|| format!("{}'s stamp is unreadable", from.display()))?;
-    if read_stamp(&to).as_deref() == Some(wanted.as_str()) {
+    if read_stamp(&from, STAMP).is_none() {
+        return Err(format!("{}'s stamp is unreadable", from.display()));
+    }
+    if same_stamp(&from, &to, STAMP) {
         return Ok(Some(to)); // Already extracted, at this exact build. The ordinary launch.
     }
 
@@ -88,7 +104,7 @@ pub fn ensure(app: &AppHandle) -> Result<Option<PathBuf>, String> {
     // would read it, believe the payload was complete, and start a backend with a mixture of two
     // versions in it. Absent means "extract"; present means "this exact tree is all here".
     let _ = fs::remove_file(to.join(STAMP));
-    copy_into(&from, &to).map_err(|e| format!("could not extract the backend to {}: {e}", to.display()))?;
+    mirror(&from, &to).map_err(|e| format!("could not extract the backend to {}: {e}", to.display()))?;
 
     Ok(Some(to))
 }
@@ -97,7 +113,11 @@ pub fn ensure(app: &AppHandle) -> Result<Option<PathBuf>, String> {
 ///
 /// Iterative rather than recursive: `node_modules` is a deep tree of somebody else's making, and
 /// a recursion depth this code does not control is a stack this code cannot bound.
-fn copy_into(from: &Path, to: &Path) -> std::io::Result<()> {
+///
+/// `fs::copy` carries the Unix permission bits across, which is not incidental — python.rs uses
+/// this to extract a uv binary and an interpreter, and an executable that arrives without its
+/// executable bit is a runtime nobody can spawn.
+pub fn mirror(from: &Path, to: &Path) -> std::io::Result<()> {
     let mut pending = vec![PathBuf::new()];
     while let Some(relative) = pending.pop() {
         let source = from.join(&relative);

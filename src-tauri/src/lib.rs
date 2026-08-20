@@ -13,6 +13,7 @@
 mod paths;
 mod payload;
 mod ports;
+mod python;
 mod sidecar;
 mod window;
 
@@ -71,12 +72,39 @@ pub fn run() {
                     Err(err) => return eprintln!("[jaroku] the extraction task failed: {err}"),
                 };
 
+                // The environment the backend and everything it spawns will see. Assembled once,
+                // here, so the variables the sidecar starts with are the same ones the Python
+                // warm-up below runs against — two assemblies would be two chances to configure
+                // uv one way for a run and another way for the environment that run needs.
+                let mut env = environment(port);
+                env.extend(python::environment());
+
+                if let Err(err) = tauri::async_runtime::spawn_blocking({
+                    let handle = handle.clone();
+                    move || python::ensure(&handle)
+                })
+                .await
+                .unwrap_or_else(|e| Err(format!("the Python extraction task failed: {e}")))
+                {
+                    // Reported and carried on, not fatal. Everything except running an agent
+                    // works without Python, and the surface that would have to explain a refusal
+                    // is the one a refusal would prevent from opening.
+                    eprintln!("[jaroku] {err}");
+                }
+
                 // NOT a panic, and not a dialog. A shell that killed itself over a backend that
                 // would not start would be taking down the only surface capable of explaining
                 // the problem.
-                if let Err(err) = sidecar::start(&handle, sidecar::Launch { app_dir, env: environment(port) }) {
+                let launch = sidecar::Launch { app_dir: app_dir.clone(), env: env.clone() };
+                if let Err(err) = sidecar::start(&handle, launch) {
                     eprintln!("[jaroku] {err}");
                 }
+
+                // LAST, AND DELIBERATELY AFTER THE BACKEND. Building the virtualenv is the slow
+                // half of a first launch and the only half nothing needs immediately: `uv run`
+                // syncs the environment itself before it runs anything, so a run started while
+                // this is still going pays the build inside the run rather than failing.
+                tauri::async_runtime::spawn_blocking(move || python::warm(&app_dir, &env));
             });
 
             Ok(())
