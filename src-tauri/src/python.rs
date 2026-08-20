@@ -111,7 +111,39 @@ pub fn environment() -> HashMap<String, String> {
     // nothing else.
     let separator = if cfg!(windows) { ";" } else { ":" };
     let existing = std::env::var("PATH").unwrap_or_default();
-    env.insert("PATH".into(), format!("{}{separator}{existing}", install.join("bin").display()));
+    let bin = install.join("bin");
+
+    // AND ON WINDOWS THERE IS A SACRIFICIAL ENTRY IN FRONT OF IT, which is not a trick for its
+    // own sake and is the smallest correct thing this crate can do about a bug in the code it
+    // wraps.
+    //
+    // `processManager.ts` and `sandbox/codeCheck.ts` both spawn uv with
+    // `PATH: \`/opt/homebrew/bin:${process.env.PATH ?? ""}\``. That is right on macOS, where uv
+    // lives in Homebrew's bin and `:` is the separator. On Windows the separator is `;`, so the
+    // template does not prepend an entry — it GLUES `/opt/homebrew/bin:` onto the front of
+    // whatever the first entry happens to be, and the first entry is the one this function just
+    // put there. `C:\…\jaroku\python\bin` becomes `/opt/homebrew/bin:C:\…\jaroku\python\bin`,
+    // which is not a directory, and the bundled toolchain is gone from the search.
+    //
+    // Measured rather than reasoned about: spawning `uv` with the PATH this function returns
+    // resolves the bundled binary; spawning it with the PATH `processManager.ts` builds from that
+    // same value answers ENOENT. What saved the machine this was found on is that it had uv
+    // installed anyway, further down the user's own PATH — so the bundle silently ran the
+    // machine's toolchain, which is the exact external dependency the bundle exists to remove,
+    // and on a machine without uv a run fails outright.
+    //
+    // THE REAL FIX IS TWO LINES OF SERVER CODE and it is not this crate's to make; it is written
+    // up in docs/tauri-stabilization-report.md. What is here is the wrapper adapting, which is
+    // the rule this whole wrapper works under: an entry that exists only to absorb the glue, so
+    // the entry after it — the one that matters — survives intact. `install` itself is used for
+    // it because it is a real directory containing no executables, so the sacrificial entry is
+    // inert whichever way it is read.
+    let path = if cfg!(windows) {
+        format!("{}{separator}{}{separator}{existing}", install.display(), bin.display())
+    } else {
+        format!("{}{separator}{existing}", bin.display())
+    };
+    env.insert("PATH".into(), path);
 
     env.insert("UV_PYTHON_INSTALL_DIR".into(), install.join("interpreters").to_string_lossy().into());
     env.insert("UV_CACHE_DIR".into(), install.join("cache").to_string_lossy().into());
