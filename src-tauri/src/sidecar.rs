@@ -20,7 +20,7 @@
 // every time, and a loop around it is a busy wait that hides the error it should be surfacing.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -52,6 +52,12 @@ const HEALTHY_AFTER: Duration = Duration::from_secs(60);
 /// ceiling and then exits: events already read off a run's stdout are events the user watched
 /// happen, and closing the database out from under the last few loses the end of a trace that
 /// visibly ran. Three seconds is that two plus room for the exit itself.
+///
+/// `cfg(unix)` because there is nothing to wait for anywhere else. Windows has no SIGTERM for a
+/// console-less child, so `stop` has nothing to ask politely and no grace period to observe —
+/// and the compiler said so, as an unused-constant warning on the one platform where the
+/// asymmetry this crate documents is not a comment but a missing code path.
+#[cfg(unix)]
 const DRAIN_GRACE: Duration = Duration::from_secs(3);
 
 /// What the shell holds on to about the running backend, which is two things and deliberately

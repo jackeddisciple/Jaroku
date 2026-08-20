@@ -28,7 +28,7 @@ use std::fs;
 use std::path::Path;
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::paths;
 

@@ -97,7 +97,11 @@ pub fn environment() -> HashMap<String, String> {
     if tauri::is_dev() {
         return env;
     }
-    let (Some(install), Some(home)) = (install_dir(), paths::jaroku_home()) else {
+    // `paths::venv_dir()` rather than `home.join("venv")`. The compiler found this: `venv_dir`
+    // was written, exported and never called, which meant the venv's location existed in two
+    // places — and two places that compute one path are two places that can disagree about it
+    // after somebody moves it in one of them.
+    let (Some(install), Some(venv)) = (install_dir(), paths::venv_dir()) else {
         return env;
     };
 
@@ -112,7 +116,7 @@ pub fn environment() -> HashMap<String, String> {
     env.insert("UV_PYTHON_INSTALL_DIR".into(), install.join("interpreters").to_string_lossy().into());
     env.insert("UV_CACHE_DIR".into(), install.join("cache").to_string_lossy().into());
     env.insert("UV_MANAGED_PYTHON".into(), "1".into());
-    env.insert("UV_PROJECT_ENVIRONMENT".into(), home.join("venv").to_string_lossy().into());
+    env.insert("UV_PROJECT_ENVIRONMENT".into(), venv.to_string_lossy().into());
     env
 }
 
