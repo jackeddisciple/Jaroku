@@ -31,6 +31,10 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# The sidecar mechanism. It is used from Rust only: the capability file grants the webview no
+# shell permission at all, so nothing the frontend can say reaches a process spawn. That is the
+# same posture the relay takes with its command matrix — a capability nobody granted is refused.
+tauri-plugin-shell = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-window-state = "2"
@@ -41,6 +45,9 @@ tauri-plugin-window-state = "2"
 # the Secret Service on Linux — see src/secrets.rs for what happens where there is no such
 # service, which is a real case on a headless Linux box.
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+# Only `time`, and only for the supervisor's backoff sleep. Tauri already runs a tokio runtime;
+# this names the one feature of it this crate reaches for directly.
+tokio = { version = "1", features = ["time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The updater is behind a feature because a build of it needs a signing key pair that does not
@@ -57,3 +64,10 @@ strip = true
 lto = true
 codegen-units = 1
 panic = "abort"
+
+# SIGTERM, and nothing else. The Node server installs a handler for it and drains its trace
+# ingest chain before exiting; every portable kill available in std is the equivalent of SIGKILL,
+# which would lose the end of a run somebody watched happen. There is no Windows counterpart, and
+# sidecar.rs says so where the asymmetry lives.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
