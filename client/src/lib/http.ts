@@ -16,18 +16,19 @@
 // The elevation header is deliberately NOT here: it is the Secrets surface's own credential, held
 // in memory by `lib/secrets.ts` for reasons that file states at length, and it is passed in per
 // call by the wrapper there.
+//
+// THE ORIGIN COMES FROM `auth.ts` AND USED TO BE COMPUTED HERE, and the difference was a real bug
+// with a very confusing shape. This file's own version read `VITE_JAROKU_WS` and fell back to
+// `ws://localhost:4317` — and never asked `hostConfig`, which is the only source that knows which
+// port the desktop shell's backend actually got. So on any launch where 4317 was taken, the socket
+// and the whole sign-in exchange went to the right port while the Secrets group, the checkout, the
+// export and the workspace deletion went to 4317 — which is either nothing at all, or, far worse,
+// somebody else's server holding that port. A window that signed in, connected, streamed a run,
+// and then failed at four specific surfaces for no visible reason.
+//
+// One origin, one function, resolved per call. See `apiBase`.
 
-import { AuthFailure, storedToken, storedWorkspace } from "./auth.ts";
-
-function viteEnv(name: string): string | undefined {
-  const env = (import.meta as { env?: Record<string, string | undefined> }).env;
-  return env?.[name];
-}
-
-/** The API origin, derived from the socket URL so one variable configures both. */
-export const API_BASE =
-  viteEnv("VITE_JAROKU_API") ??
-  (viteEnv("VITE_JAROKU_WS") ?? "ws://localhost:4317").replace(/^ws/, "http").replace(/\/+$/, "");
+import { AuthFailure, apiBase, storedToken, storedWorkspace } from "./auth.ts";
 
 export interface RequestOptions {
   /** Extra headers for this one call. The Secrets surface's elevation token arrives this way. */
@@ -56,7 +57,7 @@ export async function apiRequest<T>(
 ): Promise<T> {
   const token = storedToken();
   const workspace = opts.scoped === false ? null : storedWorkspace();
-  const url = `${API_BASE}${path}${
+  const url = `${apiBase()}${path}${
     workspace ? `${path.includes("?") ? "&" : "?"}workspace=${encodeURIComponent(workspace)}` : ""
   }`;
   let res: Response;

@@ -38,6 +38,32 @@ function host(): HostConfig | undefined {
 }
 
 /**
+ * A later answer from the same host, when it has one.
+ *
+ * THE INJECTED OBJECT IS A SEED RATHER THAN A CONSTANT, and finding out why cost a stabilisation
+ * pass. A host that merely serves a page can freeze the address it serves it at. A host that
+ * SUPERVISES the backend cannot: the desktop shell restarts a backend that died, and a restart
+ * that finds the old port taken has to move — so the address the page was handed at load is an
+ * address that can stop being true while the page is still open. The frozen object is untouched
+ * (see window.rs on why it is frozen); a correction arrives beside it, through the same
+ * validation, and every reader below asks for the latest rather than remembering the first.
+ */
+let updated: string | undefined;
+
+/**
+ * Record a host's correction. Answers whether it was one this module will use.
+ *
+ * Refusing loudly-by-returning-false rather than throwing: the caller is a host bridge, the
+ * failure it is guarding against is a host that spells something wrong, and the right response
+ * is to keep the address that is already working rather than to break the page over a message.
+ */
+export function applyHostWsUrl(value: unknown): boolean {
+  const accepted = validate(value);
+  if (accepted) updated = accepted;
+  return accepted !== undefined;
+}
+
+/**
  * The WebSocket origin the host wants this client to use, or `undefined` for "there is no host,
  * or it did not say".
  *
@@ -47,7 +73,10 @@ function host(): HostConfig | undefined {
  * that never opens — where it is hardest to see.
  */
 export function hostWsUrl(): string | undefined {
-  const raw = host()?.wsUrl;
+  return updated ?? validate(host()?.wsUrl);
+}
+
+function validate(raw: unknown): string | undefined {
   if (typeof raw !== "string" || raw === "") return undefined;
   let parsed: URL;
   try {
@@ -56,8 +85,13 @@ export function hostWsUrl(): string | undefined {
     return undefined;
   }
   if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") return undefined;
-  // Trailing slashes are stripped here rather than at each of the two call sites, which is where
+  // Trailing slashes are stripped here rather than at each of the call sites, which is where
   // the duplication that this module replaces had already produced two slightly different
   // spellings of the same normalisation.
   return raw.replace(/\/+$/, "");
+}
+
+/** Forget a correction. For suites, which must not leak one test's host into the next. */
+export function forgetHostUpdate(): void {
+  updated = undefined;
 }

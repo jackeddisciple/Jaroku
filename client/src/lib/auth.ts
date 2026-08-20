@@ -44,7 +44,23 @@ function viteEnv(name: string): string | undefined {
   return env?.[name];
 }
 
-const BASE = viteEnv("VITE_JAROKU_API") ?? wsOrigin().replace(/^ws/, "http");
+/**
+ * The relay's HTTP origin, resolved per call.
+ *
+ * A FUNCTION RATHER THAN A CONSTANT, AND THAT WAS A BUG RATHER THAN A STYLE CHOICE. It was
+ * `const BASE = …`, evaluated once at module load, which is fine while the answer cannot change
+ * and is wrong the moment it can: the desktop shell re-resolves the backend's port when a
+ * restart finds the old one taken, and a value captured at load time would send every request
+ * afterwards to a port nothing is listening on — while the socket, which resolves per call,
+ * reconnected perfectly well. Two halves of one client disagreeing about where the server is, is
+ * the hardest kind of "it works sometimes" to read.
+ *
+ * Exported because `http.ts` needs the identical answer and used to compute its own — see the
+ * note there on what that cost.
+ */
+export function apiBase(): string {
+  return viteEnv("VITE_JAROKU_API") ?? wsOrigin().replace(/^ws/, "http");
+}
 
 /**
  * The relay's WebSocket origin, from the most specific source that has an answer.
@@ -155,7 +171,7 @@ export function storeWorkspace(id: string | null): void {
 async function post<T>(path: string, body: unknown, token?: string | null): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, {
+    res = await fetch(`${apiBase()}${path}`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify(body ?? {}),
@@ -211,7 +227,7 @@ export async function localIssuerAvailable(): Promise<boolean> {
                  5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000];
   for (let attempt = 0; ; attempt++) {
     try {
-      const res = await fetch(`${BASE}/v1/auth/jwks.json`);
+      const res = await fetch(`${apiBase()}/v1/auth/jwks.json`);
       return res.ok;
     } catch {
       // The request never reached a server. Not a verdict — see above.
@@ -289,8 +305,8 @@ export async function acceptInvite(
 
 /** The socket URL, with a ticket on it. The only place a credential goes in a query string. */
 export function socketUrl(ticket: string): string {
-  // Resolved per call rather than read from the module-level `BASE` above. The two are the same
-  // origin by construction, but `BASE` has already been rewritten to http:// — deriving the
+  // Derived from `wsOrigin` rather than from `apiBase`. The two are the same origin by
+  // construction, but `apiBase` has already rewritten the scheme to http:// — deriving the
   // socket URL back from it would mean spelling that rewrite twice and in opposite directions.
   return `${wsOrigin()}/?ticket=${encodeURIComponent(ticket)}`;
 }
