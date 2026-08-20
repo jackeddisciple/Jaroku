@@ -2,6 +2,10 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "What the main window is allowed to ask the Rust side for. Every permission here is one somebody has to add on purpose: Tauri v2 refuses a command that no capability grants, so the failure mode of forgetting one is a loud refusal rather than an ungated command. That is the same posture as the WebSocket relay's capability matrix, where a command with no entry is refused rather than allowed.",
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default"
+  ]
 }

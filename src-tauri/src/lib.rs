@@ -10,6 +10,7 @@
 //
 // THE ORDER IN `setup` IS LOAD-BEARING and each step says why where it happens.
 
+mod marker;
 mod paths;
 mod payload;
 mod ports;
@@ -25,6 +26,7 @@ use tauri::{Manager, RunEvent};
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .invoke_handler(tauri::generate_handler![marker::first_launch_state])
         .setup(|app| {
             // 1 — THE PORT, FIRST, because everything after it is told the answer rather than
             // asked to guess. 4317 unless something already holds it; see ports.rs.
@@ -98,6 +100,14 @@ pub fn run() {
                 let launch = sidecar::Launch { app_dir: app_dir.clone(), env: env.clone() };
                 if let Err(err) = sidecar::start(&handle, launch) {
                     eprintln!("[jaroku] {err}");
+                }
+
+                // THE MARKER, once the runtime is on disk and the checkpoint directory has been
+                // proved writable. Before the warm-up rather than after it, because the venv is
+                // rebuildable from what was just extracted and its absence costs a slow first run
+                // rather than a broken install — see marker.rs on what the file claims.
+                if let Err(err) = marker::mark(&handle, &app_dir) {
+                    eprintln!("[jaroku] this machine is not fully set up: {err}");
                 }
 
                 // LAST, AND DELIBERATELY AFTER THE BACKEND. Building the virtualenv is the slow
