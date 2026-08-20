@@ -212,6 +212,13 @@ does, so it works out of the box in local mode.
 On startup the server fires one run of the hand-written fixture agent so you see a live trace
 immediately. Set `JAROKU_NO_AUTORUN=1` to suppress it.
 
+**Or run the whole thing in a window.** `npm install && npm run tauri:dev` at the repository root
+starts the same two processes inside a desktop shell — the same `server/src/index.ts` from your
+working tree, the same Vite bundle, the same localhost WebSocket between them. It is a host rather
+than a port: nothing under `server/` or `client/` imports from it, and the two commands above stay
+the development path. See [docs/tauri.md](docs/tauri.md) for the architecture, the per-platform
+builds, where code-signing certificates go, and what has and has not been verified.
+
 ---
 
 ## First run
