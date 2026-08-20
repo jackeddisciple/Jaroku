@@ -23,7 +23,7 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 
-use crate::window;
+use crate::{logs, window};
 
 const ID_SHOW: &str = "jaroku:tray-show";
 const ID_QUIT: &str = "jaroku:tray-quit";
@@ -78,7 +78,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<bool> {
             // which is a sentence somebody can act on, and the consequence — the close button
             // quits instead of hiding — is a behaviour change they would otherwise have to guess
             // the cause of.
-            eprintln!("[jaroku] no system tray on this session ({err}); closing the window will quit");
+            logs::say(format!("no system tray on this session ({err}); closing the window will quit"));
             Ok(false)
         }
     }

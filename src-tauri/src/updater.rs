@@ -54,7 +54,7 @@ pub async fn check_for_update(app: AppHandle) -> Result<Option<Available>, Strin
         Ok(Some(update)) => Ok(Some(Available { version: update.version.clone(), notes: update.body.clone() })),
         Ok(None) => Ok(None),
         Err(err) => {
-            println!("[jaroku] update check did not complete: {err}");
+            crate::logs::say(format!("update check did not complete: {err}"));
             Ok(None)
         }
     }
@@ -101,7 +101,7 @@ pub fn check_on_launch(app: &AppHandle) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         if let Ok(Some(available)) = check_for_update(app.clone()).await {
-            println!("[jaroku] version {} is available", available.version);
+            crate::logs::say(format!("version {} is available", available.version));
             let _ = app.emit(EVENT, available);
         }
     });

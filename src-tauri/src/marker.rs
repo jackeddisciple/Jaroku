@@ -30,7 +30,7 @@ use std::path::Path;
 use serde::Serialize;
 use tauri::AppHandle;
 
-use crate::paths;
+use crate::{clock, paths};
 
 /// What the marker holds, and what the command answers with.
 ///
@@ -85,44 +85,9 @@ pub fn mark(app: &AppHandle, app_dir: &Path) -> Result<(), String> {
     }
     let body = serde_json::json!({
         "version": app.package_info().version.to_string(),
-        "at": now(),
+        "at": clock::now(),
     });
     fs::write(&path, format!("{body}\n")).map_err(|e| format!("could not write {}: {e}", path.display()))
-}
-
-/// A UTC timestamp with no dependency on a date crate.
-///
-/// Seconds since the epoch turned into `YYYY-MM-DDTHH:MM:SSZ` by hand. That is more arithmetic
-/// than a crate would need, and it is the whole of what the field is for — a line in a support
-/// conversation. A dependency whose only reader is a string nothing parses is a dependency that
-/// costs more than it carries.
-fn now() -> String {
-    format_at(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0),
-    )
-}
-
-/// Split out from `now` so the arithmetic can be asserted against dates somebody can check by
-/// eye, which is the only way a hand-written calendar is worth having.
-fn format_at(secs: i64) -> String {
-    let (days, rest) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
-    let (hour, minute, second) = (rest / 3600, (rest % 3600) / 60, rest % 60);
-
-    // Civil-from-days, Howard Hinnant's algorithm, with the era shifted so 1970-01-01 is day 0.
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = if m <= 2 { y + 1 } else { y };
-    format!("{year:04}-{m:02}-{d:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
 /// Whether this machine has been set up, for the onboarding specification to read.
@@ -134,26 +99,4 @@ fn format_at(secs: i64) -> String {
 #[tauri::command]
 pub fn first_launch_state() -> Initialised {
     read()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::now;
-
-    #[test]
-    fn the_epoch_formats_as_the_day_unix_time_starts() {
-        // Not a tautology: this is the one date where every term in the civil-from-days
-        // arithmetic is at a boundary, which is where an off-by-one in the era shift shows up.
-        assert_eq!(super::format_at(0), "1970-01-01T00:00:00Z");
-    }
-
-    #[test]
-    fn a_leap_day_is_the_leap_day_and_not_the_first_of_march() {
-        assert_eq!(super::format_at(1_709_164_800), "2024-02-29T00:00:00Z");
-    }
-
-    #[test]
-    fn the_clock_is_read_rather_than_hardcoded() {
-        assert!(now().ends_with('Z') && now().len() == 20);
-    }
 }

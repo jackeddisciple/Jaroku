@@ -37,9 +37,23 @@ const SCAN: u16 = 32;
 /// because some other process holds it on an external interface, which is a port this app could
 /// have used perfectly well.
 pub fn first_free(preferred: u16) -> Option<u16> {
-    (0..SCAN)
+    let chosen = (0..SCAN)
         .filter_map(|offset| preferred.checked_add(offset))
-        .find(|port| is_free(*port))
+        .find(|port| is_free(*port));
+    // WHICH PORT, AND WHETHER IT WAS THE PREFERRED ONE. A backend on 4318 is a backend whose logs
+    // nobody can match against the port they expected, and until this line the only way to find
+    // out which one it got was to go looking in a process list.
+    match chosen {
+        Some(port) if port == preferred => crate::logs::detail(format!("port {port}, which was free")),
+        Some(port) => crate::logs::say(format!(
+            "port {preferred} is already in use, so the backend gets {port}"
+        )),
+        None => crate::logs::say(format!(
+            "every port from {preferred} to {} is in use",
+            preferred.saturating_add(SCAN - 1)
+        )),
+    }
+    chosen
 }
 
 fn is_free(port: u16) -> bool {

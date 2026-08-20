@@ -39,7 +39,7 @@ use std::process::Command;
 
 use tauri::{AppHandle, Manager};
 
-use crate::{paths, payload};
+use crate::{logs, paths, payload};
 
 const STAMP: &str = "python.json";
 
@@ -76,7 +76,7 @@ pub fn ensure(app: &AppHandle) -> Result<(), String> {
         // Not fatal, and not silent. A build assembled without `npm run tauri:python` still runs
         // the whole product for anybody who has uv installed, which is every developer — so this
         // says what is missing and carries on rather than refusing to start.
-        eprintln!("[jaroku] this build carries no Python runtime; agent runs will need uv on PATH");
+        logs::say("this build carries no Python runtime; agent runs will need uv on PATH");
         return Ok(());
     };
     let to = install_dir().ok_or("no home directory, so there is nowhere to extract the Python runtime")?;
@@ -153,7 +153,7 @@ pub fn warm(app_dir: &Path, env: &HashMap<String, String>) {
     }
     match command.status() {
         Ok(status) if status.success() => {}
-        Ok(status) => eprintln!("[jaroku] preparing the Python environment exited {status}"),
-        Err(err) => eprintln!("[jaroku] preparing the Python environment failed: {err}"),
+        Ok(status) => logs::say(format!("preparing the Python environment exited {status}")),
+        Err(err) => logs::say(format!("preparing the Python environment failed: {err}")),
     }
 }

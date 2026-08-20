@@ -10,7 +10,9 @@
 //
 // THE ORDER IN `setup` IS LOAD-BEARING and each step says why where it happens.
 
+mod clock;
 mod deeplink;
+mod logs;
 mod marker;
 mod menu;
 mod paths;
@@ -76,6 +78,7 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             marker::first_launch_state,
+            logs::log_path,
             deeplink::drain_deep_links,
             secrets::secret_get,
             secrets::secret_set,
@@ -88,9 +91,21 @@ pub fn run() {
     // `--config src-tauri/tauri.updater.conf.json` is what turns it on; see updater.rs.
     //
     // It REPLACES the handler above rather than adding to it, because a builder takes one. That
-    // is why `with_updater` restates the five names.
+    // is why `with_updater` restates the six names.
     with_updater(builder)
         .setup(|app| {
+            // 0 — THE LOG, BEFORE ANYTHING THAT COULD HAVE SOMETHING TO SAY.
+            //
+            // This is step zero rather than step one because every step below it can fail, and
+            // until this line runs a failure has nowhere to go. A packaged build has no console:
+            // `main.rs` asks for the windows subsystem on Windows, a `.app` launched from Finder
+            // has its streams on /dev/null, and Rust's standard library reports a write to a
+            // handle that does not exist as a successful write. So for the whole of this
+            // wrapper's life every `eprintln!` in it — and the entire output of the Node backend
+            // it forwards — was discarded in exactly the build where somebody needed it. See
+            // logs.rs.
+            logs::init();
+
             // 1 — THE PORT, FIRST, because everything after it is told the answer rather than
             // asked to guess. 4317 unless something already holds it; see ports.rs.
             let port = ports::first_free(ports::DEFAULT_PORT).ok_or_else(|| {
@@ -129,12 +144,14 @@ pub fn run() {
             // how the resolved port reaches the bundle BEFORE its first module evaluates — see
             // window.rs, and client/src/lib/hostConfig.ts for the side that reads it.
             window::open(app.handle(), port)?;
+            logs::detail("the window is open and has been told the port");
 
             // 2a — THE TRAY, immediately after the window it controls. Whether the close button
             // hides or quits is decided by whether this succeeded: a window hidden with nothing
             // to bring it back is worse than a run cancelled by a quit. See tray.rs.
             if tray::install(app.handle()).unwrap_or(false) {
                 tray::hide_on_close(app.handle());
+                logs::detail("the tray is up, so the close button hides rather than quits");
             }
 
             // 3 — EXTRACT, THEN START. Not on the main thread: `payload::ensure` is file I/O
@@ -142,19 +159,27 @@ pub fn run() {
             // on every other launch it is one file read and returns immediately.
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
+                // THE STARTUP CLOCK. Every line below carries how long it has been since the
+                // window appeared, which is the number that makes an intermittent hang legible:
+                // the same launch on the same machine either extracts in two seconds or takes
+                // forty on a synced folder, and the difference between "slow" and "stuck" is not
+                // visible in a sequence of untimed lines.
+                let began = std::time::Instant::now();
+                logs::detail("extracting the payload");
                 let prepared = tauri::async_runtime::spawn_blocking({
                     let handle = handle.clone();
                     move || payload::ensure(&handle)
                 })
                 .await;
+                logs::detail(format!("the payload is ready after {:?}", began.elapsed()));
 
                 let app_dir = match prepared {
                     Ok(Ok(Some(dir))) => dir,
                     // Development: nothing was extracted because nothing needed to be, and the
                     // working tree is what runs.
                     Ok(Ok(None)) => repo_dir(),
-                    Ok(Err(err)) => return eprintln!("[jaroku] {err}"),
-                    Err(err) => return eprintln!("[jaroku] the extraction task failed: {err}"),
+                    Ok(Err(err)) => return logs::say(err),
+                    Err(err) => return logs::say(format!("the extraction task failed: {err}")),
                 };
 
                 // The environment the backend and everything it spawns will see. Assembled once,
@@ -163,7 +188,19 @@ pub fn run() {
                 // uv one way for a run and another way for the environment that run needs.
                 let mut env = environment(port);
                 env.extend(python::environment());
+                // NAMES, NEVER VALUES, which is the same rule the server's own log sink follows —
+                // this environment carries the paths to three signing keys, and a log somebody
+                // attaches to a bug report is a log that leaves the machine.
+                logs::detail(format!(
+                    "the backend's environment: {}",
+                    {
+                        let mut names: Vec<&str> = env.keys().map(String::as_str).collect();
+                        names.sort_unstable();
+                        names.join(", ")
+                    }
+                ));
 
+                logs::detail("extracting the Python runtime");
                 if let Err(err) = tauri::async_runtime::spawn_blocking({
                     let handle = handle.clone();
                     move || python::ensure(&handle)
@@ -174,15 +211,16 @@ pub fn run() {
                     // Reported and carried on, not fatal. Everything except running an agent
                     // works without Python, and the surface that would have to explain a refusal
                     // is the one a refusal would prevent from opening.
-                    eprintln!("[jaroku] {err}");
+                    logs::say(err);
                 }
+                logs::detail(format!("the Python runtime is ready after {:?}", began.elapsed()));
 
                 // NOT a panic, and not a dialog. A shell that killed itself over a backend that
                 // would not start would be taking down the only surface capable of explaining
                 // the problem.
                 let launch = sidecar::Launch { app_dir: app_dir.clone(), env: env.clone() };
                 if let Err(err) = sidecar::start(&handle, launch) {
-                    eprintln!("[jaroku] {err}");
+                    logs::say(err);
                 }
 
                 // THE MARKER, once the runtime is on disk and the checkpoint directory has been
@@ -190,7 +228,7 @@ pub fn run() {
                 // rebuildable from what was just extracted and its absence costs a slow first run
                 // rather than a broken install — see marker.rs on what the file claims.
                 if let Err(err) = marker::mark(&handle, &app_dir) {
-                    eprintln!("[jaroku] this machine is not fully set up: {err}");
+                    logs::say(format!("this machine is not fully set up: {err}"));
                 }
 
                 // Whether a newer version exists, asked once and thirty seconds from now — see
@@ -198,6 +236,8 @@ pub fn run() {
                 // for the same disk and network a first launch needs.
                 #[cfg(feature = "updater")]
                 updater::check_on_launch(&handle);
+
+                logs::detail(format!("startup finished after {:?}", began.elapsed()));
 
                 // LAST, AND DELIBERATELY AFTER THE BACKEND. Building the virtualenv is the slow
                 // half of a first launch and the only half nothing needs immediately: `uv run`
@@ -231,12 +271,13 @@ pub fn run() {
 /// configuration nobody builds by default, which is the worst place to put one — so the whole
 /// registration moves here, where each branch is an ordinary expression.
 ///
-/// The command list is spelled twice as a result. That is the cost, it is five names, and the
+/// The command list is spelled twice as a result. That is the cost, it is six names, and the
 /// duplication is visible in one function rather than hidden in a macro.
 #[cfg(feature = "updater")]
 fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder.plugin(tauri_plugin_updater::Builder::new().build()).invoke_handler(tauri::generate_handler![
         marker::first_launch_state,
+        logs::log_path,
         deeplink::drain_deep_links,
         secrets::secret_get,
         secrets::secret_set,

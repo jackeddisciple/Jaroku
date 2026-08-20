@@ -31,7 +31,7 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 
-use crate::window;
+use crate::{logs, window};
 
 /// The event the page listens for. Colon-separated rather than dot-separated so it can never be
 /// mistaken for one of the `jaroku.*` browser-storage keys, which `test:reset` audits by
@@ -54,7 +54,7 @@ pub fn init(app: &AppHandle) {
     // whole product for one feature.
     #[cfg(any(windows, target_os = "linux"))]
     if let Err(err) = app.deep_link().register_all() {
-        eprintln!("[jaroku] could not register the jaroku:// scheme: {err}");
+        logs::say(format!("could not register the jaroku:// scheme: {err}"));
     }
 
     let handle = app.clone();
@@ -72,7 +72,7 @@ pub fn init(app: &AppHandle) {
 /// all, which is the difference that actually matters here — the not-running case is precisely
 /// the one where it does not.
 pub fn deliver(app: &AppHandle, url: &str) {
-    println!("[jaroku] received {url}");
+    logs::say(format!("received {url}"));
 
     if app.get_webview_window(window::MAIN).is_none() {
         if let Some(pending) = app.try_state::<Pending>() {

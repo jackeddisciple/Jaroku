@@ -29,6 +29,8 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
+use crate::logs;
+
 /// The sidecar's name in `tauri.conf.json`'s `bundle.externalBin`. Tauri appends the target
 /// triple to it on disk; this is the name without one.
 const SIDECAR: &str = "jaroku-node";
@@ -149,7 +151,7 @@ async fn supervise(app: AppHandle, launch: Launch) {
                 // overlap almost entirely (a missing binary, a directory that vanished, a machine
                 // out of file handles) and splitting the budget in two would give a failing app
                 // six attempts where the comment above promises three.
-                eprintln!("[jaroku] the backend could not be started: {err}");
+                logs::say(format!("the backend could not be started: {err}"));
             }
             Ok(mut events) => {
                 while let Some(event) = events.recv().await {
@@ -160,18 +162,29 @@ async fn supervise(app: AppHandle, launch: Launch) {
                         // database, the object store, the run sandbox and the workspace this
                         // process acts in. An app that ate them would be strictly harder to
                         // support than the terminal it replaces.
-                        CommandEvent::Stdout(line) => print!("{}", String::from_utf8_lossy(&line)),
-                        CommandEvent::Stderr(line) => eprint!("{}", String::from_utf8_lossy(&line)),
-                        CommandEvent::Error(err) => eprintln!("[jaroku] backend error: {err}"),
+                        //
+                        // AND FOR MOST OF THIS WRAPPER'S LIFE IT DID EAT THEM. These two arms
+                        // were `print!` and `eprint!`, which in the only build anybody installs
+                        // write to a standard handle that does not exist — see logs.rs. So a
+                        // backend that could not bind its port said so, three times, into
+                        // nothing. The tags are `backend` and `backend!` so the two streams stay
+                        // distinguishable in one file: Jaroku puts real errors on stderr and its
+                        // ordinary boot narration on stdout, and losing that split would mean
+                        // reading tone to find failures.
+                        CommandEvent::Stdout(line) => logs::from("backend", &String::from_utf8_lossy(&line)),
+                        CommandEvent::Stderr(line) => logs::from("backend!", &String::from_utf8_lossy(&line)),
+                        CommandEvent::Error(err) => logs::say(format!("backend error: {err}")),
                         CommandEvent::Terminated(status) => {
                             // `let _ =` because the taken child is deliberately dropped here: the
                             // process is already gone, and what this line is for is emptying the
                             // slot so `stop` does not later try to signal a pid nobody owns.
                             let _ = app.state::<Backend>().child.lock().ok().and_then(|mut c| c.take());
-                            eprintln!(
-                                "[jaroku] the backend exited (code {:?}, signal {:?})",
-                                status.code, status.signal
-                            );
+                            logs::say(format!(
+                                "the backend exited (code {:?}, signal {:?}) after {:?}",
+                                status.code,
+                                status.signal,
+                                started.elapsed(),
+                            ));
                             break;
                         }
                         _ => {}
@@ -190,17 +203,17 @@ async fn supervise(app: AppHandle, launch: Launch) {
         }
 
         if failures >= MAX_RESTARTS {
-            eprintln!(
-                "[jaroku] the backend has failed {MAX_RESTARTS} times in a row and will not be \
-                 restarted again. The window stays open and will report itself disconnected, which \
-                 is the truth; the reason is in the lines above this one."
-            );
+            logs::say(format!(
+                "the backend has failed {MAX_RESTARTS} times in a row and will not be restarted \
+                 again. The window stays open and will report itself disconnected, which is the \
+                 truth; the reason is in the lines above this one."
+            ));
             return;
         }
 
         let wait = BACKOFF[failures as usize];
         failures += 1;
-        eprintln!("[jaroku] restarting the backend in {:?} (attempt {failures} of {MAX_RESTARTS})", wait);
+        logs::say(format!("restarting the backend in {wait:?} (attempt {failures} of {MAX_RESTARTS})"));
         tokio::time::sleep(wait).await;
     }
 }
@@ -224,6 +237,17 @@ fn spawn_once(
         ]);
 
     let (events, child) = command.spawn().map_err(|e| e.to_string())?;
+    // THE ARGUMENT VECTOR AND THE PID, RECORDED. Two of the three failures a packaged build
+    // actually has are visible in this one line: a payload extracted somewhere other than where
+    // the launch points, and a port the backend was told to take that it cannot have. Neither is
+    // deducible from "the window says disconnected".
+    logs::detail(format!(
+        "spawned the backend as pid {} in {} — {} {}",
+        child.pid(),
+        launch.app_dir.display(),
+        launch.tsx().display(),
+        launch.entry().display(),
+    ));
     if let Ok(mut slot) = app.state::<Backend>().child.lock() {
         *slot = Some(child);
     }
