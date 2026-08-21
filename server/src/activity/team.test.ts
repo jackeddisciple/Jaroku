@@ -82,6 +82,22 @@ async function versionBy(
   );
 }
 
+/**
+ * A thread, started by somebody, AT A STATED TIME.
+ *
+ * The stated time is the whole reason this helper exists. `threadStore.create` stamps `created_at`
+ * from the real clock, and every window in this suite is resolved against a FIXED `NOW` — so a
+ * thread created through the store alone lands after the window it is being counted in, and the
+ * assertion below it passed on the day the suite was written and has failed every day since. Every
+ * other fixture here already writes its own timestamp for exactly this reason; this one did not.
+ */
+async function threadBy(ctx: TenantContext, title: string, by: string, at: string): Promise<void> {
+  const t = await threads.create(ctx, { agentId: null, title, createdBy: by });
+  await db.forWorkspace(ctx.workspaceId).run(
+    `UPDATE threads SET created_at = ? WHERE id = ?`, [at, t.id],
+  );
+}
+
 async function runAt(ctx: TenantContext, agent: string, at: string, usd = 0.05): Promise<void> {
   const id = randomUUID();
   await trace.upsertRun(ctx, {
@@ -107,7 +123,7 @@ console.log("\nper-member contribution, over what is actually recorded");
   await versionBy(ctx, a1, 2, "edit", ada, ago(3 * DAY));
   await versionBy(ctx, a1, 3, "edit", ada, ago(2 * DAY));
   await versionBy(ctx, a1, 4, "generation", bob, ago(DAY));
-  await threads.create(ctx, { agentId: null, title: "a session", createdBy: ada });
+  await threadBy(ctx, "a session", ada, ago(DAY));
 
   const pulse = await store.teamPulse(ctx, month);
   const adaRow = pulse.find((m) => m.userId === ada)!;

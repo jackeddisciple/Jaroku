@@ -154,6 +154,15 @@ console.log("\na branch counts as one run and does not inherit its prefix's seco
     status: "completed", started_at: ago(2 * HOUR), ended_at: ago(2 * HOUR),
     cost: 0, tokens: 0, error: null,
   } as Run);
+  // AND THE START TIME, WRITTEN DIRECTLY. `copyRunPrefix` stamps `started_at` from the real clock,
+  // which is right for a real branch and wrong for a fixture, and `upsertRun`'s conflict path
+  // updates only status, cost, tokens and error — so the `ago(2 * HOUR)` above never reached the
+  // row. The window here is resolved against a fixed NOW, so the branch sat outside it and both
+  // assertions below failed from the day after this suite was written rather than on it.
+  await db.forWorkspace(ctx.workspaceId).run(
+    `UPDATE runs SET started_at = ?, ended_at = ? WHERE id = ? AND workspace_id = ?`,
+    [ago(2 * HOUR), ago(2 * HOUR), branchId, ctx.workspaceId],
+  );
   // Its own new work: one step, half a second, past the branch point.
   await trace.insertStep(ctx, {
     id: randomUUID(), run_id: branchId, seq: 2, type: "llm_call", name: "call_model",

@@ -117,6 +117,16 @@ console.log("\nnine sources, one chronology");
     id: branchId, agent_id: "worker", provider: "anthropic", model: "claude-haiku-4-5",
     status: "completed", started_at: ago(8 * HOUR), ended_at: ago(8 * HOUR), cost: 0, tokens: 0, error: null,
   } as Run);
+  // AND THE START TIME, WRITTEN DIRECTLY, because neither call above can place it. `copyRunPrefix`
+  // stamps `started_at` from the real clock — correct, since a real branch happens now — and
+  // `upsertRun`'s conflict path deliberately updates only status, cost, tokens and error, so the
+  // `ago(8 * HOUR)` it was handed never reaches the row. The window here is resolved against a
+  // fixed NOW, so the branch landed after `w.to` and every assertion about it failed from the day
+  // after this suite was written. Same reason `addVersionRow` exists two blocks down.
+  await db.forWorkspace(ctx.workspaceId).run(
+    `UPDATE runs SET started_at = ?, ended_at = ? WHERE id = ? AND workspace_id = ?`,
+    [ago(8 * HOUR), ago(8 * HOUR), branchId, ctx.workspaceId],
+  );
 
   // A published version and an edit, the edit later undone.
   // INSERTED DIRECTLY rather than through `addVersion`, because the repository stamps `created_at`
@@ -163,10 +173,16 @@ console.log("\nnine sources, one chronology");
     latency_ms: 30, error: null, parent_step_id: null, started_at: ago(HOUR),
   } as Step);
 
-  // And a member event.
+  // And a member event. `appendAudit` stamps `created_at` from the clock too, so it gets the same
+  // correction for the same reason — an audit row written now is outside a window that ends at a
+  // fixed NOW in the past.
   await identity.appendAudit(ctx, {
     action: "member.added", targetType: "user", targetId: user.user.id, actorUserId: user.user.id,
   });
+  await db.forWorkspace(ctx.workspaceId).run(
+    `UPDATE audit_log SET created_at = ? WHERE workspace_id = ? AND action = 'member.added'`,
+    [ago(30 * MINUTE), ctx.workspaceId],
+  );
 
   const page = await store.feed(ctx, w);
   const kinds = new Set(page.rows.map((r) => r.kind));
@@ -270,6 +286,12 @@ console.log("\nfiltering narrows by dropping whole sources, not by hiding rows")
   await makeRun(ctx, "beta", ago(4 * HOUR));
   await addVersionRow(ctx, a1.id, 2, "edit", "tidy", user.user.id, ago(3 * HOUR));
   await identity.appendAudit(ctx, { action: "member.added", targetType: "user", targetId: user.user.id, actorUserId: user.user.id });
+  // Pinned into the window, for the reason the union block above states at length: `appendAudit`
+  // stamps the clock, and this suite's window ends at a fixed NOW in the past.
+  await db.forWorkspace(ctx.workspaceId).run(
+    `UPDATE audit_log SET created_at = ? WHERE workspace_id = ? AND action = 'member.added'`,
+    [ago(2 * HOUR), ctx.workspaceId],
+  );
 
   const byKind = await store.feed(ctx, w, { kinds: ["run"] });
   check("a kind filter returns only that kind", byKind.rows.every((r) => r.kind === "run"));
