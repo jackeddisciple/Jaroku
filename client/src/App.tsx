@@ -7,6 +7,8 @@ import { CommandPalette } from "./components/CommandPalette.tsx";
 import { TopBar } from "./components/TopBar.tsx";
 import { CodeOverlay } from "./components/CodeOverlay.tsx";
 import { SignIn } from "./components/SignIn.tsx";
+import { FirstRun } from "./components/firstrun/FirstRun.tsx";
+import { firstRunOnScreen, useFirstRunStore } from "./store/firstRunStore.ts";
 import { McpConfirmModal } from "./components/McpConfirmModal.tsx";
 import { FullScreenView } from "./components/FullScreenView.tsx";
 import { AdminModeBanner } from "./components/AdminModeBanner.tsx";
@@ -62,6 +64,12 @@ export function App() {
   // every session after the first — see components/onboarding/useOnboarding.ts.
   const { phase, mountSidebar, mountRightPanel } = useOnboarding();
 
+  // The MACHINE's first run, which is a different question from the person's — see §1.3, and the
+  // gate below where it is spent. Both selectors read the same store; `firstRunOnScreen` is what
+  // decides, in one place, so two readers cannot answer differently.
+  const firstRunProgress = useFirstRunStore((s) => s.progress);
+  const firstRunNeeded = useFirstRunStore(firstRunOnScreen);
+
   useEffect(() => {
     startSocket();
   }, []);
@@ -107,10 +115,27 @@ export function App() {
     });
   }, [sessionStatus]);
 
-  // BEFORE EVERYTHING, INCLUDING ONBOARDING. There is no session, so there is no workspace,
-  // and every screen below this line — the welcome step included — is a view of one
-  // workspace's data. Rendering any of it would mean showing a first-run flow to somebody who
-  // may well have been using the product for months in an account they are not signed into.
+  // BEFORE THE SIGN-IN SCREEN, AND THEREFORE BEFORE EVERYTHING. §1.3's trigger matrix is two
+  // columns because these are two different events with two different triggers: first-run is about
+  // the MACHINE and is gated by a marker file on this disk, account onboarding is about the PERSON
+  // and is gated by a flag on the server. Conflating them is how re-installing the app re-runs
+  // account onboarding, and how a returning user on a second device is walked through a welcome
+  // screen for a product they use daily.
+  //
+  // It outranks sign-in because there is nothing to sign in TO yet: on this launch the backend is
+  // still unpacking, and a sign-in form in front of a server that is not listening is a form whose
+  // only outcome is a spinner. A `jaroku://` link that arrives during it is queued rather than
+  // dropped — §4.5, and lib/authLink.ts is where it waits.
+  //
+  // FALSE IN A BROWSER FOREVER, so `npm run dev` in a tab renders exactly what it always did.
+  if (firstRunNeeded) {
+    return <FirstRun progress={firstRunProgress!} onDone={() => useFirstRunStore.getState().dismiss()} />;
+  }
+
+  // Then the session. There is no workspace without one, and every screen below this line — the
+  // welcome step included — is a view of one workspace's data. Rendering any of it would mean
+  // showing a first-run flow to somebody who may well have been using the product for months in an
+  // account they are not signed into.
   //
   // Only `signed_out` gets this. `connecting` deliberately does not: a dropped network must
   // not throw a sign-in form over a working session, which is precisely the "retry vs stop"

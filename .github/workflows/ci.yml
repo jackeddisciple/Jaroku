@@ -637,6 +637,16 @@ jobs:
           # the moment one can, and exactly once — a ticket redelivered after a failed exchange is
           # a "that link expired" somebody sees twice for one click.
           npm run test:auth-link
+          # WHAT A HOST MAY SAY ABOUT SETTING THE MACHINE UP, and every assertion in it is a
+          # refusal — the same shape `test:host-backend` takes and for the same reason. A mismatch
+          # here does not error: the client refuses a progress whose steps it does not recognise,
+          # deliberately, so a step renamed in Rust alone produces a setup screen that never
+          # appears and a launch that looks exactly like the freeze this feature was written to
+          # end. The subtlest assertion is that `required` is decided ONCE from the marker file —
+          # the four steps run on every launch, and a page that rendered them because one was
+          # briefly in flight would greet a returning user with a setup flow for a machine they set
+          # up months ago.
+          npm run test:auth-first-run
           # WHERE THE SESSION TOKEN GOES, and the assertion the suite exists for is where it does
           # NOT. Under a host with an OS credential store the token must never touch
           # localStorage, and a mirror is the easy implementation that leaves the protection

@@ -7,6 +7,21 @@
 @import "@fontsource/jetbrains-mono/400.css";
 @import "@fontsource/jetbrains-mono/500.css";
 @import "@fontsource/jetbrains-mono/600.css";
+/* Display. THE THIRD FAMILY, AND IT HAS EXACTLY ONE HOME: the screens somebody sees before they
+   have a session — first-run, sign-in, and account onboarding. Nothing inside the app uses it, and
+   `font-serif` appearing on a panel is a review comment rather than a style choice.
+
+   Why a third family at all, when the type section of the design system argues for two. Those
+   screens are the only ones in this product that are a PAGE rather than an instrument: one line of
+   type is the whole of the hierarchy, there is no data on them, and Inter at 30px is the same
+   voice the status bar speaks in. A display serif is what makes the first thing somebody sees read
+   as a product rather than as a dialog — and confining it to the pre-session surface is what keeps
+   that from becoming decoration everywhere else.
+
+   Two weights, not three. These headings are one size and one weight per screen; a ladder here
+   would be a ladder nothing climbs, and every unused weight is a font file in the bundle. */
+@import "@fontsource/newsreader/400.css";
+@import "@fontsource/newsreader/500.css";
 
 @tailwind base;
 @tailwind components;

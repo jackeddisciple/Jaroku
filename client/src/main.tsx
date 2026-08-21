@@ -6,6 +6,7 @@ import { onDeepLink } from "./lib/deepLink.ts";
 import { offerAuthCallback, readAuthCallback } from "./lib/authLink.ts";
 import { onBackendStatus } from "./lib/hostBackend.ts";
 import { useHostStore } from "./store/hostStore.ts";
+import { useFirstRunStore } from "./store/firstRunStore.ts";
 import { useUiStore } from "./store/uiStore.ts";
 import { hydrateSession } from "./lib/auth.ts";
 
@@ -77,6 +78,13 @@ onBackendStatus((status) => {
   useHostStore.getState().setStatus(status);
   console.log(`[jaroku] backend ${status.phase}${status.message ? `: ${status.message}` : ""}`);
 });
+
+// AND WHETHER THIS MACHINE IS SET UP AT ALL, which is the question underneath that one on exactly
+// one launch per install. Subscribed here for both of the reasons above and a third of its own: the
+// store holds "the person has pressed past the ready screen", and a subscription that lived inside
+// a component would re-read a progress saying `required: true` on every remount and put the setup
+// screen back over an app somebody had already been let into. See store/firstRunStore.ts.
+useFirstRunStore.getState().watch();
 
 // THE SESSION IS LOADED BEFORE THE FIRST RENDER, and this is the only reason `main.tsx` is not
 // three lines any more.

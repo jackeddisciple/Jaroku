@@ -171,6 +171,80 @@ pub fn open_checkout(app: AppHandle, url: String) -> Result<(), String> {
         return Err("that is not a payment page this app will open".into());
     }
     let _ = &app;
+    launch(url)
+}
+
+// --- the other hop out, which authentication needs ------------------------------------------------
+//
+// SIGN-IN LEAVES THE APP TOO, and for a stricter reason than the payment step does. Google will not
+// accept `jaroku://` as a redirect URI and will not accept an embedded webview as a user agent at
+// all — its own policy refuses OAuth from one, because a webview is a browser the application can
+// read the contents of, which is precisely what an identity flow must not permit. So §3.2 step 2
+// says "the system browser (not an embedded webview)", and this is the call that obeys it.
+//
+// AND THE SAME THREE LINKS EVERY PRE-SESSION SCREEN CARRIES. Terms, privacy, and the "where do I
+// find this?" a provider key screen offers. An `<a href>` in a packaged webview navigates the
+// APPLICATION away with no route back — the frontend is served from `tauri://localhost` and no web
+// origin can return to one — so every outbound link on those screens comes through here.
+//
+// A SECOND LIST RATHER THAN A LONGER FIRST ONE. `ALLOWED_HOSTS` above is what this application will
+// let somebody TYPE A CARD NUMBER INTO, and it must not quietly grow to include a documentation
+// site because a sign-in screen needed a link to a privacy policy. Two lists, two commands, two
+// reasons, and neither can widen the other.
+
+/// Hosts a non-payment page may be opened at.
+///
+/// EVERY ENTRY IS SOMEWHERE THIS PRODUCT'S OWN SCREENS LINK TO, and there is no wildcard. Four
+/// groups, and each one is a screen:
+///
+///   `jaroku.dev` and `docs.jaroku.dev` — terms, privacy, and §2.3's troubleshooting page.
+///   `auth.jaroku.dev`                  — the callback host, for the one case where somebody has to
+///                                        open a sign-in link by hand because the deep link did not
+///                                        fire.
+///   `accounts.google.com`              — §3.2's authorization endpoint. Google's own host, and the
+///                                        only OAuth provider this specification has.
+///   the three consoles                 — §5.1 step 3's "Where do I find this?", per provider.
+const ALLOWED_EXTERNAL: [&str; 7] = [
+    "jaroku.dev",
+    "docs.jaroku.dev",
+    "auth.jaroku.dev",
+    "accounts.google.com",
+    "console.anthropic.com",
+    "platform.openai.com",
+    "aistudio.google.com",
+];
+
+/// Whether this URL may be handed to the operating system as an ordinary page.
+///
+/// The same rule as `may_open` and a different list — https only, exact host match, never a suffix
+/// test. See the note on `may_open` for why `ends_with` is the oldest hole in this shape of check.
+pub fn may_open_external(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else { return false };
+    if parsed.scheme() != "https" {
+        return false;
+    }
+    parsed.host_str().is_some_and(|host| ALLOWED_EXTERNAL.contains(&host))
+}
+
+/// Open a documentation, legal or sign-in page in the user's own browser.
+#[tauri::command]
+pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
+    if !may_open_external(&url) {
+        // Not echoed into the error, for `open_checkout`'s reason: it came from outside this
+        // function and is about to be rendered in a webview. The log line has it.
+        logs::say(format!("refused to open a URL that is not on the external allowlist: {url}"));
+        return Err("that is not a page this app will open".into());
+    }
+    let _ = &app;
+    launch(url)
+}
+
+/// Hand a URL to the operating system, with one message for the one thing that can go wrong.
+///
+/// Shared by both commands so the failure a person sees does not depend on which list admitted the
+/// URL — a machine with no browser configured is the same machine in both cases, and two wordings
+/// for it would be two bug reports for one problem.
+fn launch(url: String) -> Result<(), String> {
     tauri_plugin_opener::open_url(url, None::<&str>).map_err(|err| {
         logs::say(format!("could not open the system browser: {err}"));
         "could not open your browser — copy the link and open it yourself".to_string()
@@ -213,6 +287,48 @@ mod tests {
         assert!(!may_open("javascript:alert(1)"));
         // And our own scheme, which would be the app asking the OS to reopen the app.
         assert!(!may_open("jaroku://billing/success"));
+    }
+
+    #[test]
+    fn the_external_list_admits_what_the_pre_session_screens_link_to() {
+        // Spelled as literals rather than read from ALLOWED_EXTERNAL, so the suite fails if
+        // somebody edits the constant — which would be editing what this app is willing to launch.
+        assert!(may_open_external("https://jaroku.dev/terms"));
+        assert!(may_open_external("https://jaroku.dev/privacy"));
+        assert!(may_open_external("https://docs.jaroku.dev/help/first-run"));
+        assert!(may_open_external("https://auth.jaroku.dev/magic?token=x"));
+        // §3.2 step 2: the authorization endpoint goes to the SYSTEM BROWSER, because Google's own
+        // policy refuses OAuth from an embedded webview.
+        assert!(may_open_external("https://accounts.google.com/o/oauth2/v2/auth?client_id=x"));
+        // §5.1 step 3's "Where do I find this?", per provider.
+        assert!(may_open_external("https://console.anthropic.com/settings/keys"));
+        assert!(may_open_external("https://platform.openai.com/api-keys"));
+        assert!(may_open_external("https://aistudio.google.com/app/apikey"));
+    }
+
+    #[test]
+    fn the_two_lists_cannot_widen_each_other() {
+        // THE WHOLE REASON THERE ARE TWO. The payment list is what this application will let
+        // somebody type a card number into; the external one is documentation and a sign-in
+        // redirect. Neither may admit the other's hosts, or the narrower list stops being one.
+        assert!(!may_open("https://jaroku.dev/terms"), "a docs page is not a payment page");
+        assert!(!may_open("https://accounts.google.com/o/oauth2/v2/auth"), "nor is an OAuth endpoint");
+        assert!(!may_open_external("https://checkout.stripe.com/c/pay/cs_test_a1b2c3"), "and a checkout is not a docs page");
+    }
+
+    #[test]
+    fn the_external_list_has_the_same_holes_closed_as_the_payment_one() {
+        // Every trick the payment list refuses, refused again — a second allowlist written by
+        // hand is a second chance to leave out the suffix check.
+        assert!(!may_open_external("https://jaroku.dev.evil.example/terms"));
+        assert!(!may_open_external("https://notjaroku.dev/terms"));
+        assert!(!may_open_external("https://accounts.google.com@evil.example/oauth"));
+        assert!(!may_open_external("http://jaroku.dev/terms"), "plain http is rewritable on the path");
+        assert!(!may_open_external("file:///etc/passwd"));
+        assert!(!may_open_external("javascript:alert(1)"));
+        assert!(!may_open_external("jaroku://auth/complete?ticket=x"), "our own scheme is not a web page");
+        assert!(!may_open_external(""));
+        assert!(!may_open_external("jaroku.dev"), "a bare host is not a URL");
     }
 
     #[test]

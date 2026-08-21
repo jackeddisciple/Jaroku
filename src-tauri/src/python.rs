@@ -34,8 +34,9 @@
 // bundle's convenience into a restriction.
 
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use tauri::{AppHandle, Manager};
 
@@ -152,40 +153,186 @@ pub fn environment() -> HashMap<String, String> {
     env
 }
 
-/// Build `~/.jaroku/venv` from the lock file, once.
+/// Where the bundled uv is, or `None` when this build carries no runtime.
 ///
-/// AN OPTIMISATION RATHER THAN A PREREQUISITE, which is why it runs after the backend is already
-/// up and why its failure is reported and not acted on. `uv run` syncs the project environment
-/// itself before it runs anything, so an agent started before this finishes still works — it just
-/// pays the build inside the first run instead of before it, and uv's own lock on the environment
-/// is what makes the two safe to overlap. Doing it here means the pause lands on a launch nobody
-/// is watching rather than on the first trace somebody is.
-pub fn warm(app_dir: &Path, env: &HashMap<String, String>) {
+/// Split out because three things need it now rather than one: the version probe, the sync, and
+/// the sync's own decision about whether there is anything to sync WITH. A fourth copy of
+/// `install.join("bin").join(if cfg!(windows) { "uv.exe" } else { "uv" })` is a fourth place that
+/// stops being true the day the layout moves.
+fn uv_binary() -> Option<PathBuf> {
+    let install = install_dir()?;
+    let uv = install.join("bin").join(if cfg!(windows) { "uv.exe" } else { "uv" });
+    uv.is_file().then_some(uv)
+}
+
+/// Which Python is going to run agents, proved by RUNNING IT.
+///
+/// §2.1's second step is "Python runtime detection", and the thing worth detecting is not that a
+/// file is present. A half-extracted interpreter is a file that is present; a bundle interrupted
+/// by a full disk leaves one, and so does an antivirus that quarantined a shared library out of
+/// the middle of it. Both pass `is_file()` and both fail the first agent run with a message about
+/// a missing DLL. So this spawns it and reads what it says.
+///
+/// THREE ANSWERS, AND THE MIDDLE ONE IS NOT A FAILURE:
+///
+///   `Ok(Some(version))`  a runtime is here and it starts. The string goes on the screen.
+///   `Ok(None)`           this build carries none, and none was configured. Everything except
+///                        running an agent works — which is the whole product up to and including
+///                        signing in — so holding somebody at a setup screen over it would be
+///                        refusing them a surface they have not reached yet. `ensure` already
+///                        takes exactly this position and says so.
+///   `Err(message)`       a runtime is here and it does NOT start. That is a broken install, it
+///                        will not fix itself, and it is worth stopping for.
+pub fn probe(env: &HashMap<String, String>) -> Result<Option<String>, String> {
     if tauri::is_dev() {
-        return;
+        // Development uses the developer's own toolchain, as `ensure` does and for its reason.
+        return Ok(None);
+    }
+    let Some(uv) = uv_binary() else { return Ok(None) };
+
+    // `uv python find` rather than `--version` on the interpreter directly, because the question
+    // is which interpreter UV will choose — and `UV_MANAGED_PYTHON` plus `UV_PYTHON_INSTALL_DIR`
+    // are what make that answer the bundled one. Asking the file we expect it to pick would prove
+    // the file starts and prove nothing about the choice.
+    let mut find = Command::new(&uv);
+    find.args(["python", "find"]);
+    for (key, value) in env {
+        find.env(key, value);
+    }
+    let found = find
+        .output()
+        .map_err(|e| format!("the bundled uv would not start: {e}"))?;
+    if !found.status.success() {
+        let detail = String::from_utf8_lossy(&found.stderr);
+        return Err(format!(
+            "the bundled Python runtime is on this machine but uv cannot use it: {}",
+            first_line(&detail).unwrap_or_else(|| format!("uv exited {}", found.status)),
+        ));
+    }
+    let interpreter = String::from_utf8_lossy(&found.stdout).trim().to_owned();
+    if interpreter.is_empty() {
+        return Err("uv found no Python interpreter to run agents with".into());
+    }
+
+    // AND NOW ACTUALLY START IT. Everything above proves uv can name a file.
+    let started = Command::new(&interpreter)
+        .arg("--version")
+        .output()
+        .map_err(|e| format!("the bundled Python interpreter would not start: {e}"))?;
+    if !started.status.success() {
+        return Err(format!("the bundled Python interpreter exited {}", started.status));
+    }
+    // `python --version` writes to stdout on 3.4+ and to stderr before it; both are read because
+    // the cost is one `or_else` and the alternative is a version that reads as empty on a runtime
+    // somebody pinned deliberately.
+    let spoken = String::from_utf8_lossy(&started.stdout);
+    let fallback = String::from_utf8_lossy(&started.stderr);
+    let text = if spoken.trim().is_empty() { fallback } else { spoken };
+    Ok(Some(
+        text.trim().trim_start_matches("Python").trim().to_owned(),
+    ))
+}
+
+/// Build `~/.jaroku/venv` from the lock file, reporting each line uv writes.
+///
+/// AN OPTIMISATION RATHER THAN A PREREQUISITE, AND STILL ONE. `uv run` syncs the project
+/// environment itself before it runs anything, so an agent started before this finishes still
+/// works — it just pays the build inside the first run instead of before it, and uv's own lock on
+/// the environment is what makes the two safe to overlap. What changed is who is told: §2.1 shows
+/// this step on screen with uv's output under it, so a launch that sits here for twenty seconds is
+/// visibly downloading `langgraph` rather than visibly stuck.
+///
+/// `on_line` IS CALLED FROM THIS THREAD, synchronously, as each line is read. That keeps the whole
+/// function blocking and single-threaded, which is what the caller wants — it is already inside a
+/// blocking task — and it means the screen's detail row is never ahead of or behind the process.
+///
+/// Returns the combined output on failure rather than a tidy message, because the caller has to
+/// look at it: telling an offline first launch apart from a full disk is done by reading what uv
+/// said, and a message this function had already summarised would have thrown that away.
+pub fn sync(
+    app_dir: &Path,
+    env: &HashMap<String, String>,
+    on_line: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    if tauri::is_dev() {
+        return Ok(());
     }
     let runtime = app_dir.join("runtime");
     if !runtime.join("uv.lock").is_file() {
-        return;
+        // Nothing pinned to install. Same position as `probe`'s `Ok(None)`: not a failure, because
+        // there is nothing here that could succeed.
+        return Ok(());
     }
-    let Some(install) = install_dir() else { return };
-    let uv = install.join("bin").join(if cfg!(windows) { "uv.exe" } else { "uv" });
-    if !uv.is_file() {
-        return;
-    }
+    let Some(uv) = uv_binary() else { return Ok(()) };
 
     // `--frozen`, so a launch can never silently re-resolve the lock file the release was built
     // and tested against. A resolution that differs from `uv.lock` is a different set of
     // dependencies than the one this build's Python was verified on, and doing that quietly on a
     // user's machine is how "it works on the release build" stops being a true sentence.
     let mut command = Command::new(uv);
-    command.args(["sync", "--frozen"]).current_dir(&runtime);
+    command
+        .args(["sync", "--frozen"])
+        .current_dir(&runtime)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     for (key, value) in env {
         command.env(key, value);
     }
-    match command.status() {
-        Ok(status) if status.success() => {}
-        Ok(status) => logs::say(format!("preparing the Python environment exited {status}")),
-        Err(err) => logs::say(format!("preparing the Python environment failed: {err}")),
+
+    let mut child = command.spawn().map_err(|e| format!("could not start uv: {e}"))?;
+    // BOTH PIPES, AND STDERR IS THE ONE THAT MATTERS. uv writes its progress — "Resolved 84
+    // packages", "Prepared 12 packages", "Installed langgraph" — to stderr, and its stdout is
+    // usually empty. Reading only stdout would produce a screen that says a step is running and
+    // never says anything else, which is the failure this whole module is about.
+    //
+    // Read serially rather than on two threads: stdout is drained first and is nearly always
+    // empty and immediately closed, so there is no deadlock to arrange around, and one thread
+    // keeps `on_line` free of any synchronisation it would otherwise need.
+    let mut collected = String::new();
+    if let Some(out) = child.stdout.take() {
+        drain(out, on_line, &mut collected);
     }
+    if let Some(err) = child.stderr.take() {
+        drain(err, on_line, &mut collected);
+    }
+
+    match child.wait() {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => {
+            logs::say(format!("preparing the Python environment exited {status}"));
+            Err(if collected.trim().is_empty() {
+                format!("preparing the Python environment exited {status}")
+            } else {
+                collected
+            })
+        }
+        Err(err) => Err(format!("preparing the Python environment failed: {err}")),
+    }
+}
+
+/// Read a pipe to its end, offering each non-empty line and keeping the whole of it.
+///
+/// The lines go to the screen and the whole goes to the caller, because the two are used for
+/// different things: one line is what somebody reads while they wait, and the whole is what tells
+/// an absent network apart from a full disk. Capped, because this string is held in memory and a
+/// `uv sync` that has decided to narrate every wheel in a large lock file should not be able to
+/// grow it without limit.
+fn drain(pipe: impl std::io::Read, on_line: &mut dyn FnMut(&str), collected: &mut String) {
+    const MAX: usize = 64 * 1024;
+    for line in BufReader::new(pipe).lines().map_while(Result::ok) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if collected.len() < MAX {
+            collected.push_str(trimmed);
+            collected.push('\n');
+        }
+        on_line(trimmed);
+    }
+}
+
+/// The first non-empty line of some output, for a message that goes on a screen.
+fn first_line(text: &str) -> Option<String> {
+    text.lines().map(str::trim).find(|l| !l.is_empty()).map(str::to_owned)
 }

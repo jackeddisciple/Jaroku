@@ -146,8 +146,16 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
  * account — it belongs to the MACHINE, and it is equally true a millisecond after a switch as a
  * millisecond before. Resetting it would blank a failure notice at the exact moment somebody was
  * reading one, and would do so on the switch that failure had just made impossible.
+ *
+ * `firstRunStore` is the fourth, on hostStore's argument taken one step further. Its subject is the
+ * machine itself — whether `~/.jaroku` has been set up — which is a fact about a DISK, decided once
+ * from a marker file before a session existed and unchanged by anything a workspace can do. It also
+ * holds one thing a reset would be actively harmful to: whether the person has pressed past the
+ * "your device is ready" screen. Clearing that on a workspace switch would put a first-run flow
+ * over a signed-in application, which is the exact conflation §1 spends its first section warning
+ * about — first-run is per DEVICE, account onboarding is per PERSON, and neither is per workspace.
  */
-export const NOT_WORKSPACE_SCOPED = ["sessionStore", "uiStore", "hostStore"] as const;
+export const NOT_WORKSPACE_SCOPED = ["sessionStore", "uiStore", "hostStore", "firstRunStore"] as const;
 
 /**
  * Empty every store that holds a workspace's data.

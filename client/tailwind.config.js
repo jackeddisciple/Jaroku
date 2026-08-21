@@ -27,6 +27,21 @@ export default {
         // links, focus rings. Never decoration, never a category — a blue on a non-interactive
         // badge is what makes an accent unusable for selection later.
         accent: "#6b8afd",
+        // THE PRE-SESSION SURFACE'S LINK COLOUR, and the one deliberate exception to the sentence
+        // above. It is used on first-run, sign-in and account onboarding, and nowhere else — a
+        // `text-ember` inside a panel is a review comment rather than a style choice.
+        //
+        // WHY AN EXCEPTION EXISTS AT ALL. `accent` is a SELECTION colour: it means "this is the row
+        // you are on", and it earns that meaning by never appearing on anything that is not
+        // selectable. The screens before a session have no rows, no tabs and nothing selected —
+        // their only interactive text is "Terms of Service", "Start over", "Where do I find this?"
+        // — so painting those in the selection blue would spend the one colour that says "here"
+        // on a screen where nothing is anywhere. Warm, because the alternative reading of a blue
+        // link on near-black is a hyperlink from 1996.
+        ember: "#e08a5c",
+        // Its hover. One step up in light rather than a hue shift, so a link answering the pointer
+        // reads as the same link rather than as a different kind of thing.
+        emberlit: "#eda17b",
         // Status colors — reserved exclusively for meaning, never decoration.
         ok: "#22c55e",
         err: "#ef4444",
@@ -89,6 +104,17 @@ export default {
           "SFMono-Regular",
           "Menlo",
           "monospace",
+        ],
+        // Display, and ONLY on the screens before there is a session — first-run, sign-in,
+        // account onboarding. See the note beside the @import in src/index.css for why a third
+        // family exists and why it is confined to that surface.
+        serif: [
+          "Newsreader",
+          "ui-serif",
+          "Georgia",
+          "Cambria",
+          "Times New Roman",
+          "serif",
         ],
       },
       keyframes: {

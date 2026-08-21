@@ -12,6 +12,7 @@
 
 mod clock;
 mod deeplink;
+mod firstrun;
 mod logs;
 mod marker;
 mod menu;
@@ -86,10 +87,15 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             marker::first_launch_state,
+            firstrun::first_run_progress,
+            firstrun::retry_first_run,
+            firstrun::quit_app,
+            firstrun::focus_window,
             status::backend_status,
             sidecar::restart_backend,
             deeplink::drain_deep_links,
             deeplink::open_checkout,
+        deeplink::open_external,
             secrets::secret_get,
             secrets::secret_set,
             secrets::secret_delete,
@@ -139,6 +145,14 @@ pub fn run() {
             // See menu.rs on why the Edit menu is load-bearing rather than conventional.
             #[cfg(target_os = "macos")]
             menu::install(app.handle())?;
+
+            // 1b2 — WHETHER THIS MACHINE HAS BEEN SET UP, read before the window and before any
+            // step that could change the answer. `Progress::required` is decided ONCE, from the
+            // marker file, because the steps themselves run on every launch — an upgrade
+            // re-extracts, `uv sync` re-syncs — and a page that rendered the setup screen because
+            // a step was briefly in flight would show a returning user a first launch for a
+            // machine they set up months ago. See firstrun.rs.
+            firstrun::init(app.handle());
 
             // 1c — THE `jaroku://` SCHEME, before the window rather than after it. A URL that
             // STARTED this application is delivered during startup, and the queue that catches
@@ -232,7 +246,11 @@ pub fn run() {
                     // is the one a refusal would prevent from opening.
                     logs::say(err);
                 }
-                logs::detail(format!("the Python runtime is ready after {:?}", began.elapsed()));
+                logs::detail(format!(
+                    "the Python runtime is ready after {:?} (in {})",
+                    began.elapsed(),
+                    firstrun::describe(&app_dir),
+                ));
 
                 // NOT a panic, and not a dialog. A shell that killed itself over a backend that
                 // would not start would be taking down the only surface capable of explaining
@@ -249,27 +267,47 @@ pub fn run() {
                     fail(&handle, err);
                 }
 
-                // THE MARKER, once the runtime is on disk and the checkpoint directory has been
-                // proved writable. Before the warm-up rather than after it, because the venv is
-                // rebuildable from what was just extracted and its absence costs a slow first run
-                // rather than a broken install — see marker.rs on what the file claims.
-                if let Err(err) = marker::mark(&handle, &app_dir) {
-                    logs::say(format!("this machine is not fully set up: {err}"));
-                }
-
                 // Whether a newer version exists, asked once and thirty seconds from now — see
                 // updater.rs on why it waits rather than racing the extraction and the backend
                 // for the same disk and network a first launch needs.
                 #[cfg(feature = "updater")]
                 updater::check_on_launch(&handle);
 
-                logs::detail(format!("startup finished after {:?}", began.elapsed()));
+                logs::detail(format!("the backend is up after {:?}", began.elapsed()));
 
-                // LAST, AND DELIBERATELY AFTER THE BACKEND. Building the virtualenv is the slow
-                // half of a first launch and the only half nothing needs immediately: `uv run`
-                // syncs the environment itself before it runs anything, so a run started while
-                // this is still going pays the build inside the run rather than failing.
-                tauri::async_runtime::spawn_blocking(move || python::warm(&app_dir, &env));
+                // AND THEN THE FOUR STEPS, INCLUDING THE MARKER, AFTER THE BACKEND IS ALREADY UP.
+                //
+                // THE ORDERING IS UNCHANGED AND THE MARKER MOVED. The virtualenv build was always
+                // last, deliberately, so the slow half of a first launch lands on a backend that
+                // is already listening rather than in front of the first trace somebody watches —
+                // that is still true. What moved is the marker, which used to be written BEFORE
+                // this on the reasoning that a venv is rebuildable and its absence costs a slow
+                // first run rather than a broken install. Sound, and not what §2.2 asks for: "the
+                // marker file is NOT written on incomplete first-run". A marker written over a
+                // failed dependency install is a machine that never shows the screen that could
+                // explain itself again. So `firstrun::run` writes it, once, at the end, and only
+                // if all four steps actually succeeded.
+                //
+                // HELD FIRST, so the Retry button on the failure screen has the same inputs this
+                // call does and does not need `lib.rs` to still be holding them.
+                let inputs = firstrun::Inputs { app_dir, env };
+                firstrun::hold(&handle, inputs.clone());
+                let required = firstrun::required(&handle);
+                let done = tauri::async_runtime::spawn_blocking({
+                    let handle = handle.clone();
+                    move || firstrun::run(&handle, &inputs)
+                })
+                .await
+                .unwrap_or(false);
+                if !done && !required {
+                    // A LAUNCH WITH NOBODY WATCHING. The marker is already there, so the page is
+                    // showing the app rather than a setup screen, and a step that failed here is
+                    // an upgrade that could not re-sync rather than an install that never
+                    // happened. Logged, and nothing is put on screen: the product works, and the
+                    // one thing that does not — running an agent — says so where it is refused.
+                    logs::say("a launch step failed on an already-initialised machine; agent runs may be slow or fail");
+                }
+                logs::detail(format!("startup finished after {:?}", began.elapsed()));
             });
 
             Ok(())
@@ -303,9 +341,19 @@ pub fn run() {
 fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder.plugin(tauri_plugin_updater::Builder::new().build()).invoke_handler(tauri::generate_handler![
         marker::first_launch_state,
+        firstrun::first_run_progress,
+        firstrun::retry_first_run,
+        firstrun::quit_app,
+        firstrun::focus_window,
         status::backend_status,
         sidecar::restart_backend,
         deeplink::drain_deep_links,
+        // ABSENT FROM THIS LIST UNTIL NOW, which is the whole reason the contract suite asserts
+        // both lists rather than one. A build with `--features updater` is the build that ships,
+        // and it had no `open_checkout` — so the upgrade button in that build would have refused
+        // to open a payment page, in the only configuration anybody pays money in.
+        deeplink::open_checkout,
+        deeplink::open_external,
         secrets::secret_get,
         secrets::secret_set,
         secrets::secret_delete,
