@@ -24,7 +24,8 @@ import { exportKey, agentStagingKey, workspacePrefix } from "../storage/keys.ts"
 import { FileCheckpointStore } from "../checkpoints/store.ts";
 import { PLANS } from "../billing/plans.ts";
 import {
-  RETENTION_KEPT_TABLES, RETENTION_SWEPT_TABLES, RetentionSweeper, STAGING_MAX_AGE_MS, describeSweep,
+  RETENTION_KEPT_TABLES, RETENTION_SWEPT_TABLES, RetentionSweeper, STAGING_MAX_AGE_MS, deleted,
+  describeSweep, type WorkspaceSweep,
 } from "./retention.ts";
 
 let failures = 0;
@@ -147,6 +148,9 @@ for (const [kind, ref] of [
   );
 }
 
+/** What the sweep wrote down, in the order it wrote it. The audit trail, captured. */
+const audited: { workspaceId: string; sweep: WorkspaceSweep }[] = [];
+
 const sweeper = new RetentionSweeper({
   db,
   workspaces: async () => [
@@ -156,6 +160,7 @@ const sweeper = new RetentionSweeper({
   overridesFor: async () => ({}),
   checkpoints,
   objects,
+  audit: (ctx, sweep) => { audited.push({ workspaceId: ctx.workspaceId, sweep }); },
   log: () => {},
   now: () => NOW,
 });
@@ -281,6 +286,42 @@ console.log("\nevery workspace-scoped table is swept or explicitly kept");
   check(
     RETENTION_SWEPT_TABLES.includes("thread_items"),
     "...and the join table added by 044 is on the swept side of it",
+  );
+}
+
+// --- what a sweep wrote down --------------------------------------------------------------------
+//
+// THE QUESTION THIS ANSWERS IS ASKED MONTHS LATER: "where did my trace from March go". A sweep is
+// the one scheduled job in this product that deletes somebody's work on purpose with no undo, and
+// without a row nobody can tell a correct sweep from an early one. `audit_log` is the table
+// retention itself exempts, which is exactly what makes it the right place to keep this.
+
+console.log("\nthe sweep records what it took");
+{
+  const freeAudit = audited.find((a) => a.workspaceId === free.workspaceId);
+  check(freeAudit !== undefined, "the workspace that lost rows has an audit entry");
+  check(
+    freeAudit?.sweep.runsDeleted === freeSweep.runsDeleted,
+    "...and its figures are the sweep's own rather than a second count",
+  );
+  check(
+    freeAudit?.sweep.retentionDays === PLANS.free.retentionDays,
+    "...including the window it was applying, which is the number somebody will ask about",
+  );
+
+  // NOTHING IS WRITTEN FOR A SWEEP THAT TOOK NOTHING. A nightly row per workspace saying zero is a
+  // log nobody can read: the one entry that matters would be lost in a wall of them.
+  check(deleted(teamSweep) === 0, "the workspace on the longer plan lost nothing");
+  check(
+    !audited.some((a) => a.workspaceId === team.workspaceId),
+    "...so it writes no row at all, rather than a nightly row saying zero",
+  );
+
+  // And the helper agrees with the sweep it describes, or the condition above is guarding on a
+  // different number from the one the audit reports.
+  check(
+    deleted(freeSweep) > freeSweep.runsDeleted,
+    "`deleted` counts every table a sweep touches, not only runs",
   );
 }
 

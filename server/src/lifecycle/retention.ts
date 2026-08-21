@@ -75,6 +75,20 @@ export interface RetentionDeps {
   overridesFor: (ctx: TenantContext) => Promise<Record<string, unknown>>;
   checkpoints: CheckpointStore;
   objects: ObjectStore;
+  /**
+   * Record what a sweep took, in the log that outlives the rows it took.
+   *
+   * WHY THIS IS NOT OPTIONAL POLISH. A sweep is the one scheduled job in this product that DELETES
+   * a user's work, on purpose, with no undo — and the question it provokes months later is always
+   * the same: "where did my trace from March go". Without a row, the honest answer is that nobody
+   * can tell whether it was swept correctly, swept early, or never existed. `audit_log` is the one
+   * table retention itself exempts (see RETENTION_KEPT_TABLES), which is exactly what makes it the
+   * right place to write this down.
+   *
+   * A CALLBACK RATHER THAN THE REPOSITORY, so this file keeps importing no repository and the
+   * sweeper stays constructible in a suite that has no identity layer.
+   */
+  audit?: (ctx: TenantContext, sweep: WorkspaceSweep) => Promise<void> | void;
   log?: (line: string) => void;
   now?: () => number;
 }
@@ -175,6 +189,12 @@ export const RETENTION_KEPT_TABLES: Record<string, string> = {
   threads: "§3.4: a thread is archived, never deleted. test:thread-archive audits the whole server for a delete path, and this would be it",
 };
 
+/** How many rows a sweep actually took, across every table it touches. */
+export function deleted(sweep: WorkspaceSweep): number {
+  return sweep.runsDeleted + sweep.stepsDeleted + sweep.checkpointsSwept + sweep.exportsDeleted +
+    sweep.stagingDeleted + sweep.threadItemsDeleted + sweep.inboxItemsDeleted;
+}
+
 export class RetentionSweeper {
   private log: (line: string) => void;
   private now: () => number;
@@ -197,7 +217,13 @@ export class RetentionSweeper {
       const limits = limitsFor(ws.plan, overrides);
       longestDays = Math.max(longestDays, limits.retentionDays);
       try {
-        report.workspaces.push(await this.sweepWorkspace(ctx, limits.retentionDays));
+        const swept = await this.sweepWorkspace(ctx, limits.retentionDays);
+        report.workspaces.push(swept);
+        // WRITTEN ONLY WHEN SOMETHING WENT. A nightly row per workspace saying nothing was deleted
+        // is a log nobody can read: the audit page would be a wall of empty sweeps, and the one
+        // entry that matters would be somewhere in it. A sweep that took nothing is fully described
+        // by the absence of a row.
+        if (deleted(swept) > 0) await this.deps.audit?.(ctx, swept);
       } catch (err) {
         // One workspace's failure must not stop the others. A sweeper that gives up on the first
         // error is a sweeper that stops running entirely the week somebody's object store has a

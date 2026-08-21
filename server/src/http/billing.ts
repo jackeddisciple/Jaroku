@@ -38,6 +38,16 @@ export interface BillingRoutesDeps {
   /** Tell a workspace something happened to its subscription. Fan-out is the caller's business. */
   notify?: (ctx: TenantContext, e: { kind: "attention" | "plan"; plan: string; status: string }) => void;
   /**
+   * The workspace's TIER actually moved, which is a narrower fact than `notify`'s.
+   *
+   * `notify` fires for anything worth telling somebody about, including a failed renewal that moves
+   * nothing. This fires only when `workspaces.plan` changed, because what hangs off it is a
+   * RETENTION SWEEP: a downgrade shortens the window a workspace's history is kept for, and until
+   * something sweeps, the days between the old window and the new one are still there to be read.
+   * Firing it on a dunning notice would sweep a workspace whose plan had not moved at all.
+   */
+  onTierChanged?: (ctx: TenantContext, plan: string) => void;
+  /**
    * A paid workspace's month has turned over, as of the instant the provider says it did.
    *
    * A CALLBACK BECAUSE THIS FILE DOES NOT DECIDE WHAT A PERIOD MEANS. `billingPeriod()` in
@@ -317,6 +327,9 @@ async function handleEvent(
       if (result.planChanged || result.attention) {
         deps.notify?.(ctx, { kind: result.attention ? "attention" : "plan", plan: result.plan, status });
       }
+      // AFTER the plan is committed, never before: a sweep that ran against the old tier would
+      // apply the window the workspace is leaving. Only on an actual move — see `onTierChanged`.
+      if (result.planChanged) deps.onTierChanged?.(ctx, result.plan);
       return `${status}${result.planChanged ? ` — plan now ${result.plan}` : ""}`;
     }
 

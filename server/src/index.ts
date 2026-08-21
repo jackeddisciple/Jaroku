@@ -28,7 +28,7 @@ import {
 } from "./activity/payload.ts";
 import { comparable, isActivityRange, resolveWindow, type Window } from "./activity/range.ts";
 import { describePartitions, ensurePartitions } from "./lifecycle/partitions.ts";
-import { RetentionSweeper, describeSweep } from "./lifecycle/retention.ts";
+import { RetentionSweeper, describeSweep, deleted as sweptRows } from "./lifecycle/retention.ts";
 import { openDb } from "./db/open.ts";
 import { newRequestId, systemContext, systemContextFor, type TenantContext } from "./db/tenant.ts";
 import { EvalStore, type Rubric, type RubricCriterion } from "./evalStore.ts";
@@ -211,7 +211,7 @@ import { connectorRunEnv } from "./oauth/injection.ts";
 import { ConnectorSecrets } from "./connectorSecrets.ts";
 import { buildEgressPolicy, EgressPolicyError, type EgressPolicy } from "./sandbox/egressPolicy.ts";
 import { BillingRepository } from "./db/repositories/billing.ts";
-import { assertPlanRegistry, planFor } from "./billing/plans.ts";
+import { assertPlanRegistry, limitsFor, planFor } from "./billing/plans.ts";
 import { UsageMeter, usageKey, type Payer } from "./billing/usage.ts";
 import { SAMPLE_INTERVAL_MS, sampleStorage } from "./billing/storage.ts";
 import { Balances } from "./billing/balances.ts";
@@ -1419,6 +1419,31 @@ const retention = new RetentionSweeper({
   overridesFor: async (ctx) => (await billing.balance(ctx)).limit_overrides,
   checkpoints,
   objects,
+  // WHAT A SWEEP TOOK, in the one table retention itself exempts. The question this answers is
+  // asked months later and always the same way — "where did my trace from March go" — and without
+  // a row nobody can tell a correct sweep from an early one. Written per workspace and only when
+  // something actually went, so the audit page is not a nightly wall of empty passes.
+  audit: async (ctx, sweep) => {
+    await identityRepo.appendAudit(ctx, {
+      workspaceId: ctx.workspaceId,
+      // No actor. A sweep is the system acting on a promise the plan made, not a person acting —
+      // and a null actor is how every other automatic write in this table says so.
+      actorUserId: null,
+      action: "retention.swept",
+      targetType: "workspace",
+      targetId: ctx.workspaceId,
+      metadata: {
+        retentionDays: sweep.retentionDays,
+        runs: sweep.runsDeleted,
+        steps: sweep.stepsDeleted,
+        checkpoints: sweep.checkpointsSwept,
+        exports: sweep.exportsDeleted,
+        staging: sweep.stagingDeleted,
+        threadItems: sweep.threadItemsDeleted,
+        inboxItems: sweep.inboxItemsDeleted,
+      },
+    });
+  },
   log: (line) => console.log(line),
 });
 const sweepRetention = (): void => {
@@ -1431,6 +1456,40 @@ const sweepRetention = (): void => {
     .catch((err) => console.error("[retention] sweep failed:", (err as Error)?.message ?? err));
 };
 setInterval(sweepRetention, 24 * 3_600_000).unref();
+
+/**
+ * Sweep ONE workspace now, because its tier just moved.
+ *
+ * WHY A TIER CHANGE CANNOT WAIT FOR TONIGHT. Retention is a plan promise, and a downgrade shortens
+ * it: a workspace that drops from Pro to Free goes from ninety days of history to seven, and until
+ * something sweeps, the eighty-three days in between are still there to be read. That is the
+ * specification's own reason for asking that a tier change re-run within the hour — a limit that
+ * only takes effect at 3am is a limit the product does not actually have during the day.
+ *
+ * AND AN UPGRADE RUNS IT TOO, which costs nothing and is not pointless: it is the pass that finds
+ * nothing, writes no audit row, and confirms the window widened rather than narrowed. Branching on
+ * the direction would mean deciding which way the retention moved, which is a second place that has
+ * to know what a plan means.
+ *
+ * FLOATING AND CAUGHT. This is called from a webhook handler that has already committed the plan
+ * change; a sweep that failed must not turn a successful upgrade into a 500 the provider retries.
+ */
+const sweepWorkspaceNow = (ctx: TenantContext): void => {
+  void (async () => {
+    const workspace = await identityRepo.workspaceById(ctx, ctx.workspaceId);
+    const overrides = (await billing.balance(ctx)).limit_overrides;
+    const limits = limitsFor(workspace?.plan, overrides);
+    const swept = await retention.sweepWorkspace(ctx, limits.retentionDays);
+    if (sweptRows(swept) > 0) {
+      console.log(
+        `[retention] ${ctx.workspaceId} swept on a tier change to ${workspace?.plan ?? "free"} — ` +
+        `${swept.runsDeleted} run(s), ${swept.stepsDeleted} step(s)`,
+      );
+    }
+  })().catch((err) =>
+    console.error("[retention] tier-change sweep failed:", (err as Error)?.message ?? err),
+  );
+};
 
 // --- the Inbox reconciler ----------------------------------------------------------------
 //
@@ -2345,6 +2404,12 @@ for (const route of billingRoutes({
   // definition of a period, and today the answer is simply logged: `billingPeriod()` is the one
   // function that decides where a month starts, and it reads the calendar rather than a stored
   // marker, so there is nothing to write down.
+  // A DOWNGRADE SHORTENS RETENTION, AND THE DIFFERENCE IS READABLE UNTIL SOMETHING SWEEPS. Pro
+  // keeps ninety days and Free keeps seven, so a workspace that drops between them has eighty-three
+  // days of history that its plan no longer covers — and waiting for tonight's pass means the
+  // limit is one the product does not actually have during the day. §5.4 asks for within the hour;
+  // this is immediately, which is strictly better and no harder.
+  onTierChanged: (ctx) => sweepWorkspaceNow(ctx),
   onPeriodRollover: (ctx, periodStart) => {
     console.log(`[billing] ${ctx.workspaceId} renewed; period from ${periodStart ?? "unstated"}`);
   },

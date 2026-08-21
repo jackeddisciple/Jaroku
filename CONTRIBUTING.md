@@ -83,6 +83,7 @@ The shortest list, with the tests that defend them:
 | The edge and the application exempt the same paths | `test:edge-rules` |
 | Nothing automatic suspends a workspace; a human's decision does not lapse | `test:enforcement` |
 | Retention is per workspace, and a plan's window is kept to the day | `test:retention`, `test:partitions` |
+| A sweep that deleted something says so in `audit_log`, and one that deleted nothing stays silent | `test:retention` |
 | An export contains no credential, and no table is silently omitted from one | `test:workspace-export` |
 | Deleting a workspace leaves every other workspace's rows untouched | `test:deletion` |
 | A registered secret value cannot reach any log sink | `test:log-redaction` |
