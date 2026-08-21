@@ -38,7 +38,20 @@ export interface StripeConfig {
   secretKey?: string;
   /** `whsec_…`. The webhook's whole authentication — see the header. */
   webhookSecret?: string;
-  /** Where a completed checkout sends the browser. */
+  /**
+   * Where a completed checkout sends the BROWSER — and it is a browser, which is the whole reason
+   * these are configured rather than derived.
+   *
+   * NEITHER MAY BE AN APP-RELATIVE PATH, and on a desktop app neither may be a `jaroku://` URL
+   * either. Stripe redirects a real browser to a real web page; a custom scheme is not something a
+   * payment provider will accept as a success_url, and `/billing/success` is a route no external
+   * redirect can reach because the app is not served over HTTP at all. So both point at
+   * Jaroku-owned pages (see `web/checkout/`) whose only job is to hop to the deep link, and
+   * `checkoutUrlIsExternal` below is what stops a well-meaning edit from breaking that.
+   *
+   * ON THEIR OWN SUBDOMAIN, away from the auth callbacks: a misconfigured auth callback then cannot
+   * intercept a payment redirect, and vice versa. Cheap to arrange, and the isolation is the point.
+   */
   successUrl?: string;
   cancelUrl?: string;
   /** Overridable so a suite can point at a fixture server rather than at Stripe. */
@@ -58,6 +71,27 @@ export function stripeConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Strip
 /** Whether payments are configured at all. Absent is the default and the local path. */
 export function paymentsConfigured(cfg: StripeConfig): boolean {
   return Boolean(cfg.secretKey && cfg.webhookSecret);
+}
+
+/**
+ * Whether a configured return URL is one a browser can actually be sent to.
+ *
+ * THREE WAYS TO GET THIS WRONG, and all three look plausible in a config file. A `jaroku://` URL is
+ * refused by Stripe outright. An app-relative path — `/billing/success` — is a route that exists
+ * only inside a webview and cannot be reached by an external redirect at all. And a plain-http URL
+ * is a payment confirmation over a channel anybody on the path can rewrite.
+ *
+ * Checked at the point a checkout is created rather than at boot, because the config is read per
+ * request — a deployment that fixes its URL should not need a restart, and one that breaks it
+ * should find out from the first checkout rather than from a customer.
+ */
+export function checkoutUrlIsExternal(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    return new URL(url).protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 export type SignatureVerdict =
@@ -136,6 +170,29 @@ export interface CheckoutRequest {
   customerEmail?: string | null;
   /** Reuse the customer Stripe already knows, when there is one. */
   externalCustomerId?: string | null;
+  /**
+   * Seats, for a per-user price. One unless the caller says otherwise.
+   *
+   * THE QUANTITY ON THE LINE ITEM, which is how a per-seat plan is priced — not a separate product
+   * and not a number we multiply ourselves. Stripe computes the total, prorates a mid-cycle change,
+   * and renders the arithmetic on the invoice, which is three things worth not reimplementing.
+   */
+  seats?: number;
+}
+
+/**
+ * A seat count Stripe will accept, or one.
+ *
+ * CLAMPED HERE RATHER THAN TRUSTED, because this number reaches a payment provider and comes from a
+ * request body. A fractional quantity is a 400 from Stripe with a message about `line_items`; a
+ * negative or enormous one is somebody trying something. The floor is one and the ceiling is the
+ * largest workspace any tier allows — above that is an Enterprise conversation rather than a bigger
+ * number, so there is no legitimate checkout for it.
+ */
+export function seatQuantity(requested: unknown): number {
+  const n = typeof requested === "number" ? Math.trunc(requested) : Number.NaN;
+  if (!Number.isFinite(n)) return 1;
+  return Math.max(1, Math.min(20, n));
 }
 
 export interface CheckoutSession {
@@ -164,12 +221,21 @@ export async function createCheckoutSession(
   const body = new URLSearchParams();
   body.set("mode", "subscription");
   body.set("line_items[0][price]", req.priceId);
-  body.set("line_items[0][quantity]", "1");
+  body.set("line_items[0][quantity]", String(seatQuantity(req.seats)));
   body.set("client_reference_id", req.workspaceId);
   body.set("metadata[workspace_id]", req.workspaceId);
   body.set("metadata[plan_id]", req.planId);
   body.set("subscription_data[metadata][workspace_id]", req.workspaceId);
   body.set("subscription_data[metadata][plan_id]", req.planId);
+  // REFUSED HERE RATHER THAN PASSED ON. Stripe would reject a `jaroku://` success_url with a
+  // message about the parameter, and would ACCEPT an `http://` one — so leaving this to the
+  // provider catches one of the two mistakes and ships the other.
+  if (cfg.successUrl && !checkoutUrlIsExternal(cfg.successUrl)) {
+    throw new Error("STRIPE_SUCCESS_URL must be an https page a browser can reach, not an app route");
+  }
+  if (cfg.cancelUrl && !checkoutUrlIsExternal(cfg.cancelUrl)) {
+    throw new Error("STRIPE_CANCEL_URL must be an https page a browser can reach, not an app route");
+  }
   if (cfg.successUrl) body.set("success_url", cfg.successUrl);
   if (cfg.cancelUrl) body.set("cancel_url", cfg.cancelUrl);
   if (req.externalCustomerId) body.set("customer", req.externalCustomerId);
@@ -183,7 +249,13 @@ export async function createCheckoutSession(
       // Stripe's own idempotency: a retried checkout for the same workspace and plan within 24
       // hours returns the SAME session rather than a second one. Without it a double-clicked
       // Upgrade button is two checkout sessions and, if both are completed, two subscriptions.
-      "idempotency-key": `checkout:${req.workspaceId}:${req.priceId}`,
+      //
+      // THE SEAT COUNT IS PART OF THE KEY, and leaving it out would have been a quiet bug rather
+      // than a missing feature: Stripe returns the CACHED session for a repeated key, so somebody
+      // who started a Team checkout at two seats, went back, and chose five would have been sent
+      // to the two-seat page again — with the right number on our screen and the wrong one on the
+      // invoice. The key has to name everything that changes what is being bought.
+      "idempotency-key": `checkout:${req.workspaceId}:${req.priceId}:${seatQuantity(req.seats)}`,
     },
     body: body.toString(),
     signal: AbortSignal.timeout(15_000),

@@ -814,7 +814,11 @@ export class BillingRepository {
       externalCustomerId?: string | null;
       externalSubscriptionId: string;
       /** Omitted keeps what is stored, for the same reason. An invoice carries no period. */
+      /** Omitted keeps what is stored, for the same reason. An invoice carries no period start. */
+      currentPeriodStart?: string | null;
       currentPeriodEnd?: string | null;
+      /** Omitted keeps what is stored. Most events carry no seat count, and a default would erase one. */
+      seatCount?: number | null;
       /** Omitted keeps what is stored. An invoice says nothing about a pending cancellation. */
       cancelAtPeriodEnd?: boolean;
     },
@@ -835,14 +839,17 @@ export class BillingRepository {
       // column and SQLite stores what it is given; putting a literal beside it is what forces a
       // type onto the pair. Same reasoning for the plan's `'free'`.
       `INSERT INTO subscriptions (id, workspace_id, plan_id, status, external_customer_id,
-         external_subscription_id, current_period_end, cancel_at_period_end, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         external_subscription_id, current_period_start, current_period_end, cancel_at_period_end,
+         seat_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (external_subscription_id) DO UPDATE SET
          plan_id = COALESCE(?, subscriptions.plan_id),
          status = excluded.status,
          external_customer_id = COALESCE(excluded.external_customer_id, subscriptions.external_customer_id),
+         current_period_start = COALESCE(?, subscriptions.current_period_start),
          current_period_end = COALESCE(?, subscriptions.current_period_end),
          cancel_at_period_end = COALESCE(?, subscriptions.cancel_at_period_end),
+         seat_count = COALESCE(?, subscriptions.seat_count),
          updated_at = excluded.updated_at
        WHERE subscriptions.workspace_id = ?`,
       [
@@ -854,14 +861,20 @@ export class BillingRepository {
         s.status,
         s.externalCustomerId ?? null,
         s.externalSubscriptionId,
+        s.currentPeriodStart ?? null,
         s.currentPeriodEnd ?? null,
         cancelling ?? 0,
+        // One seat is what a subscription nobody counted seats for means, and it is what every row
+        // written before 052 already holds.
+        s.seatCount ?? 1,
         now,
         now,
-        // The DO UPDATE's own three, in the order they appear above.
+        // The DO UPDATE's own five, in the order they appear above.
         s.planId ?? null,
+        s.currentPeriodStart ?? null,
         s.currentPeriodEnd ?? null,
         cancelling,
+        s.seatCount ?? null,
         ctx.workspaceId,
       ],
     );

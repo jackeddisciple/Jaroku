@@ -43,6 +43,19 @@ console.log("\nthe shapes a real link takes");
   check("a deeper path keeps every segment in order", link?.path.join(",") === "abc,step,4");
 }
 {
+  // THE CHECKOUT HOP'S RETURN LEG. Stripe redirects a browser to a Jaroku-owned page, and that page
+  // redirects here — so this is the shape that arrives after somebody has paid, and the session id
+  // is what the app polls `GET /v1/billing/subscription` with.
+  const link = parseDeepLink("jaroku://billing/success?session_id=cs_test_a1b2c3");
+  check("a completed checkout comes back as a billing link", link?.action === "billing");
+  check("...naming which half of the flow it is", link?.path.join(",") === "success");
+  check("...and carrying the session id untouched", link?.params.session_id === "cs_test_a1b2c3");
+
+  const cancelled = parseDeepLink("jaroku://billing/canceled");
+  check("a cancelled one arrives with no query at all", cancelled?.action === "billing");
+  check("...and its own path, so the app can tell the two apart", cancelled?.path.join(",") === "canceled");
+}
+{
   const link = parseDeepLink("jaroku://agent/my%20agent");
   check("a percent-encoded segment is decoded once", link?.path[0] === "my agent");
 }

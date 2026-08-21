@@ -449,6 +449,13 @@ jobs:
           # requireEntitlement ALLOWS a kind that has no limit behind it, which is right for a check nobody
           # wrote and a bypass for one somebody meant to.
           npm run test:entitlements
+          # THE PAYMENT PATH, WHICH HAS EXISTED SINCE v0.1.9 AND HAS NEVER RUN HERE. It was registered in
+          # package.json and absent from this file, which is the same as not having it: the signature check
+          # is the only thing between "Stripe says this workspace paid" and "anybody who can reach the URL
+          # says so", and the state machine below it decides who keeps a paid plan through a failed
+          # renewal. It also now holds the desktop rule the whole checkout hop rests on — a return URL
+          # must be an https page a browser can reach, because Stripe would accept a plain-http one.
+          npm run test:stripe
           npm run test:metering
           npm run test:balances
           npm run test:gate

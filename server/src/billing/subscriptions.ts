@@ -79,8 +79,19 @@ export interface SubscriptionUpdate {
   status: string;
   externalSubscriptionId: string;
   externalCustomerId?: string | null;
+  /** Omitted keeps what is stored, like every other optional here — an invoice carries no period. */
+  currentPeriodStart?: string | null;
   currentPeriodEnd?: string | null;
   cancelAtPeriodEnd?: boolean;
+  /**
+   * Seats, as the provider now counts them.
+   *
+   * OPTIONAL FOR THE REASON `planId` IS: most events do not carry one, and a default written over a
+   * real value is the bug migration 025's header describes about `invoice.payment_failed` — an
+   * event that knows only a status must patch only the status. A workspace that bought five seats
+   * and then received an invoice event must not silently become a one-seat workspace.
+   */
+  seatCount?: number | null;
 }
 
 export interface ApplyResult {

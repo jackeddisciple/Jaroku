@@ -2324,12 +2324,28 @@ for (const route of billingRoutes({
     relay.broadcastProviders(ctx, {
       type: "notice",
       message:
-        e.kind === "attention"
-          ? `a payment for this workspace did not go through (${e.status}) — update the card before the retries run out`
-          : `this workspace is now on the ${e.plan} plan`,
+        e.status === "trial_will_end"
+          ? "this workspace's trial ends in three days — add a payment method to keep the plan"
+          : e.kind === "attention"
+            ? `a payment for this workspace did not go through (${e.status}) — update the card before the retries run out`
+            : `this workspace is now on the ${e.plan} plan`,
     }),
+  // A settled renewal turns a paid workspace's month over. NOTHING IS DELETED and nothing is
+  // zeroed: the counters are keyed by `period_start`, so a new period is a row that does not exist
+  // yet and the first increment after this creates it — which is what leaves "what did I use in
+  // July" answerable. This callback exists so the webhook can say WHEN without owning the
+  // definition of a period, and today the answer is simply logged: `billingPeriod()` is the one
+  // function that decides where a month starts, and it reads the calendar rather than a stored
+  // marker, so there is nothing to write down.
+  onPeriodRollover: (ctx, periodStart) => {
+    console.log(`[billing] ${ctx.workspaceId} renewed; period from ${periodStart ?? "unstated"}`);
+  },
 })) {
-  router.post(route.path, route.handler);
+  // A GET among the POSTs now: `/v1/billing/subscription` is the poll the desktop app runs after
+  // the checkout hop, and it reads its workspace off the query string rather than a body it has
+  // none of. Same resolver either way.
+  if (route.method === "GET") router.get(route.path, route.handler);
+  else router.post(route.path, route.handler);
 }
 
 // THE OAUTH CALLBACK, and it is the one route here a third party drives.

@@ -20,7 +20,7 @@
 // value with a known shape. `onDeepLink` below is what that specification will subscribe to.
 
 /** The actions a `jaroku://` URL may name. Anything else is refused rather than passed along. */
-const ACTIONS = ["auth", "agent", "thread", "test"] as const;
+const ACTIONS = ["auth", "agent", "thread", "billing", "test"] as const;
 
 export type DeepLinkAction = (typeof ACTIONS)[number];
 

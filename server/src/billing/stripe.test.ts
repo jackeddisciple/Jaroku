@@ -18,7 +18,8 @@ import { newRequestId, systemContext, systemContextFor, type TenantContext } fro
 import { IdentityRepository } from "../db/repositories/identity.ts";
 import { BillingRepository } from "../db/repositories/billing.ts";
 import {
-  SIGNATURE_TOLERANCE_S, paymentsConfigured, stripeSignatureHeader, verifyStripeSignature,
+  SIGNATURE_TOLERANCE_S, checkoutUrlIsExternal, paymentsConfigured, seatQuantity,
+  stripeSignatureHeader, verifyStripeSignature,
 } from "./stripe.ts";
 import { applySubscription, needsAttention, planForStatus } from "./subscriptions.ts";
 
@@ -234,6 +235,111 @@ console.log("\nan event is claimed once, whatever arrives");
     billing.claimWebhookEvent("evt_race", "invoice.paid"),
   ]);
   check(both.filter(Boolean).length === 1, "exactly one of two simultaneous claims wins");
+}
+
+// --- the desktop hop: where a checkout may send a browser ---------------------------------------
+//
+// THE ONE RULE THE WHOLE TAURI FLOW RESTS ON. Stripe redirects a real browser to a real web page,
+// so the return URL cannot be a `jaroku://` link (the provider refuses it) and cannot be an
+// app-relative route (nothing external can reach one — the app is not served over HTTP at all). It
+// also must not be plain http, which Stripe would happily ACCEPT: leaving this to the provider
+// catches one of the three mistakes and ships the other two.
+
+console.log("\na checkout may only return a browser to a page a browser can reach");
+{
+  check(checkoutUrlIsExternal("https://checkout.jaroku.dev/success"), "an https page is fine");
+  check(
+    !checkoutUrlIsExternal("jaroku://billing/success"),
+    "a deep link is not — Stripe redirects a browser, and this is not a browser destination",
+  );
+  check(
+    !checkoutUrlIsExternal("/billing/success"),
+    "nor is an app-relative route, which no external redirect can reach",
+  );
+  check(
+    !checkoutUrlIsExternal("http://checkout.jaroku.dev/success"),
+    "nor plain http, which the provider WOULD accept — which is why this is checked here",
+  );
+  check(!checkoutUrlIsExternal(undefined) && !checkoutUrlIsExternal(""), "and absent is not a URL");
+  check(!checkoutUrlIsExternal("not a url at all"), "nor is something that does not parse");
+}
+
+// --- seats ---------------------------------------------------------------------------------------
+//
+// A number that reaches a payment provider, out of a request body. Stripe answers a fractional
+// quantity with a 400 about `line_items`, which sends somebody looking in the wrong place.
+
+console.log("\na seat count is clamped rather than trusted");
+{
+  check(seatQuantity(1) === 1 && seatQuantity(5) === 5, "an ordinary count passes through");
+  check(seatQuantity(undefined) === 1 && seatQuantity(null) === 1, "absent is one seat");
+  check(seatQuantity("5") === 1, "a string is not a count — it is one seat, not five");
+  check(seatQuantity(0) === 1 && seatQuantity(-3) === 1, "zero and negative are refused up to one");
+  check(seatQuantity(2.7) === 2, "a fraction is truncated, because Stripe refuses one outright");
+  check(
+    seatQuantity(10_000) === 20,
+    "and an enormous one is capped at the largest workspace any tier allows — above that is a conversation",
+  );
+  // BOTH FALL TO ONE RATHER THAN TO THE CAP, and Infinity is the interesting half: `Math.trunc`
+  // leaves it Infinity, `Number.isFinite` rejects it, and it never reaches the clamp. That is the
+  // right direction — an infinite seat count is not a request for the largest workspace we sell,
+  // it is a value nobody meant, and the safe reading of a number nobody meant is the smallest one.
+  check(seatQuantity(Number.NaN) === 1 && seatQuantity(Infinity) === 1, "NaN and Infinity are one seat, not twenty");
+}
+
+// --- what an invoice event may and may not overwrite ---------------------------------------------
+//
+// The bug this file's own header describes, two fields over. An event that carries only a status
+// must patch only the status: `invoice.payment_failed` carries no plan, no period and no seat
+// count, and defaults written for those would turn a five-seat Team workspace into a one-seat free
+// one on the day its card expired — which is the worst possible day for it.
+
+console.log("\nan event patches what it carries and nothing else");
+{
+  const ctx = await workspace();
+  const sub = `sub_${randomUUID()}`;
+  await billing.upsertSubscription(ctx, {
+    planId: "team",
+    status: "active",
+    externalSubscriptionId: sub,
+    externalCustomerId: "cus_seats",
+    currentPeriodStart: "2026-08-01T00:00:00.000Z",
+    currentPeriodEnd: "2026-09-01T00:00:00.000Z",
+    seatCount: 5,
+  });
+  const stored = await billing.liveSubscription(ctx);
+  check(stored?.seat_count === 5, "a subscription remembers its seat count");
+  check(stored?.current_period_start === "2026-08-01T00:00:00.000Z", "...and both ends of its period");
+
+  // The dunning event: a status and a customer, and nothing else.
+  await billing.upsertSubscription(ctx, {
+    status: "past_due",
+    externalSubscriptionId: sub,
+    externalCustomerId: "cus_seats",
+  });
+  const after = await billing.liveSubscription(ctx);
+  check(after?.status === "past_due", "an invoice failure moves the status");
+  check(after?.seat_count === 5, "...and does NOT reset the seat count to one");
+  check(after?.plan_id === "team", "...nor the plan to free");
+  check(
+    after?.current_period_start === "2026-08-01T00:00:00.000Z" &&
+      after?.current_period_end === "2026-09-01T00:00:00.000Z",
+    "...nor null the period it never mentioned",
+  );
+
+  // And a real seat change does move it, or the COALESCE would be hiding the write rather than
+  // protecting it.
+  await billing.upsertSubscription(ctx, {
+    status: "active",
+    externalSubscriptionId: sub,
+    seatCount: 8,
+  });
+  const grown = await billing.liveSubscription(ctx);
+  check(grown?.seat_count === 8, "a stated seat count is written");
+  check(
+    grown?.byok_enabled === false,
+    "and BYOK stays off until somebody turns it on — the default 052 gave every existing row",
+  );
 }
 
 await db.close();

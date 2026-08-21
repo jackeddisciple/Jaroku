@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Payment received — Jaroku</title>
+<!--
+  checkout.jaroku.dev/success — a Jaroku-owned page whose only job is to get the person back
+  into the desktop app.
+
+  WHY THIS PAGE EXISTS AT ALL, given that the app could have been the redirect target. It could
+  not: Stripe redirects a BROWSER, and a `jaroku://` URL is not something a payment provider will
+  accept as a success_url. So the hop is browser -> this page -> deep link, and this page is the
+  only part of it we control.
+
+  IT IS NOT THE SOURCE OF TRUTH AND SAYS SO. Arriving here means the checkout form was submitted,
+  not that the subscription is active — the webhook is what settles that, and it travels
+  independently of this redirect. So the wording is "payment received", never "welcome to Pro",
+  and the app shows "confirming your subscription" until its own poll agrees. A page that
+  congratulated somebody on a tier they do not have yet would be a page that lies about a third of
+  the time.
+
+  NO SCRIPT DOES ANYTHING BUT REDIRECT. This page never sees a card, a token or a session; the
+  session_id in the query is Stripe's own and is passed through untouched, for the app to poll
+  with. There is nothing here worth attacking.
+
+  AND THE MANUAL BUTTON IS NOT A FALLBACK NOBODY NEEDS. An OS may refuse to hand a custom scheme
+  to an application without asking, and a person who dismisses that prompt has no other way back.
+  It is also the only route on a machine where the app is not installed at all, where the honest
+  answer is the download page rather than a dead link.
+-->
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px;
+    background: #0d0d0f; color: #e4e4e7;
+    font: 400 14px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+  }
+  .card {
+    width: 100%; max-width: 420px; padding: 32px; text-align: center;
+    background: #18181b; border: 1px solid #2a2a30; border-radius: 14px;
+  }
+  .mark {
+    width: 40px; height: 40px; margin: 0 auto 20px; display: grid; place-items: center;
+    border-radius: 50%; background: rgba(34, 197, 94, 0.12); color: #22c55e;
+  }
+  h1 { margin: 0 0 8px; font-size: 17px; font-weight: 600; }
+  p { margin: 0; font-size: 13px; color: #71717a; }
+  .btn {
+    display: inline-block; margin-top: 24px; padding: 9px 18px;
+    background: #e4e4e7; color: #0d0d0f; border-radius: 8px;
+    font-size: 13px; font-weight: 500; text-decoration: none;
+  }
+  .btn:hover { background: #d4d4d8; }
+  .quiet { margin-top: 16px; font-size: 12px; color: #52525b; }
+  .quiet a { color: #71717a; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div class="mark" aria-hidden="true">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 6 9 17l-5-5" />
+      </svg>
+    </div>
+    <h1>Payment received</h1>
+    <!-- Deliberately not "you are on Pro". The webhook decides that, and it has not necessarily
+         landed yet. The app says "confirming…" until its own poll agrees. -->
+    <p>Opening Jaroku to confirm your subscription&hellip;</p>
+    <a class="btn" id="open" href="jaroku://billing/success">Open Jaroku</a>
+    <p class="quiet">
+      Nothing further is needed here — you can close this tab.<br />
+      Don't have the app? <a href="https://jaroku.dev/download">Download Jaroku</a>
+    </p>
+  </main>
+<script>
+  // The session id, passed through exactly as Stripe gave it and never parsed here. The app polls
+  // `GET /v1/billing/subscription` with it; this page has no idea what a subscription is.
+  //
+  // VALIDATED BEFORE IT IS APPENDED, because this value lands in a URL that launches a local
+  // application. Stripe's session ids are `cs_` followed by alphanumerics; anything else is not
+  // one, and the deep link is sent without it rather than with something a stranger put in the
+  // query string. The app refuses what it does not recognise too — this is the belt to that
+  // braces, on the one hop we own.
+  var id = new URLSearchParams(location.search).get('session_id') || '';
+  var target = 'jaroku://billing/success';
+  if (/^cs_[A-Za-z0-9_]{1,200}$/.test(id)) target += '?session_id=' + encodeURIComponent(id);
+  document.getElementById('open').setAttribute('href', target);
+
+  // A beat before the automatic hop, so the sentence above is readable rather than a flash. The
+  // button is already correct by now, so a browser that blocks this has cost the user one click.
+  setTimeout(function () { location.href = target; }, 700);
+</script>
+</body>
+</html>
