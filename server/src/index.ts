@@ -224,6 +224,7 @@ import {
 } from "./billing/entitlementGate.ts";
 import { WorkspaceProviderKeys } from "./billing/providerKeys.ts";
 import { PlatformKeyGate } from "./billing/platformKey.ts";
+import { ProviderKeyPool, poolRefusal } from "./billing/keyPool.ts";
 import { GENERATION_MODEL } from "./claude.ts";
 import { isSecretName } from "./secrets/secretStore.ts";
 import {
@@ -990,6 +991,12 @@ const budgetGate = new BudgetGate(billing, balances, bootIdentity);
 // OURS". Separate from the budget gate because the two protect different people — see
 // billing/platformKey.ts.
 const platformKeyGate = new PlatformKeyGate(billing, bootIdentity, async (ctx) => (await abuseGate.check(ctx)).level);
+
+// WHICH of the platform's keys a run gets, when it gets one. `platformKeyGate` above decides
+// WHETHER a workspace may spend our money; this decides which credential carries it, turn by turn,
+// and refuses rather than queues when every one of them is rate limited. Reads the environment per
+// call, so adding a key is adding a variable and a restart rather than a deploy of new code.
+const keyPool = new ProviderKeyPool();
 const workspaceIds = await bootIdentity.listWorkspaceIds(systemContext(newRequestId()));
 const workspaceContexts = workspaceIds.map((id) => systemContextFor(id, newRequestId()));
 
@@ -8467,12 +8474,27 @@ async function runAgent(
       relay.broadcastDebug(ctx, { type: "error", message: lent.message });
       return;
     }
+    // WHICH of the platform's keys, rather than THE platform's key. One key is one rate limit
+    // shared by every workspace on the deployment, and the way that fails at fifty workspaces is
+    // not a clear "we are at capacity" but a scatter of 429s that look, from inside a run, exactly
+    // like the provider having a bad afternoon. See billing/keyPool.ts.
+    //
+    // A DEPLOYMENT WITH ONE KEY ALREADY HAS A POOL OF ONE and changes nothing: the pool reads the
+    // same `ANTHROPIC_API_KEY` it always did, and `_2`, `_3` are how capacity is added.
+    const lease = keyPool.lease(provider as ProviderId);
+    if (!lease.ok) {
+      // EXHAUSTED IS REFUSED, NEVER QUEUED. Holding the run until a key frees up turns a capacity
+      // problem into a latency problem and hides it — the graphs stay green, the runs get slower,
+      // and nobody learns there is not enough capacity until somebody complains about speed.
+      console.log(`[billing] refused run ${runId}: ${lease.reason} key pool for ${provider}`);
+      relay.broadcastDebug(ctx, { type: "error", message: poolRefusal(lease) });
+      return;
+    }
     // Handed over EXPLICITLY rather than left to inheritance. Locally the subprocess inherits
     // this process's environment and would have found it anyway; a hosted sandbox has an
     // explicit `env` and no inheritance at all, so the seam has to be filled here or the same
     // run works in development and cannot authenticate in production.
-    const platformValue = process.env[PROVIDER_ENV_KEY[provider as ProviderId]];
-    if (platformValue) env[PROVIDER_ENV_KEY[provider as ProviderId]] = platformValue;
+    env[PROVIDER_ENV_KEY[provider as ProviderId]] = lease.key.value;
   }
 
   // NO CREDENTIAL AT ALL IS SAID HERE, NOT DISCOVERED BY THE PROVIDER.

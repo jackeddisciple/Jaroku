@@ -471,6 +471,23 @@ jobs:
           # against two instances rather than one, because the guard has to be the unique key and not a
           # Set: pausing to think must not cost a run, and two replicas watching one start must agree.
           npm run test:usage-periods
+          # The platform key POOL, and the assertion it exists for: an exhausted pool refuses rather than
+          # queues. A queue would pass every other check here and turn a capacity problem into a latency
+          # one no graph shows — flat error rate, slower runs, and the first anybody hears is a complaint
+          # about speed weeks later. Beside it, the cooldown: a 429 means busy rather than broken, so a
+          # pool that REMOVED keys drains to empty over one busy hour with every symptom pointing at the
+          # provider.
+          # The three gates in front of the pool, which have never run here either: the kill switch, the
+          # plan, and the per-workspace ceiling on what WE pay. It is the one place in this system where
+          # the platform's money is spent by somebody else's decision.
+          npm run test:platform-key
+          npm run test:key-pool
+          # And the batching, which is not an optimisation. Stripe rate-limits usage records, so per-call
+          # reporting loses them under exactly the load that makes reporting matter — and a dropped usage
+          # record is revenue that never happened, with no error, no failed run, and nothing to notice
+          # until a reconciliation months later. Its load-bearing assertion is that a failed flush KEEPS
+          # its rows: take-post-forget loses the batch precisely when the post fails.
+          npm run test:usage-reporter
           npm run test:balances
           npm run test:gate
           npm run test:aggregate

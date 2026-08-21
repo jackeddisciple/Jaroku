@@ -70,6 +70,8 @@ The shortest list, with the tests that defend them:
 | Concurrent runs cannot overdraw one balance | `test:balances` |
 | A ceiling bounds what is STARTED, never what is spent | `test:gate`, `test:eval-budget` |
 | A workspace's provider key reaches its own run's provider and nothing else | `test:byok` |
+| An exhausted provider-key pool answers 429 with a retry-after, and never a silent queue | `test:key-pool` |
+| Usage is reported to the provider in batches, and a flush that failed keeps its rows | `test:usage-reporter` |
 | An unsigned or replayed payment webhook changes nothing | `test:stripe` |
 | A run receives an hour-long access token, never the refresh token behind it | `test:oauth-injection` |
 | Concurrent runs refresh one connection exactly once | `test:oauth-refresh` |

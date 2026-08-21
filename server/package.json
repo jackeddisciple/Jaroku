@@ -86,6 +86,8 @@
     "test:estimate": "tsx src/billing/estimate.test.ts",
     "test:byok": "tsx src/billing/byok.test.ts",
     "test:platform-key": "tsx src/billing/platformKey.test.ts",
+    "test:key-pool": "tsx src/billing/keyPool.test.ts",
+    "test:usage-reporter": "tsx src/billing/usageReporter.test.ts",
     "test:stripe": "tsx src/billing/stripe.test.ts",
     "test:checkout-surfaces": "tsx src/billing/checkoutSurfaces.test.ts",
     "billing:stuck": "tsx src/billing/replay.cli.ts",
