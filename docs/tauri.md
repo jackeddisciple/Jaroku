@@ -78,6 +78,38 @@ that finds the old port taken has to move. So the injected object stays frozen a
 arrives beside it on every backend status, through the same validation — and both readers,
 the socket and every HTTP surface, resolve per call rather than at module load.
 
+### The subscription model, and the two variables it adds
+
+The tier model, the entitlement gate, checkout, metering, retention, the key pool, the spend caps,
+the BYOK toggle and admin mode all run inside the packaged app exactly as they do under
+`npm run dev`, because the shell spawns the same process. Two things are worth knowing.
+
+**The sidecar inherits this process’s environment**, and the server additionally loads
+`runtime/.env` from the payload. So both of these work, and the second survives a restart:
+
+```
+# in the environment the app is launched from, or in runtime/.env
+JAROKU_ADMIN_USER_IDS=<your user id>     # who may turn admin mode on. A restart to change.
+STRIPE_SECRET_KEY=sk_test_…              # absent means the Upgrade control is absent
+STRIPE_WEBHOOK_SECRET=whsec_…
+STRIPE_SUCCESS_URL=https://checkout.jaroku.dev/success?session_id={CHECKOUT_SESSION_ID}
+STRIPE_CANCEL_URL=https://checkout.jaroku.dev/canceled
+ANTHROPIC_API_KEY_2=…                    # a second platform key. The pool reads _2, _3, …
+```
+
+**The payment step is the one hop out of the window, and it is the only one.** Comparing plans,
+choosing seats and reading a price all render in the webview; `Continue to payment` calls the
+`open_checkout` command in `src-tauri/src/deeplink.rs`, which checks the URL against an exact-host
+allowlist before handing it to the operating system — `capabilities/default.json` still grants the
+page nothing. The browser comes back through `jaroku://billing/success`, which the existing
+deep-link handler routes; the webhook is what actually moves the tier, and the app polls
+`GET /v1/billing/subscription` until it agrees.
+
+**Admin mode resets on every launch, and that is automatic rather than remembered.** The session
+token lives in the OS credential store and survives quitting, so "resets on sign-in" would keep
+the mode on for weeks. It is held in the backend process’s memory and nowhere else, so a relaunch
+starts from off whether or not the same token came back out of the keychain.
+
 ### Where things live at runtime
 
 `~/.jaroku` on macOS and Linux, `%APPDATA%\jaroku` on Windows. Not Tauri's own `app_data_dir()`,
