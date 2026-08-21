@@ -61,8 +61,25 @@ check(
   (PLANS.pro.concurrency["run.eval"] ?? 0) > (PLANS.free.concurrency["run.eval"] ?? 0),
   "pro runs more eval jobs at once than free",
 );
-check(PLANS.free.seats !== null && PLANS.pro.seats !== null && PLANS.pro.seats > PLANS.free.seats, "pro seats more people");
-check(PLANS.team.seats === null, "team does not cap seats at all");
+// >= RATHER THAN >, AND THE PRICING IS WHY. Pro is the single-operator tier at $20 and Team is
+// what a second person costs, so Pro seats exactly as many people as Free does — one. This is the
+// only axis in this file where a paid plan does not beat the one below it, and it is stated as its
+// own assertion with its own reason rather than folded into the loop, so that nobody reading the
+// loop later concludes the whole direction rule was quietly relaxed.
+check(
+  PLANS.free.seats !== null && PLANS.pro.seats !== null && PLANS.pro.seats >= PLANS.free.seats,
+  "pro seats at least as many people as free",
+);
+check(PLANS.free.seats === 1 && PLANS.pro.seats === 1, "...and both are one, because both are solo tiers");
+// TWENTY, NOT null, AND THE CAP IS A HANDOFF. Above twenty a workspace is an Enterprise
+// conversation rather than a bigger number, so the members page surfaces a mailto instead of
+// refusing a twenty-first invite. A cap that only said no is a cap somebody works around by
+// opening a second workspace, which is worse for them and worse for us.
+check(PLANS.team.seats === 20, "team caps at twenty, where self-service stops and a conversation starts");
+check(
+  PLANS.pro.seats !== null && PLANS.team.seats! > PLANS.pro.seats,
+  "...which is still more than Pro, so the one axis that ties does not also invert",
+);
 check(
   Object.keys(PLANS.free.features).every((f) => f in PLANS.team.features),
   "every feature flag free knows about, team knows about",

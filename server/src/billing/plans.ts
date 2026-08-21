@@ -47,6 +47,31 @@ export interface PlanFeatures {
   deploy: boolean;
   /** Whether it may connect third-party MCP servers. */
   mcp: boolean;
+  /**
+   * Pushing an agent's code to a repository the workspace owns.
+   *
+   * PHASE ONE AND PHASE TWO ARE TWO FLAGS, not one with a number. Pushing is a write this
+   * workspace initiates and can undo; reading a repository back — branches, pull requests,
+   * webhooks landing on our side — is a standing grant against somebody's account that keeps
+   * acting while nobody is watching. A single flag would mean the tier that wanted the first
+   * had to be given the second.
+   */
+  githubPhase1: boolean;
+  githubPhase2: boolean;
+  /**
+   * Per-agent Access grants, as opposed to the workspace role alone.
+   *
+   * Off below Team for a reason that is not price: Free and Pro are single-member, so there is
+   * nobody in the workspace to grant anything TO. Gating it is describing the tier rather than
+   * withholding a feature.
+   */
+  perAgentAccessGrants: boolean;
+  /** Approving a batch of pending approvals at once rather than one at a time. */
+  approvalBatchApprove: boolean;
+  /** The policy engine — rules evaluated against every run rather than per agent. */
+  policyEngine: boolean;
+  /** An eval that can fail a pull request. Needs GitHub phase two to have anything to fail. */
+  evalCiGate: boolean;
 }
 
 export interface PlanLimits {
@@ -103,6 +128,40 @@ export interface PlanLimits {
   retentionDays: number;
   /** Members allowed in the workspace, or null for unlimited. */
   seats: number | null;
+  /**
+   * How long the AUDIT log is kept, in days, as distinct from how long a trace is.
+   *
+   * Two numbers that happen to be equal on all three tiers today, and kept apart anyway. They
+   * answer to different people: a trace window is a product decision about how far back somebody
+   * can debug, and an audit window is a compliance answer somebody gives their own security team.
+   * The day one of them has to move, the other must not move with it by accident.
+   */
+  auditRetentionDays: number;
+  /**
+   * The counted limits, where null means no limit from the plan.
+   *
+   * NULL RATHER THAN A SENTINEL NUMBER, and rather than the string the entitlement contract uses
+   * at its boundary. Inside this file null is already the word for "no ceiling from the plan" —
+   * `budgetCeilingUsd` and `seats` have both meant it since 020 — and `limitsFor` below
+   * distinguishes an override of null from an absent key by `hasOwnProperty` precisely so that
+   * it stays a real answer somebody can negotiate. `resolveEntitlements` translates it to
+   * 'unlimited' on the way out, where the value is about to become JSON and null would read as
+   * "we do not know" rather than as "there is no limit".
+   */
+  maxAgents: number | null;
+  maxWorkspaces: number | null;
+  maxLiveDeployments: number | null;
+  /**
+   * Runs and eval runs allowed per CALENDAR MONTH, counted in `workspace_usage_periods`.
+   *
+   * Per calendar month rather than per rolling thirty days, and that is a decision rather than an
+   * approximation: people think in months, and a rolling window means the answer to "how many do
+   * I have left" changes every night without anybody doing anything. `billingPeriod()` in
+   * gate.ts is the one function that decides where a month starts.
+   */
+  runsPerMonth: number | null;
+  evalRunsPerMonth: number | null;
+  maxMcpServers: number | null;
   features: PlanFeatures;
 }
 
@@ -121,9 +180,30 @@ const FREE: PlanLimits = {
   // jobs. Stated here rather than left as jobs.ts's default so that raising the default for
   // everybody and raising it for paying workspaces stay two different edits.
   concurrency: { "run.interactive": 1, "run.eval": 2, judge: 2 },
-  retentionDays: 14,
-  seats: 3,
-  features: { platformKey: true, byok: true, deploy: false, mcp: true },
+  // SEVEN DAYS, DOWN FROM FOURTEEN, and this one deletes data the first night it runs. The
+  // pricing says seven and the sweeper reads this number, so a free workspace's traces from days
+  // 8-14 go on the next nightly pass. Stated here rather than discovered there.
+  retentionDays: 7,
+  auditRetentionDays: 7,
+  // ONE, DOWN FROM THREE. Free is solo: there is no invite, and `perAgentAccessGrants` is off
+  // below Team for the same reason rather than as a second decision.
+  seats: 1,
+  maxAgents: 3,
+  maxWorkspaces: 1,
+  maxLiveDeployments: 1,
+  runsPerMonth: 500,
+  evalRunsPerMonth: 20,
+  maxMcpServers: 3,
+  // `deploy` IS TRUE ON FREE NOW, which reads like a giveaway and is not. The tier table grants
+  // one concurrent live deployment, and a boolean that said no would make that number
+  // unreachable — the flag asks whether this workspace may put an agent on a URL at all, and the
+  // count is what bounds it. Deploying is into the USER's own hosting account (ADR-027), so the
+  // one thing it costs us is nothing.
+  features: {
+    platformKey: true, byok: true, deploy: true, mcp: true,
+    githubPhase1: false, githubPhase2: false, perAgentAccessGrants: false,
+    approvalBatchApprove: false, policyEngine: false, evalCiGate: false,
+  },
 };
 
 const PRO: PlanLimits = {
@@ -135,9 +215,24 @@ const PRO: PlanLimits = {
   platformKeyCeilingUsd: 50,
   concurrency: { "run.interactive": 3, "run.eval": 8, judge: 8 },
   retentionDays: 90,
-  seats: 10,
+  auditRetentionDays: 90,
+  // ONE SEAT, THE SAME AS FREE, and the only place in this file where a paid plan does not beat
+  // the one below it on an axis. It is the pricing's own shape rather than an oversight: Pro is
+  // the single-operator tier at $20 and Team is what collaboration costs, so a Pro workspace has
+  // nobody to invite by construction. `plans.test.ts` asserts >= rather than > for this axis
+  // and says why there too, because an assertion weakened without a reason is how the next one
+  // gets weakened without one.
+  seats: 1,
+  maxAgents: null,
+  maxWorkspaces: 3,
+  maxLiveDeployments: 5,
+  runsPerMonth: 10_000,
+  evalRunsPerMonth: 500,
+  maxMcpServers: null,
   // Nested rather than restated: a flag added to FREE.features is automatically PRO's too.
-  features: { ...FREE.features, deploy: true },
+  // `evalCiGate` stays off here because it has nothing to gate — it fails a pull request, and
+  // reading pull requests is phase two.
+  features: { ...FREE.features, githubPhase1: true, approvalBatchApprove: true },
 };
 
 const TEAM: PlanLimits = {
@@ -155,8 +250,26 @@ const TEAM: PlanLimits = {
   budgetCeilingUsd: null,
   concurrency: { "run.interactive": 10, "run.eval": 32, judge: 32 },
   retentionDays: 365,
-  seats: null,
-  features: { ...PRO.features },
+  auditRetentionDays: 365,
+  // TWENTY, NOT NULL, and the cap is a handoff rather than a wall. The twenty-first invite is
+  // where self-service stops and a conversation starts, so the members page surfaces a mailto
+  // instead of refusing — a limit that just says no at 20 is a limit somebody works around by
+  // opening a second workspace, which is worse for them and worse for us.
+  seats: 20,
+  maxAgents: null,
+  maxWorkspaces: null,
+  maxLiveDeployments: null,
+  // POOLED ACROSS THE WORKSPACE, not per member, which is why this is one number rather than a
+  // per-seat one multiplied by `seat_count`. A team of three where one person runs everything
+  // is the ordinary case, and a per-seat quota would refuse that team while its allowance sat
+  // unused on two accounts.
+  runsPerMonth: 50_000,
+  evalRunsPerMonth: 2_500,
+  maxMcpServers: null,
+  features: {
+    ...PRO.features,
+    githubPhase2: true, perAgentAccessGrants: true, policyEngine: true, evalCiGate: true,
+  },
 };
 
 export const PLANS: Record<PlanId, PlanLimits> = { free: FREE, pro: PRO, team: TEAM };
@@ -180,7 +293,19 @@ const OVERRIDABLE = [
   "budgetCeilingUsd",
   "platformKeyCeilingUsd",
   "retentionDays",
+  "auditRetentionDays",
   "seats",
+  // The counted limits, overridable for the same two reasons the ceilings are: a negotiated
+  // exception somebody agreed to, and an abuse response clamping a workspace down without
+  // moving it off the plan it paid for. Zero is a real value here — it is what "start nothing"
+  // means — which is why they share the null-or-non-negative case below rather than
+  // `retentionDays`'s strictly-positive one.
+  "maxAgents",
+  "maxWorkspaces",
+  "maxLiveDeployments",
+  "runsPerMonth",
+  "evalRunsPerMonth",
+  "maxMcpServers",
   "concurrency",
   "features",
 ] as const;
@@ -211,6 +336,7 @@ export function limitsFor(
         // Zero is meaningful here: a workspace with no monthly credit is an ordinary arrangement.
         if (typeof v === "number" && Number.isFinite(v) && v >= 0) out[key] = v;
         break;
+      case "auditRetentionDays":
       case "retentionDays":
         // STRICTLY POSITIVE, and this is the one bound in this function whose absence destroys
         // data rather than blocking work.
@@ -235,6 +361,12 @@ export function limitsFor(
       case "budgetCeilingUsd":
       case "platformKeyCeilingUsd":
       case "seats":
+      case "maxAgents":
+      case "maxWorkspaces":
+      case "maxLiveDeployments":
+      case "runsPerMonth":
+      case "evalRunsPerMonth":
+      case "maxMcpServers":
         // null is meaningful — "no ceiling", "no seat limit" — so it is accepted alongside a
         // number rather than falling through to the plan's value.
         if (v === null) out[key] = null;
