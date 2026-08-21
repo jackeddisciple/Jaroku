@@ -8,6 +8,78 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.4.0 : Subscriptions — What Each Tier Allows, Checked Where Every Command Already Passes
+
+Free, Pro and Team, and one function that says what each is allowed: `resolveEntitlements`,
+which extends the `FREE`/`PRO`/`TEAM` objects `billing/plans.ts` already held rather than
+forking a second table of numbers beside them. The harder question this release answers is not
+what the tiers get but where that gets enforced. This product has almost no HTTP routes — nearly
+everything goes down the WebSocket as a command — so the gate that would ordinarily sit in front
+of an Express handler sits instead at the one dispatch point `COMMAND_CAPABILITY` already sits
+behind, checking what the tier allows beside the existing check for who may.
+
+### Added
+
+- **`resolveEntitlements`**, the one function tier limits and features come from. An admin
+  session gets `ADMIN_ENTITLEMENTS`, a checked-in constant rather than a computed bypass.
+- **`requireEntitlement`**, a second gate orthogonal to the capability check it sits beside:
+  capability says who may, entitlement says what the tier allows, and a command failing either
+  is refused the same way. `test:entitlements` enumerates every command in `wsRelay.ts` the way
+  `test:capabilities` already does, and fails on one left unclassified.
+- **The 402 renders as an inline `UpsellCard`, never a modal** — `{ error, kind, current, limit,
+  tier, upgradeUrl }`. Until the Stripe wiring below went live, resolution ran Team-equivalent so
+  the rollout itself never locked anyone out.
+- **Checkout, handed to the system browser and back through a deep link.** `openExternal` is a
+  Rust command (`deeplink.rs`) that validates `https` and an allowlisted host before it will
+  spawn anything, so nothing a web page says reaches a process spawn. `jaroku://billing/success`
+  and `/canceled` both open the same Billing screen — the honest thing to show someone who backed
+  out of a payment form is their plan, unchanged. Nothing is believed from the link itself: the
+  tier moves only when `GET /v1/billing/subscription` agrees with the webhook.
+- **`workspace_usage_periods`, one row per workspace/period/metric** — a new metered dimension
+  later is a new string, not a migration. Runs increment at the moment `status` first becomes
+  `running`, not on receipt or completion; eval cases increment one per dispatch.
+- **The Billing section, a fourth `WorkspaceSection`** — plan, status, renewal date, seats, the
+  BYOK toggle, change-plan, cancel. A downgrade that would leave the workspace over the target
+  tier's limits is blocked with a resolve-first screen rather than left to silently overflow.
+- **BYOK, instant and workspace-level.** `subscriptions.byok_enabled` decides routing at
+  inference-call time, no proration, because the moment anyone reaches for this is the moment
+  they just noticed a bill. Absent from Free entirely rather than present and disabled — Free
+  already runs on the workspace's own key by construction, and a disabled switch would have
+  implied a paywall behind it that isn't there.
+- **The platform key pool, round-robin behind a 429** — `system_provider_key` secrets,
+  `Retry-After` on exhaustion rather than a silent queue, usage batched to Stripe every five
+  minutes or a hundred calls, whichever comes first. Free never touches the pool.
+- **Retention, extended to move on a tier change** — the daily sweep already existed; this adds
+  the re-run within the hour a plan moves, an `audit_log` summary with a per-table row count, and
+  the three windows themselves: 7 days, 90, a year.
+- **Abuse control's specific numbers** — a $50/7-day cap for a new account, a hard ceiling at
+  twice the plan's included credit, a hundred requests a minute per user, and a freeze (plus an
+  internal alert) at ten times a trailing 24 hours.
+- **Admin mode.** `JAROKU_ADMIN_USER_IDS`, read once, at session hydration, nowhere else — adding
+  an admin costs a restart, on purpose. `adminMode` itself is in-memory and defaults to off on
+  every session *and every relaunch*, which matters because the session token survives for weeks
+  in the OS keychain. A non-admin sending `adminMode: true` gets a logged 403. The toggle is
+  absent from the DOM for anyone who isn't an admin — not hidden, absent — and the banner it
+  turns on is not dismissible.
+
+### Migrations
+
+`052` `workspace_usage_periods`, `seat_count`/`byok_enabled`/`current_period_start` on
+`subscriptions`, `scale` repointed to `team` · `053` RLS on the new table.
+
+### Verified
+
+- Ten commits, each its own suite (`test:entitlements`, `test:billing-view`,
+  `test:usage-periods`, `test:platform-key`, `test:byok`, `test:admin-mode` among them), each
+  wired into `ci.yml` rather than left in `package.json` alone.
+- Checked against the actual packaged Tauri shell, not only the browser: the `jaroku://billing`
+  deep link, which previously only logged, now opens the Billing screen the way the checkout
+  handoff always specified; admin mode confirmed to reset when the spawned backend process is
+  killed and relaunched while the session token itself survives, because that is the exact case
+  the design exists for.
+
+---
+
 ## v0.3.3 : The Activity Tab — What This Workspace Is Doing
 
 The fourth and last of the sidebar's destinations, and the only one that writes nothing. Threads is
