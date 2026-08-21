@@ -88,6 +88,7 @@ The shortest list, with the tests that defend them:
 | One trace spans four tiers, and every span carries the run id | `test:tracing` |
 | Every alert names a metric something actually emits | `test:metrics` |
 | A migration cannot break the version currently serving | `test:migration-gate`, `migrate:check` |
+| No string function is applied to a column that is a timestamp on Postgres and text on SQLite | `test:timestamp-text` |
 | The GitHub App asks for exactly seven permissions, and `checks` is **write** — read-only would let the panel see a check run and never post one | `test:github-app` |
 | A GitHub App install stores no repository credential: an installation id, and a token minted per hour against GitHub's own expiry | `test:github-app`, `test:github-app-flow` |
 | A registration or install callback takes its workspace from a single-use state, never from a query string | `test:github-app` |
@@ -106,6 +107,8 @@ The shortest list, with the tests that defend them:
 | A trace event's own run id must match the slot that produced it | `test:control-plane-routes` |
 | Retention sweeps every workspace-scoped table or exempts it with a stated reason | `test:retention` |
 | An invoice event patches the subscription's status and nothing it does not carry | `test:stripe` |
+| Every quota-relevant command is classified, and a check with no limit behind it cannot silently allow | `test:entitlements` |
+| One resolver produces every tier feature and limit value, and admin mode needs the environment as well as the request | `test:entitlements` |
 
 ## Commits
 

@@ -815,8 +815,26 @@ export class ActivityStore {
       [length, ...bounds(ctx, w)],
     );
 
+    // AND THE SECOND ONE CANNOT SPELL ITS COLUMN THE SAME WAY, because `occurred_at` is not the
+    // same TYPE on the two drivers. `runs.started_at` above is `text` on both — migration 002 froze
+    // the trace schema on ISO-8601 strings — but `usage_events.occurred_at` is a real `timestamptz`
+    // on Postgres, and `substr` has no overload that takes one. So this query could never have run
+    // there; it was only ever reached after the GROUP BY above had already failed the statement.
+    //
+    // `to_char` REPRODUCES SQLITE'S STORED SPELLING EXACTLY, and that is the requirement rather than
+    // "some canonical date string": `grainInstant` puts the key back together by appending a suffix
+    // to it, so the key has to be an ISO-8601 PREFIX with the `T` in it. Postgres's own
+    // `timestamptz::text` gives `2026-08-21 07:32:30.776+00` — a space, and an offset — which
+    // produces the right answer at day grain and a key nothing can parse at hour grain.
+    //
+    // The dialect is interpolated rather than bound because a placeholder cannot carry a function
+    // call; it is a constant chosen from a closed set two lines up and never anything a caller said.
+    // Same shape `deployStore` and `evalStore` already use for their own driver divergences.
+    const occurredIso = this.db.dialect === "postgres"
+      ? `to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`
+      : "occurred_at";
     const usageRows = await q.all<Record<string, unknown>>(
-      `SELECT SUBSTR(occurred_at, 1, ?) AS k,
+      `SELECT SUBSTR(${occurredIso}, 1, ?) AS k,
               SUM(cost_usd)     AS usd,
               SUM(total_tokens) AS tokens
          FROM usage_events
