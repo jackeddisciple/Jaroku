@@ -12,7 +12,7 @@
 // separate onboarding-only slot would be a second place credentials live, which is the one thing
 // the Secrets tab exists to stop.
 
-import { createSecret } from "./secrets.ts";
+import { createSecret, fetchSecrets } from "./secrets.ts";
 
 /** §5.1's three, in the order it lists them. */
 export const PROVIDER_CHOICES = [
@@ -58,4 +58,32 @@ export async function saveProviderKey(provider: ProviderChoiceId, key: string): 
   const choice = PROVIDER_CHOICES.find((p) => p.id === provider);
   if (!choice) throw new Error(`${provider} is not a provider Jaroku knows about`);
   await createSecret({ name: choice.secretName, value: key, kind: "provider_key", provider: choice.id });
+}
+
+/**
+ * Which providers already have a key in this workspace.
+ *
+ * §5.3: "Data already saved (workspace, provider key) is not re-collected — it's re-shown for
+ * confirmation only if the user navigates back to that step." So the step reads this before it
+ * decides what it is, and a provider that already has one reads as connected rather than as an
+ * empty field somebody assumes means nothing was saved.
+ *
+ * IT READS THE CREDENTIAL LIST, NEVER A VALUE. `fetchSecrets` answers with names, kinds and masked
+ * hints — the vault has no plaintext return path at all outside the one deliberate `reveal` route —
+ * so what comes back is "there is a row called ANTHROPIC_API_KEY", which is exactly the fact needed
+ * and nothing more.
+ *
+ * AN EMPTY SET FOR EVERY FAILURE, including a locked vault. The listing is elevation-gated under
+ * the default policy, and "we could not look" and "there is nothing" lead to the same screen: a
+ * field to type a key into. Guessing otherwise would mean claiming a key exists when nobody can see
+ * whether it does.
+ */
+export async function connectedProviders(): Promise<Set<ProviderChoiceId>> {
+  try {
+    const secrets = await fetchSecrets();
+    const held = new Set(secrets.map((s) => s.name));
+    return new Set(PROVIDER_CHOICES.filter((p) => held.has(p.secretName)).map((p) => p.id));
+  } catch {
+    return new Set();
+  }
 }

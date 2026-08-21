@@ -707,6 +707,15 @@ jobs:
           # name, whose failure mode is not a crash but "Welcome, ada.lovelace+jaroku" on the
           # first screen anybody sees after signing up.
           npm run test:account-onboarding
+          # §5.1 STEP 3S KEY, and mostly §5.3s "already saved is not re-collected". The three
+          # names are the first half: a key stored as GEMINI_API_KEY and read as GOOGLE_API_KEY
+          # produces an onboarding that reports success, a Secrets tab that shows a connected
+          # provider, and a first run that cannot authenticate — with nothing anywhere saying the
+          # two differ. The second half is about a failure that looks like success: whether a
+          # provider reads as Connected decides whether somebody is sent PAST the screen that
+          # would have set a key, so a locked vault, an unreachable server and a malformed body
+          # all answer with nothing rather than guessing.
+          npm run test:provider-keys
           # WHERE THE SESSION TOKEN GOES, and the assertion the suite exists for is where it does
           # NOT. Under a host with an OS credential store the token must never touch
           # localStorage, and a mirror is the easy implementation that leaves the protection
