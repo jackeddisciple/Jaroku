@@ -131,12 +131,22 @@ check(
 
 // --- 2. what production SQL does to them --------------------------------------------------------
 
-/** Functions that take a string and have no timestamp overload on Postgres. */
+/** Functions that take a string and have no overload for the families below on Postgres. */
 const STRING_FUNCTIONS = ["substr", "substring", "lower", "upper", "trim", "ltrim", "rtrim", "replace"];
+
+/**
+ * The families a string function or a `LIKE` cannot be applied to.
+ *
+ * `num` and `bool` are absent deliberately: Postgres will not implicitly cast those either, but
+ * nothing in this codebase has ever tried, and every family added here is a family whose false
+ * positives somebody has to argue with. These three are the ones that have actually broken —
+ * `stamp` in the pulse, `uuid` in the feed, `json` in the tool leaderboard's truncation count.
+ */
+const NOT_A_STRING: ReadonlySet<ColType> = new Set<ColType>(["stamp", "uuid", "json"]);
 
 interface Offence {
   file: string;
-  /** The string function with no timestamp overload, or `UNION` for branches that disagree. */
+  /** The string operation with no overload for that family, or `UNION` for disagreeing branches. */
   fn: string;
   what: string;
 }
@@ -193,8 +203,19 @@ export function offencesIn(file: string, source: string): Offence[] {
     for (const fn of STRING_FUNCTIONS) {
       const re = new RegExp(`\\b${fn}\\s*\\(\\s*([a-z_]+(?:\\.[a-z_]+)?)\\b`, "gi");
       for (const m of statement.matchAll(re)) {
-        if (typeOf(m[1]!, aliases) === "stamp") found.push({ file, fn, what: m[1]! });
+        const type = typeOf(m[1]!, aliases);
+        if (type && NOT_A_STRING.has(type)) found.push({ file, fn, what: `${m[1]!} is ${type}` });
       }
+    }
+
+    // AND `LIKE`, WHICH IS A STRING FUNCTION SPELLED AS AN OPERATOR. Postgres reports it as
+    // "operator does not exist: json ~~ unknown", which reads as a missing operator rather than as
+    // a type problem — the same disguise `booleanLiterals.test.ts` notes about a boolean compared
+    // to an integer in a WHERE. `steps.output` is `json` there and `text` on SQLite, so the tool
+    // leaderboard's truncation count was another statement that could only ever run on one driver.
+    for (const m of statement.matchAll(/([a-z_]+(?:\.[a-z_]+)?)\s+(?:NOT\s+)?LIKE\b/gi)) {
+      const type = typeOf(m[1]!, aliases);
+      if (type && NOT_A_STRING.has(type)) found.push({ file, fn: "LIKE", what: `${m[1]!} is ${type}` });
     }
 
     // A UNION whose branches disagree about the TYPE of one output column. Detected by ALIAS rather
@@ -278,8 +299,24 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
   );
   check(
     "the detector detects a string function on a timestamp",
-    planted.some((o) => o.fn === "substr" && o.what === "occurred_at"),
+    planted.some((o) => o.fn === "substr" && o.what.startsWith("occurred_at is")),
   );
+
+  // `LIKE` is a string function spelled as an operator, and Postgres disguises it as a missing one.
+  const likedJson = offencesIn(
+    "fixture.ts",
+    "const q = `SELECT COUNT(CASE WHEN s.output LIKE ? THEN 1 END) FROM steps s`;",
+  );
+  check(
+    "...and a LIKE against a json column, which Postgres reports as a missing operator",
+    likedJson.some((o) => o.fn === "LIKE" && o.what.startsWith("s.output is json")),
+  );
+
+  const likedText = offencesIn(
+    "fixture.ts",
+    "const q = `SELECT COUNT(CASE WHEN s.error LIKE ? THEN 1 END) FROM steps s`;",
+  );
+  check("...while the same predicate on a text column is fine", likedText.length === 0);
 
   const wrapped = offencesIn(
     "fixture.ts",

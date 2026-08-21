@@ -1229,6 +1229,14 @@ export class ActivityStore {
    * is being added. Matching it is a cross-language coupling and it is named as such: if the phrase
    * changes there, this rate silently becomes zero, which is why `test:activity-tools` asserts the
    * marker against the value the runtime actually produces rather than against a copy of it.
+   *
+   * AND THE MATCH ON IT CASTS FIRST, because `steps.output` is `json` on Postgres and `text` on
+   * SQLite, and `LIKE` has no json overload there — "operator does not exist: json ~~ unknown",
+   * which reads as a missing operator rather than as a type problem. The three predicates beside it
+   * are on `s.error`, which is text on both drivers, and that is why only the truncation count
+   * needs it. A cast rather than a dialect branch: rendering a json value as text is what `::text`
+   * already means, and SQLite accepts `CAST` on a value it stores as a string anyway, so one
+   * statement means the same thing on both.
    */
   async toolUsage(
     ctx: TenantContext,
@@ -1244,7 +1252,7 @@ export class ActivityStore {
               COUNT(CASE WHEN s.error LIKE ? THEN 1 END)                    AS refused,
               COUNT(CASE WHEN s.error LIKE ? THEN 1 END)                    AS denied,
               COUNT(CASE WHEN s.error LIKE ? THEN 1 END)                    AS timed_out,
-              COUNT(CASE WHEN s.output LIKE ? THEN 1 END)                   AS truncated
+              COUNT(CASE WHEN CAST(s.output AS TEXT) LIKE ? THEN 1 END)     AS truncated
          FROM steps s
          LEFT JOIN mcp_tools t ON t.workspace_id = s.workspace_id AND t.name = s.name
         WHERE s.workspace_id = ? AND s.type = 'tool_call'
