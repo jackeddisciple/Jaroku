@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import { App } from "./App.tsx";
 import { onDeepLink } from "./lib/deepLink.ts";
+import { offerAuthCallback, readAuthCallback } from "./lib/authLink.ts";
 import { onBackendStatus } from "./lib/hostBackend.ts";
 import { useHostStore } from "./store/hostStore.ts";
 import { useUiStore } from "./store/uiStore.ts";
@@ -17,15 +18,30 @@ import { hydrateSession } from "./lib/auth.ts";
 // module is that thing, and it is also the reason `onDeepLink` is idempotent about being called
 // once — it is called once.
 //
-// IT ACTS ON ONE ACTION AND LOGS THE REST. What a link MEANS is mostly a specification's own
-// business — redeeming a magic link and finishing an OAuth round trip are the auth spec's — and
-// `parseDeepLink` has already done the part that belongs here: proved the scheme, matched the
-// action against a list, and refused everything it did not recognise. `billing` is the exception,
-// because its meaning is entirely about this window: somebody left for a payment page and needs to
-// be looking at the screen that says whether it worked. In a browser this call does nothing at all
-// and returns a no-op.
+// IT ACTS ON TWO ACTIONS AND LOGS THE REST, and both of them are about this window rather than
+// about anything in a workspace. `parseDeepLink` has already done the part that belongs to it:
+// proved the scheme, matched the action against a list, and refused everything it did not
+// recognise. In a browser this call does nothing at all and returns a no-op.
+//
+//   `billing` — somebody left for a payment page and needs to be looking at the screen that says
+//   whether it worked.
+//
+//   `auth` — somebody finished signing in somewhere else and came back with the proof. It is
+//   OFFERED rather than acted on, because the app may not be in a position to spend a ticket yet:
+//   on the launch this exists for, the operating system started this application WITH the URL and
+//   first-run has not finished. See lib/authLink.ts, which holds it until a screen claims it.
 onDeepLink((link) => {
   console.log(`[jaroku] deep link: ${link.action}${link.path.map((s) => `/${s}`).join("")}`);
+
+  // NOTHING IS BELIEVED FROM THE LINK. Its arrival means a browser somewhere redirected here, not
+  // that anybody signed in — any program on this machine can open a `jaroku://` URL. What it
+  // carries is a ticket, and a ticket is worth exactly what the server says it is worth when it is
+  // presented: signed, unexpired, unused, or nothing at all. See §4.4.
+  const callback = readAuthCallback(link);
+  if (callback) {
+    offerAuthCallback(callback);
+    return;
+  }
 
   // THE CHECKOUT'S RETURN LEG, and the only action this file acts on rather than logs.
   //

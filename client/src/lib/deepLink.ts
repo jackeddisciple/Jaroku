@@ -19,8 +19,16 @@
 // OAuth round trip are the auth specification's, and this module's job ends at handing over a
 // value with a known shape. `onDeepLink` below is what that specification will subscribe to.
 
-/** The actions a `jaroku://` URL may name. Anything else is refused rather than passed along. */
-const ACTIONS = ["auth", "agent", "thread", "billing", "test"] as const;
+/** The actions a `jaroku://` URL may name. Anything else is refused rather than passed along.
+ *
+ * `open` is CLAIMED RATHER THAN IMPLEMENTED, which is the auth specification's own instruction:
+ * `jaroku://open?workspace=<id>&resource=<path>` is the URL space a shared agent, run or trace
+ * link will land in, and claiming it now means the day somebody builds it is not the day they
+ * discover the name was already spent on something else. A link naming it parses and reaches
+ * `main.tsx`, which logs it and does nothing — which is the honest behaviour for a route that
+ * exists and has no handler, and is a great deal better than the alternative reading, where a
+ * shared link is refused as malformed and looks like a broken product rather than an unbuilt one. */
+const ACTIONS = ["auth", "agent", "thread", "billing", "open", "test"] as const;
 
 export type DeepLinkAction = (typeof ACTIONS)[number];
 

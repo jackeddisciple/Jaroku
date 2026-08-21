@@ -628,6 +628,15 @@ jobs:
           # because the platform URL parser was checked rather than trusted: it resolves `..`
           # away for `jaroku://host/path` and does NOT for the slashless form or for `..%2f`.
           npm run test:deep-link
+          # And what ONE of those links means, which is the auth specification's own question
+          # rather than the parser's. Its refusals are the near-misses — `auth/completed`,
+          # `auth/complete/extra`, `auth` alone — each a shape this application never produces and
+          # each accepted by a reader that matched on a prefix. The other half is §4.5's queue: the
+          # OS starts the app WITH the URL when it is not running, so a callback arrives before
+          # first-run has finished and before any screen could spend it. Delivered synchronously
+          # the moment one can, and exactly once — a ticket redelivered after a failed exchange is
+          # a "that link expired" somebody sees twice for one click.
+          npm run test:auth-link
           # WHERE THE SESSION TOKEN GOES, and the assertion the suite exists for is where it does
           # NOT. Under a host with an OS credential store the token must never touch
           # localStorage, and a mirror is the easy implementation that leaves the protection
