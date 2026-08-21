@@ -678,6 +678,22 @@ export interface UsageSnapshot {
    * absent there rather than present and refusing — the same signal the checkout route answers
    * "payments are not configured on this deployment" from.
    */
+  /**
+   * What the TIER bounds, as counts rather than as money.
+   *
+   * A SECOND PAIR OF METERS, and the distinction is the whole reason it is a separate field. Every
+   * other figure here is dollars: what was spent, on what, against which ceiling. These are
+   * quantity — runs and eval cases this month against the number the plan states — and a workspace
+   * on its own provider key spends none of our money while still using its allowance. One number
+   * could not say both.
+   *
+   * `limit` is `"unlimited"` rather than null, because at this boundary null reads as "we do not
+   * know" to everyone who did not write the server. See `billing/entitlements.ts`.
+   */
+  quota: {
+    runs: { used: number; limit: number | "unlimited" };
+    evalRuns: { used: number; limit: number | "unlimited" };
+  };
   paymentsConfigured: boolean;
 }
 

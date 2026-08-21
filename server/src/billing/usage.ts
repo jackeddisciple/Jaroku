@@ -39,6 +39,24 @@ export const USAGE_KINDS = [
   "llm.explain",
   "sandbox.seconds",
   "storage.bytes",
+  /**
+   * A thing that was COUNTED against a tier's quota, rather than a thing that cost money.
+   *
+   * THE ODD ONE OUT ON THIS LIST, and it is here rather than in a table of its own because what it
+   * needs is exactly what this table already provides: a globally unique key, an INSERT that either
+   * wins or collides, and a row somebody can look at afterwards. `workspace_usage_periods` holds a
+   * running total and cannot answer "was THIS run counted"; a second marker table would be this
+   * one with the money columns unused.
+   *
+   * IT COSTS ZERO AND KNOWS IT. `cost_usd: 0` with `cost_known: true` is not the "unknown is not
+   * zero" rule being broken — an unpriced call is a call whose price we could not look up, and this
+   * is not a call at all. `quantity` carries how many the row counted, so an eval batch of a
+   * hundred cases is one row saying a hundred rather than a hundred rows.
+   *
+   * IT MUST STAY OUT OF EVERY SPEND FIGURE, which it does by costing nothing: `spendSince` sums
+   * `cost_usd`, and zero adds nothing to a total or to a share. `test:metering` asserts that.
+   */
+  "period.marker",
 ] as const;
 
 export type UsageKind = (typeof USAGE_KINDS)[number];

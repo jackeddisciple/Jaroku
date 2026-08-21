@@ -92,6 +92,10 @@ check("and a fully-priced-or-unpriced cell does not claim to be a floor",
     spentUsd: 4.2, costKnown: false,
     ceilingUsd: 5, headroomUsd: 0.8, overCeiling: false,
     balanceUsd: 0, reservedUsd: 0, availableUsd: 0,
+    // The counted limits, which this export does not carry — a CSV of what was SPENT has no column
+    // for how many runs are left. Present because the snapshot is one shape and a fixture that
+    // omitted a field would be a fixture testing a shape nothing sends.
+    quota: { runs: { used: 3, limit: 500 }, evalRuns: { used: 0, limit: 20 } },
     platformSpentUsd: 1.1, platformCeilingUsd: 2, ownKeyForPlatform: false,
     byAgent: [
       { agentId: "a1", label: "support_bot", usd: 3.1, tokens: 40_000, costKnown: true, runs: 4 },

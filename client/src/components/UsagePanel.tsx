@@ -211,6 +211,82 @@ function Meter({
   );
 }
 
+/** Where a quota stops being a number and starts being a warning. §8.3's figure. */
+const NEARING = 0.8;
+
+/**
+ * A COUNT against a limit, which is not the same shape as money against a ceiling.
+ *
+ * A SEPARATE COMPONENT RATHER THAN A PARAMETER ON `Meter`, and the reason is what each one says
+ * when it has nothing to say. A spend meter with no ceiling reads "of no limit", which is correct
+ * and mildly reassuring. A quota with no limit is a tier that does not count this at all, and the
+ * useful rendering there is the count on its own — "1,204 runs this month" — with no bar, because a
+ * bar with no end is a bar that always looks empty.
+ *
+ * AND IT WARNS BEFORE IT REFUSES. §8.3 asks for a soft warning past eighty per cent, which exists
+ * because the alternative is finding out at the moment you are stopped. Amber at 80, red at 100,
+ * and the sentence names what would change it — the same rule every refusal in this codebase is
+ * written under.
+ */
+function QuotaMeter({
+  label, used, limit, unit,
+}: {
+  label: string;
+  used: number;
+  limit: number | "unlimited";
+  unit: string;
+}) {
+  if (limit === "unlimited") {
+    return (
+      <div className="rounded-control border border-hair px-3 py-2.5">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-[12px] text-muted">{label}</span>
+          <span className="font-mono text-[13px] tabular-nums text-ink">
+            {used.toLocaleString()}
+            <span className="ml-1 text-[12px] text-faint">this period</span>
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const ratio = limit === 0 ? 1 : used / limit;
+  const at = used >= limit;
+  const nearing = !at && ratio >= NEARING;
+  const pct = Math.min(100, Math.round(ratio * 100));
+
+  return (
+    <div className="rounded-control border border-hair px-3 py-2.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[12px] text-muted">{label}</span>
+        <span className="font-mono text-[13px] tabular-nums text-ink">
+          {used.toLocaleString()}
+          <span className="ml-1 text-[12px] text-faint">of {limit.toLocaleString()}</span>
+        </span>
+      </div>
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-active">
+        <div
+          className="h-full rounded-full transition-[width]"
+          style={{ width: `${pct}%`, background: at ? STATUS.error : nearing ? STATUS.pending : STATUS.ok }}
+        />
+      </div>
+      {(at || nearing) && (
+        <div
+          className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-[1.5]"
+          style={{ color: at ? STATUS.error : STATUS.pending }}
+        >
+          <span className="mt-0.5 shrink-0"><AlertTriangleIcon size={ICON.sm} /></span>
+          <span>
+            {at
+              ? `no ${unit} left this period — the count resets at the start of next month, and upgrading raises the limit`
+              : `${limit - used} ${unit} left this period`}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * What this workspace is on, and what else it could be on.
  *
@@ -398,6 +474,26 @@ export function UsagePanel() {
                 ? "your own key pays for generation, edits and the judge too — this covers what is left"
                 : "what this plan covers on our key. Connect your own to run past it."
             }
+          />
+        )}
+        {/* WHAT THE TIER BOUNDS, under what the money bounds, because they are two different
+            limits and a workspace can be nowhere near one while sitting on the other. A BYOK
+            workspace is the clearest case: nothing spent on our key, and its runs counted all the
+            same. */}
+        <QuotaMeter
+          label="Runs this period"
+          used={usage.quota.runs.used}
+          limit={usage.quota.runs.limit}
+          unit="runs"
+        />
+        {/* Only when the tier counts them. A plan with unlimited eval runs still renders the plain
+            figure above; a workspace that has run no evals at all does not need a row saying so. */}
+        {(usage.quota.evalRuns.used > 0 || usage.quota.evalRuns.limit !== "unlimited") && (
+          <QuotaMeter
+            label="Eval runs this period"
+            used={usage.quota.evalRuns.used}
+            limit={usage.quota.evalRuns.limit}
+            unit="eval runs"
           />
         )}
         {/* Inside the meters block, directly under the ceiling it is about. "How do I raise this"

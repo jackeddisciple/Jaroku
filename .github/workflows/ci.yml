@@ -464,6 +464,13 @@ jobs:
           # page to what it actually knows: a payment was received, not that a tier moved.
           npm run test:checkout-surfaces
           npm run test:metering
+          # The counters a TIER is bounded by, which are quantity rather than money. Every assertion in it
+          # is about a number that would look right on a screen: a run is counted where status first
+          # becomes running — not on receipt, where a refused request was never a run, and not on
+          # completion, where a crashed run that spent real model calls would be free. And ONCE, proved
+          # against two instances rather than one, because the guard has to be the unique key and not a
+          # Set: pausing to think must not cost a run, and two replicas watching one start must agree.
+          npm run test:usage-periods
           npm run test:balances
           npm run test:gate
           npm run test:aggregate

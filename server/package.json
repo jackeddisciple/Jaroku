@@ -79,6 +79,7 @@
     "test:plans": "tsx src/billing/plans.test.ts",
     "test:entitlements": "tsx src/billing/entitlements.test.ts",
     "test:metering": "tsx src/billing/metering.test.ts",
+    "test:usage-periods": "tsx src/billing/periodUsage.test.ts",
     "test:balances": "tsx src/billing/balances.test.ts",
     "test:gate": "tsx src/billing/gate.test.ts",
     "test:eval-budget": "tsx src/billing/evalBudget.test.ts",

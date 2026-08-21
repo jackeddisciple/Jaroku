@@ -66,6 +66,7 @@ The shortest list, with the tests that defend them:
 | A job survives the worker that was running it | `test:chaos`, `test:worker-loop` |
 | Eval runs stay off the live trace channel, across replicas too | `test:eval-off-trace` |
 | A redelivered trace batch cannot bill twice | `test:metering` |
+| A run is counted where `status` first becomes `running`, exactly once, however many replicas saw it | `test:usage-periods` |
 | Concurrent runs cannot overdraw one balance | `test:balances` |
 | A ceiling bounds what is STARTED, never what is spent | `test:gate`, `test:eval-budget` |
 | A workspace's provider key reaches its own run's provider and nothing else | `test:byok` |

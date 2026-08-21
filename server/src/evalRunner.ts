@@ -161,6 +161,22 @@ export interface EvalRunnerDeps {
    */
   bindWorkspace?: (evalId: string, ctx: TenantContext) => void;
   /**
+   * Count this eval against the workspace's monthly eval-run quota, per dataset CASE.
+   *
+   * PER CASE AND NOT PER BATCH, which is the specification's own instruction and is the difference
+   * between a quota that means something and one the eval engine walks around: a comparison over a
+   * hundred examples is a hundred runs of the agent and a hundred model calls, and billing it as
+   * one would make the eval tab the cheapest way to use the product.
+   *
+   * AT DISPATCH, beside `createJobs`, because that is the moment the work becomes real — the rows
+   * exist and the pump is about to start them. Counting at completion would make a cancelled
+   * five-hundred-job fan-out free, and it is not.
+   *
+   * Optional, so a runner constructed without billing — every existing suite — behaves exactly as
+   * it did.
+   */
+  countEvalCases?: (ctx: TenantContext, evalRunId: string, cases: number) => void;
+  /**
    * Whether the WORKSPACE has run out of room, and why — or null when it has not.
    *
    * Distinct from the eval's own `budget_usd`, which is a ceiling somebody set on this
@@ -323,6 +339,10 @@ export class EvalRunner {
     // Rows first, dispatch second. If the process dies right here, the eval is recoverable
     // rather than a set of runs nothing points at.
     await this.deps.evalStore.createJobs(req.ctx, evalRun.id, spec);
+    // `spec.length` and not `examples.length`: a comparison across three providers runs every
+    // example three times, and each of those is a run of the agent that costs a model call. The
+    // number of JOBS is the number of runs, which is what the quota bounds.
+    this.deps.countEvalCases?.(req.ctx, evalRun.id, spec.length);
     await this.deps.evalStore.setEvalStatus(req.ctx, evalRun.id, "running");
 
     this.live.set(evalRun.id, {

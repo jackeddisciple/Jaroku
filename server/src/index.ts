@@ -217,6 +217,7 @@ import { SAMPLE_INTERVAL_MS, sampleStorage } from "./billing/storage.ts";
 import { Balances } from "./billing/balances.ts";
 import { BudgetGate, billingPeriod, ceilingRefusal } from "./billing/gate.ts";
 import { entitlementsForPlan } from "./billing/entitlements.ts";
+import { PeriodUsage } from "./billing/periodUsage.ts";
 import {
   NO_ENTITLEMENT, entitlementFor, refusalMessage, requireEntitlement,
   type EntitlementCounts,
@@ -401,6 +402,13 @@ const meter = new UsageMeter(billing, async (ctx, runId) => {
   const run = await store.getRun(ctx, runId);
   return run ? { provider: run.provider, model: run.model } : null;
 });
+
+// The counters a TIER is bounded by, which are a different thing again from either of the two
+// above. `usage_events` is money — what was spent, on what, by whom. This is quantity: how many
+// runs and eval cases this workspace has had this month, against a limit its plan states. A
+// workspace on its own key spends none of our money and still uses its allowance of runs, so the
+// two cannot be one number. See billing/periodUsage.ts.
+const periodUsage = new PeriodUsage(billing);
 
 // The other half: what may be STARTED, as opposed to what is recorded once it has been.
 // `balances` is the mechanism (an atomic claim against a balance, and a row that can be given
@@ -3324,6 +3332,13 @@ evalRunner = new EvalRunner({
   // that itself, between the eval becoming live and its first job, because nothing outside
   // knows the id before then.
   bindWorkspace: (evalId, ctx) => evalWorkspaces.set(evalId, ctx),
+  // Fired and caught, like the run counter on the ingest chain: a dispatch that failed because a
+  // counter could not be written would be five hundred jobs somebody lost over a figure.
+  countEvalCases: (ctx, evalRunId, cases) => {
+    void periodUsage.countEvalCases(ctx, evalRunId, cases).catch((err) => {
+      console.error("[billing] failed to count eval cases:", (err as Error).message);
+    });
+  },
   // The WORKSPACE's ceiling, checked on every pump beside the eval's own. A five-hundred-job
   // fan-out is five hundred things being started, and a gate that only ran at the button would
   // let the first job's authorisation cover all of them. Returns the sentence the user reads,
@@ -3855,7 +3870,7 @@ async function broadcastUsage(ctx: TenantContext): Promise<void> {
   try {
     const status = await budgetGate.status(ctx);
     const period = status.periodStart;
-    const [byAgent, byRun, byKind, platform, agents, planRows] = await Promise.all([
+    const [byAgent, byRun, byKind, platform, agents, planRows, counters] = await Promise.all([
       billing.spendByAgent(ctx, period),
       billing.spendByRun(ctx, period),
       billing.spendByKind(ctx, period),
@@ -3866,7 +3881,17 @@ async function broadcastUsage(ctx: TenantContext): Promise<void> {
       // its columns. The limits beside each one come from `PLANS`, which is the code that enforces
       // them, so the panel cannot advertise a ceiling the gate would not apply.
       billing.listPlans(ctx),
+      // WHAT THE TIER BOUNDS, as opposed to what the money bounds. Every figure above is dollars;
+      // these are counts — runs and eval cases this month against the limit the plan states. A
+      // workspace on its own key spends nothing of ours and still uses its allowance, so the two
+      // meters answer different questions and both belong on the panel.
+      periodUsage.forCurrentPeriod(ctx),
     ]);
+    // The limits those counts are measured against, from the ONE resolver. Read here rather than
+    // recomputed on the client for the reason billingStore's header states: a client that worked
+    // out its own limit would eventually disagree with the refusal the user is looking at.
+    const balanceRow = await billing.balance(ctx);
+    const entitlements = entitlementsForPlan(status.plan.id, balanceRow.limit_overrides);
     // Slugs, because an agent uuid means nothing to a person reading a bill. Resolved here
     // rather than joined in SQL so the query stays about money.
     const slugById = new Map(agents.map((a) => [a.id, a.slug]));
@@ -3929,6 +3954,13 @@ async function broadcastUsage(ctx: TenantContext): Promise<void> {
         // WHETHER THIS DEPLOYMENT CAN SELL ANYTHING AT ALL, from the one signal the checkout route
         // already answers on. The local path has no Stripe keys and is not an error state, so the
         // Upgrade control is absent there rather than present and refusing.
+        // THE COUNTED LIMITS AND WHAT IS LEFT OF THEM. `used` is absent-means-zero here rather than
+        // in the repository, because at this boundary the two are genuinely the same answer: a
+        // workspace that has started no runs has used none.
+        quota: {
+          runs: { used: counters["runs"] ?? 0, limit: entitlements.runsPerMonth },
+          evalRuns: { used: counters["eval_runs"] ?? 0, limit: entitlements.evalRunsPerMonth },
+        },
         paymentsConfigured: paymentsConfigured(stripeConfigFromEnv()),
       },
     });
@@ -7400,6 +7432,18 @@ onBothPools("event", ({ runId, event }) => {
         // chatty. See UsageMeter.
         if (event.kind === "run_start") {
           meter.noteRun(event.run.id, event.run.provider, event.run.model, runPayers.get(event.run.id) ?? "platform");
+          // AND THE QUOTA COUNTER, HERE AND NOWHERE ELSE. This is the moment `runs.status` first
+          // becomes `running` — not the request that asked for it, which may have been refused,
+          // and not the end, which a crashed run never reaches while still having spent the model
+          // calls it made. `countRun` is idempotent on the run's id, so the resume that follows a
+          // pause does not cost a second run.
+          //
+          // Fired and caught, like `meterStep` two lines down and for the same reason: this sits
+          // on the trace ingest chain, and a run that died because its counter could not be written
+          // would be a far worse outcome than a figure that is one low for a month.
+          void periodUsage.countRun(runCtx, event.run.id).catch((err) => {
+            console.error("[billing] failed to count a run:", (err as Error).message);
+          });
         }
       } else if (event.kind === "step") {
         await store.insertStep(runCtx, event.step);
