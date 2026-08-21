@@ -106,3 +106,120 @@ pub fn deliver(app: &AppHandle, url: &str) {
 pub fn drain_deep_links(pending: tauri::State<'_, Pending>) -> Vec<String> {
     pending.0.lock().map(|mut queue| std::mem::take(&mut *queue)).unwrap_or_default()
 }
+
+// --- the outbound half ---------------------------------------------------------------------------
+//
+// Everything above receives a URL from the operating system. This sends one TO it, and the two
+// belong in one file because they are one round trip: the app opens a payment page in the system
+// browser, and the browser comes back through `jaroku://`. Splitting them would put half a
+// conversation in each of two modules.
+//
+// WHY THE APP CANNOT JUST NAVIGATE THERE. Stripe Checkout is built for a real browser — saved cards,
+// autofill, and a 3-D Secure challenge that may itself redirect to a bank. None of that works
+// reliably in an embedded webview, and `window.location.assign` inside the app navigates the APP
+// away with no route back, because the return URL is a web origin the packaged frontend is not
+// served from. So the payment step is a deliberate, single hop out and back.
+//
+// AND WHY IT IS A COMMAND RATHER THAN A PLUGIN PERMISSION. `tauri-plugin-opener` would be the tidy
+// answer and would mean granting the webview a permission to open arbitrary URLs — see menu.rs,
+// which declines the same offer for the same reason. A capability the page holds is a capability
+// anything running in the page holds, and this one launches programs. So the frontend asks, and
+// THIS decides, against a rule the frontend cannot influence — and the capability file stays at the
+// two permissions it has had since the wrapper shipped.
+//
+// It goes through `tauri-plugin-opener`, called from RUST. The plugin being present is not the
+// same as the page being allowed to use it: a capability is granted per window in
+// capabilities/default.json, and that file still lists exactly `core:default` and
+// `deep-link:default`. `tauri-plugin-shell` is registered on the same terms and has been since the
+// wrapper shipped — it spawns the backend and the page cannot reach it either.
+
+/// Hosts a checkout may be opened at.
+///
+/// AN ALLOWLIST, NOT A SCHEME CHECK, and the difference is the whole security of this command. The
+/// page hands over a URL it got from our own server, but "from our own server" is not something
+/// this side can verify — a compromised or merely buggy frontend would be asking with whatever it
+/// had. `https://` alone would permit every site on the internet; these three are the only hosts a
+/// payment flow ever needs.
+const ALLOWED_HOSTS: [&str; 3] = ["checkout.stripe.com", "billing.stripe.com", "checkout.jaroku.dev"];
+
+/// Whether this URL may be handed to the operating system.
+///
+/// Split out and `pub` so it can be tested without a running app: the rule is the valuable part and
+/// a rule that can only be exercised by launching a desktop application is a rule nobody exercises.
+/// The same argument `deepLink.ts` makes about keeping the inbound parser in the frontend.
+pub fn may_open(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else { return false };
+    if parsed.scheme() != "https" {
+        return false;
+    }
+    // EXACT HOST MATCH, never a suffix test. `ends_with("stripe.com")` also admits
+    // `checkout.stripe.com.evil.example`, which is the oldest hole in this shape of check.
+    parsed.host_str().is_some_and(|host| ALLOWED_HOSTS.contains(&host))
+}
+
+/// Open a payment page in the user's own browser.
+///
+/// Returns an error the page can render rather than panicking: a refused URL is a bug worth seeing,
+/// and a spawn that fails is a machine with no browser configured — neither should take the app
+/// down, and both should say which happened.
+#[tauri::command]
+pub fn open_checkout(app: AppHandle, url: String) -> Result<(), String> {
+    if !may_open(&url) {
+        // The URL is NOT echoed into the error. It came from outside this function and is about to
+        // be rendered in a webview; the log line has it for whoever is debugging.
+        logs::say(format!("refused to open a URL that is not a payment page: {url}"));
+        return Err("that is not a payment page this app will open".into());
+    }
+    let _ = &app;
+    tauri_plugin_opener::open_url(url, None::<&str>).map_err(|err| {
+        logs::say(format!("could not open the system browser: {err}"));
+        "could not open your browser — copy the link and open it yourself".to_string()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_payment_page_may_be_opened() {
+        // The three hosts a checkout flow ever needs, spelled as literals rather than read from
+        // ALLOWED_HOSTS — so the suite fails if somebody edits the constant, which would be
+        // editing what this app is willing to launch.
+        assert!(may_open("https://checkout.stripe.com/c/pay/cs_test_a1b2c3"));
+        assert!(may_open("https://billing.stripe.com/p/session/live_abc"));
+        assert!(may_open("https://checkout.jaroku.dev/success?session_id=cs_test_x"));
+    }
+
+    #[test]
+    fn a_lookalike_host_is_not_a_match() {
+        // THE OLDEST HOLE IN THIS SHAPE OF CHECK. `ends_with("stripe.com")` admits every one of
+        // these, and each is a domain anybody can register this afternoon.
+        assert!(!may_open("https://checkout.stripe.com.evil.example/c/pay"));
+        assert!(!may_open("https://evil-checkout.stripe.com.attacker.test/"));
+        assert!(!may_open("https://notcheckout.stripe.com/"));
+        // A userinfo section is the other half of the same trick: everything before the `@` is a
+        // credential, not a host, and a reader that scanned the string would find the wrong one.
+        assert!(!may_open("https://checkout.stripe.com@evil.example/pay"));
+    }
+
+    #[test]
+    fn a_scheme_that_is_not_https_is_refused_whatever_the_host() {
+        // http, because a payment page over plain http is one anybody on the path can rewrite.
+        assert!(!may_open("http://checkout.stripe.com/c/pay"));
+        // file and javascript, because this string reaches the operating system: a shell asked to
+        // "open" either of those does something considerably more interesting than show a page.
+        assert!(!may_open("file:///etc/passwd"));
+        assert!(!may_open("javascript:alert(1)"));
+        // And our own scheme, which would be the app asking the OS to reopen the app.
+        assert!(!may_open("jaroku://billing/success"));
+    }
+
+    #[test]
+    fn nonsense_is_refused_rather_than_parsed_halfway() {
+        assert!(!may_open(""));
+        assert!(!may_open("checkout.stripe.com"), "a bare host is not a URL");
+        assert!(!may_open("not a url at all"));
+        assert!(!may_open("https://"), "a scheme with no host is not a page");
+    }
+}

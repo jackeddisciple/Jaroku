@@ -108,9 +108,11 @@ The shortest list, with the tests that defend them:
 | Retention sweeps every workspace-scoped table or exempts it with a stated reason | `test:retention` |
 | An invoice event patches the subscription's status and nothing it does not carry | `test:stripe` |
 | A checkout returns a browser to an https page, never a `jaroku://` link or an app route | `test:stripe` |
+| The public pricing page sells nothing — every CTA downloads the app, so there is one checkout entry point | `test:checkout-surfaces` |
 | Every quota-relevant command is classified, and a check with no limit behind it cannot silently allow | `test:entitlements` |
 | One resolver produces every tier feature and limit value, and admin mode needs the environment as well as the request | `test:entitlements` |
 | A refusal off the socket is checked before it becomes a card, and a quota without its figures is not one | `test:entitlement-store` |
+| Only a payment page may be handed to the operating system, matched by exact host rather than by suffix | `cargo test --lib deeplink` |
 
 ## Commits
 

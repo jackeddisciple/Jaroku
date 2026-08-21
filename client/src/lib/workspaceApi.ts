@@ -87,6 +87,49 @@ export async function deleteWorkspace(confirm: string): Promise<DeletionReceipt>
  * The PRICE is never sent. It comes from the `plans` table server-side — a price id in a request
  * body would let somebody subscribe to whatever they could name.
  */
-export async function startCheckout(plan: string, workspaceId: string): Promise<{ url: string }> {
-  return apiRequest<{ url: string }>("POST", "/v1/billing/checkout", { plan, workspaceId });
+export async function startCheckout(
+  plan: string,
+  workspaceId: string,
+  seats?: number,
+): Promise<{ url: string }> {
+  return apiRequest<{ url: string }>("POST", "/v1/billing/checkout", { plan, workspaceId, seats });
+}
+
+/** What the server believes about this workspace's subscription. See `fetchSubscription`. */
+export interface SubscriptionView {
+  /** What every limit is read from. Not the same fact as the provider's status — see below. */
+  tier: string;
+  entitled: boolean;
+  subscription: {
+    status: string;
+    seatCount: number;
+    byokEnabled: boolean;
+    currentPeriodStart: string | null;
+    currentPeriodEnd: string | null;
+    cancelAtPeriodEnd: boolean;
+    attention: boolean;
+  } | null;
+}
+
+/**
+ * What this workspace's subscription actually is, right now.
+ *
+ * THE AUTHORITATIVE ANSWER AFTER A CHECKOUT, and the reason the upgrade flow polls it rather than
+ * trusting what it has. Coming back from the system browser, the app knows only that a deep link
+ * arrived — not whether the webhook has landed, and not whether the person actually paid. So it
+ * asks here until the answer settles, and says "confirming your subscription" until it does.
+ *
+ * TWO FACTS, DELIBERATELY SEPARATE. `tier` is what this system believes and what every limit is
+ * read from; `subscription.status` is what the payment provider believes. A workspace whose card
+ * failed on Tuesday is `past_due` AND still on Pro, and a screen that had to pick one of those
+ * would be wrong about the other.
+ */
+export async function fetchSubscription(workspaceId: string): Promise<SubscriptionView> {
+  return apiRequest<SubscriptionView>(
+    "GET",
+    `/v1/billing/subscription?workspace=${encodeURIComponent(workspaceId)}`,
+    undefined,
+    // The workspace is already on the path; `apiRequest` would append a second copy of it.
+    { scoped: false },
+  );
 }

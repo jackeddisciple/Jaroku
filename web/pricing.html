@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pricing — Jaroku</title>
+<meta name="description" content="Jaroku pricing: Free, Pro at $20/month, Team at $40/user/month." />
+<!--
+  jaroku.dev/pricing — an ordinary web page, read in an ordinary browser, BEFORE the desktop app
+  has been installed.
+
+  IT IS NOT AN APP ROUTE AND COULD NOT BE. Jaroku's first screen is first-run setup or sign-in;
+  there is no unauthenticated state to render a pricing page into. So this page does pre-install
+  discovery and nothing else.
+
+  EVERY CALL TO ACTION DOWNLOADS THE APP — Free, Pro and Team alike. There is no Stripe integration
+  here of any kind, deliberately: a visitor who wants Pro downloads Jaroku, signs in (which
+  provisions a Free workspace), and upgrades from inside it, through the same flow every other
+  upgrade uses. A second checkout entry point would mean getting webhook linking, workspace
+  association and every edge case right in two places rather than one, and the in-app flow already
+  handles all of it. The single exception is Team's "Contact", which is a mailto.
+
+  THE COMPARISON TABLE IS BELOW THE FOLD BY DESIGN. Power buyers scroll and want the exhaustive
+  answer; everyone else stays with the three cards. Putting the table first would make the page
+  read as a specification rather than as an offer.
+-->
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0d0d0f; --panel: #18181b; --edge: #2a2a30; --hair: #1e1e22;
+    --ink: #e4e4e7; --muted: #71717a; --faint: #52525b; --accent: #6b8afd;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 24px 80px; background: var(--bg); color: var(--ink);
+    font: 400 14px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  header { padding: 72px 0 40px; text-align: center; }
+  h1 { margin: 0 0 10px; font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
+  .sub { margin: 0; font-size: 15px; color: var(--muted); }
+
+  .tiers { display: grid; gap: 14px; grid-template-columns: 1fr; }
+  @media (min-width: 720px) { .tiers { grid-template-columns: repeat(3, 1fr); } }
+
+  .tier {
+    padding: 24px; background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 14px; display: flex; flex-direction: column;
+  }
+  .tier.mid { border-color: rgba(107, 138, 253, 0.45); }
+  .name { font-size: 13px; font-weight: 600; }
+  .price { margin: 8px 0 2px; font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
+  .price span { font-size: 13px; font-weight: 400; color: var(--faint); }
+  .line { margin: 0 0 18px; font-size: 12px; line-height: 1.5; color: var(--muted); min-height: 36px; }
+  ul { margin: 18px 0 0; padding: 0; list-style: none; }
+  li { padding: 5px 0; font-size: 12px; color: var(--muted); border-top: 1px solid var(--hair); }
+  li:first-child { border-top: 0; }
+
+  .cta {
+    display: block; padding: 9px 16px; border-radius: 8px; text-align: center;
+    font-size: 13px; font-weight: 500; text-decoration: none;
+    background: var(--ink); color: var(--bg);
+  }
+  .cta:hover { background: #d4d4d8; }
+  .cta.quiet { background: transparent; color: var(--ink); border: 1px solid var(--edge); }
+  .cta.quiet:hover { background: var(--hair); }
+
+  .more { margin: 48px 0 0; text-align: center; font-size: 12px; color: var(--faint); }
+
+  h2 { margin: 64px 0 16px; font-size: 17px; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  caption { text-align: left; padding-bottom: 10px; font-size: 12px; line-height: 1.55; color: var(--faint); }
+  th, td { padding: 8px 10px; text-align: left; border-top: 1px solid var(--hair); }
+  thead th { border-top: 0; color: var(--faint); font-weight: 500; }
+  tbody th { font-weight: 400; color: var(--muted); }
+  td { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .group th { padding-top: 20px; color: var(--faint); font-weight: 500; border-top: 0; }
+  .no { color: var(--faint); }
+  .scroll { overflow-x: auto; }
+
+  footer {
+    margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--hair);
+    text-align: center; font-size: 12px; color: var(--faint);
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Pricing</h1>
+    <p class="sub">Build, run and debug LangGraph agents. Start free, on your own API key.</p>
+  </header>
+
+  <section class="tiers">
+    <article class="tier">
+      <div class="name">Free</div>
+      <div class="price">$0</div>
+      <p class="line">Bring your own provider key. No inference runs through us.</p>
+      <a class="cta quiet" href="https://jaroku.dev/download">Download</a>
+      <ul>
+        <li>1 workspace</li>
+        <li>3 agents</li>
+        <li>500 runs a month</li>
+        <li>7 days of trace history</li>
+        <li>Your own provider key</li>
+      </ul>
+    </article>
+
+    <article class="tier mid">
+      <div class="name">Pro</div>
+      <div class="price">$20<span>/month</span></div>
+      <p class="line">Single operator, with $15 of inference included.</p>
+      <!-- A DOWNLOAD, NOT A CHECKOUT. Upgrading happens inside the app, once there is a workspace
+           for a subscription to belong to. -->
+      <a class="cta" href="https://jaroku.dev/download">Download</a>
+      <ul>
+        <li>3 workspaces</li>
+        <li>Unlimited agents</li>
+        <li>10,000 runs a month</li>
+        <li>90 days of trace history</li>
+        <li>GitHub push</li>
+      </ul>
+    </article>
+
+    <article class="tier">
+      <div class="name">Team</div>
+      <div class="price">$40<span>/user/month</span></div>
+      <p class="line">Two people or more, with $30 of inference each, pooled.</p>
+      <!-- The one exception on this page, and it is a mailto rather than a form. -->
+      <a class="cta quiet" href="mailto:contact@jaroku.dev?subject=Jaroku%20Team">Contact</a>
+      <ul>
+        <li>Unlimited workspaces</li>
+        <li>Up to 20 members</li>
+        <li>50,000 runs a month, pooled</li>
+        <li>A year of trace history</li>
+        <li>GitHub sync, Access grants, Policy</li>
+      </ul>
+    </article>
+  </section>
+
+  <p class="more">Full comparison below &darr;</p>
+
+  <h2>Every limit, side by side</h2>
+  <div class="scroll">
+  <table>
+    <caption>
+      Agent generation, editing, branching, the Trace, Graph, Evals, MCP and Secrets tabs,
+      reasoning-effort control and the permission shield are on every plan, including Free.
+      They are the product, not an upsell.
+    </caption>
+    <thead>
+      <tr><th scope="col">&nbsp;</th><th scope="col">Free</th><th scope="col">Pro</th><th scope="col">Team</th></tr>
+    </thead>
+    <tbody>
+      <tr class="group"><th scope="row" colspan="4">Scale</th></tr>
+      <tr><th scope="row">Workspaces per user</th><td>1</td><td>3</td><td>Unlimited</td></tr>
+      <tr><th scope="row">Members per workspace</th><td>1</td><td>1</td><td>Up to 20</td></tr>
+      <tr><th scope="row">Agents per workspace</th><td>3</td><td>Unlimited</td><td>Unlimited</td></tr>
+      <tr><th scope="row">Concurrent live deployments</th><td>1</td><td>5</td><td>Unlimited</td></tr>
+      <tr><th scope="row">Runs per month</th><td>500</td><td>10,000</td><td>50,000 pooled</td></tr>
+      <tr><th scope="row">Eval runs per month</th><td>20</td><td>500</td><td>2,500 pooled</td></tr>
+      <tr><th scope="row">Connected MCP servers</th><td>3</td><td>Unlimited</td><td>Unlimited</td></tr>
+
+      <tr class="group"><th scope="row" colspan="4">History</th></tr>
+      <tr><th scope="row">Trace retention</th><td>7 days</td><td>90 days</td><td>365 days</td></tr>
+      <tr><th scope="row">Audit log retention</th><td>7 days</td><td>90 days</td><td>365 days</td></tr>
+      <tr><th scope="row">Version history</th><td>Full</td><td>Full</td><td>Full</td></tr>
+
+      <tr class="group"><th scope="row" colspan="4">Inference</th></tr>
+      <tr><th scope="row">Your own provider key</th><td>Required</td><td>Optional</td><td>Optional</td></tr>
+      <tr><th scope="row">Included credit</th><td class="no">—</td><td>$15/month</td><td>$30/user/month</td></tr>
+      <tr><th scope="row">Overage</th><td class="no">—</td><td>At cost + 15%</td><td>At cost + 15%, pooled</td></tr>
+
+      <tr class="group"><th scope="row" colspan="4">Features</th></tr>
+      <tr><th scope="row">GitHub push</th><td class="no">—</td><td>Yes</td><td>Yes</td></tr>
+      <tr><th scope="row">GitHub sync (bidirectional)</th><td class="no">—</td><td class="no">—</td><td>Yes</td></tr>
+      <tr><th scope="row">Per-agent Access grants</th><td class="no">—</td><td class="no">—</td><td>Yes</td></tr>
+      <tr><th scope="row">Batch approvals</th><td class="no">—</td><td>Yes</td><td>Yes</td></tr>
+      <tr><th scope="row">Policy engine</th><td class="no">—</td><td class="no">—</td><td>Yes</td></tr>
+      <tr><th scope="row">Evals as a CI gate</th><td class="no">—</td><td class="no">—</td><td>Yes</td></tr>
+
+      <tr class="group"><th scope="row" colspan="4">Support</th></tr>
+      <tr><th scope="row">Channel</th><td>GitHub Issues</td><td>Email, 48h</td><td>Priority email, 24h</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <footer>
+    <p>
+      Enterprise — SSO, an SLA, or on-premises:
+      <a href="mailto:contact@jaroku.dev?subject=Jaroku%20Enterprise">contact@jaroku.dev</a>
+    </p>
+    <p>Prices in USD. Downgrading never deletes your agents, deployments or history.</p>
+  </footer>
+</div>
+</body>
+</html>

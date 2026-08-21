@@ -39,12 +39,18 @@ import {
   ActivityIcon, AlertTriangleIcon, CheckIcon, UserCircleIcon, XIcon,
 } from "./panelIcons.tsx";
 import { Select } from "./Select.tsx";
+import { BillingSection } from "./BillingSection.tsx";
+import { UpsellCard } from "./UpsellCard.tsx";
 
 const SECTIONS: { id: WorkspaceSection; label: string }[] = [
   { id: "members", label: "Members" },
   // Beside Members because most of what it records is membership, and because the two answer
   // the same question at different tenses: who is here, and what has been done here.
   { id: "audit", label: "Audit" },
+  // What the workspace is PAYING, which this file's own header named as one of the four scopes
+  // this panel exists for. Beside Members because seats are a membership question at the moment
+  // somebody buys them, and before Data because it is read far more often than it is acted on.
+  { id: "billing", label: "Billing" },
   // Last, and deliberately: it is the section with the irreversible button in it.
   { id: "data", label: "Data" },
 ];
@@ -212,6 +218,9 @@ function MembersSection() {
   const invites = useMemberStore((s) => s.invites);
   const loaded = useMemberStore((s) => s.loaded);
   const error = useMemberStore((s) => s.error);
+  // Where the upsell card's "See Pro" goes. The panel is already open, so this only moves the
+  // section — which is the whole reason Billing is a section of this panel rather than elsewhere.
+  const openBilling = useUiStore((s) => s.openWorkspacePanel);
   const workspaceId = useSessionStore((s) => s.workspaceId);
   const workspaces = useSessionStore((s) => s.workspaces);
   const userId = useSessionStore((s) => s.user?.id ?? null);
@@ -284,6 +293,14 @@ function MembersSection() {
       )}
 
       <InviteLink />
+
+      {/* WHAT THE TIER REFUSED, above the plain error rather than instead of it. An invite is the
+          limit a Free workspace meets first — it is single-user, so the very first invite is
+          refused — and "1 of 1 members used, and Pro raises it" beside the form somebody has just
+          filled in is a different message from a red sentence, because it names what would change
+          it. The card answers only to the `members` channel, so a refused generation puts nothing
+          here and a refused invite puts nothing on the composer. */}
+      <UpsellCard channel="members" onUpgrade={() => openBilling("billing")} />
 
       {error && (
         <p className="rounded-control border border-err/30 px-2 py-1.5 text-[11px] text-err">{error}</p>
@@ -648,6 +665,7 @@ export function WorkspacePanel() {
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3.5">
           {section === "data" ? <DataSection />
             : section === "audit" ? <AuditSection />
+            : section === "billing" ? <BillingSection />
             : <MembersSection />}
         </div>
       </div>

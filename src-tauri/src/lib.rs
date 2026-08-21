@@ -51,6 +51,12 @@ pub fn run() {
             window::focus_existing(app);
         }))
         .plugin(tauri_plugin_shell::init())
+        // THE ONE HOP OUT, and it grants the page nothing. Registering a plugin makes it available
+        // to RUST; what a window may ask for is capabilities/default.json, which still lists
+        // exactly `core:default` and `deep-link:default`. `open_checkout` in deeplink.rs is the
+        // only caller, and it checks the URL against a host allowlist first — see the note there on
+        // why an exact match rather than a suffix test.
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
         // WINDOW GEOMETRY ACROSS LAUNCHES, and the flag list is the whole of the decision.
         //
@@ -83,6 +89,7 @@ pub fn run() {
             status::backend_status,
             sidecar::restart_backend,
             deeplink::drain_deep_links,
+            deeplink::open_checkout,
             secrets::secret_get,
             secrets::secret_set,
             secrets::secret_delete,

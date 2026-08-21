@@ -160,3 +160,41 @@ export function onDeepLink(handler: (link: DeepLink) => void): () => void {
     unlisten?.();
   };
 }
+
+/**
+ * Open a payment page in the user's own browser, and say whether that worked.
+ *
+ * THE ONE MOMENT THE UPGRADE FLOW LEAVES THE APP, and it is stated rather than sprung: the button
+ * above this call says "Continue to payment" and the screen after it says the browser is where the
+ * rest happens. A surprise browser launch mid-flow reads as something going wrong; an announced one
+ * does not, and being honest about the hop is part of the same rule that keeps the pricing free of
+ * countdowns.
+ *
+ * IT LIVES HERE BECAUSE IT IS THE OTHER HALF OF THE ROUND TRIP `onDeepLink` COMPLETES. The app opens
+ * a browser, the browser pays, and the browser comes back through `jaroku://billing/success` — one
+ * conversation, one module. Putting the outbound call in a third Tauri-aware file would break the
+ * invariant `docs/tauri.md` states and documents by name: exactly three modules in this client know
+ * Tauri exists.
+ *
+ * `false` IN A BROWSER RATHER THAN A THROW, and the caller decides what to do about it. Absent a
+ * host there is no system browser to hop to — the page IS in a browser — so the honest answer is
+ * "this did not happen" and the fallback is an ordinary link the person can click. The same shape
+ * `onDeepLink` takes: a no-op that a caller never has to branch on the host to use.
+ *
+ * WHAT IT DOES NOT DO IS DECIDE WHETHER THE URL IS SAFE. That is `may_open` in
+ * `src-tauri/src/deeplink.rs`, against a host allowlist this side cannot influence — because "the
+ * URL came from our own server" is not something the page can prove about itself.
+ */
+export async function openCheckout(url: string): Promise<boolean> {
+  const tauri = bridge();
+  if (!tauri?.core?.invoke) return false;
+  try {
+    await tauri.core.invoke("open_checkout", { url });
+    return true;
+  } catch (err) {
+    // The shell refused it or could not launch anything. Logged rather than thrown: the caller's
+    // fallback is to show the link, which is a better outcome than an error boundary.
+    console.warn(`[jaroku] could not open the payment page: ${String(err)}`);
+    return false;
+  }
+}

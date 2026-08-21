@@ -456,6 +456,13 @@ jobs:
           # renewal. It also now holds the desktop rule the whole checkout hop rests on — a return URL
           # must be an https page a browser can reach, because Stripe would accept a plain-http one.
           npm run test:stripe
+          # And the three web pages, which are the only Jaroku surfaces on the open web and the ones
+          # nobody opens between releases. Two rules: the pricing page sells nothing — every CTA is a
+          # download, so there is one place that has to get webhook linking and workspace association
+          # right rather than two — and the return pages land the browser back in the app rather than
+          # leaving somebody in a tab wondering whether they were charged. It also holds the success
+          # page to what it actually knows: a payment was received, not that a tier moved.
+          npm run test:checkout-surfaces
           npm run test:metering
           npm run test:balances
           npm run test:gate

@@ -35,6 +35,14 @@ tauri = { version = "2", features = ["tray-icon", "image-png"] }
 # shell permission at all, so nothing the frontend can say reaches a process spawn. That is the
 # same posture the relay takes with its command matrix — a capability nobody granted is refused.
 tauri-plugin-shell = "2"
+# OPENING THE SYSTEM BROWSER, for the one hop out the payment step takes. `shell`'s own `open` is
+# deprecated in favour of this, and the reason to add a crate rather than keep calling the
+# deprecated one is that this is the path a PAYMENT takes — the place to be on the supported API.
+#
+# THE WEBVIEW IS GRANTED NOTHING BY IT. capabilities/default.json still lists exactly
+# `core:default` and `deep-link:default`; this is called from Rust, behind a host allowlist the
+# page cannot influence, in the same posture `shell` is already used in for the sidecar.
+tauri-plugin-opener = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-window-state = "2"
@@ -48,6 +56,12 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 # Only `time`, and only for the supervisor's backoff sleep. Tauri already runs a tokio runtime;
 # this names the one feature of it this crate reaches for directly.
 tokio = { version = "1", features = ["time"] }
+# URL PARSING FOR ONE ALLOWLIST CHECK, and a real parser rather than string operations because
+# this one decides what the shell may launch. `ends_with("stripe.com")` also admits
+# `checkout.stripe.com.evil.example`, which is the oldest hole in this shape of check — and it is
+# not a hole worth hand-rolling around. Already in the tree via tauri, so this names a version
+# rather than adding a dependency.
+url = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The updater is behind a feature because a build of it needs a signing key pair that does not
