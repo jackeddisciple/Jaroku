@@ -22,6 +22,7 @@
     "test:deep-link": "tsx src/lib/deepLink.test.ts",
     "test:auth-link": "tsx src/lib/authLink.test.ts",
     "test:auth-first-run": "tsx src/lib/firstRun.test.ts",
+    "test:auth-sign-in": "tsx src/lib/signIn.test.ts",
     "test:host-backend": "tsx src/lib/hostBackend.test.ts",
     "test:session-vault": "tsx src/lib/sessionVault.test.ts",
     "test:invite": "tsx src/lib/invite.test.ts",

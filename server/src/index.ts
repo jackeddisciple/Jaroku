@@ -2424,6 +2424,15 @@ for (const route of sessionRoutes({
   localIssuer,
   tickets: ticketStore,
   signIn: signInStore,
+  // Read per request rather than captured, so a deployment that adds a Google client or an email
+  // provider starts offering it without a restart. See `SessionDeps.methods`.
+  methods: {
+    google: () => googleConfigFrom() !== null,
+    // M5's answer. Until the mail provider is wired, the honest answer is that this server can
+    // generate a link and not deliver one — and a "Continue with email" that silently sends
+    // nothing is worse than one that is not there.
+    magicLink: () => false,
+  },
   resolver: contextResolver,
   // FAILS OPEN, like every other limiter call in this file — see rateLimit.ts. A workspace is a
   // tenancy rather than a row, so it is worth a bucket; a Redis blip is not worth being the

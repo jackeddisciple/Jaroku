@@ -6,7 +6,7 @@ import { StatusBar } from "./components/StatusBar.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { TopBar } from "./components/TopBar.tsx";
 import { CodeOverlay } from "./components/CodeOverlay.tsx";
-import { SignIn } from "./components/SignIn.tsx";
+import { AuthFlow, SignInSwapPrompt } from "./components/auth/AuthFlow.tsx";
 import { FirstRun } from "./components/firstrun/FirstRun.tsx";
 import { firstRunOnScreen, useFirstRunStore } from "./store/firstRunStore.ts";
 import { McpConfirmModal } from "./components/McpConfirmModal.tsx";
@@ -140,7 +140,7 @@ export function App() {
   // Only `signed_out` gets this. `connecting` deliberately does not: a dropped network must
   // not throw a sign-in form over a working session, which is precisely the "retry vs stop"
   // distinction lib/socket.ts exists to keep straight.
-  if (sessionStatus === "signed_out") return <SignIn />;
+  if (sessionStatus === "signed_out") return <AuthFlow />;
 
   // The welcome step replaces the layout entirely rather than covering it. It has nothing to say
   // about an agent, a run or a trace, so mounting three empty columns underneath it would be
@@ -170,6 +170,11 @@ export function App() {
             describes what this workspace may not do, and this describes every limit not being
             applied at all. Both are true about the whole session rather than about whatever is on
             screen, which is why neither lives in a panel. */}
+        {/* §4.5's last row: a sign-in link arrived while somebody else is signed in. A strip
+            rather than a modal, beside the app rather than instead of it — taking the screen away
+            to ask about an event they may not have caused is the modal-mid-flow pattern this
+            product refuses everywhere else. Renders nothing at all when no link is waiting. */}
+        <SignInSwapPrompt />
         <AdminModeBanner />
         <EnforcementStrip />
 

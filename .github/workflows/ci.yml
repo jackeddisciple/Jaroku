@@ -657,6 +657,15 @@ jobs:
           # briefly in flight would greet a returning user with a setup flow for a machine they set
           # up months ago.
           npm run test:auth-first-run
+          # AND THE CLIENT'S HALF OF SIGNING IN, which is mostly about ONE VALUE. The nonce binds a
+          # sign-in to this window, and `jaroku://` is a scheme any program on the machine can
+          # register — so it is what makes an intercepted deep link useless, and only because it
+          # never leaves this process's memory. So the suite installs a localStorage that records
+          # every write and asserts the nonce is never among them: the same shape
+          # `test:session-vault` uses for the token, against the mirror-image mistake. Beside it,
+          # the refusals that decide what the screen says: a 401 on an exchange is an expired link
+          # with a way back, a 500 is ours, and an unreachable server is neither.
+          npm run test:auth-sign-in
           # WHERE THE SESSION TOKEN GOES, and the assertion the suite exists for is where it does
           # NOT. Under a host with an OS credential store the token must never touch
           # localStorage, and a mirror is the easy implementation that leaves the protection

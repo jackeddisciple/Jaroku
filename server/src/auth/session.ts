@@ -44,6 +44,14 @@ export interface SessionDeps {
    * rather than exist and refuse.
    */
   signIn?: SignInStore;
+  /**
+   * Whether each sign-in path is configured, read PER REQUEST rather than captured.
+   *
+   * Functions rather than booleans, for the reason every other override in this codebase is a
+   * function: a deployment that adds a Google client should not need a restart before the button
+   * appears. It also means the answer cannot be a snapshot taken before the environment settled.
+   */
+  methods?: { google: () => boolean; magicLink: () => boolean };
   resolver?: ContextResolver;
   /**
    * Bound how often one PERSON may create a workspace. Returns the seconds to wait, or null.
@@ -149,6 +157,20 @@ export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" 
   if (deps.tickets && deps.resolver) {
     routes.push({ path: "/v1/ws-ticket", method: "POST", handler: ticketHandler(deps) });
   }
+  // WHAT THIS SERVER CAN ACTUALLY DO, asked before the sign-in screen renders a single control.
+  //
+  // REGISTERED UNCONDITIONALLY, unlike the dev routes below it, because its whole job is to say
+  // what exists — a route that appeared and disappeared with a configuration change would answer
+  // its own question by 404ing, and a client would then have to treat "no answer" as "no methods",
+  // which is indistinguishable from a server that has not finished starting.
+  //
+  // §3.1 is why this exists at all. "Both buttons appear equally valid" is a promise a client can
+  // only keep if it knows which buttons are real: a "Continue with Google" that produces a 404 is
+  // worse than no Google at all, and the client cannot know without asking. `localIssuerAvailable`
+  // already probes `/v1/auth/jwks.json` for the same reason, one question at a time; this answers
+  // all of them in one round trip, which is the difference between a sign-in screen that appears
+  // and one that appears twice.
+  routes.push({ path: "/v1/auth/methods", method: "GET", handler: methodsHandler(deps) });
   routes.push({ path: "/v1/auth/onboarded", method: "POST", handler: onboardedHandler(deps) });
   // THE FOUNDER'S OVERRIDE. Registered unconditionally rather than only when the environment lists
   // somebody, because a route that appeared and disappeared with a configuration change would tell
@@ -266,6 +288,31 @@ function sessionHandler(deps: SessionDeps): Handler {
     };
     return { body: view };
   };
+}
+
+/**
+ * Which sign-in paths this deployment actually has.
+ *
+ * UNAUTHENTICATED, and it discloses nothing worth protecting: which providers a server offers is
+ * visible to anybody who opens its sign-in screen, and hiding it would only mean the screen had to
+ * guess. It says nothing about whether any particular ACCOUNT exists, which is the fact §3.3 goes
+ * to lengths to keep unknowable.
+ */
+function methodsHandler(deps: SessionDeps): Handler {
+  return async () => ({
+    body: {
+      // Present only when a client id, a secret and an HTTPS callback origin are all configured —
+      // see `googleConfigFrom`. Half-configured answers false, because a half-configured Google is
+      // a button that 500s.
+      google: deps.methods?.google() ?? false,
+      // Present when there is somewhere to send mail from AND an issuer that can mint the session
+      // at the end of it. Both, because either alone is a flow that stops halfway.
+      magicLink: (deps.methods?.magicLink() ?? false) && Boolean(deps.localIssuer),
+      // The development sign-in. False in every packaged and hosted configuration that has a real
+      // provider; true on a desktop install, where the local issuer IS the session issuer.
+      localIssuer: Boolean(deps.localIssuer),
+    },
+  });
 }
 
 /**
