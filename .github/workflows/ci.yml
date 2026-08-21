@@ -166,6 +166,21 @@ jobs:
           # signing are all refused here rather than in somebody's console. A suite that needed a
           # real Google project is a suite that runs when somebody remembers.
           npm run test:sign-in
+          # THE MESSAGE AND THE TWO PROVIDERS, neither of which touches a network here. The half
+          # that cannot be checked any other way is the request each provider actually gets: a
+          # header spelled `X-Postmark-Server-Token` in the docs and `X-Postmark-Token` in the code
+          # compiles, typechecks, and 401s the first time anybody tries to sign in. The other half
+          # is §8.3's omissions — no unsubscribe link, no image, no webfont, no script — every one
+          # of which is a thing somebody would add while being helpful and every one of which moves
+          # a transactional message towards the Promotions tab.
+          npm run test:email
+          # AND THE TWO ROUTES, driven as routes through a real Router on a real port, because both
+          # properties they are judged on are properties of the ROUTE. §12's criterion 10 is a
+          # COMPARISON of two responses — a known address and an unknown one must be
+          # indistinguishable, or this is a way for anybody to test whether a given person has an
+          # account. And criterion 13 is a CONCURRENT double-click: Gmail's proxy prefetches,
+          # Outlook previews, then the person clicks, and exactly one of the three may win.
+          npm run test:magic-link
           npm run test:members
           npm run test:relay
           npm run test:channels

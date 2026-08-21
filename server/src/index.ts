@@ -80,7 +80,9 @@ import { resolveOriginPolicy } from "./auth/origin.ts";
 import { resolveSocketAuth } from "./auth/socketAuth.ts";
 import { DbTicketStore } from "./db/repositories/tickets.ts";
 import { DbSignInStore } from "./db/repositories/signIn.ts";
-import { googleConfigFrom, googleJwks } from "./auth/googleSignIn.ts";
+import { GOOGLE_ENV, googleConfigFrom, googleJwks } from "./auth/googleSignIn.ts";
+import { EMAIL_ENV, emailConfigFrom, emailTransport } from "./email/transport.ts";
+import { magicLinkRoutes } from "./http/magicLink.ts";
 import { signInRoutes } from "./http/signIn.ts";
 import { MAGIC_LINK_LIMITS, rateKeyForIp } from "./auth/signIn.ts";
 import { Generator, type UsageSummary } from "./generator.ts";
@@ -2417,6 +2419,18 @@ const ticketStore = new DbTicketStore(db);
 // value good for one was structurally capable of being the other, and the whole reason either is
 // safe in a URL is that it is worth exactly one narrow thing. See migration 053.
 const signInStore = new DbSignInStore(db);
+
+// WHETHER EMAIL SIGN-IN IS POSSIBLE AT ALL, settled here rather than where the routes are mounted
+// a few hundred lines below. `/v1/auth/methods` is registered before that and has to be able to
+// answer, so the flag has to exist before it — a `const` read above its declaration is a crash at
+// boot, which is the loud version of the failure and still the wrong place to find out.
+//
+// BOTH HALVES ARE REQUIRED. A server that can send mail but has no public origin would mail a link
+// to `localhost`; one with an origin and no provider would mint a token and deliver nothing. §8
+// spends a whole section on why the second is worse than not offering the path at all.
+const emailConfig = emailConfigFrom();
+const authOrigin = (process.env[GOOGLE_ENV.authOrigin] ?? "").trim().replace(/\/+$/, "");
+const magicLinkReady = Boolean(emailConfig && authOrigin);
 for (const route of sessionRoutes({
   config: authConfig,
   verifier: tokenVerifier,
@@ -2428,10 +2442,10 @@ for (const route of sessionRoutes({
   // provider starts offering it without a restart. See `SessionDeps.methods`.
   methods: {
     google: () => googleConfigFrom() !== null,
-    // M5's answer. Until the mail provider is wired, the honest answer is that this server can
-    // generate a link and not deliver one — and a "Continue with email" that silently sends
-    // nothing is worse than one that is not there.
-    magicLink: () => false,
+    // Settled at boot rather than read per request, unlike Google's: turning email on needs a
+    // mail provider AND a public origin, and both are consumed at mount time to build the routes.
+    // A method flag that said yes to a route that was never mounted would be a button that 404s.
+    magicLink: () => magicLinkReady,
   },
   resolver: contextResolver,
   // FAILS OPEN, like every other limiter call in this file — see rateLimit.ts. A workspace is a
@@ -2588,6 +2602,81 @@ if (googleConfig) {
   }
 } else {
   console.log("[auth] Google sign-in is not configured; email is the only sign-in path on this server");
+}
+
+// AND SIGNING IN BY EMAIL, which is the other half of §3 and is deliberately not a lesser one.
+//
+// MOUNTED WHEN THERE IS SOMEWHERE TO SEND MAIL FROM **AND** SOMEWHERE TO POINT THE LINK AT. Both,
+// because either alone is a flow that stops halfway: a server that can send but has no public
+// origin would mail a link to `localhost`, and one with an origin and no provider would mint a
+// token and deliver nothing — which §8 spends a whole section arguing is worse than not offering
+// the path at all.
+//
+// THE ORIGIN COMES FROM THE SAME VARIABLE GOOGLE'S CALLBACK IS BUILT FROM. One public origin, one
+// place it is configured, and no way for the OAuth callback and the magic link to end up on
+// different hosts — which would mean two domains to get SPF, DKIM and DMARC right on.
+if (emailConfig && authOrigin) {
+  const transport = emailTransport(emailConfig);
+  console.log(
+    transport.provider === "log"
+      ? `[auth] email sign-in is on, but NOTHING IS SENT — links are written to this log. Development only.`
+      : `[auth] email sign-in is on via ${transport.provider}, from ${emailConfig.from}`,
+  );
+  for (const route of magicLinkRoutes({
+    store: signInStore,
+    transport,
+    authOrigin,
+    // PROVISIONED AT CONSUMPTION, NEVER AT REQUEST — see the note on `resolveUser` in
+    // http/magicLink.ts. A link is sent to any address anybody types, so creating the account then
+    // would create one for every address somebody probing had typed.
+    resolveUser: async (email, context) => {
+      const sys = systemContext(context.requestId);
+      // §10's first row: "same account, matched by verified email. Never two accounts for one
+      // email." Somebody who signed up with Google and now uses a link must land on the row they
+      // already have, so the existing account is looked up by ADDRESS before a new external id is
+      // invented for them.
+      const existing = await identityRepo.userByEmail(sys, email);
+      if (existing) {
+        await identityRepo.recordSignIn(sys, existing.id, { provider: "magic_link", emailVerified: true });
+        return { userId: existing.id };
+      }
+      const provisioned = await identityRepo.provisionUser(sys, {
+        // Namespaced like the Google one, for the same reason: two identity systems writing into
+        // one UNIQUE column with no namespace between them is how one person's subject becomes
+        // another's. `email` rather than a random value, so a person who somehow loses and regains
+        // their row resolves to the same subject rather than to a second account.
+        externalId: `email|${email}`,
+        email,
+        // NULL, AND THAT IS §3.4'S TRIGGER. A magic-link account has no name until the person types
+        // one on the screen after this — `users.name IS NULL` is exactly the condition the client
+        // reads to decide whether to show it.
+        displayName: null,
+        authProvider: "magic_link",
+      });
+      return { userId: provisioned.user.id };
+    },
+    audit: async (action, detail) => {
+      await identityRepo.appendAudit(systemContext(detail.requestId), {
+        workspaceId: null,
+        actorUserId: detail.userId ?? null,
+        action,
+        targetType: "user",
+        targetId: detail.userId ?? null,
+        metadata: detail.metadata ?? {},
+        ip: detail.ip,
+      });
+    },
+    webhookSecret: process.env[EMAIL_ENV.webhookSecret],
+  })) {
+    if (route.prefix) router.prefixRoute(route.method, route.path, route.handler);
+    else if (route.method === "GET") router.get(route.path, route.handler);
+    else router.post(route.path, route.handler);
+  }
+} else {
+  console.log(
+    `[auth] email sign-in is off (${!emailConfig ? "no mail provider" : "no public origin"}); ` +
+      `set ${EMAIL_ENV.provider} and ${GOOGLE_ENV.authOrigin} to turn it on`,
+  );
 }
 
 // THE OAUTH CALLBACK, and it is the one route here a third party drives.
