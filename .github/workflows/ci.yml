@@ -156,6 +156,16 @@ jobs:
           # own source for a persistence call to prove there is nowhere for it to survive.
           npm run test:admin-mode
           npm run test:tickets
+          # THE THREE SHORT-LIVED SECRETS A SIGN-IN IS BUILT OUT OF, and the Google round trip on
+          # top of them. Its store half runs three times — memory, SQLite, Postgres — because
+          # "exactly one caller wins" is a row lock on one driver and a serialised transaction on
+          # another, and a session ticket buys an ACCOUNT rather than a socket: a double-spend is
+          # two sessions from one sign-in. Its Google half needs no Google at all, which is the
+          # only reason it runs: every check the ID-token verifier makes is exercised against a
+          # token the suite signs itself, so `aud`, `nonce`, `alg: none` and a payload edited after
+          # signing are all refused here rather than in somebody's console. A suite that needed a
+          # real Google project is a suite that runs when somebody remembers.
+          npm run test:sign-in
           npm run test:members
           npm run test:relay
           npm run test:channels

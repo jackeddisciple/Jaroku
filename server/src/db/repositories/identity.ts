@@ -6,7 +6,7 @@
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Db, Queryable } from "../db.ts";
-import { jsonFromColumn } from "../db.ts";
+import { asBool, asInt, jsonFromColumn } from "../db.ts";
 import {
   isMemberRole,
   type AnyContext,
@@ -30,6 +30,78 @@ export interface User {
    * migration 013.
    */
   onboarded_at: string | null;
+  /**
+   * Whether the address on this row has been proved to reach this person.
+   *
+   * TRUE FOR EVERY ROW THAT EXISTS, and the column is here because the specification asks for it
+   * to be recorded rather than assumed. `sessionHandler` has always refused a token carrying no
+   * verified address, `verifyGoogleIdToken` refuses an `email_verified: false` claim, and a magic
+   * link is itself a proof of delivery — so nothing in this system can currently write `false`.
+   * The column exists so that the day something can (a provider that does not verify, an admin
+   * creating an account by hand) it is a value rather than a schema change.
+   */
+  email_verified: boolean;
+  /**
+   * How this person most recently got in: `google`, `magic_link`, or null.
+   *
+   * NULL IS "BEFORE THIS WAS RECORDED", not "unknown provider". Every account provisioned before
+   * migration 053 came through the local issuer or a configured OIDC provider, and stamping either
+   * new value onto those rows would be inventing a fact.
+   *
+   * MOST RECENT, NOT FIRST. §10: somebody who signed up with Google and later used a magic link on
+   * the same address is the SAME account — matched by verified email — and this column reflects
+   * how they last arrived. It is a record, never a rule: nothing refuses a sign-in because this
+   * says something else, and a column that did would be the "two accounts for one email" failure
+   * wearing a different hat.
+   */
+  auth_provider: string | null;
+  /** §3.4's checkbox. Unchecked by default, opt-in rather than opt-out. */
+  marketing_emails_opt_in: boolean;
+  /** When they first saw step 1 of account onboarding. See migration 053. */
+  onboarding_started_at: string | null;
+  /** §5.3's resume point, 1-5. Advances as steps complete, never as they are merely shown. */
+  onboarding_step: number;
+}
+
+/**
+ * Every column a `User` is read from, spelled once.
+ *
+ * IT WAS SPELLED FOUR TIMES BEFORE THIS, and the day migration 053 added five columns was the day
+ * that stopped being harmless: four identical lists is four places to forget one, and the symptom
+ * of forgetting is not a crash — it is a `User` with `undefined` where a boolean should be, which
+ * reads as `false` at every call site and is wrong silently.
+ */
+const USER_COLUMNS = `id, external_id, email, display_name, created_at, deleted_at, onboarded_at,
+       email_verified, auth_provider, marketing_emails_opt_in, onboarding_started_at, onboarding_step`;
+
+/** The row as a driver hands it back, before the two columns that need normalising are. */
+interface UserRow extends Omit<User, "email_verified" | "marketing_emails_opt_in" | "onboarding_step"> {
+  email_verified: unknown;
+  marketing_emails_opt_in: unknown;
+  onboarding_step: unknown;
+}
+
+/**
+ * A row, as the rest of this codebase should see it.
+ *
+ * THE TWO BOOLEANS ARE THE WHOLE REASON THIS FUNCTION EXISTS. SQLite stores them as `INTEGER` and
+ * hands back `0` or `1`; Postgres stores them as `boolean` and hands back `true` or `false`. Both
+ * are truthy-correct for `1`/`true` and both are falsy-correct for `0`/`false`, which is exactly
+ * why leaving them alone is dangerous rather than merely untidy: `user.email_verified === true` is
+ * a comparison that is right on one driver and wrong on the other, and it is the natural way to
+ * write it. `asBool` is the same normalisation every other cross-driver boolean in this codebase
+ * goes through.
+ *
+ * `onboarding_step` gets `asInt` for the sibling reason: it is `smallint` on Postgres, which the
+ * driver may hand back as a string.
+ */
+function readUser(row: UserRow): User {
+  return {
+    ...(row as unknown as User),
+    email_verified: asBool(row.email_verified),
+    marketing_emails_opt_in: asBool(row.marketing_emails_opt_in),
+    onboarding_step: asInt(row.onboarding_step, 1),
+  };
 }
 
 export type WorkspaceKind = "personal" | "team";
@@ -151,19 +223,105 @@ export class IdentityRepository {
   // sight there is nothing to scope the lookup by.
 
   async userByExternalId(_ctx: SystemContext, externalId: string): Promise<User | undefined> {
-    return this.db.get<User>(
-      `SELECT id, external_id, email, display_name, created_at, deleted_at, onboarded_at
-         FROM users WHERE external_id = ? AND deleted_at IS NULL`,
+    const row = await this.db.get<UserRow>(
+      `SELECT ${USER_COLUMNS} FROM users WHERE external_id = ? AND deleted_at IS NULL`,
       [externalId],
     );
+    return row ? readUser(row) : undefined;
   }
 
   async userById(_ctx: AnyContext, id: string): Promise<User | undefined> {
-    return this.db.get<User>(
-      `SELECT id, external_id, email, display_name, created_at, deleted_at, onboarded_at
-         FROM users WHERE id = ? AND deleted_at IS NULL`,
+    const row = await this.db.get<UserRow>(
+      `SELECT ${USER_COLUMNS} FROM users WHERE id = ? AND deleted_at IS NULL`,
       [id],
     );
+    return row ? readUser(row) : undefined;
+  }
+
+  /**
+   * Find somebody by the address they typed, case-insensitively.
+   *
+   * §10's FIRST TWO ROWS ARE THIS METHOD. "User signs in with Google, later signs in with magic
+   * link on same email → same account, matched by verified email. Never two accounts for one
+   * email." And: "normalize to lowercase before comparison; store as user entered but match as
+   * lowercase."
+   *
+   * THE LOWERCASING IS EXPLICIT RATHER THAN LEFT TO THE COLUMN, and that is the whole point of it
+   * being here. `users.email` is `citext` on Postgres and `COLLATE NOCASE` on SQLite, so a bare
+   * comparison already matches case-insensitively on both — which means a caller that forgot to
+   * normalise would work perfectly in every test and every deployment, right up until somebody
+   * changed the column type. Normalising at the call site makes the property belong to the code
+   * rather than to two dialect features that happen to agree.
+   */
+  async userByEmail(_ctx: SystemContext, email: string): Promise<User | undefined> {
+    const row = await this.db.get<UserRow>(
+      `SELECT ${USER_COLUMNS} FROM users WHERE LOWER(email) = ? AND deleted_at IS NULL`,
+      [email.trim().toLowerCase()],
+    );
+    return row ? readUser(row) : undefined;
+  }
+
+  /**
+   * Record how somebody most recently signed in, and that their address is proved.
+   *
+   * NOT PART OF `provisionUser`, deliberately, even though the first sign-in does both. Somebody's
+   * SECOND sign-in provisions nothing and still moves `auth_provider` — §10 says the column
+   * "reflects most recent" — so folding it in would mean the fact only ever recorded the first
+   * time and then went stale for the life of the account.
+   */
+  async recordSignIn(
+    _ctx: SystemContext,
+    userId: string,
+    input: { provider: string; emailVerified?: boolean },
+  ): Promise<void> {
+    await this.db.run(`UPDATE users SET auth_provider = ? WHERE id = ? AND deleted_at IS NULL`, [
+      input.provider,
+      userId,
+    ]);
+    // `email_verified` ONLY EVER MOVES UP, and that is spelled as control flow rather than as a
+    // `CASE` in the SQL. A provider that says nothing about verification must not un-prove an
+    // address a magic link already delivered to — and a `CASE WHEN ? THEN ? ELSE email_verified`
+    // would be a clever statement whose parameter types both drivers have to infer through a
+    // conditional, which is exactly the shape `test:boolean-literals` exists because of.
+    if (input.emailVerified) {
+      // A BOUND `true`, never a literal. See db/booleanLiterals.test.ts: a bound value leaves the
+      // driver untyped and Postgres resolves it against the column, while a literal in the
+      // statement text is typed before the column is consulted and is refused.
+      await this.db.run(`UPDATE users SET email_verified = ? WHERE id = ? AND deleted_at IS NULL`, [
+        true,
+        userId,
+      ]);
+    }
+  }
+
+  /**
+   * §3.4's `PATCH /v1/users/me`. The name, and the one checkbox.
+   *
+   * BOTH FIELDS ARE OPTIONAL AND AN ABSENT ONE IS UNTOUCHED, which is what makes this a PATCH
+   * rather than a PUT. A settings screen that changes only the marketing preference must not clear
+   * a display name by omitting it.
+   */
+  async updateProfile(
+    _ctx: AnyContext,
+    userId: string,
+    input: { displayName?: string; marketingEmailsOptIn?: boolean },
+  ): Promise<User | undefined> {
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    if (input.displayName !== undefined) {
+      sets.push("display_name = ?");
+      params.push(input.displayName);
+    }
+    if (input.marketingEmailsOptIn !== undefined) {
+      sets.push("marketing_emails_opt_in = ?");
+      // A BOUND BOOLEAN, never a literal `0` in the statement text. See db/booleanLiterals.test.ts:
+      // the two are indistinguishable on SQLite and only one of them is accepted by Postgres.
+      params.push(input.marketingEmailsOptIn);
+    }
+    if (sets.length === 0) return this.userById(_ctx, userId);
+    params.push(userId);
+    await this.db.run(`UPDATE users SET ${sets.join(", ")} WHERE id = ? AND deleted_at IS NULL`, params);
+    return this.userById(_ctx, userId);
   }
 
   /**
@@ -214,15 +372,14 @@ export class IdentityRepository {
    */
   async provisionUser(
     ctx: SystemContext,
-    input: { externalId: string; email: string; displayName?: string | null },
+    input: { externalId: string; email: string; displayName?: string | null; authProvider?: string | null },
   ): Promise<{ user: User; workspace: Workspace; created: boolean }> {
     return this.db.transaction(async (tx) => {
-      const existing = await tx.get<User>(
-        `SELECT id, external_id, email, display_name, created_at, deleted_at, onboarded_at
-           FROM users WHERE external_id = ? AND deleted_at IS NULL`,
+      const existingRow = await tx.get<UserRow>(
+        `SELECT ${USER_COLUMNS} FROM users WHERE external_id = ? AND deleted_at IS NULL`,
         [input.externalId],
       );
-      if (existing) return this.withPersonalWorkspace(tx, existing, input);
+      if (existingRow) return this.withPersonalWorkspace(tx, readUser(existingRow), input);
 
       // `users.email` is UNIQUE, so an address already held by a DIFFERENT `sub` cannot be
       // taken. That is not a race, it is a person whose provider changed (or two providers
@@ -246,23 +403,46 @@ export class IdentityRepository {
         created_at: nowIso(),
         deleted_at: null,
         onboarded_at: null,
+        // TRUE, AND EARNED RATHER THAN ASSUMED. Every path that reaches this function has already
+        // proved the address: `sessionHandler` refuses a token with no verified email claim,
+        // `verifyGoogleIdToken` refuses `email_verified: false`, and a magic link is itself a
+        // delivery receipt. §12's criterion 7 asks for exactly this on a new Google user.
+        email_verified: true,
+        // NULL WHEN THE CALLER DID NOT SAY, rather than a guess. The two sign-in flows pass their
+        // own name; a session established through a configured OIDC provider passes nothing,
+        // because neither `google` nor `magic_link` would be true of it.
+        auth_provider: input.authProvider ?? null,
+        // §3.4: unchecked by default. Opt-in, never opt-out — CAN-SPAM compliant, GDPR compliant,
+        // and the right thing to do.
+        marketing_emails_opt_in: false,
+        onboarding_started_at: null,
+        onboarding_step: 1,
       };
       const inserted = await tx.run(
-        `INSERT INTO users (id, external_id, email, display_name, created_at)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO users (id, external_id, email, display_name, created_at, email_verified, auth_provider)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (external_id) DO NOTHING`,
-        [user.id, user.external_id, user.email, user.display_name, user.created_at],
+        [
+          user.id,
+          user.external_id,
+          user.email,
+          user.display_name,
+          user.created_at,
+          // A BOUND BOOLEAN. See db/booleanLiterals.test.ts — a literal `1` here is accepted by
+          // SQLite and refused by Postgres, and the two are indistinguishable on a laptop.
+          user.email_verified,
+          user.auth_provider,
+        ],
       );
       if (inserted.changes === 0) {
         // Somebody else provisioned this `sub` between the SELECT and here. Their row is the
         // real one; ours was never written.
-        const winner = await tx.get<User>(
-          `SELECT id, external_id, email, display_name, created_at, deleted_at, onboarded_at
-             FROM users WHERE external_id = ? AND deleted_at IS NULL`,
+        const winnerRow = await tx.get<UserRow>(
+          `SELECT ${USER_COLUMNS} FROM users WHERE external_id = ? AND deleted_at IS NULL`,
           [input.externalId],
         );
-        if (!winner) throw new Error(`could not provision ${input.externalId}`);
-        return this.withPersonalWorkspace(tx, winner, input);
+        if (!winnerRow) throw new Error(`could not provision ${input.externalId}`);
+        return this.withPersonalWorkspace(tx, readUser(winnerRow), input);
       }
 
       const workspace = await this.insertWorkspaceIn(tx, {

@@ -79,6 +79,10 @@ import { ContextResolver } from "./auth/resolve.ts";
 import { resolveOriginPolicy } from "./auth/origin.ts";
 import { resolveSocketAuth } from "./auth/socketAuth.ts";
 import { DbTicketStore } from "./db/repositories/tickets.ts";
+import { DbSignInStore } from "./db/repositories/signIn.ts";
+import { googleConfigFrom, googleJwks } from "./auth/googleSignIn.ts";
+import { signInRoutes } from "./http/signIn.ts";
+import { MAGIC_LINK_LIMITS, rateKeyForIp } from "./auth/signIn.ts";
 import { Generator, type UsageSummary } from "./generator.ts";
 import { Planner } from "./planner.ts";
 import { Editor } from "./editor.ts";
@@ -2407,12 +2411,19 @@ const contextResolver = new ContextResolver({
 // against the Postgres already here has exactly the property GETDEL was wanted for. Session 5
 // puts Redis behind the same interface when it introduces a client for the queues.
 const ticketStore = new DbTicketStore(db);
+
+// THE OTHER TICKET STORE, and the two are deliberately not one. `ws_tickets` names a WORKSPACE and
+// buys one socket; `session_tickets` names a USER and buys a session. Sharing a table would mean a
+// value good for one was structurally capable of being the other, and the whole reason either is
+// safe in a URL is that it is worth exactly one narrow thing. See migration 053.
+const signInStore = new DbSignInStore(db);
 for (const route of sessionRoutes({
   config: authConfig,
   verifier: tokenVerifier,
   identity: identityRepo,
   localIssuer,
   tickets: ticketStore,
+  signIn: signInStore,
   resolver: contextResolver,
   // FAILS OPEN, like every other limiter call in this file — see rateLimit.ts. A workspace is a
   // tenancy rather than a row, so it is worth a bucket; a Redis blip is not worth being the
@@ -2492,6 +2503,82 @@ for (const route of billingRoutes({
   // none of. Same resolver either way.
   if (route.method === "GET") router.get(route.path, route.handler);
   else router.post(route.path, route.handler);
+}
+
+// SIGNING IN WITH GOOGLE, which is a different feature from the OAuth block below it despite
+// sharing a provider. That one connects a WORKSPACE to a mailbox so an agent can read it; this one
+// establishes WHO SOMEBODY IS and then forgets Google entirely. See auth/googleSignIn.ts on why
+// merging them would mean widening the identity scopes silently widened what every agent can read.
+//
+// MOUNTED ONLY WHEN GOOGLE IS CONFIGURED, and absent rather than refusing when it is not. A
+// deployment with no Google client is not broken — the magic link is a complete sign-in path on its
+// own, and §3.1 is explicit that neither is a second-class citizen. What must not exist is a
+// "Continue with Google" button that produces a 500, which is what a half-configured server gives.
+// The client asks whether the route exists before it renders the button; see `signInMethods` below.
+const googleConfig = googleConfigFrom();
+if (googleConfig) {
+  console.log(`[auth] Google sign-in is configured, calling back at ${googleConfig.redirectUri}`);
+  // ONE JWKS CLIENT FOR THE PROCESS. It caches Google's keys for ten minutes, shares a single
+  // in-flight fetch across simultaneous sign-ins, and remembers a failure — so ten people signing
+  // in at once is one request rather than ten. A client per callback would throw all three away.
+  const googleKeys = googleJwks();
+  for (const route of signInRoutes({
+    store: signInStore,
+    config: googleConfig,
+    jwks: googleKeys,
+    // PROVISION OR FIND, and §10's first row lives here: "User signs in with Google, later signs in
+    // with magic link on same email → same account, matched by verified email. Never two accounts
+    // for one email." `provisionUser` already keys on `external_id` and refuses an address held by
+    // a different one, so the account this resolves to is the account that address already has.
+    resolveUser: async (identity, context) => {
+      const sys = systemContext(context.requestId);
+      const provisioned = await identityRepo.provisionUser(sys, {
+        // PREFIXED, so a Google `sub` can never collide with the local issuer's `local|<email>`
+        // or with a configured provider's own subject space. Two identity systems writing into one
+        // UNIQUE column with no namespace between them is how one person's `sub` becomes another's.
+        externalId: `google|${identity.subject}`,
+        email: identity.email,
+        displayName: identity.displayName,
+        authProvider: "google",
+      });
+      // A SECOND SIGN-IN PROVISIONS NOTHING AND STILL MOVES THE COLUMN. §10 says `auth_provider`
+      // "reflects most recent", so recording it only at creation would mean the fact went stale
+      // for the life of every account.
+      await identityRepo.recordSignIn(sys, provisioned.user.id, { provider: "google", emailVerified: true });
+      return { userId: provisioned.user.id };
+    },
+    audit: async (action, detail) => {
+      await identityRepo.appendAudit(systemContext(detail.requestId), {
+        workspaceId: null,
+        actorUserId: detail.userId ?? null,
+        action,
+        targetType: "user",
+        targetId: detail.userId ?? null,
+        metadata: detail.metadata ?? {},
+        ip: detail.ip,
+      });
+    },
+    // FAILS OPEN, like every other limiter call in this file — see rateLimit.ts. Keyed by IP
+    // because nobody has said who they are at this point in the flow, and bounded at all because
+    // this route writes a row and needs no credential.
+    limitStart: async (ip) => {
+      try {
+        const window = await signInStore.countAttempt(rateKeyForIp(ip), MAGIC_LINK_LIMITS.windowS);
+        if (window.count > MAGIC_LINK_LIMITS.perIp) {
+          metrics.increment("rate_limited_total", { action: "oauth.start" });
+          return Math.max(1, Math.ceil((window.windowStart + MAGIC_LINK_LIMITS.windowS * 1000 - Date.now()) / 1000));
+        }
+      } catch (err) {
+        console.error("[rate] limiter failed for oauth.start, admitting:", (err as Error)?.message ?? err);
+      }
+      return null;
+    },
+  })) {
+    if (route.method === "GET") router.get(route.path, route.handler);
+    else router.post(route.path, route.handler);
+  }
+} else {
+  console.log("[auth] Google sign-in is not configured; email is the only sign-in path on this server");
 }
 
 // THE OAUTH CALLBACK, and it is the one route here a third party drives.

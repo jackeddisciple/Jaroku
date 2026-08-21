@@ -18,7 +18,7 @@
 // workspace list is what the caller MAY act in, computed from membership rows — never echoed
 // back from anything the client sent.
 
-import { badRequest, forbidden, tooMany, unauthorized, type Handler, type HttpRequest } from "../http/router.ts";
+import { HttpError, badRequest, forbidden, tooMany, unauthorized, type Handler, type HttpRequest } from "../http/router.ts";
 import { newRequestId, systemContext } from "../db/tenant.ts";
 import { IdentityConflictError, defaultWorkspace, type IdentityRepository } from "../db/repositories/identity.ts";
 import { planFor } from "../billing/plans.ts";
@@ -27,6 +27,7 @@ import { AuthError, TokenVerifier, type AuthContext } from "./verifier.ts";
 import type { LocalIssuer } from "./localIssuer.ts";
 import type { AuthConfig } from "./config.ts";
 import type { TicketStore } from "./tickets.ts";
+import { hashSecret, type SignInStore } from "./signIn.ts";
 import type { ContextResolver } from "./resolve.ts";
 
 export interface SessionDeps {
@@ -37,6 +38,12 @@ export interface SessionDeps {
   localIssuer?: LocalIssuer;
   /** Present once there are sockets to authorise — see `/v1/ws-ticket` below. */
   tickets?: TicketStore;
+  /**
+   * Where the sixty-second session tickets live. Absent in a deployment that has no sign-in flows
+   * of its own, which is what makes the ticket branch of `POST /v1/auth/session` not exist there
+   * rather than exist and refuse.
+   */
+  signIn?: SignInStore;
   resolver?: ContextResolver;
   /**
    * Bound how often one PERSON may create a workspace. Returns the seconds to wait, or null.
@@ -157,9 +164,40 @@ export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" 
   return routes;
 }
 
+/**
+ * §7's row for `POST /v1/auth/session`: "Exchange ticket for session (existing endpoint,
+ * extended)."
+ *
+ * TWO WAYS IN, ONE WAY OUT. Presented with a bearer token this is what it has always been — verify,
+ * provision on first sight, answer with the account and its workspaces. Presented with a `ticket`
+ * it is the last step of §3.2 and §3.3: spend the sixty-second single-use value the web callback
+ * minted, MINT A TOKEN for the account it names, and answer with that token alongside the same view.
+ *
+ * EXTENDING THIS ROUTE RATHER THAN ADDING ONE is the specification's own instruction and it is the
+ * right shape for a reason worth stating: what a client wants at the end of a sign-in is a session,
+ * and a second route would mean two places that assemble a `SessionView` from memberships — which
+ * is exactly the duplication that lets one of them start reporting a different default workspace
+ * than the socket will actually use.
+ *
+ * THE TICKET BRANCH EXISTS ONLY WHERE THIS SERVER CAN MINT A TOKEN, which is `deps.localIssuer`.
+ * That is not a limitation of the desktop app — a packaged install runs the local issuer by
+ * construction, because `lib.rs` points `JAROKU_DEV_AUTH_KEY` at `~/.jaroku/keys/devauth.json` and
+ * no OIDC provider is configured — it is a limitation of a HOSTED deployment pointed at Clerk or
+ * Auth0, where Jaroku verifies somebody else's tokens and cannot issue one. Growing a second
+ * identity system beside a configured provider would be the wrong answer to that; the right one is
+ * that a deployment with a provider signs people in through the provider, which is what it already
+ * does.
+ */
 function sessionHandler(deps: SessionDeps): Handler {
   const log = deps.log ?? console.log;
   return async (req) => {
+    // THE TICKET BRANCH IS TRIED FIRST AND ONLY WHEN THERE IS A TICKET. A request carrying both a
+    // ticket and an Authorization header is somebody finishing a sign-in while an old session is
+    // still in the vault — §4.5's "deep-link arrives while a different user is signed in" — and the
+    // ticket is what they just did, so it wins.
+    const ticketed = await exchangeTicket(deps, req, log);
+    if (ticketed) return ticketed;
+
     const auth = await authenticate(req, deps.verifier);
     if (!auth.email) {
       // `users.email` is NOT NULL and UNIQUE, so there is nowhere to put "no address". The
@@ -227,6 +265,118 @@ function sessionHandler(deps: SessionDeps): Handler {
       expiresAt: auth.expiresAt,
     };
     return { body: view };
+  };
+}
+
+/**
+ * The ticket half of `POST /v1/auth/session`, or `null` when this is not that kind of request.
+ *
+ * `null` RATHER THAN A THROW ON AN ABSENT TICKET, so the caller falls through to the bearer path
+ * with no branch of its own. Every OTHER refusal here is a throw, because by then somebody has
+ * presented a ticket and is owed an answer about it.
+ *
+ * §4.5'S FAILURE TABLE IS THIS FUNCTION. Expired, already used, and forged all produce the SAME
+ * message — "that link expired, try signing in again" — and different audit rows. The message is
+ * identical on purpose: a used-ticket message distinguishable from an invalid-ticket message is a
+ * fingerprinting signal for whether an account exists, which is the same reasoning that makes
+ * `POST /v1/auth/magic-link` always answer 200.
+ */
+async function exchangeTicket(
+  deps: SessionDeps,
+  req: HttpRequest,
+  log: (m: string) => void,
+): Promise<{ body: unknown } | null> {
+  const store = deps.signIn;
+  if (!store) return null;
+  const body = await req.json<{ ticket?: unknown; nonce?: unknown }>();
+  if (typeof body.ticket !== "string" || body.ticket === "") return null;
+
+  const sys = systemContext(req.requestId);
+  const audit = (action: string, metadata: Record<string, unknown>, userId: string | null = null): Promise<void> =>
+    deps.identity
+      .appendAudit(sys, { workspaceId: null, actorUserId: userId, action, targetType: "user", targetId: userId, metadata, ip: req.ip })
+      // A sign-in must not fail because an audit row would not write. The row matters and the
+      // person getting into their account matters more; the failure is logged where the write was.
+      .catch((err: Error) => console.error(`[auth] could not write ${action}:`, err.message));
+
+  if (!deps.localIssuer) {
+    // Configured with an external provider, so there is nothing here that could mint a session.
+    // A 501 rather than a 400: the request is well-formed and this deployment cannot serve it.
+    throw new HttpError(501, "not_configured", "this server does not issue its own sessions");
+  }
+
+  const claimed = await store.consumeSessionTicket(body.ticket);
+  if (!claimed) {
+    // THE HIGHEST-SIGNAL ROW IN §7'S LIST, and it is deliberately not sampled. It covers three
+    // different things — expired, already spent, never existed — and the metadata says which is
+    // impossible to tell from here, which is itself the honest record.
+    await audit("auth.invalid_ticket", { presented: hashSecret(body.ticket) });
+    throw unauthorized("that sign-in link expired or was already used — try signing in again");
+  }
+
+  // §3.2's app-instance binding, spent. A ticket minted by the OAuth flow carries the digest of a
+  // nonce that never left the app's memory; presenting the ticket without it means whoever is
+  // asking is not the window that started this. A magic-link ticket carries no digest at all —
+  // §10 wants a link clicked on a second device to work — and that branch requires nothing.
+  if (claimed.nonceHash) {
+    const nonce = typeof body.nonce === "string" ? body.nonce : "";
+    if (!nonce || hashSecret(nonce) !== claimed.nonceHash) {
+      await audit("auth.invalid_ticket", { reason: "nonce_mismatch" }, claimed.userId);
+      throw unauthorized("that sign-in link expired or was already used — try signing in again");
+    }
+  }
+
+  const user = await deps.identity.userById(sys, claimed.userId);
+  if (!user) {
+    // The ticket is real and the account is gone — deleted between the callback and the exchange,
+    // which is a sixty-second window and therefore very nearly never. Same message: there is
+    // nothing a person can do differently, and naming it would confirm an account had existed.
+    await audit("auth.invalid_ticket", { reason: "user_missing" }, claimed.userId);
+    throw unauthorized("that sign-in link expired or was already used — try signing in again");
+  }
+
+  // THE TOKEN, MINTED HERE AND HANDED OVER EXACTLY ONCE. `subject` is the user's own external id
+  // rather than a fresh one derived from their email, so the token verifies to the row that
+  // already exists — deriving it would provision a SECOND account for the same person on their
+  // next request, which is §10's "never two accounts for one email" broken from the inside.
+  const minted = deps.localIssuer.mint({
+    subject: user.external_id,
+    email: user.email,
+    displayName: user.display_name,
+  });
+  await audit("auth.session_created", { provider: claimed.provider }, user.id);
+  log(`[auth] ${user.email} signed in with ${claimed.provider} (${req.requestId})`);
+
+  const memberships = await deps.identity.workspacesForUser(sys, user.id);
+  if (memberships.length === 0) throw forbidden("this account belongs to no workspace");
+  const preferred = defaultWorkspace(memberships) ?? memberships[0]!;
+
+  return {
+    body: {
+      // THE ONLY PLACE THIS SERVER EVER PUTS A DURABLE TOKEN IN A RESPONSE, and the client's next
+      // move is to write it to the operating system's credential store — §4.4 step 4, and
+      // `sessionVault.ts` is the half that does it.
+      token: minted.token,
+      expiresAt: minted.expiresAt,
+      provider: claimed.provider,
+      user: {
+        id: user.id,
+        email: user.email,
+        displayName: user.display_name,
+        onboarded: user.onboarded_at !== null,
+        isAdmin: isAdminUser(user.id),
+        adminMode: adminModeOn(user.id),
+      },
+      workspaces: memberships.map((w) => ({
+        id: w.id,
+        slug: w.slug,
+        name: w.name,
+        kind: w.kind,
+        role: w.role,
+        plan: { id: planFor(w.plan).id, label: planFor(w.plan).label },
+      })),
+      defaultWorkspaceId: preferred.id,
+    },
   };
 }
 
