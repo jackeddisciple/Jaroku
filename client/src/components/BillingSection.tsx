@@ -31,6 +31,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { openCheckout } from "../lib/deepLink.ts";
+import { sendSetByok } from "../lib/socket.ts";
 import {
   fetchSubscription, startCheckout, type SubscriptionView,
 } from "../lib/workspaceApi.ts";
@@ -220,13 +221,42 @@ export function BillingSection() {
               <dt className={TYPE.meta}>Seats</dt>
               <dd className="text-[12px] tabular-nums text-ink">{sub.seatCount}</dd>
             </div>
-            <div className="flex items-baseline justify-between gap-4">
-              <dt className={TYPE.meta}>Inference</dt>
-              <dd className="text-[12px] text-ink">
-                {sub.byokEnabled ? "Your own provider keys" : "Included with your plan"}
-              </dd>
-            </div>
           </dl>
+        )}
+
+        {/* BYOK, WHICH IS A CONTROL AND NOT A STATUS LINE — the specification asks for a toggle on
+            both paid tiers, and the reason it is here rather than on the Usage tab is that it
+            changes what the workspace is BUYING rather than what it has spent.
+
+            ABSENT ON FREE rather than present and refusing: Free runs on the workspace's own key by
+            construction, so there is no choice to offer and a disabled switch would imply there is
+            one behind a paywall. The server says whether the control applies at all. */}
+        {sub && (
+          <div className="mt-3 rounded-control border border-hair px-3 py-2.5">
+            <label className="flex cursor-pointer items-start gap-2.5">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-accent"
+                checked={sub.byokEnabled}
+                disabled={!canManage}
+                onChange={(e) => sendSetByok(e.target.checked)}
+              />
+              <span className="min-w-0">
+                <span className="text-[12px] text-ink">Use my own provider keys</span>
+                {/* INSTANT, AND SAID SO. Inference is usage-based rather than seat-based, so there
+                    is nothing to prorate — and the moment anybody reaches for this is the moment
+                    they have just noticed a bill, when "takes effect next month" is useless. */}
+                <span className="mt-0.5 block text-[11px] leading-[1.5] text-muted">
+                  {sub.byokEnabled
+                    ? "Your agents run on the keys in the Secrets tab. You pay the plan fee and no inference charges."
+                    : "Your agents run on our keys, against the credit your plan includes. Switching is instant — the next run routes the other way."}
+                </span>
+                {!canManage && (
+                  <span className="mt-0.5 block text-[11px] text-faint">Only an owner can change this</span>
+                )}
+              </span>
+            </label>
+          </div>
         )}
 
         {/* WHERE THE SPEND FIGURES LIVE, said out loud rather than duplicated here. Two screens

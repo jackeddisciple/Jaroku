@@ -952,6 +952,28 @@ export class BillingRepository {
     return row ? Number(row["count"] ?? 0) : 0;
   }
 
+  /**
+   * Turn BYOK on or off for this workspace's LIVE subscription.
+   *
+   * ON THE SUBSCRIPTION AND NOT ON THE WORKSPACE, which is where it looks like it should go. The
+   * reason is what happens at the boundary: a workspace that cancels and comes back later gets a
+   * new subscription row, and a flag on `workspaces` would silently carry a decision made about a
+   * plan they are no longer on into one they have just bought. Attached to the subscription, the
+   * question "is this workspace on its own keys" is only ever asked about the arrangement that is
+   * actually in force.
+   *
+   * A WORKSPACE WITH NO LIVE SUBSCRIPTION IS A NO-OP rather than an error, and answers false: Free
+   * runs on the user's own key by construction, so there is nothing here to turn on.
+   */
+  async setByok(ctx: TenantContext, on: boolean): Promise<boolean> {
+    const res = await this.q(ctx).run(
+      `UPDATE subscriptions SET byok_enabled = ?, updated_at = ?
+        WHERE workspace_id = ? AND status IN ('incomplete', 'active', 'past_due')`,
+      [on ? 1 : 0, nowIso(), ctx.workspaceId],
+    );
+    return res.changes > 0;
+  }
+
   // --- webhook events -----------------------------------------------------------------------
   //
   // No context, and no scope. A webhook arrives before we know whose it is — resolving a

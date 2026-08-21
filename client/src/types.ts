@@ -694,6 +694,16 @@ export interface UsageSnapshot {
     runs: { used: number; limit: number | "unlimited" };
     evalRuns: { used: number; limit: number | "unlimited" };
   };
+  /**
+   * Whether the AGENTS run on this workspace's own provider keys.
+   *
+   * Not the same fact as `ownKeyForPlatform` above it, which decides who pays for Jaroku's own
+   * calls — generation, edits, the judge. A workspace can reasonably want us to pay for the
+   * generation that produced an agent while running the agent itself on its own key.
+   */
+  byokEnabled: boolean;
+  /** Whether there is a paid plan to attach that choice to. Free runs on its own key regardless. */
+  byokAvailable: boolean;
   paymentsConfigured: boolean;
 }
 
@@ -1796,6 +1806,7 @@ export type ClientCommand =
    * would make setting a ceiling a one-way door.
    */
   | { cmd: "setSpendCeiling"; usd: number | null }
+  | { cmd: "setByok"; on: boolean }
   // Connections. THE ONE SET IN THIS UNION THAT CARRIES NO SECRET IN EITHER DIRECTION: a
   // credential for a connected account is minted by the provider and collected at the callback,
   // so the browser never holds one and never sends one. `returnTo` is a PATH — the server

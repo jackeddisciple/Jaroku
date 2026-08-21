@@ -96,6 +96,9 @@ check("and a fully-priced-or-unpriced cell does not claim to be a floor",
     // for how many runs are left. Present because the snapshot is one shape and a fixture that
     // omitted a field would be a fixture testing a shape nothing sends.
     quota: { runs: { used: 3, limit: 500 }, evalRuns: { used: 0, limit: 20 } },
+    // Free, which is what the rest of this fixture is: no paid plan to attach the choice to, and
+    // inference already on the workspace's own key by construction.
+    byokEnabled: false, byokAvailable: false,
     platformSpentUsd: 1.1, platformCeilingUsd: 2, ownKeyForPlatform: false,
     byAgent: [
       { agentId: "a1", label: "support_bot", usd: 3.1, tokens: 40_000, costKnown: true, runs: 4 },

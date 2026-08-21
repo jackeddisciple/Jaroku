@@ -428,7 +428,26 @@ export type LoadUsageCommand = { cmd: "loadUsage" };
  */
 export type SetSpendCeilingCommand = { cmd: "setSpendCeiling"; usd: number | null };
 
-export type BillingCommand = LoadUsageCommand | SetSpendCeilingCommand;
+/**
+ * Run this workspace's inference on ITS OWN provider keys rather than the platform's.
+ *
+ * A WORKSPACE-LEVEL FACT AND NOT A PLAN ONE, which is the whole reason it is a command rather than
+ * a column on `plans`: it is a choice a customer makes and unmakes, not a property of what they
+ * bought. Both paid tiers offer it, and turning it on pays the platform fee and nothing else.
+ *
+ * INSTANT, WITH NO PRORATION. Inference is usage-based rather than seat-based, so there is nothing
+ * to prorate — the next call simply routes the other way. A toggle that took effect at the period
+ * boundary would be one nobody could use to stop a bill they had just noticed.
+ *
+ * DISTINCT FROM `setOwnKeyForPlatform`, which is a narrower thing on the same axis: that one
+ * decides who pays for JAROKU's own calls — generation, edits, the judge — and this decides who
+ * pays for the AGENT's. Collapsing them would mean a workspace could not run its agents on its own
+ * key while letting us pay for the generation that produced them, which is a reasonable
+ * arrangement and the one a trial naturally wants.
+ */
+export type SetByokCommand = { cmd: "setByok"; on: boolean };
+
+export type BillingCommand = LoadUsageCommand | SetSpendCeilingCommand | SetByokCommand;
 
 /** The billing channel. A full snapshot, like every other channel here — never a merge. */
 export type BillingEvent =
@@ -446,7 +465,7 @@ const PROVIDER_COMMANDS = new Set(["setOwnKeyForPlatform"]);
  * is a balance, a plan, a period rollup and a ceiling, which is four dependencies for one read;
  * the app already owns all four and answers on the `billing` channel.
  */
-const BILLING_COMMANDS = new Set(["loadUsage", "setSpendCeiling"]);
+const BILLING_COMMANDS = new Set(["loadUsage", "setSpendCeiling", "setByok"]);
 
 // Deploy. Everything below rides beside the frozen schema in a new channel, exactly as
 // pause/resume, the eval engine and the MCP registry did — a deploy is not an agent run and
@@ -2347,7 +2366,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   setMcpServerAuth: "mcp", setMcpToolImpact: "mcp", resolveMcpConfirm: "mcp",
   listProviders: "providers", setOwnKeyForPlatform: "providers",
   listConnections: "connections", connectConnector: "connections", disconnectConnector: "connections",
-  loadUsage: "billing", setSpendCeiling: "billing",
+  loadUsage: "billing", setSpendCeiling: "billing", setByok: "billing",
   listMembers: "members", inviteMember: "members", revokeInvite: "members",
   setMemberRole: "members", removeMember: "members",
   listAudit: "audit",

@@ -482,6 +482,10 @@ jobs:
           # the platform's money is spent by somebody else's decision.
           npm run test:platform-key
           npm run test:key-pool
+          # BYOK, which has existed since v0.1.9 and has never run here either: a workspace's own provider
+          # key must reach its own run and nothing else, and the toggle that chooses between its keys and
+          # ours is the one control that changes what a paid plan actually costs.
+          npm run test:byok
           # And the batching, which is not an optimisation. Stripe rate-limits usage records, so per-call
           # reporting loses them under exactly the load that makes reporting matter — and a dropped usage
           # record is revenue that never happened, with no error, no failed run, and nothing to notice

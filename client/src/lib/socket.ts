@@ -903,6 +903,17 @@ export function sendLoadUsage(): void {
  * reachable number was whatever the plan said. The server answers with a fresh usage snapshot, so
  * the meter, its bar and the over-ceiling state all move from one computation.
  */
+/**
+ * Run this workspace's agents on its own provider keys, or on the platform's.
+ *
+ * Instant and with no proration — inference is usage-based, so the next call simply routes the
+ * other way. The server refuses turning it on with no key configured, rather than accepting it and
+ * quietly continuing to bill platform credit.
+ */
+export function sendSetByok(on: boolean): boolean {
+  return send({ cmd: "setByok", on });
+}
+
 export function sendSetSpendCeiling(usd: number | null): void {
   send({ cmd: "setSpendCeiling", usd });
 }

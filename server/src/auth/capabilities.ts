@@ -370,6 +370,14 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // a decision about the workspace's money. A member whose run is refused for budget can see the
   // number; raising it is not theirs.
   setSpendCeiling: "billing:manage",
+  /**
+   * Choosing whose provider key the agents run on.
+   *
+   * `billing:manage`, beside the ceiling, because that is what it decides: turning BYOK on stops
+   * inference charges and turning it off starts them again. It is the owner's for the same reason
+   * the plan is — a member who could flip it could move the workspace's bill in either direction.
+   */
+  setByok: "billing:manage",
 
   // The rung a workspace is under, and the note it answers with. A MEMBER's, because the refusal
   // it explains is a member's — see the capability's own entry.

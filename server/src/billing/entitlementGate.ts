@@ -195,6 +195,11 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   listAudit: NO_ENTITLEMENT,
   loadUsage: NO_ENTITLEMENT,
   setSpendCeiling: NO_ENTITLEMENT,
+  // CHOOSING TO PAY FOR YOUR OWN INFERENCE IS NEVER GATED. A workspace turning BYOK on is asking to
+  // stop spending our money, and a tier check in front of that would be refusing somebody the right
+  // to cost us less. Turning it OFF is bounded by the platform-key gate at run time, where the
+  // question is actually about our money, rather than here.
+  setByok: NO_ENTITLEMENT,
   setOwnKeyForPlatform: NO_ENTITLEMENT,
   loadEnforcement: NO_ENTITLEMENT,
   appealEnforcement: NO_ENTITLEMENT,

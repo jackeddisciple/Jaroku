@@ -3279,6 +3279,7 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (INBOX_COMMAND_NAMES.has(cmd.cmd)) void handleInboxCommand(ctx, cmd as InboxCommand);
     else if (cmd.cmd === "loadUsage") void broadcastUsage(ctx);
     else if (cmd.cmd === "setSpendCeiling") void setSpendCeiling(ctx, cmd.usd);
+    else if (cmd.cmd === "setByok") void setByok(ctx, cmd.on === true);
     else void handleEvalCommand(ctx, cmd);
   }
 }
@@ -3979,6 +3980,51 @@ async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): 
 }
 
 /**
+ * Run this workspace's agents on ITS OWN provider keys, or on the platform's.
+ *
+ * INSTANT, AND SAID SO. Inference is usage-based rather than seat-based, so there is nothing to
+ * prorate — the next call routes the other way and that is the whole change. A toggle that took
+ * effect at the period boundary would be one nobody could use to stop a bill they had just noticed,
+ * which is the only moment anybody reaches for it.
+ *
+ * TURNING IT ON WITH NO KEY IS REFUSED rather than accepted and inert, the same judgement
+ * `setOwnKeyForPlatform` makes twenty lines up and for the same reason: a workspace that believed
+ * it was on its own key while still spending platform credit would find out on an invoice rather
+ * than at the moment of the mistake.
+ *
+ * Answered by re-broadcasting the whole usage snapshot, like every other mutation here — the flag
+ * appears beside the plan and beside the platform-key meter, and a partial update is how two places
+ * showing one fact come to disagree.
+ */
+async function setByok(ctx: TenantContext, on: boolean): Promise<void> {
+  try {
+    if (on && (await providerKeys.configuredNames(ctx)).size === 0) {
+      relay.broadcastBilling(ctx, {
+        type: "error",
+        message: "connect a provider key first — that is what this would run on",
+      });
+      return;
+    }
+    const moved = await billing.setByok(ctx, on);
+    if (!moved) {
+      // No live subscription, which is Free — where inference already runs on the workspace's own
+      // key by construction. Said plainly rather than silently succeeding on a flag nothing reads.
+      relay.broadcastBilling(ctx, {
+        type: "error",
+        message: "this workspace has no paid plan — Free already runs on your own provider key",
+      });
+      return;
+    }
+    console.log(`[billing] byok ${on ? "on" : "off"} (${ctx.workspaceId})`);
+    await broadcastUsage(ctx);
+  } catch (err) {
+    const message = (err as Error)?.message ?? String(err);
+    console.error(`[billing] setByok failed: ${message}`);
+    relay.broadcastBilling(ctx, { type: "error", message: `could not change that: ${message}` });
+  }
+}
+
+/**
  * What this workspace has spent, and against what.
  *
  * ONE COMPUTATION, SHARED WITH THE GATE. `budgetGate.status` is what refuses a run; every figure
@@ -3995,7 +4041,7 @@ async function broadcastUsage(ctx: TenantContext): Promise<void> {
   try {
     const status = await budgetGate.status(ctx);
     const period = status.periodStart;
-    const [byAgent, byRun, byKind, platform, agents, planRows, counters] = await Promise.all([
+    const [byAgent, byRun, byKind, platform, agents, planRows, subscription, counters] = await Promise.all([
       billing.spendByAgent(ctx, period),
       billing.spendByRun(ctx, period),
       billing.spendByKind(ctx, period),
@@ -4006,6 +4052,9 @@ async function broadcastUsage(ctx: TenantContext): Promise<void> {
       // its columns. The limits beside each one come from `PLANS`, which is the code that enforces
       // them, so the panel cannot advertise a ceiling the gate would not apply.
       billing.listPlans(ctx),
+      // The live subscription, for the one fact the panel needs from it: whether this workspace has
+      // chosen to run on its own keys. Null on Free, which is the ordinary case.
+      billing.liveSubscription(ctx),
       // WHAT THE TIER BOUNDS, as opposed to what the money bounds. Every figure above is dollars;
       // these are counts — runs and eval cases this month against the limit the plan states. A
       // workspace on its own key spends nothing of ours and still uses its allowance, so the two
@@ -4039,6 +4088,15 @@ async function broadcastUsage(ctx: TenantContext): Promise<void> {
         platformSpentUsd: platform.usd,
         platformCeilingUsd: status.plan.platformKeyCeilingUsd,
         ownKeyForPlatform: await providerKeys.ownKeyForPlatform(ctx),
+        // BYOK on a PAID plan, which is a different fact from `ownKeyForPlatform` beside it: that
+        // one decides who pays for Jaroku's own calls — generation, edits, the judge — and this
+        // decides who pays for the AGENT's. A workspace can reasonably want us to pay for the
+        // generation that produced an agent while running the agent itself on its own key.
+        byokEnabled: subscription?.byok_enabled ?? false,
+        // Whether the toggle should exist at all. Free has no paid plan to attach the choice to and
+        // already runs on the workspace's own key by construction, so the control is absent there
+        // rather than present and refusing.
+        byokAvailable: subscription !== undefined,
         byAgent: byAgent.map((a) => ({
           agentId: a.agentId,
           // Null is not "unknown agent" — it is spend with no run behind it: a generation, a
