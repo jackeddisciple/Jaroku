@@ -797,14 +797,22 @@ export class ActivityStore {
     const grain = grainFor(w.bucketMs);
     const { length } = GRAIN_PREFIX[grain];
 
+    // GROUP BY THE OUTPUT NAME, NOT A SECOND COPY OF THE EXPRESSION, and this is a driver
+    // difference that cost a red CI for days. Postgres decides whether a column is functionally
+    // grouped by comparing the GROUP BY expression to the select-list one SYNTACTICALLY — and a
+    // repeated `SUBSTR(started_at, 1, ?)` is not the same expression, because the two `?` become
+    // $1 and $5. So Postgres saw a bare `started_at` in the select list under a GROUP BY it could
+    // not match and refused the statement; SQLite is lenient about exactly this and ran it.
+    // Both dialects accept an output-column name in GROUP BY, so naming `k` once is the version
+    // that means the same thing on both — and it drops the duplicated parameter with it.
     const runRows = await q.all<Record<string, unknown>>(
       `SELECT SUBSTR(started_at, 1, ?) AS k,
               COUNT(*)                                        AS runs,
               COUNT(CASE WHEN status = 'error' THEN 1 END)    AS errors
          FROM runs
         WHERE workspace_id = ? AND started_at >= ? AND started_at < ?
-        GROUP BY SUBSTR(started_at, 1, ?)`,
-      [length, ...bounds(ctx, w), length],
+        GROUP BY k`,
+      [length, ...bounds(ctx, w)],
     );
 
     const usageRows = await q.all<Record<string, unknown>>(
@@ -813,8 +821,8 @@ export class ActivityStore {
               SUM(total_tokens) AS tokens
          FROM usage_events
         WHERE workspace_id = ? AND occurred_at >= ? AND occurred_at < ?
-        GROUP BY SUBSTR(occurred_at, 1, ?)`,
-      [length, ...bounds(ctx, w), length],
+        GROUP BY k`,
+      [length, ...bounds(ctx, w)],
     );
 
     const series: PulseColumn[] = bucketStarts(w).map((at) => ({
