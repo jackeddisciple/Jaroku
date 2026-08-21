@@ -1087,7 +1087,7 @@ export class ActivityStore {
     limit = FEED_PAGE_DEFAULT,
   ): Promise<FeedPage> {
     const size = pageSize(limit);
-    const built = feedQuery(ctx, w, filters, cursor, size);
+    const built = feedQuery(ctx, w, filters, cursor, size, this.db.dialect);
     if (!built) return { rows: [], next: null };
 
     const rows = await this.q(ctx).all<Record<string, unknown>>(built.sql, built.params);

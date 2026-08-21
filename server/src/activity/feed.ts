@@ -23,6 +23,7 @@
 // them. A cursor of `(at, id)` is stable under any amount of writing: it says "everything strictly
 // older than this row", which stays true however many rows arrive above it.
 
+import type { Dialect } from "../db/db.ts";
 import type { TenantContext } from "../db/tenant.ts";
 import { TraceStore } from "../store.ts";
 import type { Window } from "./range.ts";
@@ -185,11 +186,33 @@ export const ACTOR_SOURCES: readonly FeedKind[] = ["version", "edit", "edit_undo
  * rather than outside the union. A branch that fetched its whole history and let the outer query
  * sort it would read a year of runs to serve fifty rows.
  */
-function sources(w: Window): FeedSource[] {
+function sources(w: Window, dialect: Dialect): FeedSource[] {
   const key = (col: string, id: string): string =>
     // The keyset, as one predicate per branch: strictly older, or the same instant and a lower id.
     `(${col} < ? OR (${col} = ? AND ${id} < ?))`;
   const bound = (col: string): string => `${col} >= ? AND ${col} < ?`;
+
+  // THE `at` COLUMN OF EVERY BRANCH HAS TO BE THE SAME TYPE, and on Postgres it was not.
+  //
+  // Nine sources, and the schema genuinely disagrees with itself about what a moment is: `runs`,
+  // `steps` and `eval_runs` are the frozen trace schema and carry ISO-8601 `text`, while
+  // `agent_versions`, `deployments` and `audit_log` were written later and carry `timestamptz`.
+  // A UNION across both is "UNION types text and timestamp with time zone cannot be matched" —
+  // the whole feed, unreachable on the production driver, while SQLite ran it happily because
+  // there a timestamp IS text. The file header above already argued this exact point about the
+  // NULL columns and then left `at` out of it.
+  //
+  // TEXT IS THE COMMON TYPE, not timestamptz, and that direction is forced rather than chosen:
+  // `runs.started_at` is the partition key of `steps` and cannot move, so the frozen half wins
+  // and the newer half is rendered to match. `to_char` reproduces exactly what SQLite stores,
+  // which matters because the value goes out to the client as-is and comes back as a cursor.
+  //
+  // ONLY THE SELECT LIST IS WRAPPED. `bound` and `key` keep the raw column, so the window and the
+  // keyset are still index-visible predicates rather than comparisons against a computed string.
+  const iso = (col: string): string =>
+    dialect === "postgres"
+      ? `to_char(${col} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`
+      : col;
   void w;
 
   return [
@@ -238,7 +261,7 @@ function sources(w: Window): FeedSource[] {
       hasAgent: true,
       hasActor: true,
       sql: ({ agentFilter, actorFilter }) => `
-        SELECT 'version:' || v.id AS feed_id, v.created_at AS at, 'version' AS kind,
+        SELECT 'version:' || v.id AS feed_id, ${iso("v.created_at")} AS at, 'version' AS kind,
                a.slug AS agent_id, v.created_by AS actor_user_id,
                v.source AS object, CAST('ok' AS TEXT) AS outcome,
                v.version AS num, 'version' AS target_type, v.id AS target_id
@@ -255,7 +278,7 @@ function sources(w: Window): FeedSource[] {
       hasAgent: true,
       hasActor: true,
       sql: ({ agentFilter, actorFilter }) => `
-        SELECT 'edit:' || v.id AS feed_id, v.created_at AS at, 'edit' AS kind,
+        SELECT 'edit:' || v.id AS feed_id, ${iso("v.created_at")} AS at, 'edit' AS kind,
                a.slug AS agent_id, v.created_by AS actor_user_id,
                v.instruction AS object, CAST('ok' AS TEXT) AS outcome,
                v.version AS num, 'version' AS target_type, v.id AS target_id
@@ -273,7 +296,7 @@ function sources(w: Window): FeedSource[] {
       hasAgent: true,
       hasActor: true,
       sql: ({ agentFilter, actorFilter }) => `
-        SELECT 'edit_undone:' || v.id AS feed_id, v.undone_at AS at, 'edit_undone' AS kind,
+        SELECT 'edit_undone:' || v.id AS feed_id, ${iso("v.undone_at")} AS at, 'edit_undone' AS kind,
                a.slug AS agent_id, v.created_by AS actor_user_id,
                v.instruction AS object, CAST('ok' AS TEXT) AS outcome,
                v.version AS num, 'version' AS target_type, v.id AS target_id
@@ -354,7 +377,7 @@ function sources(w: Window): FeedSource[] {
       hasAgent: false,
       hasActor: true,
       sql: ({ actorFilter }) => `
-        SELECT 'member:' || CAST(l.id AS TEXT) AS feed_id, l.created_at AS at, 'member' AS kind,
+        SELECT 'member:' || CAST(l.id AS TEXT) AS feed_id, ${iso("l.created_at")} AS at, 'member' AS kind,
                CAST(NULL AS TEXT) AS agent_id, l.actor_user_id AS actor_user_id,
                l.action AS object, CAST('ok' AS TEXT) AS outcome,
                CAST(NULL AS INTEGER) AS num, 'workspace' AS target_type,
@@ -381,6 +404,7 @@ export function feedQuery(
   filters: FeedFilters,
   cursor: FeedCursor | null,
   limit: number,
+  dialect: Dialect,
 ): { sql: string; params: unknown[] } | null {
   const wanted = filters.kinds?.length ? new Set(filters.kinds) : null;
   const agentFilter = typeof filters.agentId === "string" && filters.agentId.length > 0;
@@ -394,7 +418,7 @@ export function feedQuery(
 
   const parts: string[] = [];
   const params: unknown[] = [];
-  for (const source of sources(w)) {
+  for (const source of sources(w, dialect)) {
     if (wanted && !wanted.has(source.kind)) continue;
     if (agentFilter && !source.hasAgent) continue;
     if (actorFilter && !source.hasActor) continue;
