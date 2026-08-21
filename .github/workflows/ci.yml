@@ -492,6 +492,13 @@ jobs:
           npm run test:gate
           npm run test:aggregate
           npm run test:abuse-signals
+          # The three spend caps, and the assertions are mostly about what must NOT trip. A cap that
+          # catches abuse and also catches Tuesday is one somebody switches off in week two, at which
+          # point it protects nothing: the anomaly rule must not fire on a first hour of work where the
+          # trailing average is a rounding error, the runaway cap must not exist on a plan including
+          # nothing (zero times two is zero), and a workspace whose age could not be read must not be
+          # frozen on a failed lookup.
+          npm run test:spend-caps
           npm run test:enforcement
           npm run test:edge-rules
           npm run test:partitions

@@ -51,6 +51,7 @@
     "test:rate-limit": "tsx src/http/rateLimit.test.ts",
     "test:edge-rules": "tsx src/abuse/edgeRules.test.ts",
     "test:abuse-signals": "tsx src/abuse/signals.test.ts",
+    "test:spend-caps": "tsx src/abuse/spendCaps.test.ts",
     "test:enforcement": "tsx src/abuse/enforcement.test.ts",
     "test:partitions": "tsx src/lifecycle/partitions.test.ts",
     "test:retention": "tsx src/lifecycle/retention.test.ts",

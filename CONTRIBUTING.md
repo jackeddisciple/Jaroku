@@ -84,6 +84,7 @@ The shortest list, with the tests that defend them:
 | A rate limit's `Retry-After` is computed from the refill, never guessed | `test:rate-limit` |
 | The edge and the application exempt the same paths | `test:edge-rules` |
 | Nothing automatic suspends a workspace; a human's decision does not lapse | `test:enforcement` |
+| A spend cap never fires on a workspace's first hour of work, or on a plan that includes no credit | `test:spend-caps` |
 | Retention is per workspace, and a plan's window is kept to the day | `test:retention`, `test:partitions` |
 | A sweep that deleted something says so in `audit_log`, and one that deleted nothing stays silent | `test:retention` |
 | An export contains no credential, and no table is silently omitted from one | `test:workspace-export` |

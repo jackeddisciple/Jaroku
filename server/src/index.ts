@@ -225,6 +225,7 @@ import {
 import { WorkspaceProviderKeys } from "./billing/providerKeys.ts";
 import { PlatformKeyGate } from "./billing/platformKey.ts";
 import { ProviderKeyPool, poolRefusal } from "./billing/keyPool.ts";
+import { NEW_ACCOUNT_DAYS, firstBreach, type CapBreach } from "./abuse/spendCaps.ts";
 import { GENERATION_MODEL } from "./claude.ts";
 import { isSecretName } from "./secrets/secretStore.ts";
 import {
@@ -997,6 +998,58 @@ const platformKeyGate = new PlatformKeyGate(billing, bootIdentity, async (ctx) =
 // and refuses rather than queues when every one of them is rate limited. Reads the environment per
 // call, so adding a key is adding a variable and a restart rather than a deploy of new code.
 const keyPool = new ProviderKeyPool();
+
+/**
+ * The three caps that stand between an infinite-loop agent and a five-figure surprise.
+ *
+ * ASKED AFTER `platformKeyGate` AND BEFORE THE POOL, which is the order the answers matter in: the
+ * gate says whether this workspace may spend our money at all, this says whether the pattern of
+ * that spending is one to keep serving, and the pool says which credential carries it. Every figure
+ * the gate checks is one somebody could deliberately max out; these are the answers to "what if the
+ * agreement was made by a bot". See abuse/spendCaps.ts.
+ *
+ * A FAILURE TO READ THE FACTS ALLOWS, and logs. The alternative is a database hiccup freezing every
+ * workspace on the deployment — the same trade `entitlementRefusalFor` makes, and for the same
+ * reason: the budget gate and the platform-key ceiling are still in front of anything that costs
+ * money, so allowing here is not allowing unbounded spend.
+ */
+async function spendCapBreach(ctx: TenantContext): Promise<CapBreach | null> {
+  try {
+    const period = billingPeriod();
+    const workspace = await identityRepo.workspaceById(ctx, ctx.workspaceId);
+    const created = workspace ? Date.parse(workspace.created_at) : Number.NaN;
+    const ageDays = Number.isFinite(created) ? (Date.now() - created) / 86_400_000 : null;
+    const hourAgo = new Date(Date.now() - 3_600_000).toISOString();
+    const dayAgo = new Date(Date.now() - 24 * 3_600_000).toISOString();
+    const weekEnd = Number.isFinite(created)
+      ? new Date(created + NEW_ACCOUNT_DAYS * 86_400_000).toISOString()
+      : null;
+
+    const [thisPeriod, lastHour, lastDay, firstWeek] = await Promise.all([
+      billing.platformSpendSince(ctx, period.start),
+      billing.platformSpendSince(ctx, hourAgo),
+      billing.platformSpendSince(ctx, dayAgo),
+      // The first week is measured from the workspace's own birthday rather than from now, so it
+      // stays a fact about the account rather than a rolling window that keeps forgiving.
+      weekEnd ? billing.platformSpendSince(ctx, new Date(created).toISOString()) : Promise.resolve(null),
+    ]);
+
+    const limits = limitsFor(workspace?.plan, (await billing.balance(ctx)).limit_overrides);
+    return firstBreach({
+      ageDays,
+      firstWeekPlatformUsd: firstWeek?.usd ?? 0,
+      periodPlatformUsd: thisPeriod.usd,
+      includedCreditUsd: limits.monthlyCreditsUsd,
+      lastHourUsd: lastHour.usd,
+      // The day BEFORE the last hour, averaged. Including the spike in its own baseline would make
+      // a big enough spike its own justification.
+      trailingDayAverageHourUsd: Math.max(0, lastDay.usd - lastHour.usd) / 23,
+    });
+  } catch (err) {
+    console.error("[abuse] could not read spend facts:", (err as Error)?.message ?? err);
+    return null;
+  }
+}
 const workspaceIds = await bootIdentity.listWorkspaceIds(systemContext(newRequestId()));
 const workspaceContexts = workspaceIds.map((id) => systemContextFor(id, newRequestId()));
 
@@ -8481,6 +8534,15 @@ async function runAgent(
     //
     // A DEPLOYMENT WITH ONE KEY ALREADY HAS A POOL OF ONE and changes nothing: the pool reads the
     // same `ANTHROPIC_API_KEY` it always did, and `_2`, `_3` are how capacity is added.
+    // THE CAPS, BEFORE A KEY IS HANDED OUT. A workspace past one of them must not get a credential
+    // at all — refusing after the lease would mean the pool's cursor had already moved for a run
+    // that never happened.
+    const breach = await spendCapBreach(ctx);
+    if (breach) {
+      console.log(`[abuse] refused run ${runId}: ${breach.kind} cap (${breach.spentUsd} of ${breach.capUsd})`);
+      relay.broadcastDebug(ctx, { type: "error", message: breach.message });
+      return;
+    }
     const lease = keyPool.lease(provider as ProviderId);
     if (!lease.ok) {
       // EXHAUSTED IS REFUSED, NEVER QUEUED. Holding the run until a key frees up turns a capacity

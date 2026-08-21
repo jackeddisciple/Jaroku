@@ -67,7 +67,9 @@ export type RateAction =
   | "secrets.reveal"
   | "billing.checkout"
   // --- per person: creating the tenancy itself ------------------------------------------------
-  | "workspace.create";
+  | "workspace.create"
+  // --- per person: what the platform's own key is asked to do ---------------------------------
+  | "inference.call";
 
 export interface RateRule {
   /** The most that may happen at once, from an empty-handed start. Bounds a BURST. */
@@ -156,6 +158,26 @@ export const RATE_RULES: Record<RateAction, RateRule> = {
   // office behind one, which is the mistake the elevation rules explain at length. Ten an hour is
   // more than any real reorganisation and far less than a farm wants.
   "workspace.create": { capacity: 10, perMinute: 10 / 60, scope: "user" },
+
+  /**
+   * A hundred a minute, per PERSON, on the platform-paid inference path.
+   *
+   * A FLOOR RATHER THAN A TARGET, which is the specification's own word for it and is what makes
+   * the number choosable at all: a legitimate agent — even one fanning out across a dataset — is
+   * nowhere near a hundred model calls a minute from one human's session, and something that needs
+   * far more is not an agent somebody is watching. Setting it where real usage lives would mean
+   * tuning it forever against the loudest customer.
+   *
+   * PER USER AND NOT PER WORKSPACE, deliberately. A Team workspace of twenty people legitimately
+   * makes twenty times what one person does, so a workspace-scoped limit would either throttle the
+   * team or be twenty times too loose for the compromised account inside it. The thing being bounded
+   * here is one credential behaving abnormally.
+   *
+   * CAPACITY EQUALS THE RATE, so a burst is a minute's worth and not more — the shape every other
+   * per-user rule here uses. A bucket that allowed a large burst would let a script have its
+   * thousand calls up front and then look well-behaved.
+   */
+  "inference.call": { capacity: 100, perMinute: 100, scope: "user" },
 };
 
 export interface RateDecision {
