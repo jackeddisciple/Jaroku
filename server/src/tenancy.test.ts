@@ -558,6 +558,11 @@ const SCOPED_API: Record<string, string[]> = {
     "balance", "addCredit", "setCeiling", "setLimitOverrides", "record", "spendSince",
     "eventsForRun", "recentEvents", "runSpend", "hold", "liveHolds", "expiredHolds", "liveSubscription",
     "subscriptions", "upsertSubscription", "platformSpendSince", "setOwnKeyForPlatform",
+    // Session 052's counters, and they are the reason this list is an assertion rather than a
+    // note. A quota counter read across the boundary is one workspace's runs spending another
+    // workspace's allowance — a leak that shows up as somebody being refused work they had every
+    // right to, which nobody reports as a tenancy bug.
+    "incrementUsage", "usageForPeriod", "usageCount",
   ],
   // Session 7. A connection is a grant against somebody's REAL ACCOUNT, so a cross-tenant read
   // here is not a leaked row — it is one workspace learning whose mailbox another's agents read,
@@ -1062,12 +1067,33 @@ async function remainder(db: Db): Promise<void> {
   // The one plan write in the system. A workspace that could move another's plan could grant
   // itself a paid tier, or take one away.
   const identityRepo = new IdentityRepository(db);
-  await identityRepo.setWorkspacePlan(A.ctx, "scale");
+  await identityRepo.setWorkspacePlan(A.ctx, "team");
   check(
-    (await identityRepo.workspaceById(B.ctx, B.ctx.workspaceId))?.plan !== "scale",
+    (await identityRepo.workspaceById(B.ctx, B.ctx.workspaceId))?.plan !== "team",
     "setWorkspacePlan cannot move B's plan",
   );
   check((await billing.subscriptions(A.ctx)).length === 0, "nor does the full history");
+
+  // The metered counters, which are the quota system's whole memory of what a month has held.
+  // Worth its own trio rather than a single read: a counter leaks in both directions and each is
+  // a different failure. Read across the boundary, A is refused work it had every right to start
+  // because B was busy. Written across it, A spends B's allowance — and neither shows up as a
+  // tenancy bug when somebody reports it, only as a quota that is wrong.
+  const period = { periodStart: "2026-08-01T00:00:00.000Z", periodEnd: "2026-09-01T00:00:00.000Z" };
+  await billing.incrementUsage(B.ctx, { ...period, metric: "runs", by: 7 });
+  check(
+    (await billing.usageCount(A.ctx, period.periodStart, "runs")) === 0,
+    "usageCount reads none of B's runs — A's quota is not spent by B's month",
+  );
+  check(
+    Object.keys(await billing.usageForPeriod(A.ctx, period.periodStart)).length === 0,
+    "...and usageForPeriod lists none of B's metrics either",
+  );
+  await billing.incrementUsage(A.ctx, { ...period, metric: "runs", by: 1 });
+  check(
+    (await billing.usageCount(B.ctx, period.periodStart, "runs")) === 7,
+    "incrementUsage cannot add to B's counter — the upsert collides only within one workspace",
+  );
 }
 
 /**

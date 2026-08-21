@@ -127,8 +127,8 @@ console.log("\nthe platform ceiling and the budget ceiling are different numbers
     "and on pro",
   );
   check(
-    PLANS.scale.budgetCeilingUsd === null && PLANS.scale.platformKeyCeilingUsd !== null,
-    "scale declines to guess about the customer's own money and still caps ours — there is no unlimited version of that",
+    PLANS.team.budgetCeilingUsd === null && PLANS.team.platformKeyCeilingUsd !== null,
+    "team declines to guess about the customer's own money and still caps ours — there is no unlimited version of that",
   );
 
   const ctx = await workspace("pro");

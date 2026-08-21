@@ -212,8 +212,8 @@ console.log("\na plan change mid-cycle is an update, not a second subscription")
   const ctx = await workspace();
   const sub = `sub_${randomUUID()}`;
   await applySubscription(ctx, billing, identity, { planId: "pro", status: "active", externalSubscriptionId: sub });
-  await applySubscription(ctx, billing, identity, { planId: "scale", status: "active", externalSubscriptionId: sub });
-  check((await identity.workspaceById(ctx, ctx.workspaceId))?.plan === "scale", "the plan follows");
+  await applySubscription(ctx, billing, identity, { planId: "team", status: "active", externalSubscriptionId: sub });
+  check((await identity.workspaceById(ctx, ctx.workspaceId))?.plan === "team", "the plan follows");
   check((await billing.subscriptions(ctx)).length === 1, "on the same subscription row, keyed by the provider's id");
 }
 

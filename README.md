@@ -3258,10 +3258,10 @@ as roles in `auth/capabilities.ts` and job classes in `queue/jobs.ts`. What *is*
 the part that genuinely varies per deployment: which payment-provider price a plan maps to, and
 whether it can be bought today. The two are checked against each other at boot, in both
 directions: a row nothing defines would resolve to the free limits, so a workspace that paid for
-Scale would get a free workspace's ceiling with no error and no symptom except its own
+Team would get a free workspace's ceiling with no error and no symptom except its own
 throughput.
 
-| | Free | Pro | Scale |
+| | Free | Pro | Team |
 |---|---|---|---|
 | Monthly credit | $5 | $50 | $250 |
 | Budget ceiling — what may be **started** | $5 | $200 | none |

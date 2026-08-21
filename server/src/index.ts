@@ -375,7 +375,7 @@ setInterval(() => {
 //
 // The `plans` table holds only what varies per deployment — a price id, and whether a plan can
 // be bought today. Every number a plan implies is in billing/plans.ts. A row with no definition
-// there resolves through `planFor` to the FREE limits, so a workspace that paid for Scale would
+// there resolves through `planFor` to the FREE limits, so a workspace that paid for Team would
 // silently get a free workspace's ceiling and concurrency, and nothing anywhere would say so.
 // Checked here for the same reason the migrations are applied here: a mismatch is a deployment
 // mistake, and the useful moment to learn about one is during the deployment.

@@ -4,7 +4,7 @@
 // The last one is the point of the suite. `test:jobs` asserts every job class has a complete
 // config so a class added without one fails rather than silently defaulting; this is the same
 // assertion one layer up, and the failure it prevents is worse: a plan row with no definition
-// resolves to FREE, so a workspace that paid for Scale gets a free workspace's ceiling and
+// resolves to FREE, so a workspace that paid for Team gets a free workspace's ceiling and
 // nothing anywhere says so.
 //
 //   npm run test:plans
@@ -54,18 +54,18 @@ console.log("\nthe nesting nests");
 // somebody adds a limit to FREE and forgets PRO, `...FREE` gives PRO the free value and this
 // assertion is what notices.
 check(PLANS.pro.monthlyCreditsUsd > PLANS.free.monthlyCreditsUsd, "pro grants more credit than free");
-check(PLANS.scale.monthlyCreditsUsd > PLANS.pro.monthlyCreditsUsd, "scale grants more than pro");
+check(PLANS.team.monthlyCreditsUsd > PLANS.pro.monthlyCreditsUsd, "team grants more than pro");
 check(PLANS.pro.retentionDays > PLANS.free.retentionDays, "pro keeps traces longer than free");
-check(PLANS.scale.retentionDays > PLANS.pro.retentionDays, "scale keeps them longer still");
+check(PLANS.team.retentionDays > PLANS.pro.retentionDays, "team keeps them longer still");
 check(
   (PLANS.pro.concurrency["run.eval"] ?? 0) > (PLANS.free.concurrency["run.eval"] ?? 0),
   "pro runs more eval jobs at once than free",
 );
 check(PLANS.free.seats !== null && PLANS.pro.seats !== null && PLANS.pro.seats > PLANS.free.seats, "pro seats more people");
-check(PLANS.scale.seats === null, "scale does not cap seats at all");
+check(PLANS.team.seats === null, "team does not cap seats at all");
 check(
-  Object.keys(PLANS.free.features).every((f) => f in PLANS.scale.features),
-  "every feature flag free knows about, scale knows about",
+  Object.keys(PLANS.free.features).every((f) => f in PLANS.team.features),
+  "every feature flag free knows about, team knows about",
 );
 check(
   Object.entries(PLANS.free.features).every(
@@ -79,7 +79,7 @@ console.log("\nresolving a plan");
 check(planFor("pro").id === "pro", "a known plan resolves to itself");
 check(planFor("enterprise-gold").id === "free", "an unknown one falls back to free rather than throwing");
 check(planFor(null).id === "free", "so does no plan at all");
-check(isPlanId("scale") && !isPlanId("scale "), "isPlanId is exact");
+check(isPlanId("team") && !isPlanId("team "), "isPlanId is exact");
 
 console.log("\noverrides fold in without rewriting the plan");
 
@@ -171,7 +171,7 @@ console.log("\nthe registry and this file cannot disagree in silence");
 
     let missingRefused = false;
     try {
-      assertPlanRegistry(rows.filter((r) => r.id !== "scale"));
+      assertPlanRegistry(rows.filter((r) => r.id !== "team"));
     } catch {
       missingRefused = true;
     }

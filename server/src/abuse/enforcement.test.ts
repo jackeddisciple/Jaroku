@@ -103,13 +103,13 @@ console.log("\nwhat a rung does to the limits");
   check(limited.concurrency["run.eval"] === 1, "...and narrows concurrency to one");
 
   // The negotiated exception loses to the enforcement, which is the whole point of the order.
-  const negotiated = limitsUnderEnforcement("scale", { platformKeyCeilingUsd: 9999 }, "soft_limit");
+  const negotiated = limitsUnderEnforcement("team", { platformKeyCeilingUsd: 9999 }, "soft_limit");
   check(
     negotiated.platformKeyCeilingUsd === 0,
     "a generous negotiated ceiling does not survive the rung — the ladder is applied last",
   );
   check(
-    limitsUnderEnforcement("scale", { platformKeyCeilingUsd: 9999 }, "watch").platformKeyCeilingUsd === 9999,
+    limitsUnderEnforcement("team", { platformKeyCeilingUsd: 9999 }, "watch").platformKeyCeilingUsd === 9999,
     "...and `watch` changes nothing at all, which is what makes it safe to apply eagerly",
   );
 

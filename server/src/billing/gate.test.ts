@@ -137,7 +137,7 @@ console.log("\na total that is a floor says so");
 console.log("\nno ceiling means no ceiling");
 
 {
-  const ctx = await workspace("scale"); // budgetCeilingUsd: null
+  const ctx = await workspace("team"); // budgetCeilingUsd: null
   await spend(ctx, 10_000);
   const s = await gate.status(ctx, NOW);
   check(s.ceilingUsd === null && s.headroomUsd === null, "the plan states no limit");
@@ -175,7 +175,7 @@ console.log("\nwith platform credit, a hold is taken and bounded by the headroom
 console.log("\nan unpriced estimate holds nothing rather than guessing");
 
 {
-  const ctx = await workspace("scale"); // no ceiling, so the estimate would size the hold
+  const ctx = await workspace("team"); // no ceiling, so the estimate would size the hold
   await billing.addCredit(ctx, 20);
   const v = await gate.mayStart(ctx, { estimateUsd: null, purpose: "run", subjectId: "unpriced" }, NOW);
   check(v.ok, "an unpriced run is not refused");
@@ -185,7 +185,7 @@ console.log("\nan unpriced estimate holds nothing rather than guessing");
 console.log("\nwhen credit runs out, the refusal says what it needs");
 
 {
-  const ctx = await workspace("scale"); // no ceiling, so only credit binds
+  const ctx = await workspace("team"); // no ceiling, so only credit binds
   await billing.addCredit(ctx, 1);
   const first = await gate.mayStart(ctx, { estimateUsd: 0.9, purpose: "run", subjectId: "a" }, NOW);
   check(first.ok, "the first run fits");

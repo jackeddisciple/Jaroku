@@ -20,7 +20,7 @@
 //   STAGED OBJECTS, which are not retention at all and are here because this is the sweeper.
 //   A staging copy belongs to a generation or an edit proposal that is in flight; one that is a
 //   day old belongs to a process that died. Its lifetime is hours, on every plan, and making it
-//   a plan promise would mean a free workspace's dead staging outliving a Scale workspace's.
+//   a plan promise would mean a free workspace's dead staging outliving a Team workspace's.
 //
 //   EXPORTS, which are a convenience copy of data the trace already holds. They expire on the
 //   plan's own clock: an export is a snapshot of exactly the regulated content above, and a CSV
@@ -44,7 +44,7 @@
 // THE PARTITION DROP IS AN OPTIMISATION OVER THE DELETE, NOT A REPLACEMENT FOR IT, and the
 // reason is worth stating because it is the one thing about this design that surprises people: a
 // partition is a MONTH, and a month contains every workspace's steps. It can only be dropped
-// once it is past the LONGEST retention any live workspace has — 365 days on Scale — so a free
+// once it is past the LONGEST retention any live workspace has — 365 days on Team — so a free
 // workspace's fourteen-day promise is kept by a scoped DELETE inside a partition that will not
 // be droppable for a year. The drop is what stops the table growing forever; the delete is what
 // keeps the promise.
@@ -156,6 +156,7 @@ export const RETENTION_KEPT_TABLES: Record<string, string> = {
   eval_scores: "a judge verdict belongs to its job, and leaves when the job does",
   rubrics: "authored, like the dataset it belongs to",
   usage_events: "the ledger. A bill stays defensible for longer than a trace does, and §4.3's per-thread cost joins through it",
+  workspace_usage_periods: "the counter beside that ledger — a running total per month, not an event with an age, and the answer to what a workspace was charged for long after its traces have gone",
   billing_holds: "settled or expired by the billing layer, which is the only thing that knows which",
   billing_webhook_events: "the provider's own delivery record, and the queue an operator replays",
   subscriptions: "the current plan. There is one, and it is not an event",

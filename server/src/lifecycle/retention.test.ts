@@ -57,7 +57,7 @@ async function workspace(plan: string): Promise<TenantContext> {
 }
 
 const free = await workspace("free"); // 14 days
-const scale = await workspace("scale"); // 365 days
+const team = await workspace("team"); // 365 days
 
 /** A run with one step, started `age` days ago. */
 async function seedRun(ctx: TenantContext, ageDays: number): Promise<string> {
@@ -98,7 +98,7 @@ const freshFree = await seedRun(free, 1);
 const staleFree = await seedRun(free, 30);
 const edgeInside = await seedRun(free, PLANS.free.retentionDays - 1);
 const edgeOutside = await seedRun(free, PLANS.free.retentionDays + 1);
-const staleScale = await seedRun(scale, 30);
+const staleTeam = await seedRun(team, 30);
 
 // A checkpoint for each of the free workspace's runs, so "the expired one's goes and the fresh
 // one's stays" is a real assertion rather than a vacuous one.
@@ -151,7 +151,7 @@ const sweeper = new RetentionSweeper({
   db,
   workspaces: async () => [
     { id: free.workspaceId, plan: "free" },
-    { id: scale.workspaceId, plan: "scale" },
+    { id: team.workspaceId, plan: "team" },
   ],
   overridesFor: async () => ({}),
   checkpoints,
@@ -163,11 +163,11 @@ const sweeper = new RetentionSweeper({
 console.log("\nsweeping");
 const report = await sweeper.sweep();
 const freeSweep = report.workspaces.find((w) => w.workspaceId === free.workspaceId)!;
-const scaleSweep = report.workspaces.find((w) => w.workspaceId === scale.workspaceId)!;
+const teamSweep = report.workspaces.find((w) => w.workspaceId === team.workspaceId)!;
 
 {
   check(freeSweep.retentionDays === PLANS.free.retentionDays, "each workspace is swept on ITS plan's clock");
-  check(scaleSweep.retentionDays === PLANS.scale.retentionDays, "...and a longer plan gets the longer one");
+  check(teamSweep.retentionDays === PLANS.team.retentionDays, "...and a longer plan gets the longer one");
 
   const remaining = (await store.listRuns(free, 100)).map((r) => r.id);
   check(remaining.includes(freshFree), "a run inside retention is untouched");
@@ -176,12 +176,12 @@ const scaleSweep = report.workspaces.find((w) => w.workspaceId === scale.workspa
   check(!remaining.includes(staleFree), "...as is one long past");
   check(freeSweep.runsDeleted === 2 && freeSweep.stepsDeleted === 2, "steps go with their runs");
 
-  const scaleRemaining = (await store.listRuns(scale, 100)).map((r) => r.id);
+  const teamRemaining = (await store.listRuns(team, 100)).map((r) => r.id);
   check(
-    scaleRemaining.includes(staleScale),
+    teamRemaining.includes(staleTeam),
     "THE SAME DAY-OLD RUN SURVIVES ON A LONGER PLAN — retention is per workspace, not per sweep",
   );
-  check(scaleSweep.runsDeleted === 0, "...and that workspace loses nothing");
+  check(teamSweep.runsDeleted === 0, "...and that workspace loses nothing");
 }
 
 console.log("\nwhat goes with a run");
@@ -203,10 +203,10 @@ console.log("\nobjects");
   check(freeSweep.exportsDeleted === 1 && freeSweep.stagingDeleted === 1, "...and both are counted");
 
   // Staging expires on hours regardless of plan. A free workspace's dead staging must not
-  // outlive a Scale workspace's, which is what making it a plan promise would do.
-  const recentStaging = agentStagingKey(scale.workspaceId, randomUUID(), randomUUID(), "agent.py");
+  // outlive a Team workspace's, which is what making it a plan promise would do.
+  const recentStaging = agentStagingKey(team.workspaceId, randomUUID(), randomUUID(), "agent.py");
   await objects.put(recentStaging, "in flight");
-  const second = await sweeper.sweepWorkspace(scale, PLANS.scale.retentionDays);
+  const second = await sweeper.sweepWorkspace(team, PLANS.team.retentionDays);
   check(second.stagingDeleted === 0, "a staging copy from an hour ago is in flight, not abandoned");
   check((await objects.head(recentStaging)) !== null, "...and is still there");
 }
@@ -249,10 +249,10 @@ console.log("\nthe join table does not outlive what it points at");
 console.log("\nnothing crosses a workspace");
 {
   // The free workspace's sweep ran first and deleted two runs. If any statement had been
-  // unscoped, the Scale workspace's thirty-day-old run would have gone with them.
-  check((await store.listRuns(scale, 100)).length === 1, "the other workspace's rows are exactly as they were");
-  const keys = (await objects.list(workspacePrefix(scale.workspaceId))).map((o) => o.key);
-  check(keys.every((k) => k.startsWith(`ws/${scale.workspaceId}/`)), "...and so are its objects");
+  // unscoped, the Team workspace's thirty-day-old run would have gone with them.
+  check((await store.listRuns(team, 100)).length === 1, "the other workspace's rows are exactly as they were");
+  const keys = (await objects.list(workspacePrefix(team.workspaceId))).map((o) => o.key);
+  check(keys.every((k) => k.startsWith(`ws/${team.workspaceId}/`)), "...and so are its objects");
 }
 
 console.log("\nevery workspace-scoped table is swept or explicitly kept");

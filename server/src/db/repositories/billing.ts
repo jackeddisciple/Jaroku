@@ -142,8 +142,14 @@ export interface SubscriptionRow {
   status: string;
   external_customer_id: string | null;
   external_subscription_id: string | null;
+  /** The other end of the period. Null on every row written before migration 052. */
+  current_period_start: string | null;
   current_period_end: string | null;
   cancel_at_period_end: boolean;
+  /** Seats bought. One on every tier that is not Team, and the multiplier on the price if it is. */
+  seat_count: number;
+  /** Platform fee only, inference on the workspace's own keys. See the spec's BYOK toggle. */
+  byok_enabled: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -186,8 +192,8 @@ const USAGE_COLUMNS = `id, workspace_id, run_id, kind, provider, model, input_to
 const HOLD_COLUMNS = `id, workspace_id, amount_usd, purpose, subject_id, created_at,
                       expires_at, released_at`;
 const SUBSCRIPTION_COLUMNS = `id, workspace_id, plan_id, status, external_customer_id,
-                              external_subscription_id, current_period_end,
-                              cancel_at_period_end, created_at, updated_at`;
+                              external_subscription_id, current_period_start, current_period_end,
+                              cancel_at_period_end, seat_count, byok_enabled, created_at, updated_at`;
 
 export class BillingRepository {
   constructor(private db: Db) {}
@@ -868,6 +874,71 @@ export class BillingRepository {
     return this.hydrateSubscription(row);
   }
 
+  // --- metered periods ----------------------------------------------------------------------
+  //
+  // The counters every quota check reads, one row per workspace per period per metric. Separate
+  // from `usage_events` because they answer different questions: that table is the ledger, one
+  // immutable row per thing that happened; these are the running totals, incremented in place and
+  // read on the hot path. Counting the ledger on every check is the right answer computed the
+  // expensive way. See migration 052's header.
+
+  /**
+   * Add `by` to one counter, creating the period's row if this is its first event.
+   *
+   * ONE STATEMENT, NOT A READ THEN A WRITE. Two runs starting in the same millisecond are the
+   * ordinary case, not the race nobody hits, and a SELECT-then-UPDATE loses one of them silently —
+   * which on a quota counter means a workspace that quietly gets more than it paid for. The unique
+   * constraint from 052 is what arbitrates, and `count = count + ?` is evaluated by the database
+   * on the row it just locked.
+   *
+   * `period_end` is written on the insert and never updated. The period a counter belongs to is
+   * decided by its `period_start`; carrying the end as well is what lets a reader render "resets
+   * on the 1st" without recomputing a calendar it did not choose.
+   */
+  async incrementUsage(
+    ctx: TenantContext,
+    u: { metric: string; periodStart: string; periodEnd: string; by: number },
+  ): Promise<void> {
+    await this.q(ctx).run(
+      `INSERT INTO workspace_usage_periods (id, workspace_id, period_start, period_end, metric, count)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (workspace_id, period_start, metric) DO UPDATE SET
+         count = workspace_usage_periods.count + ?
+       WHERE workspace_usage_periods.workspace_id = ?`,
+      [randomUUID(), ctx.workspaceId, u.periodStart, u.periodEnd, u.metric, u.by, u.by, ctx.workspaceId],
+    );
+  }
+
+  /**
+   * Every counter this workspace has for one period, as a map.
+   *
+   * A MAP WITH THE ABSENT METRICS MISSING, not zero-filled, and the caller decides what absence
+   * means. For a quota check it is zero — nothing has happened yet — but for a usage screen the
+   * two are worth telling apart, the same distinction `billingStore`'s `loaded` flag draws on
+   * the client. `usageCount` below is the zero-filling reader, so nobody has to write `?? 0`
+   * twice with two different opinions about it.
+   */
+  async usageForPeriod(ctx: TenantContext, periodStart: string): Promise<Record<string, number>> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT metric, count FROM workspace_usage_periods
+        WHERE workspace_id = ? AND period_start = ?`,
+      [ctx.workspaceId, periodStart],
+    );
+    const out: Record<string, number> = {};
+    for (const r of rows) out[String(r["metric"])] = Number(r["count"] ?? 0);
+    return out;
+  }
+
+  /** One counter, or zero when the period has seen nothing of that kind yet. */
+  async usageCount(ctx: TenantContext, periodStart: string, metric: string): Promise<number> {
+    const row = await this.q(ctx).get<Record<string, unknown>>(
+      `SELECT count FROM workspace_usage_periods
+        WHERE workspace_id = ? AND period_start = ? AND metric = ?`,
+      [ctx.workspaceId, periodStart, metric],
+    );
+    return row ? Number(row["count"] ?? 0) : 0;
+  }
+
   // --- webhook events -----------------------------------------------------------------------
   //
   // No context, and no scope. A webhook arrives before we know whose it is — resolving a
@@ -924,8 +995,13 @@ export class BillingRepository {
       status: String(r["status"]),
       external_customer_id: (r["external_customer_id"] as string | null) ?? null,
       external_subscription_id: (r["external_subscription_id"] as string | null) ?? null,
+      current_period_start: (r["current_period_start"] as string | null) ?? null,
       current_period_end: (r["current_period_end"] as string | null) ?? null,
       cancel_at_period_end: asBool(r["cancel_at_period_end"]),
+      // A driver difference, not a preference: Postgres answers `integer` and SQLite answers
+      // whatever it stored, so the Number() is what makes a seat count arithmetic on both.
+      seat_count: Number(r["seat_count"] ?? 1),
+      byok_enabled: asBool(r["byok_enabled"]),
       created_at: String(r["created_at"]),
       updated_at: String(r["updated_at"]),
     };

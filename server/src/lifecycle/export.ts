@@ -92,6 +92,11 @@ export const EXPORTED_TABLES = [
   // What this workspace is paying for. The provider's own record is the provider's; this is the
   // row the platform acted on, and a billing dispute is argued from it.
   "subscriptions",
+  // And what it actually used, month by month. The same argument one line up, at the other
+  // grain: `usage_events` is already here and answers "what did this cost", and this answers
+  // "how much of what I paid for did I use" — which is the half of a billing dispute the
+  // ledger cannot settle, because a quota is counted in runs rather than in dollars.
+  "workspace_usage_periods",
   "workspace_enforcements",
   "abuse_signals",
   // WHERE EACH CREDENTIAL IS USED, and when each was rotated. Both are exported in full rather

@@ -193,7 +193,7 @@ Concurrency, credits, ceilings, retention and seat counts are data in
 table holds only what varies per deployment — a price id, and whether a plan can be bought today
 — and `npm run test:plans` fails at boot when the two disagree in either direction. A plan row
 nothing defines resolves to the FREE limits, so the failure it prevents is a workspace that paid
-for Scale quietly getting a free workspace's ceiling.
+for Team quietly getting a free workspace's ceiling.
 
 Plans nest by spreading (`PRO` starts from `FREE`), and the suite asserts a paid plan is never
 worse than a free one on any axis. Add a limit to the base and every plan has it; add three

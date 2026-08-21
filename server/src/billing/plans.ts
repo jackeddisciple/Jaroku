@@ -13,7 +13,7 @@
 // pull request to change. See migration 020's header.
 //
 // PLANS ARE NESTED, expressed by spreading rather than by copying. `pro` starts from `free` and
-// `scale` from `pro`, so a limit added to the base is a limit every plan has, and the day
+// `team` from `pro`, so a limit added to the base is a limit every plan has, and the day
 // somebody adds a feature flag and forgets two of the three tables is a day that cannot happen.
 // The same reason `ADMIN` is `[...MEMBER, …]` rather than its own list.
 //
@@ -25,7 +25,7 @@
 
 import type { JobClass } from "../queue/jobs.ts";
 
-export const PLAN_IDS = ["free", "pro", "scale"] as const;
+export const PLAN_IDS = ["free", "pro", "team"] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
 
 export function isPlanId(v: unknown): v is PlanId {
@@ -140,10 +140,10 @@ const PRO: PlanLimits = {
   features: { ...FREE.features, deploy: true },
 };
 
-const SCALE: PlanLimits = {
+const TEAM: PlanLimits = {
   ...PRO,
-  id: "scale",
-  label: "Scale",
+  id: "team",
+  label: "Team",
   monthlyCreditsUsd: 250,
   // Still a ceiling, even on the plan whose budget has none. `budgetCeilingUsd: null` is us
   // declining to guess on the customer's behalf about their own money; this is our money, and
@@ -159,7 +159,7 @@ const SCALE: PlanLimits = {
   features: { ...PRO.features },
 };
 
-export const PLANS: Record<PlanId, PlanLimits> = { free: FREE, pro: PRO, scale: SCALE };
+export const PLANS: Record<PlanId, PlanLimits> = { free: FREE, pro: PRO, team: TEAM };
 
 /** The plan a workspace is on, falling back to `free` for a value nothing recognises. */
 export function planFor(plan: string | null | undefined): PlanLimits {
@@ -282,7 +282,7 @@ export function planConcurrency(limits: PlanLimits, jobClass: JobClass): number 
  *
  * The registry exists so a subscription can reference a plan and so a price id has a home. A
  * row here with no definition above would resolve through `planFor` to the FREE limits, which
- * means a workspace that paid for Scale silently gets a free workspace's concurrency and
+ * means a workspace that paid for Team silently gets a free workspace's concurrency and
  * ceiling — a failure with no symptom except somebody's throughput. And a definition with no
  * row cannot be subscribed to at all.
  *
