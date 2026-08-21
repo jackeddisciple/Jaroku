@@ -2499,6 +2499,21 @@ export interface RelayOptions {
   // "loadRun", "listAgents", "loadAgentFiles", "loadAgentGraph", "listMcpServers" and
   // "listProviders" are answered locally; the rest are forwarded.
   onCommand?: (cmd: ForwardedCommand, ctx: TenantContext) => void;
+  /**
+   * May this workspace do one more of what this command does?
+   *
+   * ANSWERED HERE RATHER THAN IN THE HANDLER, beside the capability check and for the same reason:
+   * a limit enforced at four call sites is four limits, and the hole is always in the call site
+   * nobody thought of. This is where every command already passes through.
+   *
+   * A CALLBACK RATHER THAN A REPOSITORY, because counting agents needs a database and this file
+   * imports none — `test:db-boundary` is what makes that a rule rather than a habit. index.ts
+   * supplies it, where the stores already are.
+   *
+   * Absent means unrestricted, which is what a suite that stands the relay up on its own wants:
+   * those are testing the socket, not the pricing.
+   */
+  entitles?: (ctx: TenantContext, cmd: string) => Promise<{ message: string; refusal: unknown } | null>;
   // Every read takes the asking socket's context, the filesystem-backed ones included: the
   // directory they read is global, so the caller's right to a given agent is a question only
   // the database can answer. Session 3's object store makes the key itself workspace-scoped
@@ -2665,10 +2680,12 @@ export class WsRelay {
   private revalidator?: ReturnType<typeof setInterval>;
   private store: TraceStore;
   private onCommand?: (cmd: ForwardedCommand, ctx: TenantContext) => void;
+  private entitles?: (ctx: TenantContext, cmd: string) => Promise<{ message: string; refusal: unknown } | null>;
 
   constructor(private opts: RelayOptions) {
     this.store = opts.store;
     this.onCommand = opts.onCommand;
+    this.entitles = opts.entitles;
 
     // SLOWLORIS, WHICH IS NOT THE SAME PROBLEM AS A SLOW HANDLER. The router puts a deadline on
     // OUR work; these bound how long somebody else is allowed to take dribbling a request in.
@@ -2930,13 +2947,33 @@ export class WsRelay {
       });
       return false;
     }
-    if (can(ctx.role, capability)) return true;
-    this.sendTo(ws, {
-      channel: channelFor(cmd),
-      type: "error",
-      message: `a ${ctx.role} cannot do this — it needs ${capability}`,
-    });
-    return false;
+    if (!can(ctx.role, capability)) {
+      this.sendTo(ws, {
+        channel: channelFor(cmd),
+        type: "error",
+        message: `a ${ctx.role} cannot do this — it needs ${capability}`,
+      });
+      return false;
+    }
+
+    // AND THEN THE TIER, WHICH IS A DIFFERENT QUESTION FROM THE ROLE. "May this person do this" and
+    // "has this workspace any of these left" fail for unrelated reasons and read differently to
+    // whoever hit them: one is answered by asking an owner, the other by paying or by waiting for
+    // the month to turn. So the refusal travels with its structure attached — the figure, the limit
+    // and where to go — and the client renders that as an inline card rather than a bare string.
+    // On the command's OWN channel rather than a new one, so the panel that asked still gets an
+    // error it already knows how to show if it has no card to render.
+    const refusal = this.entitles ? await this.entitles(ctx, cmd) : null;
+    if (refusal) {
+      this.sendTo(ws, {
+        channel: channelFor(cmd),
+        type: "error",
+        message: refusal.message,
+        entitlement: refusal.refusal,
+      });
+      return false;
+    }
+    return true;
   }
 
   /**

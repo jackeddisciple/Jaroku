@@ -216,6 +216,11 @@ import { UsageMeter, usageKey, type Payer } from "./billing/usage.ts";
 import { SAMPLE_INTERVAL_MS, sampleStorage } from "./billing/storage.ts";
 import { Balances } from "./billing/balances.ts";
 import { BudgetGate, billingPeriod, ceilingRefusal } from "./billing/gate.ts";
+import { entitlementsForPlan } from "./billing/entitlements.ts";
+import {
+  NO_ENTITLEMENT, entitlementFor, refusalMessage, requireEntitlement,
+  type EntitlementCounts,
+} from "./billing/entitlementGate.ts";
 import { WorkspaceProviderKeys } from "./billing/providerKeys.ts";
 import { PlatformKeyGate } from "./billing/platformKey.ts";
 import { GENERATION_MODEL } from "./claude.ts";
@@ -3020,7 +3025,68 @@ const relay = new WsRelay({
   // every handler reached for the server's own instead. With one workspace the two are the
   // same object, which is exactly why it would have gone unnoticed until it was not.
   onCommand: (cmd: ForwardedCommand, ctx: TenantContext) => void dispatchCommand(cmd, ctx),
+  entitles: (ctx: TenantContext, cmd: string) => entitlementRefusalFor(ctx, cmd),
 });
+
+/**
+ * How many of each counted thing a workspace already has.
+ *
+ * THE COUNTS COME FROM THE STORES THAT OWN THEM, not from a second query written here, so a
+ * definition cannot drift: "how many agents does this workspace have" is `agentRepo.list`, which is
+ * the same answer the sidebar renders. A count that disagreed with the list on screen would be a
+ * refusal nobody could reconcile with what they were looking at.
+ *
+ * ARCHIVED AGENTS DO NOT COUNT, and that is the one judgement in here. An archived agent is put
+ * away, not deleted — its versions, runs and threads all stay — so counting it would mean a Free
+ * workspace that archived two agents could never make a third, and the only way out would be a
+ * delete this product deliberately does not offer. `includeArchived` defaults to false, so this is
+ * the plain call rather than a filter.
+ *
+ * LIVE DEPLOYMENTS ARE THE ONES CURRENTLY SERVING, which is what `currentByAgent` answers: one
+ * entry per agent that has something up. A superseded deployment is history and is not occupying
+ * the slot the tier limits.
+ */
+const entitlementCounts: EntitlementCounts = {
+  agents: async (ctx) => (await agentRepo.list(ctx)).length,
+  liveDeployments: async (ctx) => (await deployStore.currentByAgent(ctx)).size,
+  mcpServers: async (ctx) => (await mcpStore.listServers(ctx)).length,
+  members: async (ctx) => (await identityRepo.listMembers(ctx)).length,
+  workspacesForUser: async (ctx) =>
+    ctx.actorUserId ? (await identityRepo.workspacesForUser(ctx, ctx.actorUserId)).length : 1,
+  usage: async (ctx, metric) => billing.usageCount(ctx, billingPeriod().start, metric),
+};
+
+/**
+ * The refusal a command earns from this workspace's tier, or null.
+ *
+ * READS THE PLAN PER CALL rather than caching it, for the reason `stripeConfigFromEnv` is read per
+ * request: a workspace that upgrades mid-session must not keep hitting the old limit until it
+ * reconnects, and the upgrade flow's whole promise is that the tier moves the moment the webhook
+ * lands. It is one indexed read on a row the gate already touches.
+ *
+ * A FAILURE TO RESOLVE ALLOWS. If the plan lookup throws, the workspace gets its command and the
+ * server logs it — the alternative is a database hiccup reading as "you have hit your limit", which
+ * sends somebody to a billing page to fix an outage. The budget gate and the balance reservation
+ * are still in front of anything that costs money, so allowing here is not allowing spend.
+ */
+async function entitlementRefusalFor(
+  ctx: TenantContext,
+  cmd: string,
+): Promise<{ message: string; refusal: unknown } | null> {
+  const check = entitlementFor(cmd);
+  if (!check || check === NO_ENTITLEMENT) return null;
+  try {
+    const workspace = await identityRepo.workspaceById(ctx, ctx.workspaceId);
+    const balance = await billing.balance(ctx);
+    const tier = workspace?.plan ?? "free";
+    const entitlements = entitlementsForPlan(tier, balance.limit_overrides);
+    const refusal = await requireEntitlement(check, ctx, tier, entitlements, entitlementCounts);
+    return refusal ? { message: refusalMessage(refusal), refusal } : null;
+  } catch (err) {
+    console.error(`[entitlements] could not resolve ${cmd}:`, (err as Error)?.message ?? err);
+    return null;
+  }
+}
 
 /**
  * Every socket command, after the per-workspace rate limit has had its say.
