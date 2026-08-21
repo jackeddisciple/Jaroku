@@ -262,9 +262,9 @@ function sources(w: Window, dialect: Dialect): FeedSource[] {
       hasActor: true,
       sql: ({ agentFilter, actorFilter }) => `
         SELECT 'version:' || v.id AS feed_id, ${iso("v.created_at")} AS at, 'version' AS kind,
-               a.slug AS agent_id, v.created_by AS actor_user_id,
+               a.slug AS agent_id, CAST(v.created_by AS TEXT) AS actor_user_id,
                v.source AS object, CAST('ok' AS TEXT) AS outcome,
-               v.version AS num, 'version' AS target_type, v.id AS target_id
+               v.version AS num, 'version' AS target_type, CAST(v.id AS TEXT) AS target_id
           FROM agent_versions v
           JOIN agents a ON a.id = v.agent_id
          WHERE a.workspace_id = ? AND ${bound("v.created_at")}
@@ -279,9 +279,9 @@ function sources(w: Window, dialect: Dialect): FeedSource[] {
       hasActor: true,
       sql: ({ agentFilter, actorFilter }) => `
         SELECT 'edit:' || v.id AS feed_id, ${iso("v.created_at")} AS at, 'edit' AS kind,
-               a.slug AS agent_id, v.created_by AS actor_user_id,
+               a.slug AS agent_id, CAST(v.created_by AS TEXT) AS actor_user_id,
                v.instruction AS object, CAST('ok' AS TEXT) AS outcome,
-               v.version AS num, 'version' AS target_type, v.id AS target_id
+               v.version AS num, 'version' AS target_type, CAST(v.id AS TEXT) AS target_id
           FROM agent_versions v
           JOIN agents a ON a.id = v.agent_id
          WHERE a.workspace_id = ? AND ${bound("v.created_at")}
@@ -297,9 +297,9 @@ function sources(w: Window, dialect: Dialect): FeedSource[] {
       hasActor: true,
       sql: ({ agentFilter, actorFilter }) => `
         SELECT 'edit_undone:' || v.id AS feed_id, ${iso("v.undone_at")} AS at, 'edit_undone' AS kind,
-               a.slug AS agent_id, v.created_by AS actor_user_id,
+               a.slug AS agent_id, CAST(v.created_by AS TEXT) AS actor_user_id,
                v.instruction AS object, CAST('ok' AS TEXT) AS outcome,
-               v.version AS num, 'version' AS target_type, v.id AS target_id
+               v.version AS num, 'version' AS target_type, CAST(v.id AS TEXT) AS target_id
           FROM agent_versions v
           JOIN agents a ON a.id = v.agent_id
          WHERE a.workspace_id = ? AND v.undone_at IS NOT NULL AND ${bound("v.undone_at")}
@@ -378,7 +378,7 @@ function sources(w: Window, dialect: Dialect): FeedSource[] {
       hasActor: true,
       sql: ({ actorFilter }) => `
         SELECT 'member:' || CAST(l.id AS TEXT) AS feed_id, ${iso("l.created_at")} AS at, 'member' AS kind,
-               CAST(NULL AS TEXT) AS agent_id, l.actor_user_id AS actor_user_id,
+               CAST(NULL AS TEXT) AS agent_id, CAST(l.actor_user_id AS TEXT) AS actor_user_id,
                l.action AS object, CAST('ok' AS TEXT) AS outcome,
                CAST(NULL AS INTEGER) AS num, 'workspace' AS target_type,
                COALESCE(l.target_id, '') AS target_id

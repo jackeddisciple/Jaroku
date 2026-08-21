@@ -7,6 +7,12 @@
 //
 //   function substr(timestamp with time zone, integer, unknown) does not exist
 //   UNION types text and timestamp with time zone cannot be matched
+//   UNION types text and uuid cannot be matched
+//
+// The third message is the same rule two families over, and it is why this reads FAMILIES rather
+// than a list of timestamp columns: `runs.id` is text and `agent_versions.id` is uuid, and the feed
+// unioned those into one `target_id` as well. Fixing only the timestamps produced the third red CI
+// in a row, which is what a rule stated too narrowly buys you.
 //
 // Every Activity suite opens SQLite, so the whole tab was unreachable on the production driver and
 // nothing said so. It is the same failure `test:boolean-literals` was written for, one type over,
@@ -59,7 +65,29 @@ const SRC = join(SERVER_DIR, "src");
 
 // --- 1. the type of every column, per table, read from the schema -------------------------------
 
-type ColType = "stamp" | "text";
+/**
+ * The families a UNION has to agree within.
+ *
+ * FAMILIES RATHER THAN TYPE NAMES, because Postgres resolves `integer` against `bigint` happily and
+ * refuses `text` against `uuid` — so a rule comparing type names would fail correct SQL, and one
+ * comparing nothing would miss the real thing. Every pair this codebase has actually been bitten by
+ * crosses a family boundary: `text` against `timestamptz` in the pulse, `text` against `uuid` in
+ * the feed's `actor_user_id` and `target_id`.
+ */
+type ColType = "text" | "num" | "uuid" | "stamp" | "bool" | "json";
+
+const FAMILY: Record<string, ColType> = {
+  text: "text", citext: "text", varchar: "text",
+  integer: "num", bigint: "num", bigserial: "num", numeric: "num",
+  "double precision": "num", real: "num", smallint: "num",
+  uuid: "uuid",
+  timestamptz: "stamp", timestamp: "stamp", date: "stamp",
+  boolean: "bool",
+  json: "json", jsonb: "json",
+};
+
+/** Longest first, so `double precision` is not read as `double`. */
+const TYPE_NAMES = Object.keys(FAMILY).sort((a, b) => b.length - a.length).join("|");
 
 /** `"agent_versions.created_at" -> "stamp"`. Keyed by table so a shared name is not one answer. */
 function columnTypes(): Map<string, ColType> {
@@ -75,15 +103,15 @@ function columnTypes(): Map<string, ColType> {
 
     for (const m of sql.matchAll(/CREATE TABLE(?:\s+IF NOT EXISTS)?\s+([a-z_]+)\s*\(([\s\S]*?)\n\s*\)/gi)) {
       for (const line of m[2]!.split("\n")) {
-        const stamp = /^\s*([a-z_]+)\s+timestamptz\b/i.exec(line);
-        if (stamp) add(m[1]!, stamp[1]!, "stamp");
-        const text = /^\s*([a-z_]+)\s+text\b/i.exec(line);
-        if (text) add(m[1]!, text[1]!, "text");
+        const col = new RegExp(`^\\s*([a-z_]+)\\s+(${TYPE_NAMES})\\b`, "i").exec(line);
+        if (col) add(m[1]!, col[1]!, FAMILY[col[2]!.toLowerCase()]!);
       }
     }
     // A later ADD COLUMN wins over the CREATE, which is what forward-only migrations mean.
-    for (const m of sql.matchAll(/ALTER TABLE\s+([a-z_]+)\s+ADD COLUMN\s+(?:IF NOT EXISTS\s+)?([a-z_]+)\s+(timestamptz|text)\b/gi)) {
-      add(m[1]!, m[2]!, m[3]!.toLowerCase() === "timestamptz" ? "stamp" : "text");
+    for (const m of sql.matchAll(
+      new RegExp(`ALTER TABLE\\s+([a-z_]+)\\s+ADD COLUMN\\s+(?:IF NOT EXISTS\\s+)?([a-z_]+)\\s+(${TYPE_NAMES})\\b`, "gi"),
+    )) {
+      add(m[1]!, m[2]!, FAMILY[m[3]!.toLowerCase()]!);
     }
   }
   return out;
@@ -169,20 +197,44 @@ export function offencesIn(file: string, source: string): Offence[] {
       }
     }
 
-    // A UNION whose branches disagree about what a moment is. Detected by ALIAS rather than by
-    // splitting the union, because the alias is what makes two branches the same column: every
-    // branch of the feed ends `… AS at`. A wrapped expression is not a bare column reference and
-    // never reaches this loop, which is exactly the fix being recognised.
-    const byAlias = new Map<string, Set<ColType>>();
-    for (const m of statement.matchAll(/(?:^|[\s,(])([a-z_]+(?:\.[a-z_]+)?)\s+AS\s+([a-z_]+)\b/gi)) {
-      const type = typeOf(m[1]!, aliases);
-      if (!type) continue;
-      const alias = m[2]!.toLowerCase();
-      if (!byAlias.has(alias)) byAlias.set(alias, new Set());
-      byAlias.get(alias)!.add(type);
+    // A UNION whose branches disagree about the TYPE of one output column. Detected by ALIAS rather
+    // than by splitting the union, because the alias is what makes two branches the same column:
+    // every branch of the feed ends `… AS at`, `… AS target_id`, `… AS actor_user_id`.
+    //
+    // TWO SHAPES CONTRIBUTE. A bare column reference, whose type comes from the schema — and an
+    // explicit `CAST(x AS TYPE)`, whose type is stated. Both matter, and the second is not just for
+    // completeness: `CAST(NULL AS TEXT) AS actor_user_id` is how the branches that record nobody
+    // fill that column, so a reader that ignored casts would see only the uuid branches, find them
+    // unanimous, and pass the exact statement Postgres refuses.
+    //
+    // A `${...}` interpolation is neither shape and contributes nothing, which is how a
+    // dialect-rendered half stays silent — the fix being recognised rather than suppressed.
+    const byAlias = new Map<string, Map<ColType, string>>();
+    const note = (alias: string, type: ColType, source: string): void => {
+      if (!byAlias.has(alias)) byAlias.set(alias, new Map());
+      const seen = byAlias.get(alias)!;
+      if (!seen.has(type)) seen.set(type, source);
+    };
+
+    for (const m of statement.matchAll(/CAST\s*\(\s*[^()]*?\s+AS\s+([a-z ]+?)\s*\)\s+AS\s+([a-z_]+)\b/gi)) {
+      const type = FAMILY[m[1]!.trim().toLowerCase()];
+      if (type) note(m[2]!.toLowerCase(), type, `CAST(… AS ${m[1]!.trim()})`);
     }
+    for (const m of statement.matchAll(/(?:^|[\s,(])([a-z_]+(?:\.[a-z_]+)?)\s+AS\s+([a-z_]+)\b/gi)) {
+      // `CAST(l.id AS TEXT)` also matches this shape, and its "alias" is a type name. Reading it as
+      // one invents a column called `text` holding every casted column in the statement, which is a
+      // failure with no bug behind it — the cast loop above has already recorded that expression
+      // correctly. A real output column is never named after a type.
+      if (FAMILY[m[2]!.toLowerCase()]) continue;
+      const type = typeOf(m[1]!, aliases);
+      if (type) note(m[2]!.toLowerCase(), type, m[1]!);
+    }
+
     for (const [alias, seen] of byAlias) {
-      if (seen.size > 1) found.push({ file, fn: "UNION", what: `${alias} is both text and timestamp` });
+      if (seen.size > 1) {
+        const how = [...seen].map(([type, source]) => `${source} is ${type}`).join(", ");
+        found.push({ file, fn: "UNION", what: `${alias}: ${how}` });
+      }
     }
   }
   return found;
@@ -208,7 +260,7 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
 
   const offences = files.flatMap((f) => offencesIn(relative(SERVER_DIR, f), readFileSync(f, "utf8")));
   check(
-    "no statement treats a Postgres timestamp as a string, and no UNION mixes the two",
+    "no statement treats a Postgres timestamp as a string, and no UNION mixes two type families",
     offences.length === 0,
     offences.map((o) => `${o.file}: ${o.fn} — ${o.what}`).join("\n       "),
   );
@@ -245,8 +297,50 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
   );
   check(
     "a UNION whose branches disagree about what a moment is fails",
-    mixedUnion.some((o) => o.fn === "UNION" && o.what.startsWith("at is both")),
+    mixedUnion.some((o) => o.fn === "UNION" && o.what.startsWith("at:")),
   );
+
+  // The feed's OTHER divergence, which is the same rule two families over: `runs.id` is text and
+  // `agent_versions.id` is uuid, and Postgres refuses that union with its own message.
+  const mixedIds = offencesIn(
+    "fixture.ts",
+    "const q = `SELECT r.id AS target_id FROM runs r" +
+      " UNION ALL SELECT v.id AS target_id FROM agent_versions v`;",
+  );
+  check(
+    "...and so does one that disagrees about text against uuid",
+    mixedIds.some((o) => o.fn === "UNION" && o.what.startsWith("target_id:")),
+  );
+
+  // A CAST is a stated type and counts as a branch. This is the case a reader that skipped casts
+  // would pass: the uuid branches agree with each other, and the NULL that fills the column
+  // everywhere else is text.
+  const castNull = offencesIn(
+    "fixture.ts",
+    "const q = `SELECT CAST(NULL AS TEXT) AS actor_user_id FROM runs r" +
+      " UNION ALL SELECT v.created_by AS actor_user_id FROM agent_versions v`;",
+  );
+  check(
+    "...and a CAST(NULL AS TEXT) beside a uuid column is caught, not skipped",
+    castNull.some((o) => o.fn === "UNION" && o.what.startsWith("actor_user_id:")),
+  );
+
+  // And the same statement with the uuid rendered to match is silent, which is the fix.
+  const castBoth = offencesIn(
+    "fixture.ts",
+    "const q = `SELECT CAST(NULL AS TEXT) AS actor_user_id FROM runs r" +
+      " UNION ALL SELECT CAST(v.created_by AS TEXT) AS actor_user_id FROM agent_versions v`;",
+  );
+  check("...while casting both sides to one family is not an offence", castBoth.length === 0);
+
+  // `integer` against `bigint` is not a divergence: Postgres resolves those, and a rule that
+  // reported them would fail correct SQL until somebody switched it off.
+  const numbers = offencesIn(
+    "fixture.ts",
+    "const q = `SELECT r.tokens AS num FROM runs r" +
+      " UNION ALL SELECT v.version AS num FROM agent_versions v`;",
+  );
+  check("a bigint beside an integer is one family and not an offence", numbers.length === 0);
 
   const wrappedUnion = offencesIn(
     "fixture.ts",
