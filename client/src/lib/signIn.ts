@@ -183,6 +183,34 @@ export async function startGoogleSignIn(): Promise<void> {
   }
 }
 
+/** What the server says about a link it accepted. Never whether the address has an account. */
+export interface MagicLinkSent {
+  /** How long the link lasts, from the server, so the screen and the token cannot disagree. */
+  expiresInMinutes: number;
+}
+
+/**
+ * §3.3 steps 1 and 2. Ask for a sign-in link.
+ *
+ * IT RESOLVES FOR AN ADDRESS THAT HAS NO ACCOUNT, and that is the point rather than a limitation.
+ * The server answers 200 whether or not anybody owns the address, so this client cannot tell — and
+ * must not try. A screen that showed "no account with that address" would turn one request into a
+ * way for anybody to test whether a given person uses Jaroku.
+ *
+ * THREE FAILURES ARE STILL FAILURES, and each says something about the REQUEST rather than about a
+ * person: a malformed address (400), too many attempts (429), and a mail provider that is down
+ * (502). §10 asks for the last one specifically — "Do not silently fail" — because a confirmation
+ * screen for a message nothing dispatched is the worst outcome available here.
+ */
+export async function requestMagicLink(email: string): Promise<MagicLinkSent> {
+  const sent = await post<{ expiresInMinutes?: number }>("/v1/auth/magic-link", { email });
+  return {
+    // Defaulted rather than trusted blindly: a server that answered without the field would
+    // otherwise put "expires in undefined minutes" on a screen.
+    expiresInMinutes: typeof sent.expiresInMinutes === "number" && sent.expiresInMinutes > 0 ? sent.expiresInMinutes : 15,
+  };
+}
+
 /**
  * Spend a ticket for a session. §4.4, and the last step of both flows.
  *

@@ -20,9 +20,11 @@ import {
   clearNonce,
   currentNonce,
   exchangeTicket,
+  requestMagicLink,
   signInMethods,
   startGoogleSignIn,
 } from "./signIn.ts";
+import { RESEND_COOLDOWN_S } from "./signInTiming.ts";
 
 let failures = 0;
 function check(name: string, ok: boolean): void {
@@ -282,6 +284,84 @@ console.log("\nspending a ticket");
     caught = err;
   }
   check("...and neither is an unreachable server", (caught as SignInFailure).kind === "network");
+}
+
+console.log("\nasking for a sign-in link");
+{
+  reset();
+  responder = () => ({ status: 200, body: { sent: true, expiresInMinutes: 15 } });
+  const sent = await requestMagicLink("Ada@Example.com");
+  check("the server's expiry comes back", sent.expiresInMinutes === 15);
+  const asked1 = asked.find((a) => a.url.endsWith("/v1/auth/magic-link"));
+  // Sent AS TYPED. §10: "store as user entered but match as lowercase" — the lowercasing is the
+  // server's job, and doing it here as well would be a second place that has to agree about it.
+  check("...and the address went as the person typed it", (asked1?.body as { email?: string })?.email === "Ada@Example.com");
+}
+{
+  reset();
+  // THE PROPERTY THIS WHOLE ROUTE IS SHAPED BY. The server answers 200 whether or not the address
+  // belongs to anybody, so this client cannot tell — and must not try. A screen that showed "no
+  // account with that address" would turn one request into a way for anybody to test whether a
+  // given person uses Jaroku.
+  responder = () => ({ status: 200, body: { sent: true, expiresInMinutes: 15 } });
+  const known = await requestMagicLink("ada@example.com");
+  const unknown = await requestMagicLink("nobody@example.com");
+  check("a known and an unknown address are indistinguishable from here", known.expiresInMinutes === unknown.expiresInMinutes);
+}
+{
+  reset();
+  // A server that answered without the field would otherwise put "expires in undefined minutes" on
+  // a screen — which is the kind of thing that survives review because nobody tests the odd server.
+  responder = () => ({ status: 200, body: { sent: true } });
+  check("a missing expiry falls back rather than rendering undefined", (await requestMagicLink("a@b.co")).expiresInMinutes === 15);
+  responder = () => ({ status: 200, body: { sent: true, expiresInMinutes: "fifteen" } });
+  check("...and so does one of the wrong type", (await requestMagicLink("a@b.co")).expiresInMinutes === 15);
+  responder = () => ({ status: 200, body: { sent: true, expiresInMinutes: 0 } });
+  check("...and a nonsensical zero", (await requestMagicLink("a@b.co")).expiresInMinutes === 15);
+}
+{
+  reset();
+  // THREE FAILURES ARE STILL FAILURES, and each says something about the REQUEST rather than about a
+  // person. The screen renders each of them in the same place, under the field they came from.
+  responder = () => ({ status: 400, body: { error: { message: "that does not look like an email address" } } });
+  let caught: unknown = null;
+  try {
+    await requestMagicLink("nope");
+  } catch (err) {
+    caught = err;
+  }
+  check("a malformed address is refused", caught instanceof SignInFailure);
+  check("...as a refusal rather than an expiry, so the screen keeps the field", (caught as SignInFailure).kind === "refused");
+
+  responder = () => ({ status: 429, body: { error: { message: "too many sign-in links have been requested" } } });
+  try {
+    await requestMagicLink("a@b.co");
+  } catch (err) {
+    caught = err;
+  }
+  check("a rate limit is surfaced rather than swallowed", (caught as SignInFailure).message.includes("too many"));
+
+  // §10: "Email provider is down when magic link is requested → Return an actionable error to the
+  // user. Do not silently fail." A 502 must never look like a message that was sent.
+  responder = () => ({
+    status: 502,
+    body: { error: { message: "couldn't send that email right now — try again in a minute, or sign in with Google" } },
+  });
+  try {
+    await requestMagicLink("a@b.co");
+  } catch (err) {
+    caught = err;
+  }
+  check("a provider that is down throws rather than resolving", caught instanceof SignInFailure);
+  check("...with something the person can actually do", (caught as SignInFailure).message.includes("Google"));
+}
+
+console.log("\nthe countdown the check-your-email screen watches");
+{
+  // Not the rate limit — that is three an hour and lives on the server, where a client cannot be
+  // talked out of it. This is the shorter interval whose whole job is to be visible.
+  check("the resend cooldown is §3.3's forty-five seconds", RESEND_COOLDOWN_S === 45);
+  check("...and it is well under the hour the real limit runs on", RESEND_COOLDOWN_S < 3600);
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

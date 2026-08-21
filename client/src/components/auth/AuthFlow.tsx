@@ -23,7 +23,8 @@ import { SignInFailure, clearNonce, exchangeTicket } from "../../lib/signIn.ts";
 import { restartSocket } from "../../lib/socket.ts";
 import { useSessionStore } from "../../store/sessionStore.ts";
 import { AuthNotice } from "./AuthShell.tsx";
-import { PrimaryButton, SecondaryButton } from "./controls.tsx";
+import { PrimaryButton } from "./controls.tsx";
+import { CheckEmailScreen } from "./CheckEmailScreen.tsx";
 import { SignInScreen } from "./SignInScreen.tsx";
 import { Reveal } from "../onboarding/Reveal.tsx";
 
@@ -39,7 +40,7 @@ import { Reveal } from "../onboarding/Reveal.tsx";
 type Screen =
   | { at: "signin" }
   /** §3.3 step 4. Owns the address, because the resend and the "wrong email" both need it. */
-  | { at: "sent"; email: string }
+  | { at: "sent"; email: string; expiresInMinutes: number }
   | { at: "exchanging" }
   /** §4.5's first three rows, which all say the same sentence for the same reason. */
   | { at: "expired" };
@@ -120,23 +121,27 @@ export function AuthFlow() {
   }
 
   if (screen.at === "sent") {
-    // M6 renders the "check your email" screen here. Until then the address is carried and the
-    // screen says so rather than pretending a link was sent — a confirmation for a mail nothing
-    // dispatched is the one failure mode §8 spends a whole section preventing.
     return (
-      <AuthNotice>
-        <h1 className="font-serif text-[32px] font-normal leading-[1.15] text-ink">Check your email</h1>
-        <p className="mx-auto mt-3 max-w-[38ch] text-[13px] leading-[1.6] text-muted">
-          We sent a sign-in link to <span className="text-ink">{screen.email}</span>.
-        </p>
-        <div className="mx-auto mt-8 max-w-[300px]">
-          <SecondaryButton onClick={() => setScreen({ at: "signin" })}>Start over</SecondaryButton>
-        </div>
-      </AuthNotice>
+      <CheckEmailScreen
+        email={screen.email}
+        expiresInMinutes={screen.expiresInMinutes}
+        // §3.3: "No 'resend to a different email' option. If the user typed the wrong address, they
+        // use 'Start over' — resending to a different address on the same session is a phishing
+        // surface." So the way back is the whole way back, to a screen with an empty field on it.
+        onStartOver={() => setScreen({ at: "signin" })}
+      />
     );
   }
 
-  return <SignInScreen onEmail={(email) => setScreen({ at: "sent", email })} />;
+  return (
+    <SignInScreen
+      // REACHED ONLY AFTER THE SERVER ACCEPTED THE REQUEST. The sign-in screen sends it and hands
+      // up the answer, so this screen is never shown for a message nothing dispatched — which is
+      // the one failure mode §8 spends a whole section preventing, and the reason `onSent` carries
+      // the expiry rather than this component assuming fifteen minutes.
+      onSent={(email, expiresInMinutes) => setScreen({ at: "sent", email, expiresInMinutes })}
+    />
+  );
 }
 
 /**

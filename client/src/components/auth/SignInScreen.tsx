@@ -22,7 +22,7 @@
 import { useEffect, useState } from "react";
 import { devSignIn, localIssuerAvailable } from "../../lib/auth.ts";
 import { pendingInvite } from "../../lib/invite.ts";
-import { SignInFailure, signInMethods, startGoogleSignIn, type SignInMethods } from "../../lib/signIn.ts";
+import { SignInFailure, requestMagicLink, signInMethods, startGoogleSignIn, type SignInMethods } from "../../lib/signIn.ts";
 import { restartSocket } from "../../lib/socket.ts";
 import { useSessionStore } from "../../store/sessionStore.ts";
 import { backendHasFailed, useHostStore } from "../../store/hostStore.ts";
@@ -53,10 +53,19 @@ function GoogleMark() {
 }
 
 export function SignInScreen({
-  onEmail,
+  onSent,
 }: {
-  /** §3.3 step 1. Handing the address up rather than sending it here — see the note at the call. */
-  onEmail: (email: string) => void;
+  /**
+   * §3.3 steps 1-4. Called only once the server has ACCEPTED the request.
+   *
+   * The request is made here rather than by the parent, because this is the screen with the field
+   * on it and therefore the screen that has somewhere to put a refusal: a malformed address, a rate
+   * limit, a mail provider that is down. Handing the address up and letting the next screen send it
+   * would mean the "check your email" screen appearing first and then having to take itself back
+   * down — which is a confirmation for a message nothing dispatched, the one failure mode §8 spends
+   * a whole section preventing.
+   */
+  onSent: (email: string, expiresInMinutes: number) => void;
 }) {
   const message = useSessionStore((s) => s.message);
   const [methods, setMethods] = useState<SignInMethods | null>(null);
@@ -116,17 +125,26 @@ export function SignInScreen({
     }
   };
 
-  const submitEmail = (e: React.FormEvent): void => {
+  const submitEmail = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
     if (busy) return;
     const address = email.trim();
     if (!address) return;
+    setBusy("email");
     setError(null);
-    // HANDED UP RATHER THAN SENT FROM HERE, and the reason is which screen owns the result. §3.3
-    // step 4 is a whole screen — "check your email", a resend countdown, a way back — and it needs
-    // the address. Sending the request here and then telling the parent would mean two places knew
-    // how to ask for a link, and the one that did not send it would be the one rendering the state.
-    onEmail(address);
+    try {
+      const sent = await requestMagicLink(address);
+      // ONLY NOW. The next screen is a claim that a message is on its way, and it is only made once
+      // the server has said one is. §10: "Do not silently fail."
+      onSent(address, sent.expiresInMinutes);
+    } catch (err) {
+      // WHAT COMES BACK IS NEVER ABOUT AN ACCOUNT. The server answers 200 whether or not the address
+      // belongs to anybody — that is what makes this route non-enumerable — so every message that
+      // can reach this line is about the request: a malformed address, too many attempts, or a mail
+      // provider having a bad minute. None of them says whether anybody uses Jaroku.
+      setError(err instanceof SignInFailure ? err.message : String(err));
+      setBusy(null);
+    }
   };
 
   const devSubmit = async (e: React.FormEvent): Promise<void> => {
@@ -207,7 +225,7 @@ export function SignInScreen({
             {methods.google && methods.magicLink && <OrDivider />}
 
             {methods.magicLink && (
-              <form onSubmit={submitEmail} className="flex flex-col gap-4">
+              <form onSubmit={(e) => void submitEmail(e)} className="flex flex-col gap-4">
                 <TextField
                   type="email"
                   value={email}
@@ -225,7 +243,7 @@ export function SignInScreen({
                   }
                 />
                 <PrimaryButton type="submit" disabled={busy !== null || email.trim().length === 0}>
-                  Continue with email
+                  {busy === "email" ? "Sending a link…" : "Continue with email"}
                 </PrimaryButton>
               </form>
             )}
