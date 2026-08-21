@@ -166,6 +166,15 @@ jobs:
           # signing are all refused here rather than in somebody's console. A suite that needed a
           # real Google project is a suite that runs when somebody remembers.
           npm run test:sign-in
+          # §3.4'S ONE SCREEN, and most of the suite is about what it must NOT reject. "Emoji
+          # allowed (people put them in their display names)" is the specification's own line, and
+          # the instinct to sanitise a display name is the instinct that rejects أحمد, 李伟 and
+          # O'Brien — three real names, one of which is somebody's whole identity. So the accepted
+          # list is the long one, the refused list is three cases, and zero-width characters are
+          # asserted to pass because U+200D is load-bearing in emoji sequences. Beside it, the rule
+          # a PATCH exists for — changing the marketing box must not clear a name by omitting it —
+          # and the audit row, which records WHICH fields moved and never their values.
+          npm run test:profile
           # THE MESSAGE AND THE TWO PROVIDERS, neither of which touches a network here. The half
           # that cannot be checked any other way is the request each provider actually gets: a
           # header spelled `X-Postmark-Server-Token` in the docs and `X-Postmark-Token` in the code

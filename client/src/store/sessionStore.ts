@@ -59,6 +59,19 @@ interface SessionState {
   setStatus: (status: SessionStatus, message?: string | null) => void;
   applySession: (view: SessionView, workspaceId: string) => void;
   setWorkspaces: (workspaces: SessionWorkspace[]) => void;
+  /**
+   * Replace the signed-in user with what the server just answered with.
+   *
+   * FROM THE SERVER, NEVER FROM WHAT WAS TYPED. The one caller is §3.4's name screen, and the
+   * server trims, bounds and may refuse — so believing the local value would mean the app rendering
+   * a name one character longer than the one actually saved, which nobody notices until somebody's
+   * name is truncated everywhere except here.
+   *
+   * It is also what moves the gate: the name screen is shown while `displayName` is null, so this
+   * is the write that ends it. A screen that navigated as well would be a second answer to a
+   * question the gate already answers.
+   */
+  setUser: (user: SessionUser) => void;
   setLocalIssuer: (available: boolean) => void;
   setExpiring: (expiring: boolean) => void;
   /** Record that this person has finished onboarding, here and on the server. */
@@ -100,6 +113,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }),
 
   setWorkspaces: (workspaces) => set({ workspaces }),
+  setUser: (user) => set({ user }),
   setLocalIssuer: (localIssuer) => set({ localIssuer }),
   setExpiring: (expiring) => set({ expiring }),
 

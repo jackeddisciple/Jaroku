@@ -150,8 +150,8 @@ export interface SessionView {
   expiresAt: number;
 }
 
-export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" | "POST"; handler: Handler }[] {
-  const routes: { path: string; method: "GET" | "POST"; handler: Handler }[] = [
+export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" | "POST" | "PATCH"; handler: Handler }[] {
+  const routes: { path: string; method: "GET" | "POST" | "PATCH"; handler: Handler }[] = [
     { path: "/v1/auth/session", method: "POST", handler: sessionHandler(deps) },
   ];
   if (deps.tickets && deps.resolver) {
@@ -171,6 +171,10 @@ export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" 
   // all of them in one round trip, which is the difference between a sign-in screen that appears
   // and one that appears twice.
   routes.push({ path: "/v1/auth/methods", method: "GET", handler: methodsHandler(deps) });
+  // §3.4 and §7's table. The only route in this file that is a PATCH, and it is one because "change
+  // this one field" is a distinct operation from "replace this resource": a settings screen that
+  // changed only the marketing preference must not clear a display name by omitting it.
+  routes.push({ path: "/v1/users/me", method: "PATCH", handler: profileHandler(deps) });
   routes.push({ path: "/v1/auth/onboarded", method: "POST", handler: onboardedHandler(deps) });
   // THE FOUNDER'S OVERRIDE. Registered unconditionally rather than only when the environment lists
   // somebody, because a route that appeared and disappeared with a configuration change would tell
@@ -287,6 +291,114 @@ function sessionHandler(deps: SessionDeps): Handler {
       expiresAt: auth.expiresAt,
     };
     return { body: view };
+  };
+}
+
+/**
+ * The longest a person may be called.
+ *
+ * §3.4: "Name is 1-100 chars, trimmed, non-empty. Emoji allowed (people put them in their display
+ * names)." A hundred is more than any real name and short enough that the members list, the audit
+ * metadata and the workspace's default name never have to decide where to cut.
+ */
+export const DISPLAY_NAME_MAX = 100;
+
+/**
+ * The only thing a display name may not contain.
+ *
+ * WRITTEN AS ESCAPES RATHER THAN AS A LITERAL RANGE, deliberately. The first version of this line
+ * had the actual bytes in it, which made the whole file read as binary to `grep`, `git diff` and
+ * every code-review tool — a regular expression whose contents are invisible in review is one
+ * nobody can check.
+ *
+ * C0, C1 AND DEL, and nothing else. None of the three is a thing a person types on purpose; all of
+ * them are somebody trying to break a log line, a CSV export or a terminal. Zero-width characters
+ * are deliberately absent from this list — U+200D is load-bearing in emoji sequences and U+200C in
+ * several scripts, and refusing them would be refusing real names.
+ */
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
+
+/**
+ * §3.4 — the name, and the one checkbox.
+ *
+ * WHAT IT ACCEPTS IS AS IMPORTANT AS WHAT IT REFUSES. The specification is explicit that emoji are
+ * allowed, and the instinct to sanitise a display name is the instinct that rejects "أحمد",
+ * "李伟" and "Ada 🏳️‍🌈" — three real names and one flag sequence that is six code points long. So
+ * the only rules are: trimmed, non-empty, and inside a hundred characters. Nothing is stripped and
+ * nothing is transliterated.
+ *
+ * WHAT IS REFUSED IS CONTROL CHARACTERS, and only those. A newline or a NUL in a display name
+ * is not a name — it is somebody trying to break a log line, a CSV export or a terminal — and none
+ * of the three is a thing a person types on purpose. Zero-width characters are deliberately NOT
+ * refused: they are load-bearing in several scripts, and refusing them would be refusing names.
+ *
+ * ONLY EVER THE CALLER'S OWN PROFILE. There is no user id in the body and there is nowhere to put
+ * one — the only person this can change is whoever presented the token, so there is no id to forge
+ * because there is no id to send. A route that accepted one would need a rule about who may edit
+ * whom, and the only correct rule is "nobody".
+ */
+function profileHandler(deps: SessionDeps): Handler {
+  return async (req) => {
+    const auth = await authenticate(req, deps.verifier);
+    const sys = systemContext(req.requestId);
+    const user = await deps.identity.userByExternalId(sys, auth.subject);
+    // A verified token for somebody with no row: a session against an account deleted mid-flight.
+    if (!user) throw forbidden("this account no longer exists");
+
+    const body = await req.json<{ name?: unknown; marketingEmailsOptIn?: unknown }>();
+    const patch: { displayName?: string; marketingEmailsOptIn?: boolean } = {};
+
+    if (body.name !== undefined) {
+      if (typeof body.name !== "string") throw badRequest("a name is a string");
+      const name = body.name.trim();
+      if (name.length === 0) throw badRequest("give a name to be called by");
+      if (name.length > DISPLAY_NAME_MAX) {
+        throw badRequest(`a name is at most ${DISPLAY_NAME_MAX} characters`);
+      }
+      // The control-character refusal, and nothing else. See the note above on why this is the only
+      // filter and why zero-width characters are not in it.
+      if (CONTROL_CHARACTERS.test(name)) throw badRequest("a name cannot contain control characters");
+      patch.displayName = name;
+    }
+
+    if (body.marketingEmailsOptIn !== undefined) {
+      // STRICTLY A BOOLEAN, never a truthy value. This decides whether somebody receives marketing
+      // email, and reading `"false"` as true is the shape of consent bug that ends in a complaint
+      // to a regulator rather than a bug report.
+      if (typeof body.marketingEmailsOptIn !== "boolean") throw badRequest("marketingEmailsOptIn is true or false");
+      patch.marketingEmailsOptIn = body.marketingEmailsOptIn;
+    }
+
+    if (Object.keys(patch).length === 0) throw badRequest("give something to change");
+
+    const updated = await deps.identity.updateProfile(sys, user.id, patch);
+    if (!updated) throw forbidden("this account no longer exists");
+    await deps.identity.appendAudit(sys, {
+      workspaceId: null,
+      actorUserId: user.id,
+      action: "user.profile_updated",
+      targetType: "user",
+      targetId: user.id,
+      // WHICH FIELDS MOVED, NEVER THEIR VALUES. A display name is personal data and an audit row
+      // outlives the thing it describes; "the name changed" is what an investigation needs, and
+      // "the name changed to X" is a copy of somebody's name in a table nobody sweeps.
+      metadata: { fields: Object.keys(patch) },
+      ip: req.ip,
+    });
+
+    return {
+      body: {
+        user: {
+          id: updated.id,
+          email: updated.email,
+          displayName: updated.display_name,
+          onboarded: updated.onboarded_at !== null,
+          marketingEmailsOptIn: updated.marketing_emails_opt_in,
+          isAdmin: isAdminUser(updated.id),
+          adminMode: adminModeOn(updated.id),
+        },
+      },
+    };
   };
 }
 

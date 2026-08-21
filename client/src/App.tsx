@@ -7,6 +7,7 @@ import { CommandPalette } from "./components/CommandPalette.tsx";
 import { TopBar } from "./components/TopBar.tsx";
 import { CodeOverlay } from "./components/CodeOverlay.tsx";
 import { AuthFlow, SignInSwapPrompt } from "./components/auth/AuthFlow.tsx";
+import { SetUpAccountScreen } from "./components/auth/SetUpAccountScreen.tsx";
 import { FirstRun } from "./components/firstrun/FirstRun.tsx";
 import { firstRunOnScreen, useFirstRunStore } from "./store/firstRunStore.ts";
 import { McpConfirmModal } from "./components/McpConfirmModal.tsx";
@@ -69,6 +70,10 @@ export function App() {
   // decides, in one place, so two readers cannot answer differently.
   const firstRunProgress = useFirstRunStore((s) => s.progress);
   const firstRunNeeded = useFirstRunStore(firstRunOnScreen);
+
+  // Whether this account still has to say what to call it. Null rather than empty: the server
+  // stores a trimmed non-empty string or nothing at all, so there is no third state to consider.
+  const needsName = useSessionStore((s) => s.user !== null && s.user.displayName === null);
 
   useEffect(() => {
     startSocket();
@@ -141,6 +146,22 @@ export function App() {
   // not throw a sign-in form over a working session, which is precisely the "retry vs stop"
   // distinction lib/socket.ts exists to keep straight.
   if (sessionStatus === "signed_out") return <AuthFlow />;
+
+  // §3.4 AND §4.4 STEP 6 — a verified address and nothing else known about the person.
+  //
+  // MAGIC-LINK ACCOUNTS ONLY, and the condition says so structurally rather than by checking which
+  // provider was used: a Google account arrives with `display_name` already set from the ID
+  // token's claim, so it is never null and this never renders. Branching on the provider instead
+  // would be a second way of asking the same question, and the one that goes wrong the day a
+  // provider stops supplying a name.
+  //
+  // BEFORE ACCOUNT ONBOARDING, because step 1 of it says "Welcome, {firstName}" and there is no
+  // first name yet. §5.1's whole first screen is personalised; running it against a null would
+  // greet somebody by their email address, which is the opposite of what that screen is for.
+  //
+  // IT SELF-HEALS THE CASE §10 SAYS SHOULD NOT HAPPEN. "Onboarding completed but user was created
+  // with name: NULL" — if a row ever reaches that state, this is what asks.
+  if (needsName) return <SetUpAccountScreen />;
 
   // The welcome step replaces the layout entirely rather than covering it. It has nothing to say
   // about an agent, a run or a trace, so mounting three empty columns underneath it would be

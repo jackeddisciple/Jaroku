@@ -2464,7 +2464,12 @@ for (const route of sessionRoutes({
     return null;
   },
 })) {
+  // PATCH joined GET and POST here for exactly one route: `/v1/users/me`. "Change this one field"
+  // is a distinct operation from "replace this resource", and spelling it POST would mean the
+  // method no longer says what the request does — which matters most on the routes an audit log is
+  // reading back. See auth/session.ts.
   if (route.method === "GET") router.get(route.path, route.handler);
+  else if (route.method === "PATCH") router.patch(route.path, route.handler);
   else router.post(route.path, route.handler);
 }
 
