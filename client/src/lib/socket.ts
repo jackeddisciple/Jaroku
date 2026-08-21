@@ -862,8 +862,14 @@ export function sendPlanAgent(
   revisePlanId?: string,
   /** Scoped MCP tools, as `"server/tool"` refs — per tool, never per server. */
   mcpTools?: string[],
-): void {
-  send({ cmd: "planAgent", prompt, connectors, mcpTools, name, revisePlanId, threadId: activeThread() });
+): boolean {
+  // THE ONE SENDER IN THIS FILE THAT RETURNS WHETHER IT SENT, and it does because it has a caller
+  // that cannot recover on its own. Every other `send` here is fired from a composer sitting inside
+  // a connected app, where a closed socket is a reconnect the user can already see and the frame is
+  // legitimately dropped. §5.1s step 4 is not that: it is a button on an onboarding screen that
+  // advances to "You are all set" the moment it returns, so a dropped frame there is a flow that
+  // reports success and generated nothing — with an empty app behind it and no way to tell why.
+  return send({ cmd: "planAgent", prompt, connectors, mcpTools, name, revisePlanId, threadId: activeThread() });
 }
 
 export function sendDiscardPlan(planId: string): void {

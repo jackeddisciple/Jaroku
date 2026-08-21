@@ -716,6 +716,18 @@ jobs:
           # would have set a key, so a locked vault, an unreachable server and a malformed body
           # all answer with nothing rather than guessing.
           npm run test:provider-keys
+          # §5.1 STEP 4, AND THE FAILURE IT IS ONE LINE AWAY FROM HAVING. That screens button
+          # advances to "Youre all set" the moment it resolves, so anything failing quietly
+          # there congratulates somebody and leaves them with an empty app and no way to tell
+          # why. Three things can: a closed socket, a socket that LOOKED open and was not, and a
+          # workspace with no sample agent to select. `send` returns false on the second and
+          # every other caller in socket.ts legitimately ignores that — they are composers inside
+          # a connected app where a dropped frame is a reconnect somebody can already see. This
+          # one cannot, which is why `sendPlanAgent` is the single sender in the client that
+          # reports whether it sent. It also asserts the command is planAgent rather than
+          # generate: a generate would work, produce an agent, and skip the plan card the step
+          # exists for.
+          npm run test:first-agent
           # WHERE THE SESSION TOKEN GOES, and the assertion the suite exists for is where it does
           # NOT. Under a host with an OS credential store the token must never touch
           # localStorage, and a mirror is the easy implementation that leaves the protection
