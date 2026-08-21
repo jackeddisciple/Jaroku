@@ -18,6 +18,7 @@ import { useSessionStore } from "../store/sessionStore.ts";
 import { useMemberStore } from "../store/memberStore.ts";
 import { useAuditStore } from "../store/auditStore.ts";
 import { useEnforcementStore } from "../store/enforcementStore.ts";
+import { isRefusal, useEntitlementStore } from "../store/entitlementStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { useInboxStore } from "../store/inboxStore.ts";
 import { useActivityStore } from "../store/activityStore.ts";
@@ -70,6 +71,24 @@ let generation = 0;
 
 function dispatch(msg: ServerMessage): void {
   const s = useTraceStore.getState();
+
+  // A TIER REFUSAL, LIFTED OUT BEFORE THE SWITCH AND THEN LEFT TO FALL THROUGH IT.
+  //
+  // The server answers a refused command on the channel that command belonged to — `gen` for a
+  // fourth agent on Free, `deploy` for a sixth deployment, `members` for an invite Pro cannot make
+  // — and every one of those already carries a `type: "error"` its own panel knows how to show. The
+  // structure rides ALONGSIDE that string rather than replacing it, so this reads it once here
+  // instead of eighteen error shapes each gaining an optional field and eighteen handlers each
+  // deciding whether to look.
+  //
+  // NO `return`, DELIBERATELY. The channel's own error still reaches its own store, so a surface
+  // with no card to render is not one where the refusal disappears — it shows the sentence it would
+  // have shown anyway. The card is an upgrade on that, never a replacement.
+  const carried = (msg as { entitlement?: unknown }).entitlement;
+  if (carried !== undefined && isRefusal(carried)) {
+    useEntitlementStore.getState().refuse(msg.channel, carried);
+  }
+
   switch (msg.channel) {
     case "history":
       s.applyHistory(msg.runs, { complete: msg.complete, window: msg.window });

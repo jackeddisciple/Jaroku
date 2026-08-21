@@ -109,6 +109,7 @@ The shortest list, with the tests that defend them:
 | An invoice event patches the subscription's status and nothing it does not carry | `test:stripe` |
 | Every quota-relevant command is classified, and a check with no limit behind it cannot silently allow | `test:entitlements` |
 | One resolver produces every tier feature and limit value, and admin mode needs the environment as well as the request | `test:entitlements` |
+| A refusal off the socket is checked before it becomes a card, and a quota without its figures is not one | `test:entitlement-store` |
 
 ## Commits
 

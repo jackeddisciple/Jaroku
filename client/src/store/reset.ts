@@ -29,6 +29,7 @@ import { useConnectionStore } from "./connectionStore.ts";
 import { useDeployStore } from "./deployStore.ts";
 import { useDiagnosticsStore } from "./diagnosticsStore.ts";
 import { useEnforcementStore } from "./enforcementStore.ts";
+import { useEntitlementStore } from "./entitlementStore.ts";
 import { useEvalStore } from "./evalStore.ts";
 import { useGithubStore } from "./githubStore.ts";
 import { useInboxStore } from "./inboxStore.ts";
@@ -105,6 +106,11 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
   // an agent uuid from the old workspace can never be asked for again, so nothing would ever
   // overwrite these: they would sit in the store for the life of the tab.
   diagnosticsStore: useDiagnosticsStore as unknown as Resettable,
+  // The last thing a tier refused, which is a claim about ONE workspace's limits and its usage.
+  // Carried across a switch it would say "3 of 3 agents used on the free plan" over a workspace on
+  // Team with none — a number that is wrong, attributed to the wrong tenant, and sitting beside an
+  // Upgrade button that would charge the wrong account.
+  entitlementStore: useEntitlementStore as unknown as Resettable,
   // Which rung a workspace is under and what it said about it. The reason it must not survive a
   // switch is the loudest one on this list: a strip reading "this workspace is suspended" over the
   // workspace you have just moved to would be the app accusing the wrong tenant.

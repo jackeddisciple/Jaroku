@@ -22,6 +22,7 @@ import {
   sendGenerate, sendPlanAgent, sendPromoteTestInput, sendRun,
 } from "../lib/socket.ts";
 import { useEvalStore } from "../store/evalStore.ts";
+import { UpsellCard } from "./UpsellCard.tsx";
 import { composerMoment } from "../lib/composerMoment.ts";
 import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
 import { fmtCost, fmtTokens } from "../lib/format.ts";
@@ -484,6 +485,10 @@ export function BuildPane({
   // are the active mode's draft, so the rest of the component is unchanged.
   const composerMode = useUiStore((s) => s.composerMode);
   const setComposerMode = useUiStore((s) => s.setComposerMode);
+  // Where the upsell card's "See Pro" goes. Named by the PLACEMENT rather than inside the card, so
+  // the card stays a rendering of one refusal and each surface decides where its own upgrade path
+  // leads — the same reason `NoProviderKeyBanner` above reaches for the tab itself.
+  const openUsageTab = useUiStore((s) => s.setRightTab);
   const [chatDraft, setChatDraft] = useState("");
   const [testDraft, setTestDraft] = useState("");
   const text = composerMode === "test" ? testDraft : chatDraft;
@@ -1296,6 +1301,15 @@ export function BuildPane({
           className={`rounded-modal border border-edge bg-panel p-4 pb-3 transition-shadow duration-fast
             focus-within:shadow-focusring ${standalone ? "shadow-glow" : "shadow-raised"}`}
         >
+          {/* WHAT THE TIER JUST REFUSED, above the input and inside the composer card.
+              Inline rather than as a modal, per the specification: a fourth agent on Free is
+              refused at the moment somebody presses Generate, and taking the screen away to say so
+              would cost them the prompt they had just written. Here it sits directly over the
+              control that did not work, with the sentence still in the box. */}
+          <div className="empty:hidden [&>*]:mb-3">
+            <UpsellCard channel="gen" onUpgrade={() => openUsageTab("usage")} />
+          </div>
+
           {/* Attached GitHub context, above the input. Above rather than below because it is
               part of the message being composed, and a chip under the send button would read as
               something that happened rather than something about to be sent. */}

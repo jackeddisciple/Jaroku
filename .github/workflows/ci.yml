@@ -504,6 +504,12 @@ jobs:
           npm run test:thread-resume
           npm run test:thread-archive
           npm run test:secrets-store
+          # The guard that decides whether a value off the socket becomes an upsell card. A cast instead
+          # of a check renders "undefined of undefined used" over an Upgrade button, which is worse than
+          # the plain error string it replaced because it looks like a number somebody could act on. Its
+          # load-bearing assertion is the asymmetry: a quota refusal without its figures is refused, and a
+          # feature refusal without them is correct — "GitHub is not on Free" is not zero of zero.
+          npm run test:entitlement-store
           # THE AGENTS TAB'S FOUR PURE MODULES. Every one of them is a rule that looks obviously right
           # in a screenshot and is wrong in the case nobody had that day, which is exactly the kind of
           # thing a suite that only runs when somebody remembers does not catch.

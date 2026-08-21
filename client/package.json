@@ -31,6 +31,7 @@
     "test:thread-resume": "tsx src/lib/threadResume.test.ts",
     "test:thread-archive": "tsx src/lib/threadArchive.test.ts",
     "test:secrets-store": "tsx src/store/secretsStore.test.ts",
+    "test:entitlement-store": "tsx src/store/entitlementStore.test.ts",
     "test:agent-art": "tsx src/lib/agentArt.test.ts",
     "test:agent-tags": "tsx src/lib/agentTags.test.ts",
     "test:agent-filter": "tsx src/lib/agentFilter.test.ts",
