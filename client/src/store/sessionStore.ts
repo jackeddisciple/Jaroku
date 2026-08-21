@@ -22,6 +22,7 @@
 import { create } from "zustand";
 import {
   markOnboarded as markOnboardedOnServer,
+  setAdminMode as setAdminModeOnServer,
   storedToken,
   storeWorkspace,
   type SessionUser,
@@ -62,6 +63,14 @@ interface SessionState {
   setExpiring: (expiring: boolean) => void;
   /** Record that this person has finished onboarding, here and on the server. */
   markOnboarded: () => void;
+  /**
+   * Turn admin mode on or off. Rejects if the server refuses, and the caller surfaces that.
+   *
+   * Async and awaited, unlike `markOnboarded`: this flag decides whether an unmissable banner is on
+   * screen, and believing it optimistically would mean a failed request leaves somebody thinking
+   * they are bypassing every limit when they are not, or the reverse.
+   */
+  setAdminMode: (on: boolean) => Promise<void>;
   signOut: (message?: string | null) => void;
   /** The role this tab holds in its current workspace, or null. Drives what the UI offers. */
   role: () => string | null;
@@ -93,6 +102,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setWorkspaces: (workspaces) => set({ workspaces }),
   setLocalIssuer: (localIssuer) => set({ localIssuer }),
   setExpiring: (expiring) => set({ expiring }),
+
+  /**
+   * Turn admin mode on or off, and only believe the server's answer.
+   *
+   * THE OPPOSITE OF `markOnboarded` BESIDE IT, deliberately. That one moves the flag locally first,
+   * because the worst case is being offered a welcome screen twice. This one waits, because the
+   * flag decides whether an unmissable "you are bypassing every limit" banner is on screen — and
+   * showing that optimistically would mean a failed request leaves somebody believing they are in
+   * admin mode when they are not, or the reverse. There is exactly one authority for this and it is
+   * not the browser.
+   */
+  setAdminMode: async (on) => {
+    const { user } = get();
+    if (!user) return;
+    const result = await setAdminModeOnServer(on);
+    set({ user: { ...user, isAdmin: result.isAdmin, adminMode: result.adminMode } });
+  },
 
   markOnboarded: () => {
     const { user } = get();

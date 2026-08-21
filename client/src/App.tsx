@@ -9,6 +9,7 @@ import { CodeOverlay } from "./components/CodeOverlay.tsx";
 import { SignIn } from "./components/SignIn.tsx";
 import { McpConfirmModal } from "./components/McpConfirmModal.tsx";
 import { FullScreenView } from "./components/FullScreenView.tsx";
+import { AdminModeBanner } from "./components/AdminModeBanner.tsx";
 import { EnforcementStrip } from "./components/EnforcementStrip.tsx";
 import { WorkspacePanel } from "./components/WorkspacePanel.tsx";
 import { InviteNotice } from "./components/InviteNotice.tsx";
@@ -140,6 +141,11 @@ export function App() {
             the reason the last thing they pressed was refused, and until now the only place that
             sentence appeared was an error strip on whichever channel they happened to be using.
             Renders nothing at all when no rung is in force, which is almost always. */}
+        {/* ABOVE the enforcement strip, because it is the more urgent of the two: an enforcement
+            describes what this workspace may not do, and this describes every limit not being
+            applied at all. Both are true about the whole session rather than about whatever is on
+            screen, which is why neither lives in a panel. */}
+        <AdminModeBanner />
         <EnforcementStrip />
 
         {/* TWO NESTED GROUPS RATHER THAN ONE, WHICH IS WHAT §2 COSTS.

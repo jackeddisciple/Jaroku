@@ -93,6 +93,27 @@ export interface SessionUser {
    * welcome screen for a product they use daily.
    */
   onboarded: boolean;
+  /**
+   * Whether this account MAY turn admin mode on — never whether it currently is.
+   *
+   * FALSE FOR ALMOST EVERYBODY, and when it is false the client renders NOTHING: no toggle, no
+   * menu item, no hint that the mode exists. Absent from the DOM rather than hidden with CSS, which
+   * is the specification's own instruction and the difference between "invisible" and "one devtools
+   * panel away".
+   *
+   * The server derives it from an environment variable at session hydration, and nothing a client
+   * sends can influence it. Asking to turn admin mode on without it grants nothing and earns a 403.
+   */
+  isAdmin: boolean;
+  /**
+   * Whether it is on right now.
+   *
+   * Always false immediately after the app launches, because the server holds it in memory only —
+   * which matters here more than it would on the web: the session token lives in the OS keychain
+   * and survives quitting, so somebody stays signed in for weeks and would otherwise carry admin
+   * mode across dozens of launches.
+   */
+  adminMode: boolean;
 }
 
 export interface SessionWorkspace {
@@ -238,6 +259,21 @@ export async function localIssuerAvailable(): Promise<boolean> {
 }
 
 /** Sign in against the local issuer. There is no password; see server/src/auth/localIssuer.ts. */
+/**
+ * Turn admin mode on or off for this account.
+ *
+ * AN HTTP CALL AND NOT A SOCKET COMMAND, because it changes what the SESSION is, and a socket's
+ * authority was decided by the ticket it was opened with.
+ *
+ * NO GUARD ON THIS SIDE, deliberately. The server refuses a non-admin with a 403 and writes an
+ * audit row either way; a client-side check would be a second answer to the same question, and the
+ * one a determined caller skips. What the client does with `isAdmin` is decide what to RENDER,
+ * which is a different job from deciding what is allowed.
+ */
+export async function setAdminMode(on: boolean): Promise<{ isAdmin: boolean; adminMode: boolean }> {
+  return post<{ isAdmin: boolean; adminMode: boolean }>("/v1/auth/admin-mode", { on }, storedToken());
+}
+
 export async function devSignIn(email: string, name?: string): Promise<string> {
   const out = await post<{ token: string }>("/v1/auth/dev-login", { email, name });
   storeToken(out.token);

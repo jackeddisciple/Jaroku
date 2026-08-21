@@ -226,6 +226,7 @@ import { WorkspaceProviderKeys } from "./billing/providerKeys.ts";
 import { PlatformKeyGate } from "./billing/platformKey.ts";
 import { ProviderKeyPool, poolRefusal } from "./billing/keyPool.ts";
 import { NEW_ACCOUNT_DAYS, firstBreach, type CapBreach } from "./abuse/spendCaps.ts";
+import { adminModeConfigured, adminModeOn, isAdminUser } from "./auth/adminMode.ts";
 import { GENERATION_MODEL } from "./claude.ts";
 import { isSecretName } from "./secrets/secretStore.ts";
 import {
@@ -389,6 +390,18 @@ setInterval(() => {
 // mistake, and the useful moment to learn about one is during the deployment.
 const billing = new BillingRepository(db);
 assertPlanRegistry(await billing.listPlans(systemContext(newRequestId())));
+
+// SAID AT BOOT, WHERE SOMEBODY IS WATCHING. Admin mode is invisible everywhere else by design —
+// no dropdown, no hint, nothing in any billing surface — which makes a deployment that has it
+// configured indistinguishable from one that does not, including to whoever is deploying. One line
+// naming how many accounts can bypass every limit is the smallest thing that fixes that, and it
+// names a COUNT rather than the ids: a log line is a place a user id should not be pasted from.
+if (adminModeConfigured()) {
+  console.log(
+    "[admin] this deployment lists account(s) that may enable admin mode. " +
+    "It defaults to OFF on every process start and is never persisted.",
+  );
+}
 
 const store = new TraceStore(db);
 await store.init();
@@ -3230,7 +3243,33 @@ async function entitlementRefusalFor(
     const tier = workspace?.plan ?? "free";
     const entitlements = entitlementsForPlan(tier, balance.limit_overrides);
     const refusal = await requireEntitlement(check, ctx, tier, entitlements, entitlementCounts);
-    return refusal ? { message: refusalMessage(refusal), refusal } : null;
+    if (!refusal) return null;
+
+    // THE BYPASS, AND IT IS THE LAST THING ASKED RATHER THAN THE FIRST.
+    //
+    // Resolving admin mode up front would mean an admin never computing a refusal at all — and the
+    // audit row the specification asks for is specifically "what WOULD have stopped this", which
+    // only exists if the check actually ran. So the limit is evaluated, the refusal is built, and
+    // only then is it set aside. It costs one count on a session that was going to be allowed
+    // anyway, and it buys a trail that says which limits were being walked through at the moment
+    // something broke while somebody was testing a feature.
+    //
+    // BOTH FLAGS, NEITHER FROM THE REQUEST. `isAdmin` is derived from the environment; `adminMode`
+    // is this process's own memory. Nothing a client sends reaches either.
+    if (ctx.actorUserId && isAdminUser(ctx.actorUserId) && adminModeOn(ctx.actorUserId)) {
+      void identityRepo
+        .appendAudit(ctx, {
+          workspaceId: ctx.workspaceId,
+          actorUserId: ctx.actorUserId,
+          action: "admin.entitlement_bypassed",
+          targetType: "entitlement",
+          targetId: check,
+          metadata: { check, originalResult: "denied", bypassedBy: "admin_mode", refusal },
+        })
+        .catch((err) => console.error("[admin] could not record a bypass:", (err as Error).message));
+      return null;
+    }
+    return { message: refusalMessage(refusal), refusal };
   } catch (err) {
     console.error(`[entitlements] could not resolve ${cmd}:`, (err as Error)?.message ?? err);
     return null;

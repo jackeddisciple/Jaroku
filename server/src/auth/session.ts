@@ -22,6 +22,7 @@ import { badRequest, forbidden, tooMany, unauthorized, type Handler, type HttpRe
 import { newRequestId, systemContext } from "../db/tenant.ts";
 import { IdentityConflictError, defaultWorkspace, type IdentityRepository } from "../db/repositories/identity.ts";
 import { planFor } from "../billing/plans.ts";
+import { adminModeOn, isAdminUser, setAdminMode } from "./adminMode.ts";
 import { AuthError, TokenVerifier, type AuthContext } from "./verifier.ts";
 import type { LocalIssuer } from "./localIssuer.ts";
 import type { AuthConfig } from "./config.ts";
@@ -88,6 +89,27 @@ export interface SessionView {
      * migration 013.
      */
     onboarded: boolean;
+    /**
+     * Whether this account MAY turn admin mode on — never whether it currently is.
+     *
+     * TWO FLAGS AND NOT ONE, which is the whole security model. This one is derived from the
+     * environment at hydration and cannot be set by anything a client sends; the other,
+     * `adminMode`, is a deliberate act. A request carrying `adminMode: true` grants nothing,
+     * because the flag that would make it meaningful is not one a request can reach.
+     *
+     * FALSE FOR ALMOST EVERYBODY, and the client renders nothing at all when it is — the toggle is
+     * absent from the DOM rather than hidden, so admin mode is invisible to a non-admin reading
+     * view-source rather than merely inconvenient to reach.
+     */
+    isAdmin: boolean;
+    /**
+     * Whether it is on RIGHT NOW.
+     *
+     * Always false in a freshly-started process, because it lives only in this process's memory —
+     * which is what makes "resets on every app launch" true on a desktop app whose session token
+     * survives in the OS keychain for weeks. See auth/adminMode.ts.
+     */
+    adminMode: boolean;
   };
   workspaces: {
     id: string;
@@ -121,6 +143,11 @@ export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" 
     routes.push({ path: "/v1/ws-ticket", method: "POST", handler: ticketHandler(deps) });
   }
   routes.push({ path: "/v1/auth/onboarded", method: "POST", handler: onboardedHandler(deps) });
+  // THE FOUNDER'S OVERRIDE. Registered unconditionally rather than only when the environment lists
+  // somebody, because a route that appeared and disappeared with a configuration change would tell
+  // an unauthenticated prober whether this deployment HAS admins — and the handler refuses a
+  // non-admin either way, which is the check that actually matters.
+  routes.push({ path: "/v1/auth/admin-mode", method: "POST", handler: adminModeHandler(deps) });
   routes.push({ path: "/v1/invites/accept", method: "POST", handler: acceptInviteHandler(deps) });
   routes.push({ path: "/v1/workspaces", method: "POST", handler: createWorkspaceHandler(deps) });
   if (deps.localIssuer) {
@@ -182,6 +209,11 @@ function sessionHandler(deps: SessionDeps): Handler {
         // flow; WHEN somebody onboarded is for whoever reads the funnel, and a date on the
         // wire is a date somebody eventually renders.
         onboarded: provisioned.user.onboarded_at !== null,
+        // FROM THE ENVIRONMENT, IN EXACTLY ONE PLACE. Every downstream check reads the flag off the
+        // session rather than re-deriving, so there is one answer per session rather than a
+        // scattering of environment reads that could disagree mid-request.
+        isAdmin: isAdminUser(provisioned.user.id),
+        adminMode: adminModeOn(provisioned.user.id),
       },
       workspaces: memberships.map((w) => ({
         id: w.id,
@@ -267,6 +299,64 @@ function onboardedHandler(deps: SessionDeps): Handler {
     if (!user) throw forbidden("this account no longer exists");
     const at = await deps.identity.markOnboarded(sys, user.id);
     return { body: { onboarded: at !== null } };
+  };
+}
+
+/**
+ * Turn admin mode on or off, for the person asking, for as long as this process lives.
+ *
+ * AN HTTP ROUTE AND NOT A SOCKET COMMAND, for the reason the checkout is one: it changes what the
+ * SESSION is, and a socket's authority was decided by the ticket it was opened with. Answering on
+ * the same channel as trace events would also mean the client had to hold "am I mid-toggle" across
+ * a reconnect, for a control whose whole point is to be unambiguous.
+ *
+ * A NON-ADMIN GETS 403 AND IS LOGGED, which is a deliberate departure from how this codebase hides
+ * things elsewhere. A 404 is right for a resource somebody may not know exists; this is somebody who
+ * found an endpoint they were never shown, constructing a request for a privilege they do not have,
+ * and the specification is explicit that it is worth a row rather than a disguise.
+ *
+ * THE AUDIT ROW CARRIES THE IP, because the case it exists for is "an admin account was used from
+ * somewhere unexpected", and a row with an actor and no address cannot answer that.
+ */
+function adminModeHandler(deps: SessionDeps): Handler {
+  return async (req) => {
+    const auth = await authenticate(req, deps.verifier);
+    const sys = systemContext(req.requestId);
+    const user = await deps.identity.userByExternalId(sys, auth.subject);
+    if (!user) throw forbidden("this account no longer exists");
+
+    const body = await req.json<{ on?: unknown }>();
+    const on = body.on === true;
+    const admin = isAdminUser(user.id);
+
+    if (!admin) {
+      // LOGGED BEFORE THE REFUSAL, so a probe that gets a 403 still leaves the row. The action name
+      // is distinct from the ordinary toggle's, because "somebody tried" and "somebody did" are
+      // different questions and a shared name would make them one.
+      await deps.identity.appendAudit(sys, {
+        workspaceId: null,
+        actorUserId: user.id,
+        action: "admin.mode_denied",
+        targetType: "user",
+        targetId: user.id,
+        metadata: { requested: on },
+        ip: req.ip,
+      });
+      throw forbidden("admin mode is not available to this account");
+    }
+
+    const result = setAdminMode(user.id, admin, on);
+    await deps.identity.appendAudit(sys, {
+      workspaceId: null,
+      actorUserId: user.id,
+      action: "admin.mode_changed",
+      targetType: "user",
+      targetId: user.id,
+      metadata: { on: result.on },
+      ip: req.ip,
+    });
+    console.log(`[admin] mode ${result.on ? "ON" : "off"} for ${user.id}`);
+    return { body: { isAdmin: true, adminMode: result.on } };
   };
 }
 

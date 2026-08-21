@@ -148,6 +148,13 @@ jobs:
           npm run test:session
           npm run test:resolve
           npm run test:capabilities
+          # ADMIN MODE, which is a permission bypass and is therefore mostly asserted by what it must NOT
+          # do. Two flags and a request can reach neither: `isAdmin` comes from an environment variable
+          # read at session hydration, `adminMode` from this process’s memory. Its subtlest assertion is
+          # the desktop one — the session token lives in the OS keychain and survives quitting, so if the
+          # mode were persisted ANYWHERE it would stay on across dozens of launches. The suite greps its
+          # own source for a persistence call to prove there is nowhere for it to survive.
+          npm run test:admin-mode
           npm run test:tickets
           npm run test:members
           npm run test:relay

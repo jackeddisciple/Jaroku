@@ -72,6 +72,7 @@
     "test:session": "tsx src/auth/session.test.ts",
     "test:resolve": "tsx src/auth/resolve.test.ts",
     "test:capabilities": "tsx src/auth/capabilities.test.ts",
+    "test:admin-mode": "tsx src/auth/adminMode.test.ts",
     "test:tickets": "tsx src/auth/tickets.test.ts",
     "test:members": "tsx src/auth/members.test.ts",
     "test:protocol": "tsx src/fileProtocol.test.ts",

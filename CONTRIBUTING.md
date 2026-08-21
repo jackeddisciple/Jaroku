@@ -60,6 +60,8 @@ The shortest list, with the tests that defend them:
 | `workspace_id` never appears in an emitted event | `test:trace` |
 | `alg: "none"` and symmetric algorithms can never verify a token | `test:jwt` |
 | A ws-ticket works exactly once, even when two sockets race for it | `test:tickets` |
+| Admin mode needs the environment AND a deliberate toggle; a request carrying `adminMode` grants nothing | `test:admin-mode` |
+| Admin mode is persisted nowhere, so a desktop relaunch starts from off even on a reused session token | `test:admin-mode` |
 | A socket cannot outlive the membership that authorised it | `test:relay`, `test:tenancy` |
 | No client store retains a row across a workspace switch | `test:reset` |
 | One workspace's backlog never delays another's work | `test:dispatcher`, `loadtest:queue` |

@@ -15,6 +15,8 @@ import {
   sendArchiveAgent, sendLoadHistory, sendLoadRun, sendRenameAgent, sendRestoreAgent,
 } from "../lib/socket.ts";
 import { ICON, SURFACE, TYPE } from "../lib/tokens.ts";
+import { quietBtn, secondaryBtn } from "./buttons.ts";
+import { AlertTriangleIcon } from "./panelIcons.tsx";
 import { useUiStore, type NavDestination } from "../store/uiStore.ts";
 import { useGithubStore } from "../store/githubStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
@@ -470,21 +472,100 @@ function AccountRow() {
   if (!user) return <div className="h-8" />;
 
   return (
+    <div>
+      <button
+        onClick={() => openWorkspacePanel("members")}
+        title={`${user.email}${workspace ? ` — ${workspace.role} of ${workspace.name}` : ""}`}
+        className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-active active:bg-chrome"
+      >
+        {/* The first letter of whoever is actually here, uppercased. */}
+        <span className="flex h-5 w-5 items-center justify-center rounded-control bg-active text-[11px] text-ink">
+          {(name ?? "?").trim().charAt(0).toUpperCase()}
+        </span>
+        <Truncate className="text-[12px] text-ink" title={name}>{name}</Truncate>
+        {/* Only when the session carries one. A chip is a claim about what the workspace is paying,
+            and inventing a default for it is how the hardcoded `Free` got there in the first place. */}
+        {workspace?.plan?.label && (
+          <Chip caps size="sm" tone="faint" className="ml-auto shrink-0">{workspace.plan.label}</Chip>
+        )}
+      </button>
+      {/* RENDERED ONLY FOR AN ADMIN, and `AdminModeToggle` itself returns null otherwise — so for
+          everybody else there is no element, no comment and nothing in view-source suggesting the
+          mode exists. Absent rather than hidden, which is the specification's own instruction and
+          the difference between invisible and one devtools panel away. */}
+      <AdminModeToggle />
+    </div>
+  );
+}
+
+/**
+ * The founder's switch, in the one place a session-wide setting belongs.
+ *
+ * NOTHING AT ALL FOR A NON-ADMIN. Not a disabled control, not a tooltip explaining why — the
+ * component returns null, so the DOM contains no evidence that admin mode is a thing this product
+ * has. That is deliberate: a greyed-out "Admin mode" row would be an invitation.
+ *
+ * IT CONFIRMS BEFORE TURNING ON AND NOT BEFORE TURNING OFF. Enabling removes every limit and starts
+ * logging every bypass, which is worth a sentence somebody reads; disabling puts things back, and a
+ * confirmation there would be friction on the safe direction — the one somebody reaches for when
+ * they have just realised they are recording a demo.
+ */
+function AdminModeToggle() {
+  const user = useSessionStore((s) => s.user);
+  const setAdminMode = useSessionStore((s) => s.setAdminMode);
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!user?.isAdmin) return null;
+
+  const apply = async (on: boolean): Promise<void> => {
+    setError(null);
+    try {
+      await setAdminMode(on);
+      setConfirming(false);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  if (user.adminMode) {
+    // While it is ON the banner across the top is the primary control. This stays as a second door
+    // so the switch is where somebody looks for it, and reads as a state rather than an offer.
+    return (
+      <button
+        onClick={() => void apply(false)}
+        className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-[11px] text-err transition-colors hover:bg-active"
+      >
+        <span className="shrink-0"><AlertTriangleIcon size={ICON.badge} /></span>
+        <span>Admin mode on — turn off</span>
+      </button>
+    );
+  }
+
+  if (confirming) {
+    return (
+      <div className="mt-0.5 rounded-control border border-run/40 bg-run/[0.06] px-2 py-1.5">
+        <p className="text-[11px] leading-[1.5] text-ink">
+          Enable admin mode? This bypasses every tier limit and feature gate. Everything you do
+          while it is on is logged as admin-privileged.
+        </p>
+        <div className="mt-1.5 flex items-center gap-1.5">
+          <button className={secondaryBtn} onClick={() => void apply(true)}>Enable</button>
+          <button className={quietBtn} onClick={() => { setConfirming(false); setError(null); }}>
+            Cancel
+          </button>
+        </div>
+        {error && <p className="mt-1 text-[11px] text-err">{error}</p>}
+      </div>
+    );
+  }
+
+  return (
     <button
-      onClick={() => openWorkspacePanel("members")}
-      title={`${user.email}${workspace ? ` — ${workspace.role} of ${workspace.name}` : ""}`}
-      className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-active active:bg-chrome"
+      onClick={() => setConfirming(true)}
+      className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-[11px] text-faint transition-colors hover:bg-active hover:text-muted"
     >
-      {/* The first letter of whoever is actually here, uppercased. */}
-      <span className="flex h-5 w-5 items-center justify-center rounded-control bg-active text-[11px] text-ink">
-        {(name ?? "?").trim().charAt(0).toUpperCase()}
-      </span>
-      <Truncate className="text-[12px] text-ink" title={name}>{name}</Truncate>
-      {/* Only when the session carries one. A chip is a claim about what the workspace is paying,
-          and inventing a default for it is how the hardcoded `Free` got there in the first place. */}
-      {workspace?.plan?.label && (
-        <Chip caps size="sm" tone="faint" className="ml-auto shrink-0">{workspace.plan.label}</Chip>
-      )}
+      <span>Admin mode</span>
+      <span className="ml-auto shrink-0">off</span>
     </button>
   );
 }
