@@ -29,6 +29,7 @@ import { useAuditStore } from "../store/auditStore.ts";
 import { useMemberStore, type Invite, type Member } from "../store/memberStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore, type WorkspaceSection } from "../store/uiStore.ts";
+import { AccountSection } from "./AccountSection.tsx";
 import { absTime, fmtUntil, isExpired, relTime } from "../lib/format.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
@@ -53,6 +54,11 @@ const SECTIONS: { id: WorkspaceSection; label: string }[] = [
   { id: "billing", label: "Billing" },
   // Last, and deliberately: it is the section with the irreversible button in it.
   { id: "data", label: "Data" },
+  // AND THE ONE THAT IS NOT ABOUT THE WORKSPACE AT ALL. Every section above is scoped by
+  // `workspace_id`; this one is scoped by `user_id` and follows somebody to every workspace they
+  // are in. It is last because it is the least often wanted, and separate because filing a personal
+  // preference under a tenants settings is the conflation §1 of the onboarding spec warns about.
+  { id: "account", label: "Account" },
 ];
 
 /**
@@ -666,6 +672,7 @@ export function WorkspacePanel() {
           {section === "data" ? <DataSection />
             : section === "audit" ? <AuditSection />
             : section === "billing" ? <BillingSection />
+            : section === "account" ? <AccountSection />
             : <MembersSection />}
         </div>
       </div>

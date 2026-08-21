@@ -104,6 +104,17 @@ function readUser(row: UserRow): User {
   };
 }
 
+/**
+ * How many steps §5.1 draws.
+ *
+ * FIVE, AND THE NUMBER LIVES HERE because two things need it and they must not disagree: the route
+ * that advances the step bounds what a client may send, and `markOnboarded` writes it. A client
+ * that could send 9 would put a row into a state no screen renders; a `markOnboarded` that wrote a
+ * different number would leave `onboarded_at` and `onboarding_step` describing two different
+ * states, which §5.4's restart then reads.
+ */
+export const ONBOARDING_STEPS = 5;
+
 export type WorkspaceKind = "personal" | "team";
 
 export interface Workspace {
@@ -343,15 +354,73 @@ export class IdentityRepository {
   async markOnboarded(_ctx: AnyContext, userId: string): Promise<string | null> {
     const at = nowIso();
     await this.db.run(
-      `UPDATE users SET onboarded_at = ?
+      // THE STEP GOES TO THE LAST ONE IN THE SAME STATEMENT. §5.2 defines completion as reaching an
+      // engagement action, and every path to that has passed every step — so a row with
+      // `onboarded_at` set and `onboarding_step = 2` would be a row describing two different
+      // states. It matters because §5.4's restart clears the flag and reads the step: leaving a
+      // stale one behind would drop a returning user back into the middle of a tour.
+      `UPDATE users SET onboarded_at = ?, onboarding_step = ?
         WHERE id = ? AND deleted_at IS NULL AND onboarded_at IS NULL`,
-      [at, userId],
+      [at, ONBOARDING_STEPS, userId],
     );
     const row = await this.db.get<{ onboarded_at: string | null }>(
       `SELECT onboarded_at FROM users WHERE id = ? AND deleted_at IS NULL`,
       [userId],
     );
     return row?.onboarded_at ?? null;
+  }
+
+  /**
+   * §5.3 — how far through account onboarding somebody got.
+   *
+   * MONOTONIC, AND THAT IS THE WHOLE OF THE CONCURRENCY HANDLING. The step only ever moves FORWARD,
+   * enforced by `onboarding_step < ?` in the WHERE clause rather than by reading and comparing —
+   * so two tabs, a double-click, or a request that arrives out of order cannot walk somebody back
+   * to a screen they have already finished. A client that advanced from 2 to 3 and then retried the
+   * earlier request writes nothing.
+   *
+   * `onboarding_started_at` IS STAMPED HERE, ON THE FIRST ADVANCE, and never again — `IS NULL`
+   * makes that idempotent. It is stamped on the first ADVANCE rather than at provisioning because
+   * the question it answers is "when did they start setting up", and an account that was created
+   * and never returned to has not started anything. The gap between this and `onboarded_at` is the
+   * only thing that can say where people give up, and one timestamp cannot.
+   *
+   * IT REFUSES TO MOVE A COMPLETED ONBOARDING. Somebody who has finished and whose old tab fires a
+   * stale step must not be walked back into the flow — §5.2's flag is the gate, and a step that
+   * could move underneath it would be a second, disagreeing answer.
+   */
+  async advanceOnboarding(_ctx: AnyContext, userId: string, step: number): Promise<number> {
+    await this.db.run(
+      `UPDATE users
+          SET onboarding_step = ?,
+              onboarding_started_at = COALESCE(onboarding_started_at, ?)
+        WHERE id = ? AND deleted_at IS NULL AND onboarded_at IS NULL AND onboarding_step < ?`,
+      [step, nowIso(), userId, step],
+    );
+    const row = await this.db.get<{ onboarding_step: unknown }>(
+      `SELECT onboarding_step FROM users WHERE id = ? AND deleted_at IS NULL`,
+      [userId],
+    );
+    return asInt(row?.onboarding_step, 1);
+  }
+
+  /**
+   * §5.4 — put somebody back at the start of the tour without touching anything they made.
+   *
+   * "Your workspace and settings won't change." So this clears exactly two columns and nothing
+   * else: the completion flag and the step. The workspace, the provider key and every agent stay
+   * where they are, which is what makes steps 2-4 read as "confirm or change" rather than "create"
+   * when the flow runs again.
+   *
+   * `onboarding_started_at` IS DELIBERATELY NOT CLEARED. It records when this person first started
+   * setting up, which is a fact about the past that a second walk-through does not change — and a
+   * funnel that reset it would count one person as two.
+   */
+  async restartOnboarding(_ctx: AnyContext, userId: string): Promise<void> {
+    await this.db.run(
+      `UPDATE users SET onboarded_at = NULL, onboarding_step = 1 WHERE id = ? AND deleted_at IS NULL`,
+      [userId],
+    );
   }
 
   /**
@@ -665,6 +734,27 @@ export class IdentityRepository {
    * application role, which is the whole reason the sweeps go workspace-by-workspace rather
    * than issuing one unscoped query that returns nothing in production.
    */
+  /**
+   * Rename the workspace this context is scoped to.
+   *
+   * THE CONTEXT NAMES THE WORKSPACE AND THE ARGUMENTS DO NOT, which is the boundary rule this
+   * repository follows everywhere: a method taking a workspace id beside a context would be one
+   * that could be pointed at a workspace the context did not resolve to. The caller has already
+   * been through the resolver and has already had its role checked.
+   *
+   * THE SLUG DOES NOT MOVE. It is in URLs, it is what `workspaceBySlug` looks up, and it is UNIQUE
+   * — so re-deriving it from a new name would break every link anybody has and would fail outright
+   * the first time two workspaces chose the same name. A slug is an identifier that happened to
+   * start as a name; the name is what people read.
+   */
+  async renameWorkspace(ctx: TenantContext, name: string): Promise<Workspace | undefined> {
+    await this.db.run(`UPDATE workspaces SET name = ? WHERE id = ? AND deleted_at IS NULL`, [
+      name,
+      ctx.workspaceId,
+    ]);
+    return this.workspaceById(ctx, ctx.workspaceId);
+  }
+
   async listWorkspaceIds(_ctx: SystemContext): Promise<string[]> {
     const rows = await this.db.all<{ id: string }>(
       `SELECT id FROM workspaces WHERE deleted_at IS NULL ORDER BY created_at ASC`,

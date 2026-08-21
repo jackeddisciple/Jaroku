@@ -175,6 +175,14 @@ jobs:
           # a PATCH exists for — changing the marketing box must not clear a name by omitting it —
           # and the audit row, which records WHICH fields moved and never their values.
           npm run test:profile
+          # §7S LAST THREE ROUTES AND §5.3S RESUME. Its load-bearing assertion is that the step
+          # only ever moves FORWARD — a property of the STATEMENT rather than of the handler, so
+          # it needs the requests actually racing: two tabs on step 3 pressing Continue at once
+          # must not leave somebody on the lower of the two. And §5.4s promise is asserted as an
+          # ABSENCE, against an account that HAS a renamed workspace: a restart that cascaded
+          # would pass every assertion about the flag and quietly destroy what the promise was
+          # about.
+          npm run test:onboarding
           # THE MESSAGE AND THE TWO PROVIDERS, neither of which touches a network here. The half
           # that cannot be checked any other way is the request each provider actually gets: a
           # header spelled `X-Postmark-Server-Token` in the docs and `X-Postmark-Token` in the code
@@ -690,6 +698,15 @@ jobs:
           # the refusals that decide what the screen says: a 401 on an exchange is an expired link
           # with a way back, a 500 is ours, and an unreachable server is neither.
           npm run test:auth-sign-in
+          # §5S STEP ARITHMETIC, which is pure and is therefore the only reason these rules get
+          # exercised at all — a resume that could only be checked by closing a desktop app
+          # mid-flow and reopening it is a rule nobody checks. Two of them matter most. The
+          # engagement threshold is step 3, and both directions of getting it wrong are real: too
+          # low and closing the window on the welcome screen marks somebody onboarded forever;
+          # too high and somebody who finished is walked through it all again. And the first
+          # name, whose failure mode is not a crash but "Welcome, ada.lovelace+jaroku" on the
+          # first screen anybody sees after signing up.
+          npm run test:account-onboarding
           # WHERE THE SESSION TOKEN GOES, and the assertion the suite exists for is where it does
           # NOT. Under a host with an OS credential store the token must never touch
           # localStorage, and a mirror is the easy implementation that leaves the protection

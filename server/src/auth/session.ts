@@ -18,9 +18,9 @@
 // workspace list is what the caller MAY act in, computed from membership rows — never echoed
 // back from anything the client sent.
 
-import { HttpError, badRequest, forbidden, tooMany, unauthorized, type Handler, type HttpRequest } from "../http/router.ts";
+import { HttpError, badRequest, forbidden, notFound, tooMany, unauthorized, type Handler, type HttpRequest } from "../http/router.ts";
 import { newRequestId, systemContext } from "../db/tenant.ts";
-import { IdentityConflictError, defaultWorkspace, type IdentityRepository } from "../db/repositories/identity.ts";
+import { IdentityConflictError, ONBOARDING_STEPS, defaultWorkspace, type IdentityRepository } from "../db/repositories/identity.ts";
 import { planFor } from "../billing/plans.ts";
 import { adminModeOn, isAdminUser, setAdminMode } from "./adminMode.ts";
 import { AuthError, TokenVerifier, type AuthContext } from "./verifier.ts";
@@ -105,6 +105,14 @@ export interface SessionView {
      */
     onboarded: boolean;
     /**
+     * How far through account onboarding they got, 1-5. §5.3.
+     *
+     * MEANINGLESS WHILE `onboarded` IS TRUE, and the client must not read it then — `markOnboarded`
+     * writes the last step in the same statement it sets the flag, so a finished account always
+     * reads 5, and the number is only a resume point while the flag is false.
+     */
+    onboardingStep: number;
+    /**
      * Whether this account MAY turn admin mode on — never whether it currently is.
      *
      * TWO FLAGS AND NOT ONE, which is the whole security model. This one is derived from the
@@ -176,6 +184,11 @@ export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" 
   // changed only the marketing preference must not clear a display name by omitting it.
   routes.push({ path: "/v1/users/me", method: "PATCH", handler: profileHandler(deps) });
   routes.push({ path: "/v1/auth/onboarded", method: "POST", handler: onboardedHandler(deps) });
+  // §7's last three rows. All three are facts about a PERSON rather than about anything in a
+  // workspace — which is why none of them is a socket command and why none takes a workspace id.
+  routes.push({ path: "/v1/users/me/onboarding/step", method: "POST", handler: onboardingStepHandler(deps) });
+  routes.push({ path: "/v1/users/me/onboarding/complete", method: "POST", handler: onboardedHandler(deps) });
+  routes.push({ path: "/v1/users/me/onboarding/restart", method: "POST", handler: onboardingRestartHandler(deps) });
   // THE FOUNDER'S OVERRIDE. Registered unconditionally rather than only when the environment lists
   // somebody, because a route that appeared and disappeared with a configuration change would tell
   // an unauthenticated prober whether this deployment HAS admins — and the handler refuses a
@@ -183,6 +196,7 @@ export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" 
   routes.push({ path: "/v1/auth/admin-mode", method: "POST", handler: adminModeHandler(deps) });
   routes.push({ path: "/v1/invites/accept", method: "POST", handler: acceptInviteHandler(deps) });
   routes.push({ path: "/v1/workspaces", method: "POST", handler: createWorkspaceHandler(deps) });
+  routes.push({ path: "/v1/workspaces/rename", method: "POST", handler: renameWorkspaceHandler(deps) });
   if (deps.localIssuer) {
     routes.push({ path: "/v1/auth/jwks.json", method: "GET", handler: jwksHandler(deps.localIssuer) });
     routes.push({ path: "/v1/auth/dev-login", method: "POST", handler: devLoginHandler(deps) });
@@ -273,6 +287,10 @@ function sessionHandler(deps: SessionDeps): Handler {
         // flow; WHEN somebody onboarded is for whoever reads the funnel, and a date on the
         // wire is a date somebody eventually renders.
         onboarded: provisioned.user.onboarded_at !== null,
+        // §5.3's resume point. On the session rather than fetched separately, because it is read
+        // on exactly the same occasion `onboarded` is — the moment a client decides what to render
+        // — and a second round trip for one integer would be a second chance to disagree.
+        onboardingStep: provisioned.user.onboarding_step,
         // FROM THE ENVIRONMENT, IN EXACTLY ONE PLACE. Every downstream check reads the flag off the
         // session rather than re-deriving, so there is one answer per session rather than a
         // scattering of environment reads that could disagree mid-request.
@@ -291,6 +309,73 @@ function sessionHandler(deps: SessionDeps): Handler {
       expiresAt: auth.expiresAt,
     };
     return { body: view };
+  };
+}
+
+/**
+ * §5.3 — record how far through the tour somebody got.
+ *
+ * IDEMPOTENT AND MONOTONIC, and the second is the interesting half. `advanceOnboarding` refuses to
+ * move the step backwards, so a stale request from a second tab, a double-click, or two calls that
+ * arrive out of order cannot walk somebody back to a screen they have already finished. The client
+ * fires this after each step advances and does not wait for it.
+ *
+ * §9.3'S DISTINCTION IS MADE BY WHO CALLS THIS, NOT BY A FLAG ON IT. A SKIP advances the step,
+ * because the person decided; an INTERRUPTION — a closed app, a killed process — never reaches this
+ * route at all, so the step stays where it was and resume shows the same screen. That is the whole
+ * of the difference, and it is structural rather than recorded: a `skipped: true` parameter would
+ * be a thing a client could get wrong.
+ */
+function onboardingStepHandler(deps: SessionDeps): Handler {
+  return async (req) => {
+    const auth = await authenticate(req, deps.verifier);
+    const sys = systemContext(req.requestId);
+    const user = await deps.identity.userByExternalId(sys, auth.subject);
+    if (!user) throw forbidden("this account no longer exists");
+
+    const body = await req.json<{ step?: unknown }>();
+    const step = typeof body.step === "number" ? Math.floor(body.step) : NaN;
+    // BOUNDED AGAINST THE NUMBER OF SCREENS THAT EXIST. A client that could send 9 would put a row
+    // into a state no screen renders, and the person it belonged to would meet a blank onboarding
+    // on their next sign-in with no way out of it.
+    if (!Number.isFinite(step) || step < 1 || step > ONBOARDING_STEPS) {
+      throw badRequest(`a step is between 1 and ${ONBOARDING_STEPS}`);
+    }
+
+    const at = await deps.identity.advanceOnboarding(sys, user.id, step);
+    return { body: { step: at } };
+  };
+}
+
+/**
+ * §5.4 — walk through the setup screens again.
+ *
+ * "Your workspace and settings won't change." The repository clears exactly two columns and this
+ * route adds nothing to that: there is no cascade, no deletion, and nothing that touches a
+ * workspace, a key or an agent. What resets is a flag.
+ *
+ * AUDITED, unlike the step advance beside it. A step moving is somebody pressing Continue forty
+ * times a year; a restart puts an account back into a flow it had finished, which is the kind of
+ * thing that turns up in a support conversation as "why am I seeing this again".
+ */
+function onboardingRestartHandler(deps: SessionDeps): Handler {
+  return async (req) => {
+    const auth = await authenticate(req, deps.verifier);
+    const sys = systemContext(req.requestId);
+    const user = await deps.identity.userByExternalId(sys, auth.subject);
+    if (!user) throw forbidden("this account no longer exists");
+
+    await deps.identity.restartOnboarding(sys, user.id);
+    await deps.identity.appendAudit(sys, {
+      workspaceId: null,
+      actorUserId: user.id,
+      action: "user.onboarding_restarted",
+      targetType: "user",
+      targetId: user.id,
+      metadata: {},
+      ip: req.ip,
+    });
+    return { body: { onboarded: false, step: 1 } };
   };
 }
 
@@ -393,6 +478,7 @@ function profileHandler(deps: SessionDeps): Handler {
           email: updated.email,
           displayName: updated.display_name,
           onboarded: updated.onboarded_at !== null,
+          onboardingStep: updated.onboarding_step,
           marketingEmailsOptIn: updated.marketing_emails_opt_in,
           isAdmin: isAdminUser(updated.id),
           adminMode: adminModeOn(updated.id),
@@ -523,6 +609,7 @@ async function exchangeTicket(
         email: user.email,
         displayName: user.display_name,
         onboarded: user.onboarded_at !== null,
+        onboardingStep: user.onboarding_step,
         isAdmin: isAdminUser(user.id),
         adminMode: adminModeOn(user.id),
       },
@@ -848,6 +935,64 @@ function createWorkspaceHandler(deps: SessionDeps): Handler {
         })),
       },
     };
+  };
+}
+
+/**
+ * Rename a workspace somebody already belongs to.
+ *
+ * §5.1 STEP 2 IS WHY THIS EXISTS, AND IT IS A RENAME RATHER THAN THE `POST /v1/workspaces` THE
+ * SPECIFICATION NAMES. That instruction is right for a system where signing in does not create a
+ * workspace; this one does — `provisionUser` makes a personal workspace in the same transaction as
+ * the user, because every panel in the product is a view of one workspace's data and an account
+ * without one cannot render anything. Following §5.1 literally would leave every new account with
+ * two workspaces, one of them empty and named after their email address.
+ *
+ * HTTP RATHER THAN A SOCKET COMMAND, for the reason `createWorkspaceHandler` beside it is: the one
+ * caller runs BEFORE the app has opened a socket, on a screen that exists precisely because there
+ * is not a usable workspace yet. It also means the capability matrix does not grow an entry that
+ * would have to be true during onboarding and false after it.
+ *
+ * THE MEMBERSHIP CHECK IS THE RESOLVER'S, exactly as `/v1/ws-ticket`'s is — so nothing below this
+ * line sees a workspace id the client chose. And the ROLE check is here rather than there, because
+ * "may act in" and "may rename" are different questions: a member can use a workspace and should
+ * not be able to rename it out from under everybody else in it.
+ */
+function renameWorkspaceHandler(deps: SessionDeps): Handler {
+  const log = deps.log ?? console.log;
+  return async (req) => {
+    const resolver = deps.resolver;
+    if (!resolver) throw notFound("this server cannot rename workspaces");
+    const auth = await authenticate(req, deps.verifier);
+    const body = await req.json<{ workspaceId?: unknown; name?: unknown }>();
+    const requested = typeof body.workspaceId === "string" && body.workspaceId ? body.workspaceId : null;
+
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name) throw badRequest("a workspace needs a name");
+    if (name.length > WORKSPACE_NAME_MAX) {
+      throw badRequest(`a workspace name is at most ${WORKSPACE_NAME_MAX} characters`);
+    }
+
+    // Throws 403 and writes an audit row if they are not a member.
+    const session = await resolver.resolve(auth, requested, req.requestId, req.ip);
+    if (session.role !== "owner" && session.role !== "admin") {
+      throw forbidden("only an owner or an admin may rename a workspace");
+    }
+
+    const renamed = await deps.identity.renameWorkspace(session.context, name);
+    if (!renamed) throw notFound("that workspace no longer exists");
+    await deps.identity.appendAudit(session.context, {
+      action: "workspace.renamed",
+      targetType: "workspace",
+      targetId: renamed.id,
+      // The name is in the row on purpose, unlike a person's display name: a workspace name is the
+      // shared label a team argues about, and "who changed it to what" is the whole question
+      // somebody asks when it changes.
+      metadata: { name: renamed.name },
+      ip: req.ip,
+    });
+    log(`[auth] ${renamed.slug} was renamed to "${renamed.name}"`);
+    return { body: { workspace: { id: renamed.id, slug: renamed.slug, name: renamed.name, kind: renamed.kind } } };
   };
 }
 

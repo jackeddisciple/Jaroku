@@ -94,6 +94,18 @@ export interface SessionUser {
    */
   onboarded: boolean;
   /**
+   * How far through §5s account onboarding they got, 1-5.
+   *
+   * FROM THE SERVER, for the reason `onboarded` is: §5.3 asks for somebody who stops on step 3 to
+   * resume on step 3 on a DIFFERENT MACHINE, which a browser cannot answer. It is the same
+   * argument migration 013 made for the flag beside it, one level of detail further in.
+   *
+   * MEANINGLESS WHILE `onboarded` IS TRUE. The server writes the last step in the same statement
+   * it sets the flag, so a finished account always reads 5 — the number is only a resume point
+   * while the flag is false, and reading it otherwise would be reading a value nothing maintains.
+   */
+  onboardingStep: number;
+  /**
    * Whether this account MAY turn admin mode on — never whether it currently is.
    *
    * FALSE FOR ALMOST EVERYBODY, and when it is false the client renders NOTHING: no toggle, no

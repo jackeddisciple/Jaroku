@@ -147,6 +147,14 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
  * millisecond before. Resetting it would blank a failure notice at the exact moment somebody was
  * reading one, and would do so on the switch that failure had just made impossible.
  *
+ * `accountOnboardingStore` is the fifth, and its subject is a PERSON rather than a workspace: how
+ * far through §5s five setup screens somebody got, which follows them to every workspace they are
+ * in and to every device they sign in on. `users.onboarding_step` is where it actually lives; this
+ * is a cache of that, hydrated once per session. Resetting it on a workspace switch would put a
+ * five-screen setup flow over a working application at the moment somebody changed tenant — which
+ * is the same conflation §1 of the onboarding specification opens by warning about, one column
+ * over: first-run is per DEVICE, account onboarding is per PERSON, and neither is per workspace.
+ *
  * `firstRunStore` is the fourth, on hostStore's argument taken one step further. Its subject is the
  * machine itself — whether `~/.jaroku` has been set up — which is a fact about a DISK, decided once
  * from a marker file before a session existed and unchanged by anything a workspace can do. It also
@@ -155,7 +163,13 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
  * over a signed-in application, which is the exact conflation §1 spends its first section warning
  * about — first-run is per DEVICE, account onboarding is per PERSON, and neither is per workspace.
  */
-export const NOT_WORKSPACE_SCOPED = ["sessionStore", "uiStore", "hostStore", "firstRunStore"] as const;
+export const NOT_WORKSPACE_SCOPED = [
+  "sessionStore",
+  "uiStore",
+  "hostStore",
+  "firstRunStore",
+  "accountOnboardingStore",
+] as const;
 
 /**
  * Empty every store that holds a workspace's data.

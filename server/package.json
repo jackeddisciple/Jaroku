@@ -72,6 +72,7 @@
     "test:session": "tsx src/auth/session.test.ts",
     "test:sign-in": "tsx src/auth/signIn.test.ts",
     "test:profile": "tsx src/auth/profile.test.ts",
+    "test:onboarding": "tsx src/auth/onboarding.test.ts",
     "test:email": "tsx src/email/email.test.ts",
     "test:magic-link": "tsx src/http/magicLink.test.ts",
     "test:resolve": "tsx src/auth/resolve.test.ts",

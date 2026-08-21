@@ -133,3 +133,34 @@ export async function fetchSubscription(workspaceId: string): Promise<Subscripti
     { scoped: false },
   );
 }
+
+/**
+ * §5.1 step 2 — give the workspace a name a person chose.
+ *
+ * A RENAME RATHER THAN A CREATE, and the server's own handler explains why at length: signing in
+ * already made a personal workspace, because every panel in this product is a view of one
+ * workspace's data and an account without one cannot render anything. Following §5.1's
+ * `POST /v1/workspaces` literally would leave every new account with two, one of them empty and
+ * named after their email address.
+ *
+ * THE WORKSPACE ID IS SENT AND IS STILL NOT TRUSTED. The server resolves it through the same
+ * membership lookup `/v1/ws-ticket` uses, then checks the ROLE — "may act in" and "may rename" are
+ * different questions, and a member should not be able to rename a workspace out from under
+ * everybody else in it. What this parameter buys is being explicit about which one, on a screen
+ * where the socket that would otherwise imply it does not exist yet.
+ */
+export async function renameWorkspace(
+  workspaceId: string,
+  name: string,
+): Promise<{ id: string; slug: string; name: string; kind: string }> {
+  const answer = await apiRequest<{ workspace: { id: string; slug: string; name: string; kind: string } }>(
+    "POST",
+    "/v1/workspaces/rename",
+    { workspaceId, name },
+    // `scoped: false`, because the workspace is named in the BODY and the query parameter would be
+    // a second, possibly different answer to the same question — and on this screen the stored
+    // workspace may still be the previous account's.
+    { scoped: false },
+  );
+  return answer.workspace;
+}

@@ -19,7 +19,13 @@ import { InviteNotice } from "./components/InviteNotice.tsx";
 import { redeemPendingInvite } from "./lib/invite.ts";
 import { switchWorkspace } from "./lib/socket.ts";
 import { ComposerColumn } from "./components/onboarding/ComposerColumn.tsx";
-import { WelcomeStep } from "./components/onboarding/WelcomeStep.tsx";
+import {
+  AccountOnboarding,
+  accountOnboardingOnScreen,
+  useAccountOnboardingHydration,
+} from "./components/onboarding/account/AccountOnboarding.tsx";
+import { FinishSetupBanner } from "./components/onboarding/account/FinishSetupBanner.tsx";
+import { useAccountOnboardingStore } from "./store/accountOnboardingStore.ts";
 import { useOnboarding } from "./components/onboarding/useOnboarding.ts";
 import { sendLoadAgentFiles, startSocket } from "./lib/socket.ts";
 import { useBuildStore } from "./store/buildStore.ts";
@@ -74,6 +80,13 @@ export function App() {
   // Whether this account still has to say what to call it. Null rather than empty: the server
   // stores a trimmed non-empty string or nothing at all, so there is no third state to consider.
   const needsName = useSessionStore((s) => s.user !== null && s.user.displayName === null);
+
+  // §5.3s resume point, read off the session once it lands. A hook rather than an effect inside
+  // `AccountOnboarding`, because the store has to hydrate whether or not the flow is on screen —
+  // the gate below reads `step !== null`, so a component that only hydrated while it was already
+  // rendering would never render at all.
+  useAccountOnboardingHydration();
+  const onboardingNeeded = useAccountOnboardingStore(accountOnboardingOnScreen);
 
   useEffect(() => {
     startSocket();
@@ -163,10 +176,16 @@ export function App() {
   // with name: NULL" — if a row ever reaches that state, this is what asks.
   if (needsName) return <SetUpAccountScreen />;
 
-  // The welcome step replaces the layout entirely rather than covering it. It has nothing to say
-  // about an agent, a run or a trace, so mounting three empty columns underneath it would be
-  // paying to render what nobody can see. It owns the whole surface.
-  if (phase === "welcome") return <WelcomeStep />;
+  // §5 — the five screens between a session and a working workspace.
+  //
+  // IT OWNS THE WHOLE SURFACE rather than covering the layout, for the reason the old welcome step
+  // did: it has nothing to say about an agent, a run or a trace, so mounting three empty columns
+  // underneath it would be paying to render what nobody can see.
+  //
+  // AND IT IS THE LAST GATE. Everything above it — first-run, sign-in, the name screen — is about
+  // getting to a session; this is the only one that runs WITH one, which is why it is the only one
+  // that can greet somebody by name.
+  if (onboardingNeeded) return <AccountOnboarding />;
 
   return (
     // The app is a panel on a surface, not the surface. A few pixels of inset and one outer
@@ -195,6 +214,10 @@ export function App() {
             rather than a modal, beside the app rather than instead of it — taking the screen away
             to ask about an event they may not have caused is the modal-mid-flow pattern this
             product refuses everywhere else. Renders nothing at all when no link is waiting. */}
+        {/* §5.1s "Skip setup" left somebody in the app with nothing set up. Persistent, with no
+            dismiss, because the state it describes does not resolve on its own and there is no
+            other surface that mentions it. Renders nothing for everybody who did not skip. */}
+        <FinishSetupBanner />
         <SignInSwapPrompt />
         <AdminModeBanner />
         <EnforcementStrip />

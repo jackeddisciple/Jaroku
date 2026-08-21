@@ -40,7 +40,7 @@ export type NavDestination = "threads" | "agents" | "inbox" | "activity";
  * thing they change. A boolean would open the panel and leave the caller's actual intent to be
  * re-navigated by hand.
  */
-export type WorkspaceSection = "members" | "audit" | "billing" | "data";
+export type WorkspaceSection = "members" | "audit" | "billing" | "data" | "account";
 
 export type RightTab =
   | "secrets"
@@ -150,7 +150,7 @@ function writePinned(slugs: string[]): void {
 
 // `provider` is gone: pasting an API key is no longer a wall in front of the product. Credentials
 // live in one place now — the Secrets tab — and onboarding goes welcome → prompt → run.
-export type OnboardingStep = "welcome" | "prompt" | "run";
+export type OnboardingStep = "prompt" | "run";
 
 /** The one-time hints shown so far, by id. A list rather than a boolean per hint, so adding a
  *  second hint later is data rather than another field. */
@@ -166,7 +166,7 @@ interface OnboardingProgress {
   hintsShown: string[];
 }
 
-const DEFAULT_PROGRESS: OnboardingProgress = { step: "welcome", hintsShown: [] };
+const DEFAULT_PROGRESS: OnboardingProgress = { step: "prompt", hintsShown: [] };
 
 function readProgress(userId: string | null): OnboardingProgress {
   try {
@@ -182,12 +182,12 @@ function readProgress(userId: string | null): OnboardingProgress {
       // the old flow has already seen the welcome screen — sending them back to it would be the
       // one thing `users.onboarded_at` exists to stop. `prompt` is where the provider step used
       // to hand off to, so they resume exactly where they would have.
-      step:
-        parsed.step === "prompt" || parsed.step === "run"
-          ? parsed.step
-          : (parsed.step as string) === "provider"
-            ? "prompt"
-            : "welcome",
+      // TWO REMOVED STEPS NOW DEGRADE TO THE SAME PLACE, and `welcome` is the newer of them. A
+      // browser stopped on either has already seen whatever those screens said — `provider` handed
+      // off to `prompt`, and the welcome screen is now §5's first step, tracked on the SERVER and
+      // gated by `onboarded_at`. Sending somebody back to a screen they finished is the one thing
+      // migration 013 exists to stop, so anything unrecognised resolves forward to `prompt`.
+      step: parsed.step === "run" ? "run" : "prompt",
       hintsShown: Array.isArray(parsed.hintsShown) ? parsed.hintsShown.filter((h) => typeof h === "string") : [],
     };
   } catch {
