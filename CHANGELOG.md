@@ -8,7 +8,7 @@ release notes and the commits in that release's range.
 
 ---
 
-## v0.4.0 : Subscriptions — What Each Tier Allows, Checked Where Every Command Already Passes
+## v0.3.4 : Subscriptions — What Each Tier Allows, Checked Where Every Command Already Passes
 
 Free, Pro and Team, and one function that says what each is allowed: `resolveEntitlements`,
 which extends the `FREE`/`PRO`/`TEAM` objects `billing/plans.ts` already held rather than
