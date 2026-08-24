@@ -816,3 +816,13 @@ jobs:
           # reviewed a dozen times at one width. So the rules live in a pure module and the suite
           # holds them, rather than living in a class string nobody can assert against.
           npm run test:composer-bar
+          # THE CONNECTOR DECK'S LAYOUT — §12.9: "1/2/3 render as tiles; 5 renders 3 tiles + +2;
+          # a disabled connector renders grayscale and stays in the deck." Every clause has a
+          # wrong answer that looks fine on the one workspace somebody tested with: three
+          # connectors is the common case and the case where nothing is exercised — the counter
+          # never appears, the stacking order is unnoticeable at that width, and a deck that
+          # shrank when you switched something off is indistinguishable from one that did not.
+          # That last clause is the one most likely to be "simplified" away, and the spec
+          # pre-empts it: an absent connector reads as a workspace disconnection, which is the
+          # one thing this toggle deliberately is not.
+          npm run test:connector-deck

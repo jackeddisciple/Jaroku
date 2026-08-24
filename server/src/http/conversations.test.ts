@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto";
 import { conversationRoutes, type ConversationCaller } from "./conversations.ts";
 import { HttpError, type HttpRequest } from "./router.ts";
 import { ConversationSettingsStore, type PermissionMode } from "../conversationSettings.ts";
+import { ConversationConnectorStore } from "../conversationConnectors.ts";
 import { openTestSqlite, testContext } from "../db/testDb.ts";
 import { newRequestId } from "../db/tenant.ts";
 
@@ -75,6 +76,7 @@ async function harness() {
   );
 
   const settings = new ConversationSettingsStore(db);
+  const connectors = new ConversationConnectorStore(db);
   const audits: AuditRow[] = [];
 
   const seedThread = async (workspaceId: string): Promise<string> => {
@@ -98,13 +100,21 @@ async function harness() {
       );
       return row !== undefined;
     },
+    connectors,
+    // Two connectors, one of them with a dying credential — enough for the deck's join and for
+    // §3.2's health row without standing up an OAuth flow in a route suite.
+    workspaceConnectors: async () => [
+      { id: "slack", label: "Slack", logoUrl: null, toolCount: 12, warning: null },
+      { id: "notion", label: "Notion", logoUrl: null, toolCount: 9, warning: "token expires in 3 days" },
+    ],
     audit: async (c, d) => { audits.push({ ...d, actor: c.userId }); },
   });
 
   const get = routes.find((r) => r.method === "GET")!.handler;
   const patch = routes.find((r) => r.method === "PATCH")!.handler;
+  const put = routes.find((r) => r.method === "PUT")!.handler;
   return {
-    db, settings, audits, seedThread, get, patch, userId: USER,
+    db, settings, connectors, audits, seedThread, get, patch, put, userId: USER,
     as: (c: ConversationCaller) => { caller = c; },
     close: () => db.close(),
   };
@@ -240,6 +250,98 @@ console.log("\n§3.2 — a mode change is audited, with the actor and BOTH value
   check("a real change writes another", h.audits.length === 2 && h.audits[1]?.from === "fast" && h.audits[1]?.to === "strict");
   await h.close();
 }
+
+console.log("\n§3.2 — a connector nobody has ruled on is available");
+{
+  const h = await harness();
+  const thread = await h.seedThread(ctx.workspaceId);
+  const res = await h.get(req("GET", `/v1/conversations/${thread}/connectors`));
+  const rows = (res.body as { connectors: Record<string, unknown>[] }).connectors;
+
+  // THE ABSENT ROW MEANS YES, which is the opposite of the settings table and correct for the same
+  // reason it is correct there. A conversation started before Notion was connected must still be
+  // able to reach Notion, so nothing is backfilled and nothing defaults to off.
+  check("both connectors are listed", rows.length === 2, String(rows.length));
+  check("...and both are on", rows.every((r) => r.enabled === true));
+  check("...with the deck's fields", rows[0]!.label === "Slack" && rows[0]!.tool_count === 12);
+  // §3.2's health row reaches the client rather than being computed in it.
+  check("a dying credential is reported", rows[1]!.warning === "token expires in 3 days", String(rows[1]!.warning));
+  await h.close();
+}
+
+console.log("\n...and switching one off is recorded, not merely rendered");
+{
+  const h = await harness();
+  const thread = await h.seedThread(ctx.workspaceId);
+
+  const res = await h.put(req("PUT", `/v1/conversations/${thread}/connectors`, { connectors: { slack: false } }));
+  const rows = (res.body as { connectors: Record<string, unknown>[] }).connectors;
+  check("Slack is off", rows.find((r) => r.id === "slack")?.enabled === false);
+  // §12.9 / §3.2: a disabled connector STAYS in the list — "its absence would be more confusing
+  // than its dimming", and a deck that shrank would read as a workspace disconnection.
+  check("...and is still listed", rows.length === 2);
+  check("...while the other is untouched", rows.find((r) => r.id === "notion")?.enabled === true);
+
+  // §12.10's other half: the row is what the dispatch reads, so the toggle is a capability rather
+  // than a display filter. A version of this that only dimmed a logo would leave the tool in the
+  // dispatch, the model would call it anyway, and the user would conclude the control does nothing.
+  const enabled = await h.connectors.enabledFor(ctx, thread, ["slack", "notion"]);
+  check("the dispatch sees only what is on", enabled.join(",") === "notion", enabled.join(","));
+
+  // Turning it back on WRITES rather than deletes, so "deliberately re-enabled" and "never
+  // touched" stay distinguishable — which matters the first time somebody asks why a conversation
+  // started using Slack again.
+  await h.put(req("PUT", `/v1/conversations/${thread}/connectors`, { connectors: { slack: true } }));
+  const decisions = await h.connectors.decisionsFor(ctx, thread);
+  check("re-enabling leaves a row behind", decisions.get("slack") === true, JSON.stringify([...decisions]));
+  await h.close();
+}
+
+console.log("\n...and the workspace connection itself is untouched");
+{
+  // The other half of §12.10, and the half a user is afraid of: "leaves the workspace connection
+  // intact". Scoping a conversation must not reach the workspace's list at all, which is why this
+  // table records decisions and never membership.
+  const h = await harness();
+  const a = await h.seedThread(ctx.workspaceId);
+  const b = await h.seedThread(ctx.workspaceId);
+
+  await h.put(req("PUT", `/v1/conversations/${a}/connectors`, { connectors: { slack: false } }));
+
+  const other = (await h.get(req("GET", `/v1/conversations/${b}/connectors`))).body as {
+    connectors: Record<string, unknown>[];
+  };
+  check("a second conversation still has Slack", other.connectors.find((r) => r.id === "slack")?.enabled === true);
+  check("...and still has both", other.connectors.length === 2);
+  await h.close();
+}
+
+console.log("\n...and a connector this workspace does not have is refused");
+{
+  const h = await harness();
+  const thread = await h.seedThread(ctx.workspaceId);
+  // Harmless at read time — it joins against nothing — and still wrong: the table would accumulate
+  // rows nobody can explain, and a typo'd id would look like a setting that quietly does nothing.
+  const bad = await statusOf(() => h.put(req("PUT", `/v1/conversations/${thread}/connectors`, { connectors: { gmail: false } })));
+  check("an unknown connector is a 400", bad.status === 400 && bad.code === "unknown_connector", JSON.stringify(bad));
+  const wrongType = await statusOf(() => h.put(req("PUT", `/v1/conversations/${thread}/connectors`, { connectors: { slack: "off" } })));
+  check("a non-boolean is a 400", wrongType.status === 400 && wrongType.code === "invalid_value", JSON.stringify(wrongType));
+  const notAnObject = await statusOf(() => h.put(req("PUT", `/v1/conversations/${thread}/connectors`, { connectors: ["slack"] })));
+  check("an array body is a 400", notAnObject.status === 400, JSON.stringify(notAnObject));
+  await h.close();
+}
+
+console.log("\n...and another workspace's conversation is 404 here too");
+{
+  const h = await harness();
+  const theirs = await h.seedThread(OTHER);
+  const read = await statusOf(() => h.get(req("GET", `/v1/conversations/${theirs}/connectors`)));
+  check("reading their deck is 404", read.status === 404, JSON.stringify(read));
+  const write = await statusOf(() => h.put(req("PUT", `/v1/conversations/${theirs}/connectors`, { connectors: { slack: false } })));
+  check("scoping their conversation is 404", write.status === 404, JSON.stringify(write));
+  await h.close();
+}
+
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exitCode = fail === 0 ? 0 : 1;

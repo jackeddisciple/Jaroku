@@ -113,6 +113,37 @@ MAX_ARGS_CHARS = 4000
 # and only this process knows a low-impact call is happening.
 PERMISSION_MODE = (os.environ.get("JAROKU_PERMISSION_MODE") or "smart").strip().lower()
 
+
+def _allowed_servers() -> set[str] | None:
+    """Which MCP servers this conversation may reach, or None for "no restriction".
+
+    The composer's connector deck scopes a CONVERSATION, and the manifest belongs to the AGENT --
+    so the scoping arrives as an allowlist in the environment rather than as a rewritten manifest.
+    Rewriting mcp_tools.json per run would make an agent's own file depend on which thread happened
+    to launch it, and that file is a protected path precisely so that cannot happen.
+
+    THREE STATES, AND THE SENTINEL IS WHAT MAKES THE THIRD REACHABLE:
+
+      unset  no restriction -- a run outside any conversation, or one nobody has scoped.
+      "-"    nothing is allowed. A real state: somebody switched every connector off.
+      list   exactly these.
+
+    An empty string cannot carry the middle case, because Windows deletes an environment variable
+    set to "" -- so "unset" and "none allowed" would be the same value, and the two would collapse
+    into the permissive one. A sentinel keeps them apart.
+
+    LIKE PERMISSION_MODE, THIS DECIDES WHAT TO OFFER AND NEVER WHAT TO ALLOW. The host applies the
+    same scoping when it answers a confirmation, so a run whose environment was edited to widen
+    this list gains nothing it can actually call.
+    """
+    raw = os.environ.get("JAROKU_MCP_SERVERS")
+    if raw is None:
+        return None
+    raw = raw.strip()
+    if raw == "-":
+        return set()
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
 # Must match jaroku_runner/debug.py:CTRL_SENTINEL and processManager.ts:CTRL_SENTINEL.
 # Three copies, because this file is copied into projects that import nothing from Jaroku —
 # a generated agent stays plain LangGraph, and that is worth one duplicated constant.
@@ -681,12 +712,18 @@ def build_tools(manifest: dict[str, Any] | None = None) -> list[StructuredTool]:
     one to honour approximately. Same posture as a manifest that will not parse.
     """
     data = manifest if manifest is not None else load_manifest()
+    allowed = _allowed_servers()
     tools: list[StructuredTool] = []
     owners: dict[str, str] = {}
     for server in data.get("servers") or []:
         if not isinstance(server, dict):
             continue
         server_id = str(server.get("id") or "unknown")
+        # The conversation's scoping, applied before a tool is BUILT rather than before it is
+        # called. A tool the model never sees is one it cannot ask for, which is the difference
+        # between scoping a conversation and refusing every call it makes.
+        if allowed is not None and server_id not in allowed:
+            continue
         for spec in server.get("tools") or []:
             if not isinstance(spec, dict):
                 continue

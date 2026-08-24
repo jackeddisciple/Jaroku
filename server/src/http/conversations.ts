@@ -28,6 +28,7 @@ import {
   isPermissionMode, type ConversationSettingsStore, type EffectiveSettings, type PermissionMode,
 } from "../conversationSettings.ts";
 import { isEffort, type Effort } from "../effort.ts";
+import type { ConversationConnectorStore } from "../conversationConnectors.ts";
 
 export interface ConversationRoute {
   method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
@@ -48,6 +49,21 @@ export interface ConversationRouteDeps {
   settings: ConversationSettingsStore;
   /** Whether this conversation exists IN THIS WORKSPACE. A 404 either way — see `requireThread`. */
   threadExists(ctx: TenantContext, conversationId: string): Promise<boolean>;
+  connectors: ConversationConnectorStore;
+  /**
+   * Every connector the WORKSPACE has, with what the deck needs to draw it.
+   *
+   * Membership lives here and decisions live in `connectors`, and the split is deliberate: a
+   * conversation's row says "somebody switched this off", never "this exists". A version of the
+   * decision store that also knew the workspace's list would be a second, stale copy of it.
+   */
+  workspaceConnectors(ctx: TenantContext): Promise<{
+    id: string;
+    label: string;
+    logoUrl: string | null;
+    toolCount: number;
+    warning: string | null;
+  }[]>;
   /** §3.2's audit row. Called only for permission-mode changes, and only when one really changed. */
   audit(
     caller: ConversationCaller,
@@ -115,14 +131,47 @@ function readField<T>(
   throw new HttpError(400, "invalid_value", `${key} must be null or one of ${what}`);
 }
 
+/**
+ * The deck's rows: the workspace's connectors joined with this conversation's decisions.
+ *
+ * ONE BUILDER FOR THE GET AND THE PUT. They answer with the same shape, and two constructions of
+ * it would drift the first time a field was added — leaving a deck that rendered differently
+ * depending on whether it had just been toggled.
+ */
+async function connectorView(
+  deps: ConversationRouteDeps,
+  caller: ConversationCaller,
+  conversationId: string,
+): Promise<Record<string, unknown>[]> {
+  const available = await deps.workspaceConnectors(caller.ctx);
+  const decisions = await deps.connectors.decisionsFor(caller.ctx, conversationId);
+  return available.map((c) => ({
+    id: c.id,
+    label: c.label,
+    logo_url: c.logoUrl,
+    tool_count: c.toolCount,
+    warning: c.warning,
+    // The absent-row rule, at the wire: a connector nobody has ruled on is on.
+    enabled: decisions.get(c.id) ?? true,
+  }));
+}
+
 export function conversationRoutes(deps: ConversationRouteDeps): ConversationRoute[] {
   return [
     {
+      // ONE GET ON THE PREFIX, BRANCHING ON THE SUFFIX, and that is a constraint of the router
+      // rather than a preference: it matches the FIRST prefix route with this method, so a second
+      // `GET /v1/conversations/` would be unreachable code that looks like a mounted route.
       method: "GET",
       path: "/v1/conversations/",
       prefix: true,
       handler: async (req) => {
         const caller = await deps.callerFor(req);
+        if (req.path.endsWith("/connectors")) {
+          const id = idFrom(req.path, "/connectors");
+          await requireThread(deps, caller, id);
+          return { body: { connectors: await connectorView(deps, caller, id) } };
+        }
         const id = idFrom(req.path, "/settings");
         await requireThread(deps, caller, id);
         return { body: view(await deps.settings.effective(caller.ctx, id)) };
@@ -177,6 +226,37 @@ export function conversationRoutes(deps: ConversationRouteDeps): ConversationRou
         // had something to say, and a client that echoed its own request back would render a
         // setting the server is not running under.
         return { body: view(after) };
+      },
+    },
+    {
+      method: "PUT",
+      path: "/v1/conversations/",
+      prefix: true,
+      handler: async (req) => {
+        const caller = await deps.callerFor(req);
+        const id = idFrom(req.path, "/connectors");
+        await requireThread(deps, caller, id);
+
+        const body = await req.json<{ connectors?: unknown }>();
+        const raw = body.connectors;
+        if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+          throw new HttpError(400, "invalid_body", "connectors must be an object of id -> boolean");
+        }
+
+        // ONLY CONNECTORS THE WORKSPACE ACTUALLY HAS. A decision about a connector that does not
+        // exist is harmless at read time — it joins against nothing — and accepting it would still
+        // be wrong: the table would accumulate rows nobody can explain, and a typo'd id would look
+        // like a setting that quietly does nothing.
+        const known = new Set((await deps.workspaceConnectors(caller.ctx)).map((c) => c.id));
+        const map: Record<string, boolean> = {};
+        for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+          if (!known.has(key)) throw new HttpError(400, "unknown_connector", `this workspace has no connector "${key}"`);
+          if (typeof value !== "boolean") throw new HttpError(400, "invalid_value", `${key} must be true or false`);
+          map[key] = value;
+        }
+
+        await deps.connectors.setMany(caller.ctx, id, map, caller.userId);
+        return { body: { connectors: await connectorView(deps, caller, id) } };
       },
     },
   ];

@@ -47,6 +47,7 @@ import { refKey, type AttachKind, type AttachableRow } from "./composer/AttachPi
 import { MAX_ATTACHMENTS, WARN_AT, budgetPercent } from "../lib/attachBudget.ts";
 import { EffortControl, effortLabel } from "./composer/EffortControl.tsx";
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
+import { ConnectorDeck } from "./composer/ConnectorDeck.tsx";
 import {
   FALLBACK_SETTINGS, useComposerSettingsStore, type Effort, type PermissionMode,
 } from "../store/composerSettingsStore.ts";
@@ -615,6 +616,35 @@ export function BuildPane({
   const settingsError = useComposerSettingsStore((s) => s.error);
   const clearSettingsError = useComposerSettingsStore((s) => s.clearError);
   useEffect(() => { void loadSettings(activeThreadId); }, [activeThreadId, loadSettings]);
+
+  // §3.2's deck — the workspace's connectors joined with this conversation's decisions, from the
+  // server. Not assembled here: the join is what decides whether a connector renders grayscale,
+  // and a client that computed it would need its own copy of the absent-row rule.
+  const conversationConnectors = useComposerSettingsStore(
+    (s) => s.connectorsByConversation[activeThreadId ?? "__none"],
+  );
+  const loadConnectors = useComposerSettingsStore((s) => s.loadConnectors);
+  const toggleConnector = useComposerSettingsStore((s) => s.toggleConnector);
+  useEffect(() => { void loadConnectors(activeThreadId); }, [activeThreadId, loadConnectors]);
+
+  /**
+   * What the deck draws.
+   *
+   * FROM THE SERVER'S JOIN WHEN THERE IS A CONVERSATION, and from the workspace's own MCP snapshot
+   * before there is one. The second case is a composer that has not started a thread yet: there is
+   * nothing to scope, so every connector is on and the deck is a readout rather than a control.
+   */
+  const deckConnectors = useMemo(() => {
+    if (conversationConnectors) {
+      return conversationConnectors.map((c) => ({
+        id: c.id, label: c.label, logoUrl: c.logo_url, enabled: c.enabled, warning: c.warning,
+      }));
+    }
+    return mcpServers.map((sv) => ({
+      id: sv.id, label: sv.label || sv.id, logoUrl: null, enabled: true,
+      warning: sv.status === "error" ? "could not be reached" : null,
+    }));
+  }, [conversationConnectors, mcpServers]);
 
   /**
    * The effort THIS message will be sent with.
@@ -1823,6 +1853,30 @@ export function BuildPane({
                   />
                 ),
               },
+              // §3.2's deck. Absent with zero connectors, which is §12.1c's own worked example:
+              // its absence must move nothing else, and it does not, because both groups are
+              // packed against their own edge rather than spread.
+              ...(deckConnectors.length > 0
+                ? {
+                    connectors: {
+                      bar: () => (
+                        <ConnectorDeck
+                          connectors={deckConnectors}
+                          disabled={busy}
+                          onToggle={(id, on) => void toggleConnector(activeThreadId, id, on)}
+                          onAddConnector={() => openUsageTab("connections")}
+                        />
+                      ),
+                      menu: () => (
+                        <PopoverRow
+                          label="Connectors"
+                          detail={`${deckConnectors.filter((c) => c.enabled).length} of ${deckConnectors.length} available here`}
+                          onSelect={() => openUsageTab("connections")}
+                        />
+                      ),
+                    },
+                  }
+                : {}),
               // Test mode only: the input IS an eval example, so promotion belongs on the bar
               // beside the thing being promoted rather than in the Evals tab — that is where a
               // case earns its place.

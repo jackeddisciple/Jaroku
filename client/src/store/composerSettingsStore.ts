@@ -54,8 +54,20 @@ export const FALLBACK_SETTINGS: ConversationSettings = {
 /** The key a conversation's settings live under. `__none` is the composer with no thread yet. */
 const keyFor = (conversationId: string | null): string => conversationId ?? "__none";
 
+/** One connector, as the deck draws it. The workspace's list joined with this conversation's. */
+export interface ConversationConnector {
+  id: string;
+  label: string;
+  logo_url: string | null;
+  tool_count: number;
+  warning: string | null;
+  /** The absent-row rule already applied by the server: nobody has ruled on it means it is on. */
+  enabled: boolean;
+}
+
 interface State {
   byConversation: Record<string, ConversationSettings>;
+  connectorsByConversation: Record<string, ConversationConnector[]>;
   /** In flight, so a control can render as busy rather than as changed. */
   saving: Record<string, true>;
   /** The last refusal, in words, for the control that caused it. Cleared on the next success. */
@@ -67,11 +79,15 @@ interface State {
     conversationId: string | null,
     patch: { reasoning_effort?: Effort | null; permission_mode?: PermissionMode | null },
   ): Promise<void>;
+  connectorsFor(conversationId: string | null): ConversationConnector[];
+  loadConnectors(conversationId: string | null): Promise<void>;
+  toggleConnector(conversationId: string | null, connectorId: string, enabled: boolean): Promise<void>;
   clearError(): void;
 }
 
 export const useComposerSettingsStore = create<State>((set, get) => ({
   byConversation: {},
+  connectorsByConversation: {},
   saving: {},
   error: null,
 
@@ -114,6 +130,49 @@ export const useComposerSettingsStore = create<State>((set, get) => ({
       // admin has pinned the permission mode for this workspace". A generic "couldn't save" would
       // leave the user retrying a control that will refuse them every time.
       set((s) => ({ saving: omit(s.saving, key), error: (err as Error)?.message ?? "Couldn't save that setting." }));
+    }
+  },
+
+  connectorsFor: (conversationId) => get().connectorsByConversation[keyFor(conversationId)] ?? [],
+
+  loadConnectors: async (conversationId) => {
+    // A composer with no thread has no conversation to scope, so there is nothing to ask about.
+    // The deck renders the workspace's connectors from the socket snapshot until there is.
+    if (!conversationId) return;
+    try {
+      const body = await apiRequest<{ connectors: ConversationConnector[] }>(
+        "GET", `/v1/conversations/${encodeURIComponent(conversationId)}/connectors`,
+      );
+      set((s) => ({
+        connectorsByConversation: { ...s.connectorsByConversation, [keyFor(conversationId)]: body.connectors ?? [] },
+      }));
+    } catch {
+      // Silent on read, loud on write — the same split as the settings above, for the same reason.
+    }
+  },
+
+  toggleConnector: async (conversationId, connectorId, enabled) => {
+    if (!conversationId) {
+      set({ error: "Start the conversation before scoping its connectors." });
+      return;
+    }
+    const key = keyFor(conversationId);
+    set((s) => ({ saving: { ...s.saving, [key]: true }, error: null }));
+    try {
+      // THE RESPONSE IS THE TRUTH, not the request. The server answers with the whole joined list,
+      // so a toggle that was refused — or one that arrived alongside somebody else's — leaves the
+      // deck showing what is actually in force rather than what this tab asked for.
+      const body = await apiRequest<{ connectors: ConversationConnector[] }>(
+        "PUT", `/v1/conversations/${encodeURIComponent(conversationId)}/connectors`,
+        { connectors: { [connectorId]: enabled } },
+      );
+      set((s) => ({
+        connectorsByConversation: { ...s.connectorsByConversation, [key]: body.connectors ?? [] },
+        saving: omit(s.saving, key),
+        error: null,
+      }));
+    } catch (err) {
+      set((s) => ({ saving: omit(s.saving, key), error: (err as Error)?.message ?? "Couldn't scope that connector." }));
     }
   },
 

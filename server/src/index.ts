@@ -77,6 +77,7 @@ import { TokenVerifier } from "./auth/verifier.ts";
 import { authenticate, sessionRoutes } from "./auth/session.ts";
 import { conversationRoutes } from "./http/conversations.ts";
 import { ConversationSettingsStore, DEFAULT_PERMISSION_MODE, type PermissionMode } from "./conversationSettings.ts";
+import { ConversationConnectorStore } from "./conversationConnectors.ts";
 import { classOf, mustConfirm } from "./permissionShield.ts";
 import { turnRoutes, type Attachable } from "./http/turns.ts";
 import { AttachmentStore } from "./attachmentStore.ts";
@@ -3039,6 +3040,25 @@ mountSecretsRoutes(router, {
  * file: nothing below this line sees a workspace id the client chose.
  */
 const conversationSettings = new ConversationSettingsStore(store.database());
+const conversationConnectors = new ConversationConnectorStore(store.database());
+
+/**
+ * §3.2's health row, in one sentence.
+ *
+ * A REVOKED CONNECTION AND AN EXPIRING ONE ARE DIFFERENT PROBLEMS with the same remedy, and the
+ * deck says which: one has already stopped working and the other is about to. Both are learned
+ * about here rather than at 2am when an agent fails.
+ */
+function connectorWarning(conn: { status: string; access_expires_at: string | null; last_error: string | null }): string | null {
+  if (conn.status === "revoked") return "was disconnected — reconnect it";
+  if (conn.status === "reauth_required") return "needs to be reconnected";
+  if (!conn.access_expires_at) return null;
+  const days = Math.floor((Date.parse(conn.access_expires_at) - Date.now()) / 86_400_000);
+  if (!Number.isFinite(days) || days > 7) return null;
+  // Seven days, because that is long enough to act on during a working week and short enough that
+  // the warning is not permanent furniture on a connector that renews monthly.
+  return days <= 0 ? "has expired" : `token expires in ${days} day${days === 1 ? "" : "s"}`;
+}
 
 for (const route of conversationRoutes({
   callerFor: async (req) => {
@@ -3052,6 +3072,57 @@ for (const route of conversationRoutes({
     return { ctx: session.context, userId: session.userId, ip: req.ip };
   },
   settings: conversationSettings,
+  connectors: conversationConnectors,
+  /**
+   * WHAT THIS WORKSPACE HAS CONNECTED — both kinds, in one list.
+   *
+   * §3.2's deck does not distinguish a reviewed connector from a self-hosted MCP server, and it is
+   * right not to: from the composer's side they are both "a thing this agent can reach", and the
+   * distinction that matters (reviewed versus unreviewed code) is carried by the MCP badge in the
+   * plan and by the confirmation gate, not by whether a logo is in the deck.
+   *
+   * A reviewed connector counts as present only when it has a live OAuth connection, because a
+   * catalogue entry nobody has connected is an option rather than a capability — a deck listing all
+   * three templates on a workspace that has connected none would be a picture of the product rather
+   * than of this workspace.
+   */
+  workspaceConnectors: async (ctx) => {
+    const rows: {
+      id: string; label: string; logoUrl: string | null; toolCount: number; warning: string | null;
+    }[] = [];
+
+    const catalogue = new Map(loadConnectors(RUNTIME_DIR).map((c) => [c.id, c]));
+    for (const conn of await oauthRepo.list(ctx).catch(() => [])) {
+      const entry = catalogue.get(conn.connector_id);
+      rows.push({
+        id: conn.connector_id,
+        label: entry?.label ?? conn.connector_id,
+        // Deliberately null for the reviewed three: their marks live in the client's own icon set
+        // with the right brand colours, and a per-workspace override would be a support problem
+        // rather than a feature. See migration 056.
+        logoUrl: null,
+        toolCount: entry?.tools.length ?? 0,
+        // §3.2's health row: "This is the surface where a user is thinking about connectors, so
+        // it's the right place to learn a token is dying."
+        warning: connectorWarning(conn),
+      });
+    }
+
+    for (const server of await mcpStore.listServers(ctx).catch(() => [])) {
+      const tools = await mcpStore.listTools(ctx, server.id).catch(() => []);
+      rows.push({
+        id: server.id,
+        label: server.label || server.id,
+        // The case the column exists for — a self-hosted server whose mark nobody can predict.
+        // Null here means the deck draws a monogram derived from the slug.
+        logoUrl: (server as { logo_url?: string | null }).logo_url ?? null,
+        toolCount: tools.length,
+        warning: server.status === "error" ? "could not be reached" : null,
+      });
+    }
+
+    return rows;
+  },
   // Through the thread store's own scoped read, so "does this conversation exist" is answered by
   // the same WHERE that answers every other question about it. A bare `SELECT 1 FROM threads`
   // here would be a second, unscoped, path to the same fact.
@@ -9037,6 +9108,39 @@ async function runAgent(
   // auto-approves or puts a person in front of it. A run whose environment claimed "fast" would
   // ask less often and be refused just as often, because the deciding is not done here.
   env.JAROKU_PERMISSION_MODE = await permissionModeForRun(ctx, runId);
+
+  // §12.10 — "Disabling a connector for a conversation removes its tools from that conversation's
+  // dispatch and leaves the workspace connection intact."
+  //
+  // THIS IS THE HALF THAT MAKES THE TOGGLE A CAPABILITY. Without it the deck would dim a logo, the
+  // tool would stay in the manifest, the model would call it anyway, and the user would conclude
+  // the control does nothing — which is exactly the failure §3.2 is warning about when it says
+  // "This is a real capability, not cosmetic."
+  //
+  // AN ALLOWLIST RATHER THAN A REWRITTEN MANIFEST, because the manifest is written at GENERATION
+  // time and belongs to the agent, while this decision belongs to the conversation. Rewriting the
+  // project's `mcp_tools.json` per run would make an agent's own file depend on which thread
+  // happened to launch it, and `mcp_tools.json` is a protected path precisely so that cannot
+  // happen.
+  //
+  // THE SENTINEL IS DELIBERATE. An absent variable means "no restriction", which is what a run
+  // outside any conversation gets; `-` means "nothing is allowed", which is a real state somebody
+  // can reach by switching everything off. An empty string cannot carry that distinction —
+  // Windows deletes an environment variable set to "", so the two would be the same value.
+  {
+    const threadId = await threadStore.threadForRef(ctx, "run", runId).catch(() => undefined);
+    if (threadId) {
+      const decisions = await conversationConnectors.decisionsFor(ctx, threadId).catch(() => new Map<string, boolean>());
+      // Only when somebody has actually ruled on something. A conversation nobody has scoped runs
+      // with no allowlist at all, which is also what makes connecting a new connector reach every
+      // existing conversation.
+      if (decisions.size > 0) {
+        const servers = await mcpStore.listServers(ctx).catch(() => []);
+        const allowed = servers.map((sv) => sv.id).filter((id) => decisions.get(id) ?? true);
+        env.JAROKU_MCP_SERVERS = allowed.length > 0 ? allowed.join(",") : "-";
+      }
+    }
+  }
 
   // THE CREDENTIALS THIS RUN NEEDS, RESOLVED BY NAME, THROUGH THE SECRET STORE.
   //

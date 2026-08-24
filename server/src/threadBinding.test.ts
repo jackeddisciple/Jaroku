@@ -190,6 +190,33 @@ async function statusesFor(
     (await h.threads.messages(ctx, t.id))[0]?.body === "add exponential backoff");
   check("a thread nobody has spoken in has no preview at all, rather than an empty quote",
     (await statusesFor(await harness())).size === 0);
+
+  // THE SAME CLAIM WHEN EVERY ITEM LANDS IN ONE MILLISECOND, which is the case that actually
+  // failed. `created_at` is the only ordering these rows have, and neither driver promises a stable
+  // order for equal values — so on CI, where three awaited inserts really do share a millisecond,
+  // the preview came back as the FIRST message. It had been latent for as long as the column has
+  // existed; adding an index to `thread_items` changed the plan Postgres chose and surfaced it.
+  //
+  // Nothing here sleeps: a suite that spaced its writes out would be testing the clock rather than
+  // the ordering, and would go on passing after the guarantee was removed.
+  {
+    const fast = await harness();
+    const quick = await fast.threads.create(ctx);
+    for (const body of ["first", "second", "third"]) {
+      await fast.threads.addItem(ctx, quick.id, { kind: "message", role: "user", body });
+    }
+    const s2 = await statusesFor(fast);
+    check("...even when all three land in the same millisecond",
+      s2.get(quick.id)?.preview === "third", String(s2.get(quick.id)?.preview));
+    const msgs = await fast.threads.messages(ctx, quick.id);
+    check("...and the title still comes from the first",
+      msgs[0]?.body === "first" && msgs[2]?.body === "third",
+      msgs.map((m) => m.body).join(","));
+    // The instants really are distinct, which is what makes the order defined rather than lucky.
+    check("...because no two items share an instant",
+      new Set(msgs.map((m) => m.created_at)).size === msgs.length,
+      msgs.map((m) => m.created_at).join(" "));
+  }
 }
 
 // --- 5. an eval's progress, and a confirmation halting a run -------------------------------

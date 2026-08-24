@@ -131,6 +131,33 @@ function capTitle(title: string): string {
 
 const nowIso = (): string => new Date().toISOString();
 
+/**
+ * A clock for `thread_items` that never issues the same instant twice.
+ *
+ * WHY THIS IS NOT PARANOIA. `created_at` is the ONLY ordering these rows have — there is no
+ * sequence column — and every read of them is ordered by it. Two items written in the same
+ * millisecond therefore have no defined order at all, and neither driver promises a stable one: the
+ * result depends on the scan the planner chose, which changes when an index is added.
+ *
+ * What that costs is not theoretical. §4.3's preview is "the last USER message", derived by walking
+ * the items in order — so a message and the proposal it produced landing in one millisecond can
+ * make a thread's preview flip to an older sentence, with no write in between and nothing to blame.
+ * It is invisible until it happens in front of somebody.
+ *
+ * A PROCESS-LOCAL MONOTONIC CLOCK, not a database sequence, because that is proportional to the
+ * problem: the items whose ordering matters are written by one process handling one conversation,
+ * and a sequence would be a migration plus a round trip on every append to fix an ordering that is
+ * already correct for every other case. Two gateway replicas writing into one thread in the same
+ * millisecond remain possible and remain tie-broken by `id` at the read — which is arbitrary but
+ * at least stable, so the preview cannot change between two reads of unchanged rows.
+ */
+let lastIssued = 0;
+function nextItemIso(): string {
+  const now = Date.now();
+  lastIssued = now > lastIssued ? now : lastIssued + 1;
+  return new Date(lastIssued).toISOString();
+}
+
 // Explicit rather than `SELECT *`: `workspace_id` is on every row and belongs on none of the
 // snapshots a client receives. The same reason the MCP registry lists its columns out.
 const COLUMNS = `id, agent_id, agent_name_snapshot, title, title_is_custom, created_by,
@@ -318,7 +345,7 @@ export class ThreadStore {
     const row = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT body FROM thread_items
         WHERE workspace_id = ? AND thread_id = ? AND kind = 'message' AND role = 'user'
-        ORDER BY created_at ASC LIMIT 1`,
+        ORDER BY created_at ASC, id ASC LIMIT 1`,
       [ctx.workspaceId, threadId],
     );
     return row ? String(row["body"] ?? "") : null;
@@ -431,7 +458,9 @@ export class ThreadStore {
     threadId: string,
     item: { kind: ThreadItemKind; refId?: string | null; role?: "user" | null; body?: string | null },
   ): Promise<void> {
-    const now = nowIso();
+    // The monotonic clock, not the wall one — see `nextItemIso`. These rows are ordered by nothing
+    // else, so two written in the same millisecond would have no defined order on either driver.
+    const now = nextItemIso();
     await this.q(ctx).run(
       `INSERT INTO thread_items (id, workspace_id, thread_id, kind, ref_id, role, body, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -448,7 +477,7 @@ export class ThreadStore {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT body, created_at FROM thread_items
         WHERE workspace_id = ? AND thread_id = ? AND kind = 'message' AND role = 'user'
-        ORDER BY created_at ASC`,
+        ORDER BY created_at ASC, id ASC`,
       [ctx.workspaceId, threadId],
     );
     return rows.map((r) => ({ body: String(r["body"] ?? ""), created_at: String(r["created_at"]) }));
@@ -465,7 +494,7 @@ export class ThreadStore {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT thread_id, kind, ref_id, role, body, created_at FROM thread_items
         WHERE workspace_id = ?
-        ORDER BY created_at ASC`,
+        ORDER BY created_at ASC, id ASC`,
       [ctx.workspaceId],
     );
     return rows.map((r) => ({
@@ -493,7 +522,7 @@ export class ThreadStore {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT thread_id, kind, ref_id, role, body, created_at FROM thread_items
         WHERE workspace_id = ? AND thread_id = ?
-        ORDER BY created_at ASC`,
+        ORDER BY created_at ASC, id ASC`,
       [ctx.workspaceId, threadId],
     );
     return rows.map((r) => ({
@@ -521,7 +550,7 @@ export class ThreadStore {
     const row = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT thread_id FROM thread_items
         WHERE workspace_id = ? AND kind = ? AND ref_id = ?
-        ORDER BY created_at ASC LIMIT 1`,
+        ORDER BY created_at ASC, id ASC LIMIT 1`,
       [ctx.workspaceId, kind, refId],
     );
     return row ? String(row["thread_id"]) : undefined;

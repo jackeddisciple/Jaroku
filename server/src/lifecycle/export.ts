@@ -172,6 +172,11 @@ export const EXPORTED_TABLES = [
   // references — a path and a version id, a run id, a commit sha — and no content and no
   // credential, which is the only question this list asks.
   "turn_attachments",
+  // WHICH CONNECTORS EACH CONVERSATION COULD REACH. Ids and booleans, no credential — the only
+  // question this list asks. It belongs with the turns for the same reason the settings do: an
+  // export carrying every run but not the scope they executed under describes what happened while
+  // omitting what was possible.
+  "conversation_connectors",
   // WHAT NEEDED SOMEBODY, AND WHEN IT STOPPED. An inbox item is the workspace's own operational
   // record — which credential was missing, which deploy failed, which agent was drifting, and how
   // long each of those was true before it was fixed. It answers "when did this start going wrong"
