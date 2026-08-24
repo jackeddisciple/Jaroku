@@ -111,11 +111,14 @@ export function CommandPalette() {
         useUiStore.getState().setPaletteOpen(true);
         return;
       }
-      if (mod && e.key === "/") {
-        e.preventDefault();
-        useUiStore.getState().focusChat();
-        return;
-      }
+      // ⌘/ BELONGS TO THE COMPOSER NOW. The composer spec (§3.3) assigns it to the ⊕ attach
+      // menu, and BuildPane binds it at the window. It is not handled here any more, and it is
+      // not handled in two places either — a chord with two owners is a chord whose behaviour
+      // depends on which listener ran first.
+      //
+      // Nothing is lost: ⊕ lives in the composer, so the chord still puts the user there, with
+      // the menu it was asked to open already open. "Focus chat" stays reachable as a palette
+      // item, now without a chord beside it that would be a lie.
       // Non-modified keys are trace navigation — but never while typing or in the palette.
       //
       // AND NEVER WHILE A FULL-SCREEN VIEW IS UP. J/K move a thread row there exactly as they move a
@@ -263,7 +266,9 @@ export function CommandPalette() {
                 <Item onSelect={run(() => useUiStore.getState().openNav("agents"))}>Open Agents</Item>
                 <Item onSelect={run(() => useUiStore.getState().openNav("threads"))}>Open Threads</Item>
                 <Item onSelect={run(() => sendCreateThread())} kbd="⌘N">New thread</Item>
-                <Item onSelect={run(focusChat)} kbd="⌘/">Focus chat</Item>
+                {/* No chord: ⌘/ opens the composer's ⊕ menu as of the composer spec. A keycap on a row that
+                    no longer answers to it is worse than no keycap. */}
+                <Item onSelect={run(focusChat)}>Focus chat</Item>
               </Command.Group>
             </>
           )}

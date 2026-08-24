@@ -79,7 +79,12 @@ console.log("\nthe size ladder is Hugeicons', not the Lucide one beside it");
   check("a menu row is 18", GLYPH.menu === 18);
   check("an empty state is 32", GLYPH.empty === 32);
   check("stroke is 1.5 throughout", GLYPH.strokeWidth === 1.5);
-  check("...which is NOT the Lucide ladder's weight", GLYPH.strokeWidth !== ICON.strokeWidth);
+  // Widened deliberately. Both are `as const`, so tsc decides `1.5 !== 1.75` at compile time and
+  // rejects the comparison as pointless — which is exactly the guarantee wanted, but a type error
+  // is not an assertion. Comparing as numbers keeps the claim in the suite where somebody merging
+  // the two ladders will see it fail.
+  check("...which is NOT the Lucide ladder's weight",
+    (GLYPH.strokeWidth as number) !== (ICON.strokeWidth as number));
   // The ladder ascends. A context that reads as more subordinate than another must not be drawn
   // larger than it.
   check("meta < action < menu < toolbar < empty",

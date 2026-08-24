@@ -22,7 +22,7 @@
 // entry appears only when a PR exists. Absent rather than shown-and-disabled, because a greyed
 // "Open PR (#42)" for an agent with no PR is a promise about a number that does not exist.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ICON } from "../lib/tokens.ts";
 import { useGithubStore } from "../store/githubStore.ts";
@@ -30,7 +30,7 @@ import type { GithubAttachment, GithubView } from "../types.ts";
 import type { ActiveTrigger, TriggerKind } from "../lib/composerTriggers.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
-import { ChevronRightIcon, GithubIcon, PlusIcon, XIcon } from "./panelIcons.tsx";
+import { ChevronRightIcon, GithubIcon, XIcon } from "./panelIcons.tsx";
 import { Select } from "./Select.tsx";
 
 /** A stable identity for an attachment, so the same thing cannot be attached twice. */
@@ -62,119 +62,93 @@ export function attachmentLabel(a: GithubAttachment): string {
 }
 
 /**
- * The ⊕ menu's GitHub submenu.
+ * The ⊕ menu's GitHub source — §4.2's fifth row, and only its rows.
  *
- * Renders nothing when the agent is unlinked — see the header. The entries are exactly §7's, and
- * the phase split falls out of the data rather than out of a feature flag: "diff since last sync"
+ * IT OWNS NO TRIGGER AND NO POPOVER any more. It used to be a whole menu: its own button, its own
+ * outside-click handling, its own Esc key, opening upward because the composer is at the bottom of
+ * the column. Every one of those decisions is now made once, in composer/Popover.tsx, for all five
+ * of the ⊕ menu's sources — and a source that brought its own popover would be a second menu
+ * hanging off the same button.
+ *
+ * Renders nothing when the agent is unlinked. §4.2 is explicit that the GitHub option is HIDDEN
+ * rather than disabled in that case: "an empty menu item that always fails is worse than no item".
+ * The phase split falls out of the data rather than out of a feature flag — "diff since last sync"
  * needs a delta to exist, and a PR entry needs a PR.
  */
-export function GitHubAttachMenu({
+export function GitHubAttachItems({
   view,
   onAttach,
+  onDone,
 }: {
   view: GithubView | null;
   onAttach: (attachment: GithubAttachment) => void;
+  /** Closes whatever popover this is rendered inside. */
+  onDone?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [pickingFile, setPickingFile] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
 
   if (!view) return null;
 
   const take = (attachment: GithubAttachment): void => {
     onAttach(attachment);
-    setOpen(false);
     setPickingFile(false);
+    onDone?.();
   };
 
   const hasDelta = view.state === "ahead" || view.state === "behind" || view.state === "diverged";
 
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        title="Attach GitHub context"
-        className={`transition-colors ${open ? "text-ink" : "text-muted hover:text-ink"}`}
-      >
-        <span className="inline-flex items-center gap-1">
-          <PlusIcon size={ICON.sm} />
-          <GithubIcon size={12} />
-        </span>
-      </button>
+    <>
+      <div className="px-2 pb-1 pt-0.5 text-[10px] uppercase tracking-wider text-faint">
+        Attach from {view.link.repo_full_name}
+      </div>
 
-      {open && (
-        // Opens UPWARD, like the model selector beside it: the composer is at the bottom of the
-        // column and a menu opening down would be a menu off the screen.
-        <div className="absolute bottom-full left-0 z-30 mb-1 min-w-[260px] animate-slide-in rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none">
-          <div className="px-2 pb-1 pt-0.5 text-[10px] uppercase tracking-wider text-faint">
-            Attach from {view.link.repo_full_name}
-          </div>
+      <MenuItem
+        label="Diff of unpushed versions"
+        detail={
+          view.unpushed.length === 0
+            ? "nothing unpushed"
+            : `${view.unpushed.length} version${view.unpushed.length === 1 ? "" : "s"}`
+        }
+        disabled={view.unpushed.length === 0}
+        onSelect={() => take({ kind: "unpushed" })}
+      />
 
-          <MenuItem
-            label="Diff of unpushed versions"
-            detail={
-              view.unpushed.length === 0
-                ? "nothing unpushed"
-                : `${view.unpushed.length} version${view.unpushed.length === 1 ? "" : "s"}`
-            }
-            disabled={view.unpushed.length === 0}
-            onSelect={() => take({ kind: "unpushed" })}
-          />
-
-          {/* Phase 2's entries, present only when the sync state they describe exists. */}
-          {hasDelta && (
-            <MenuItem
-              label="Diff since last sync"
-              detail="what changed on GitHub since Jaroku last looked"
-              onSelect={() => take({ kind: "sinceSync" })}
-            />
-          )}
-
-          <MenuItem
-            label="A specific commit…"
-            detail={`${view.pushed.filter((v) => v.sha).length + view.remoteOnly.length} on this branch`}
-            expand
-            onSelect={() => setPickingFile(false)}
-          >
-            <CommitList view={view} onPick={(sha) => take({ kind: "commit", sha })} />
-          </MenuItem>
-
-          <MenuItem
-            label="A specific file at a ref…"
-            detail={pickingFile ? undefined : "any path, on any branch"}
-            expand
-            onSelect={() => setPickingFile((v) => !v)}
-          >
-            <FilePicker view={view} onPick={(path, refName) => take({ kind: "file", path, ref: refName })} />
-          </MenuItem>
-
-          {view.pr && (
-            <MenuItem
-              label={`Open PR (#${view.pr.number})`}
-              detail={view.pr.title}
-              onSelect={() => take({ kind: "pr" })}
-            />
-          )}
-        </div>
+      {/* Phase 2's entries, present only when the sync state they describe exists. */}
+      {hasDelta && (
+        <MenuItem
+          label="Diff since last sync"
+          detail="what changed on GitHub since Jaroku last looked"
+          onSelect={() => take({ kind: "sinceSync" })}
+        />
       )}
-    </div>
+
+      <MenuItem
+        label="A specific commit…"
+        detail={`${view.pushed.filter((v) => v.sha).length + view.remoteOnly.length} on this branch`}
+        expand
+        onSelect={() => setPickingFile(false)}
+      >
+        <CommitList view={view} onPick={(sha) => take({ kind: "commit", sha })} />
+      </MenuItem>
+
+      <MenuItem
+        label="A specific file at a ref…"
+        detail={pickingFile ? undefined : "any path, on any branch"}
+        expand
+        onSelect={() => setPickingFile((v) => !v)}
+      >
+        <FilePicker view={view} onPick={(path, refName) => take({ kind: "file", path, ref: refName })} />
+      </MenuItem>
+
+      {view.pr && (
+        <MenuItem
+          label={`Open PR (#${view.pr.number})`}
+          detail={view.pr.title}
+          onSelect={() => take({ kind: "pr" })}
+        />
+      )}
+    </>
   );
 }
 

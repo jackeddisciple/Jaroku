@@ -33,10 +33,17 @@ import { EmptyState } from "./EmptyState.tsx";
 import { Prose } from "./InlineCode.tsx";
 import { StreamingFileRow } from "./FileList.tsx";
 import { PlanCard } from "./PlanCard.tsx";
-import { ArrowUpIcon, ChevronDownIcon, MicIcon, SaveToDatasetIcon } from "./composerIcons.tsx";
+import { ChevronDownIcon } from "./composerIcons.tsx";
 import {
-  GitHubAttachChips, GitHubAttachMenu, GitHubTriggerPicker, useGithubAttachments,
+  GitHubAttachChips, GitHubTriggerPicker, useGithubAttachments,
 } from "./GitHubAttach.tsx";
+import { ComposerBar, showsLabel } from "./composer/ComposerBar.tsx";
+import { ComposerShell } from "./composer/FullscreenComposer.tsx";
+import { ControlButton } from "./composer/ControlButton.tsx";
+import { PopoverRow } from "./composer/Popover.tsx";
+import { AddMenu } from "./composer/AddMenu.tsx";
+import { GLYPH, Glyph, HIT_TARGET, Icon } from "./icons.ts";
+import type { Density } from "../lib/composerBar.ts";
 import { activeTrigger, removeTrigger, type ActiveTrigger } from "../lib/composerTriggers.ts";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
@@ -55,6 +62,19 @@ import { displayTitle, fullTitle } from "../lib/title.ts";
 import { useStreamedText } from "../lib/useStreamedText.ts";
 import { useVoiceInput } from "../lib/useVoiceInput.ts";
 import { VoiceWaveform } from "./VoiceWaveform.tsx";
+
+/**
+ * Band 2's geometry, in the two numbers §3.1 gives it.
+ *
+ * The textarea is 14px at line-height 1.5, so one line is 21px. Twelve of those is the cap the
+ * spec sets before the box stops growing and starts scrolling inside itself — which is the clause
+ * that matters, because the alternative is a composer that eats the thread as somebody types.
+ *
+ * Named rather than written into the style object because the auto-grow effect and the style have
+ * to agree about them, and two copies of 252 is how a box grows one line past where it scrolls.
+ */
+const LINE_PX = 21;
+const MAX_LINES = 12;
 
 // Mirrors runtime/tool_templates/catalog.json. The server validates the ids it receives
 // against the catalog, so a stale entry here can never inject an unreviewed connector.
@@ -504,6 +524,8 @@ export function BuildPane({
   // decision about this moment, and the next fork — or the same one on a new plan — should ask.
   const [skippedFork, setSkippedFork] = useState<string | null>(null);
   const mcpServers = useMcpStore((s) => s.servers);
+
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusChatNonce = useUiStore((s) => s.focusChatNonce);
@@ -559,6 +581,23 @@ export function BuildPane({
   // composer's business, and a message typed here is filed here.
   const activeThreadId = useThreadStore((s) => s.activeThreadId);
 
+  // §3.2's expanded editor. PER CONVERSATION AND LOCAL ONLY, which the spec is explicit about:
+  // "Persist 'was fullscreen' per conversation in local state only. Not a server setting."
+  // Keyed by thread rather than held as one boolean, so opening a second thread does not inherit
+  // the first one's editor — writing a long brief in one conversation says nothing about the next.
+  const [fullscreenBy, setFullscreenBy] = useState<Record<string, boolean>>({});
+  // `__none` covers the composer before a thread exists — a brand-new agent's first message,
+  // which is exactly the case the expanded editor was asked for.
+  const fullscreenKey = activeThreadId ?? "__none";
+  const fullscreen = fullscreenBy[fullscreenKey] ?? false;
+  const setFullscreen = useCallback(
+    (on: boolean) => setFullscreenBy((m) => ({ ...m, [fullscreenKey]: on })),
+    [fullscreenKey],
+  );
+  // §3.3's ⌘/ — a counter rather than a boolean, because the same chord pressed twice has to open
+  // the menu twice, and a boolean that is already true is a keystroke that does nothing.
+  const [attachChordNonce, setAttachChordNonce] = useState(0);
+
   const agent = agents.find((a) => a.agent_id === activeAgentId);
   const mode: "generate" | "edit" = activeAgentId ? "edit" : "generate";
   const turns = threadFor({ threads, pending: pendingThread }, activeThreadId);
@@ -566,6 +605,64 @@ export function BuildPane({
   // the connector selection changes, is what gets invalidated.
   const planId = pendingPlanId(turns);
   const busy = genStatus === "generating" || streamingAgentId !== null || isPlanning(turns);
+
+  // §3.3's two window-level chords.
+  //
+  // WINDOW-LEVEL RATHER THAN ON THE TEXTAREA, because both are meant to work when the caret is
+  // not in it — ⌘⇧F is how you get to the editor from anywhere in the pane, and ⌘/ is how you
+  // attach something without first clicking into a box you are about to leave again.
+  //
+  // ⌘/ MOVED. It focused the composer until now (CommandPalette.tsx), and §3.3 assigns it to the
+  // ⊕ menu. The old behaviour is not lost: the palette still carries "Focus chat" as an item, and
+  // ⌘/ lands in the composer's own ⊕ anyway — so the chord still puts you in the composer, just
+  // with the menu it was asked to open already open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+      if (e.shiftKey && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        setFullscreen(!fullscreen);
+        return;
+      }
+      if (e.key === "/") {
+        e.preventDefault();
+        setAttachChordNonce((n) => n + 1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullscreen, setFullscreen]);
+
+  /**
+   * §3.3: ↑ on an EMPTY composer edits the last user message.
+   *
+   * "Empty" is doing real work here. On a composer with text in it, ↑ is how you move the caret up
+   * a line, and stealing that would make the expanded editor unusable for the long instructions it
+   * exists to hold. So the binding lives on the textarea, fires only when the box is empty, and
+   * puts the previous message back rather than opening an editor — the message is a draft again,
+   * which is the same shape everything else in this composer has.
+   */
+  const editLastUserMessage = useCallback((): boolean => {
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const t = turns[i];
+      if (t && t.role === "user" && t.text.trim()) {
+        setText(t.text);
+        return true;
+      }
+    }
+    return false;
+  }, [turns, setText]);
+
+  // Band 2 auto-grows with what is typed into it. MEASURED rather than counted: a wrapped line is
+  // still a line, and counting newlines says a 300-character paragraph is one.
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el || fullscreen) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, LINE_PX * MAX_LINES)}px`;
+  }, [text, composerMode, fullscreen]);
+
 
   // Unified-composer context: what the user last selected. A graph node takes precedence for
   // "explain"; otherwise the selected trace step is the context.
@@ -1294,12 +1391,24 @@ export function BuildPane({
             it, and a box that only lights up once you have already found it is not an anchor —
             it is a form field that happens to be focusable. In the three-column app the composer
             is one of several places to look and it goes back to a hairline and a shadow. */}
+        {/* §3.2's re-parenting. The composer below is written ONCE; the shell decides whether it
+            renders here at the bottom of the thread or inside the expanded dialog. Every piece of
+            its state — draft, attachments, mode, model — is held above this line, which is what
+            makes "the same composer state, re-parented" true rather than aspirational. */}
+        <ComposerShell fullscreen={fullscreen} onClose={() => setFullscreen(false)} onSend={submit}>
         <div
           // ON THE GRID, AND IN CLASSES. It was `padding: "14px 16px 12px"` as an inline style —
           // the only inline padding in the app, on the app's most important control, off the 4px
           // grid on two of its three axes.
-          className={`rounded-modal border border-edge bg-panel p-4 pb-3 transition-shadow duration-fast
-            focus-within:shadow-focusring ${standalone ? "shadow-glow" : "shadow-raised"}`}
+          //
+          // In the dialog it drops its own border, radius and shadow and fills instead: the dialog
+          // already IS the raised box, and a card inside a card is two edges saying one thing.
+          className={
+            fullscreen
+              ? "flex min-h-0 flex-1 flex-col bg-panel p-4 pb-3"
+              : `rounded-modal border border-edge bg-panel p-4 pb-3 transition-shadow duration-fast
+                 focus-within:shadow-focusring ${standalone ? "shadow-glow" : "shadow-raised"}`
+          }
         >
           {/* WHAT THE TIER JUST REFUSED, above the input and inside the composer card.
               Inline rather than as a modal, per the specification: a fourth agent on Free is
@@ -1338,7 +1447,10 @@ export function BuildPane({
 
           {/* input slot: the textarea and the live waveform crossfade in place (~200ms) so the
               transition from typing to recording is smooth and the card doesn't jump. */}
-          <div className="relative" style={{ height: showWave ? recordHeight : undefined }}>
+          <div
+            className={fullscreen ? "relative min-h-0 flex-1" : "relative"}
+            style={{ height: showWave ? recordHeight : undefined }}
+          >
             <textarea
               ref={composerRef}
               // First run only. The caret belongs in the one control the screen exists for, and
@@ -1366,9 +1478,18 @@ export function BuildPane({
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
                   submit();
+                  // §3.2: ⌘↵ in the expanded editor sends AND collapses. The dialog binds this
+                  // too, for when focus is on a control rather than in the text; both paths end
+                  // in the same two calls rather than in two ideas of what the chord does.
+                  if (fullscreen) setFullscreen(false);
+                  return;
                 }
+                // §3.3: ↑ on an EMPTY composer brings the last message back as a draft. Guarded on
+                // emptiness because on a composer with text in it ↑ is how you move the caret up a
+                // line, and taking that would make the twelve-line editor unusable.
+                if (e.key === "ArrowUp" && text === "" && editLastUserMessage()) e.preventDefault();
               }}
-              rows={2}
+              rows={1}
               placeholder={moment.placeholder}
               // 14px, in a class. It is still deliberately off the 11/12/13 chrome ladder — this
               // is the sentence the user writes and it should be the largest text on the screen —
@@ -1376,8 +1497,11 @@ export function BuildPane({
               // maintain or match.
               className="w-full resize-none bg-transparent text-[14px] leading-[1.5] text-ink outline-none transition-opacity duration-base placeholder:text-muted focus-visible:shadow-focusring"
               style={{
-                minHeight: "44px",
-                maxHeight: "200px",
+                minHeight: LINE_PX,
+                // In the dialog there is no 12-line cap — the box IS the editor, and it fills
+                // whatever the 70vh dialog gives it.
+                maxHeight: fullscreen ? undefined : LINE_PX * MAX_LINES,
+                height: fullscreen ? "100%" : undefined,
                 overflowY: "auto",
                 opacity: showWave ? 0 : 1,
                 pointerEvents: showWave ? "none" : "auto",
@@ -1399,112 +1523,164 @@ export function BuildPane({
             </div>
           </div>
 
-          <div className="mt-3 flex items-center justify-between">
-            {/* left — the glyphs that put something INTO the message: voice, attached context,
-                and (in test mode) saving the input as an eval case. No boxes.
+          {/* Band 3 — the control bar. §3.1: every composer control lives in this one row at the
+              bottom of the card. Nothing renders above the textarea except attachment chips, and
+              nothing floats inside it.
 
-                ONE GAP FOR BOTH GROUPS. This was 14px on the left and 10px on the right — two icon
-                groups in the same row at two different rhythms, which reads as one of them being
-                slightly wrong without it being obvious which. */}
-            <div className="flex items-center gap-2.5">
-              <button
-                type="button"
-                onClick={voice.toggle}
-                disabled={!voice.supported}
-                title={
-                  voice.supported
-                    ? voice.listening
-                      ? "Stop voice input"
-                      : "Voice input"
-                    : "Voice input isn't supported in this browser"
-                }
-                className={`transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
-                  voice.listening ? "text-run animate-stream-pulse motion-reduce:animate-none" : "text-muted hover:text-ink"
-                }`}
-              >
-                <MicIcon size={ICON.md} />
-              </button>
-              {/* Beside the mic: it is an input to the message, like the mic, rather than a
-                  setting for how the message is handled. */}
-              <GitHubAttachMenu view={github.view} onAttach={github.attach} />
-              {/* Test mode only: the input IS an eval example, so promotion belongs here
-                  rather than in the Evals tab — that's where a case earns its place. */}
-              {composerMode === "test" && activeAgentId && (
-                <button
-                  type="button"
-                  onClick={promote}
-                  disabled={!connected || !promotable}
-                  title={
-                    promotable
-                      ? "Save this test input to the eval dataset"
-                      : "Type or run a test input first"
+              THE CONTROLS ARE A MAP, NOT A LAYOUT. Which side of the spacer each one sits on, what
+              collapses below which width, and where the `⋯` goes are decided in
+              lib/composerBar.ts, where they are rules a suite can check rather than a class string
+              somebody reads. A control that is absent — the deck with no connectors, promote
+              outside Test mode — is simply not a key here, and §12.1c is the promise that its
+              absence moves nothing else. */}
+          <ComposerBar
+            className="mt-3"
+            controls={{
+              add: {
+                bar: () => (
+                  <AddMenu
+                    githubView={github.view}
+                    onAttachGithub={github.attach}
+                    disabled={busy}
+                    openSignal={attachChordNonce}
+                  />
+                ),
+              },
+              fullscreen: {
+                bar: () => (
+                  <ControlButton
+                    icon={Icon.Fullscreen}
+                    name={fullscreen ? "Collapse the composer" : "Expand the composer"}
+                    title={
+                      fullscreen
+                        ? "Collapse (Esc)"
+                        : "Write in a larger editor (⌘⇧F) — keeps your text, attachments and settings"
+                    }
+                    pressed={fullscreen}
+                    active={fullscreen}
+                    onClick={() => setFullscreen(!fullscreen)}
+                  />
+                ),
+              },
+              // Test mode only: the input IS an eval example, so promotion belongs on the bar
+              // beside the thing being promoted rather than in the Evals tab — that is where a
+              // case earns its place.
+              ...(composerMode === "test" && activeAgentId
+                ? {
+                    promote: {
+                      bar: (density: Density) => (
+                        <ControlButton
+                          icon={Icon.AttachDataset}
+                          name="Save this test input to the eval dataset"
+                          label={
+                            showsLabel(density) && promoted
+                              ? promoted.duplicate ? "already saved" : "saved"
+                              : undefined
+                          }
+                          title={
+                            promoted
+                              ? promoted.duplicate
+                                ? `already in ${promoted.datasetName}`
+                                : `saved to ${promoted.datasetName}`
+                              : promotable
+                                ? "Save this test input to the eval dataset"
+                                : "Type or run a test input first"
+                          }
+                          active={Boolean(promoted)}
+                          disabled={!connected || !promotable}
+                          onClick={promote}
+                        />
+                      ),
+                      menu: () => (
+                        <PopoverRow
+                          label="Save to eval dataset"
+                          detail={promoted ? `saved to ${promoted.datasetName}` : "turn this test input into a case"}
+                          disabled={!connected || !promotable}
+                          onSelect={promote}
+                        />
+                      ),
+                    },
                   }
-                  className="text-muted hover:text-ink transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  <SaveToDatasetIcon size={ICON.md} />
-                </button>
-              )}
-              {promoted && (
-                <span className={`text-[11px] ${promoted.duplicate ? "text-muted" : "text-ok"}`}>
-                  {promoted.duplicate
-                    ? `already in ${promoted.datasetName}`
-                    : `saved to ${promoted.datasetName}`}
-                </span>
-              )}
-            </div>
-
-            {/* right — how the message is HANDLED, and the one filled control on this screen.
-                The model selector belongs on this side: the glyphs opposite add content, and this
-                decides what the content is sent to. It sat among them, which put a setting in the
-                row of inputs. */}
-            <div className="flex items-center gap-2.5">
-              <ModelSelector provider={provider} model={model} setProvider={setProvider} setModel={setModel} />
-              {/* Two chips in a track. Same geometry as every other chip in the app, overridden
-                  only where a segmented control genuinely differs from a chip strip: the radius
-                  is a pill because the segments sit inside one.
-
-                  THE ACTIVE SEGMENT USED TO BE INK-FILLED, on the argument that choosing where ⌘↵
-                  goes is the same weight of decision as pressing send. It is not — it is a mode,
-                  and a mode is a state rather than an act. The cost of the argument was three
-                  ink-filled controls on the default screen at once (Deploy, this, and send), where
-                  the rule is one per view. Panel surface with an accent label: unmistakably the
-                  chosen one, without competing with the thing you press. */}
-              <div className="flex items-center rounded-full bg-active p-0.5">
-                {(["chat", "test"] as const).map((m) => {
-                  const active = composerMode === m;
-                  return (
-                    <Chip
-                      key={m}
-                      size="lg"
-                      onClick={() => setComposerMode(m)}
-                      variant={active ? "fill" : "bare"}
-                      color={active ? INTERACTION.accent : undefined}
-                      background={active ? SURFACE.panel : undefined}
-                      className="!rounded-full"
-                      title={
-                        m === "chat"
-                          ? "Talk to Jaroku — plan, edit, explain"
-                          : "Send this as the agent's own input and run it"
-                      }
-                    >
-                      {m === "chat" ? "Chat" : "Test"}
-                    </Chip>
-                  );
-                })}
-              </div>
-              <button
-                type="button"
-                onClick={submit}
-                disabled={!connected || !text.trim() || (composerMode === "test" ? !canRun : busy)}
-                title={composerMode === "test" ? "Run the agent on this input" : "Send"}
-                className="flex items-center justify-center rounded-full transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
-                style={{ width: 30, height: 30, background: TEXT.ink, color: SURFACE.bg }}
-              >
-                <ArrowUpIcon size={ICON.sm} />
-              </button>
-            </div>
-          </div>
+                : {}),
+              model: {
+                bar: () => (
+                  <ModelSelector provider={provider} model={model} setProvider={setProvider} setModel={setModel} />
+                ),
+              },
+              mode: {
+                bar: () => (
+                  // Two chips in a track — unchanged from v0.2.2 except for where it sits. The
+                  // active segment is panel surface with an accent label rather than an ink fill:
+                  // a mode is a state, not an act, and the app's one ink-filled control on this
+                  // screen is the thing you press.
+                  <div className="flex shrink-0 items-center rounded-full bg-active p-0.5">
+                    {(["chat", "test"] as const).map((m) => {
+                      const active = composerMode === m;
+                      return (
+                        <Chip
+                          key={m}
+                          size="lg"
+                          onClick={() => setComposerMode(m)}
+                          variant={active ? "fill" : "bare"}
+                          color={active ? INTERACTION.accent : undefined}
+                          background={active ? SURFACE.panel : undefined}
+                          className="!rounded-full"
+                          title={
+                            m === "chat"
+                              ? "Talk to Jaroku — plan, edit, explain"
+                              : "Send this as the agent's own input and run it"
+                          }
+                        >
+                          {m === "chat" ? "Chat" : "Test"}
+                        </Chip>
+                      );
+                    })}
+                  </div>
+                ),
+              },
+              mic: {
+                bar: () => (
+                  <ControlButton
+                    icon={Icon.Mic}
+                    name={voice.listening ? "Stop voice input" : "Voice input"}
+                    title={
+                      voice.supported
+                        ? voice.listening
+                          ? "Stop voice input"
+                          : "Voice input"
+                        : "Voice input isn't supported in this browser"
+                    }
+                    pressed={voice.listening}
+                    disabled={!voice.supported || busy}
+                    onClick={voice.toggle}
+                    className={voice.listening ? "text-run animate-stream-pulse motion-reduce:animate-none" : ""}
+                  />
+                ),
+              },
+              send: {
+                bar: () => (
+                  <button
+                    type="button"
+                    onClick={submit}
+                    disabled={!connected || !text.trim() || (composerMode === "test" ? !canRun : busy)}
+                    aria-label={composerMode === "test" ? "Run the agent on this input" : "Send"}
+                    title={composerMode === "test" ? "Run the agent on this input" : "Send (⌘↵)"}
+                    // The one ink-filled control on the screen, and the only one in this bar that
+                    // is not a glyph on open background. §3.2: the only change here is the
+                    // registry icon and the 32px hit target the rest of the bar now shares.
+                    className="flex shrink-0 items-center justify-center rounded-full transition-opacity
+                      focus-visible:outline-none focus-visible:shadow-focusring
+                      disabled:cursor-not-allowed disabled:opacity-30"
+                    style={{ width: HIT_TARGET, height: HIT_TARGET, background: TEXT.ink, color: SURFACE.bg }}
+                  >
+                    <Glyph icon={Icon.Send} size={GLYPH.toolbar} />
+                  </button>
+                ),
+              },
+            }}
+          />
         </div>
+        </ComposerShell>
       </div>
     </div>
   );

@@ -763,3 +763,11 @@ jobs:
           # tokens resolves to real path data — which is what turns a silent blank square in the
           # control bar into a named failure on the upgrade that caused it.
           npm run test:icons
+          # WHERE EACH COMPOSER CONTROL SITS, which §12 states as two acceptance criteria written
+          # as things somebody checks by resizing a window — 1c, that hiding a control moves no
+          # other control, and 1d, that the bar never wraps and the right three collapse into the
+          # ⋯ below ~560px. Both have a wrong answer that stays invisible until the day somebody
+          # switches to a model with no reasoning control, by which point the bar has been
+          # reviewed a dozen times at one width. So the rules live in a pure module and the suite
+          # holds them, rather than living in a class string nobody can assert against.
+          npm run test:composer-bar
