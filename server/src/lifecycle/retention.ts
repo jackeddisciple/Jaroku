@@ -190,6 +190,7 @@ export const RETENTION_KEPT_TABLES: Record<string, string> = {
   conversation_settings: "a setting is current or absent, not an event with an age — and it is bounded by the thread it belongs to, which cascades. Sweeping one would silently loosen a permission mode somebody chose",
   turn_attachments: "what a turn was looking at, and it leaves when that turn does — the row cascades from thread_items, which this sweep already removes. Sweeping it on its own clock would leave a turn whose context is unreconstructible while the turn itself still renders, which is the one thing §4.4 says the table exists to prevent",
   conversation_connectors: "which connectors a conversation may reach. A decision, not an event — and one that must outlive the runs it shaped, because 'why could this thread not see Slack' is asked long after those traces have been swept",
+  turn_variants: "what each response was — which model, which effort, what it cost. It leaves with the turn, which cascades, and never on its own clock: sweeping it would leave a variant switcher counting responses whose metadata is gone",
 };
 
 /** How many rows a sweep actually took, across every table it touches. */

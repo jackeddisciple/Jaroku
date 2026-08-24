@@ -48,6 +48,9 @@ import { MAX_ATTACHMENTS, WARN_AT, budgetPercent } from "../lib/attachBudget.ts"
 import { EffortControl, effortLabel } from "./composer/EffortControl.tsx";
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
 import { ConnectorDeck } from "./composer/ConnectorDeck.tsx";
+import { TurnActions } from "./composer/TurnActions.tsx";
+import { TurnMetadata } from "./composer/TurnMetadata.tsx";
+import { turnSource, metaForTurn, promptForRegenerate } from "../lib/turnSource.ts";
 import {
   FALLBACK_SETTINGS, useComposerSettingsStore, type Effort, type PermissionMode,
 } from "../store/composerSettingsStore.ts";
@@ -261,6 +264,80 @@ function JarokuMark() {
   );
 }
 
+/**
+ * §5 and §6, under every one of Jaroku's turns.
+ *
+ * WRAPPED AROUND THE CARD RATHER THAN BUILT INTO EACH ONE. There are four kinds of assistant turn
+ * — a plan, a generation, a diff proposal, a reply — and every one of them is copyable,
+ * regenerable and has metadata to report. Four copies of that row would be four places for the
+ * keyboard rule to be forgotten, and §5 is explicit that it "must be reachable in tab order" on
+ * every turn rather than only the ones somebody remembered.
+ *
+ * An INFO turn gets neither: it is the app narrating itself ("connectors changed"), not a response
+ * anybody asked for, and offering to regenerate one would be offering to re-run nothing.
+ */
+function AssistantTurn({
+  turn,
+  isLast,
+  children,
+}: {
+  turn: ChatTurn;
+  isLast: boolean;
+  children: React.ReactNode;
+}) {
+  const streaming = useChatStore((s) => s.streamingThreadId !== null);
+  const models = useProviderStore((s) => s.models);
+  const threadId = useThreadStore((s) => s.activeThreadId);
+  const turns = useChatStore((s) => threadFor({ threads: s.threads, pending: s.pending }, threadId));
+  const meta = metaForTurn(turn);
+  const source = turnSource(turn);
+
+  return (
+    // `group/turn` is what lets the action row appear on hover of the WHOLE turn rather than of the
+    // row itself — a strip of glyphs you have to find before it appears is one nobody finds.
+    <div className="group/turn">
+      {children}
+      {source !== null && (
+        <div className="mt-1.5 pl-[26px]">
+          <TurnActions
+            source={source}
+            isLast={isLast}
+            streaming={isLast && streaming}
+            onRegenerate={() => rerunTurn(turns, turn)}
+            onRegenerateWith={(opts) => rerunTurn(turns, turn, opts)}
+            // The three most recent models from the catalogue. The whole list would be a menu
+            // longer than the response it is offering to replace.
+            models={models.slice(0, 3).map((m) => ({ id: m.id, label: m.label }))}
+          />
+          {meta && <TurnMetadata meta={meta} streaming={isLast && streaming} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Re-run the message that produced this turn — §5.4.
+ *
+ * THE PREVIOUS RESPONSE IS NEVER DESTROYED. The server writes a new `turn_variants` row beside the
+ * old one, so "which model wrote this?" stays answerable for both. What the client does here is
+ * put the original message back in the composer's send path; the variant bookkeeping is the
+ * server's, because it is the only side that knows what the request actually cost.
+ */
+function rerunTurn(
+  turns: readonly ChatTurn[],
+  turn: ChatTurn,
+  opts?: { modelId?: string; effort?: string },
+): void {
+  // The message, not the turn. A generation three cards down re-runs the sentence that started it
+  // — §5.4's "the same user input" — rather than whatever is in the box now.
+  const prompt = promptForRegenerate(turns, turn);
+  if (!prompt) return;
+  const ui = useUiStore.getState();
+  if (opts?.modelId) ui.setModel(opts.modelId);
+  ui.prefillChat(prompt);
+}
+
 function Turn({ turn, isLastGen }: { turn: ChatTurn; isLastGen: boolean }) {
   if (turn.role === "user") {
     return (
@@ -272,10 +349,34 @@ function Turn({ turn, isLastGen }: { turn: ChatTurn; isLastGen: boolean }) {
       </TurnRow>
     );
   }
-  if (turn.kind === "plan") return <TurnRow marker={<JarokuMark />}><PlanCard turn={turn} /></TurnRow>;
-  if (turn.kind === "gen") return <TurnRow marker={<JarokuMark />}><GenTurnView turn={turn} isLive={isLastGen} /></TurnRow>;
-  if (turn.kind === "proposal") return <TurnRow marker={<JarokuMark />}><DiffCard turn={turn} /></TurnRow>;
-  if (turn.kind === "reply") return <TurnRow marker={<JarokuMark />}><ReplyTurnView turn={turn} /></TurnRow>;
+  if (turn.kind === "plan") {
+    return (
+      <AssistantTurn turn={turn} isLast={isLastGen}>
+        <TurnRow marker={<JarokuMark />}><PlanCard turn={turn} /></TurnRow>
+      </AssistantTurn>
+    );
+  }
+  if (turn.kind === "gen") {
+    return (
+      <AssistantTurn turn={turn} isLast={isLastGen}>
+        <TurnRow marker={<JarokuMark />}><GenTurnView turn={turn} isLive={isLastGen} /></TurnRow>
+      </AssistantTurn>
+    );
+  }
+  if (turn.kind === "proposal") {
+    return (
+      <AssistantTurn turn={turn} isLast={isLastGen}>
+        <TurnRow marker={<JarokuMark />}><DiffCard turn={turn} /></TurnRow>
+      </AssistantTurn>
+    );
+  }
+  if (turn.kind === "reply") {
+    return (
+      <AssistantTurn turn={turn} isLast={isLastGen}>
+        <TurnRow marker={<JarokuMark />}><ReplyTurnView turn={turn} /></TurnRow>
+      </AssistantTurn>
+    );
+  }
   // Info notes are the app narrating itself ("connectors changed"), not Jaroku answering — no
   // mark, so the gutter stays a record of who spoke.
   return (

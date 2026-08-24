@@ -177,6 +177,11 @@ export const EXPORTED_TABLES = [
   // export carrying every run but not the scope they executed under describes what happened while
   // omitting what was possible.
   "conversation_connectors",
+  // WHICH MODEL WROTE WHICH RESPONSE, at what effort, for what money. Ids and numbers, no content
+  // and no credential — the only question this list asks. It is the per-response half of what
+  // `usage_events` answers per run, and it is the only place a clamp is recorded: an export
+  // without it could not answer "we asked for XHigh, what did we actually get?" about any turn.
+  "turn_variants",
   // WHAT NEEDED SOMEBODY, AND WHEN IT STOPPED. An inbox item is the workspace's own operational
   // record — which credential was missing, which deploy failed, which agent was drifting, and how
   // long each of those was true before it was fixed. It answers "when did this start going wrong"

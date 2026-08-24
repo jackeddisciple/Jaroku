@@ -101,6 +101,35 @@ export interface GenUsage {
   cache_read_input_tokens: number;
   cache_creation_input_tokens: number;
   cost_usd: number;
+
+  // --- what §6's metadata row reports ----------------------------------------------------------
+  //
+  // ALL OPTIONAL, AND THAT IS THE HONEST SHAPE RATHER THAN A MIGRATION HALF-DONE. A turn that
+  // predates the variant store has none of these, and §6.5's row omits the slots it cannot fill —
+  // which is what the spec asks for anyway ("absent items collapse, the rest hold position").
+  // Making them required would mean inventing values for every historical turn, and §7's migration
+  // note is explicit about that: "null the rest rather than guessing."
+  //
+  // THEY RIDE ON `usage` RATHER THAN ON THE TURN because every one of them is a fact about one
+  // REQUEST, and a regenerated turn has several. When the variant switcher moves, this whole
+  // object is what changes — which is what stops variant 1's duration being rendered under
+  // variant 2's response.
+
+  /** The model that produced THIS response. §6.1 — never the composer's current selection. */
+  model?: string;
+  provider?: string;
+  /** The level actually spent. §6.2 shows this one. */
+  effort?: string;
+  /** What was asked for. Differs from `effort` only when something clamped — §6.2's marker. */
+  effort_requested?: string;
+  /** Wall clock, dispatch to end of stream (§6.4). Absent while it is still being measured. */
+  duration_ms?: number;
+  /** §6.3's trailing DiffStat, when the diff is small enough to summarise. */
+  added?: number;
+  removed?: number;
+  /** §5.4's switcher — the two numbers in "2/2". Absent means a single response. */
+  variant_ordinal?: number;
+  variant_total?: number;
 }
 
 // The pre-generation plan (server/src/planProtocol.ts). Hand-mirrored like every other

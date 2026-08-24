@@ -534,6 +534,14 @@ jobs:
           # that request through, which is why the estimator is deliberately pessimistic about
           # source code and why that pessimism is checked rather than assumed.
           npm run test:attachments
+          # RESPONSE VARIANTS — §12.21 and §12.22. The first has a comfortable failure: a store
+          # that updated a turn in place looks completely correct while ONE response is on
+          # screen, and is only wrong when somebody compares two — at which point the metadata
+          # row, whose whole job is answering "which model wrote this?", answers with whichever
+          # model ran last. The second is not a wrong pixel at all: if switching a view moved
+          # the published pointer, reading a response would be deploying one, so the suite
+          # asserts the store has no publish path to reach.
+          npm run test:turn-variants
           npm run test:plans
           # The entitlement resolver, and the audit that is the reason it is a suite rather than a note.
           # It reads wsRelay.ts for every command the relay accepts and fails on one that has neither a
@@ -826,3 +834,11 @@ jobs:
           # pre-empts it: an absent connector reads as a workspace disconnection, which is the
           # one thing this toggle deliberately is not.
           npm run test:connector-deck
+          # THE METADATA ROW'S ORDER — §12.24: "Metadata row order is stable; absent items
+          # collapse without reordering the rest." The failure is not a crash and not a wrong
+          # value: it is the duration sitting in a different place on a turn that produced code
+          # than on one that did not, and §6.5 gives the reason it matters in one sentence —
+          # "people learn the position of the thing they check most". Reordering on availability
+          # is also the natural thing to write, so the suite checks every combination of
+          # absences rather than the three the spec happens to name.
+          npm run test:turn-metadata
