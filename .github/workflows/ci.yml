@@ -756,3 +756,10 @@ jobs:
           # address is worse than having no shortcut at all.
           npm run test:truncate-path
           npm run test:composer-triggers
+          # THE ICON REGISTRY, and it is here for a failure a typecheck cannot see. Hugeicons
+          # numbers some glyph families and the numbers move between releases; a renamed export
+          # arrives as `undefined` rather than throwing, the renderer draws an empty `<svg>`, and
+          # the composer quietly loses a control. So the suite asserts every one of §2.1's twenty
+          # tokens resolves to real path data — which is what turns a silent blank square in the
+          # control bar into a named failure on the upgrade that caused it.
+          npm run test:icons
