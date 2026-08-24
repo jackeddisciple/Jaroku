@@ -117,3 +117,89 @@ export function costFor(model: string, t: TokenBreakdown): number | null {
 export function round8(usd: number): number {
   return Number(usd.toFixed(USD_DP));
 }
+
+// ── Capability ──────────────────────────────────────────────────────────────
+// What a model can DO, as opposed to what it costs. Same file, same reader, and that is a
+// decision rather than convenience: the composer spec requires the reasoning budgets to live
+// "in the same shared pricing/capability file as model metadata", and the reason is the reason
+// the prices are here — a table that lives in TypeScript is a table the Python runtime cannot
+// read, and two tables about the same models drift the first time one of them is edited.
+//
+// Loading is best-effort in exactly the same way. A missing `reasoning` key means "this model
+// has no reasoning control", which is the safe direction: the composer hides the effort chip
+// rather than sending a thinking budget to a provider that would reject it.
+
+/** How a provider spells "think harder", or null when it does not. */
+export type ReasoningKind = "thinking" | "effort";
+
+export interface Capability {
+  id: string;
+  /** Null when the model exposes no reasoning control at all — §6.2 omits the chip. */
+  reasoning: ReasoningKind | null;
+  /** The ceiling every thinking budget is validated against before dispatch. */
+  maxOutputTokens: number;
+  /** For the attachment budget check. Null when nothing has recorded one. */
+  contextWindow: number | null;
+}
+
+/** Jaroku's four levels, in tokens, for `thinking`-shaped providers. */
+export type ReasoningBudgets = Record<string, number>;
+
+function loadCapabilities(): { caps: Capability[]; budgets: ReasoningBudgets } {
+  try {
+    const raw = JSON.parse(readFileSync(PRICING_PATH, "utf8")) as {
+      models?: Record<string, unknown>[];
+      reasoning?: { budgets?: Record<string, unknown> };
+    };
+    const caps: Capability[] = [];
+    for (const m of raw.models ?? []) {
+      const id = typeof m.id === "string" ? m.id : null;
+      if (!id) continue;
+      const kind = m.reasoning;
+      caps.push({
+        id,
+        reasoning: kind === "thinking" || kind === "effort" ? kind : null,
+        // A model with no recorded ceiling gets a conservative one rather than Infinity. An
+        // unbounded default would let a budget through unvalidated, which is the one thing this
+        // number exists to prevent.
+        maxOutputTokens: Number.isFinite(Number(m.max_output_tokens)) ? Number(m.max_output_tokens) : 4096,
+        contextWindow: Number.isFinite(Number(m.context_window)) ? Number(m.context_window) : null,
+      });
+    }
+    const budgets: ReasoningBudgets = {};
+    for (const [k, v] of Object.entries(raw.reasoning?.budgets ?? {})) {
+      if (Number.isFinite(Number(v))) budgets[k] = Number(v);
+    }
+    return { caps, budgets };
+  } catch {
+    return { caps: [], budgets: {} };
+  }
+}
+
+const CAPS = loadCapabilities();
+
+/**
+ * The capability record for a model, matched exactly-then-longest-prefix — the SAME rule
+ * `priceFor` uses, and deliberately so. A model id that prices as `claude-sonnet-5` and reasons
+ * as something else would be two answers about one model.
+ */
+export function capabilityFor(model: string): Capability | null {
+  if (!model) return null;
+  const exact = CAPS.caps.find((c) => c.id === model);
+  if (exact) return exact;
+  let best: Capability | null = null;
+  for (const c of CAPS.caps) {
+    if (model.startsWith(c.id) && (best === null || c.id.length > best.id.length)) best = c;
+  }
+  return best;
+}
+
+/** The shared budget table. Empty when the file is missing, which reads as "no thinking". */
+export function reasoningBudgets(): ReasoningBudgets {
+  return CAPS.budgets;
+}
+
+/** How much context this model has, for the attachment budget check. Null when unrecorded. */
+export function contextWindowFor(model: string): number | null {
+  return capabilityFor(model)?.contextWindow ?? null;
+}

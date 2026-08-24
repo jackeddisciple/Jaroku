@@ -489,6 +489,32 @@ jobs:
         working-directory: server
         run: |
           npm run test:pricing
+          # REASONING EFFORT, AND THE ONE FAILURE MODE THAT IS COMFORTABLE. The composer spec's
+          # §3.2 says "Degradation is visible, not silent" and "Never report an effort that
+          # wasn't used" — two statements of the same rule, because the way this breaks is a
+          # request that quietly downgrades while the UI keeps reporting what was asked for.
+          # Nothing errors, nothing looks wrong, and somebody believes they paid for XHigh
+          # reasoning on every turn for a month. The suite constructs a reasoning_effort-shaped
+          # model rather than adding one to the shipped price sheet, because the clamp branch is
+          # otherwise unreachable — and a criterion that passes without executing a line of its
+          # subject is the worst kind of green.
+          npm run test:effort
+          # WHAT A CONVERSATION IS SET TO, and §7's refusal to backfill a row per conversation.
+          # The failure is silent: a conversation frozen at whatever the default was on the day
+          # somebody touched an unrelated setting still WORKS, it just stops following the
+          # workspace, and nobody finds out until an admin changes the default and half the
+          # threads ignore it. It also holds §3.2's pin, which is a security rule wearing a
+          # settings hat — a pin a conversation can opt out of is a suggestion.
+          npm run test:conversation-settings
+          # ...and the routes over it, where three of the four interesting answers are policy
+          # rather than validation: another workspace's conversation is 404 and never 403 (a 403
+          # confirms the id exists, which makes the route an enumeration oracle), a pinned
+          # workspace refuses with 409 rather than accepting a write the resolver would then
+          # ignore, and the response is the EFFECTIVE settings rather than an echo of the
+          # request. Plus the audit row §3.2 requires, carrying BOTH values — "set to Fast" does
+          # not distinguish somebody relaxing Strict from somebody re-saving, and the first is
+          # what the row exists to make findable.
+          npm run test:conversation-routes
           npm run test:plans
           # The entitlement resolver, and the audit that is the reason it is a suite rather than a note.
           # It reads wsRelay.ts for every command the relay accepts and fails on one that has neither a

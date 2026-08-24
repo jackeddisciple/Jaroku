@@ -42,6 +42,8 @@ import { ComposerShell } from "./composer/FullscreenComposer.tsx";
 import { ControlButton } from "./composer/ControlButton.tsx";
 import { PopoverRow } from "./composer/Popover.tsx";
 import { AddMenu } from "./composer/AddMenu.tsx";
+import { EffortControl, effortLabel } from "./composer/EffortControl.tsx";
+import { FALLBACK_SETTINGS, useComposerSettingsStore, type Effort } from "../store/composerSettingsStore.ts";
 import { GLYPH, Glyph, HIT_TARGET, Icon } from "./icons.ts";
 import type { Density } from "../lib/composerBar.ts";
 import { activeTrigger, removeTrigger, type ActiveTrigger } from "../lib/composerTriggers.ts";
@@ -597,6 +599,32 @@ export function BuildPane({
   // §3.3's ⌘/ — a counter rather than a boolean, because the same chord pressed twice has to open
   // the menu twice, and a boolean that is already true is a keystroke that does nothing.
   const [attachChordNonce, setAttachChordNonce] = useState(0);
+
+  // §3.2's settings, mirrored from the server. The store never decides — a workspace can pin the
+  // permission mode and disallow Fast, so what somebody picked and what is in effect are different
+  // values, and only the server knows the second one.
+  const settings = useComposerSettingsStore((s) => s.byConversation[activeThreadId ?? "__none"]) ?? FALLBACK_SETTINGS;
+  const patchSettings = useComposerSettingsStore((s) => s.patch);
+  const loadSettings = useComposerSettingsStore((s) => s.load);
+  useEffect(() => { void loadSettings(activeThreadId); }, [activeThreadId, loadSettings]);
+
+  /**
+   * The effort THIS message will be sent with.
+   *
+   * Held beside the draft rather than in the store, because §3.2 is explicit that a per-turn
+   * override is not sticky unless "Remember" is checked. An override that lived in the settings
+   * store would be one that persisted by construction, and the checkbox would have nothing left to
+   * mean. Cleared when the conversation changes, for the same reason the draft is per-thread: an
+   * override is about a message, and that message is gone.
+   */
+  const [effortOverride, setEffortOverride] = useState<Effort | null>(null);
+  useEffect(() => { setEffortOverride(null); }, [activeThreadId]);
+  const effort: Effort = effortOverride ?? settings.reasoning_effort;
+
+  // The selected model's own capability record, from the server's catalogue snapshot. Looked up
+  // rather than guessed: whether a reasoning control exists at all is the server's answer, and a
+  // second table in this client is what put the catalogue four models behind the price sheet once.
+  const selectedModel = useProviderStore((s) => s.models.find((m) => m.id === model));
 
   const agent = agents.find((a) => a.agent_id === activeAgentId);
   const mode: "generate" | "edit" = activeAgentId ? "edit" : "generate";
@@ -1559,6 +1587,41 @@ export function BuildPane({
                     pressed={fullscreen}
                     active={fullscreen}
                     onClick={() => setFullscreen(!fullscreen)}
+                  />
+                ),
+              },
+              effort: {
+                bar: (density: Density) => (
+                  <EffortControl
+                    value={effort}
+                    model={selectedModel}
+                    dense={!showsLabel(density)}
+                    disabled={busy}
+                    remembered={settings.explicit.effort}
+                    onPick={(level, remember) => {
+                      // UNCHECKED IS THE DEFAULT AND IT WRITES NOTHING. The level applies to the
+                      // next turn and is forgotten after it; only "Remember" reaches the server.
+                      setEffortOverride(level);
+                      if (remember) void patchSettings(activeThreadId, { reasoning_effort: level });
+                    }}
+                  />
+                ),
+                menu: () => (
+                  <PopoverRow
+                    label="Reasoning effort"
+                    detail={
+                      selectedModel?.reasoning
+                        ? effortLabel(effort)
+                        : `${selectedModel?.id ?? "This model"} doesn't expose a reasoning control.`
+                    }
+                    disabled={!selectedModel?.reasoning || busy}
+                    onSelect={() => {
+                      // Cycles rather than opening a second popover inside the overflow one. A
+                      // nested menu at this width is a menu that does not fit on the screen it is
+                      // collapsing for, and the four levels are a ring somebody can step round.
+                      const order: Effort[] = ["low", "medium", "high", "xhigh"];
+                      setEffortOverride(order[(order.indexOf(effort) + 1) % order.length]!);
+                    }}
                   />
                 ),
               },

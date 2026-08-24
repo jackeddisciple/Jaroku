@@ -1,17 +1,17 @@
 {
   "$comment": [
     "SINGLE SOURCE OF TRUTH for model pricing. Read by BOTH sides:",
-    "  runtime/jaroku_interceptor/callback.py  \u2014 per-step cost as a run executes",
-    "  server/src/pricing.ts                   \u2014 pre-run estimates + eval aggregation",
+    "  runtime/jaroku_interceptor/callback.py  — per-step cost as a run executes",
+    "  server/src/pricing.ts                   — pre-run estimates + eval aggregation",
     "Two copies of a pricing table drift, and a drifted table means the comparison",
     "dashboard and the pre-run estimate disagree about the same run. One file, two readers.",
     "",
     "Prices are USD per MILLION tokens (readable + auditable against a published price",
     "sheet). Both readers divide by 1e6 themselves; nothing stores per-token floats.",
     "",
-    "Matching is EXACT first, then LONGEST PREFIX \u2014 never unordered substring. A model",
-    "with no entry is priced as UNKNOWN (null cost), never as zero. Doc \u00a78: 'wrong cost",
-    "numbers destroy trust instantly' \u2014 a silent $0.00 is the worst kind of wrong."
+    "Matching is EXACT first, then LONGEST PREFIX — never unordered substring. A model",
+    "with no entry is priced as UNKNOWN (null cost), never as zero. Doc §8: 'wrong cost",
+    "numbers destroy trust instantly' — a silent $0.00 is the worst kind of wrong."
   ],
   "version": 1,
   "currency": "USD",
@@ -20,66 +20,90 @@
     {
       "id": "claude-opus-5",
       "provider": "anthropic",
-      "input": 5.0,
-      "output": 25.0,
+      "input": 5,
+      "output": 25,
       "cache_read_mult": 0.1,
-      "cache_write_mult": 1.25
+      "cache_write_mult": 1.25,
+      "reasoning": "thinking",
+      "max_output_tokens": 64000,
+      "context_window": 200000
     },
     {
       "id": "claude-opus-4-8",
       "provider": "anthropic",
-      "input": 5.0,
-      "output": 25.0,
+      "input": 5,
+      "output": 25,
       "cache_read_mult": 0.1,
-      "cache_write_mult": 1.25
+      "cache_write_mult": 1.25,
+      "reasoning": "thinking",
+      "max_output_tokens": 64000,
+      "context_window": 200000
     },
     {
       "id": "claude-opus-4-7",
       "provider": "anthropic",
-      "input": 5.0,
-      "output": 25.0,
+      "input": 5,
+      "output": 25,
       "cache_read_mult": 0.1,
-      "cache_write_mult": 1.25
+      "cache_write_mult": 1.25,
+      "reasoning": "thinking",
+      "max_output_tokens": 64000,
+      "context_window": 200000
     },
     {
       "id": "claude-opus-4-6",
       "provider": "anthropic",
-      "input": 5.0,
-      "output": 25.0,
+      "input": 5,
+      "output": 25,
       "cache_read_mult": 0.1,
-      "cache_write_mult": 1.25
+      "cache_write_mult": 1.25,
+      "reasoning": "thinking",
+      "max_output_tokens": 64000,
+      "context_window": 200000
     },
     {
       "id": "claude-sonnet-5",
       "provider": "anthropic",
-      "input": 3.0,
-      "output": 15.0,
+      "input": 3,
+      "output": 15,
       "cache_read_mult": 0.1,
-      "cache_write_mult": 1.25
+      "cache_write_mult": 1.25,
+      "reasoning": "thinking",
+      "max_output_tokens": 64000,
+      "context_window": 200000
     },
     {
       "id": "claude-sonnet-4-6",
       "provider": "anthropic",
-      "input": 3.0,
-      "output": 15.0,
+      "input": 3,
+      "output": 15,
       "cache_read_mult": 0.1,
-      "cache_write_mult": 1.25
+      "cache_write_mult": 1.25,
+      "reasoning": "thinking",
+      "max_output_tokens": 64000,
+      "context_window": 200000
     },
     {
       "id": "claude-haiku-4-5",
       "provider": "anthropic",
-      "input": 1.0,
-      "output": 5.0,
+      "input": 1,
+      "output": 5,
       "cache_read_mult": 0.1,
-      "cache_write_mult": 1.25
+      "cache_write_mult": 1.25,
+      "reasoning": null,
+      "max_output_tokens": 8192,
+      "context_window": 200000
     },
     {
       "id": "gpt-4o",
       "provider": "openai",
       "input": 2.5,
-      "output": 10.0,
+      "output": 10,
       "cache_read_mult": 0.5,
-      "cache_write_mult": 1.0
+      "cache_write_mult": 1,
+      "reasoning": null,
+      "max_output_tokens": 16384,
+      "context_window": 128000
     },
     {
       "id": "gpt-4o-mini",
@@ -87,7 +111,10 @@
       "input": 0.15,
       "output": 0.6,
       "cache_read_mult": 0.5,
-      "cache_write_mult": 1.0
+      "cache_write_mult": 1,
+      "reasoning": null,
+      "max_output_tokens": 16384,
+      "context_window": 128000
     },
     {
       "id": "gemini-2.0-flash",
@@ -95,7 +122,10 @@
       "input": 0.1,
       "output": 0.4,
       "cache_read_mult": 0.25,
-      "cache_write_mult": 1.0
+      "cache_write_mult": 1,
+      "reasoning": null,
+      "max_output_tokens": 8192,
+      "context_window": 1048576
     },
     {
       "id": "gemini-2.5-flash",
@@ -103,24 +133,62 @@
       "input": 0.3,
       "output": 2.5,
       "cache_read_mult": 0.25,
-      "cache_write_mult": 1.0
+      "cache_write_mult": 1,
+      "reasoning": "thinking",
+      "max_output_tokens": 65536,
+      "context_window": 1048576
     },
     {
       "id": "gemini-2.5-pro",
       "provider": "google",
       "input": 1.25,
-      "output": 10.0,
+      "output": 10,
       "cache_read_mult": 0.25,
-      "cache_write_mult": 1.0
+      "cache_write_mult": 1,
+      "reasoning": "thinking",
+      "max_output_tokens": 65536,
+      "context_window": 1048576
     },
     {
       "id": "fake-dry-run",
       "provider": "fake",
-      "input": 0.0,
-      "output": 0.0,
-      "cache_read_mult": 0.0,
-      "cache_write_mult": 0.0,
-      "free": true
+      "input": 0,
+      "output": 0,
+      "cache_read_mult": 0,
+      "cache_write_mult": 0,
+      "free": true,
+      "reasoning": null,
+      "max_output_tokens": 4096,
+      "context_window": 32000
     }
-  ]
+  ],
+  "reasoning": {
+    "$comment": [
+      "REASONING CAPABILITY, and the budgets an effort level maps to. Read by server/src/effort.ts.",
+      "",
+      "Here rather than in the adapter because the composer spec requires it: 'Concrete budget",
+      "numbers belong in the same shared pricing/capability file as model metadata, not hardcoded",
+      "in the adapter.' The reason is the same one the prices are here for — a number that lives in",
+      "code is a number the Python side cannot read, and the two would drift.",
+      "",
+      "`kinds` are the three shapes a provider takes:",
+      "  thinking  an extended-thinking budget in tokens (Claude, Gemini 2.5)",
+      "  effort    a named level the API takes directly (OpenAI's reasoning_effort)",
+      "  null      no reasoning control at all — the composer HIDES the chip rather than",
+      "            reporting a meaningless 'Low' (spec 6.2)",
+      "",
+      "XHigh CLAMPS TO HIGH on `effort` providers because the API has three levels and no fourth.",
+      "The clamp is REPORTED, never silent: spec 3.2 — 'Never report an effort that wasn't used.'",
+      "",
+      "Every budget is validated against the model's max_output_tokens before dispatch. A thinking",
+      "budget larger than the response it has to fit inside is a 400 from the provider, and the",
+      "honest answer is a clamp the user can see rather than a failed run."
+    ],
+    "budgets": {
+      "low": 0,
+      "medium": 4000,
+      "high": 16000,
+      "xhigh": 32000
+    }
+  }
 }

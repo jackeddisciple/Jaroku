@@ -539,6 +539,17 @@ export interface ProviderModel {
   label: string;
   /** Whether running on it costs anybody anything. What identifies the dry-run path. */
   free: boolean;
+  /**
+   * How this model spells "think harder", or null when it does not.
+   *
+   * FROM THE SERVER'S SHARED PRICING/CAPABILITY FILE, never from a table in this client. The
+   * composer's effort control renders disabled with an explanatory tooltip when this is null
+   * (§12.4), and a browser that decided that for itself would be the second copy of model facts
+   * that put the catalogue four models behind the price sheet last time.
+   */
+  reasoning: "thinking" | "effort" | null;
+  /** How much context it has, for §4.4's attachment budget check. Null when unrecorded. */
+  context_window: number | null;
 }
 
 export interface ProviderStatus {

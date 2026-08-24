@@ -75,6 +75,8 @@ import { AUTH_ENV, resolveAuthConfig } from "./auth/config.ts";
 import { LocalIssuer } from "./auth/localIssuer.ts";
 import { TokenVerifier } from "./auth/verifier.ts";
 import { authenticate, sessionRoutes } from "./auth/session.ts";
+import { conversationRoutes } from "./http/conversations.ts";
+import { ConversationSettingsStore } from "./conversationSettings.ts";
 import { ContextResolver } from "./auth/resolve.ts";
 import { resolveOriginPolicy } from "./auth/origin.ts";
 import { resolveSocketAuth } from "./auth/socketAuth.ts";
@@ -239,7 +241,7 @@ import {
   PROVIDER_ENV_KEY, isProviderId, isRealProvider, providerLabel, providerStatus, verifyProviderKey,
   type ProviderId,
 } from "./providers.ts";
-import { allPrices } from "./pricing.ts";
+import { allPrices, capabilityFor } from "./pricing.ts";
 import { DeployStore, isInFlight as isDeployInFlight } from "./deployStore.ts";
 import { DeployManager, planDeploy, type DeployManagerDeps } from "./deployManager.ts";
 import { RailwayApi, RailwayError, RAILWAY_ENV_KEY } from "./railwayApi.ts";
@@ -3020,6 +3022,59 @@ mountSecretsRoutes(router, {
   },
 });
 
+/**
+ * §8's conversation surface — the composer's settings, over HTTP rather than the socket.
+ *
+ * HTTP AND NOT THE SOCKET, which is a departure from how most of this product talks and is the
+ * spec's own choice (§8's route table). It is the right one here for a reason worth naming: these
+ * are REQUEST/RESPONSE with a refusal that matters. A pinned workspace answers 409, and a client
+ * has to know its PATCH did not take so it can put the control back where it was. The socket's
+ * broadcast shape has no natural place to put "your change was refused, and here is why".
+ *
+ * The workspace comes from the resolver, exactly like every other authenticated route in this
+ * file: nothing below this line sees a workspace id the client chose.
+ */
+const conversationSettings = new ConversationSettingsStore(store.database());
+
+for (const route of conversationRoutes({
+  callerFor: async (req) => {
+    const auth = await authenticate(req, tokenVerifier);
+    const session = await contextResolver.resolve(
+      auth,
+      req.url.searchParams.get("workspace"),
+      req.requestId,
+      req.ip,
+    );
+    return { ctx: session.context, userId: session.userId, ip: req.ip };
+  },
+  settings: conversationSettings,
+  // Through the thread store's own scoped read, so "does this conversation exist" is answered by
+  // the same WHERE that answers every other question about it. A bare `SELECT 1 FROM threads`
+  // here would be a second, unscoped, path to the same fact.
+  threadExists: async (ctx, id) => (await threadStore.get(ctx, id)) !== undefined,
+  // §3.2: "Mode changes write to audit_log with actor, conversation, old value, new value. In a
+  // multi-tenant workspace, 'who loosened the gate and when' must be answerable."
+  //
+  // BOTH VALUES IN THE METADATA, not just the new one. "Set to Fast" does not distinguish somebody
+  // relaxing Strict from somebody who was already on Fast re-saving, and the first is the event
+  // this row exists to make findable.
+  audit: async (caller, detail) => {
+    await identityRepo.appendAudit(caller.ctx, {
+      actorUserId: caller.userId,
+      action: "conversation.permission_mode_changed",
+      targetType: "conversation",
+      targetId: detail.conversationId,
+      metadata: { from: detail.from, to: detail.to },
+      ip: caller.ip,
+    });
+  },
+})) {
+  if (route.prefix) router.prefixRoute(route.method, route.path, route.handler);
+  else if (route.method === "GET") router.get(route.path, route.handler);
+  else if (route.method === "PATCH") router.patch(route.path, route.handler);
+  else router.post(route.path, route.handler);
+}
+
 const relay = new WsRelay({
   port: PORT,
   store,
@@ -4166,12 +4221,25 @@ async function providerSnapshot(ctx: TenantContext): Promise<ProviderSnapshot> {
     // ORDER IS THE FILE'S ORDER, deliberately: it is a curated list with the newest entries first,
     // and re-sorting it here would put a client's opinion in front of the one the price sheet
     // already expresses.
-    models: allPrices().map((p) => ({
-      id: p.id,
-      provider: p.provider,
-      label: providerLabel(p.provider),
-      free: p.free,
-    })),
+    //
+    // AND CAPABILITY RIDES WITH IT, from the same file. The composer's effort control has to know
+    // whether the selected model exposes a reasoning control at all — §12.4 disables it with an
+    // explanatory tooltip when it does not — and the client must not answer that from a table of
+    // its own. That is the exact drift this comment is about, one field over: a second hidden copy
+    // of model facts in the browser is how the catalogue fell four models behind last time.
+    models: allPrices().map((p) => {
+      const cap = capabilityFor(p.id);
+      return {
+        id: p.id,
+        provider: p.provider,
+        label: providerLabel(p.provider),
+        free: p.free,
+        // Null means "no reasoning control", which §6.2 renders as the chip being OMITTED rather
+        // than showing a meaningless "Low".
+        reasoning: cap?.reasoning ?? null,
+        context_window: cap?.contextWindow ?? null,
+      };
+    }),
   };
 }
 
