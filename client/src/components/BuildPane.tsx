@@ -42,6 +42,9 @@ import { ComposerShell } from "./composer/FullscreenComposer.tsx";
 import { ControlButton } from "./composer/ControlButton.tsx";
 import { PopoverRow } from "./composer/Popover.tsx";
 import { AddMenu } from "./composer/AddMenu.tsx";
+import { AttachmentRail, type DraftAttachment } from "./composer/AttachmentRail.tsx";
+import { refKey, type AttachKind, type AttachableRow } from "./composer/AttachPicker.tsx";
+import { MAX_ATTACHMENTS, WARN_AT, budgetPercent } from "../lib/attachBudget.ts";
 import { EffortControl, effortLabel } from "./composer/EffortControl.tsx";
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
 import {
@@ -831,6 +834,95 @@ export function BuildPane({
   // works both before running and right after, which is when a case proves worth keeping.
   // The server picks/creates the dataset, so this stays a single round trip.
   const promoted = useEvalStore((s) => s.promoted);
+  const runCount = useTraceStore((st) => Object.keys(st.runs).length);
+  const datasetCount = useEvalStore((st) => st.datasets.length);
+
+  /**
+   * §4's attachments, held beside the draft.
+   *
+   * NOT IN A STORE, and for the same reason the GitHub attachments above are not: they belong to
+   * the message being written, they are cleared when it is sent, and nothing outside this composer
+   * has a reason to read them. §4.4's "snapshot at send, not at attach" is what makes that safe —
+   * the ref is already pinned when it lands here, so a file that changes between attaching and
+   * sending does not change what was attached.
+   */
+  const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
+  // Cleared with the thread, like the draft. Attachments are about a message, and that message is
+  // gone when the conversation changes.
+  useEffect(() => { setAttachments([]); }, [activeThreadId]);
+
+  const addAttachments = useCallback((kind: AttachKind, rows: AttachableRow[]) => {
+    setAttachments((current) => {
+      const byKey = new Map(current.map((a) => [a.key, a]));
+      for (const row of rows) {
+        const key = refKey(row.ref);
+        // ATTACHING THE SAME THING TWICE IS ONE ATTACHMENT. A picker left open across two searches
+        // makes this easy to do by accident, and two identical chips is both noise and double the
+        // context budget for one file.
+        if (byKey.has(key)) continue;
+        // §4.4's cap, enforced here as well as at the route: the eleventh is refused with a
+        // sentence rather than silently dropped.
+        if (byKey.size >= MAX_ATTACHMENTS) break;
+        byKey.set(key, {
+          key,
+          kind,
+          ref: row.ref,
+          label: row.label,
+          tokenEstimate: row.token_estimate,
+          protected: row.protected,
+        });
+      }
+      return [...byKey.values()];
+    });
+  }, []);
+
+  const removeAttachment = useCallback((key: string) => {
+    setAttachments((current) => current.filter((a) => a.key !== key));
+  }, []);
+
+  /**
+   * Which of the five sources have anything behind them.
+   *
+   * A SOURCE WITH NOTHING BEHIND IT IS HIDDEN — §4.2's rule about the GitHub entry, generalised:
+   * "an empty menu item that always fails is worse than no item". An agent that has never been
+   * generated has no file tree, a workspace with no MCP server has no tool schemas, and an unlinked
+   * agent has no commits.
+   */
+  const attachSources = useMemo(() => {
+    const kinds = new Set<AttachKind>();
+    if (activeAgentId && agentFileOrder.length > 0) kinds.add("file");
+    if (runCount > 0) kinds.add("run");
+    if (datasetCount > 0) kinds.add("dataset_case");
+    if (mcpTools.length > 0) kinds.add("tool_schema");
+    // §12.12: hidden when the agent has no `github_links` row. `github.view` is null exactly then.
+    if (github.view) kinds.add("github");
+    return kinds;
+  }, [activeAgentId, agentFileOrder.length, runCount, datasetCount, mcpTools.length, github.view]);
+
+  /**
+   * §4.4's budget, computed in the browser for the WARNING and re-computed on the server for the
+   * REFUSAL.
+   *
+   * Two implementations, said out loud rather than pretended away. This one exists because the
+   * warning has to move as somebody attaches, and a round trip per chip would make the rail feel
+   * broken. The server's is the one that decides: it re-measures every ref at attach time and
+   * answers 413 if the turn does not fit, so a client that under-counted cannot talk its way past
+   * the limit. What this can do is be WRONG IN THE HARMLESS DIRECTION — warn slightly early — and
+   * the estimates it sums came from the server in the first place.
+   */
+  const attachmentTokens = useMemo(
+    () => attachments.reduce((n, a) => n + a.tokenEstimate, 0),
+    [attachments],
+  );
+  const contextWindow = selectedModel?.context_window ?? null;
+  const budgetFraction = contextWindow ? attachmentTokens / contextWindow : null;
+  const overBudget = budgetFraction !== null && budgetFraction >= 1;
+  // Largest first, because the remedy is "remove one" and the largest is the one worth removing.
+  const offending = overBudget
+    ? [...attachments].sort((a, b) => b.tokenEstimate - a.tokenEstimate).slice(0, 2).map((a) => a.label)
+    : [];
+  const unresolved = attachments.filter((a) => a.error);
+
   const clearPromoted = useEvalStore((s) => s.clearPromoted);
   const promotable = (testDraft.trim() || (localStorage.getItem(inputKey(activeAgentId)) ?? "").trim());
   const promote = () => {
@@ -1502,6 +1594,38 @@ export function BuildPane({
 
           <GitHubAttachChips attachments={github.attachments} onRemove={github.remove} />
 
+          {/* Band 1 — §3.1's attachment rail. CONTENT rather than controls, which is why it sits
+              with the text it belongs to rather than in the bottom bar: chips are variable-length,
+              and in the control bar they would push every button around as they wrapped. */}
+          <AttachmentRail attachments={attachments} onRemove={removeAttachment} />
+
+          {/* §4.4 and §9's budget. A warning at 70%, a BLOCK at 100% naming what to remove.
+              Blocking is the half that matters: the alternative is a request that fits by having
+              been quietly cut, and §4.4 is blunt about it — "Silent truncation is the worst
+              possible behavior here — it produces a confident answer grounded in half a file." */}
+          {attachments.length > 0 && budgetFraction !== null && budgetFraction >= WARN_AT && (
+            <div
+              className="mb-2 flex items-start gap-2 rounded-card border border-edge bg-bg px-2.5 py-2 text-[11px]"
+              role="status"
+            >
+              <span className="shrink-0" style={{ color: overBudget ? STATUS.error : STATUS.warn }} aria-hidden>
+                <AlertTriangleIcon size={ICON.xs} />
+              </span>
+              <span className="min-w-0 flex-1 text-muted">
+                {overBudget ? (
+                  <>
+                    This turn&apos;s context is about {budgetPercent(attachmentTokens, contextWindow)}% of what{" "}
+                    {selectedModel?.id ?? "this model"} can hold. Remove {offending.join(" or ")} to send it.
+                  </>
+                ) : (
+                  <>
+                    Using about {budgetPercent(attachmentTokens, contextWindow)}% of the model&apos;s context.
+                  </>
+                )}
+              </span>
+            </div>
+          )}
+
           {/* input slot: the textarea and the live waveform crossfade in place (~200ms) so the
               transition from typing to recording is smooth and the card doesn't jump. */}
           <div
@@ -1545,6 +1669,13 @@ export function BuildPane({
                 // emptiness because on a composer with text in it ↑ is how you move the caret up a
                 // line, and taking that would make the twelve-line editor unusable.
                 if (e.key === "ArrowUp" && text === "" && editLastUserMessage()) e.preventDefault();
+                // §4.3: "Backspace in an empty textarea removes the last chip." Guarded on empty
+                // for the same reason ↑ is — in a box with text in it, Backspace deletes a
+                // character, and taking that would be unusable.
+                if (e.key === "Backspace" && text === "" && attachments.length > 0) {
+                  e.preventDefault();
+                  removeAttachment(attachments[attachments.length - 1]!.key);
+                }
               }}
               rows={1}
               placeholder={moment.placeholder}
@@ -1596,8 +1727,9 @@ export function BuildPane({
               add: {
                 bar: () => (
                   <AddMenu
-                    githubView={github.view}
-                    onAttachGithub={github.attach}
+                    agentId={activeAgentId}
+                    available={attachSources}
+                    onPick={addAttachments}
                     disabled={busy}
                     openSignal={attachChordNonce}
                   />
@@ -1791,7 +1923,13 @@ export function BuildPane({
                   <button
                     type="button"
                     onClick={submit}
-                    disabled={!connected || !text.trim() || (composerMode === "test" ? !canRun : busy)}
+                    // §9: over the context budget, or holding an attachment that would not
+                    // resolve, send is BLOCKED rather than allowed to truncate. The notice above
+                    // the input says which, so a disabled button is never unexplained.
+                    disabled={
+                      !connected || !text.trim() || overBudget || unresolved.length > 0
+                      || (composerMode === "test" ? !canRun : busy)
+                    }
                     aria-label={composerMode === "test" ? "Run the agent on this input" : "Send"}
                     title={composerMode === "test" ? "Run the agent on this input" : "Send (⌘↵)"}
                     // The one ink-filled control on the screen, and the only one in this bar that

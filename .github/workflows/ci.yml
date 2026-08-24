@@ -526,6 +526,14 @@ jobs:
           # once that invariant holds, Fast is deliberately a small mode, and a change that made
           # it a large one would fail here rather than in production.
           npm run test:permission-shield
+          # THE ATTACHMENT BUDGET — §12.15: "Exceeding the context window blocks send and names
+          # the offending attachments — never truncates silently." The failure it guards has no
+          # symptom at all: an over-budget request does not error, the provider takes what fits
+          # and answers confidently about half a file. So the assertions are mostly about the
+          # arithmetic leaning the right way — an estimate that came in LOW would let exactly
+          # that request through, which is why the estimator is deliberately pessimistic about
+          # source code and why that pessimism is checked rather than assumed.
+          npm run test:attachments
           npm run test:plans
           # The entitlement resolver, and the audit that is the reason it is a suite rather than a note.
           # It reads wsRelay.ts for every command the relay accepts and fails on one that has neither a

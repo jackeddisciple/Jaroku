@@ -166,6 +166,12 @@ export const EXPORTED_TABLES = [
   // An export that carried every run but not the policy they executed under would describe what
   // happened while omitting what was allowed to.
   "conversation_settings",
+  // WHAT EACH TURN WAS LOOKING AT. §4.4's whole claim is that "a turn's context must be
+  // reconstructible from turn_attachments alone", and an export carrying every turn but not the
+  // refs they were grounded in would carry the questions without the evidence. It holds pinned
+  // references — a path and a version id, a run id, a commit sha — and no content and no
+  // credential, which is the only question this list asks.
+  "turn_attachments",
   // WHAT NEEDED SOMEBODY, AND WHEN IT STOPPED. An inbox item is the workspace's own operational
   // record — which credential was missing, which deploy failed, which agent was drifting, and how
   // long each of those was true before it was fixed. It answers "when did this start going wrong"

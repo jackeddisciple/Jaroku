@@ -87,6 +87,7 @@
     "test:conversation-settings": "tsx src/conversationSettings.test.ts",
     "test:conversation-routes": "tsx src/http/conversations.test.ts",
     "test:permission-shield": "tsx src/permissionShield.test.ts",
+    "test:attachments": "tsx src/attachments.test.ts",
     "test:plans": "tsx src/billing/plans.test.ts",
     "test:entitlements": "tsx src/billing/entitlements.test.ts",
     "test:metering": "tsx src/billing/metering.test.ts",

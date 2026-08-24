@@ -78,6 +78,9 @@ import { authenticate, sessionRoutes } from "./auth/session.ts";
 import { conversationRoutes } from "./http/conversations.ts";
 import { ConversationSettingsStore, DEFAULT_PERMISSION_MODE, type PermissionMode } from "./conversationSettings.ts";
 import { classOf, mustConfirm } from "./permissionShield.ts";
+import { turnRoutes, type Attachable } from "./http/turns.ts";
+import { AttachmentStore } from "./attachmentStore.ts";
+import { estimateTokens } from "./attachments.ts";
 import { ContextResolver } from "./auth/resolve.ts";
 import { resolveOriginPolicy } from "./auth/origin.ts";
 import { resolveSocketAuth } from "./auth/socketAuth.ts";
@@ -3113,6 +3116,173 @@ async function permissionModeForRun(ctx: TenantContext, runId: string): Promise<
   }
   runPermissionModes.set(runId, mode);
   return mode;
+}
+
+/**
+ * §8's turn surface — attachments, and the one route that populates all five pickers.
+ *
+ * THE PICKERS ARE ONE ROUTE WITH FIVE BRANCHES, which is the server side of §4.2's "same
+ * component, different data source. Do not build five bespoke modals." Each branch reads the store
+ * that already owns that kind of thing rather than a copy — the file tree comes from the agent's
+ * current version, the runs from the trace store, the cases from the eval store, the tools from
+ * the MCP registry, and the commits from the GitHub link. There is no sixth place any of those
+ * facts live.
+ *
+ * EVERY BRANCH MEASURES ITS OWN TOKEN COST HERE, and that is what makes §4.4's budget check real
+ * rather than advisory: the number the client renders is the number the server computed, and a
+ * request that claimed to be small would be re-measured before it was written.
+ */
+const attachmentStore = new AttachmentStore(store.database());
+
+for (const route of turnRoutes({
+  callerFor: async (req) => {
+    const auth = await authenticate(req, tokenVerifier);
+    const session = await contextResolver.resolve(
+      auth,
+      req.url.searchParams.get("workspace"),
+      req.requestId,
+      req.ip,
+    );
+    return { ctx: session.context, userId: session.userId, ip: req.ip };
+  },
+  attachments: attachmentStore,
+  // Through the thread store's own scoped read, so "does this turn exist" is answered by the same
+  // WHERE that answers every other question about it.
+  turnExists: async (ctx, turnId) => {
+    const row = await store
+      .database()
+      .forWorkspace(ctx.workspaceId)
+      .get(`SELECT id FROM thread_items WHERE workspace_id = ? AND id = ?`, [ctx.workspaceId, turnId]);
+    return row !== undefined;
+  },
+  // WHICH MODEL'S WINDOW THE BUDGET IS MEASURED AGAINST. The composer's current selection, which is
+  // the honest answer at the moment somebody is attaching: the turn has not been dispatched yet, so
+  // there is no model on it. §9's "Model swapped after effort set" applies here too — swap the
+  // model and the budget is re-evaluated against the new window on the next read.
+  modelForTurn: async () => process.env.JAROKU_GEN_MODEL ?? GENERATION_MODEL,
+  attachables: async (ctx, agentId, kind, query, limit) => {
+    const q = query.trim().toLowerCase();
+    const matches = (s: string): boolean => q === "" || s.toLowerCase().includes(q);
+    const cap = limit > 0 ? limit : 500;
+
+    switch (kind) {
+      case "file": {
+        // The agent's CURRENT VERSION TREE, per §4.2's table. A protected file is included with a
+        // lock rather than filtered out: "Protected files are attachable (reading them as context
+        // is fine and useful)... Attaching must never imply write capability."
+        const agent = await agentRepo.byId(ctx, agentId).catch(() => null);
+        const slug = agent?.slug ?? agentId;
+        const { files } = await readAgentFiles(agentFilesDeps, ctx, slug);
+        const versionId = agent?.current_version ?? "";
+        return files
+          .filter((f) => matches(f.path))
+          .slice(0, cap)
+          .map((f) => ({
+            // `version_id` is what makes this a snapshot rather than a bookmark — §4.4.
+            ref: { path: f.path, version_id: String(versionId) },
+            label: f.path,
+            detail: f.readOnly ? "read-only" : undefined,
+            tokenEstimate: estimateTokens(f.content),
+            protected: f.readOnly,
+          }));
+      }
+
+      case "run": {
+        const runs = await store.listRuns(ctx, Math.min(cap, 200));
+        return runs
+          .filter((r) => matches(String(r.id)) || matches(String(r.agent_id ?? "")))
+          .slice(0, cap)
+          .map((r) => ({
+            ref: { run_id: String(r.id) },
+            label: `run ${String(r.id).slice(0, 8)}`,
+            detail: `${String(r.status)} · ${String(r.model ?? "")} · ${String(r.started_at ?? "")}`,
+            // A run's trace is summarised rather than pasted in full, so the cost is bounded by the
+            // summary rather than by however many steps it happened to take. A thousand-step run
+            // must not be un-attachable.
+            tokenEstimate: 400,
+          }));
+      }
+
+      case "dataset_case": {
+        const datasets = await evalStore.listDatasets(ctx, agentId || undefined);
+        const rows: Attachable[] = [];
+        for (const d of datasets) {
+          if (rows.length >= cap) break;
+          for (const ex of await evalStore.listExamples(ctx, d.id)) {
+            if (rows.length >= cap) break;
+            // A case has no name of its own — its INPUT is the case, which is what makes it one.
+            // The first line of that input is what the eval dashboard shows, so it is what the chip
+            // shows too: two spellings of the same case would read as two cases.
+            const firstLine = String(ex.input ?? "").split(String.fromCharCode(10))[0] ?? "";
+            const name = firstLine.slice(0, 40) || String(ex.id);
+            if (!matches(name) && !matches(d.name)) continue;
+            rows.push({
+              ref: { case_id: String(ex.id), dataset_id: String(d.id), name },
+              label: `case: ${name}`,
+              detail: d.name,
+              tokenEstimate: estimateTokens(JSON.stringify(ex.input ?? {})),
+            });
+          }
+        }
+        return rows;
+      }
+
+      case "tool_schema": {
+        const tools = await mcpStore.listTools(ctx);
+        return tools
+          .filter((t) => matches(t.name) || matches(t.server_id))
+          .slice(0, cap)
+          .map((t) => {
+            const schema = JSON.stringify(t.input_schema ?? {});
+            const args = Object.keys(
+              (t.input_schema as { properties?: Record<string, unknown> } | null)?.properties ?? {},
+            ).length;
+            return {
+              ref: { tool_id: String(t.id), server_id: String(t.server_id ?? ""), name: t.name },
+              label: t.name,
+              detail: `${String(t.server_id ?? "")} · ${args} arg${args === 1 ? "" : "s"}`,
+              tokenEstimate: estimateTokens(schema),
+            };
+          });
+      }
+
+      case "github": {
+        // GATED ON AN ACTIVE LINK, and the option is HIDDEN rather than disabled when there is
+        // none — §4.2: "an empty menu item that always fails is worse than no item." An empty
+        // result is what the client reads as "hide it".
+        // A NULL VIEW IS "NO LINK", and that is the whole gate. §4.2: the GitHub option is hidden
+        // entirely when the agent has no `github_links` row, because "an empty menu item that
+        // always fails is worse than no item" — and an empty result is what the client reads as
+        // "do not render this source".
+        const view = await githubService.view(ctx, agentId).catch(() => null);
+        if (!view) return [];
+        const rows: Attachable[] = [];
+        for (const c of view?.pushed ?? []) {
+          if (!c.sha || !matches(c.sha) && !matches(String(c.summary ?? ""))) continue;
+          rows.push({
+            ref: { commit_sha: String(c.sha) },
+            label: `commit ${String(c.sha).slice(0, 7)}`,
+            detail: String(c.summary ?? ""),
+            tokenEstimate: 600,
+          });
+        }
+        if (view?.pr) {
+          rows.push({
+            ref: { pr: view.pr.number },
+            label: `PR #${view.pr.number}`,
+            detail: String(view.pr.title ?? ""),
+            tokenEstimate: 800,
+          });
+        }
+        return rows.slice(0, cap);
+      }
+    }
+  },
+})) {
+  if (route.prefix) router.prefixRoute(route.method, route.path, route.handler);
+  else if (route.method === "GET") router.get(route.path, route.handler);
+  else if (route.method === "DELETE") router.del(route.path, route.handler);
+  else router.post(route.path, route.handler);
 }
 
 const relay = new WsRelay({
