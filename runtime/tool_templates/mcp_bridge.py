@@ -101,6 +101,18 @@ CONFIRM_POLL_S = 0.2
 # whole point of showing them is that someone reads them.
 MAX_ARGS_CHARS = 4000
 
+# The permission shield's mode for the conversation this run belongs to, handed down by the host.
+#
+# READ HERE ONLY TO DECIDE WHETHER TO *ASK*, NEVER TO DECIDE WHETHER TO *ALLOW*. The host makes the
+# real decision: every ask arrives at the server, which consults the same mode from its own row and
+# either auto-approves or puts a person in front of it. So a run that started with this variable
+# unset, or set to something invented, asks in exactly the cases it asked in before — and a run
+# that set it to "fast" cannot thereby skip a gate, because the gate is not here.
+#
+# What it buys is Strict: a mode that confirms EVERY tool call needs low-impact tools to ask too,
+# and only this process knows a low-impact call is happening.
+PERMISSION_MODE = (os.environ.get("JAROKU_PERMISSION_MODE") or "smart").strip().lower()
+
 # Must match jaroku_runner/debug.py:CTRL_SENTINEL and processManager.ts:CTRL_SENTINEL.
 # Three copies, because this file is copied into projects that import nothing from Jaroku —
 # a generated agent stays plain LangGraph, and that is worth one duplicated constant.
@@ -173,7 +185,13 @@ def _http_control_plane() -> tuple[str, str, str] | None:
 
 
 def _http_confirm(
-    control_plane: tuple[str, str, str], server_id: str, name: str, reason: str, payload: str
+    control_plane: tuple[str, str, str],
+    server_id: str,
+    name: str,
+    reason: str,
+    payload: str,
+    impact: str,
+    first_call: bool,
 ) -> str:
     """Block on POST /mcp-confirm until a human answers or the SERVER's own timeout denies.
 
@@ -190,6 +208,10 @@ def _http_confirm(
         {
             "ctrl": "tool_confirm", "run_id": run_id, "nonce": nonce, "server": server_id,
             "tool": name, "impact_reason": reason, "args": payload, "timeout_s": CONFIRM_TIMEOUT_S,
+            # The host's shield needs both of these and neither used to be on the wire, so every
+            # ask looked identical to it — which meant it could not tell a read from a write and
+            # had to put a person in front of all of them.
+            "impact": impact, "first_call_in_run": first_call,
         }
     )
     body = json.dumps(
@@ -213,7 +235,14 @@ def _http_confirm(
     return verdict if verdict in ("run", "once", "deny") else "deny"
 
 
-def _confirm(server_id: str, name: str, args: dict[str, Any], reason: str) -> None:
+def _confirm(
+    server_id: str,
+    name: str,
+    args: dict[str, Any],
+    reason: str,
+    impact: str = "high",
+    first_call: bool = True,
+) -> None:
     """Block until a high-impact call is approved, or raise.
 
     Five situations, and each is decided on purpose rather than by fallthrough:
@@ -250,7 +279,7 @@ def _confirm(server_id: str, name: str, args: dict[str, Any], reason: str) -> No
             payload = repr(args)
         if len(payload) > MAX_ARGS_CHARS:
             payload = payload[:MAX_ARGS_CHARS] + " …(truncated)"
-        verdict = _http_confirm(control_plane, server_id, name, reason, payload)
+        verdict = _http_confirm(control_plane, server_id, name, reason, payload, impact, first_call)
         if verdict == "run":
             _run_grants.add(key)
             return
@@ -297,6 +326,8 @@ def _confirm(server_id: str, name: str, args: dict[str, Any], reason: str) -> No
             "impact_reason": reason,
             "args": payload,
             "timeout_s": CONFIRM_TIMEOUT_S,
+            "impact": impact,
+            "first_call_in_run": first_call,
         }
     )
 
@@ -582,11 +613,23 @@ def _make_tool(server: dict[str, Any], spec: dict[str, Any]) -> StructuredTool:
         except ValueError as exc:
             raise RuntimeError(f"{name}: {exc}") from exc
 
-        # 2. Ask, if this is a high-impact tool being called for the first time this run.
+        # 2. Ask, if this is a high-impact tool being called for the first time this run — or if
+        #    the conversation is in Strict mode, which confirms every tool call including reads.
         #    Before the credential is even read: a call nobody approved should not so much as
         #    look at a secret.
-        if high_impact:
-            _confirm(server_id, name, kwargs, impact_reason)
+        #
+        #    STRICT IS THE ONLY MODE THIS PROCESS KNOWS ABOUT, and only because it is the only one
+        #    that asks about calls the host would otherwise never hear of. Smart and Fast differ
+        #    from each other by whether the HOST auto-answers, which it decides from its own row —
+        #    asking it more often is always safe, and asking it less never happens here.
+        if high_impact or PERMISSION_MODE == "strict":
+            _confirm(
+                server_id,
+                name,
+                kwargs,
+                impact_reason if high_impact else "Strict mode confirms every tool call",
+                impact="high" if high_impact else "low",
+            )
 
         # 3. The credential, read at the moment of use and never held anywhere.
         token = os.environ.get(auth_env_key) if auth_env_key else None

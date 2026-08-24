@@ -43,7 +43,10 @@ import { ControlButton } from "./composer/ControlButton.tsx";
 import { PopoverRow } from "./composer/Popover.tsx";
 import { AddMenu } from "./composer/AddMenu.tsx";
 import { EffortControl, effortLabel } from "./composer/EffortControl.tsx";
-import { FALLBACK_SETTINGS, useComposerSettingsStore, type Effort } from "../store/composerSettingsStore.ts";
+import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
+import {
+  FALLBACK_SETTINGS, useComposerSettingsStore, type Effort, type PermissionMode,
+} from "../store/composerSettingsStore.ts";
 import { GLYPH, Glyph, HIT_TARGET, Icon } from "./icons.ts";
 import type { Density } from "../lib/composerBar.ts";
 import { activeTrigger, removeTrigger, type ActiveTrigger } from "../lib/composerTriggers.ts";
@@ -606,6 +609,8 @@ export function BuildPane({
   const settings = useComposerSettingsStore((s) => s.byConversation[activeThreadId ?? "__none"]) ?? FALLBACK_SETTINGS;
   const patchSettings = useComposerSettingsStore((s) => s.patch);
   const loadSettings = useComposerSettingsStore((s) => s.load);
+  const settingsError = useComposerSettingsStore((s) => s.error);
+  const clearSettingsError = useComposerSettingsStore((s) => s.clearError);
   useEffect(() => { void loadSettings(activeThreadId); }, [activeThreadId, loadSettings]);
 
   /**
@@ -1447,6 +1452,30 @@ export function BuildPane({
             <UpsellCard channel="gen" onUpgrade={() => openUsageTab("usage")} />
           </div>
 
+          {/* WHAT A WORKSPACE POLICY JUST REFUSED, in the same place and for the same reason as the
+              tier upsell above it: the control that did not work is a few pixels below, and the
+              sentence the server sent names the policy rather than saying "couldn't save".
+
+              Rendered rather than prevented. This control can be looking at a stale row when an
+              admin pins the mode, and a control that silently snapped back would read as the app
+              being broken instead of as a rule being applied. */}
+          {settingsError && (
+            <div className="mb-3 flex items-start gap-2 rounded-card border border-edge bg-bg px-2.5 py-2 text-[11px] text-muted">
+              <span className="shrink-0" style={{ color: STATUS.warn }} aria-hidden>
+                <AlertTriangleIcon size={ICON.xs} />
+              </span>
+              <span className="min-w-0 flex-1" role="status">{settingsError}</span>
+              <button
+                type="button"
+                onClick={clearSettingsError}
+                aria-label="Dismiss"
+                className="shrink-0 text-faint transition-colors duration-fast hover:text-ink"
+              >
+                <XIcon size={ICON.xs} />
+              </button>
+            </div>
+          )}
+
           {/* Attached GitHub context, above the input. Above rather than below because it is
               part of the message being composed, and a chip under the send button would read as
               something that happened rather than something about to be sent. */}
@@ -1621,6 +1650,43 @@ export function BuildPane({
                       // collapsing for, and the four levels are a ring somebody can step round.
                       const order: Effort[] = ["low", "medium", "high", "xhigh"];
                       setEffortOverride(order[(order.indexOf(effort) + 1) % order.length]!);
+                    }}
+                  />
+                ),
+              },
+              shield: {
+                bar: (density: Density) => (
+                  <ShieldControl
+                    value={settings.permission_mode}
+                    dense={!showsLabel(density)}
+                    pinned={settings.permission_mode_pinned}
+                    fastDisallowed={settings.fast_disallowed}
+                    disabled={busy}
+                    // ALWAYS PERSISTED, unlike effort. The two look like the same kind of control
+                    // and are not: effort is a property of the question being asked, while the
+                    // shield is a policy about what an agent may do — and a policy that reverted
+                    // after one turn would be a policy nobody could rely on. There is deliberately
+                    // no "just for this turn" here.
+                    onPick={(mode: PermissionMode) => void patchSettings(activeThreadId, { permission_mode: mode })}
+                  />
+                ),
+                menu: () => (
+                  <PopoverRow
+                    label="Permission mode"
+                    detail={
+                      settings.permission_mode_pinned
+                        ? `pinned to ${modeLabel(settings.permission_mode)} by a workspace policy`
+                        : modeLabel(settings.permission_mode)
+                    }
+                    disabled={settings.permission_mode_pinned || busy}
+                    onSelect={() => {
+                      // Cycles the three, skipping Fast where an admin has disallowed it — the same
+                      // reason the bar's own popover renders that row disabled rather than hidden.
+                      const order: PermissionMode[] = settings.fast_disallowed
+                        ? ["strict", "smart"]
+                        : ["strict", "smart", "fast"];
+                      const at = order.indexOf(settings.permission_mode);
+                      void patchSettings(activeThreadId, { permission_mode: order[(at + 1) % order.length]! });
                     }}
                   />
                 ),

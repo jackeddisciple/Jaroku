@@ -46,6 +46,11 @@ export default {
         ok: "#22c55e",
         err: "#ef4444",
         run: "#f59e0b",
+        // Caution — a legitimate setting worth noticing, not a failure and not an in-flight thing.
+        // See STATUS.warn in src/lib/tokens.ts for why this is a fourth colour rather than a reuse
+        // of `run`: amber means "happening right now" everywhere else in this app, and one static
+        // exception is all it takes to stop it answering that question.
+        warn: "#fb923c",
         // Category accents (see src/lib/tokens.ts for why these three and not others).
         // These say what *kind* of thing something is; the status colors above say how it's doing.
         reviewed: "#5eead4", // audited connector template, copied in verbatim

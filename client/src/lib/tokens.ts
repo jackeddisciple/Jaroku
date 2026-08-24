@@ -74,6 +74,28 @@ export const STATUS = {
   ok: "#22c55e",
   pending: "#f59e0b",
   error: "#ef4444",
+  /**
+   * Caution — a setting that is legitimate and worth noticing. The permission shield's Fast mode
+   * is the first and so far only one.
+   *
+   * A FOURTH STATUS COLOUR, ADDED RATHER THAN BORROWED, and the composer spec is explicit about
+   * why: Fast must wear "a caution tone (NOT the amber used for in-flight — reuse the warning
+   * token, keeping amber's single meaning intact)". There was no warning token to reuse. The two
+   * candidates were both wrong in a way worth recording:
+   *
+   *   `pending` amber means IN-FLIGHT in this app, everywhere, and always moves (stream-pulse).
+   *   A static amber chip in the composer would be the first amber in the product that does not
+   *   mean "this is happening right now", and one exception is all it takes to stop the colour
+   *   answering that question.
+   *
+   *   `error` red means SOMETHING WENT WRONG. Fast is a supported mode a user chose on purpose,
+   *   and painting a valid setting as a failure teaches people to ignore red.
+   *
+   * Orange rather than a second yellow, because the whole point is being distinguishable from
+   * amber at a glance in a row that may contain both. And it is never the ONLY signal: §10
+   * requires a word or a mark beside it, which is why Fast also carries "⚠".
+   */
+  warn: "#fb923c",
   /** Decided-but-not-notable: superseded, discarded, undone. Recedes rather than signals. */
   neutral: "#52525b",
 } as const;

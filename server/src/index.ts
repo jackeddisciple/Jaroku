@@ -76,7 +76,8 @@ import { LocalIssuer } from "./auth/localIssuer.ts";
 import { TokenVerifier } from "./auth/verifier.ts";
 import { authenticate, sessionRoutes } from "./auth/session.ts";
 import { conversationRoutes } from "./http/conversations.ts";
-import { ConversationSettingsStore } from "./conversationSettings.ts";
+import { ConversationSettingsStore, DEFAULT_PERMISSION_MODE, type PermissionMode } from "./conversationSettings.ts";
+import { classOf, mustConfirm } from "./permissionShield.ts";
 import { ContextResolver } from "./auth/resolve.ts";
 import { resolveOriginPolicy } from "./auth/origin.ts";
 import { resolveSocketAuth } from "./auth/socketAuth.ts";
@@ -3073,6 +3074,45 @@ for (const route of conversationRoutes({
   else if (route.method === "GET") router.get(route.path, route.handler);
   else if (route.method === "PATCH") router.patch(route.path, route.handler);
   else router.post(route.path, route.handler);
+}
+
+
+/**
+ * The permission mode a run is executing under — §3.2's scope, resolved from the run.
+ *
+ * A run belongs to a thread (migration 044's `thread_items`), a thread is the conversation, and
+ * the conversation is where the shield's scope lives. Resolved rather than passed in because the
+ * gate fires minutes after dispatch, inside the ingest chain, with nothing in hand but a run id.
+ *
+ * TWO FALLBACKS, AND BOTH LAND ON THE SAFE SIDE. A run bound to no thread — a startup autorun, a
+ * webhook-driven check, anything predating the threads table — resolves to the workspace default,
+ * and a lookup that throws resolves to Smart. Neither ever produces Fast, which is the direction
+ * that matters: a resolver that failed open would turn every unbound run into the loosest mode in
+ * the product, and it would do it silently.
+ *
+ * CACHED PER RUN, because a run makes many tool calls and the mode cannot change mid-run — the
+ * conversation's row can, but a run that started under Strict finishes under Strict. That is also
+ * the honest semantics: a mode change is a decision about what happens next, not a way to retract
+ * approval for work already in flight.
+ */
+const runPermissionModes = new Map<string, PermissionMode>();
+
+async function permissionModeForRun(ctx: TenantContext, runId: string): Promise<PermissionMode> {
+  const cached = runPermissionModes.get(runId);
+  if (cached) return cached;
+  let mode: PermissionMode = DEFAULT_PERMISSION_MODE;
+  try {
+    const threadId = await threadStore.threadForRef(ctx, "run", runId);
+    mode = threadId
+      ? (await conversationSettings.effective(ctx, threadId)).permissionMode
+      : (await conversationSettings.workspaceDefaults(ctx)).permissionMode;
+  } catch (err) {
+    // Never fatal, and never Fast. A gate that could not read its policy asks a person, which is
+    // the expensive-but-safe answer — the same direction mcpImpact's step 4 fails in.
+    console.warn(`[mcp] could not resolve the permission mode for ${runId}, using ${mode}:`, (err as Error)?.message ?? err);
+  }
+  runPermissionModes.set(runId, mode);
+  return mode;
 }
 
 const relay = new WsRelay({
@@ -8113,6 +8153,35 @@ onBothPools("control", ({ runId: slotRunId, ctrl }) => {
       if (!nonce) return;
       const server = String(ctrl.server ?? "unknown");
       const tool = String(ctrl.tool ?? "unknown");
+
+      // THE PERMISSION SHIELD, ON THE SERVER, WITH THE CLIENT BYPASSED — §12.7's own wording.
+      //
+      // The runtime asks; the shield decides whether a person has to answer. That order is what
+      // makes the mode a policy rather than a preference: a modified client, a replayed frame or a
+      // runner built from a fork all arrive HERE, and none of them can turn the gate off. The
+      // control in the composer only ever writes a row that this line reads.
+      //
+      // A read-only tool under Fast — or under Smart, after its first call in the run — is
+      // approved without anybody being interrupted. A write, a destructive call, or a tool nothing
+      // could classify is NEVER auto-approved, in any mode: `mustConfirm` checks that before it
+      // reads the mode at all, so a mode added later cannot opt out by forgetting a branch.
+      ingest(async () => {
+        const impact = ctrl.impact === "low" || ctrl.impact === "high" ? ctrl.impact : null;
+        const decision = mustConfirm(
+          await permissionModeForRun(runCtx, runId),
+          classOf(impact),
+          ctrl.first_call_in_run !== false,
+        );
+        if (decision.confirm) return;
+        // Answered by policy rather than by a person, and logged as such: "who approved this" must
+        // have an answer, and for these calls the answer is the mode somebody chose.
+        console.log(`[mcp] ${server}/${tool} — auto-approved (${decision.reason})`);
+        pendingConfirms.delete(confirmKey(runId, nonce));
+        writeApproval(runId, nonce, "run");
+        runEventBus.resolveMcpConfirm(runId, nonce, "run");
+        relay.broadcastMcp(runCtx, { type: "confirmResolved", runId, nonce, verdict: "run" });
+      });
+
       pendingConfirms.set(confirmKey(runId, nonce), {
         runId, workspaceId: runCtx.workspaceId, nonce, server, tool, requestedAt: Date.now(),
       });
@@ -8242,6 +8311,8 @@ onBothPools("exit", ({ runId, code, signal, timedOut, elapsedMs }) => {
   // the resumed segment's events to the server's workspace instead of its own.
   if (runId !== pausedRunId) {
     runWorkspaces.delete(runId);
+    // ...and the mode it ran under, which is only ever a cache of that conversation's row.
+    runPermissionModes.delete(runId);
     runPayers.delete(runId);
     // Same condition, same reason: a resumed segment's steps still need to know what the run
     // is executing on, and the meter's fallback would otherwise re-read the run row once.
@@ -8786,6 +8857,16 @@ async function runAgent(
   if (shadow) env.JAROKU_AGENT_DIR = shadow.projectDir;
   if (provider) env.JAROKU_PROVIDER = provider;
   if (model) env.JAROKU_MODEL = model;
+
+  // THE PERMISSION MODE, DOWN TO THE RUNTIME, AND ONLY SO IT KNOWS WHEN TO ASK.
+  //
+  // The bridge reads this to decide whether to raise a confirmation for a LOW-impact call, which
+  // is the one thing only it can know — Strict confirms every tool call, and a read-only call
+  // never reaches the host otherwise. It is deliberately not an authorisation: every ask still
+  // arrives at the gate above, which resolves the mode from the conversation's own row and either
+  // auto-approves or puts a person in front of it. A run whose environment claimed "fast" would
+  // ask less often and be refused just as often, because the deciding is not done here.
+  env.JAROKU_PERMISSION_MODE = await permissionModeForRun(ctx, runId);
 
   // THE CREDENTIALS THIS RUN NEEDS, RESOLVED BY NAME, THROUGH THE SECRET STORE.
   //

@@ -35,6 +35,11 @@ const ICON_FOR: Record<BadgeState, Glyph> = {
   ok: CheckIcon,
   pending: ClockIcon,
   error: AlertTriangleIcon,
+  // THE SAME TRIANGLE AS `error`, ON PURPOSE. The two differ by colour and by the word beside
+  // them, which is exactly the distinction they should carry: both are "look at this", and only
+  // one of them is "something went wrong". A second glyph would be a shape whose meaning nobody
+  // could name — and §10 is satisfied here because the LABEL always differs, not the mark.
+  warn: AlertTriangleIcon,
   neutral: XIcon,
 };
 

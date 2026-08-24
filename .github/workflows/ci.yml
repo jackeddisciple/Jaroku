@@ -515,6 +515,17 @@ jobs:
           # not distinguish somebody relaxing Strict from somebody re-saving, and the first is
           # what the row exists to make findable.
           npm run test:conversation-routes
+          # THE PERMISSION SHIELD'S TWO HARD INVARIANTS — §12.7 and §12.8. Both are written as
+          # things somebody verifies by bypassing the UI, and the second has already failed once
+          # here in exactly the way it names: a block-list entry assembled with `join` read
+          # toolsmcp_bridge.py on Windows, matched the local paths one code path produced, and
+          # matched nothing in the object store — so the list went quietly empty for the one file
+          # that carries an agent's entire MCP grant. It never failed on Linux, where the
+          # separator happens to agree, which is why every spelling of that path is asserted
+          # rather than the canonical one. The other half is that Fast still confirms a write:
+          # once that invariant holds, Fast is deliberately a small mode, and a change that made
+          # it a large one would fail here rather than in production.
+          npm run test:permission-shield
           npm run test:plans
           # The entitlement resolver, and the audit that is the reason it is a suite rather than a note.
           # It reads wsRelay.ts for every command the relay accepts and fails on one that has neither a

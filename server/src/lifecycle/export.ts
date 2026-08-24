@@ -156,6 +156,16 @@ export const EXPORTED_TABLES = [
   // the questions somebody asked, in their own words. Exporting `threads` without it would hand over
   // a list of session titles with no way to tell what any of them did.
   "thread_items",
+  // HOW EACH CONVERSATION WAS CONFIGURED — the reasoning effort it ran at and the permission mode
+  // the shield enforced. Two columns and a timestamp, holding no credential, which is the only
+  // question this list asks.
+  //
+  // It is here for the same reason `audit_log` is. "Which conversation was in Fast mode, and who
+  // set it" is a question asked long after the runs it applies to have been swept, and it is
+  // precisely the sort of thing an audit of a workspace that has left needs to be able to answer.
+  // An export that carried every run but not the policy they executed under would describe what
+  // happened while omitting what was allowed to.
+  "conversation_settings",
   // WHAT NEEDED SOMEBODY, AND WHEN IT STOPPED. An inbox item is the workspace's own operational
   // record — which credential was missing, which deploy failed, which agent was drifting, and how
   // long each of those was true before it was fixed. It answers "when did this start going wrong"

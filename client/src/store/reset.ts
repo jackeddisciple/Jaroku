@@ -25,6 +25,7 @@ import { useAuditStore } from "./auditStore.ts";
 import { useBillingStore } from "./billingStore.ts";
 import { useBuildStore } from "./buildStore.ts";
 import { useChatStore } from "./chatStore.ts";
+import { useComposerSettingsStore } from "./composerSettingsStore.ts";
 import { useConnectionStore } from "./connectionStore.ts";
 import { useDeployStore } from "./deployStore.ts";
 import { useDiagnosticsStore } from "./diagnosticsStore.ts";
@@ -98,6 +99,13 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
   // Which accounts a workspace has connected, and whose mailbox each points at. An account label
   // held across a switch would show one tenant's email address under another tenant's name, and
   // the "Reconnect" button beside it would start a flow in the wrong workspace.
+  // Which reasoning effort and which PERMISSION MODE each conversation is running under, keyed by
+  // conversation id. The second half is why this one matters more than it looks: carried across a
+  // switch, the composer would render another tenant's shield state — quite possibly "Fast" — over
+  // a workspace whose admin has pinned Strict, and the first thing that would correct it is a
+  // refused write. A control reporting a policy that is not in force is worse than one reporting
+  // nothing, because somebody acts on it.
+  composerSettingsStore: useComposerSettingsStore as unknown as Resettable,
   connectionStore: useConnectionStore as unknown as Resettable,
   deployStore: useDeployStore as unknown as Resettable,
   // §B.3's squiggles, keyed by agent uuid and path. It looks like the one store here that holds

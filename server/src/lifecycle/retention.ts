@@ -187,6 +187,7 @@ export const RETENTION_KEPT_TABLES: Record<string, string> = {
   shadow_runs: "what a run WAS. Without the row, neither the run nor its cost can be attributed to anything",
   pr_comments: "a mirror of a review — other people's words, like steps and audit_log",
   threads: "§3.4: a thread is archived, never deleted. test:thread-archive audits the whole server for a delete path, and this would be it",
+  conversation_settings: "a setting is current or absent, not an event with an age — and it is bounded by the thread it belongs to, which cascades. Sweeping one would silently loosen a permission mode somebody chose",
 };
 
 /** How many rows a sweep actually took, across every table it touches. */
