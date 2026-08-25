@@ -199,6 +199,15 @@ jobs:
           # Outlook previews, then the person clicks, and exactly one of the three may win.
           npm run test:magic-link
           npm run test:members
+          # AND AN INVITATION FROM BOTH ENDS, which `test:members` does not reach: it exercises the
+          # membership commands against a workspace somebody is already in, and every failure §12.3
+          # asks to be tested is a redemption that must NOT produce one. Revoked, expired, already
+          # used, addressed to somebody else, a made-up secret — all five answer 403 with one
+          # sentence, deliberately, so that a stolen link learns nothing about which of the five it
+          # is. It also covers §13.4's link-for-anybody, whose row stores NULL rather than an empty
+          # string: two empty-string invites compete for the one row the partial unique index gives
+          # them, and the second silently revokes the first.
+          npm run test:invite-flow
           npm run test:relay
           npm run test:channels
 
@@ -878,6 +887,30 @@ jobs:
           # is also the natural thing to write, so the suite checks every combination of
           # absences rather than the three the spec happens to name.
           npm run test:turn-metadata
+          # §14.1'S FOUR CLIENT SUITES, and the reason they are one group is that they are one
+          # feature: a workspace you can be in more than one of. `test:workspace-switcher` holds
+          # the arrangement rules — a personal workspace first, teams alphabetical by a comparison
+          # that knows "acme co" sorts before "Zebra" and that Å belongs beside A — and the render,
+          # which is where a role badge on a personal workspace or a hardcoded plan chip shows up.
+          #
+          # `test:workspace-switch` IS THE LOAD-BEARING ONE. §5 calls the transition the hardest
+          # section in its specification and every property it names is an ORDERING: the old socket
+          # closed before the new one opens, the stores emptied before anything can refill them, a
+          # ticket for A unable to open a socket for B. None of those is visible in a screenshot of
+          # a switch that worked — the stores look empty because the new snapshot replaced what was
+          # on screen, not because anything cleared — so the suite asserts against a transcript of
+          # what the fake socket and fake network were actually asked to do. Its last assertion in
+          # every block is that nothing from workspace A survived into workspace B, which is a
+          # cross-tenant leak in the UI and the one failure the server cannot prevent.
+          #
+          # `test:join-flow` is the paste box: a full invite URL, a bare token, and the truncated
+          # paste that is the case the refusals exist for. `test:permission-ui` reads the SERVER's
+          # capabilities.ts as text and fails when the client's copy has drifted in either
+          # direction — §8.1 says a copy "guarantees they match", and this is what makes that true.
+          npm run test:workspace-switcher
+          npm run test:workspace-switch
+          npm run test:join-flow
+          npm run test:permission-ui
 
   # THE PYTHON SIDE, WHICH THIS FILE HAS NEVER RUN. Two jobs above it check the two halves
   # written in TypeScript; the connector templates are Python, and the two verifications built to
