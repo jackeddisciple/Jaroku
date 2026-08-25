@@ -39,6 +39,7 @@ import {
 } from "../lib/secrets.ts";
 import { groupSecrets, holdForElevation, useSecretsStore, visibleTo } from "../store/secretsStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
+import { useCanReach } from "../lib/useCapability.ts";
 
 /** Status as a chip, with a word in it — never colour alone. */
 function StatusChip({ secret }: { secret: SecretSummary }) {
@@ -307,6 +308,24 @@ function UsageView({ sites }: { sites: UsageSite[] }) {
 type RowMode = "idle" | "rotate" | "revoke" | "revealed" | "usage" | "history";
 
 function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: () => void }) {
+  /**
+   * §8.2 — "Secrets panel / Add, rotate, reveal". `secret:manage`, the admin's, for every verb on
+   * this row including the two that look like reads.
+   *
+   * REVEAL IS NOT A READ, which is the one worth stating: `secret:read` is a member capability and
+   * carries no value — names, masks, health, where each credential is used — and this button is
+   * the single path in the product that returns a plaintext credential. Filing it with `Usage` and
+   * `History`, which genuinely are metadata, would put the one control that hands out a secret in
+   * with the ones that describe it.
+   *
+   * `Test` GOES TOO, for a quieter reason: it spends the credential against the provider, and a
+   * member repeatedly testing a key is a member making requests on somebody else's account.
+   *
+   * WHAT A MEMBER KEEPS is the row itself — the name, whether it is set, when it was last used,
+   * which agents depend on it — plus Usage and History, which is what makes "the credential my
+   * agent needs is the one that expired" answerable without an admin.
+   */
+  const canWrite = useCanReach("secretWrite");
   const [mode, setMode] = useState<RowMode>("idle");
   const [rotations, setRotations] = useState<RotationRecord[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -343,9 +362,9 @@ function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: ()
     >
       <PlugIcon size={ICON.xs} /> Reconnect
     </button>
-  ) : (
+  ) : !canWrite && !secret.configured ? null : (
     <div className="flex items-center gap-1">
-      {secret.kind === "provider_key" ? (
+      {canWrite && secret.kind === "provider_key" ? (
         <button
           className={quietBtn}
           disabled={busy}
@@ -360,7 +379,7 @@ function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: ()
           Test
         </button>
       ) : null}
-      {secret.configured ? (
+      {canWrite && secret.configured ? (
         <button
           className={quietBtn}
           disabled={busy}
@@ -376,9 +395,11 @@ function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: ()
           <EyeIcon size={ICON.xs} /> Reveal
         </button>
       ) : null}
-      <button className={quietBtn} disabled={busy} onClick={() => setMode(mode === "rotate" ? "idle" : "rotate")}>
-        <RefreshIcon size={ICON.xs} /> {secret.configured ? "Rotate" : "Add"}
-      </button>
+      {canWrite && (
+        <button className={quietBtn} disabled={busy} onClick={() => setMode(mode === "rotate" ? "idle" : "rotate")}>
+          <RefreshIcon size={ICON.xs} /> {secret.configured ? "Rotate" : "Add"}
+        </button>
+      )}
       {secret.kind === "custom" ? (
         <button
           className={quietBtn}
@@ -420,7 +441,7 @@ function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: ()
           History
         </button>
       ) : null}
-      {secret.configured ? (
+      {canWrite && secret.configured ? (
         <button
           className={quietBtn}
           disabled={busy}

@@ -32,6 +32,8 @@ import {
   sendSetSpendCeiling,
 } from "../lib/socket.ts";
 import { useUiStore } from "../store/uiStore.ts";
+import { useSessionStore } from "../store/sessionStore.ts";
+import { can, canRun, ROUTE_CAPABILITY } from "../lib/capabilities.ts";
 import type { InboxActionName, InboxItemView } from "../types.ts";
 
 /** What a control says, so the icon it wears has a name a screen reader can read (§7). */
@@ -82,6 +84,62 @@ export const INLINE_ACTIONS = new Set<InboxActionName>([
 
 /** Actions that need somewhere to type before they can run. §4.5's "the form itself". */
 export const FORM_ACTIONS = new Set<InboxActionName>(["set_secret", "set_mcp_credential", "raise_ceiling"]);
+
+/**
+ * §8.2, on the Inbox — which command each action actually sends.
+ *
+ * THE INBOX IS THE ONE SURFACE WHERE §8.2's CHECKLIST DOES NOT REACH, and it is the surface where
+ * a missed guard is most likely: every card here OFFERS a fix, the fixes come from five different
+ * subsystems, and the card does not otherwise care which. "Redeploy" on a failed-deploy card is
+ * `deploy`; "Set the credential" on a missing-secret card is `POST /v1/secrets`; "Raise the
+ * ceiling" is `setSpendCeiling`, which is the owner's. Nothing about the cards says so.
+ *
+ * A TABLE RATHER THAN A CHECK PER ACTION, so `InboxCardActions` filters what it offers through one
+ * lookup and a new action added later fails loudly — an unmapped name answers `undefined`, which
+ * `canRun` refuses, so the affordance is absent until somebody decides who may use it. Defaulting
+ * the other way would let a new fix arrive ungated.
+ *
+ * THE ACTIONS NOT IN HERE ARE MEMBER-LEVEL ON PURPOSE: dismiss, snooze and the two memory verbs
+ * are `agent:write`, which every member holds, and two of them change one person's own board.
+ * `open_*` and `new_agent` are navigations that send nothing at all.
+ */
+export const ACTION_COMMAND: Partial<Record<InboxActionName, string>> = {
+  set_secret: "__route:secretWrite",
+  set_mcp_credential: "setMcpServerAuth",
+  rediscover: "rediscoverMcpServer",
+  retry_deploy: "deploy",
+  redeploy: "deploy",
+  raise_ceiling: "setSpendCeiling",
+  enable_gate: "setMcpToolImpact",
+  remove_grant: "setMcpToolImpact",
+};
+
+/**
+ * The subset of a card's actions this account may actually take.
+ *
+ * A HOOK RATHER THAN A PURE FILTER BECAUSE THE ROLE MOVES. `revalidateAll` updates a socket's role
+ * in place once a minute without reconnecting, so a list computed once at mount would keep
+ * offering a demoted admin the fixes they can no longer apply — on a board whose whole promise is
+ * that pressing the button clears the card.
+ *
+ * AN ACTION WITH NO ENTRY IN `ACTION_COMMAND` IS ALLOWED, and that is the opposite default from
+ * `canRun`'s. The table lists what needs a capability; everything else is a navigation, a snooze,
+ * a dismissal or a resolve — none of which send a gated command, and all of which every member
+ * holds. Defaulting those to refused would empty the board for members.
+ */
+export function useAllowedActions(actions: readonly InboxActionName[]): InboxActionName[] {
+  const role = useSessionStore((s) => s.role());
+  return actions.filter((a) => {
+    const key = ACTION_COMMAND[a];
+    if (key === undefined) return true;
+    const routeKey = key.startsWith("__route:") ? key.slice("__route:".length) : null;
+    if (routeKey) {
+      const capability = ROUTE_CAPABILITY[routeKey];
+      return capability === undefined ? false : can(role, capability);
+    }
+    return canRun(role, key);
+  });
+}
 
 const str = (item: InboxItemView, key: string): string =>
   typeof item.payload[key] === "string" ? (item.payload[key] as string) : "";

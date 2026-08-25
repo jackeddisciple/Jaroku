@@ -27,6 +27,7 @@ import {
   sendCheckGithubRepo, sendLinkGithub, sendListGithub, sendListGithubRepos, sendRefreshGithub,
   sendUnlinkGithub,
 } from "../lib/socket.ts";
+import { useCanRun } from "../lib/useCapability.ts";
 import { disconnectGithub, startGithubApp } from "../lib/secrets.ts";
 import { ICON, STATUS } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
@@ -67,6 +68,9 @@ export function GitHubPanel() {
   const setNotice = useGithubStore((s) => s.setNotice);
   const agentId = useBuildStore((s) => s.activeAgentId);
   const view = viewFor(views, agentId);
+  // §8.2's GitHub rows. `linkGithub` stands for the whole `github:manage` group here — the two
+  // screens below it are the ones that CREATE a link, and everything past them is a read.
+  const canWrite = useCanRun("linkGithub");
 
   // Ask on mount and whenever the agent changes. McpPanel's precedent: relying only on the connect
   // snapshot means opening the tab after a reconnect shows whatever was true before it.
@@ -131,8 +135,21 @@ export function GitHubPanel() {
       )}
 
       <div className="min-h-0 flex-1 overflow-auto">
+        {/* THE TWO SCREENS THAT ESTABLISH A LINK ARE THE ONES A MEMBER MAY NOT SEE. Installing the
+            GitHub App and picking a repository both decide which account outside this workspace its
+            source code goes to, which is `github:manage`. Everything past them is a read.
+
+            A member arriving at either gets a sentence rather than a blank: an empty GitHub tab on
+            an agent nobody has linked reads as a panel that failed, and the useful fact — that
+            this is an admin's to set up — is what they would otherwise have to ask for. */}
         {!connected ? (
-          <NotConnected />
+          canWrite ? <NotConnected /> : (
+            <EmptyState
+              icon={GithubIcon}
+              title="GitHub is not connected"
+              hint="An admin can connect this workspace to GitHub."
+            />
+          )
         ) : !agentId ? (
           <EmptyState
             icon={GithubIcon}
@@ -140,7 +157,13 @@ export function GitHubPanel() {
             hint="Pick an agent and Jaroku will show you what GitHub has that it does not."
           />
         ) : !view ? (
-          <RepoPicker agentId={agentId} />
+          canWrite ? <RepoPicker agentId={agentId} /> : (
+            <EmptyState
+              icon={GithubIcon}
+              title="This agent is not linked to a repository"
+              hint="An admin can choose where its code goes."
+            />
+          )
         ) : (
           <Linked view={view} />
         )}
@@ -507,6 +530,20 @@ function Field({
  */
 function Linked({ view }: { view: GithubView }) {
   const workspaceId = useSessionStore((s) => s.workspaceId);
+  /**
+   * §8.2's four GitHub rows, guarded once at the region level rather than per control.
+   *
+   * THE SPLIT IS ALREADY IN THE MATRIX AND IT MAPS ONTO THE REGIONS ALMOST EXACTLY. The three
+   * reads — where an agent's code lives, which repositories are on offer, how far the lineages
+   * have drifted — are `github:read`, a member's, because somebody debugging an agent legitimately
+   * asks all three. Everything that writes to a repository outside this workspace, or moves the
+   * pointer deciding which repository that is, is `github:manage`.
+   *
+   * SO SYNC, STAGING, THE COMMIT BOX, CHECKS AND REVIEW GO, and Repository, Changes, Versions and
+   * History stay. A member opening this panel sees the whole picture and none of the verbs, which
+   * is what `github:read` is for.
+   */
+  const canWrite = useCanRun("pushGithub");
   // Read once per agent rather than on every render: this is localStorage, the panel re-renders on
   // every stage of a push, and a synchronous read per frame during a live rail is a read per frame
   // for a value that only a click changes.
@@ -529,9 +566,15 @@ function Linked({ view }: { view: GithubView }) {
         <RepoHeader view={view} />
       </CollapsibleRegion>
 
-      <CollapsibleRegion label="Sync state" open={regions.sync} onToggle={toggle("sync")}>
-        <GitHubSyncRegion view={view} />
-      </CollapsibleRegion>
+      {/* The verdict line AND its primary action are one region — "you are three versions ahead"
+          exists to be answered by the Push beside it — so a member gets neither. What they keep is
+          the same drift, stated by the Changes and History regions below in the tense that suits a
+          reader rather than a pusher. */}
+      {canWrite && (
+        <CollapsibleRegion label="Sync state" open={regions.sync} onToggle={toggle("sync")}>
+          <GitHubSyncRegion view={view} />
+        </CollapsibleRegion>
+      )}
 
       <CollapsibleRegion
         label="Changes"
@@ -548,11 +591,11 @@ function Linked({ view }: { view: GithubView }) {
             narrowing OF that list and the message is written about whatever survives the narrowing.
             It renders nothing when there is nothing stageable, so the ordinary agent sees exactly
             the surface it always did. */}
-        <StagingRegion view={view} />
+        {canWrite && <StagingRegion view={view} />}
         {/* §3.4's commit box sits under the file list rather than above it: the message is written
             about what is in that list, and asking somebody to compose before they have looked is
             the wrong order. */}
-        {view.changes.some((c) => !c.locked) && (
+        {canWrite && view.changes.some((c) => !c.locked) && (
           <div className="mt-3 border-t border-hair pt-3">
             <GitHubCommitBox view={view} />
           </div>
@@ -560,7 +603,7 @@ function Linked({ view }: { view: GithubView }) {
         {/* §B.4.4's reorder list sits with the version lists rather than with the file list,
             because it is about versions and not about files — and it renders nothing below two
             unpushed versions, where there is no order to have. */}
-        <RestackRegion view={view} />
+        {canWrite && <RestackRegion view={view} />}
         <div className="mt-4">
           <VersionLists view={view} />
         </div>
@@ -571,7 +614,12 @@ function Linked({ view }: { view: GithubView }) {
           Repository header because it is not part of the link — an agent can be linked for a year
           with checks off, which is the default. */}
       <CollapsibleRegion label="Checks" open={regions.checks} onToggle={toggle("checks")}>
-        <ChecksRegion view={view} />
+        {/* §8.2 — "GitHub panel / CI config (dataset, policy) / github:manage". `setAgentCiConfig`
+            decides whether a PULL REQUEST — including a stranger's — may run an eval against this
+            workspace's provider balance, which the matrix calls the sharpest case of committing the
+            workspace to something outside itself. The FINDINGS below it are `github:read` and stay:
+            they name paths and rule ids in this workspace's own source and carry no value. */}
+        {canWrite && <ChecksRegion view={view} />}
         {/* §B.6's record, in the same region as the checks: both are things that happen to a push
             rather than to the code, and both are read after the fact rather than acted on. */}
         <ScanHistoryRegion view={view} />
@@ -588,7 +636,9 @@ function Linked({ view }: { view: GithubView }) {
         <PullRequestCard view={view} />
         {/* §B.5.1, directly under the pull request card it belongs to. A review is about a PR, and
             putting the comments anywhere else would make somebody hold two places in their head. */}
-        <ReviewRegion view={view} />
+        {/* Resolving a review comment posts to somebody else's pull request under this workspace's
+            token, which is a write to the repository even though it changes no code. */}
+        {canWrite && <ReviewRegion view={view} />}
         {/* §B.2.2's transient list, inside History and above the lineage rather than beside it:
             these are things that happened to this agent, and they are the only things in this
             region that did not change it. Renders nothing until somebody runs a ref. */}
@@ -645,6 +695,11 @@ function HistoryView({ view }: { view: GithubView }) {
 /** §1's first region: what this agent is linked to, and the way out of it. */
 function RepoHeader({ view }: { view: GithubView }) {
   const [menu, setMenu] = useState(false);
+  // Unlinking moves the pointer that decides which account this workspace's source goes to, which
+  // the matrix calls out by name as the `github:manage` half of the link. The repository name and
+  // the branch stay readable — that is `github:read`, and it is the first thing somebody debugging
+  // an agent asks.
+  const canWrite = useCanRun("unlinkGithub");
   return (
     <div>
       <div className="flex items-center gap-2">
@@ -657,9 +712,11 @@ function RepoHeader({ view }: { view: GithubView }) {
         >
           <Truncate title={view.link.repo_full_name}>{view.link.repo_full_name}</Truncate>
         </a>
-        <button className={`${quietBtn} shrink-0`} onClick={() => setMenu((v) => !v)} title="Link options">
-          <KebabIcon size={ICON.xs} />
-        </button>
+        {canWrite && (
+          <button className={`${quietBtn} shrink-0`} onClick={() => setMenu((v) => !v)} title="Link options">
+            <KebabIcon size={ICON.xs} />
+          </button>
+        )}
       </div>
       <div className="mt-0.5 flex items-center gap-2 pl-6 font-mono text-[11px] text-muted">
         <BranchSwitcher view={view} />

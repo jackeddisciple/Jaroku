@@ -17,6 +17,7 @@ import { useUiStore } from "../store/uiStore.ts";
 import { useDeployStore } from "../store/deployStore.ts";
 import { sendCancelDeploy, sendSetOwnKeyForPlatform } from "../lib/socket.ts";
 import { isDeployInFlight } from "../types.ts";
+import { useCanRun } from "../lib/useCapability.ts";
 import { agentStatus } from "../lib/agentStatus.ts";
 import { fmtPercent } from "../lib/format.ts";
 import { ProviderMark, BRAND_COLOR, JarokuGlyph } from "../lib/icons.tsx";
@@ -75,6 +76,7 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
   // The one provider this preference can spend: planning, generation, the fix loop, explain and
   // the judge are Anthropic-only, so an OpenAI key opted in would buy the workspace nothing.
   const anthropicReady = providers.some((p) => p.id === "anthropic" && p.configured);
+  const canManageProviders = useCanRun("setOwnKeyForPlatform");
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -141,6 +143,17 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
               Disabled with a stated reason rather than hidden when there is no Anthropic key: that
               is the same refusal the server makes, made here so the answer arrives before the
               click rather than as an error strip after it. */}
+          {/* §8.2 — "Connections tab / enter key" reaches this control from the other direction.
+              `setOwnKeyForPlatform` is `provider:manage`, the admin's: it decides which of two
+              credentials pays for planning and generation, and the person who connected the key is
+              the one who knows whether their provider account should carry ours too.
+
+              The `disabled` beside it stays, and the two are not the same thing. That one is about
+              whether the control APPLIES — there is no Anthropic key for it to spend, so the
+              server would refuse an admin too — and §8's rule is about who may use a control that
+              does apply. A refusal everybody gets is a state; a refusal only some roles get is a
+              permission, and only the second is absent. */}
+          {canManageProviders && (
           <div className="mt-3 border-t border-hair pt-2.5">
             <CheckboxField
               align="start"
@@ -156,6 +169,7 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
               </span>
             </CheckboxField>
           </div>
+          )}
 
           <button
             type="button"
@@ -302,6 +316,8 @@ export function TopBar() {
   const status = agent ? agentStatus(agent.agent_id, runs) : "draft";
   const setRightTab = useUiStore((s) => s.setRightTab);
   const inFlight = useDeployStore((s) => s.deployments.find((d) => isDeployInFlight(d.status)));
+  // `deploy:manage`, not `agent:write`. See the guard on the button itself.
+  const canDeploy = useCanRun("deploy");
 
   return (
     <div className="flex h-11 shrink-0 items-center gap-3 border-b border-hair px-4">
@@ -361,7 +377,11 @@ export function TopBar() {
         >
           <ShareOutIcon size={ICON.sm} />
         </button>
-        {inFlight ? (
+        {/* §8.2's Deploy row, at its other entry point. `deploy` and `cancelDeploy` are both
+            `deploy:manage`, the admin's — the checklist files this under `agent:write`, which is a
+            member capability, and following it here would have put a Deploy button in the title
+            bar of every member's window on every screen. See useCanRun. */}
+        {!canDeploy ? null : inFlight ? (
           // Same swap EvalRunBar makes: while something is running, the button that started it
           // becomes the one that stops it, rather than sitting there disabled and useless.
           <button

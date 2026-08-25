@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   sendCreateGithubBranch, sendOpenGithubPr, sendShadowRunGithub, sendSwitchGithubBranch,
 } from "../lib/socket.ts";
+import { useCanRun } from "../lib/useCapability.ts";
 import { absTime, relTime } from "../lib/format.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { ICON, STATUS } from "../lib/tokens.ts";
@@ -46,6 +47,12 @@ import {
  * honest front of a real rule rather than a courtesy.
  */
 export function BranchSwitcher({ view }: { view: GithubView }) {
+  // §8.2's GitHub rows again, at branch level. Switching, creating and running a ref are all
+  // `github:manage`: the first two move where this agent's code goes, and a shadow run spends the
+  // workspace's provider balance — "disposable to the product and not disposable to the bill".
+  // The CURRENT branch stays visible for everybody, because it is half of what "where did this go"
+  // means and the whole panel around it is a read.
+  const canWrite = useCanRun("switchGithubBranch");
   const [open, setOpen] = useState(false);
   // §A.7's chip opens the tab AT this control rather than merely at the panel. A nonce rather than
   // a boolean, so clicking the chip twice re-opens the switcher rather than firing once and then
@@ -89,6 +96,17 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
       setOpen(false);
     }
   };
+
+  // A member sees which branch this agent is on and cannot open the list that would move it. Not
+  // a disabled control — §8 — so the name renders as the text it already is rather than as a
+  // button that refuses.
+  if (!canWrite) {
+    return (
+      <span className="font-mono text-[11px] text-muted">
+        <Truncate title={view.link.branch}>{view.link.branch}</Truncate>
+      </span>
+    );
+  }
 
   return (
     <div ref={ref} className="relative">
@@ -385,10 +403,17 @@ function FileRow({
  * a gate back into decoration is to draw "nothing reported" in green.
  */
 export function PullRequestCard({ view }: { view: GithubView }) {
+  // Opening a pull request writes to a repository outside this workspace. The CARD — that one is
+  // open, its title, where it points — is a read and stays.
+  const canWrite = useCanRun("openGithubPr");
   if (!view.pr) {
     // Only offered where §3.1's model says a PR is the move: Jaroku's own branch, with something
     // on it. Reconciliation is always through a PR and never a silent auto-merge.
     if (view.state !== "diverged" && view.pushed.length === 0) return null;
+    // Nothing to say to a member here: the section's entire content is the one control they may
+    // not use, and a heading over an explanation of an action nobody can take is worse than
+    // silence.
+    if (!canWrite) return null;
     return (
       <section>
         <RegionLabel>Pull request</RegionLabel>

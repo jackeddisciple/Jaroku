@@ -406,6 +406,28 @@ interface UiState {
   inviteNotice: { ok: boolean; message: string } | null;
   setInviteNotice: (notice: { ok: boolean; message: string } | null) => void;
 
+  /**
+   * §8.3 — the role a command was refused for, or null.
+   *
+   * A SAFETY NET RATHER THAN A FLOW, and §8.3 says so in as many words: "If both gates are
+   * correctly implemented (affordance absent for wrong role, UpsellCard for wrong tier), neither
+   * toast should ever appear in normal use." So it exists to make a bug visible rather than to
+   * make a workflow work — seeing one means a surface rendered a control it should not have, and
+   * the alternative to showing it is a button that silently does nothing.
+   *
+   * IT HOLDS THE ROLE, NOT THE SERVER'S SENTENCE. The server's string names the capability —
+   * "a member cannot do this, it needs connector:manage" — which is precise, is addressed to
+   * whoever can read the source, and is the thing §8.3 explicitly forbids showing: "Do not name
+   * the specific capability — the user doesn't know what connector:manage means."
+   *
+   * IN `uiStore` RATHER THAN A STORE OF ITS OWN, and therefore NOT reset by a workspace switch —
+   * which is right for this one field for the reason the store's own exclusion note gives: a
+   * refusal is a fact about a click that just happened, not about a workspace, and a switch fired
+   * in the same second would blank the only explanation the click is going to get.
+   */
+  refusedRole: string | null;
+  setRefusedRole: (role: string | null) => void;
+
   // First run. WHETHER it is over is `sessionStore.user.onboarded`, not here — see the note
   // above the reader. `onboardingStep` is only consulted while that is false, and exists so a
   // reload mid-flow resumes where the user was rather than starting them over at Welcome.
@@ -523,6 +545,9 @@ export const useUiStore = create<UiState>((set) => ({
 
   inviteNotice: null,
   setInviteNotice: (inviteNotice) => set({ inviteNotice }),
+
+  refusedRole: null,
+  setRefusedRole: (refusedRole) => set({ refusedRole }),
 
   onboardingStep: onboarding.step,
   onboardingHintsShown: onboarding.hintsShown,

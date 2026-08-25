@@ -902,11 +902,15 @@ function DataSection() {
           archive. It is written by a worker and can take minutes; the link it produces expires.
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <button className={primaryBtn} onClick={() => void start()} disabled={!canManage || exportState?.status === "pending" || exportState?.status === "starting"}>
-            {exportState?.status === "pending" || exportState?.status === "starting" ? "Preparing…" : "Export everything"}
-          </button>
-          {!canManage && (
-            <span className="text-[11px] text-faint">Only an owner can export a workspace</span>
+          {/* §8.2 — "Workspace panel / Export workspace / workspace:manage", which is the owner's.
+              ABSENT, NOT DISABLED. It was a greyed button with "only an owner can export a
+              workspace" beside it, which is the exact shape §8 rules out — and the sentence made
+              it worse rather than better: a control that explains why it will not work is a
+              control that has decided somebody should keep looking at it. */}
+          {canManage && (
+            <button className={primaryBtn} onClick={() => void start()} disabled={exportState?.status === "pending" || exportState?.status === "starting"}>
+              {exportState?.status === "pending" || exportState?.status === "starting" ? "Preparing…" : "Export everything"}
+            </button>
           )}
           {exportState?.status === "pending" && (
             <span className="text-[11px] text-faint">
@@ -957,25 +961,29 @@ function DataSection() {
                 invented: the route refuses a body whose `confirm` is not the workspace's own id. The
                 id is rendered beside the box because asking somebody to type an identifier you have
                 not shown them is a puzzle rather than a confirmation. */}
-            <p className="mt-2 break-all font-mono text-[11px] text-faint select-all">{workspaceId}</p>
-            <div className="mt-1.5 flex flex-wrap items-center gap-2">
-              <input
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-                disabled={!canManage}
-                placeholder="type the id above to confirm"
-                className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 font-mono text-[11px] text-ink placeholder:font-sans placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge disabled:opacity-40"
-              />
-              <button
-                onClick={() => void destroy()}
-                disabled={!canManage || deleting || confirm.trim() !== workspaceId}
-                className="rounded-control border border-err/40 bg-err/10 px-3 py-1.5 text-[12px] text-err transition-colors hover:bg-err/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {deleting ? "Deleting…" : "Delete permanently"}
-              </button>
-            </div>
-            {!canManage && (
-              <p className="mt-1.5 text-[11px] text-faint">Only an owner can delete a workspace</p>
+            {/* §8.2 — "Workspace panel / Delete workspace / workspace:manage / OWNER ONLY". The
+                one row in the checklist the spec itself narrows to the owner, and the matrix
+                agrees. The id above stays visible for everybody because it is the thing support
+                asks for; the box that would spend it does not. */}
+            {canManage && (
+              <>
+                <p className="mt-2 break-all font-mono text-[11px] text-faint select-all">{workspaceId}</p>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <input
+                    value={confirm}
+                    onChange={(e) => setConfirm(e.target.value)}
+                    placeholder="type the id above to confirm"
+                    className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 font-mono text-[11px] text-ink placeholder:font-sans placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
+                  />
+                  <button
+                    onClick={() => void destroy()}
+                    disabled={deleting || confirm.trim() !== workspaceId}
+                    className="rounded-control border border-err/40 bg-err/10 px-3 py-1.5 text-[12px] text-err transition-colors hover:bg-err/20 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {deleting ? "Deleting…" : "Delete permanently"}
+                  </button>
+                </div>
+              </>
             )}
             {deleteError && <p className="mt-1.5 text-[11px] text-err">{deleteError}</p>}
           </>

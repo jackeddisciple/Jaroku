@@ -16,6 +16,7 @@ import { AdminModeBanner } from "./components/AdminModeBanner.tsx";
 import { EnforcementStrip } from "./components/EnforcementStrip.tsx";
 import { WorkspacePanel } from "./components/WorkspacePanel.tsx";
 import { WorkspaceSwitchLock } from "./components/WorkspaceSwitchLock.tsx";
+import { RoleRefusal } from "./components/RoleRefusal.tsx";
 import { InviteNotice } from "./components/InviteNotice.tsx";
 import { redeemPendingInvite } from "./lib/invite.ts";
 import { switchWorkspace } from "./lib/socket.ts";
@@ -303,6 +304,9 @@ export function App() {
       <WorkspacePanel />
       {/* What became of the invitation this tab was opened with, if it was opened with one. */}
       <InviteNotice />
+      {/* §8.3 — the safety net under §8s guards. It should never appear; when it does, a surface
+          rendered a control for a role that cannot use it. */}
+      <RoleRefusal />
       {/* §5.1 — the lock over the shell while a workspace switch is in flight. Above the workspace
           panel and below the MCP modal: it must cover the panel it just closed, and it must not
           cover a run halted mid-graph waiting for an answer. */}

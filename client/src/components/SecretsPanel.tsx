@@ -42,6 +42,7 @@ import {
 import { formatRemaining, holdForElevation, isFinalMinute, useSecretsStore } from "../store/secretsStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { useProviderStore } from "../store/providerStore.ts";
+import { useCanReach } from "../lib/useCapability.ts";
 
 /** How often the gate state is re-read. Also the countdown's correction against the server. */
 const POLL_MS = 15_000;
@@ -98,6 +99,9 @@ function Countdown() {
 }
 
 export function SecretsPanel() {
+  // `secret:manage` — the capability behind `POST /v1/secrets` and its rotate, reveal and revoke
+  // siblings. See the action row below for why this is separate from the elevation gate.
+  const canWrite = useCanReach("secretWrite");
   const elevated = useSecretsStore((s) => s.elevated);
   const gate = useSecretsStore((s) => s.gate);
   const gateLoaded = useSecretsStore((s) => s.gateLoaded);
@@ -277,22 +281,38 @@ export function SecretsPanel() {
 
             <HealthStrip />
 
-            <div className="flex items-center gap-2">
-              <button className={secondaryBtn} onClick={() => setAdding((v) => !v)}>
-                <PlusIcon size={ICON.xs} /> Add
-              </button>
-              <button className={quietBtn} onClick={() => setImporting((v) => !v)}>
-                Import
-              </button>
-              {/* The only way to reach PATCH /secrets/passcode. The route and the client function
-                  both existed; nothing rendered a control for either, so somebody who wanted to
-                  change a passcode they still knew had to forget it first and recover. */}
-              <button className={quietBtn} onClick={() => setChangingPasscode((v) => !v)}>
-                Change passcode
-              </button>
-            </div>
+            {/* §8.2 — "Secrets panel / Add, rotate, reveal / connector:manage". The commands here
+                are not commands at all: every one of them is an HTTP route, because elevation
+                rides on a request header a WebSocket cannot carry. The route's own capability is
+                `secret:manage`, the admin's, which is the same rung the checklist names.
 
-            {adding ? (
+                THE ELEVATION GATE IS NOT THIS GATE, and neither replaces the other. Elevation asks
+                "is it still them, right now"; a capability asks "is this person entitled to this
+                class of thing at all". A member can pass the passcode and still not be entitled to
+                store a credential the whole workspace runs on — which is why `secret:read` is a
+                member capability and `secret:manage` is not, and why the LIST below stays.
+
+                THE PASSCODE ROW GOES WITH THEM. It is the gate in front of the writes, and a
+                control for changing the lock on a door somebody may not open is a control with
+                nothing behind it. */}
+            {canWrite && (
+              <div className="flex items-center gap-2">
+                <button className={secondaryBtn} onClick={() => setAdding((v) => !v)}>
+                  <PlusIcon size={ICON.xs} /> Add
+                </button>
+                <button className={quietBtn} onClick={() => setImporting((v) => !v)}>
+                  Import
+                </button>
+                {/* The only way to reach PATCH /secrets/passcode. The route and the client function
+                    both existed; nothing rendered a control for either, so somebody who wanted to
+                    change a passcode they still knew had to forget it first and recover. */}
+                <button className={quietBtn} onClick={() => setChangingPasscode((v) => !v)}>
+                  Change passcode
+                </button>
+              </div>
+            )}
+
+            {canWrite && adding ? (
               <AddForm
                 // Keyed on the provider, so arriving for a SECOND one while the form is already
                 // open remounts it with the new name rather than leaving the first one in the field.
@@ -304,8 +324,8 @@ export function SecretsPanel() {
                 onDone={() => { setAdding(false); void refresh(); }}
               />
             ) : null}
-            {importing ? <ImportForm onDone={() => { setImporting(false); void refresh(); }} /> : null}
-            {changingPasscode ? (
+            {canWrite && importing ? <ImportForm onDone={() => { setImporting(false); void refresh(); }} /> : null}
+            {canWrite && changingPasscode ? (
               <PasscodeForm onDone={() => { setChangingPasscode(false); void refresh(); }} />
             ) : null}
 

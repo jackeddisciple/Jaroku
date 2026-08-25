@@ -60,6 +60,27 @@ export function useCanReach(route: keyof typeof ROUTE_CAPABILITY): boolean {
 }
 
 /**
+ * Whether this account may take an action named by `ACTION_COMMAND`-style key.
+ *
+ * TWO KINDS OF KEY THROUGH ONE HOOK, because the Inbox's actions are a mix of both and a card
+ * cannot know which: `__route:secretWrite` names an HTTP surface, anything else names a command.
+ * The prefix is ugly on purpose — it is a discriminator in a table, not a string anybody types —
+ * and the alternative was two parallel tables on the Inbox with the same keys, which is the shape
+ * that goes out of step.
+ *
+ * AN UNKNOWN KEY IS REFUSED, which is what makes the table's own default safe: an Inbox action
+ * added later with no entry answers `undefined` here and the card renders nothing, rather than
+ * offering a fix that 403s.
+ */
+export function useCanTake(key: string | undefined): boolean {
+  const role = useSessionStore((s) => s.role());
+  const routeKey = key?.startsWith("__route:") ? key.slice("__route:".length) : null;
+  const routeCapability = routeKey ? ROUTE_CAPABILITY[routeKey] : undefined;
+  if (routeKey) return routeCapability === undefined ? false : can(role, routeCapability);
+  return canRun(role, key ?? "");
+}
+
+/**
  * §8.3's toast — the role a refusal names, or null when it was not a role refusal.
  *
  * IT READS THE SERVER'S ANSWER RATHER THAN RE-DERIVING ONE. §13.5 puts `reason: "requires_role"`

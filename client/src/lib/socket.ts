@@ -19,6 +19,7 @@ import { useMemberStore } from "../store/memberStore.ts";
 import { useAuditStore } from "../store/auditStore.ts";
 import { useEnforcementStore } from "../store/enforcementStore.ts";
 import { isRefusal, useEntitlementStore } from "../store/entitlementStore.ts";
+import { refusedRole } from "./useCapability.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { useInboxStore } from "../store/inboxStore.ts";
 import { useActivityStore } from "../store/activityStore.ts";
@@ -88,6 +89,21 @@ function dispatch(msg: ServerMessage): void {
   if (carried !== undefined && isRefusal(carried)) {
     useEntitlementStore.getState().refuse(msg.channel, carried);
   }
+
+  // §8.3's OTHER refusal, lifted out beside the tier one and for the same reason — the server
+  // answers a role refusal on the channel the command belonged to, and every one of those already
+  // carries a `type: "error"` its own panel knows how to show. Read once here rather than in
+  // eighteen error shapes.
+  //
+  // "MAY THIS PERSON" AND "HAS THIS WORKSPACE ANY LEFT" ARE DIFFERENT QUESTIONS and they are
+  // answered by different people: one by asking an owner, the other by paying. So a role refusal
+  // is a toast naming the role, and a tier refusal is the inline card naming the figure — never
+  // the same surface, because "ask your owner" and "upgrade" are not interchangeable advice.
+  //
+  // NO `return`, DELIBERATELY, exactly as above: the channel's own error still reaches its own
+  // store, so a surface with no toast in view is not one where the refusal disappears.
+  const role = refusedRole(msg);
+  if (role) useUiStore.getState().setRefusedRole(role);
 
   switch (msg.channel) {
     case "history":

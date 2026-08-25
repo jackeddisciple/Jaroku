@@ -19,6 +19,7 @@ import { useState } from "react";
 import {
   ACTION_LABEL,
   FORM_ACTIONS,
+  useAllowedActions,
   runAction,
   submitCeiling,
   submitCredential,
@@ -170,7 +171,9 @@ function InlineForm({ item, action }: { item: InboxItemView; action: InboxAction
 /** The overflow (§4.4): every action that is not the primary one, and the snooze durations. */
 function Overflow({ item, onClose }: { item: InboxItemView; onClose: () => void }) {
   const [snoozing, setSnoozing] = useState(false);
-  const secondary = item.actions.slice(1).filter((a) => a !== "dismiss");
+  // The same filter the row above applies, for the same reason: an overflow offering a fix that
+  // 403s is worse than one that is a line shorter.
+  const secondary = useAllowedActions(item.actions).slice(1).filter((a) => a !== "dismiss");
 
   return (
     <div
@@ -237,8 +240,19 @@ function Overflow({ item, onClose }: { item: InboxItemView; onClose: () => void 
 
 export function InboxCardActions({ item, expanded }: { item: InboxItemView; expanded: boolean }) {
   const [menu, setMenu] = useState(false);
-  const primary = item.actions[0];
-  const canDismiss = item.actions.includes("dismiss");
+  /**
+   * §8 ON THE INBOX. Every card offers a fix and the fixes come from five subsystems, so an
+   * action's capability is a property of the action rather than of the card — see `ACTION_COMMAND`.
+   *
+   * FILTERED BEFORE `primary` IS CHOSEN, which is the part that matters: the registry orders each
+   * card's actions by usefulness and the first is the one that gets the button. Filtering
+   * afterwards would leave a member looking at a card whose primary control is missing and whose
+   * second-best fix is buried in a kebab — the card would still be actionable and would not look
+   * it. Taking the first action they CAN take is what keeps the board clearable at every role.
+   */
+  const offered = useAllowedActions(item.actions);
+  const primary = offered[0];
+  const canDismiss = offered.includes("dismiss");
   // §4.3: a blocking card shows its inline form WITHOUT expanding. That is what "large" buys.
   const showForm =
     primary !== undefined && FORM_ACTIONS.has(primary) && (expanded || item.severity === "blocking");
@@ -253,7 +267,7 @@ export function InboxCardActions({ item, expanded }: { item: InboxItemView; expa
             {actionIconFor(primary)({ size: ICON.xs })}
           </IconButton>
         )}
-        {item.actions.length > 1 && (
+        {offered.length > 1 && (
           <IconButton label="More actions" onClick={() => setMenu((m) => !m)}>
             <KebabIcon size={ICON.xs} />
           </IconButton>

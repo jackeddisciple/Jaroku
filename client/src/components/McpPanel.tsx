@@ -33,6 +33,7 @@ import {
   ChevronDownIcon,
   UserCircleIcon, XIcon,
 } from "./panelIcons.tsx";
+import { useCanRun } from "../lib/useCapability.ts";
 import type { McpServer, McpTool } from "../types.ts";
 
 /** What each status means, in the words a user would use to decide what to do next. */
@@ -46,6 +47,10 @@ const STATUS_COPY: Record<McpServer["status"], { state: "ok" | "error" | "pendin
 // --- one discovered tool -----------------------------------------------------
 
 function ToolRow({ tool, serverId }: { tool: McpTool; serverId: string }) {
+  // §8.2 — "MCP panel / Grant-revoke tools". The command is `setMcpToolImpact` and its capability
+  // is `mcp:manage`, the admin's: raising a tool to high impact decides whether every agent in the
+  // workspace has to be asked before running it, and lowering one stops the asking entirely.
+  const canManage = useCanRun("setMcpToolImpact");
   const [open, setOpen] = useState(false);
   const high = tool.impact === "high";
   const Icon = high ? ShieldAlertIcon : EyeIcon;
@@ -107,19 +112,26 @@ function ToolRow({ tool, serverId }: { tool: McpTool; serverId: string }) {
               </span>
               schema
             </button>
-            <span className="text-faint">·</span>
             {/* Both directions, always. Raising is how you gate something the heuristic read
-                as harmless; lowering is how you stop being asked about a search tool. */}
-            <button
-              className={quietBtn + " !px-0 !text-[11px]"}
-              onClick={() => sendSetMcpToolImpact(serverId, tool.name, high ? "low" : "high")}
-              title={high
-                ? "Stop asking before this runs."
-                : "Ask before this runs, even though it was classified read-only."}
-            >
-              {high ? "treat as read-only" : "treat as high impact"}
-            </button>
-            {tool.overridden && (
+                as harmless; lowering is how you stop being asked about a search tool.
+                ABSENT FOR A MEMBER, not disabled — §8. The classification itself stays visible to
+                everybody, because a member whose run halts for a confirmation has to be able to
+                see why; what is admin-only is CHANGING it. */}
+            {canManage && (
+              <>
+                <span className="text-faint">·</span>
+                <button
+                  className={quietBtn + " !px-0 !text-[11px]"}
+                  onClick={() => sendSetMcpToolImpact(serverId, tool.name, high ? "low" : "high")}
+                  title={high
+                    ? "Stop asking before this runs."
+                    : "Ask before this runs, even though it was classified read-only."}
+                >
+                  {high ? "treat as read-only" : "treat as high impact"}
+                </button>
+              </>
+            )}
+            {canManage && tool.overridden && (
               <>
                 <span className="text-faint">·</span>
                 <button
@@ -146,6 +158,9 @@ function ToolRow({ tool, serverId }: { tool: McpTool; serverId: string }) {
 // --- one server --------------------------------------------------------------
 
 function ServerDetail({ server }: { server: McpServer }) {
+  // The whole control row below is `mcp:manage`. See the row itself for why it is guarded as a
+  // group rather than one button at a time.
+  const canManage = useCanRun("addMcpServer");
   const discovering = useMcpStore((s) => Boolean(s.discovering[server.id]));
   const [token, setToken] = useState("");
   const [showToken, setShowToken] = useState(false);
@@ -183,23 +198,31 @@ function ServerDetail({ server }: { server: McpServer }) {
           </p>
         )}
 
-        <div className="mt-2 flex items-center gap-2 flex-wrap">
-          <button className={secondaryBtn} disabled={discovering}
-            onClick={() => sendRediscoverMcpServer(server.id)}
-            title="Ask the server what it can do, again. A failure keeps the tools already discovered.">
-            <RefreshIcon size={ICON.xs} />
-            {discovering ? "checking…" : "re-check"}
-          </button>
-          <button className={secondaryBtn} onClick={() => setShowToken((v) => !v)}>
-            <KeyIcon size={ICON.xs} />
-            {server.configured ? "replace credential" : "add a credential"}
-          </button>
-          <button className={secondaryBtn + " ml-auto hover:!text-err"}
-            onClick={() => sendRemoveMcpServer(server.id)}>
-            <XIcon size={ICON.xs} />
-            disconnect
-          </button>
-        </div>
+        {/* §8.2 — "MCP panel / Connect server / Remove server". All three of these send an
+            `mcp:manage` command, so the whole row is absent for a member rather than each control
+            being guarded separately: a row of controls where every one is missing is an empty flex
+            container with a gap, which reads as a rendering fault. What a member keeps is the
+            panel itself — which servers are connected, which tools they offer, which one is
+            failing — because that is what `mcp:read` is for. */}
+        {canManage && (
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            <button className={secondaryBtn} disabled={discovering}
+              onClick={() => sendRediscoverMcpServer(server.id)}
+              title="Ask the server what it can do, again. A failure keeps the tools already discovered.">
+              <RefreshIcon size={ICON.xs} />
+              {discovering ? "checking…" : "re-check"}
+            </button>
+            <button className={secondaryBtn} onClick={() => setShowToken((v) => !v)}>
+              <KeyIcon size={ICON.xs} />
+              {server.configured ? "replace credential" : "add a credential"}
+            </button>
+            <button className={secondaryBtn + " ml-auto hover:!text-err"}
+              onClick={() => sendRemoveMcpServer(server.id)}>
+              <XIcon size={ICON.xs} />
+              disconnect
+            </button>
+          </div>
+        )}
 
         {showToken && (
           <div className="mt-2 rounded-card border border-edge bg-panel p-2 shadow-raised">
@@ -276,6 +299,7 @@ function ServerDetail({ server }: { server: McpServer }) {
 // --- the panel ---------------------------------------------------------------
 
 export function McpPanel() {
+  const canManage = useCanRun("addMcpServer");
   const servers = useMcpStore((s) => s.servers);
   const error = useMcpStore((s) => s.error);
   const notice = useMcpStore((s) => s.notice);
@@ -362,14 +386,20 @@ export function McpPanel() {
             <Truncate title={s.label}>{s.label}</Truncate>
           </Chip>
         ))}
-        <button className={quietBtn + " shrink-0 inline-flex items-center gap-1"}
-          onClick={() => setAdding((v) => !v)}>
-          <PlusIcon size={ICON.xs} />
-          Connect a server
-        </button>
+        {/* §8.2 — "MCP panel / Connect server / connector:manage". The command is `addMcpServer`
+            and its capability is `mcp:manage`: connecting a third-party server points every agent
+            in this workspace at code nobody here has reviewed, which is the definition of
+            committing the workspace to something outside itself. */}
+        {canManage && (
+          <button className={quietBtn + " shrink-0 inline-flex items-center gap-1"}
+            onClick={() => setAdding((v) => !v)}>
+            <PlusIcon size={ICON.xs} />
+            Connect a server
+          </button>
+        )}
       </div>
 
-      {adding && (
+      {canManage && adding && (
         <div className="shrink-0 px-4 pb-2">
           <div className="rounded-card border border-edge bg-panel p-2 shadow-raised">
             <input

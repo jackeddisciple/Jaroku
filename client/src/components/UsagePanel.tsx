@@ -367,11 +367,17 @@ function PlanChoice({ usage }: { usage: UsageSnapshot }) {
                   {p.deploy ? " · deploys" : " · no deploys"}
                 </div>
               </div>
-              {!p.current && p.purchasable && (
+              {/* §8.2 — "Usage / Billing / Change plan / checkout / billing:manage". Absent rather
+                  than disabled: it was greyed with "only an owner can change the plan" as its
+                  tooltip, which is §8's forbidden shape and also the least useful place to put a
+                  sentence — a tooltip on a disabled control is text somebody has to hover a dead
+                  button to read. The sentence below the list says the same thing once, where it
+                  is read without hovering anything. */}
+              {!p.current && p.purchasable && canBuy && (
                 <button
                   className={secondaryBtn}
-                  disabled={!canBuy || busy !== null}
-                  title={canBuy ? `Change to ${p.label}` : "Only an owner can change the plan"}
+                  disabled={busy !== null}
+                  title={`Change to ${p.label}`}
                   onClick={() => void go(p.id)}
                 >
                   {busy === p.id ? "Opening…" : "Choose"}

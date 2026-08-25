@@ -26,6 +26,7 @@ import {
   sendCancelDeploy, sendDeploy, sendForgetDeployment, sendListDeployments, sendLoadDeployLogs,
   sendPlanDeploy, sendSetRailwayToken, sendTestRailwayToken,
 } from "../lib/socket.ts";
+import { useCanRun } from "../lib/useCapability.ts";
 import { ACCENT, ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { fmtDuration } from "../lib/format.ts";
 import { useBuildStore } from "../store/buildStore.ts";
@@ -109,6 +110,8 @@ export function DeployPanel() {
   const selectedId = useDeployStore((s) => s.selectedId);
   const agentId = useBuildStore((s) => s.activeAgentId);
   const agents = useBuildStore((s) => s.agents);
+  // `deploy:manage` — see the note on the Railway row below for why this is not `agent:write`.
+  const canDeploy = useCanRun("deploy");
 
   useEffect(() => {
     // McpPanel's precedent: ask on mount rather than relying only on the connect snapshot,
@@ -169,7 +172,17 @@ export function DeployPanel() {
 
       {serveToken && <ServeTokenCard onDismiss={dismissServeToken} />}
 
-      <RailwayTokenRow configured={railwayConfigured} />
+      {/* §8.2 — "Agent card / detail / Deploy / Redeploy". The checklist files it under
+          `agent:write`, which is a MEMBER capability; the command is `deploy` and its real
+          capability is `deploy:manage`, the admin's. Following the checklist here would have put a
+          Deploy button in front of every member in every team and had the relay 403 it — which is
+          the "an admin can't do something they should" half of §8.2's own warning, inverted.
+          See useCanRun's note; this is the row it names.
+
+          The Railway token row is the same capability by a different command (`setRailwayToken`),
+          and it is the one that carries a credential — so it is absent for a member for both
+          reasons at once. */}
+      {canDeploy && <RailwayTokenRow configured={railwayConfigured} />}
 
       {deployments.length > 0 && (
         <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-hair px-4 py-2">
@@ -203,12 +216,22 @@ export function DeployPanel() {
       <div className="min-h-0 flex-1 overflow-auto">
         {selected ? (
           <DeployDetail key={selected.id} deployment={selected} />
-        ) : agentId ? (
+        ) : agentId && canDeploy ? (
           <DeployForm
             agentId={agentId}
             plan={plan?.agentId === agentId ? plan : null}
             planning={planning}
             railwayConfigured={railwayConfigured}
+          />
+        ) : agentId ? (
+          // A member keeps the LIST — `deploy:read` is a member capability and somebody debugging
+          // an agent has to be able to see where it went and what its build said. What is absent
+          // is the form that would start one.
+          <EmptyState
+            size="line"
+            icon={RocketIcon}
+            title="Nothing deployed yet"
+            hint="An admin can deploy this agent to the workspace's hosting account."
           />
         ) : (
           <EmptyState
@@ -403,6 +426,11 @@ function DeployForm({
         {/* Through `primaryBtn`, which is this exact treatment now. It was an inline copy of the
             geometry — one of four in the client — from back when the shared weight named "primary"
             was the quietest control on its own card. */}
+        {/* `canDeploy` HERE IS NOT A ROLE — it is this form's own name for "the plan is ready and
+            nothing is missing", computed a few lines up from the plan. The role guard for this
+            surface is one level out: the whole form is absent for a member, so a member never
+            reaches this button to find it greyed. Two different questions, and only the role one
+            is §8's. */}
         <button
           className={`${primaryBtn} ml-auto`}
           disabled={!canDeploy}
@@ -420,6 +448,11 @@ function DeployForm({
 // --- the live detail -------------------------------------------------------
 
 function DeployDetail({ deployment }: { deployment: Deployment }) {
+  // Cancel and Forget are both `deploy:manage`. Cancel is the one worth pausing on: it REDUCES
+  // what is running, and a case could be made for letting anybody stop a runaway build. The matrix
+  // says otherwise and the matrix wins — a deploy is the workspace's own hosting account, and
+  // stopping a colleague's release mid-flight is not a lesser act than starting one.
+  const canDeploy = useCanRun("cancelDeploy");
   // Subscribed here rather than passed down, so a log line re-renders the detail pane and
   // nothing above it.
   const lines = useDeployStore((s) => s.logs[deployment.id]) ?? EMPTY_LINES;
@@ -550,19 +583,23 @@ function DeployDetail({ deployment }: { deployment: Deployment }) {
       )}
 
       <div className="mt-3 flex items-center gap-2 border-t border-hair pt-3">
-        {running ? (
+        {running && canDeploy ? (
           <button
             className="rounded-control px-3 py-1.5 text-[12px] text-err transition-colors hover:bg-active active:bg-chrome"
             onClick={() => sendCancelDeploy(deployment.id)}
           >
             Cancel deploy
           </button>
-        ) : (
+        ) : running ? null : canDeploy ? (
           <button className={quietBtn} onClick={() => select(null)}>
             Deploy another
           </button>
+        ) : (
+          <button className={quietBtn} onClick={() => select(null)}>
+            Back to deployments
+          </button>
         )}
-        {!running && (
+        {!running && canDeploy && (
           <button
             className={`${secondaryBtn} ml-auto hover:!text-err`}
             title="Removes the record from Jaroku. Nothing in your Railway account is touched."

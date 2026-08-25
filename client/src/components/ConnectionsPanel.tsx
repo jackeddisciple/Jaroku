@@ -27,6 +27,7 @@ import {
   useConnectionStore,
 } from "../store/connectionStore.ts";
 import { sendConnectConnector, sendDisconnectConnector, sendListConnections } from "../lib/socket.ts";
+import { useCanReach, useCanRun } from "../lib/useCapability.ts";
 import { createSecret, revealSecret } from "../lib/secrets.ts";
 import { ICON, TEXT } from "../lib/tokens.ts";
 import { EmptyState } from "./EmptyState.tsx";
@@ -67,6 +68,16 @@ const STATUS_COPY: Record<string, { state: "ok" | "error" | "pending" | "neutral
 // as long as the field is on screen.
 
 function ConnectorField({ field, onDone }: { field: ConnectionFieldView; onDone: () => void }) {
+  // §8.2 — "Connections tab / Connect OAuth or enter key / connector:manage". The FIELD half of
+  // that row is not a socket command at all: a value goes over `POST /v1/secrets`, because
+  // elevation rides on a request header a WebSocket cannot carry. So it gates on the route's own
+  // capability, `secret:manage`, which is the same admin rung `connector:manage` sits on — the two
+  // halves of one row cannot disagree about who may use it.
+  //
+  // THE VALUE'S ABSENCE IS NOT THE POINT; the CONTROL's is. A member could already see this row —
+  // `connector:read` and `secret:read` are both member capabilities and neither carries a value —
+  // and what §8 removes is the box they could type into and the button that would 403.
+  const canWrite = useCanReach("secretWrite");
   const [value, setValue] = useState("");
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -149,11 +160,19 @@ function ConnectorField({ field, onDone }: { field: ConnectionFieldView; onDone:
           {/* A non-secret field can be read back and edited; a credential can only be replaced.
               Rotating a credential from here writes a new value over the old one, which is what
               the Secrets tab's own Rotate does and is the only safe verb for a value nothing can
-              show you. */}
-          <button className={quietBtn} disabled={busy} onClick={field.secret ? () => setEditing(true) : show}>
-            {field.secret ? "Replace" : busy ? "Reading…" : "Edit"}
-          </button>
+              show you. Both are `secret:manage` — even the read, because `show` calls the reveal
+              route, which is the one path in the product that returns a plaintext value. */}
+          {canWrite && (
+            <button className={quietBtn} disabled={busy} onClick={field.secret ? () => setEditing(true) : show}>
+              {field.secret ? "Replace" : busy ? "Reading…" : "Edit"}
+            </button>
+          )}
         </div>
+      ) : !canWrite ? (
+        // A member reaching the unset state, which they can: the row renders for everybody and the
+        // value has simply never been entered. Said rather than left blank, because a blank line
+        // under a connector name reads as a panel that failed to load.
+        <p className="mt-1 text-[11px]" style={{ color: TEXT.muted }}>Not set. An admin can add it.</p>
       ) : (
         <div className="mt-1 flex items-center gap-1.5">
           <input
@@ -198,6 +217,12 @@ function ConnectorField({ field, onDone }: { field: ConnectionFieldView; onDone:
 // --- one connector -----------------------------------------------------------
 
 function ConnectionRow({ connection }: { connection: ConnectionView }) {
+  // §8.2 — "Connections tab / Connect OAuth / Disconnect / connector:manage". Both send
+  // `connectConnector` or `disconnectConnector`, and the matrix puts both at `connector:manage`:
+  // connecting Gmail points every agent in the workspace at one person's mailbox, and the grant is
+  // made against THEIR account. Disconnecting is the same capability rather than a lesser one —
+  // breaking every agent that depends on a connection is not a read.
+  const canManage = useCanRun("connectConnector");
   const connecting = useConnectionStore((s) => s.connecting[connection.connectorId] === true);
   const status = STATUS_COPY[connection.status] ?? STATUS_COPY["disconnected"]!;
   const connected = connection.status === "active";
@@ -312,6 +337,11 @@ function ConnectionRow({ connection }: { connection: ConnectionView }) {
           value", which is the Secrets tab's Revoke and carries its own confirmation because the
           credential may be referenced by a running agent. Emptying the field is the verb here,
           and it is where the value is. */}
+      {/* NOT `hidden` FOR THE ROLE, and the `hidden` beside it is the reason this reads oddly: the
+          user_secret case is a LAYOUT decision — the row keeps its width so the column of connectors
+          stays aligned — while the role case is §8's rule, which says absent rather than hidden
+          because hidden is one devtools panel away from a click that reaches the relay. */}
+      {canManage && (
       <div className={`flex items-center gap-1.5 ${connection.auth === "user_secret" ? "hidden" : ""}`}>
         {connected ? (
           <>
@@ -353,6 +383,7 @@ function ConnectionRow({ connection }: { connection: ConnectionView }) {
           </button>
         )}
       </div>
+      )}
     </div>
   );
 }

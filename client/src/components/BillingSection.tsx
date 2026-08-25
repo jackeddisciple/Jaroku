@@ -40,7 +40,7 @@ import { ICON, TYPE } from "../lib/tokens.ts";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { EmptyState, LoadingLine } from "./EmptyState.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
-import { AlertTriangleIcon, CheckIcon, InfoIcon } from "./panelIcons.tsx";
+import { AlertTriangleIcon, CheckIcon, InfoIcon, MinusIcon } from "./panelIcons.tsx";
 
 /**
  * The three tiers, as the person buying one would compare them.
@@ -233,14 +233,26 @@ export function BillingSection() {
             one behind a paywall. The server says whether the control applies at all. */}
         {sub && (
           <div className="mt-3 rounded-control border border-hair px-3 py-2.5">
-            <label className="flex cursor-pointer items-start gap-2.5">
-              <input
-                type="checkbox"
-                className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-accent"
-                checked={sub.byokEnabled}
-                disabled={!canManage}
-                onChange={(e) => sendSetByok(e.target.checked)}
-              />
+            {/* §8.2 — "Usage / Billing / BYOK toggle / billing:manage", which is the owner's.
+                A CHECKBOX AND A SENTENCE FOR AN OWNER, A SENTENCE ALONE FOR EVERYBODY ELSE. It was
+                `disabled={!canManage}` with "Only an owner can change this" beneath it, which is
+                exactly the pattern §8 rules out — and here it also renders a checkbox somebody can
+                click at, which reports the state and refuses to change it. The STATE is still
+                shown, because whose keys the agents run on is a fact a member needs to read a bill
+                against; what is absent is the control. */}
+            <label className={`flex items-start gap-2.5 ${canManage ? "cursor-pointer" : ""}`}>
+              {canManage ? (
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-accent"
+                  checked={sub.byokEnabled}
+                  onChange={(e) => sendSetByok(e.target.checked)}
+                />
+              ) : (
+                <span className="mt-0.5 shrink-0 text-muted" aria-hidden>
+                  {sub.byokEnabled ? <CheckIcon size={ICON.xs} /> : <MinusIcon size={ICON.xs} />}
+                </span>
+              )}
               <span className="min-w-0">
                 <span className="text-[12px] text-ink">Use my own provider keys</span>
                 {/* INSTANT, AND SAID SO. Inference is usage-based rather than seat-based, so there
@@ -251,9 +263,7 @@ export function BillingSection() {
                     ? "Your agents run on the keys in the Secrets tab. You pay the plan fee and no inference charges."
                     : "Your agents run on our keys, against the credit your plan includes. Switching is instant — the next run routes the other way."}
                 </span>
-                {!canManage && (
-                  <span className="mt-0.5 block text-[11px] text-faint">Only an owner can change this</span>
-                )}
+
               </span>
             </label>
           </div>
@@ -321,12 +331,14 @@ export function BillingSection() {
                   ))}
                 </ul>
 
-                {!current && (
+                {/* §8.2 — "Usage / Billing / Change plan / checkout". Absent rather than disabled,
+                    for the reason the BYOK row above states: the tiers and what each includes stay
+                    readable by everybody, because that is what somebody compares a bill against;
+                    the button that would start a checkout is the owner's. */}
+                {!current && canManage && (
                   <button
                     type="button"
                     className={`${open ? quietBtn : secondaryBtn} mt-2 w-full justify-center`}
-                    disabled={!canManage}
-                    title={canManage ? undefined : "Only an owner can change the plan"}
                     onClick={() => {
                       setChoosing(open ? null : t.id);
                       setSeats(Math.max(minimumSeats(t.id), sub?.seatCount ?? minimumSeats(t.id)));
