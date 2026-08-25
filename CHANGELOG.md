@@ -8,6 +8,120 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.3.5 : The Composer & Generation Panel — Telling the Model More, and Saying What Happened
+
+The right panel inspects; the middle panel acts, and this release is the middle panel. Everything
+here serves one of three jobs: tell the model more (attachments, connectors, reasoning effort),
+tell the user what happened (the response metadata row), and let the user respond to what happened
+(copy, note, pin, regenerate, feedback).
+
+One rule governs every decision in it, and it is the reason several obvious shortcuts were not
+taken: **the composer gathers intent; it never performs privileged actions.** Attaching a GitHub
+commit is context. Pushing to GitHub is a confirmed, audit-logged action that lives in the GitHub
+panel. The same line separates the permission shield — a *policy* control — from tool execution,
+which is a gated action. Blurring it is how a trust-first product quietly stops being one.
+
+### Added
+
+- **One bottom control bar, seven controls, in a fixed order.** ⊕, fullscreen, effort, shield and
+  the connector deck pack left; the model selector, the Chat/Test toggle, mic and send pack right;
+  one spacer absorbs the difference. Deliberately **not** `justify-content: space-between` — the
+  deck is absent with zero connectors and the effort control is hidden on a non-reasoning model,
+  and spreading the row would move every button each time one of them disappeared. The layout
+  rules live in `lib/composerBar.ts` with their own suite, because "hiding a control moves nothing
+  else" and "the bar never wraps" are acceptance criteria that otherwise get checked by resizing a
+  window and looking.
+- **The fullscreen editor is the same composer, re-parented.** Draft text, attachments and every
+  toolbar setting are held above both, so there is nothing to synchronise and no direction for a
+  sync to fail in. The thread behind it stays mounted at reduced opacity — unmounting it would
+  kill streaming turns.
+- **An icon registry, and nothing outside it imports the icon package.** Hugeicons numbers some
+  glyph families and the numbers move between releases; a renamed export arrives as `undefined`
+  rather than throwing, so the control bar would lose a button to a dependency bump with nothing
+  reporting it. `test:icons` asserts all twenty tokens still resolve to real path data.
+- **Reasoning effort, translated per provider in one adapter.** Four Jaroku levels; extended-
+  thinking providers get a budget, `reasoning_effort` providers get a named level, and a model
+  with no reasoning control renders the chip **disabled with the model named** rather than showing
+  a meaningless "Low". Budgets live in `runtime/pricing.json` beside the prices — the same file
+  both the Node estimator and the Python interceptor already read — and every one is validated
+  against the model's max output tokens before dispatch. A clamp is **reported**: the turn stores
+  what was requested *and* what was applied, so §6.2's marker is derivable after the fact rather
+  than only knowable to the provider.
+- **The permission shield, enforced server-side with the client bypassed.** Strict, Smart, Fast,
+  and there is no fourth. The control writes a row; the gate reads it at the moment a run stops to
+  ask, so a modified client, a replayed frame and a runner built from a fork all arrive at the same
+  decision. Two invariants hold in **every** mode including Fast: a write or a tool nothing could
+  classify always confirms, and a protected path is never writable. Paths are compared as
+  normalised POSIX keys, so the Windows separator that silently emptied that block list once
+  cannot empty it again through a new code path. Mode changes write to `audit_log` with the actor
+  and **both** values — "set to Fast" does not distinguish somebody relaxing Strict from somebody
+  re-saving.
+- **⊕ Add — five sources, one picker, searched server-side.** File, run, dataset case, tool schema
+  and GitHub, all on the command-palette infrastructure rather than five bespoke modals. A source
+  with nothing behind it is hidden rather than disabled: an empty menu item that always fails is
+  worse than no item.
+- **Attachments are snapshotted at send, not at attach.** A file ref stores its `version_id`, so a
+  turn stays reconstructible after the file changes. Token cost is measured **server-side** — a
+  client-supplied estimate would make the budget advisory — with an inline warning at 70% of the
+  model's context window and a hard block at 100% that **names what to remove**. Silent truncation
+  is the failure this exists to prevent: it produces a confident answer grounded in half a file,
+  with no error attached to it.
+- **The connector deck scopes a conversation, and the scoping reaches the dispatch.** Toggling a
+  connector off removes its tools from that conversation's run and leaves the workspace connection
+  intact. A disabled connector stays in the deck greyed rather than vanishing — its absence would
+  read as a workspace disconnection, which is precisely what the toggle does not do.
+- **The response metadata row: model → effort → build → duration → variants, always in that
+  order.** Absent items collapse and the rest hold position. The natural implementation — map over
+  what exists — passes every hand-written case and moves the duration on any turn that produced
+  code, so the ordering is a pure module with a suite that checks every combination of absences.
+- **Regenerate writes a new variant beside the old one.** Variant 1 keeps its own model, effort,
+  duration and version, and the metadata row reports the response actually on screen. Switching
+  variants stays a view change: the variant store has no publish path to reach, so reading a
+  response can never become deploying one.
+- **Notes are shared; pins are personal.** Both failures are silent, which is why both are checked:
+  a note that turned out to be private is a warning a teammate never sees, and a pin that turned
+  out to be shared is a rail full of somebody else's anchors. The user is in the pin's primary key
+  rather than in a `WHERE` somebody has to remember. Notes hang off the turn and never off a
+  variant, so a regeneration cannot take them.
+- **Thumbs are exclusive and toggleable, and a thumbs-down on a code-producing turn offers the
+  eval case it should have been** — which is the highest-value thing a negative signal can become
+  in this product.
+- **`STATUS.warn`, a fourth status colour.** Fast mode needed a caution tone and there was no
+  warning token to reuse: amber means IN-FLIGHT everywhere in this app and always moves, and red
+  means something went wrong. Painting a supported setting as a failure teaches people to ignore
+  red; one static amber teaches them it no longer means "happening now".
+
+### Fixed
+
+- **`thread_items` had no defined order for rows written in the same millisecond.** `created_at`
+  was their only ordering and neither driver promises a stable result for equal values, so the
+  preview a thread shows — "the last user message" — could flip to an older sentence with no write
+  in between. Latent since the column existed; adding an index changed the plan Postgres chose and
+  surfaced it. The store now issues monotonic timestamps and every ordered read carries a
+  tiebreaker.
+
+### Migrations
+
+`054` `conversation_settings` + workspace defaults and the admin pin · `055` `turn_attachments` ·
+`056` `conversation_connectors`, `mcp_servers.logo_url` · `057` `turn_variants`, existing turns
+backfilled as ordinal 1 with unmeasured fields left null rather than guessed · `058` `turn_notes`,
+`turn_pins`, `turn_feedback`. Every foreign key that reaches a turn or a conversation is on the
+composite `(workspace_id, id)` pair — a bare id FK is satisfiable by any tenant's row, which is
+the class of bug the earlier tenancy hunt turned up.
+
+### Verified
+
+- Eight commits, each with its own suite wired into `ci.yml` rather than left in `package.json`
+  alone: `test:icons`, `test:composer-bar`, `test:effort`, `test:conversation-settings`,
+  `test:conversation-routes`, `test:permission-shield`, `test:attachments`, `test:connector-deck`,
+  `test:turn-metadata`, `test:turn-variants`, `test:turn-interaction`.
+- Checked against the running Tauri shell rather than only the browser: all five migrations applied
+  to the desktop database on launch, every new route driven against the live backend with real
+  data, a real plan generated end to end, and the `audit_log` row for a permission-mode change
+  confirmed to carry the actor and both values.
+
+---
+
 ## v0.3.4 : Subscriptions — What Each Tier Allows, Checked Where Every Command Already Passes
 
 Free, Pro and Team, and one function that says what each is allowed: `resolveEntitlements`,
