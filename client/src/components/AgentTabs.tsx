@@ -22,9 +22,10 @@ import { EmptyState } from "./EmptyState.tsx";
 import { McpBadge, HighImpactBadge } from "./McpBadge.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
+import { AccessPanel } from "./AccessPanel.tsx";
 import { LayersIcon } from "./agentIcons.tsx";
 import {
-  ActivityIcon, DatabaseIcon, ExternalLinkIcon, HashIcon, KeyIcon, RocketIcon,
+  ActivityIcon, DatabaseIcon, ExternalLinkIcon, HashIcon, KeyIcon, RocketIcon, ShieldIcon,
 } from "./panelIcons.tsx";
 import { openThreadAgent } from "../lib/threadNav.ts";
 import { selectRun } from "../lib/selection.ts";
@@ -35,7 +36,7 @@ import { useUiStore } from "../store/uiStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import type { AgentDetailView } from "../types.ts";
 
-type TabId = "capabilities" | "health" | "deploy" | "evals" | "threads";
+type TabId = "capabilities" | "health" | "deploy" | "evals" | "threads" | "access";
 
 const TABS: { id: TabId; label: string; icon: (p: { size?: number }) => React.ReactElement }[] = [
   { id: "capabilities", label: "Capabilities", icon: LayersIcon },
@@ -43,6 +44,11 @@ const TABS: { id: TabId; label: string; icon: (p: { size?: number }) => React.Re
   { id: "deploy", label: "Deploy", icon: RocketIcon },
   { id: "evals", label: "Evals", icon: DatabaseIcon },
   { id: "threads", label: "Threads & runs", icon: HashIcon },
+  // §9.1 — LAST, and last for a reason rather than by arrival. The five before it describe what
+  // this agent IS; this one describes who may touch it and what can reach it without asking. It is
+  // the tab somebody opens with a question about a person rather than about the artifact, which is
+  // also why it is the one tab that carries a badge — see `accessBadge`.
+  { id: "access", label: "Access", icon: ShieldIcon },
 ];
 
 /** A labelled block inside a tab. §9's middle nesting level: card → SECTION → well. */
@@ -511,6 +517,7 @@ export function AgentTabs({ detail }: { detail: AgentDetailView }) {
           : tab === "health" ? <Health detail={detail} />
           : tab === "deploy" ? <Deploy detail={detail} />
           : tab === "evals" ? <Evals detail={detail} />
+          : tab === "access" ? <AccessPanel detail={detail} />
           : <ThreadsAndRuns detail={detail} />}
       </div>
     </div>

@@ -79,6 +79,23 @@ export function ShieldCheckIcon(p: P) {
   );
 }
 
+/**
+ * lucide:shield — the Access tab. Who may do what to this agent.
+ *
+ * PLAIN, AND NOT `ShieldCheckIcon` ABOVE, which is the whole reason this is a second glyph rather
+ * than a reuse. The tick in that one is a CLAIM: it marks a reviewed connector — audited, copied in
+ * verbatim, read-only — and it is drawn wherever this product wants to say "this has been checked".
+ * The Access tab makes no such claim about anything. Worse, it is the tab whose Exposure section
+ * exists to say that a deployed agent has no authentication at all, and a green-tick shield over
+ * that sentence would be the icon contradicting the panel.
+ */
+export function ShieldIcon(p: P) {
+  return svg(
+    p,
+    <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />,
+  );
+}
+
 /** lucide:plug — an MCP tool. Discovered from a server nobody here has reviewed. */
 export function PlugIcon(p: P) {
   return svg(

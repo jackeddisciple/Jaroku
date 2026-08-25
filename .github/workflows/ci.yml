@@ -929,6 +929,18 @@ jobs:
           npm run test:workspace-switch
           npm run test:join-flow
           npm run test:permission-ui
+          # THE ACCESS TAB, AND EVERY ASSERTION IN IT IS ABOUT A SENTENCE OR AN ABSENCE. Nothing
+          # this suite checks could stop anybody doing anything — the enforcement is the server's,
+          # and `test:access-resolver` holds that. What it checks is whether the panel tells the
+          # truth about what is already true, which is where this surface fails silently: a
+          # provenance line saying "granted here" about access nobody granted sends an admin to
+          # revoke a grant that was never the reason, and a capability the role has capped away
+          # rendered as though it worked reads as a grant that is doing something.
+          #
+          # Its render half asserts ABSENCE rather than a `disabled` attribute, because §8 rules
+          # out disabled AND hidden for an affordance a role cannot use — a suite that accepted
+          # either would pass on the two shapes the rule exists to forbid.
+          npm run test:access-tab
 
   # THE PYTHON SIDE, WHICH THIS FILE HAS NEVER RUN. Two jobs above it check the two halves
   # written in TypeScript; the connector templates are Python, and the two verifications built to
