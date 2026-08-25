@@ -878,3 +878,15 @@ jobs:
           cache-dependency-glob: runtime/uv.lock
       - name: the connector catalog's own verifications
         run: npm run test:connector-catalog
+
+      - name: the connector templates
+        run: |
+          # Half of what is worth asserting about a template is what it SENDS: that a listing
+          # expands recurring series, that a cap a caller argued past is clamped before the
+          # request leaves, that an update merges onto the current event rather than replacing
+          # it. A recorded response can say nothing about any of those, so the SDK is a fake
+          # that records every call — and is BLOCKED by a meta-path finder for the
+          # missing-dependency assertion, or that one would pass here for a reason that has
+          # nothing to do with the code and quietly stop testing anything on a machine with the
+          # extra installed.
+          npm run test:connector-gcal
