@@ -395,6 +395,26 @@ export function UsersIcon(p: P) {
   );
 }
 
+/**
+ * lucide:ticket — an invitation you were handed rather than one you made.
+ *
+ * NOT `PlusIcon` AND NOT A DOOR. The row above it in the menu creates a workspace and wears the
+ * plus; a second plus beside "Join" would say the two rows do the same kind of thing, and they are
+ * opposites — one brings a workspace into existence, the other spends a credential somebody else
+ * minted. A ticket is the object being spent, which is what the field below the row asks for.
+ */
+export function TicketIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z" />
+      <path d="M13 5v2" />
+      <path d="M13 17v2" />
+      <path d="M13 11v2" />
+    </>,
+  );
+}
+
 /** lucide:log-out — end this session. The arrow leaves the box; the box is the app. */
 export function LogOutIcon(p: P) {
   return svg(

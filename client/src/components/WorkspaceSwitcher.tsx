@@ -31,16 +31,18 @@
 // naming which workspace the server acts in on its own behalf.
 
 import { useEffect, useRef, useState } from "react";
-import { createWorkspace, storedToken } from "../lib/auth.ts";
+import { acceptInvite, createWorkspace, storedToken } from "../lib/auth.ts";
 import { switchWorkspace } from "../lib/socket.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { ICON } from "../lib/tokens.ts";
+import { inviteTokenFromInput } from "../lib/invite.ts";
 import { orderWorkspaces, roleLabel, shouldScroll } from "../lib/workspaceList.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import {
-  AlertTriangleIcon, CheckIcon, ChevronDownIcon, PlusIcon, SettingsIcon, UserIcon, UsersIcon, XIcon,
+  AlertTriangleIcon, CheckIcon, ChevronDownIcon, PlusIcon, SettingsIcon, TicketIcon, UserIcon,
+  UsersIcon, XIcon,
 } from "./panelIcons.tsx";
 
 /**
@@ -180,6 +182,110 @@ function NewWorkspaceForm({ onDone }: { onDone: () => void }) {
   );
 }
 
+/**
+ * §4.1.2 — redeeming an invitation somebody pasted rather than clicked.
+ *
+ * THE DEEP LINK IS NOT BEING REPLACED. `<origin>/?invite=<token>` still works end to end and is
+ * still the path an inviter should use; this is the other end of the same string, for the case the
+ * spec names — a code pasted into Slack or an email, arriving as text rather than as something to
+ * click. See lib/invite.ts, which both paths share.
+ *
+ * HTTP, NOT A COMMAND, and it is the same route the deep link uses. §4.1.2 offers either "the
+ * acceptInvite command (or the HTTP equivalent if the user has no socket yet — check how the
+ * existing deep-link path does it)", and the existing path is HTTP for a reason that applies here
+ * unchanged: a socket is scoped to a workspace by its ticket, and this tab's socket is scoped to
+ * the workspace somebody is currently in, not to the one they are joining. There is no scope for a
+ * `acceptInvite` command to arrive in.
+ */
+function JoinWorkspaceForm({ onDone }: { onDone: () => void }) {
+  const [pasted, setPasted] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault();
+    if (busy) return;
+    // §4.1.2's third failure — "Invalid invite code" — ANSWERED WITHOUT A ROUND TRIP, because it
+    // is the one of the three that is a fact about the string rather than about an invitation. A
+    // truncated paste sent as a redemption comes back as "that invitation is not valid", which
+    // reads as the invitation being wrong and sends somebody back to whoever sent it.
+    const token = inviteTokenFromInput(pasted);
+    if (!token) {
+      setError("That does not look like an invite code. Paste the whole link, or the code after it.");
+      return;
+    }
+    const bearer = storedToken();
+    if (!bearer) {
+      setError("sign in again — this tab has no credential");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const joined = await acceptInvite(bearer, token);
+      useSessionStore.getState().setWorkspaces(joined.workspaces);
+      // §4.1.2's "brief toast", on the surface the deep-link path already announces itself
+      // through. One notice for two ways of arriving, rather than a second toast system whose
+      // only difference is which of the two produced it.
+      useUiStore.getState().setInviteNotice({
+        ok: true,
+        message: `Joined ${joined.workspace.name}`,
+      });
+      // A workspace somebody has this second become a member of is a first visit by definition —
+      // §5.1 step 7. The same landing the create flow makes, and for the same reason: the Threads
+      // tab of a workspace you have never opened is a list of other people's work.
+      useUiStore.getState().openNav("inbox");
+      onDone();
+      switchWorkspace(joined.workspace.id);
+    } catch (err) {
+      // §4.1.2 ASKS FOR THREE MESSAGES AND THE SERVER CLASSIFIES TWO OF THEM TOGETHER, which is a
+      // deliberate refusal rather than a gap: `acceptInvite` answers "expired or no longer valid"
+      // for expired, revoked, already-used and invented alike, because telling the holder of a
+      // link which one it is tells somebody holding a STOLEN link whether it was ever real. The
+      // spec says these "map to the server's existing failure classification", so this maps to
+      // what the classification actually is — the malformed case above, the server's sentence
+      // here, and the two it does distinguish (already a member, addressed to somebody else).
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="border-t border-hair px-3 py-2.5">
+      <input
+        autoFocus
+        value={pasted}
+        onChange={(e) => setPasted(e.target.value)}
+        placeholder="Paste invite code"
+        aria-label="Invite code or link"
+        // `spellCheck` off and no autocapitalise: this is a base64url secret, and a phone that
+        // capitalises its first character produces a token whose digest matches nothing, with
+        // "that invitation is not valid" as the only symptom.
+        spellCheck={false}
+        autoCapitalize="off"
+        autoCorrect="off"
+        className="w-full rounded-control border border-hair bg-void px-2 py-1.5 font-mono text-[11px] text-ink placeholder:font-sans placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
+      />
+      <p className="mt-1.5 text-[11px] leading-[1.5] text-faint">
+        The whole link or just the code after it — either works.
+      </p>
+      {error && <p role="alert" className="mt-1.5 text-[11px] leading-[1.5] text-err">{error}</p>}
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="submit"
+          disabled={busy || pasted.trim().length === 0}
+          className="rounded-control bg-panel px-2.5 py-1 text-[11px] text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {busy ? "Joining…" : "Join"}
+        </button>
+        <button type="button" onClick={onDone} className="px-1 text-[11px] text-muted hover:text-ink">
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 /** A text row at the foot of the menu. §2.2: these are rows, not buttons. */
 function MenuRow({
   icon: Icon,
@@ -212,6 +318,7 @@ export function WorkspaceSwitcher() {
   const openWorkspacePanel = useUiStore((s) => s.openWorkspacePanel);
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [joining, setJoining] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   // §2.2's order, computed here rather than in the map, so the list the rows are drawn from and
@@ -285,7 +392,10 @@ export function WorkspaceSwitcher() {
   // The form is per-opening, not per-tab. A half-typed name left behind a dismissed menu would
   // reappear the next time somebody came to switch workspace, which is not what they asked for.
   useEffect(() => {
-    if (!open) setCreating(false);
+    if (!open) {
+      setCreating(false);
+      setJoining(false);
+    }
   }, [open]);
 
   // Nothing to show before there is a session. The sidebar renders during the connecting state
@@ -421,12 +531,15 @@ export function WorkspaceSwitcher() {
 
           {creating ? (
             <NewWorkspaceForm onDone={() => setOpen(false)} />
+          ) : joining ? (
+            <JoinWorkspaceForm onDone={() => setOpen(false)} />
           ) : (
             // §2.2 — TEXT ROWS, NOT BUTTONS. They sit at the bottom of a menu whose other rows are
             // all destinations, and filled buttons there would read as the menu's primary actions
             // rather than as the things you do when none of the rows above is what you wanted.
             <div className="border-t border-hair">
               <MenuRow icon={PlusIcon} label="Create workspace" onClick={() => setCreating(true)} />
+              <MenuRow icon={TicketIcon} label="Join workspace" onClick={() => setJoining(true)} />
               {/* SETTINGS FOR THE ACTIVE WORKSPACE — §6.1 and §10.1's entry point, on the row
                   group rather than on the active workspace's own row. A gear inside a row whose
                   whole job is "switch to this" would be a second target inside a click target,

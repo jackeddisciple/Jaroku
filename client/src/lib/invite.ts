@@ -46,6 +46,59 @@ export function inviteTokenFrom(search: string): string | null {
   return token;
 }
 
+/**
+ * §4.1.2 — the token out of whatever somebody pasted, or null.
+ *
+ * WHY THIS EXISTS AT ALL. The deep link works and is not being replaced; this is the other half of
+ * the same string, for the case the spec names: somebody pastes the code into Slack or an email
+ * instead of clicking the link, and the person on the other end has a fragment of text rather than
+ * something to click. The two shapes they will have are the whole link and the bit after `invite=`,
+ * and asking which one they are holding is asking them to understand a URL.
+ *
+ * SO IT TAKES BOTH, AND THE ORDER OF THE ATTEMPTS IS THE DESIGN. A URL is tried first, because a
+ * pasted link contains the token and a bare token cannot contain a URL — trying the bare form
+ * first would mean accepting `https://jaroku.app/?invite=abc` as a token, sending it as one, and
+ * getting back "not valid" about a link that was perfectly good.
+ *
+ * IT REFUSES RATHER THAN GUESSES, which is what makes §4.1.2's third failure case — "Invalid
+ * invite code" — answerable without a round trip. Everything this returns null for is malformed in
+ * a way the server would also refuse, and refusing here is the difference between a message about
+ * the code somebody pasted and a message about an invitation, which reads as the invitation being
+ * the problem.
+ *
+ * WHAT IT DELIBERATELY DOES NOT DO is check the origin of a pasted URL. An invitation is minted by
+ * one deployment and redeemed against whichever one this tab is talking to; a token from another
+ * host is refused by the server because its digest matches nothing, which is the correct refusal
+ * and the one that does not need this function to know what host it is running on.
+ */
+export function inviteTokenFromInput(raw: string): string | null {
+  const input = raw.trim();
+  if (!input) return null;
+
+  // The whole link. `URL` throws on anything that is not one, which is the branch a bare token
+  // takes — so the throw is the discriminator rather than a regex that has to agree with it.
+  try {
+    const url = new URL(input);
+    const fromQuery = inviteTokenFrom(url.search);
+    if (fromQuery) return fromQuery;
+    // A URL that parsed and carries no invitation is not a token either. Falling through to the
+    // bare-token branch would send `https://jaroku.app/` as a redemption attempt.
+    return null;
+  } catch {
+    /* not a URL — try it as the token itself */
+  }
+
+  // The bare token, checked against the shape the server will search for: `<workspace_id>.<secret>`
+  // with a base64url secret. The same check `inviteTokenFrom` makes on a query parameter, for the
+  // same reason its own comment gives — this is not a security check, it is what stops a truncated
+  // paste being sent and coming back as "that invitation is not valid".
+  const dot = input.indexOf(".");
+  if (dot <= 0) return null;
+  const secret = input.slice(dot + 1);
+  if (secret.length < 40 || !/^[A-Za-z0-9_-]+$/.test(secret)) return null;
+  return input;
+}
+
 /** The link an inviter copies. The token is percent-encoded; nothing else is added to it. */
 export function inviteUrl(origin: string, token: string): string {
   const base = origin.replace(/\/+$/, "");
