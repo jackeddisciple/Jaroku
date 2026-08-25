@@ -72,6 +72,11 @@ REQUIRED_ENV = ["STRIPE_SECRET_KEY"]
 # 500 gets 100 and should be told so rather than left to assume it saw everything.
 DEFAULT_LIMIT = 10
 MAX_LIMIT = 100
+# One invoice can have hundreds of lines — a metered subscription bills per unit — and all of
+# them arrive inlined on the object this template already has. The cap is on what is RENDERED,
+# so it costs nothing to apply and bounds a payload that would otherwise be a whole month of
+# usage in a context window.
+MAX_LINE_ITEMS = 25
 
 _MISSING_DEPS = (
     "The Stripe connector needs the 'stripe' package. Install the connector extras: "
@@ -297,4 +302,124 @@ def stripe_get_payment(payment_intent_id: str) -> str:
         raise _fail(f"Fetching payment {wanted!r}", exc) from exc
 
 
-TEMPLATE_TOOLS = [stripe_get_customer, stripe_list_payments, stripe_get_payment]
+@tool
+def stripe_list_invoices(customer_id: str, limit: int = DEFAULT_LIMIT) -> str:
+    """List a Stripe customer's invoices, newest first. Read-only.
+
+    `customer_id` is a `cus_...` id. Returns each invoice's id, number, status, amount due,
+    amount paid, creation time and due date, capped at 100.
+    """
+    wanted = customer_id.strip()
+    if not wanted:
+        return "Cannot list invoices: `customer_id` is empty."
+    limit = max(1, min(int(limit or DEFAULT_LIMIT), MAX_LIMIT))
+
+    sdk = _sdk()
+    try:
+        listing = sdk.Invoice.list(customer=wanted, limit=limit)
+        rows = list(_get(listing, "data") or [])
+        if not rows:
+            return f"No invoices for customer {wanted!r}."
+        lines = []
+        for r in rows:
+            fields = _pick(r, INVOICE_FIELDS)
+            currency = _get(r, "currency")
+            fields["amount_due"] = _money(_get(r, "amount_due"), currency)
+            fields["amount_paid"] = _money(_get(r, "amount_paid"), currency)
+            lines.append(_line(f"- {_get(r, 'id')}", fields))
+        note = f"\n({limit} cap reached — there may be more)" if len(lines) == limit else ""
+        return f"{len(lines)} invoice(s) for {wanted!r}:\n" + "\n".join(lines) + note
+    except RuntimeError:
+        raise
+    except _error_type(sdk) as exc:
+        raise _stripe_fail(f"Listing invoices for {wanted!r}", exc) from exc
+    except Exception as exc:
+        raise _fail(f"Listing invoices for {wanted!r}", exc) from exc
+
+
+@tool
+def stripe_get_invoice(invoice_id: str) -> str:
+    """Get one Stripe invoice by id, with what it is for. Read-only.
+
+    `invoice_id` is an `in_...` id. Returns the invoice's status and amounts and a summary of its
+    line items. It never returns the customer's billing address, tax ids or payment method.
+    """
+    wanted = invoice_id.strip()
+    if not wanted:
+        return "Cannot fetch an invoice: `invoice_id` is empty."
+
+    sdk = _sdk()
+    try:
+        invoice = sdk.Invoice.retrieve(wanted)
+        currency = _get(invoice, "currency")
+        fields = _pick(invoice, [*INVOICE_FIELDS, "paid", "attempt_count", "period_start", "period_end"])
+        fields["amount_due"] = _money(_get(invoice, "amount_due"), currency)
+        fields["amount_paid"] = _money(_get(invoice, "amount_paid"), currency)
+        fields["amount_remaining"] = _money(_get(invoice, "amount_remaining"), currency)
+
+        # THE LINE ITEMS ARE WHAT MAKES AN INVOICE ANSWERABLE — "what was I charged for" is the
+        # question a support agent is holding — so three fields of each are read, by name, from
+        # the object already in hand. `lines` on a retrieved invoice is a paginated list Stripe
+        # has already inlined; nothing here fetches more of it, which is both the cap and the
+        # reason no second call can widen what this tool returns.
+        raw_lines = list(_get(_get(invoice, "lines"), "data") or [])
+        shown = []
+        for item in raw_lines[:MAX_LINE_ITEMS]:
+            description = _get(item, "description") or "(no description)"
+            quantity = _get(item, "quantity")
+            amount = _money(_get(item, "amount"), _get(item, "currency") or currency)
+            shown.append(f"    - {description}{f' ×{quantity}' if quantity else ''}  {amount}")
+        body = _line(f"Invoice {wanted}:", fields)
+        if shown:
+            extra = len(raw_lines) - len(shown)
+            body += "\n  line items:\n" + "\n".join(shown)
+            if extra > 0:
+                body += f"\n    (+{extra} more)"
+        return body
+    except RuntimeError:
+        raise
+    except _error_type(sdk) as exc:
+        raise _stripe_fail(f"Fetching invoice {wanted!r}", exc) from exc
+    except Exception as exc:
+        raise _fail(f"Fetching invoice {wanted!r}", exc) from exc
+
+
+@tool
+def stripe_get_balance() -> str:
+    """Get the Stripe account's balance: what is available now and what is still pending.
+
+    Takes no arguments. Both figures are per-currency and in the smallest currency unit.
+    """
+    sdk = _sdk()
+    try:
+        balance = sdk.Balance.retrieve()
+
+        def band(name: str) -> str:
+            # `available` and `pending` are LISTS, one entry per currency, and an account that has
+            # ever taken a payment in two currencies has two entries. Reading `[0]` — which is
+            # what a reader who saw one entry writes — reports one currency's figure as the
+            # account's balance, which is a wrong number that looks exactly like a right one.
+            entries = list(_get(balance, name) or [])
+            if not entries:
+                return f"  {name}: none"
+            return f"  {name}: " + ", ".join(
+                _money(_get(e, "amount"), _get(e, "currency")) for e in entries
+            )
+
+        return "Stripe account balance:\n" + band("available") + "\n" + band("pending")
+    except RuntimeError:
+        raise
+    except _error_type(sdk) as exc:
+        raise _stripe_fail("Fetching the Stripe balance", exc) from exc
+    except Exception as exc:
+        raise _fail("Fetching the Stripe balance", exc) from exc
+
+
+TEMPLATE_TOOLS = [
+    stripe_get_customer,
+    stripe_list_payments,
+    stripe_get_payment,
+    stripe_list_invoices,
+    stripe_get_invoice,
+    stripe_get_balance,
+]

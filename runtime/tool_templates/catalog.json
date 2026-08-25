@@ -109,6 +109,21 @@
           "name": "stripe_get_payment",
           "signature": "stripe_get_payment(payment_intent_id: str) -> str",
           "summary": "Get one payment intent by id, including why it failed if it did. Never the card or bank details behind it."
+        },
+        {
+          "name": "stripe_list_invoices",
+          "signature": "stripe_list_invoices(customer_id: str, limit: int = 10) -> str",
+          "summary": "List a customer's invoices, newest first, capped at 100, with amount due and amount paid."
+        },
+        {
+          "name": "stripe_get_invoice",
+          "signature": "stripe_get_invoice(invoice_id: str) -> str",
+          "summary": "Get one invoice by id with a summary of its line items. Never the billing address, tax ids or payment method."
+        },
+        {
+          "name": "stripe_get_balance",
+          "signature": "stripe_get_balance() -> str",
+          "summary": "The account balance, available and pending, per currency. Takes no arguments."
         }
       ]
     },
