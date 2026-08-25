@@ -73,6 +73,28 @@ export interface LiveSession {
   onThisAgent: boolean;
 }
 
+/** An open invitation to the WORKSPACE, surfaced here — see the server's `PendingInvite`. */
+export interface PendingInvite {
+  id: string;
+  /** null is §13.4's link invitation — "Anyone with the link", which is a different sentence. */
+  email: string | null;
+  role: string;
+  createdAt: string;
+  expiresAt: string;
+  /** Older than seven days. Decided server-side so one clock decides — see `STALE_INVITE_MS`. */
+  stale: boolean;
+}
+
+/** One row of §15's history. `scope` is the field the section exists for. */
+export interface AccessHistoryEntry {
+  id: number;
+  action: string;
+  scope: "agent" | "workspace";
+  actorName: string;
+  summary: string;
+  createdAt: string;
+}
+
 /** One agent's answer to `loadAccess`. */
 export interface AgentAccess {
   agentId: string;
@@ -82,6 +104,8 @@ export interface AgentAccess {
   orphans: AccessPerson[];
   /** The viewer's own effective set on this agent. What every guard in the client reads. */
   viewer: AgentCapability[];
+  /** §12 — the WORKSPACE's open invitations. Not the agent's; invitations are to a workspace. */
+  invites: PendingInvite[];
 }
 
 interface AccessState {
@@ -112,6 +136,8 @@ interface AccessState {
    * rows with a different flag. One shared list would be right until two panels were open.
    */
   sessions: Record<string, LiveSession[]>;
+  /** §15's rows, keyed by agent. Admin-only; a non-admin never receives them. */
+  history: Record<string, AccessHistoryEntry[]>;
   /** Which agent ids have a `loadAccess` in flight, so a panel can say "loading" rather than "nobody". */
   loading: Record<string, boolean>;
   error: string | null;
@@ -119,6 +145,7 @@ interface AccessState {
   setAccess: (access: AgentAccess) => void;
   setExposure: (exposure: Exposure) => void;
   setSessions: (agentId: string, sessions: LiveSession[]) => void;
+  setHistory: (agentId: string, entries: AccessHistoryEntry[]) => void;
   markLoading: (agentId: string) => void;
   setError: (message: string | null) => void;
   /** §8.2 — the recheck invalidates everything, because a role change moves every ceiling at once. */
@@ -130,6 +157,7 @@ const EMPTY = {
   bySlug: {} as Record<string, string>,
   exposure: {} as Record<string, Exposure>,
   sessions: {} as Record<string, LiveSession[]>,
+  history: {} as Record<string, AccessHistoryEntry[]>,
   loading: {} as Record<string, boolean>,
   error: null as string | null,
 };
@@ -153,6 +181,9 @@ export const useAccessStore = create<AccessState>((set) => ({
 
   setSessions: (agentId, sessions) =>
     set((s) => ({ sessions: { ...s.sessions, [agentId]: sessions } })),
+
+  setHistory: (agentId, entries) =>
+    set((s) => ({ history: { ...s.history, [agentId]: entries } })),
 
   markLoading: (agentId) => set((s) => ({ loading: { ...s.loading, [agentId]: true } })),
 
@@ -178,7 +209,10 @@ export const useAccessStore = create<AccessState>((set) => ({
   // a permission change, it is simply the most perishable thing in this store. A list of who is
   // connected is stale within seconds of anything happening, and the recheck is the one moment the
   // panel is already going to ask again.
-  invalidate: () => set({ byAgent: {}, bySlug: {}, sessions: {}, loading: {} }),
+  // THE HISTORY GOES TOO, and for the reason the grants do rather than the reason the sessions do:
+  // every event this section shows is exactly the kind of thing that fires a recheck, so a list
+  // left in place would be missing the row explaining why everything above it just moved.
+  invalidate: () => set({ byAgent: {}, bySlug: {}, sessions: {}, history: {}, loading: {} }),
 }));
 
 /**

@@ -25,16 +25,19 @@ import { AccessPeople } from "./AccessPeople.tsx";
 import { GrantDialog } from "./GrantDialog.tsx";
 import { AccessExposure } from "./AccessExposure.tsx";
 import { AccessSessions } from "./AccessSessions.tsx";
+import { AccessInvites } from "./AccessInvites.tsx";
+import { AccessHistory } from "./AccessHistory.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { AlertTriangleIcon, LockIcon } from "./panelIcons.tsx";
 import { quietBtn } from "./buttons.ts";
 import {
-  sendEndSession, sendLoadAccess, sendLoadExposure, sendLoadSessions, sendRevokeGrant,
+  sendEndSession, sendLoadAccess, sendLoadAccessHistory, sendLoadExposure, sendLoadSessions,
+  sendRevokeGrant,
 } from "../lib/socket.ts";
 import { STATUS, TYPE } from "../lib/tokens.ts";
 import { accessFor, useAccessStore, type AccessPerson } from "../store/accessStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
-import { useCapability } from "../lib/useCapability.ts";
+import { useCanRun, useCapability } from "../lib/useCapability.ts";
 import type { AgentDetailView } from "../types.ts";
 
 export function AccessPanel({ detail }: { detail: AgentDetailView }) {
@@ -44,6 +47,11 @@ export function AccessPanel({ detail }: { detail: AgentDetailView }) {
   const error = useAccessStore((s) => s.error);
   const exposure = useAccessStore((s) => s.exposure[agentUuid]);
   const sessions = useAccessStore((s) => s.sessions[agentUuid]);
+  const history = useAccessStore((s) => s.history[agentUuid]);
+  // §12 — revoking a WORKSPACE invitation is `member:manage`, the owner's, and not this panel's
+  // agent-level `admin`. An agent administrator who could withdraw a workspace invitation would be
+  // reaching outside the agent they administer, which is the boundary the whole feature is about.
+  const canManageInvites = useCanRun("revokeInvite");
   const setAccessAgentId = useUiStore((s) => s.setAccessAgentId);
 
   // §9.2 — `admin` ON THIS AGENT, not a workspace role. A workspace admin holds it by default and a
@@ -77,15 +85,30 @@ export function AccessPanel({ detail }: { detail: AgentDetailView }) {
   // an agent opens; these two feed nothing but this panel, and a socket list nobody is looking at
   // is a read that goes stale before anybody sees it.
   useEffect(() => {
-    sendLoadExposure(agentUuid);
+    // EXPOSURE ONLY IF THE DETAIL PANE HAS NOT ALREADY ASKED. It fetches on open because the tab's
+    // badge is drawn from it — see AgentDetail — so asking again here would be a second read of
+    // the same row every time somebody clicked the tab.
+    if (!exposure) sendLoadExposure(agentUuid);
     sendLoadSessions(agentUuid);
-  }, [agentUuid]);
+  }, [agentUuid, exposure]);
+
+  // §15 — ASKED FOR ONLY BY SOMEBODY WHO MAY READ IT. The server refuses `loadAccessHistory`
+  // without the agent-level `admin` capability regardless, so sending it anyway would put a
+  // refusal in the panel's error strip every time a member opened the tab — a red line about
+  // something they never asked for.
+  useEffect(() => {
+    if (canAdmin) sendLoadAccessHistory(agentUuid);
+  }, [agentUuid, canAdmin]);
 
   // ...and again when the cache is emptied, which is what §7's recheck does. `sessions` going
   // undefined is the signal — the store cleared it, and this is the panel noticing.
   useEffect(() => {
     if (!sessions) sendLoadSessions(agentUuid);
   }, [agentUuid, sessions]);
+
+  useEffect(() => {
+    if (canAdmin && !history) sendLoadAccessHistory(agentUuid);
+  }, [agentUuid, canAdmin, history]);
 
   const [open, setOpen] = useState<Record<string, boolean>>({ people: true });
   const toggle = (id: string): void => setOpen((o) => ({ ...o, [id]: !o[id] }));
@@ -182,6 +205,17 @@ export function AccessPanel({ detail }: { detail: AgentDetailView }) {
         <AccessExposure exposure={exposure} />
       </CollapsibleRegion>
 
+      {/* §12 — the workspace's open invitations. Between the people who HAVE access and what is
+          reachable without it, because that is where they belong: somebody about to have access. */}
+      <CollapsibleRegion
+        label="Pending invites"
+        count={access.invites.length}
+        open={open["invites"] !== false}
+        onToggle={() => toggle("invites")}
+      >
+        <AccessInvites invites={access.invites} canManage={canManageInvites} />
+      </CollapsibleRegion>
+
       {/* §14.1's count is the section's own, so it is legible before anybody expands it. */}
       <CollapsibleRegion
         label="Live sessions"
@@ -195,6 +229,21 @@ export function AccessPanel({ detail }: { detail: AgentDetailView }) {
           onEnd={(sessionId) => sendEndSession(access.agentId, sessionId)}
         />
       </CollapsibleRegion>
+
+      {/* §15 — ADMIN ONLY, AND ABSENT RATHER THAN EMPTY for everybody else. A History section
+          rendering nothing would read as "nothing has ever happened to this agent", which is a
+          claim rather than an absence — and it is the one claim on this surface that would be most
+          reassuring and most likely to be false. */}
+      {canAdmin && (
+        <CollapsibleRegion
+          label="History"
+          count={history?.length}
+          open={open["history"] !== false}
+          onToggle={() => toggle("history")}
+        >
+          <AccessHistory entries={history} agentSlug={access.agentSlug} />
+        </CollapsibleRegion>
+      )}
 
       {dialog && (
         <GrantDialog

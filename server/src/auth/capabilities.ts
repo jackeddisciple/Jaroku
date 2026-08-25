@@ -799,6 +799,11 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // in" on the one person in the workspace most likely to be elsewhere.
   loadSessions: "member:read",
   endSession: "member:read",
+  // §15's history, at the same floor and gated at `admin` on the agent — which is where it
+  // deliberately differs from `listAudit` beside it. That one is `workspace:manage`, the owner's,
+  // because it is the whole log; this is the same rows narrowed to one agent, and the person who
+  // administers that agent is exactly who needs to read them.
+  loadAccessHistory: "member:read",
   listAudit: "workspace:manage",
   inviteMember: "member:manage",
   revokeInvite: "member:manage",
@@ -957,6 +962,10 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   // Everything else on this tab describes the agent; this describes who is at it right now.
   loadSessions: "admin",
   endSession: "admin",
+  // §15 — "Requires admin capability (agent-level). Non-admins do not see History." The rows name
+  // who granted what to whom and what somebody was refused, which is the same class of fact the
+  // workspace audit log restricts to an owner.
+  loadAccessHistory: "admin",
 
   loadAccess: "view",
   // AND THE EXPOSURE READ IS `view` FOR A SHARPER REASON. It is the section that says a deployed

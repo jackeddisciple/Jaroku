@@ -1004,6 +1004,15 @@ export type LoadAccessCommand = { cmd: "loadAccess"; agentId: string };
 export type LoadExposureCommand = { cmd: "loadExposure"; agentId: string };
 export type LoadSessionsCommand = { cmd: "loadSessions"; agentId: string };
 /**
+ * §15 — what has changed about who can reach this agent.
+ *
+ * READS `audit_log` AND IS NOT A NEW STORE. The rows are already written by the grant handlers,
+ * by `agentAccessRefusalFor`, and by the membership mutations two panels away; a table of its own
+ * would be a second record of the same events, and the two would disagree the first time one of
+ * them was written inside a transaction that rolled back.
+ */
+export type LoadAccessHistoryCommand = { cmd: "loadAccessHistory"; agentId: string; limit?: number };
+/**
  * §14.2 — close one socket.
  *
  * IT DOES NOT REVOKE ANYTHING, and the command's shape says so: there is no capability set and no
@@ -1050,13 +1059,14 @@ export type AccessCommand =
   | LoadAccessCommand
   | LoadExposureCommand
   | LoadSessionsCommand
+  | LoadAccessHistoryCommand
   | EndSessionCommand
   | GrantAccessCommand
   | ModifyGrantCommand
   | RevokeGrantCommand;
 
 const ACCESS_COMMANDS = new Set([
-  "loadAccess", "loadExposure", "loadSessions", "endSession",
+  "loadAccess", "loadExposure", "loadSessions", "loadAccessHistory", "endSession",
   "grantAccess", "modifyGrant", "revokeGrant",
 ]);
 
@@ -1132,6 +1142,47 @@ export interface LiveSession {
   onThisAgent: boolean;
 }
 
+/**
+ * One row of §15's history, from `audit_log`.
+ *
+ * `scope` IS THE FIELD THE SECTION EXISTS FOR. §15: "Workspace-role changes appear here even though
+ * they aren't agent-scoped, because they change effective access to this agent. Mark them with a
+ * distinct icon so an admin can see the difference between 'someone changed this agent' and
+ * 'someone changed the workspace, which affected this agent.'" A history that showed only the
+ * grant events would be silent about the commonest reason somebody's access to an agent changed —
+ * a role change two panels away — and an admin reading it would conclude nothing had happened.
+ *
+ * `summary` IS BUILT HERE rather than in the client, for the reason the exposure sentence is: the
+ * shape of an audit row is a server fact — an action string and a metadata blob — and a client
+ * assembling prose from it would be a second reader of a schema it does not own.
+ */
+export interface AccessHistoryEntry {
+  id: number;
+  action: string;
+  /** "agent" for something done to this agent; "workspace" for something that reached it. */
+  scope: "agent" | "workspace";
+  actorName: string;
+  summary: string;
+  createdAt: string;
+}
+
+/**
+ * An open invitation, as §12 needs it. The identity repository's row, minus its token digest.
+ *
+ * `email` IS NULL FOR §13.4's LINK INVITATION — the one addressed to nobody — and stays on the
+ * message rather than being omitted, because the panel renders a different sentence for each and
+ * "Anyone with the link" is a warning where an address is a reminder.
+ */
+export interface PendingInvite {
+  id: string;
+  email: string | null;
+  role: string;
+  createdAt: string;
+  expiresAt: string;
+  /** §12 — older than seven days. Computed server-side so one clock decides. */
+  stale: boolean;
+}
+
 export type AccessEvent =
   | {
       type: "access";
@@ -1147,9 +1198,26 @@ export type AccessEvent =
       orphans: AccessPerson[];
       /** The asking socket's own effective set on this agent. What the client's cache is keyed on. */
       viewer: string[];
+      /**
+       * §12 — the workspace's open invitations, surfaced HERE rather than reimplemented.
+       *
+       * A VIEW ONTO THE EXISTING INVITE SYSTEM. The rows come from `workspace_invites`, revoking
+       * one sends the `revokeInvite` command v0.4.1 already has, and nothing about the invite
+       * mechanism changes. What this section adds is placement: an unaccepted invitation is
+       * unclaimed access sitting in somebody's inbox, and the panel that answers "who can reach
+       * this agent" is incomplete without the people who are about to be able to.
+       *
+       * ON THE ACCESS PAYLOAD rather than on a command of its own, because it is answered from the
+       * same read the panel already makes and a second round trip would buy nothing. It is the
+       * workspace's list, not the agent's — invitations are to a workspace — and the panel says so
+       * rather than implying these people are being invited to one agent.
+       */
+      invites: PendingInvite[];
     }
   | { type: "exposure"; exposure: ExposurePayload }
   | { type: "sessions"; agentId: string; sessions: LiveSession[] }
+  | { type: "history"; agentId: string; entries: AccessHistoryEntry[] }
+  | { type: "history"; agentId: string; entries: AccessHistoryEntry[] }
   /**
    * §7 — "something about access in this workspace changed; re-resolve."
    *
@@ -2708,7 +2776,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // which section is empty and why.
   loadAccess: "access", loadExposure: "access",
   grantAccess: "access", modifyGrant: "access", revokeGrant: "access",
-  loadSessions: "access", endSession: "access",
+  loadSessions: "access", endSession: "access", loadAccessHistory: "access",
   loadEnforcement: "enforcement", appealEnforcement: "enforcement",
   // All six on `threads`, the reads included. The channel HAS an error shape, so unlike
   // `loadAgentFiles` there is nowhere better for a refusal to go — and a refusal about a rename

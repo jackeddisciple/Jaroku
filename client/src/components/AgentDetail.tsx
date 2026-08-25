@@ -27,7 +27,7 @@ import { AgentFiles } from "./AgentFiles.tsx";
 import { AgentTabs } from "./AgentTabs.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { AlertTriangleIcon, SparklesIcon } from "./panelIcons.tsx";
-import { sendLoadAccess, sendLoadAgentDetail } from "../lib/socket.ts";
+import { sendLoadAccess, sendLoadAgentDetail, sendLoadExposure } from "../lib/socket.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
 
 /**
@@ -61,9 +61,17 @@ export function AgentDetail() {
   //
   // ONCE PER AGENT, on open. The recheck is what refreshes it after that — see socket.ts — so this
   // is not a poll and does not need to be one.
+  //
+  // EXPOSURE RIDES ALONG FOR THE BADGE, which is the second reason this fetch is here rather than
+  // in the Access tab. §9.3's warning dot is drawn on the TAB — a dot that only appeared once
+  // somebody opened the tab it is meant to send them to would be the badge arriving after the
+  // question it answers. Same argument the Threads badge makes about frame one.
   const openUuid = detail?.card.uuid;
   useEffect(() => {
-    if (openUuid) sendLoadAccess(openUuid);
+    if (openUuid) {
+      sendLoadAccess(openUuid);
+      sendLoadExposure(openUuid);
+    }
   }, [openUuid]);
 
   useEffect(() => {

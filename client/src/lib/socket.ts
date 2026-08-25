@@ -17,7 +17,8 @@ import { useDiagnosticsStore } from "../store/diagnosticsStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useMemberStore } from "../store/memberStore.ts";
 import {
-  useAccessStore, type AccessPerson, type Exposure, type LiveSession,
+  useAccessStore,
+  type AccessHistoryEntry, type AccessPerson, type Exposure, type LiveSession, type PendingInvite,
 } from "../store/accessStore.ts";
 import type { AgentCapability } from "./capabilities.ts";
 import { useAuditStore } from "../store/auditStore.ts";
@@ -476,9 +477,11 @@ function dispatch(msg: ServerMessage): void {
           people: msg.people as AccessPerson[],
           orphans: msg.orphans as AccessPerson[],
           viewer: msg.viewer as AgentCapability[],
+          invites: msg.invites as PendingInvite[],
         });
       } else if (msg.type === "exposure") a.setExposure(msg.exposure as Exposure);
       else if (msg.type === "sessions") a.setSessions(msg.agentId, msg.sessions as LiveSession[]);
+      else if (msg.type === "history") a.setHistory(msg.agentId, msg.entries as AccessHistoryEntry[]);
       else if (msg.type === "recheck") {
         // §7 AND §8.2 — THE CACHE GOES, AND THEN THE PANEL ASKS AGAIN IF IT IS OPEN.
         //
@@ -1451,6 +1454,11 @@ export function sendRevokeGrant(agentId: string, userId: string): void {
 /** Who is connected. Asked when the Access tab opens, and again on §7's recheck. */
 export function sendLoadSessions(agentId: string): void {
   send({ cmd: "loadSessions", agentId });
+}
+
+/** §15's rows, out of `audit_log`. Admin-only; the server refuses it without the capability. */
+export function sendLoadAccessHistory(agentId: string, limit?: number): void {
+  send(limit === undefined ? { cmd: "loadAccessHistory", agentId } : { cmd: "loadAccessHistory", agentId, limit });
 }
 
 /** §14.2 — close one socket. It revokes nothing; see the confirmation the caller shows first. */

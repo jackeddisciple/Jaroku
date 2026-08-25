@@ -23,6 +23,8 @@ import { McpBadge, HighImpactBadge } from "./McpBadge.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
 import { AccessPanel } from "./AccessPanel.tsx";
+import { accessBadge } from "../lib/accessList.ts";
+import { accessFor, useAccessStore } from "../store/accessStore.ts";
 import { LayersIcon } from "./agentIcons.tsx";
 import {
   ActivityIcon, DatabaseIcon, ExternalLinkIcon, HashIcon, KeyIcon, RocketIcon, ShieldIcon,
@@ -484,6 +486,15 @@ export function AgentTabs({ detail }: { detail: AgentDetailView }) {
   // CAPABILITIES IS THE DEFAULT (§6), and the state is per mount rather than global: which tab
   // somebody last read about ONE agent is not a preference about the next one.
   const [tab, setTab] = useState<TabId>("capabilities");
+  // §9.3 — WHY THE ACCESS TAB IS THE ONE THAT WARNS. Every other tab here describes the agent; this
+  // one describes what can reach it, and the two facts worth interrupting somebody over — a public
+  // URL with no authentication, and an invitation nobody has accepted in a week — are both things
+  // a person is unlikely to go looking for. Null until the payload lands, so a dot never appears on
+  // an agent that has simply not answered yet.
+  const badge = accessBadge(
+    useAccessStore((s) => s.exposure[detail.card.uuid]),
+    useAccessStore((s) => accessFor(s, detail.card.uuid)?.invites),
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
@@ -505,10 +516,21 @@ export function AgentTabs({ detail }: { detail: AgentDetailView }) {
             // panel, with its own padding and its own idea of what active looks like — and
             // "active" was `bg-active`, which is also the row-hover colour, so a chosen tab and a
             // hovered tab were the same fill.
-            className={`${tabBtn(tab === id)} shrink-0`}
+            className={`${tabBtn(tab === id)} relative shrink-0`}
           >
             <Icon size={ICON.sm} />
             <span className="whitespace-nowrap">{label}</span>
+            {/* §9.3's warning dot, and it carries its own sentence — see `accessBadge`. A dot
+                somebody has to open a tab to interpret has moved the question rather than answered
+                it, and a coloured circle alone says nothing at all to a screen reader. */}
+            {id === "access" && badge && (
+              <span
+                title={badge}
+                aria-label={badge}
+                role="img"
+                className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-run"
+              />
+            )}
           </button>
         ))}
       </div>

@@ -6559,7 +6559,7 @@ async function handleMemberCommand(ctx: TenantContext, cmd: MemberCommand): Prom
 // per-person by construction.
 
 const ACCESS_COMMAND_NAMES = new Set([
-  "loadAccess", "loadExposure", "loadSessions", "endSession",
+  "loadAccess", "loadExposure", "loadSessions", "loadAccessHistory", "endSession",
   "grantAccess", "modifyGrant", "revokeGrant",
 ]);
 
@@ -6572,6 +6572,19 @@ const ACCESS_COMMAND_NAMES = new Set([
  * an array to require a text column is one nobody can read. It lives here, where the sentence is.
  */
 const NOTE_REQUIRED: readonly AgentCapability[] = ["deploy", "secrets", "admin"];
+
+/**
+ * §12 — an invitation older than this is stale, and §9.3 raises the tab's badge for it.
+ *
+ * SEVEN DAYS, DECIDED SERVER-SIDE SO ONE CLOCK DECIDES. A client computing this from its own
+ * `Date.now()` would put the marker on and off depending on whose laptop was right — and the same
+ * number drives the warning dot on the tab icon, which must not disagree with the row under it.
+ *
+ * A STALE INVITATION IS UNCLAIMED ACCESS SITTING IN SOMEBODY'S INBOX, which is why it is worth a
+ * mark at all: an invitation nobody accepted is a link that still works, addressed to an account
+ * that may since have been closed.
+ */
+const STALE_INVITE_MS = 7 * 24 * 3600_000;
 
 /**
  * One person's row: their effective set, and the provenance line that is the whole point of it.
@@ -6669,6 +6682,21 @@ async function sendAccess(ctx: TenantContext, agentId: string): Promise<void> {
       ),
   );
 
+  // §12 — the workspace's open invitations, on the same answer. A view onto the existing invite
+  // system: the rows are `workspace_invites`, revoking sends v0.4.1's own `revokeInvite`, and
+  // nothing about how an invitation works changes here.
+  const invites = (await identityRepo.listInvites(ctx)).map((i) => ({
+    id: i.id,
+    email: i.email,
+    role: i.role,
+    createdAt: i.created_at,
+    expiresAt: i.expires_at,
+    // SEVEN DAYS, DECIDED HERE SO ONE CLOCK DECIDES. A client computing staleness from its own
+    // `Date.now()` would put the marker on and off depending on whose laptop was right — and the
+    // same number drives the tab's warning dot, which must not disagree with the row under it.
+    stale: Date.now() - Date.parse(i.created_at) > STALE_INVITE_MS,
+  }));
+
   const viewer = await resolveCapabilities(ctx, agent.id, agentGrantRepo);
   relay.sendAccess(ctx, ctx.requestId, {
     type: "access",
@@ -6676,8 +6704,105 @@ async function sendAccess(ctx: TenantContext, agentId: string): Promise<void> {
     agentSlug: agent.slug,
     people,
     orphans,
+    invites,
     viewer: [...viewer.capabilities],
   });
+}
+
+/**
+ * §15 — what has changed about who can reach this agent, out of `audit_log`.
+ *
+ * TWO FILTERS RATHER THAN ONE, and the second is the section's whole reason for existing. The
+ * agent-scoped rows are the obvious half: grants written, modified, revoked, refused, sessions
+ * ended, all carrying this agent's id. The other half is WORKSPACE rows — a role changed, a member
+ * removed, an invitation accepted — which carry no agent id at all and change effective access to
+ * every agent at once. A history showing only the first half would be silent about the commonest
+ * reason somebody's access to an agent changed, and an admin reading it would conclude nothing had
+ * happened.
+ *
+ * READ, NOT STORED. There is no second table: `identityRepo.listAudit` is the same window the
+ * Workspace panel's Audit section reads, filtered. A record of its own would be a second copy of
+ * the same events, and the two would disagree the first time one was written in a transaction that
+ * rolled back.
+ */
+const ACCESS_HISTORY_AGENT = new Set([
+  "access.granted", "access.modified", "access.revoked", "access.expired",
+  "access.denied", "access.session_ended",
+]);
+/**
+ * The workspace-wide actions that change what somebody can reach on an agent.
+ *
+ * NAMED RATHER THAN PATTERN-MATCHED. "Anything starting with member." would sweep in rows this
+ * section has no business showing and, worse, would silently stop matching the day somebody renamed
+ * an action — a history that quietly shows less is one nobody notices is broken.
+ */
+const ACCESS_HISTORY_WORKSPACE = new Set([
+  "member.added", "member.removed", "member.role_changed", "member.left",
+  "member.invite", "invite.accepted", "invite.revoked",
+]);
+
+/** One audit row, as the sentence §15 asks a row to be. */
+function accessHistoryLine(action: string, metadata: Record<string, unknown>): string {
+  const who = typeof metadata["user"] === "string" ? String(metadata["user"]) : null;
+  const caps = Array.isArray(metadata["capabilities"]) ? (metadata["capabilities"] as string[]).join(", ") : null;
+  switch (action) {
+    case "access.granted":
+      return `granted ${who ?? "somebody"}${caps ? ` ${caps}` : ""}`;
+    case "access.modified":
+      return `changed ${who ?? "somebody"}'s access${caps ? ` to ${caps}` : ""}`;
+    case "access.revoked":
+      return `revoked ${who ?? "somebody"}'s grant`;
+    case "access.expired":
+      return `${who ?? "somebody"}'s grant expired`;
+    case "access.denied":
+      // THE HIGHEST-SIGNAL ROW IN THE SECTION, and it names the capability that was missing rather
+      // than only the command — "cannot deploy" is the fixable fact; "deploy was refused" is not.
+      return `refused ${String(metadata["cmd"] ?? "a command")} — no "${String(metadata["capability"] ?? "capability")}"`;
+    case "access.session_ended":
+      return "ended a session";
+    default:
+      // The workspace rows, whose metadata belongs to the membership surface rather than to this
+      // one. The action IS the sentence there, spelled without its prefix.
+      return action.replace(/^[a-z]+\./, "").replace(/_/g, " ");
+  }
+}
+
+async function sendAccessHistory(ctx: TenantContext, agentId: string, limit: number): Promise<void> {
+  const agent = await agentForCommand(ctx, agentId);
+  if (!agent) {
+    refuseAccess(ctx, `there is no agent "${agentId}" in this workspace`);
+    return;
+  }
+  const members = await identityRepo.listMembers(ctx);
+  const nameOf = (userId: string | null): string => {
+    const m = userId ? members.find((x) => x.user_id === userId) : undefined;
+    return m ? m.display_name || m.email : "somebody";
+  };
+
+  // A WIDER WINDOW THAN THE PANEL SHOWS, because the filter runs after the read: a workspace whose
+  // audit log is mostly secret reveals would otherwise return one access row out of a hundred. The
+  // read is bounded either way — this is a section, not a search.
+  const rows = await identityRepo.listAudit(ctx, Math.min(Math.max(limit, 1), 200) * 5);
+  const entries = rows
+    .filter((r) => {
+      if (ACCESS_HISTORY_WORKSPACE.has(r.action)) return true;
+      if (!ACCESS_HISTORY_AGENT.has(r.action)) return false;
+      // AGENT ROWS ARE FILTERED TO THIS AGENT, by the target this handler wrote. `access.granted`
+      // files under `<agentId>:<userId>` and `access.denied` under the agent id alone, so the
+      // prefix is what both have in common — and a `startsWith` on a uuid cannot collide.
+      return String(r.target_id ?? "").startsWith(agent.id);
+    })
+    .slice(0, limit)
+    .map((r) => ({
+      id: r.id,
+      action: r.action,
+      scope: (ACCESS_HISTORY_WORKSPACE.has(r.action) ? "workspace" : "agent") as "workspace" | "agent",
+      actorName: nameOf(r.actor_user_id ?? null),
+      summary: accessHistoryLine(r.action, r.metadata ?? {}),
+      createdAt: r.created_at,
+    }));
+
+  relay.sendAccess(ctx, ctx.requestId, { type: "history", agentId: agent.id, entries });
 }
 
 /**
@@ -7062,6 +7187,10 @@ async function handleAccessCommand(ctx: TenantContext, cmd: AccessCommand): Prom
     }
     if (cmd.cmd === "loadSessions") {
       await sendSessions(ctx, String(cmd.agentId ?? ""));
+      return;
+    }
+    if (cmd.cmd === "loadAccessHistory") {
+      await sendAccessHistory(ctx, String(cmd.agentId ?? ""), Number(cmd.limit ?? 100));
       return;
     }
     if (cmd.cmd === "endSession") {

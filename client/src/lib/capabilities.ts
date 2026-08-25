@@ -230,6 +230,10 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   // §14's two, at the same floor and gated at `admin` on the agent — they read and END connections
   // rather than change permissions, which is why they are not filed with the audit log.
   loadSessions: "member:read",
+  // §15's history, at the same floor and gated at `admin` on the agent — where it deliberately
+  // differs from `listAudit`: that one is the whole log and the owner's, this is the same rows
+  // narrowed to one agent, and whoever administers that agent is who needs to read them.
+  loadAccessHistory: "member:read",
   endSession: "member:read",
   listAudit: "workspace:manage",
   inviteMember: "member:manage",
@@ -505,6 +509,7 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   modifyGrant: "admin",
   revokeGrant: "admin",
   loadSessions: "admin",
+  loadAccessHistory: "admin",
   endSession: "admin",
 };
 

@@ -18,8 +18,8 @@
 import React from "react";
 
 import {
-  cappedLine, chipKindFor, chipsFor, matchesAccess, orderAccess, provenanceLine,
-  revokeBlockedReason,
+  accessBadge, cappedLine, chipKindFor, chipsFor, historyToCsv, matchesAccess, orderAccess,
+  provenanceLine, revokeBlockedReason,
 } from "./accessList.ts";
 import { AGENT_CAPABILITIES, closeAgentCapabilities } from "./capabilities.ts";
 import { markup, seed, sessionAs } from "./testRender.ts";
@@ -29,6 +29,8 @@ import { AccessPeople } from "../components/AccessPeople.tsx";
 import { GrantDialog } from "../components/GrantDialog.tsx";
 import { AccessExposure } from "../components/AccessExposure.tsx";
 import { AccessSessions } from "../components/AccessSessions.tsx";
+import { AccessInvites } from "../components/AccessInvites.tsx";
+import { AccessHistory } from "../components/AccessHistory.tsx";
 import type { AgentCapability } from "./capabilities.ts";
 
 let failures = 0;
@@ -263,6 +265,7 @@ const ACCESS: AgentAccess = {
   ],
   orphans: [],
   viewer: ["view"] as AgentCapability[],
+  invites: [],
 };
 
 console.log("\na non-admin sees the whole panel and none of the verbs");
@@ -544,6 +547,89 @@ console.log("\nthe sessions list carries no network location and no raw agent st
     React.createElement(AccessSessions, { sessions: [], canAdmin: true, onEnd: () => undefined }),
   );
   check(empty.includes("Nobody has a session open"), "no sessions is a sentence rather than a blank");
+}
+
+// ---------------------------------------------------------------------------------------------
+// §12, §15 and §9.3 — invitations, history, and the dot that sends somebody here.
+// ---------------------------------------------------------------------------------------------
+
+console.log("\nan invitation is to the workspace, and the section says so");
+{
+  const invites = [
+    { id: "i1", email: "sam@example.test", role: "member", createdAt: "2026-01-01T00:00:00.000Z", expiresAt: "2026-02-01T00:00:00.000Z", stale: true },
+    { id: "i2", email: null, role: "admin", createdAt: "2026-01-20T00:00:00.000Z", expiresAt: "2026-02-20T00:00:00.000Z", stale: false },
+  ];
+  const html = markup(React.createElement(AccessInvites, { invites, canManage: true }));
+  // §12.1's warning, and it is the whole reason this section is careful with its words: an admin
+  // must never think they have granted narrow agent access when they have widened the tenancy.
+  check(html.includes("workspace"), "the section says these are invitations to the workspace");
+  check(html.includes("ceiling over every agent"), "...and that the role they carry reaches every agent");
+  // NULL IS A DIFFERENT SENTENCE, not a blank. An address is a reminder of who to chase; a link
+  // invitation is a credential that works for whoever holds it, which is a warning.
+  check(html.includes("Anyone with the link"), "a link invitation says what it is rather than showing a gap");
+  check(html.includes("sam@example.test"), "...and an addressed one names the address");
+  check(html.includes(">stale<") || html.includes("stale"), "an invitation older than seven days is marked");
+  check(html.includes("Revoke"), "an owner can revoke one");
+
+  const asMember = markup(React.createElement(AccessInvites, { invites, canManage: false }));
+  // ABSENT rather than disabled — and gated by `member:manage` rather than by this panel's own
+  // agent-level `admin`, because withdrawing a workspace invitation reaches outside the agent.
+  check(!asMember.includes("Revoke"), "somebody who cannot manage membership gets no Revoke");
+  check(asMember.includes("Anyone with the link"), "...but still sees who is waiting");
+}
+
+console.log("\nhistory tells an agent change apart from a workspace one");
+{
+  const entries = [
+    { id: 2, action: "access.granted", scope: "agent" as const, actorName: "Priya", summary: "granted sam view, deploy", createdAt: "2026-01-02T00:00:00.000Z" },
+    { id: 1, action: "member.role_changed", scope: "workspace" as const, actorName: "Priya", summary: "role changed", createdAt: "2026-01-01T00:00:00.000Z" },
+  ];
+  const html = markup(React.createElement(AccessHistory, { entries, agentSlug: "billing_bot" }));
+  check(html.includes("granted sam view, deploy"), "an agent-scoped row says what was granted");
+  // §15's DISTINCT MARK, and the sentence beside it. An admin looking at "Sam can no longer
+  // deploy" needs to know whether a grant was revoked or Sam was demoted, because only one of
+  // those is fixable in this panel.
+  check(html.includes("a workspace change"), "a workspace row says it was a workspace change");
+  check(html.includes("rather than being about it"), "...and that it reached this agent rather than being about it");
+  check(/aria-label="A workspace change/.test(html), "the two scopes carry different labels, not only different icons");
+  check(html.includes("Export CSV"), "and §15's export is at the bottom of the section");
+
+  const csv = historyToCsv(entries);
+  // `scope` IS A COLUMN ON THE WAY OUT. On screen the distinction is an icon; in a spreadsheet an
+  // icon is nothing, and a file that flattened the two would let somebody conclude a role change
+  // three weeks ago was a grant nobody can find.
+  check(csv.split(/\r\n/)[0] === "when,scope,actor,action,what", `the export has a scope column (${csv.split(/\r\n/)[0]})`);
+  check(csv.includes('"granted sam view, deploy"'), "...and quotes a summary containing a comma");
+  check(csv.split(/\r\n/).length === 3, "...one row per entry plus a header");
+
+  check(
+    markup(React.createElement(AccessHistory, { entries: [], agentSlug: "x" })).includes("Nothing has changed"),
+    "an empty history is a sentence rather than a blank",
+  );
+}
+
+console.log("\n§9.3's dot carries its own reason");
+{
+  // TWO CAUSES, ONE MARK, AND THE MARK SAYS WHICH. A badge somebody has to open a tab to interpret
+  // has moved the question rather than answered it.
+  const exposed = accessBadge({ deployed: true }, []);
+  check(exposed !== null, "a publicly reachable agent raises the dot");
+  check(exposed?.includes("no authentication") === true, `...and the dot says why ("${exposed}")`);
+
+  const stale = accessBadge({ deployed: false }, [{ stale: true }, { stale: false }]);
+  check(stale !== null, "so does an invitation older than seven days");
+  check(stale?.includes("1 invitation") === true, `...naming how many ("${stale}")`);
+
+  // EXPOSURE WINS WHEN BOTH ARE TRUE. There is one dot and it can say one thing; a public URL with
+  // no authentication is the larger by a distance, and a stale invitation is still visible in its
+  // own section.
+  const both = accessBadge({ deployed: true }, [{ stale: true }]);
+  check(both?.includes("public URL") === true, "a public URL outranks a stale invitation on the one dot");
+
+  check(accessBadge({ deployed: false }, []) === null, "a private agent with no stale invites raises nothing");
+  // NULL WHILE LOADING, so a warning is never drawn from an absent payload — a dot that flashed on
+  // every agent that had not answered yet would teach people to ignore it.
+  check(accessBadge(undefined, undefined) === null, "...and nothing is claimed before the data lands");
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

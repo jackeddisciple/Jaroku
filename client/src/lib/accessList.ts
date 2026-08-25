@@ -15,7 +15,7 @@
 // once, rather than assembled inline in a row component where each of its four branches would be a
 // conditional somebody could get subtly wrong.
 
-import type { AccessPerson } from "../store/accessStore.ts";
+import type { AccessHistoryEntry, AccessPerson } from "../store/accessStore.ts";
 import type { AgentCapability } from "./capabilities.ts";
 
 /**
@@ -193,4 +193,61 @@ export function revokeBlockedReason(
   );
   if (otherAdmins.length > 0) return null;
   return "this is the last person who can manage access to this agent — grant admin to somebody else first";
+}
+
+/**
+ * §15's export: the history section as a CSV somebody pastes into an incident document.
+ *
+ * `scope` IS A COLUMN RATHER THAN A GLYPH, which is the one thing that has to change on the way out
+ * of the panel. On screen the distinction between "somebody changed this agent" and "somebody
+ * changed the workspace, which affected this agent" is an icon; in a spreadsheet an icon is
+ * nothing, and a file that flattened the two would let somebody conclude that a role change three
+ * weeks ago was a grant nobody can find.
+ *
+ * RFC-4180 QUOTING, the same rule `evalExport.ts` writes under, and it is not decoration here: a
+ * summary line contains a comma the moment a grant names two capabilities, and the note somebody
+ * typed to justify a deploy grant can contain anything at all.
+ */
+/**
+ * §9.3 — the warning dot on the Access tab's icon, or null.
+ *
+ * TWO CAUSES, ONE MARK, AND THE MARK CARRIES ITS OWN REASON. §9.3 asks for a dot when the agent is
+ * publicly reachable OR an invitation is more than seven days old, and those are genuinely
+ * different problems — so the dot's title is the sentence rather than a generic "needs attention".
+ * A badge somebody has to open a tab to interpret has moved the question rather than answered it.
+ *
+ * EXPOSURE FIRST WHEN BOTH ARE TRUE. There is one dot and it can say one thing; a public URL with
+ * no authentication is the larger of the two by a distance, and a stale invitation is still visible
+ * in the section itself.
+ *
+ * IT RETURNS NULL RATHER THAN FALSE, so a caller cannot render a dot with no reason attached: the
+ * mark and its sentence come out of the same call or neither does. And it answers null while the
+ * data is still loading — a warning drawn from an absent payload would flash on every agent that
+ * has not answered yet, which teaches people to ignore it.
+ */
+export function accessBadge(
+  exposure: { deployed: boolean } | undefined,
+  invites: readonly { stale: boolean }[] | undefined,
+): string | null {
+  if (exposure?.deployed) {
+    return "This agent is on a public URL with no authentication — see Exposure";
+  }
+  const stale = (invites ?? []).filter((i) => i.stale).length;
+  if (stale > 0) {
+    return `${stale} invitation${stale === 1 ? "" : "s"} sent more than seven days ago and still unaccepted`;
+  }
+  return null;
+}
+
+export function historyToCsv(entries: readonly AccessHistoryEntry[]): string {
+  const cell = (v: unknown): string => {
+    if (v === null || v === undefined) return "";
+    const s = String(v);
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const rows: unknown[][] = [
+    ["when", "scope", "actor", "action", "what"],
+    ...entries.map((e) => [e.createdAt, e.scope, e.actorName, e.action, e.summary]),
+  ];
+  return rows.map((r) => r.map(cell).join(",")).join("\r\n");
 }

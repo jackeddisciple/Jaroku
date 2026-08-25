@@ -1236,9 +1236,11 @@ export type AccessMessage =
       people: unknown[];
       orphans: unknown[];
       viewer: string[];
+      invites: unknown[];
     }
   | { channel: "access"; type: "exposure"; exposure: unknown }
   | { channel: "access"; type: "sessions"; agentId: string; sessions: unknown[] }
+  | { channel: "access"; type: "history"; agentId: string; entries: unknown[] }
   | { channel: "access"; type: "recheck" }
   | { channel: "access"; type: "error"; message: string }
   | { channel: "access"; type: "notice"; message: string };
@@ -2083,6 +2085,7 @@ export type ClientCommand =
     }
   | { cmd: "revokeGrant"; agentId: string; userId: string }
   | { cmd: "loadSessions"; agentId: string }
+  | { cmd: "loadAccessHistory"; agentId: string; limit?: number }
   // §14.2 — ONE SOCKET, NAMED BY A HANDLE THAT MEANS NOTHING ELSE. Not a user id: one person with
   // three tabs is three sockets, and ending "their session" would end all of them, which is not
   // what the button says.

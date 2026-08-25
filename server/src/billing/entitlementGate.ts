@@ -237,6 +237,7 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   // plan deciding how long that stays true.
   loadSessions: NO_ENTITLEMENT,
   endSession: NO_ENTITLEMENT,
+  loadAccessHistory: NO_ENTITLEMENT,
   loadUsage: NO_ENTITLEMENT,
   setSpendCeiling: NO_ENTITLEMENT,
   // CHOOSING TO PAY FOR YOUR OWN INFERENCE IS NEVER GATED. A workspace turning BYOK on is asking to
