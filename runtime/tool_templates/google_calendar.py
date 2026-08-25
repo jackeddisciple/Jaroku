@@ -97,6 +97,10 @@ DEFAULT_RESULTS = 10
 MAX_RESULTS = 50
 MAX_ATTENDEES = 20
 MAX_TEXT_CHARS = 500
+# The one cap that bounds what GOES OUT rather than what comes back. Same reason `gmail.py`
+# length-limits a draft body: what fills this field is model-written text, it lands in an
+# invitation in somebody's inbox, and there is no reviewing step between the two.
+MAX_DESCRIPTION_CHARS = 4000
 
 _MISSING_DEPS = (
     "The Google Calendar connector needs 'google-api-python-client' and 'google-auth'. Install "
@@ -216,6 +220,40 @@ def _summarise(event: dict) -> str:
     )
 
 
+def _event_body(
+    summary: str, start: str, end: str, attendees: str, location: str, description: str,
+) -> dict:
+    """The Google-shaped body for the fields a caller actually gave a value to.
+
+    EMPTY MEANS "LEAVE IT ALONE", not "clear it", and that is the whole reason this returns only
+    the keys it was given. `gcal_update_event` merges the result onto the current event, so a
+    builder that emitted `{"location": ""}` for an unmentioned argument would erase the location
+    of every event anybody renamed.
+
+    ATTENDEES ARE COMMA-SEPARATED TEXT RATHER THAN A LIST, which is the one place these signatures
+    diverge from the connector specification. Every other parameter in every template here is a
+    flat scalar, for a reason that is about the caller rather than about the type: what fills
+    these arguments is a model emitting JSON against a schema, and a list-typed field is the one
+    it most often gets structurally wrong — at which point the tool call fails validation and the
+    user sees a retry loop rather than an event. A string it cannot get structurally wrong.
+    """
+    body: dict = {}
+    if summary.strip():
+        body["summary"] = summary.strip()
+    if start.strip():
+        body["start"] = {"dateTime": start.strip()}
+    if end.strip():
+        body["end"] = {"dateTime": end.strip()}
+    if location.strip():
+        body["location"] = location.strip()
+    if description.strip():
+        body["description"] = description
+    if attendees.strip():
+        emails = [a.strip() for a in attendees.split(",") if a.strip()]
+        body["attendees"] = [{"email": e} for e in emails[:MAX_ATTENDEES]]
+    return body
+
+
 @tool
 def gcal_list_events(
     calendar_id: str = "primary",
@@ -295,4 +333,126 @@ def gcal_get_event(event_id: str, calendar_id: str = "primary") -> str:
         raise RuntimeError(f"Fetching event {event_id!r} failed: {type(exc).__name__}: {exc}") from exc
 
 
-TEMPLATE_TOOLS = [gcal_list_events, gcal_get_event]
+@tool
+def gcal_create_event(
+    summary: str,
+    start: str,
+    end: str,
+    attendees: str = "",
+    location: str = "",
+    description: str = "",
+    calendar_id: str = "primary",
+) -> str:
+    """Create a real event on the user's Google Calendar. This is NOT a draft.
+
+    The event appears on the calendar immediately and every address in `attendees` is sent an
+    invitation. There is no undo: withdrawing an invitation is a second notification, not an
+    erasure, and the people invited have already seen it. Only call this when the user has asked
+    for the event to be created.
+
+    `start` and `end` are ISO 8601 with a timezone offset (e.g. '2026-03-04T14:00:00+00:00').
+    `attendees` is a comma-separated list of email addresses.
+    """
+    if not summary.strip():
+        return "Cannot create an event: `summary` is empty."
+    if not start.strip() or not end.strip():
+        return "Cannot create an event: both `start` and `end` are required, as ISO 8601 times."
+    if len(description) > MAX_DESCRIPTION_CHARS:
+        return f"Description is too long ({len(description)} chars, limit {MAX_DESCRIPTION_CHARS})."
+
+    calendar = (calendar_id or "primary").strip() or "primary"
+    body = _event_body(
+        summary=summary, start=start, end=end, attendees=attendees,
+        location=location, description=description,
+    )
+
+    try:
+        service = _service()
+        created = service.events().insert(calendarId=calendar, body=body).execute()
+        if not isinstance(created, dict):
+            return "The event was created but Google returned nothing describing it."
+        invited = _attendees(created)
+        return (
+            f"Created event {created.get('id', '?')} on {calendar!r}.\n"
+            + _summarise(created)
+            + (f"\n  invitations sent to: {invited}" if invited else "")
+        )
+    except RuntimeError:
+        raise  # not configured, or a missing dependency — a failure, not an answer
+    except Exception as exc:
+        raise RuntimeError(f"Creating the event failed: {type(exc).__name__}: {exc}") from exc
+
+
+@tool
+def gcal_update_event(
+    event_id: str,
+    summary: str = "",
+    start: str = "",
+    end: str = "",
+    attendees: str = "",
+    location: str = "",
+    description: str = "",
+    calendar_id: str = "primary",
+) -> str:
+    """Change an existing Google Calendar event. Attendees are notified of the change.
+
+    Only the fields you pass are changed; anything left empty keeps its current value. The one
+    exception is `attendees`: passing it REPLACES the whole guest list, so include everyone who
+    should remain invited, not only the people being added. Anybody dropped is uninvited, and
+    they are told.
+
+    `event_id` is an id from gcal_list_events. `start` and `end` are ISO 8601 with a timezone.
+    """
+    if not event_id.strip():
+        return "Cannot update an event: `event_id` is empty."
+    if len(description) > MAX_DESCRIPTION_CHARS:
+        return f"Description is too long ({len(description)} chars, limit {MAX_DESCRIPTION_CHARS})."
+
+    changes = _event_body(
+        summary=summary, start=start, end=end, attendees=attendees,
+        location=location, description=description,
+    )
+    if not changes:
+        return "Nothing to update: no field was given a new value."
+
+    calendar = (calendar_id or "primary").strip() or "primary"
+    try:
+        service = _service()
+        # FETCHED, MERGED, THEN SENT WHOLE — rather than `patch`, which would be one call fewer.
+        #
+        # `update` replaces the resource, so a body carrying only the changed fields would clear
+        # every field nobody mentioned: change the title of a meeting and lose its guests, its
+        # location and its description. Merging onto the CURRENT event is what makes "only the
+        # fields you pass are changed" true rather than aspirational.
+        #
+        # `patch` would give that server-side, and was rejected for the other half: this tool has
+        # to be able to tell the model what the event looked like BEFORE, because the guest list
+        # is replaced wholesale and an agent about to uninvite six people should be able to say
+        # who they were. A patch call never sees the prior state.
+        current = service.events().get(calendarId=calendar, eventId=event_id.strip()).execute()
+        if not isinstance(current, dict):
+            return f"No event {event_id!r} on {calendar!r}."
+        before = _attendees(current)
+
+        merged = {**current, **changes}
+        updated = service.events().update(
+            calendarId=calendar, eventId=event_id.strip(), body=merged,
+        ).execute()
+        if not isinstance(updated, dict):
+            return "The event was updated but Google returned nothing describing it."
+
+        after = _attendees(updated)
+        moved = "attendees" in changes and before != after
+        return (
+            f"Updated event {updated.get('id', event_id)} on {calendar!r} "
+            f"({', '.join(sorted(changes))} changed).\n"
+            + _summarise(updated)
+            + (f"\n  guest list was: {before or '(nobody)'}" if moved else "")
+        )
+    except RuntimeError:
+        raise  # not configured, or a missing dependency — a failure, not an answer
+    except Exception as exc:
+        raise RuntimeError(f"Updating event {event_id!r} failed: {type(exc).__name__}: {exc}") from exc
+
+
+TEMPLATE_TOOLS = [gcal_list_events, gcal_get_event, gcal_create_event, gcal_update_event]

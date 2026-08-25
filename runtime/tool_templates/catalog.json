@@ -31,7 +31,7 @@
       "label": "Google Calendar",
       "file": "google_calendar.py",
       "module": "google_calendar",
-      "description": "Read the user's calendar events within a date range. Reads only — this entry gains its write tools in the next commit.",
+      "description": "Read, create and update calendar events. Creating and updating change the user's real calendar and send invitations — there is no undo, and no tool here deletes anything.",
       "required_env": ["GCAL_CLIENT_ID", "GCAL_CLIENT_SECRET", "GCAL_REFRESH_TOKEN"],
       "auth": "oauth",
       "pip_requires": ["google-api-python-client>=2.100.0", "google-auth>=2.23.0"],
@@ -45,6 +45,16 @@
           "name": "gcal_get_event",
           "signature": "gcal_get_event(event_id: str, calendar_id: str = 'primary') -> str",
           "summary": "Get one event's full details by id, including its description, organiser and link."
+        },
+        {
+          "name": "gcal_create_event",
+          "signature": "gcal_create_event(summary: str, start: str, end: str, attendees: str = '', location: str = '', description: str = '', calendar_id: str = 'primary') -> str",
+          "summary": "Create a REAL event and send invitations to every attendee. Immediate and irreversible — withdrawing an invitation is a second notification, not an erasure. Use only when the user asked for the event to be created."
+        },
+        {
+          "name": "gcal_update_event",
+          "signature": "gcal_update_event(event_id: str, summary: str = '', start: str = '', end: str = '', attendees: str = '', location: str = '', description: str = '', calendar_id: str = 'primary') -> str",
+          "summary": "Change an existing event; attendees are notified. Only the fields passed are changed, except `attendees`, which REPLACES the whole guest list — anybody omitted is uninvited."
         }
       ]
     },
