@@ -21,7 +21,7 @@ export function InviteNotice() {
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-10 z-40 flex justify-center px-4">
       <div
-        className={`pointer-events-auto flex max-w-lg items-start gap-2 rounded-card border bg-panel px-3 py-2 shadow-overlay ${
+        className={`pointer-events-auto flex max-w-lg items-start gap-2 rounded-card border bg-elevated px-3 py-2 shadow-overlay ${
           notice.ok ? "border-ok/40" : "border-err/40"
         }`}
       >

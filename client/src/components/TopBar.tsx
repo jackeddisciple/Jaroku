@@ -106,7 +106,7 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
         </Chip>
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 w-[440px] max-w-[calc(100vw-2rem)] animate-slide-in rounded-card border border-edge bg-panel p-3 shadow-floating motion-reduce:animate-none">
+        <div className="absolute right-0 top-full z-30 mt-1 w-[440px] max-w-[calc(100vw-2rem)] animate-slide-in rounded-card border border-edge bg-elevated p-3 shadow-floating motion-reduce:animate-none">
           <div className={TYPE.sectionLabel}>Provider keys</div>
           <p className="mt-1 text-tiny leading-[1.55] text-faint">
             Kept in Secrets with every other credential, behind the passcode. Never logged, never

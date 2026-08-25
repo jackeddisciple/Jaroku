@@ -45,7 +45,7 @@ export function RoleRefusal() {
     <div className="pointer-events-none fixed inset-x-0 bottom-10 z-40 flex justify-center px-4">
       <div
         role="status"
-        className="pointer-events-auto flex max-w-lg items-start gap-2 rounded-card border border-edge bg-panel px-3 py-2 shadow-overlay"
+        className="pointer-events-auto flex max-w-lg items-start gap-2 rounded-card border border-edge bg-elevated px-3 py-2 shadow-overlay"
       >
         <span className="mt-0.5 shrink-0 text-muted" aria-hidden><LockIcon size={ICON.xs} /></span>
         <p className="min-w-0 flex-1 text-caption leading-[1.5] text-ink">

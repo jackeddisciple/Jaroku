@@ -182,7 +182,7 @@ function Overflow({ item, onClose }: { item: InboxItemView; onClose: () => void 
       // `boxShadow` was a byte-identical copy of `ELEVATION.floating` written out by hand — a
       // token that would silently stop matching the moment the token changed, on the one surface
       // where "does this look like the other menus" is the whole question.
-      className="absolute right-0 top-6 z-30 mt-1 w-[184px] animate-slide-in overflow-hidden rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none"
+      className="absolute right-0 top-6 z-30 mt-1 w-[184px] animate-slide-in overflow-hidden rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none"
     >
       {snoozing ? (
         // §7: labels stay where a label genuinely carries meaning, and the snooze duration menu is

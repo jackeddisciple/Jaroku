@@ -7,7 +7,7 @@
 //
 // Three things it adds on top of that, and each of them is the same argument: a first-run screen
 // holding one paragraph and one button has to earn its full-bleed with something other than
-// emptiness, and on a near-black surface the only materials available are light and rhythm.
+// emptiness, and on a surface this quiet the only materials available are contrast and rhythm.
 //
 //   * A dot field. The same grid the Graph View canvas already draws, at a third the strength and
 //     masked to fade before it reaches an edge. It is the product's own texture, so the first
@@ -21,7 +21,8 @@
 //     more than any reassurance: "there are three of these and you are on the first" is the fact
 //     that makes somebody read the screen instead of hunting for the way out of it.
 
-import { TYPE } from "../../lib/tokens.ts";
+import { TEXT, TYPE } from "../../lib/tokens.ts";
+import { alpha } from "../../lib/palette.ts";
 
 /** The rail's own model. `prompt` is the app itself, so it is only ever the step ahead. */
 const STEPS = [
@@ -77,13 +78,15 @@ export function OnboardingSurface({
 }) {
   return (
     <div className="h-full bg-void p-2">
-      <div className="relative flex h-full flex-col overflow-hidden rounded-modal border border-edge bg-bg shadow-overlay">
+      <div className="relative flex h-full flex-col overflow-hidden rounded-modal border border-edge bg-elevated shadow-overlay">
         {/* Depth, drawn rather than cast. Both layers are behind everything and take no clicks. */}
         <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
           <div
             className="absolute inset-0"
             style={{
-              backgroundImage: "radial-gradient(rgba(228,228,231,0.055) 1px, transparent 1px)",
+              // Ink, not off-white. A texture on a near-black page is drawn in light and a texture
+              // on `#FFFFFF` is drawn in shade; the alphas are the ones this was already tuned to.
+              backgroundImage: `radial-gradient(${alpha(TEXT.ink, 0.055)} 1px, transparent 1px)`,
               backgroundSize: "22px 22px",
               // Fades out well before the border, so the field reads as depth rather than as a
               // texture somebody applied to a rectangle.
@@ -96,7 +99,7 @@ export function OnboardingSurface({
             className="absolute left-1/2 top-[-16%] h-[620px] w-[880px] -translate-x-1/2 animate-breathe motion-reduce:animate-none"
             style={{
               background:
-                "radial-gradient(closest-side, rgba(228,228,231,0.06), rgba(228,228,231,0.02) 46%, transparent 74%)",
+                `radial-gradient(closest-side, ${alpha(TEXT.ink, 0.06)}, ${alpha(TEXT.ink, 0.02)} 46%, transparent 74%)`,
               filter: "blur(26px)",
             }}
           />

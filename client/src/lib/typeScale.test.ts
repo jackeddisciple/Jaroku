@@ -208,7 +208,10 @@ console.log("\nevery size in the client is one of the eight");
     if (file.path === "lib/typeScale.test.ts") continue;
     file.text.split("\n").forEach((line) => {
       if (isComment(line)) return;
-      for (const m of line.matchAll(/\btext-([a-z][a-z0-9]*)\b/g)) {
+      // `(?<![-\w])` because the colour system's own tokens are spelled `--color-text-primary`,
+      // and a `\b` before `text` is satisfied by the hyphen in front of it — so the palette files
+      // read as forty call sites for a class called `text-primary` that does not exist.
+      for (const m of line.matchAll(/(?<![-\w])text-([a-z][a-z0-9]*)\b/g)) {
         const word = m[1]!;
         if (RUNGS.has(word) || PALETTE.has(word) || BUILT_IN.has(word)) continue;
         unknown.add(`${file.path}: text-${word}`);

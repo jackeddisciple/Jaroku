@@ -107,12 +107,12 @@ export function McpConfirmModal() {
 
   return (
     // No click-to-dismiss on the scrim, for the same reason Escape denies rather than closes.
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-void/80 p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-6">
       <div
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="mcp-confirm-title"
-        className="w-[min(560px,94vw)] overflow-hidden rounded-modal bg-panel shadow-overlay"
+        className="w-[min(560px,94vw)] overflow-hidden rounded-modal bg-elevated shadow-overlay"
         style={{ border: `1px solid ${ACCENT.mcp}33` }}
       >
         <div className="px-5 pt-4">
@@ -151,7 +151,7 @@ export function McpConfirmModal() {
           <p className={TYPE.sectionLabel}>
             Arguments the agent produced
           </p>
-          <pre className="mt-1 max-h-56 overflow-auto rounded-control border border-hair bg-bg/60 p-2.5 font-mono text-tiny leading-[1.55] text-ink">
+          <pre className="mt-1 max-h-56 overflow-auto rounded-control border border-hair bg-void p-2.5 font-mono text-tiny leading-[1.55] text-ink">
             {formatArgs(request.args)}
           </pre>
         </div>

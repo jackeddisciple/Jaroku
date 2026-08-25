@@ -112,7 +112,7 @@ export function SplitButton({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full z-30 mt-1 min-w-[170px] animate-slide-in rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none"
+          className="absolute right-0 top-full z-30 mt-1 min-w-[170px] animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none"
         >
           {everyday.map((a) => <MenuRow key={a.id} action={a} onDone={() => setOpen(false)} />)}
           {dangerous.length > 0 && (

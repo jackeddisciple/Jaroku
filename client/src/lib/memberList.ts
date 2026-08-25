@@ -62,15 +62,20 @@ export function orderMembers<T extends Sortable>(members: readonly T[]): T[] {
  * findable again after you have seen it once. More colours would buy a smaller collision rate in a
  * list nobody scrolls, at the cost of several that are hard to tell apart.
  */
+// EACH ONE DEEPENED FOR THE LIGHT SYSTEM, and the reason is the letter rather than the fill. These
+// are backgrounds with a near-white glyph on top, so what has to hold is the contrast between the
+// swatch and that glyph — and eight mid-tones chosen against a near-black page were chosen with a
+// dark letter's worth of room to spare. The hues and the "low-saturation, off-palette" argument
+// above are unchanged; every step is the same colour with the light taken out of it.
 export const AVATAR_COLORS = [
-  "#7c8fb5", // slate blue
-  "#8a9a6b", // moss
-  "#b58b6b", // clay
-  "#9b7fa8", // mauve
-  "#6b9a97", // teal-grey
-  "#a88b6b", // sand
-  "#8b7fb5", // periwinkle-grey
-  "#a3717f", // rose-grey
+  "#5C6F95", // slate blue
+  "#6A7A4D", // moss
+  "#956B4D", // clay
+  "#7B5F88", // mauve
+  "#4D7A77", // teal-grey
+  "#886B4D", // sand
+  "#6B5F95", // periwinkle-grey
+  "#83515F", // rose-grey
 ] as const;
 
 /**

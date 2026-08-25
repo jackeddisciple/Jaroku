@@ -118,7 +118,7 @@ export function GitHubPanel() {
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 animate-slide-in px-4 pt-2 motion-reduce:animate-none">
           <div
             role="status"
-            className={`pointer-events-auto flex items-start gap-2 rounded-card border bg-panel px-2 py-1.5 text-tiny leading-[1.5] shadow-floating ${
+            className={`pointer-events-auto flex items-start gap-2 rounded-card border bg-elevated px-2 py-1.5 text-tiny leading-[1.5] shadow-floating ${
               error ? "border-err/30 text-err" : "border-hair text-muted"
             }`}
           >

@@ -150,7 +150,7 @@ export function AgentDetail() {
           <Panel defaultSize={52} minSize={30} order={1}>
             {artifact}
           </Panel>
-          <PanelResizeHandle className="w-[3px] bg-hair transition-colors duration-fast hover:bg-[#3a3a3f]" />
+          <PanelResizeHandle className="w-[3px] bg-hair transition-colors duration-fast hover:bg-grip" />
           <Panel defaultSize={48} minSize={28} order={2}>
             <AgentTabs detail={detail} />
           </Panel>

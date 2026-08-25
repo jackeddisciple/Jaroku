@@ -472,7 +472,7 @@ export function WorkspaceSwitcher() {
       {open && (
         <div
           role="menu"
-          className="absolute left-2 right-2 z-30 mt-1 w-auto animate-slide-in overflow-hidden rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none"
+          className="absolute left-2 right-2 z-30 mt-1 w-auto animate-slide-in overflow-hidden rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none"
         >
           {/* THE LIST SCROLLS ONLY WHEN IT HAS TO — §2.3. A `max-h` applied unconditionally would
               put a scrollbar on a menu of three and, worse, would push the two actions below the

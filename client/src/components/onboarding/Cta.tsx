@@ -8,9 +8,10 @@
 // Two things changed while extracting it, and both are the same rule:
 //
 //   1. Hover lifts instead of dimming. `hover:opacity-90` fades the one control the screen is
-//      asking you to press — it moves AWAY as the pointer arrives, which is backwards. A glow
-//      ring (GLOW.cta) is the near-black equivalent of a control coming up to meet you, and it
-//      is the same treatment the provider cards use one screen later.
+//      asking you to press — it moves AWAY as the pointer arrives, which is backwards. The ring
+//      (GLOW.cta) is a control coming up to meet you instead, and it is the same treatment the
+//      provider cards use one screen later. It was a halo of light around a near-black button and
+//      it is a halo of ink around a charcoal one; what it says did not change.
 //
 //   2. Focus is a first-class state, not a fallback. `focus:` fires on a mouse press too, so a
 //      clicked button kept a ring nobody asked for and the ring stopped meaning "the keyboard is
@@ -21,6 +22,7 @@
 // rather than baked in.
 
 import { SURFACE, TEXT } from "../../lib/tokens.ts";
+import { alpha } from "../../lib/palette.ts";
 
 interface CtaProps {
   children: React.ReactNode;
@@ -32,7 +34,7 @@ interface CtaProps {
   className?: string;
 }
 
-/** The decision the screen exists to ask. One per screen, filled, ink on near-black. */
+/** The decision the screen exists to ask. One per screen, filled — §08's charcoal, canvas on ink. */
 export function PrimaryCta({ children, onClick, autoFocus, kbd, title, className = "" }: CtaProps) {
   return (
     <button
@@ -47,12 +49,16 @@ export function PrimaryCta({ children, onClick, autoFocus, kbd, title, className
     >
       {children}
       {kbd && (
-        // Sits ON the filled surface, so its edge is drawn in the surface's own dark rather than
-        // in a border colour from the dark-theme scale — which would be invisible here.
+        // Sits ON the filled surface, so its patch is drawn from the surface's own contrast rather
+        // than from a border colour off the neutral scale — which would be invisible here.
+        //
+        // IT WAS A DARKER PATCH AND IT IS A LIGHTER ONE. The button was near-black on a near-black
+        // page and the chip deepened it; the button is charcoal on an off-white page now, and the
+        // only direction left is up. Same idea, same alpha, opposite end.
         <kbd
           aria-hidden
           className="rounded-chip px-1.5 py-0.5 text-tiny leading-none"
-          style={{ background: "rgba(13,13,15,0.14)", color: SURFACE.bg }}
+          style={{ background: alpha(SURFACE.bg, 0.16), color: SURFACE.bg }}
         >
           {kbd}
         </kbd>

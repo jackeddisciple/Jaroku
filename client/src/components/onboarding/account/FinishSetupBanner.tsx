@@ -41,7 +41,7 @@ export function FinishSetupBanner() {
         type="button"
         onClick={resume}
         className="group inline-flex items-center gap-1.5 rounded-control px-1.5 py-0.5 text-caption
-          font-medium text-ink outline-none transition-colors duration-fast hover:text-ember
+          font-medium text-ink outline-none transition-colors duration-fast hover:text-accent
           focus-visible:shadow-focusring"
       >
         Finish setting up

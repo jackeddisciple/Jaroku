@@ -1,7 +1,7 @@
 // The one checkbox.
 //
 // THE APP HAD TWO VOCABULARIES FOR IT AND NEITHER WAS RIGHT. Five call sites used a bare
-// `<input type="checkbox">` with no styling at all, so a system-blue OS control sat on a near-black
+// `<input type="checkbox">` with no styling at all, so a system-blue OS control sat on the app's own
 // surface — the same problem the six native `<select>`s had, except these were not even given a
 // border. The sixth was hand-drawn in the staging panel: a 12×12px `<button role="checkbox">`
 // carrying `✓` and `–` as text characters at 9px, which is a font glyph standing in for an icon

@@ -6,8 +6,12 @@
 
 import { useEffect, useRef, type MutableRefObject } from "react";
 
-const REST: [number, number, number] = [82, 82, 91]; //  #52525b (faint)
-const HOT: [number, number, number] = [245, 158, 11]; // #f59e0b (run/active accent)
+// The two ends of the bar's colour, as channels because they are interpolated per frame. Written
+// out rather than imported for that reason and that reason only — the token each one IS is named
+// beside it, and `colourSystem.test.ts` holds the pair to the palette so a triplet cannot go stale
+// the way this one did when the app was near-black.
+const REST: [number, number, number] = [144, 144, 140]; // #90908C (TEXT.faint)
+const HOT: [number, number, number] = [183, 122, 27]; //   #B77A1B (STATUS.pending)
 
 function lerp(a: number, b: number, t: number): number {
   return Math.round(a + (b - a) * t);

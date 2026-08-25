@@ -392,9 +392,9 @@ function TransferConfirm({ member, onDone }: { member: Member; onDone: () => voi
       role="dialog"
       aria-modal="true"
       aria-label={`Transfer ownership of ${name}`}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-void/70 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4"
     >
-      <div className="w-full max-w-md rounded-modal border border-edge bg-panel p-4 shadow-overlay">
+      <div className="w-full max-w-md rounded-modal border border-edge bg-elevated p-4 shadow-overlay">
         <div className={TYPE.sectionLabel}>Transfer ownership</div>
         {/* §6.3's sentence, close to verbatim, because both halves of it are the point: who is
             getting it, and what happens to you. An owner who reads only the first half is an owner
@@ -467,9 +467,9 @@ function ConfirmDialog({
       role="dialog"
       aria-modal="true"
       aria-label={title}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-void/70 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4"
     >
-      <div className="w-full max-w-md rounded-modal border border-edge bg-panel p-4 shadow-overlay">
+      <div className="w-full max-w-md rounded-modal border border-edge bg-elevated p-4 shadow-overlay">
         <div className={TYPE.sectionLabel}>{title}</div>
         <p className="mt-2 text-caption leading-[1.55] text-ink">{body}</p>
         {detail && <p className="mt-1.5 text-tiny leading-[1.55] text-muted">{detail}</p>}
@@ -1226,7 +1226,7 @@ export function WorkspacePanel() {
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-start justify-center bg-void/80 p-8"
+      className="fixed inset-0 z-40 flex items-start justify-center bg-ink/40 p-8"
       // Dismissed by the backdrop as well as by Escape. Nothing here is a form somebody is
       // halfway through except the invite box, and that costs an email address to retype.
       onMouseDown={(e) => {
@@ -1235,7 +1235,7 @@ export function WorkspacePanel() {
     >
       <div
         ref={card}
-        className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-modal border border-edge bg-bg shadow-overlay"
+        className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-modal border border-edge bg-elevated shadow-overlay"
       >
         <div className="flex shrink-0 items-center gap-1 border-b border-hair px-4 py-2.5">
           <span className={TYPE.panelLabel}>Workspace</span>

@@ -47,7 +47,7 @@ const ICON_FOR: Record<BadgeState, Glyph> = {
  * A filled pill: icon + label.
  *
  * Filled rather than tinted text because a state is a fact about the thing, not an emphasis level
- * — and at 10-11px, coloured text on a near-black background is the first thing to disappear.
+ * — and at 11px, coloured text on any background is the first thing to disappear.
  * The fill is the accent at low alpha with the accent as text, which keeps it legible without
  * becoming a bright block competing with the content it describes.
  */

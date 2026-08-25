@@ -30,8 +30,10 @@
  * The decision. Ink fill, background-coloured text — the one control on a card that is
  * unmistakably the thing being asked.
  *
- * IT USED TO BE `bg-panel text-ink`, which is #18181b on a #0d0d0f page: a four percent lightness
- * step, and therefore the *least* visible control on the card it appeared on. The weight named
+ * IT USED TO BE `bg-panel text-ink`, one surface step off the page it sat on — under the near-black
+ * palette that was #18181b on #0d0d0f, a four percent lightness step, and it is a comparably small
+ * step on §01's light ladder — and therefore the *least* visible control on the card it appeared on
+ * either way. The weight named
  * "primary" was quieter than the muted-text "Discard" beside it, which inverts the whole hierarchy
  * — a card asking "apply this, or not?" was drawing the yes softer than the no. That recipe is
  * still here, correctly named, as `outlineBtn`.

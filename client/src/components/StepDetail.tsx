@@ -13,7 +13,7 @@ function Section({ label, value }: { label: string; value: unknown }) {
       {/* The payload is what this panel exists to show, and it was flowing text against the
           panel's own surface — three sections in a row read as one long blob. A well bounds
           each one. */}
-      <pre className="whitespace-pre-wrap break-words rounded-control border border-hair bg-bg/60 p-2 text-caption leading-relaxed text-[#a1a1aa]">
+      <pre className="whitespace-pre-wrap break-words rounded-control border border-hair bg-void p-2 text-caption leading-relaxed text-muted">
         {text}
       </pre>
     </div>

@@ -481,7 +481,7 @@ function ModelSelector({
         </span>
       </Chip>
       {open && (
-        <div className="absolute bottom-full left-0 z-30 mb-1 min-w-[190px] animate-slide-in rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none">
+        <div className="absolute bottom-full left-0 z-30 mb-1 min-w-[190px] animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none">
           {catalogue.map((p) => (
             <div key={p.id} className="mt-1 first:mt-0">
               {/* The provider's own mark on its group, so the menu is scanned by logo the way

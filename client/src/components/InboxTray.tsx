@@ -54,7 +54,7 @@ export function InboxTray({
       ref={trayRef}
       className="shrink-0 border-t transition-colors motion-reduce:transition-none"
       style={{
-        borderColor: armed ? "#3a3a44" : SURFACE.chrome,
+        borderColor: armed ? SURFACE.grip : SURFACE.chrome,
         background: armed ? SURFACE.active : "transparent",
         transitionDuration: `${MOTION.fast}ms`,
       }}

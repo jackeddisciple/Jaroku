@@ -153,8 +153,8 @@ export function CommandPalette() {
       //
       // The scrim goes to the app's own `void` at a real opacity, and the card comes up a step. A
       // modal earns the strongest dim in the app: nothing behind it is meant to be read.
-      overlayClassName="fixed inset-0 bg-void/80"
-      contentClassName="relative w-[min(560px,92vw)] bg-active rounded-modal overflow-hidden border border-edge shadow-overlay"
+      overlayClassName="fixed inset-0 bg-ink/40"
+      contentClassName="relative w-[min(560px,92vw)] bg-elevated rounded-modal overflow-hidden border border-edge shadow-overlay"
     >
       <Command loop>
         <Command.Input

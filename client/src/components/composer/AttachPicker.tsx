@@ -138,8 +138,8 @@ export function AttachPicker({
       onOpenChange={(o) => { if (!o) onClose(); }}
       label={`Attach a ${source.label.toLowerCase()}`}
       className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh]"
-      overlayClassName="fixed inset-0 bg-void/80"
-      contentClassName="relative w-[min(560px,92vw)] overflow-hidden rounded-modal border border-edge bg-active shadow-overlay"
+      overlayClassName="fixed inset-0 bg-ink/40"
+      contentClassName="relative w-[min(560px,92vw)] overflow-hidden rounded-modal border border-edge bg-elevated shadow-overlay"
     >
       {/* `shouldFilter={false}` — the server already filtered. See the header for why filtering the
           filtered page again is worse than it sounds. */}

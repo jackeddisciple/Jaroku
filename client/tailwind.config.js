@@ -1,61 +1,107 @@
 /** @type {import('tailwindcss').Config} */
-// Palette + type tokens from jarokudoc.md §4.2 (restraint over decoration).
+// The palette from colour_system.pdf and the type ladder from typography.pdf, as utility classes.
+// Both specifications are LOCKED; both are held to this file by a suite rather than by care.
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
+      // colour_system.pdf, as utility classes. `src/lib/palette.ts` holds the specification's own
+      // tokens and `src/lib/tokens.ts` holds what they mean; this is the third copy, and
+      // `colourSystem.test.ts` is what holds all three to each other — a Tailwind config cannot
+      // import a `.ts` module without moving the whole config to TypeScript, so the values are
+      // written out and the agreement is a test rather than an import.
+      //
+      // THE NAMES ARE THIS APP'S AND THE VALUES ARE THE SPECIFICATION'S. Two thousand call sites
+      // say `bg-panel` and `text-faint`, and renaming them to `bg-bg-surface` and
+      // `text-text-muted` would be a rename of every file in the client to gain nothing: what
+      // matters is that `panel` IS `--color-bg-surface`, which the suite asserts token by token.
+      // The specification's own names are published as custom properties in src/index.css, for the
+      // three consumers a class cannot reach.
       colors: {
-        // Layered surfaces (deepest → top).
+        // §01. Layered surfaces (under the page → floating above it).
+        //
+        // THE LADDER INVERTED WITH THE THEME. Each step used to be lighter than the one below it,
+        // because on a near-black page that is the only direction a surface can move; here each
+        // step is lighter than the page and the page is lighter than what it sits on. The ORDER of
+        // the names is unchanged, which is why two thousand call sites did not have to move.
+        //
         // `void` is what the app itself sits ON. Everything above it is inside the shell; this is
         // the only colour outside it, and it exists so the shell can read as a lifted panel
-        // rather than as the window. One step under `bg`, which used to be the floor.
-        void: "#08080a",
-        bg: "#0d0d0f", // near-black background
-        panel: "#18181b", // sidebar / panels, one layer up
-        active: "#1e1e22", // selected/active row
-        // Text.
-        ink: "#e4e4e7", // primary (off-white, never pure white)
-        muted: "#71717a", // secondary
-        faint: "#52525b", // tertiary (seq numbers, etc.)
-        hair: "#1e1e22", // hairline dividers / connector line
-        // Chrome. Both were hardcoded in several places before they were named.
-        edge: "#2a2a30", // card border — raised without reading as a visible box
-        chrome: "#26262b", // scrollbar thumbs, control dividers
-        grip: "#3a3a3f", // the brightest neutral — a seam under the pointer, a thumb being dragged
-        // The one interaction accent (see INTERACTION in src/lib/tokens.ts for why one and why
-        // this one). Four uses and no fifth: the selected row or tab, live/sync iconography,
-        // links, focus rings. Never decoration, never a category — a blue on a non-interactive
-        // badge is what makes an accent unusable for selection later.
-        accent: "#6b8afd",
-        // THE PRE-SESSION SURFACE'S LINK COLOUR, and the one deliberate exception to the sentence
-        // above. It is used on first-run, sign-in and account onboarding, and nowhere else — a
-        // `text-ember` inside a panel is a review comment rather than a style choice.
-        //
-        // WHY AN EXCEPTION EXISTS AT ALL. `accent` is a SELECTION colour: it means "this is the row
-        // you are on", and it earns that meaning by never appearing on anything that is not
-        // selectable. The screens before a session have no rows, no tabs and nothing selected —
-        // their only interactive text is "Terms of Service", "Start over", "Where do I find this?"
-        // — so painting those in the selection blue would spend the one colour that says "here"
-        // on a screen where nothing is anywhere. Warm, because the alternative reading of a blue
-        // link on near-black is a hyperlink from 1996.
-        ember: "#e08a5c",
-        // Its hover. One step up in light rather than a hue shift, so a link answering the pointer
-        // reads as the same link rather than as a different kind of thing.
-        emberlit: "#eda17b",
-        // Status colors — reserved exclusively for meaning, never decoration.
-        ok: "#22c55e",
-        err: "#ef4444",
-        run: "#f59e0b",
+        // rather than as the window. One step under `bg`, which is the canvas.
+        void: "#F1F1EF", // --color-bg-subtle
+        bg: "#F7F7F5", // --color-bg-canvas — the main application canvas
+        panel: "#FBFBFA", // --color-bg-surface — cards and standard content surfaces
+        // §01's fourth surface, and a rung the dark palette did not have. Popovers used `panel`
+        // and a shadow said "above"; on a light page a floating surface one percent off the card
+        // behind it reads as the same surface, so this is the pure white §01 reserves for them.
+        elevated: "#FFFFFF", // --color-bg-elevated — elevated panels, popovers and dialogs
+        active: "#ECECEA", // --color-bg-hover — hover, and the fill under a selected row
+        // §02. THE SIDEBAR IS ITS OWN PLANE, which is a decision rather than a shade: "it should
+        // visibly differ from the main content without becoming dark or dashboard-like. It has no
+        // outer shadow and no outer radius; a quiet border separates it from the main workspace."
+        // Four tokens of its own rather than four of §01's, because the sidebar's hover is a cool
+        // grey and the content area's is a warm one — a shared `hover` would make the sidebar warm
+        // the first time somebody reused it.
+        sidebar: "#E9EEEF", // --color-sidebar
+        "sidebar-hover": "#DEE6E8", // --color-sidebar-hover
+        "sidebar-active": "#D3DDE0", // --color-sidebar-active
+        "sidebar-border": "#D2DCDD", // --color-sidebar-border
+        // §03. Pale Mist — surfaces, selection and atmosphere. `400` is the reference colour and
+        // §03 says it "is used selectively; lighter derived steps carry most of the UI". 100, 200
+        // and 300 are the sidebar's three values, deliberately: the sidebar IS this family, and
+        // naming them twice is what lets another surface join it without copying the sidebar.
+        mist: {
+          50: "#F3F6F6",
+          100: "#E9EEEF",
+          200: "#DEE6E8",
+          300: "#D3DDE0",
+          400: "#C0C8CA",
+        },
+        // §05. Text.
+        ink: "#1D1D1B", // --color-text-primary — and §08's `brand-strong`, see below
+        muted: "#62625F", // --color-text-secondary
+        faint: "#90908C", // --color-text-muted — timestamps, slugs
+        // §05's fourth step, and a STATE rather than a fourth level of emphasis. New here: the
+        // dark palette expressed "unavailable" as `opacity-40` on whatever the control already
+        // was, which compounds — a faded control inside a faded panel ends up less legible than
+        // the empty space beside it.
+        disabled: "#B5B5B0", // --color-text-disabled
+        // §06. Borders, in three weights chosen by how much the boundary is meant to be noticed.
+        hair: "#E6E6E2", // --color-border-subtle — hairline dividers, connector lines
+        edge: "#DCDCD8", // --color-border-default — card border, inputs
+        // Chrome: scrollbar thumbs, control dividers, a pressed control.
+        chrome: "#E5E5E1", // --color-bg-active
+        // The strongest neutral the app draws — a seam under the pointer, a thumb being dragged.
+        // It used to be the BRIGHTEST, for the same reason in the opposite direction.
+        grip: "#C9C9C4", // --color-border-strong
+        // §04. Deep Harbor, the one interaction accent (see INTERACTION in src/lib/tokens.ts for
+        // why one and why this one). Four uses and no fifth: the selected row or tab, live/sync
+        // iconography, links, focus rings. §09 says it twice more — "rare and intentional", "not
+        // every button or heading" — and a Harbor badge on a non-interactive label is what makes
+        // an accent unusable for selection later.
+        accent: "#2B4851", // --color-deep-harbor
+        "accent-hover": "#24404A", // --color-deep-harbor-hover
+        "accent-soft": "#E8EFF0", // --color-deep-harbor-soft — a Harbor-tinted background
+        // §07. Semantic colours — reserved exclusively for meaning, never decoration. §09: "green,
+        // amber, red and blue retain functional meaning and are not replaced by the secondary
+        // palette."
+        ok: "#3B8F5A", // --color-success
+        err: "#C94A43", // --color-danger
+        run: "#B77A1B", // --color-warning — in this product amber means IN FLIGHT
         // Caution — a legitimate setting worth noticing, not a failure and not an in-flight thing.
-        // See STATUS.warn in src/lib/tokens.ts for why this is a fourth colour rather than a reuse
-        // of `run`: amber means "happening right now" everywhere else in this app, and one static
-        // exception is all it takes to stop it answering that question.
-        warn: "#fb923c",
-        // Category accents (see src/lib/tokens.ts for why these three and not others).
-        // These say what *kind* of thing something is; the status colors above say how it's doing.
-        reviewed: "#5eead4", // audited connector template, copied in verbatim
-        bespoke: "#c084fc", // written by a model for this agent only
-        stateful: "#a5b4fc", // state fields — the agent's shape, not its capabilities
+        // §07's `info`, and see STATUS.warn in src/lib/tokens.ts for why it is the blue rather than
+        // the amber its wording describes: amber already answers "is this happening right now" at
+        // forty-eight call sites against this one's two, and one static exception is all it takes
+        // to stop a colour answering its question.
+        warn: "#4B78B8", // --color-info
+        // Category accents (see src/lib/tokens.ts for why these four and not others). These say
+        // what *kind* of thing something is; the status colors above say how it's doing. §09 is
+        // where they are allowed to exist at all — "additional personality colours ... belong to
+        // the agent layer, not the global theme" — and every one has been re-struck for a light
+        // page, because the pastels that read on near-black vanish on #FBFBFA.
+        reviewed: "#1D6C87", // audited connector template, copied in verbatim
+        bespoke: "#683D8C", // written by a model for this agent only
+        stateful: "#3742A8", // state fields — the agent's shape, not its capabilities
       },
       // Corner radius — four steps, mirroring RADIUS in src/lib/tokens.ts. The scale is chosen by
       // the SIZE of the box, not by what the component is called, because a radius reads as a
@@ -67,22 +113,29 @@ export default {
         card: "10px", // cards, popovers, panels
         modal: "14px", // modals, the composer
       },
-      // Depth — mirrors ELEVATION in src/lib/tokens.ts. Every level pairs with a hairline border;
-      // on a near-black background the 1px edge is what actually separates two surfaces, and the
-      // shadow only says which way is up.
+      // Depth — mirrors ELEVATION in src/lib/tokens.ts. Every level still pairs with a hairline
+      // border, and which half does the work has swapped: on near-black the 1px edge separated two
+      // surfaces and the shadow only said which way was up, and on #F7F7F5 it is the shadow that
+      // separates while the hairline stops a card reading as a drawn rectangle.
+      //
+      // THE ALPHAS ARE ROUGHLY A FIFTH OF WHAT THEY WERE, which is the whole difference between a
+      // light system's depth and a dark one's — 40% black under a card is invisible on near-black
+      // and a bruise on off-white. Struck from ink (#1D1D1B) rather than from black, because a
+      // neutral-warm page casts a neutral-warm shadow and pure black under #FBFBFA goes grey-blue.
       boxShadow: {
-        raised: "0 1px 2px rgba(0,0,0,0.4)",
-        floating: "0 2px 6px rgba(0,0,0,0.35), 0 12px 28px -8px rgba(0,0,0,0.55)",
-        overlay: "0 4px 12px rgba(0,0,0,0.4), 0 28px 64px -16px rgba(0,0,0,0.7)",
-        // Mirrors FOCUS_RING in src/lib/tokens.ts. The accent, not a grey — a grey ring on a grey
-        // control on a near-black page is very nearly nothing, and "where am I" is the question a
-        // keyboard user asks most.
-        focusring: "0 0 0 1px #6b8afd, 0 0 0 4px rgba(107,138,253,0.16)",
-        // Lift by light rather than by dark — mirrors GLOW in src/lib/tokens.ts. A shadow says
-        // "this is above the page"; a glow says "this is the one you are on", which is what a
-        // hovered or keyboard-reached control needs to say.
-        glow: "0 0 0 1px #34343c, 0 0 32px -10px rgba(228,228,231,0.16)",
-        "glow-cta": "0 0 0 4px rgba(228,228,231,0.07)",
+        raised: "0 1px 2px rgba(29, 29, 27, 0.06)",
+        floating: "0 2px 6px rgba(29, 29, 27, 0.06), 0 12px 28px -8px rgba(29, 29, 27, 0.1)",
+        overlay: "0 4px 12px rgba(29, 29, 27, 0.08), 0 28px 64px -16px rgba(29, 29, 27, 0.16)",
+        // Mirrors FOCUS_RING in src/lib/tokens.ts. Deep Harbor, not a grey — a grey ring on a grey
+        // control is very nearly nothing whichever way up the greys are, and "where am I" is the
+        // question a keyboard user asks most.
+        focusring: "0 0 0 1px #2B4851, 0 0 0 4px rgba(43, 72, 81, 0.16)",
+        // Weight by shade — mirrors GLOW in src/lib/tokens.ts. A shadow says "this is above the
+        // page"; this says "this is the one you are on", which is what a hovered or
+        // keyboard-reached control needs to say. It lifted by LIGHT under the dark palette,
+        // because a card on #0d0d0f can only get brighter; on #FBFBFA it can only get darker.
+        glow: "0 0 0 1px #C9C9C4, 0 0 32px -10px rgba(29, 29, 27, 0.12)",
+        "glow-cta": "0 0 0 4px rgba(29, 29, 27, 0.07)",
       },
       transitionDuration: {
         fast: "120ms",
@@ -157,9 +210,9 @@ export default {
         // It is skipped entirely under `prefers-reduced-motion` — the caller checks, because the
         // static alternative is simply arriving there, which is fine.
         "flash-highlight": {
-          "0%": { backgroundColor: "rgba(107,138,253,0)" },
-          "35%": { backgroundColor: "rgba(107,138,253,0.16)" },
-          "100%": { backgroundColor: "rgba(107,138,253,0)" },
+          "0%": { backgroundColor: "rgba(43, 72, 81, 0)" },
+          "35%": { backgroundColor: "rgba(43, 72, 81, 0.12)" },
+          "100%": { backgroundColor: "rgba(43, 72, 81, 0)" },
         },
         "check-in": {
           "0%": { opacity: "0", transform: "scale(0.4)" },
@@ -181,16 +234,22 @@ export default {
         },
         // The executing graph node glows — a real, layered amber glow (tight ring + soft spread)
         // that swells and settles, over the persistent depth shadow. Not a flash (doc §4.6).
+        //
+        // THE AMBER IS §07's (#B77A1B) AND THE DEPTH UNDER IT IS INK AT A LIGHT SYSTEM'S ALPHA. The
+        // ring alphas are barely reduced and the SPREAD alphas are, which is the part a light page
+        // changes: a wide soft halo of colour on near-black reads as light coming off the node, and
+        // the same halo on #F1F1EF reads as a smudge. The ring is what says "this one is running";
+        // the spread only has to be perceptible.
         "pulse-node": {
           "0%, 100%": {
             boxShadow:
-              "0 1px 2px rgba(0,0,0,0.6), 0 12px 30px -8px rgba(0,0,0,0.65), " +
-              "0 0 0 1px rgba(245,158,11,0.55), 0 0 16px 1px rgba(245,158,11,0.42), 0 0 44px 6px rgba(245,158,11,0.16)",
+              "0 1px 2px rgba(29, 29, 27, 0.08), 0 12px 30px -8px rgba(29, 29, 27, 0.14), " +
+              "0 0 0 1px rgba(183, 122, 27, 0.55), 0 0 16px 1px rgba(183, 122, 27, 0.3), 0 0 44px 6px rgba(183, 122, 27, 0.1)",
           },
           "50%": {
             boxShadow:
-              "0 1px 2px rgba(0,0,0,0.6), 0 12px 30px -8px rgba(0,0,0,0.65), " +
-              "0 0 0 1px rgba(245,158,11,0.8), 0 0 24px 3px rgba(245,158,11,0.58), 0 0 64px 13px rgba(245,158,11,0.3)",
+              "0 1px 2px rgba(29, 29, 27, 0.08), 0 12px 30px -8px rgba(29, 29, 27, 0.14), " +
+              "0 0 0 1px rgba(183, 122, 27, 0.85), 0 0 24px 3px rgba(183, 122, 27, 0.42), 0 0 64px 13px rgba(183, 122, 27, 0.18)",
           },
         },
         // A column arriving during first-run onboarding (doc: progressive reveal). It fades and

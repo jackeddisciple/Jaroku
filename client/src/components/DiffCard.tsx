@@ -32,7 +32,7 @@ function HunkLines({ file }: { file: FileDiff }) {
     // A well inside the file row: one step darker than the list it sits in, with its own
     // hairline. Hunks are the thing the row is about rather than more of the row, and unbounded
     // they ran straight into the next file's header.
-    <div className="mt-1.5 overflow-x-auto rounded-control border border-hair bg-bg/60 py-1.5 font-mono">
+    <div className="mt-1.5 overflow-x-auto rounded-control border border-hair bg-void py-1.5 font-mono">
       {file.hunks.map((h, hi) => (
         <div key={hi} className={hi > 0 ? "mt-2" : ""}>
           <div className="px-2 text-tiny text-faint tabular-nums select-none">
@@ -176,7 +176,7 @@ function VersionPicker({ current, count }: { current: number; count: number }) {
       {open && (
         // Opens upward: this sits at the bottom of a card, near the bottom of a scrolling thread.
         // Same surface as the composer's model popover, which is the only other one in this pane.
-        <div className="absolute bottom-full left-0 z-30 mb-1 min-w-[150px] animate-slide-in rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none">
+        <div className="absolute bottom-full left-0 z-30 mb-1 min-w-[150px] animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none">
           <div className={`px-3 pb-1 pt-1.5 ${TYPE.sectionLabel}`}>
             Versions
           </div>

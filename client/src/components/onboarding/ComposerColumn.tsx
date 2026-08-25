@@ -78,9 +78,11 @@ const EXAMPLE_INPUTS = [
  *     build path it drafts the sentence into the composer for you to send; on the free path it
  *     runs an agent immediately. Those are not the same promise and they should not wear the
  *     same mark
- *   * hover and focus lift by light — the border brightens, the text comes up to full ink, the
+ *   * hover and focus carry weight — the border deepens, the text comes up to full ink, the
  *     surface fills. Same GLOW the provider cards use, so "you are on this one" looks identical
- *     wherever the app says it
+ *     wherever the app says it. It brightened the border under the near-black palette and deepens
+ *     it under this one, which is the same sentence spoken by whichever end of the greyscale is
+ *     free
  *   * a chevron that slides in on hover AND on keyboard focus. Reaching a row by Tab has to look
  *     exactly as arrived-at as reaching it with a pointer, or the keyboard path is second class
  */

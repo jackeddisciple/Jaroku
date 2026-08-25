@@ -30,12 +30,14 @@ interface ButtonProps {
 }
 
 /**
- * The decision the screen exists to ask. One per screen, filled, near-black on ink.
+ * The decision the screen exists to ask. One per screen, filled, canvas on ink.
  *
- * WHITE ON BLACK RATHER THAN THE ACCENT, which is the same choice `PrimaryCta` makes: the accent is
- * a selection colour and there is nothing selected on any of these screens. A filled ink button on
- * near-black is the highest-contrast thing that can be on the surface, which is what "this is the
- * one thing to press" should look like when it is the only thing to press.
+ * CHARCOAL RATHER THAN THE ACCENT, which is the same choice `PrimaryCta` makes: the accent is a
+ * selection colour and there is nothing selected on any of these screens. §08 names this exact
+ * control — "charcoal for primary high-contrast actions" — and a filled ink button is the
+ * highest-contrast thing that can be on the surface, which is what "this is the one thing to press"
+ * should look like when it is the only thing to press. It was off-white text on near-black before
+ * and it is canvas on charcoal now; what makes it work is the distance, not the direction.
  */
 export function PrimaryButton({
   children,
@@ -198,8 +200,8 @@ export function TextField({
  * be asking somebody to agree twice.
  *
  * DRAWN RATHER THAN NATIVE, for the reason the six `<select>`s in this app are: nothing in this
- * product is painted by the operating system, and a native checkbox on a near-black surface is a
- * light-grey box from another application. The real input is still there, still focusable, still
+ * product is painted by the operating system, and a native checkbox is a control from another
+ * application whichever way up this one's palette is. The real input is still there, still focusable, still
  * announced — it is `sr-only`, not `display: none`, which is the difference between styling a
  * control and replacing one.
  */

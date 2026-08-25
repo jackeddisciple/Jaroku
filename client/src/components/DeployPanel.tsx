@@ -571,7 +571,7 @@ function DeployDetail({ deployment }: { deployment: Deployment }) {
           {/* Somebody else's text, rendered with no interpretation. */}
           <pre
             ref={scrollRef}
-            className="mt-1 max-h-72 overflow-auto rounded-control border border-hair bg-bg/60 p-2.5 font-mono text-tiny leading-[1.55] text-ink"
+            className="mt-1 max-h-72 overflow-auto rounded-control border border-hair bg-void p-2.5 font-mono text-tiny leading-[1.55] text-ink"
           >
             {buildLines.map((l) => (
               <div key={l.seq} className={l.stream === "build-err" ? "text-run" : undefined}>
@@ -634,7 +634,7 @@ function ServeTokenCard({ onDismiss }: { onDismiss: () => void }) {
           </button>
         </div>
         <div className="mt-1.5 flex items-center gap-2">
-          <code className="min-w-0 flex-1 truncate rounded-control bg-bg/60 px-2 py-1 font-mono text-tiny text-ink">
+          <code className="min-w-0 flex-1 truncate rounded-control bg-void px-2 py-1 font-mono text-tiny text-ink">
             {reveal.token}
           </code>
           <button

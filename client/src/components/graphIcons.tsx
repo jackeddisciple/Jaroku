@@ -15,7 +15,7 @@
 // right brand mark + a human label.
 
 import type { ReactElement } from "react";
-import { ACCENT } from "../lib/tokens.ts";
+import { ACCENT, TEXT } from "../lib/tokens.ts";
 import { PlugIcon, svg } from "./panelIcons.tsx";
 
 type IconProps = { size?: number };
@@ -168,7 +168,7 @@ export function StripeIcon({ size = 26 }: IconProps) {
 // factory, one stroke weight, colour set by the wrapper rather than baked into the path.
 export function HttpIcon({ size = 26 }: IconProps) {
   return (
-    <span className="inline-flex" style={{ color: "#7FA9D6" }}>
+    <span className="inline-flex" style={{ color: TEXT.muted }}>
       {svg(
         { size },
         <>
@@ -194,7 +194,7 @@ export function AnthropicIcon({ size = 26 }: IconProps) {
 export function OpenAIIcon({ size = 26 }: IconProps) {
   // OpenAI knot — a monochrome hexafoil approximation.
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="1.6" aria-hidden>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={TEXT.ink} strokeWidth="1.6" aria-hidden>
       <path d="M12 4.2 a4 4 0 0 1 3.5 2 4 4 0 0 1 1.9 5.3 4 4 0 0 1-1.9 5.3 4 4 0 0 1-7 0 4 4 0 0 1-1.9-5.3 4 4 0 0 1 1.9-5.3 4 4 0 0 1 3.5-2z" />
       <path d="M12 8v8M8.5 10l7 4M15.5 10l-7 4" />
     </svg>
@@ -206,7 +206,7 @@ export function OpenAIIcon({ size = 26 }: IconProps) {
 // hex nut for a tool with no logo to show.
 export function ModelChipIcon({ size = 24 }: IconProps) {
   return (
-    <span className="inline-flex" style={{ color: "#A6B0FF" }}>
+    <span className="inline-flex" style={{ color: ACCENT.state }}>
       {svg(
         { size },
         <>
@@ -221,7 +221,7 @@ export function ModelChipIcon({ size = 24 }: IconProps) {
 
 export function GenericToolIcon({ size = 24 }: IconProps) {
   return (
-    <span className="inline-flex" style={{ color: "#c3c7d1" }}>
+    <span className="inline-flex" style={{ color: TEXT.muted }}>
       {svg(
         { size },
         <>

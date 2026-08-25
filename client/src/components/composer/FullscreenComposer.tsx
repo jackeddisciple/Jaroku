@@ -113,7 +113,7 @@ export function FullscreenComposer({
       {/* The thread stays visible through this rather than being replaced by it — §3.2 again. The
           backdrop is a scrim, not a cover. */}
       <div
-        className="absolute inset-0 bg-bg/70 backdrop-blur-[1px] transition-opacity duration-base motion-reduce:transition-none"
+        className="absolute inset-0 bg-ink/25 backdrop-blur-[1px] transition-opacity duration-base motion-reduce:transition-none"
         onClick={onClose}
         aria-hidden
       />
@@ -123,7 +123,7 @@ export function FullscreenComposer({
         aria-modal="true"
         aria-label={title}
         className="relative flex w-full max-w-[880px] flex-col overflow-hidden rounded-modal border
-          border-edge bg-panel shadow-floating animate-slide-in motion-reduce:animate-none"
+          border-edge bg-elevated shadow-floating animate-slide-in motion-reduce:animate-none"
         style={{ height: "70vh" }}
       >
         {children}

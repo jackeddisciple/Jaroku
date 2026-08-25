@@ -11,8 +11,11 @@
 // three sizes and a fourth one produced by `transform: scale` is a fourth size with no name.
 //
 // STRUCTURE IN HAIRLINES, NOT FILLS (§9). One border, one radius from the size ladder, one elevation
-// — and the hover is `shadow-glow` rather than a darker background, because on #0d0d0f a card cannot
-// get meaningfully darker and can only get brighter at its edge.
+// — and the hover is `shadow-glow` rather than a fill change, because a card that answers the
+// pointer by changing colour has spent a surface step to say something a border can say for free.
+// The argument used to be narrower than that: on #0d0d0f a card could not get meaningfully darker
+// and could only get brighter at its edge. The palette is light now and `shadow-glow` deepens the
+// border instead of brightening it, which is the same treatment arriving from the other direction.
 
 import { useState } from "react";
 import { Chip } from "./Chip.tsx";
@@ -96,7 +99,7 @@ function Overflow({
               including one that would otherwise open a different card, and it disappears with the
               menu rather than outliving it. */}
           <div className="fixed inset-0 z-30" aria-hidden onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
-          <div className="absolute right-0 top-full z-30 mt-1 w-52 animate-slide-in rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none">
+          <div className="absolute right-0 top-full z-30 mt-1 w-52 animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none">
             {archived
               ? item("Restore", ArchiveRestoreIcon, onRestore)
               : [

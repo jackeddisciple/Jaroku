@@ -103,7 +103,7 @@ export function Select<T extends string>({
       {open && (
         <div
           role="listbox"
-          className={`absolute top-full z-30 mt-1 max-h-[280px] min-w-full animate-slide-in overflow-auto rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none ${
+          className={`absolute top-full z-30 mt-1 max-h-[280px] min-w-full animate-slide-in overflow-auto rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none ${
             align === "right" ? "right-0" : "left-0"
           }`}
         >

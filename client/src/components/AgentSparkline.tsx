@@ -104,7 +104,7 @@ export function AgentSparkline({
           }}
           title={`${LABEL[bar.outcome]} · ${relTime(bar.started_at)}${bar.failed_step_id ? " — opens on the failing step" : ""}`}
           aria-label={`Run ${LABEL[bar.outcome]} ${relTime(bar.started_at)}`}
-          className="group/bar h-full w-[3px] shrink-0 rounded-[1px] transition-[opacity,transform] duration-fast hover:scale-y-110 focus-visible:outline-none focus-visible:shadow-focusring focus-visible:ring-1 focus-visible:ring-[#3a3a44] motion-reduce:hover:scale-y-100"
+          className="group/bar h-full w-[3px] shrink-0 rounded-[1px] transition-[opacity,transform] duration-fast hover:scale-y-110 focus-visible:outline-none focus-visible:shadow-focusring focus-visible:ring-1 focus-visible:ring-grip motion-reduce:hover:scale-y-100"
           style={{
             background: BAR_COLOR[bar.outcome],
             // A settled bar sits back; the pointer brings it forward. Opacity rather than a second

@@ -119,7 +119,7 @@ export function Popover({
       role="menu"
       aria-label={label}
       className={`absolute bottom-full z-30 mb-1.5 animate-slide-in rounded-card border border-edge
-        bg-panel p-1 shadow-floating motion-reduce:animate-none
+        bg-elevated p-1 shadow-floating motion-reduce:animate-none
         ${align === "right" ? "right-0" : "left-0"}`}
       style={{ minWidth: width ?? 240 }}
     >

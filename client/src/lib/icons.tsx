@@ -5,9 +5,12 @@
 // Stroke weight comes from ICON.strokeWidth like every other icon in the app. These used to be
 // drawn at 2 / 1.8 / 2 with their own inline <svg> attributes, so the provider mark in the top
 // bar sat visibly heavier than the icons either side of it.
-import { ICON } from "./tokens.ts";
+import { ICON, TEXT } from "./tokens.ts";
 
-const MUTED = "#71717a";
+// The grey a brand mark falls back to when it is not the active/chosen/connected thing. §05's
+// supporting-text step, so an unbranded provider row reads at the same weight as the words beside
+// it — it was a hex copy of the old palette's `muted`, which stayed dark when the palette did not.
+const MUTED = TEXT.muted;
 
 export const BRAND_COLOR: Record<string, string> = {
   anthropic: "#d97757", // Claude terracotta

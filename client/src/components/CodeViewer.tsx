@@ -21,7 +21,17 @@ import { iconBtn } from "./buttons.ts";
 import { ProblemsPanel, useDiagnostics, useLiveDiagnostics } from "./ProblemsPanel.tsx";
 
 const LANGS = ["python", "json", "markdown", "toml"] as const;
-const THEME = "vitesse-dark"; // muted, close to the app's near-black palette
+// The syntax theme, and it is the one thing in this pass that would have SHIPPED BROKEN rather than
+// merely looked wrong. Shiki writes its own colours — including a background — into the HTML it
+// returns, so a dark theme survives a palette change untouched: every other surface in the client
+// would have gone light around a code pane that stayed near-black, and no token, class or variable
+// in the system reaches inside that markup to say otherwise.
+//
+// `vitesse-light` rather than one of the several light themes available, because it is the same
+// author's companion to the `vitesse-dark` this replaces — the same hue assignments at the same low
+// saturation, which is what "muted, close to the app's palette" meant when the app was dark and
+// still means now that it is not.
+const THEME = "vitesse-light";
 
 type Highlighter = { codeToHtml: (code: string, opts: { lang: string; theme: string }) => string };
 

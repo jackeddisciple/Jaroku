@@ -14,11 +14,11 @@
 // thread that finished cleanly is not a success to be congratulated, it is a session with nothing
 // waiting in it, and colouring it would make the amber rows compete with something.
 
-import { STATUS } from "../lib/tokens.ts";
+import { STATUS, TEXT } from "../lib/tokens.ts";
 import type { ThreadStatus } from "../types.ts";
 
 /** The dim the two quiet glyphs share. Not a fifth colour — the absence of one. */
-const DIM = "#52525b";
+const DIM = TEXT.faint;
 
 /**
  * One glyph, at a fixed box.

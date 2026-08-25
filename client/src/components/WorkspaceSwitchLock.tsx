@@ -30,13 +30,13 @@ export function WorkspaceSwitchLock() {
       // `pointer-events-auto` IS THE WHOLE MECHANISM. Everything else here is presentation; this
       // one property is what §5.1's "the user must not be able to interact with stale data" comes
       // down to in a browser. A scrim that let clicks through would be decoration.
-      className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-void/55 backdrop-blur-[1px]"
+      className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-ink/25 backdrop-blur-[1px]"
       // `status` rather than `alert`: this is a state somebody is waiting on, not an interruption,
       // and `alert` would make a screen reader cut off whatever it was reading.
       role="status"
       aria-live="polite"
     >
-      <div className="flex items-center gap-2 rounded-card border border-edge bg-panel px-3 py-2 shadow-floating">
+      <div className="flex items-center gap-2 rounded-card border border-edge bg-elevated px-3 py-2 shadow-floating">
         <span className="animate-spin text-muted motion-reduce:animate-none" aria-hidden>
           <LoaderIcon size={ICON.sm} />
         </span>

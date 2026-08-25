@@ -17,10 +17,12 @@
 //   type is the icon, count is the `×40` badge, and resolution is the card physically collapsing.
 //
 // THREE ELEVATIONS, ONE PER SIZE, from the four-level scale v0.2.2 established — each of them a
-// border PLUS a shadow, because on a near-black background a shadow alone is invisible and a border
-// alone reads as a drawn rectangle.
+// border PLUS a shadow, because either half alone reads as a mistake. Which half carries the weight
+// depends on the page: on the near-black one this was written for, a shadow alone was invisible and
+// the hairline did the separating; on §01's light ladder the shadow works and the hairline is what
+// stops a card reading as a drawn rectangle. The pairing is the rule, not the reason for it.
 
-import { ELEVATION, ICON, MOTION, RADIUS, SURFACE, TEXT } from "../lib/tokens.ts";
+import { ACCENT, ELEVATION, ICON, MOTION, RADIUS, SURFACE, TEXT } from "../lib/tokens.ts";
 import { ageFraction } from "../lib/inboxBoard.ts";
 import { absTime, relTime } from "../lib/format.ts";
 import { INBOX_ICON } from "./inboxIcons.tsx";
@@ -32,11 +34,14 @@ import type { InboxItemView, InboxSeverity } from "../types.ts";
 /**
  * The one place rose is used in this product.
  *
- * It is `ACCENT.mcp` by value and deliberately NOT imported under that name: this is not an MCP
- * badge, and a reader following the import would arrive at a comment about third-party tools. The
- * two share a hex because the palette has one rose, and §4.3 asked for the rose.
+ * It is `ACCENT.mcp` and it keeps a local name, which is the same decision it always was for a
+ * different reason. It used to be the hex written out, because this is not an MCP badge and a
+ * reader following the import would arrive at a comment about third-party tools — but a hex is a
+ * copy, and the palette moved under it: `#f472b6` was a rose on near-black and is a highlighter on
+ * `#FBFBFA`. So the value is imported and the NAME stays local. The two share a colour because the
+ * palette has one rose, and §4.3 asked for the rose.
  */
-const ROSE = "#f472b6";
+const ROSE = ACCENT.mcp;
 
 /** §4.3's three sizes, as the geometry each one actually gets. */
 const SIZE: Record<InboxSeverity, { pad: string; title: string; elevation: string; border: string }> = {
@@ -60,7 +65,7 @@ const SIZE: Record<InboxSeverity, { pad: string; title: string; elevation: strin
     pad: "px-2.5 py-1.5",
     title: "text-caption",
     elevation: ELEVATION.raised,
-    border: "#1e1e22",
+    border: SURFACE.hair,
   },
 };
 
@@ -164,7 +169,7 @@ export function InboxCard({
       }`}
       style={{
         borderRadius: RADIUS.card,
-        border: `1px solid ${selected ? "#3a3a44" : size.border}`,
+        border: `1px solid ${selected ? SURFACE.grip : size.border}`,
         boxShadow: size.elevation,
         background: SURFACE.panel,
         // Collapsing rather than merely fading: the column closes up behind it, which is what makes a

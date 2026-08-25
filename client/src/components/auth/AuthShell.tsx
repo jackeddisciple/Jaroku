@@ -16,15 +16,18 @@
 //
 // THE COMPOSITION, FROM THE OUTSIDE IN:
 //
-//   THE FIELD. Near-black, with the same dot grid the Graph View canvas and OnboardingSurface
+//   THE FIELD. The canvas, with the same dot grid the Graph View canvas and OnboardingSurface
 //   already draw. It is the product's own texture, so the first screen is made of the same stuff
-//   as the fourth. Full-bleed and evenly lit here rather than masked to an ellipse: these screens
-//   are a page, and a vignette on a page reads as a spotlight nobody asked for.
+//   as the fourth — which is why it was near-black when they were and is off-white now that they
+//   are. Full-bleed and evenly lit here rather than masked to an ellipse: these screens are a
+//   page, and a vignette on a page reads as a spotlight nobody asked for.
 //
 //   THE MARK. The same three contours as everywhere else, at `BRAND.screen`, in ink.
 //
-//   THE TITLE, in the display serif, and this is the one decision that makes these screens read as
-//   a product rather than as a dialog. See src/index.css for why a third family exists at all.
+//   THE TITLE, on `display` — §02's top rung, 32px at 600. It was set in a serif of its own on the
+//   argument that a display face is what makes these screens read as a product rather than as a
+//   dialog; typography.pdf §01 gives the product one voice and §05 makes that a principle, so what
+//   carries it now is size and weight. See src/index.css for the family that used to be here.
 //
 //   THE CARD. One surface, one border, one radius. Everything a screen actually asks for goes
 //   inside it, so "what am I being asked" has exactly one answer on every screen in the sequence.
@@ -34,7 +37,8 @@
 
 import { JarokuGlyph } from "../../lib/icons.tsx";
 import { openExternal } from "../../lib/openExternal.ts";
-import { BRAND } from "../../lib/tokens.ts";
+import { BRAND, TEXT } from "../../lib/tokens.ts";
+import { alpha } from "../../lib/palette.ts";
 
 /**
  * The dot field, and the one bloom behind the content.
@@ -49,18 +53,22 @@ function Field() {
       <div
         className="absolute inset-0"
         style={{
-          backgroundImage: "radial-gradient(rgba(228,228,231,0.05) 1px, transparent 1px)",
+          backgroundImage: `radial-gradient(${alpha(TEXT.ink, 0.05)} 1px, transparent 1px)`,
           backgroundSize: "24px 24px",
         }}
       />
-      {/* Light rather than colour, on the keyframe the empty panels already idle on. At the
+      {/* Shade rather than colour, on the keyframe the empty panels already idle on. At the
           strength where you would not name it if asked, and would notice the screen going flat
-          without it. */}
+          without it.
+
+          IT WAS DRAWN IN OFF-WHITE, which is what a texture on a near-black page has to be — and
+          which is a texture nobody can see at all on `#F1F1EF`. Ink at the same alphas, so the
+          field is the same depth arriving from the other end of the greyscale. */}
       <div
         className="absolute left-1/2 top-[-10%] h-[560px] w-[820px] -translate-x-1/2 animate-breathe motion-reduce:animate-none"
         style={{
           background:
-            "radial-gradient(closest-side, rgba(228,228,231,0.05), rgba(228,228,231,0.018) 46%, transparent 74%)",
+            `radial-gradient(closest-side, ${alpha(TEXT.ink, 0.05)}, ${alpha(TEXT.ink, 0.018)} 46%, transparent 74%)`,
           filter: "blur(30px)",
         }}
       />
@@ -71,7 +79,7 @@ function Field() {
 export interface AuthShellProps {
   /** The display line. One per screen, and it is the screen's name to the person reading it. */
   title?: string;
-  /** Under it, in the same serif at prose size. Two short lines, never a paragraph. */
+  /** Under it, at prose size. Two short lines, never a paragraph. */
   subtitle?: React.ReactNode;
   /** Whether to draw the mark. Off for the steps deep inside a flow, where it is furniture. */
   mark?: boolean;
@@ -117,8 +125,9 @@ export function AuthShell({
           </h1>
         )}
         {subtitle && (
-          // The serif carries down into the subtitle, which is what makes the two read as one
-          // block of voice rather than as a heading with a caption stuck under it.
+          // One family, two rungs, which is what makes the pair read as one block of voice rather
+          // than as a heading with a caption stuck under it. The serif used to carry down here for
+          // the same reason, and the ladder does the same job with one less font in the bundle.
           <p className="mt-3 max-w-[38ch] text-center text-body text-muted">
             {subtitle}
           </p>
@@ -126,7 +135,7 @@ export function AuthShell({
 
         <div
           className={`mt-8 w-full ${width === "narrow" ? "max-w-[420px]" : "max-w-[520px]"}
-            rounded-modal border border-edge bg-bg/80 p-7 shadow-overlay backdrop-blur-[2px]`}
+            rounded-modal border border-edge bg-elevated/80 p-7 shadow-overlay backdrop-blur-[2px]`}
         >
           {children}
         </div>
@@ -203,8 +212,8 @@ export function TextLink({
         if (onClick) onClick();
         else if (href) void openExternal(href);
       }}
-      className="rounded-chip underline decoration-ember/50 underline-offset-2 text-ember outline-none
-        transition-colors duration-fast hover:text-emberlit hover:decoration-emberlit
+      className="rounded-chip underline decoration-accent/50 underline-offset-2 text-accent outline-none
+        transition-colors duration-fast hover:text-accent-hover hover:decoration-accent-hover
         focus-visible:shadow-focusring"
     >
       {children}

@@ -57,7 +57,7 @@ export function StepDetailPanel() {
   // Keep the element mounted for the slide-out transition; just translate it off-screen.
   return (
     <div
-      className={`absolute top-0 right-0 bottom-0 w-[340px] max-w-[85%] bg-panel z-20 flex flex-col
+      className={`absolute top-0 right-0 bottom-0 w-[340px] max-w-[85%] bg-elevated z-20 flex flex-col
         border-l border-edge shadow-floating transition-transform duration-base ease-state
         ${open ? "translate-x-0" : "translate-x-full pointer-events-none"}`}
       aria-hidden={!open}

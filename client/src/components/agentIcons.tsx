@@ -21,7 +21,8 @@
 // toggle, no history, no folder and no stack.
 
 import { svg } from "./panelIcons.tsx";
-import { ICON } from "../lib/tokens.ts";
+import { ICON, SURFACE } from "../lib/tokens.ts";
+import { alpha } from "../lib/palette.ts";
 
 type P = { size?: number; strokeWidth?: number; className?: string };
 
@@ -150,7 +151,7 @@ export function ThumbnailMark({ size = 28 }: { size?: number }) {
   return (
     <span
       className="flex items-center justify-center rounded-full text-ink backdrop-blur-[2px]"
-      style={{ width: size, height: size, background: "rgba(13,13,15,0.62)" }}
+      style={{ width: size, height: size, background: alpha(SURFACE.panel, 0.72) }}
       aria-hidden
     >
       <svg width={size * 0.55} height={size * 0.55} viewBox="0 0 24 24" fill="currentColor" aria-hidden>

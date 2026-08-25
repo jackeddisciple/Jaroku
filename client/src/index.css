@@ -27,8 +27,70 @@
 @tailwind utilities;
 
 @layer base {
+  /* colour_system.pdf's own tokens, under the specification's own names.
+     `src/lib/palette.ts` is where they are decided; `colourSystem.test.ts` compares this block to
+     it token by token, so a value edited in one place and not the other fails rather than ships.
+
+     WHY PUBLISH THEM AT ALL when tailwind.config.js already carries every one of these under this
+     app's names. Because three consumers cannot be reached by a class: React Flow draws its own
+     controls and minimap, cmdk owns its group headings, and the scroll masks are gradients rather
+     than colours. Every one of those was a hex literal copied out of the palette by hand, which is
+     how the graph canvas ended up two percent off the panels it sat behind. A variable they can all
+     read is the fix, and naming it after the specification rather than after the app is what lets
+     somebody check it against the PDF.
+
+     §08 HAS NO `--color-brand`, DELIBERATELY. The specification writes NONE in that row: "no single
+     coloured brand accent; Jaroku remains neutral/off-white". A variable resolving to nothing is a
+     variable somebody uses by accident, so the absence is the token. */
   :root {
-    color-scheme: dark;
+    color-scheme: light;
+
+    /* §01 Canvas & Surfaces */
+    --color-bg-canvas: #f7f7f5;
+    --color-bg-surface: #fbfbfa;
+    --color-bg-elevated: #ffffff;
+    --color-bg-subtle: #f1f1ef;
+    --color-bg-hover: #ececea;
+    --color-bg-active: #e5e5e1;
+
+    /* §02 Sidebar Plane */
+    --color-sidebar: #e9eeef;
+    --color-sidebar-hover: #dee6e8;
+    --color-sidebar-active: #d3dde0;
+    --color-sidebar-border: #d2dcdd;
+
+    /* §03 Pale Mist Secondary Palette */
+    --color-pale-mist-50: #f3f6f6;
+    --color-pale-mist-100: #e9eeef;
+    --color-pale-mist-200: #dee6e8;
+    --color-pale-mist-300: #d3dde0;
+    --color-pale-mist-400: #c0c8ca;
+
+    /* §04 Deep Harbor Secondary Accent */
+    --color-deep-harbor: #2b4851;
+    --color-deep-harbor-hover: #24404a;
+    --color-deep-harbor-soft: #e8eff0;
+
+    /* §05 Text */
+    --color-text-primary: #1d1d1b;
+    --color-text-secondary: #62625f;
+    --color-text-muted: #90908c;
+    --color-text-disabled: #b5b5b0;
+
+    /* §06 Borders & Dividers */
+    --color-border-subtle: #e6e6e2;
+    --color-border-default: #dcdcd8;
+    --color-border-strong: #c9c9c4;
+
+    /* §07 Semantic Colours */
+    --color-success: #3b8f5a;
+    --color-warning: #b77a1b;
+    --color-danger: #c94a43;
+    --color-info: #4b78b8;
+
+    /* §08 Brand Direction */
+    --color-brand-strong: #1d1d1b;
+    --color-brand-secondary: #2b4851;
   }
   html,
   body,
@@ -64,21 +126,22 @@
      product is drawn by the OS. */
   * {
     scrollbar-width: thin;
-    scrollbar-color: #26262b transparent;
+    scrollbar-color: var(--color-bg-active) transparent;
   }
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: #26262b;
+    background: var(--color-bg-active);
     border-radius: 6px;
   }
   /* The thumb answers the pointer, like every other control. Ten pixels of permanently-lit chrome
      on each of forty regions is a real share of a 280px sidebar, and a thumb that never responds
-     reads as a painted stripe rather than as something you can grab. */
+     reads as a painted stripe rather than as something you can grab. §06's strongest boundary,
+     which is what `grip` is — the end of the greyscale before ink. */
   ::-webkit-scrollbar-thumb:hover {
-    background: #3a3a3f;
+    background: var(--color-border-strong);
   }
   ::-webkit-scrollbar-track {
     background: transparent;
@@ -110,17 +173,20 @@
     line-height: 14px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #52525b;
+    color: var(--color-text-muted);
     padding: 6px 12px 2px;
   }
 
   /* ── Graph View canvas ──────────────────────────────────────────────────────
-     n8n-style: flat, near-black, with a faint dot grid (drawn by React Flow's Background).
-     Restraint plus precise organization reads as premium — no glow, no gradient, no grain. */
+     n8n-style: flat, with a faint dot grid (drawn by React Flow's Background). Restraint plus
+     precise organization reads as premium — no glow, no gradient, no grain. It was near-black
+     when that was written and the sentence is the same one on §01's ladder. */
   .graph-canvas {
     position: relative;
-    /* deepest layer, darker than the panel-coloured nodes so solid cards separate cleanly */
-    background: #0e0e12;
+    /* The layer under the nodes. It was DARKER than the panel-coloured cards so they separated
+       cleanly; on a light page the same relationship means darker still — §01's `bg-subtle`, one
+       step under the canvas, exactly as the shell sits on it. */
+    background: var(--color-bg-subtle);
   }
   .graph-canvas .react-flow,
   .graph-canvas .react-flow__renderer,
@@ -136,22 +202,26 @@
     font-family: "Geist Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   }
 
-  /* React Flow chrome — recolour the built-in controls/minimap to the dark system. */
+  /* React Flow chrome — recolour the built-in controls/minimap onto the light system. These are
+     the elements a class cannot reach, which is the whole reason the tokens above are published. */
   .react-flow__controls-button {
-    background: #18181b;
+    background: var(--color-bg-surface);
     border: none;
-    border-bottom: 1px solid #26262b;
-    color: #a1a1aa;
+    border-bottom: 1px solid var(--color-bg-active);
+    color: var(--color-text-secondary);
   }
   .react-flow__controls-button:hover {
-    background: #1e1e22;
-    color: #e4e4e7;
+    background: var(--color-bg-hover);
+    color: var(--color-text-primary);
   }
   .react-flow__controls-button svg {
     fill: currentColor;
   }
+  /* The mask dims what is OUTSIDE the viewport rectangle, so on a light canvas it has to be the
+     canvas itself at an alpha rather than ink — a dark wash here would invert the minimap's
+     meaning and make the part you are looking at the part that reads as switched off. */
   .react-flow__minimap-mask {
-    fill: rgba(13, 13, 15, 0.72);
+    fill: rgba(241, 241, 239, 0.72);
   }
   .react-flow__edge.animated .react-flow__edge-path {
     stroke-dasharray: 6 5;

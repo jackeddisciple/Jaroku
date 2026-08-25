@@ -354,7 +354,7 @@ export function GitHubTriggerPicker({
   if (rows.length === 0) return null;
 
   return (
-    <div className="mb-2 max-h-44 overflow-auto rounded-card border border-edge bg-panel p-1 shadow-floating">
+    <div className="mb-2 max-h-44 overflow-auto rounded-card border border-edge bg-elevated p-1 shadow-floating">
       {/* `!` HAS NO FILTER AND ONE ENTRY, so Enter attaches it immediately. The row exists so a
           mistyped `!` is one Escape away rather than an attachment somebody has to notice and
           remove — and the caption says what it does, because a bare `!` is the shortcut most

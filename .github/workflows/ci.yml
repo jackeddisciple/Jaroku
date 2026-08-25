@@ -693,6 +693,15 @@ jobs:
           # `text-error` against a palette whose red is `err`, so the one state that had to be
           # noticed rendered with no colour at all and had done since it shipped.
           npm run test:type-scale
+          # colour_system.pdf's palette, beside the ladder above it and for the same reason: most of
+          # what it asserts is a property of the WHOLE client. Its load-bearing half is an ABSENCE,
+          # which is the shape a palette bug actually takes — a hex literal does not fail when the
+          # system moves under it, it just stays the colour it was while everything around it
+          # changes, and only a person looking at the screen can see that. Forty-eight of those were
+          # in the client before this pass: nine in the graph view, four in the Inbox, one in the
+          # thread glyphs. The one it exists for most is `CodeViewer`'s syntax theme, which writes
+          # its own background into the markup and which no token, class or variable can reach.
+          npm run test:colour-system
           npm run test:reset
           npm run test:thread-store
           npm run test:thread-cost

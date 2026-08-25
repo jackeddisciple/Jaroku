@@ -42,7 +42,8 @@ import { useGraphStore } from "../store/graphStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { sendLoadAgentGraph } from "../lib/socket.ts";
-import { ICON, INTERACTION, RADIUS } from "../lib/tokens.ts";
+import { alpha } from "../lib/palette.ts";
+import { ACCENT, ICON, INTERACTION, RADIUS, STATUS, SURFACE, TEXT } from "../lib/tokens.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { GitBranchIcon, PlusIcon, XIcon } from "./panelIcons.tsx";
@@ -92,21 +93,40 @@ const NODE_ICON = {
 type FitOptions = Pick<FitViewOptions, "padding">;
 
 // ── palette (flat, n8n-ish) ───────────────────────────────────────────────────
-// Solid, opaque cards on the design-system panel colour; a slightly lighter fill marks the
-// selected/active state (paired with a thin accent bar on the left edge — never a glow).
-const CARD_BG = "#18181b"; // panel colour — solid, confident cards
-const CARD_BG_ACTIVE = "#1e1e22"; // selected/active fill (design-system "active" token)
-const ICON_BG = "#232329"; // the icon square inside a card
-const BORDER = "#2a2a30"; // thin, subtle card outline (no colour, no glow)
-const DIAMOND = "#6c6c78";
-const EDGE = "#4c4c56";
-const EDGE_DASH = "#5a5a66";
+// Solid, opaque cards on the design-system panel colour; a one-step fill marks the selected/active
+// state (paired with a thin accent bar on the left edge — never a glow).
+//
+// THIS WAS THE SECOND PALETTE IN THE CLIENT, and it is not one any more. Nine hex literals lived
+// here because tokens.ts said the graph view was "deliberately NOT migrated onto this yet — this
+// file exists so they *can* be, in a later pass, without re-deciding any of it". This is that pass.
+// Every value below is now the token it was a copy of, which is what stopped the canvas being two
+// percent off the panels behind it, and what makes a palette change reach the graph at all.
+//
+// The fill used to be a slightly LIGHTER step for the selected state, because on near-black that is
+// the only direction a surface can move. On §01's light ladder it is a step down, and `SURFACE`
+// already knows which — the constants below did not have to be re-decided, only re-pointed.
+const CARD_BG = SURFACE.panel; // cards — solid and confident on the canvas behind them
+const CARD_BG_ACTIVE = SURFACE.active; // selected/active fill
+const ICON_BG = SURFACE.chrome; // the icon square inside a card
+const BORDER = SURFACE.edge; // thin, subtle card outline (no colour, no glow)
+const DIAMOND = TEXT.faint;
+const EDGE = SURFACE.grip;
+const EDGE_DASH = TEXT.disabled;
 const SEL = INTERACTION.accent; // selection accent (left bar only) — the app's, not the canvas's own
-const AMBER = "#f59e0b"; // running/active accent (left bar only)
-const PULSE = "#8aa0ff"; // transient click micro-interaction highlight
+const AMBER = STATUS.pending; // running/active accent (left bar only)
+const PULSE = INTERACTION.hover; // transient click micro-interaction highlight
+// The particle's halo, and the softer one on the edge it runs along. Two alphas of the pulse
+// colour rather than two literals: the halo has to move when the accent does, and it was the one
+// place a Harbor particle could still be trailing periwinkle.
+const PULSE_GLOW_STRONG = alpha(INTERACTION.hover, 0.9);
+const PULSE_GLOW = alpha(INTERACTION.hover, 0.65);
+// What the minimap dims OUTSIDE the viewport rectangle. The canvas at an alpha rather than ink:
+// a dark wash on a light minimap inverts its meaning, making the part you are looking at the part
+// that reads as switched off.
+const MINIMAP_MASK = alpha(SURFACE.void, 0.7);
 
 type NodeStatus = "ok" | "error" | "running";
-const STATUS_COLOR: Record<NodeStatus, string> = { ok: "#22c55e", error: "#ef4444", running: "#f59e0b" };
+const STATUS_COLOR: Record<NodeStatus, string> = { ok: STATUS.ok, error: STATUS.error, running: STATUS.pending };
 
 type FlowKind = "trigger" | "agent" | "tool" | "action" | "terminal";
 type FlowData = {
@@ -151,7 +171,7 @@ function PlusChip({ style }: { style: React.CSSProperties }) {
   return (
     <span
       className="absolute flex items-center justify-center text-muted pointer-events-none"
-      style={{ width: 20, height: 20, borderRadius: RADIUS.control, background: "#202024", border: `1px solid ${BORDER}`, ...style }}
+      style={{ width: 20, height: 20, borderRadius: RADIUS.control, background: SURFACE.chrome, border: `1px solid ${BORDER}`, ...style }}
     >
       <PlusIcon size={ICON.xs} />
     </span>
@@ -165,11 +185,11 @@ const KIND_ICON: Record<FlowKind, (p: { size?: number }) => ReactElement> = {
   action: ActionIcon,
   terminal: TerminalIcon,
 };
-// Kept in step with ACCENT.mcp in lib/tokens.ts. The graph view has its own palette module
-// (see the note at the top of tokens.ts), so this is a deliberate second reference rather
-// than an oversight — one badge colour across the plan card, the trace and here.
-const ACCENT_MCP = "#f472b6";
-const SURFACE_BG = "#0d0d0f";
+// ACCENT.mcp itself, not a copy kept in step with it. It was written out because the graph view
+// had its own palette module; it does not any more, so the second reference has no reason to exist
+// — one badge colour across the plan card, the trace and here, from one place.
+const ACCENT_MCP = ACCENT.mcp;
+const SURFACE_BG = SURFACE.bg;
 
 /** The same plug outline as panelIcons.PlugIcon, at the size this corner marker needs. */
 function McpPlugGlyph() {
@@ -184,12 +204,16 @@ function McpPlugGlyph() {
   );
 }
 
+// The five node kinds, on the tokens they were copies of. `tool` and `action` are ACCENT.reviewed
+// and ACCENT.state by name now rather than by coincidence — tokens.ts always claimed they were the
+// same decision, and this is what makes that true. `agent` is ink because the agent card is the
+// subject of the canvas and the only node allowed to be as dark as the text around it.
 const KIND_ACCENT: Record<FlowKind, string> = {
-  trigger: "#f59e0b",
-  agent: "#e4e4e7",
-  tool: "#5eead4",
-  action: "#a5b4fc",
-  terminal: "#9ca3af",
+  trigger: STATUS.pending,
+  agent: TEXT.ink,
+  tool: ACCENT.reviewed,
+  action: ACCENT.state,
+  terminal: TEXT.faint,
 };
 
 // The selected/active state: a slightly lighter fill + a thin accent bar on the left edge.
@@ -346,14 +370,14 @@ function FlowEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPo
         style={{
           stroke,
           strokeWidth: width,
-          filter: d.pulse ? "drop-shadow(0 0 3px rgba(138,160,255,0.65))" : undefined,
+          filter: d.pulse ? `drop-shadow(0 0 3px ${PULSE_GLOW})` : undefined,
           transition: "stroke 120ms ease",
         }}
       />
       {/* a single particle travelling source→target — the real data-flow direction (only when the
           node has executed and this edge was actually traversed). Keyed so re-clicks restart it. */}
       {d.particle && (
-        <circle r="3.6" fill={PULSE} style={{ filter: "drop-shadow(0 0 4px rgba(138,160,255,0.9))" }}>
+        <circle r="3.6" fill={PULSE} style={{ filter: `drop-shadow(0 0 4px ${PULSE_GLOW_STRONG})` }}>
           <animateMotion key={d.pulseKey} dur="0.42s" repeatCount="1" fill="freeze" path={path} />
         </circle>
       )}
@@ -371,7 +395,7 @@ function FlowEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPo
                 className="nodrag nopan absolute text-tiny"
                 style={{
                   transform: `translate(-50%,-50%) translate(${lx}px, ${ly}px)`,
-                  color: hot ? "#fbbf24" : "#9a9aa4",
+                  color: hot ? STATUS.pending : TEXT.faint,
                   pointerEvents: "none",
                 }}
               >
@@ -605,7 +629,7 @@ function NodeInspector({ nodeId, ntype, onClose }: { nodeId: string; ntype: stri
   const toolFiles = findToolFiles(files);
 
   return (
-    <div className="absolute top-2 right-2 bottom-2 w-64 bg-panel rounded-card border border-edge p-3 overflow-auto text-caption shadow-floating">
+    <div className="absolute top-2 right-2 bottom-2 w-64 bg-elevated rounded-card border border-edge p-3 overflow-auto text-caption shadow-floating">
       <div className="flex items-center justify-between mb-3">
         <Truncate className="text-ink" title={nodeId}>{nodeId}</Truncate>
         <button className="text-muted transition-colors duration-fast hover:text-ink" title="Close (Esc)" aria-label="Close" onClick={onClose}>
@@ -918,17 +942,17 @@ export function GraphView() {
           useUiStore.getState().setSelectedNodeId(null);
         }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={28} size={1} color="#242429" />
-        <Controls showInteractive={false} className="!bg-panel/80 !backdrop-blur !border-0 !rounded-card !shadow-floating" />
+        <Background variant={BackgroundVariant.Dots} gap={28} size={1} color={SURFACE.chrome} />
+        <Controls showInteractive={false} className="!bg-elevated/80 !backdrop-blur !border-0 !rounded-card !shadow-floating" />
         <MiniMap
           pannable
           zoomable
           className="!bg-panel/80 !rounded-card !border-0"
-          maskColor="rgba(13,13,15,0.7)"
+          maskColor={MINIMAP_MASK}
           nodeColor={(n) => {
-            if (n.type === "resource") return "#3f3f46";
+            if (n.type === "resource") return TEXT.disabled;
             const k = (n.data as FlowData)?.kind;
-            return k ? KIND_ACCENT[k] : "#52525b";
+            return k ? KIND_ACCENT[k] : TEXT.faint;
           }}
           nodeStrokeWidth={0}
         />

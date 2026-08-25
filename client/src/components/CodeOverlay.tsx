@@ -40,9 +40,9 @@ export function CodeOverlay() {
 // values across four overlays (black/50 here and in the palette, black/60 on the MCP modal,
 // void/70 on the workspace panel), so the page darkened by a different amount depending on
 // which control you had pressed.
-<div className="fixed inset-0 z-40 flex items-stretch justify-end bg-void/80" onClick={() => setOpen(false)}>
+<div className="fixed inset-0 z-40 flex items-stretch justify-end bg-ink/40" onClick={() => setOpen(false)}>
       <div
-        className="w-[min(880px,80vw)] bg-bg flex flex-col border-l border-edge shadow-overlay animate-slide-in motion-reduce:animate-none"
+        className="w-[min(880px,80vw)] bg-elevated flex flex-col border-l border-edge shadow-overlay animate-slide-in motion-reduce:animate-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center gap-2 border-b border-hair px-4 py-2">

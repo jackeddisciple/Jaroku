@@ -121,7 +121,7 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-[280px] animate-slide-in rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none">
+        <div className="absolute left-0 top-full z-30 mt-1 w-[280px] animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none">
           <div className="flex items-center gap-1.5 border-b border-hair px-2 py-1.5">
             <span className="shrink-0 text-faint"><SearchIcon size={ICON.xs} /></span>
             <input
@@ -204,7 +204,7 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
       )}
 
       {pending && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-[300px] animate-slide-in rounded-card border border-edge bg-panel p-2.5 shadow-floating motion-reduce:animate-none">
+        <div className="absolute left-0 top-full z-30 mt-1 w-[300px] animate-slide-in rounded-card border border-edge bg-elevated p-2.5 shadow-floating motion-reduce:animate-none">
           <div className="text-caption text-ink">
             {view.ahead} unpushed version{view.ahead === 1 ? "" : "s"}
           </div>

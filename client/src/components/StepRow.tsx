@@ -52,7 +52,7 @@ export function StepRow({ step }: { step: Step }) {
       {/* connector node on the timeline's vertical line */}
       <span
         className={`absolute left-[6px] top-[13px] w-[7px] h-[7px] rounded-full ring-2 ring-bg ${
-          step.error ? "bg-err" : selected ? "bg-run" : "bg-[#3f3f46]"
+          step.error ? "bg-err" : selected ? "bg-run" : "bg-grip"
         }`}
       />
       {/* The same selection mark the other six lists use — inset 4px top and bottom, square, ink.

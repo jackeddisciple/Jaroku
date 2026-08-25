@@ -103,7 +103,7 @@ function RunRow({ run }: { run: RunSummary }) {
   return (
     <button
       onClick={() => { if (needsLoad(run.id)) sendLoadRun(run.id); selectRun(run.id); }}
-      className={`relative w-full text-left px-4 py-2 transition-colors ${active ? "bg-active" : "hover:bg-active/40"}`}
+      className={`relative w-full text-left px-4 py-2 transition-colors ${active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"}`}
     >
       {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
       {/* ONE LINE, FIGURES RIGHT-ALIGNED AND MONO — the form `StepRow` already proves works for
@@ -119,7 +119,7 @@ function RunRow({ run }: { run: RunSummary }) {
       <div className={`relative flex items-center gap-2 ${run.parent_run_id ? "pl-4" : ""}`}>
         {run.parent_run_id && (
           <>
-            <span className="absolute left-[7px] top-0 bottom-0 w-px bg-hair" aria-hidden />
+            <span className="absolute left-[7px] top-0 bottom-0 w-px bg-sidebar-border" aria-hidden />
             <span className="relative shrink-0 bg-inherit text-faint" title="branch">
               <GitForkIcon size={ICON.xs} />
             </span>
@@ -171,7 +171,7 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
         onClick={() => sendRestoreAgent(agent.agent_id)}
         title="Bring this agent back"
         aria-label="Restore this agent"
-        className="shrink-0 rounded-control p-1 text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
+        className="shrink-0 rounded-control p-1 text-muted transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
       >
         <ArchiveRestoreIcon size={ICON.xs} />
       </button>
@@ -183,7 +183,7 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
       <button
         onClick={onRename}
         title="Rename (double-click the row)"
-        className="rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
+        className="rounded-control p-1 text-faint transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
       >
         <PencilIcon size={ICON.xs} />
       </button>
@@ -195,7 +195,7 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
             sendArchiveAgent(agent.agent_id);
             setConfirming(false);
           }}
-          className="rounded-control border border-hair px-1.5 py-0.5 text-tiny text-ink"
+          className="rounded-control border border-sidebar-border px-1.5 py-0.5 text-tiny text-ink"
         >
           Archive?
         </button>
@@ -206,7 +206,7 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
           // reaching for a control on the product's central object is entitled to know that before
           // they press it rather than after.
           title="Archive — nothing is deleted; its versions, runs and threads stay"
-          className="rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
+          className="rounded-control p-1 text-faint transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
         >
           <XIcon size={ICON.xs} />
         </button>
@@ -262,7 +262,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
     // a control inside a control is invalid markup and un-clickable in practice, so the row's own
     // selection and its lifecycle actions have to be siblings.
     <div
-      className={`group relative transition-colors ${active ? "bg-active" : "hover:bg-active/40"} ${
+      className={`group relative transition-colors ${active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"} ${
         archived ? "opacity-60" : ""
       }`}
       onDoubleClick={() => {
@@ -306,7 +306,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
               }}
               // The click that lands in the field must not also select the agent underneath it.
               onClick={(e) => e.stopPropagation()}
-              className="min-w-0 flex-1 rounded-control bg-void px-1.5 py-0.5 text-label text-ink outline-none focus-visible:shadow-focusring"
+              className="min-w-0 flex-1 rounded-control bg-mist-50 px-1.5 py-0.5 text-label text-ink outline-none focus-visible:shadow-focusring"
             />
           ) : (
             <Truncate className={active ? "text-accent" : "text-ink"} title={agent.name}>{agent.name}</Truncate>
@@ -357,7 +357,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
  * disagreed would be visible in two places a person compares, which is the trust-eroding mismatch §2.1
  * names.
  *
- * The active one wears the same left accent and `bg-active` an agent row does when selected, because
+ * The active one wears the same left accent and `bg-sidebar-active` an agent row does when selected, because
  * it is the same fact — this is what the panel to the right is showing. A second visual vocabulary for
  * "current" in one column would make the two compete.
  */
@@ -406,7 +406,7 @@ function NavRail() {
             aria-label={label}
             aria-current={active ? "page" : undefined}
             className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-              active ? "bg-active text-accent" : "text-muted hover:bg-active/40 hover:text-ink"
+              active ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover hover:text-ink"
             }`}
           >
             <Icon size={ICON.md} />
@@ -435,7 +435,7 @@ function NavRail() {
         onClick={() => useUiStore.getState().setProviderPanel(true)}
         title="Provider keys"
         aria-label="Provider keys"
-        className="mt-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-active/40 hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+        className="mt-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
       >
         <SettingsIcon size={ICON.md} />
       </button>
@@ -484,10 +484,10 @@ function AccountRow() {
         // of its own — the switcher's settings row — so this one can be what it looks like.
         onClick={() => openWorkspacePanel("account")}
         title={`${user.email}${workspace ? ` — ${workspace.role} of ${workspace.name}` : ""}`}
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-active active:bg-chrome"
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-sidebar-hover active:bg-sidebar-active"
       >
         {/* The first letter of whoever is actually here, uppercased. */}
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-active text-tiny text-ink">
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-sidebar-active text-tiny text-ink">
           {(name ?? "?").trim().charAt(0).toUpperCase()}
         </span>
         <Truncate className="min-w-0 flex-1 text-caption text-ink" title={name}>{name}</Truncate>
@@ -506,7 +506,7 @@ function AccountRow() {
         onClick={signOut}
         title="Sign out"
         aria-label="Sign out"
-        className="shrink-0 rounded-control p-1.5 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+        className="shrink-0 rounded-control p-1.5 text-faint transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
       >
         <LogOutIcon size={ICON.sm} />
       </button>
@@ -555,7 +555,7 @@ function AdminModeToggle() {
     return (
       <button
         onClick={() => void apply(false)}
-        className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-tiny text-err transition-colors hover:bg-active"
+        className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-tiny text-err transition-colors hover:bg-sidebar-hover"
       >
         <span className="shrink-0"><AlertTriangleIcon size={ICON.badge} /></span>
         <span>Admin mode on — turn off</span>
@@ -584,7 +584,7 @@ function AdminModeToggle() {
   return (
     <button
       onClick={() => setConfirming(true)}
-      className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-tiny text-faint transition-colors hover:bg-active hover:text-muted"
+      className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-tiny text-faint transition-colors hover:bg-sidebar-hover hover:text-muted"
     >
       <span>Admin mode</span>
       <span className="ml-auto shrink-0">off</span>
@@ -600,14 +600,14 @@ function AdminModeToggle() {
  * as a rhythm error down a 280px column even when nobody can say which line is wrong. The rule is:
  * a hairline sits above a section's label, never between a label and its own rows.
  *
- * Sticky, because a single scroller needs its headings to stay put. `bg-bg` rather than
+ * Sticky, because a single scroller needs its headings to stay put. `bg-sidebar` rather than
  * transparent for the same reason: a sticky header that rows scroll through is worse than no
  * header at all.
  */
 function SectionHeader({ label, count, first = false }: { label: string; count: number; first?: boolean }) {
   return (
     <div
-      className={`sticky top-0 z-10 flex items-center bg-bg px-4 py-1.5 ${first ? "" : "mt-1 border-t border-hair"}`}
+      className={`sticky top-0 z-10 flex items-center bg-sidebar px-4 py-1.5 ${first ? "" : "mt-1 border-t border-sidebar-border"}`}
     >
       <span className={TYPE.panelLabel}>{label}</span>
       <span className="ml-auto text-tiny tabular-nums text-faint">{count}</span>
@@ -681,7 +681,7 @@ function FilterMenu({
         aria-label={filtering ? `Filtered: ${current?.label}` : "Filter agents"}
         aria-expanded={open}
         className={`flex h-6 shrink-0 items-center gap-1 rounded-control px-1 transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-          filtering || open ? "bg-active text-accent" : "text-muted hover:bg-active active:bg-chrome hover:text-ink"
+          filtering || open ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
         }`}
       >
         <FilterIcon size={ICON.sm} />
@@ -690,7 +690,7 @@ function FilterMenu({
         )}
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 min-w-[170px] animate-slide-in rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none">
+        <div className="absolute right-0 top-full z-30 mt-1 min-w-[170px] animate-slide-in rounded-card border border-sidebar-border bg-elevated p-1 shadow-floating motion-reduce:animate-none">
           {entries.map((e) => (
             <button
               key={e.id}
@@ -699,7 +699,7 @@ function FilterMenu({
                 setOpen(false);
               }}
               className={`flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-caption transition-colors duration-fast ${
-                filter === e.id ? "bg-active text-ink" : "text-muted hover:bg-active/40 hover:text-ink"
+                filter === e.id ? "bg-sidebar-active text-ink" : "text-muted hover:bg-sidebar-hover hover:text-ink"
               }`}
             >
               {e.label}
@@ -794,11 +794,22 @@ export function Sidebar() {
     // the four tab destinations", and above BOTH is the only reading that is true — the four
     // destinations are views of this workspace and the list beneath them is this workspace's
     // agents, so a switcher inside the column would be scoped by something it scopes.
-    <div className="flex h-full flex-col bg-bg">
+    //
+    // AND IT IS ITS OWN PLANE NOW, which is §02 of the colour system rather than a shade: "the
+    // sidebar is a distinct, slightly cool-grey structural plane. It should visibly differ from the
+    // main content without becoming dark or dashboard-like. It has no outer shadow and no outer
+    // radius; a quiet border separates it from the main workspace."
+    //
+    // Which is why every surface in this file is `sidebar-*` and not the app's own `panel`/`active`
+    // — the sidebar's hover is a cool grey and the content area's is a warm one, and the moment
+    // one of these rows reaches for `hover:bg-active` it will be the only warm row in a cool
+    // column. It was `bg-bg`, the canvas itself, and the column read as part of the workspace with
+    // a line drawn down it.
+    <div className="flex h-full flex-col bg-sidebar">
       <WorkspaceSwitcher />
       <div className="flex min-h-0 flex-1">
       <NavRail />
-      <div className="flex min-w-0 flex-1 flex-col border-l border-hair">
+      <div className="flex min-w-0 flex-1 flex-col border-l border-sidebar-border">
       {/* THE COLUMN'S HEADER ROW. `+ New Agent` was a full-width text button spending a whole row
           on two words for the one control that is unmistakably a plus. It sits here now beside the
           column's own name, which is where a creation affordance goes. */}
@@ -808,7 +819,7 @@ export function Sidebar() {
             and a search box at rest is a control asking to be noticed for something nobody is
             doing yet. Open it and it takes the row; leave it empty and it gives the row back. */}
         {searching ? (
-          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-control bg-active px-2 py-0.5">
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-control bg-sidebar-active px-2 py-0.5">
             <span className="shrink-0 text-faint"><SearchIcon size={ICON.xs} /></span>
             <input
               autoFocus
@@ -840,7 +851,7 @@ export function Sidebar() {
             onClick={() => setSearching(true)}
             title="Search agents — ⌘K opens the palette"
             aria-label="Search agents"
-            className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+            className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
           >
             <SearchIcon size={ICON.sm} />
           </button>
@@ -851,7 +862,7 @@ export function Sidebar() {
           title="New agent"
           aria-label="New agent"
           className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-            activeAgentId === null ? "bg-active text-accent" : "text-muted hover:bg-active active:bg-chrome hover:text-ink"
+            activeAgentId === null ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
           }`}
         >
           <PlusIcon size={ICON.sm} />
@@ -921,7 +932,7 @@ export function Sidebar() {
         {runList.length >= historyWindow && !historyComplete && (
           <button
             onClick={() => sendLoadHistory(Math.min(historyWindow * 2, 500))}
-            className="w-full px-4 py-2 text-left text-tiny text-muted transition-colors hover:bg-active/40 hover:text-ink"
+            className="w-full px-4 py-2 text-left text-tiny text-muted transition-colors hover:bg-sidebar-hover hover:text-ink"
           >
             Load older runs…
           </button>
@@ -939,7 +950,7 @@ export function Sidebar() {
       {/* bottom-anchored: who is signed in, and what this workspace is paying. Settings moved to
           the foot of the rail — a gear is the whole control, and the row it used to sit in spent a
           line on one word plus a chevron that pointed at nothing navigable. */}
-      <div className="shrink-0 border-t border-hair px-3 py-2.5">
+      <div className="shrink-0 border-t border-sidebar-border px-3 py-2.5">
         <AccountRow />
         </div>
       </div>

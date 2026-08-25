@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test:plan-flow": "tsx src/store/planFlow.test.ts",
     "test:type-scale": "tsx src/lib/typeScale.test.ts",
+    "test:colour-system": "tsx src/lib/colourSystem.test.ts",
     "test:deploy-store": "tsx src/store/deployStore.test.ts",
     "test:note-kind": "tsx src/lib/noteKind.test.ts",
     "test:inline-code": "tsx src/lib/inlineCode.test.ts",

@@ -153,7 +153,7 @@ function Section({
               margins between them read as one list with headings in it; this says each heading
               owns what follows it. Deliberately no border — at five repetitions a hairline
               becomes a table, and the card already has the only real edge here. */}
-          <div className="mt-2 rounded-control bg-bg/30 px-2 py-1">{children}</div>
+          <div className="mt-2 rounded-control bg-void/60 px-2 py-1">{children}</div>
         </>
       )}
     </div>
