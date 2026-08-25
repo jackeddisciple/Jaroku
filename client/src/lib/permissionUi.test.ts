@@ -24,7 +24,7 @@
 //
 //   npm run test:permission-ui
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import React from "react";
 
@@ -345,6 +345,81 @@ console.log("\n§14.1's structural test — absent for a member, present for an 
       !/disabled=""[^>]*>\s*Deploy|aria-disabled="true"/.test(member),
       "...and the member render disables nothing in its place",
     );
+  }
+}
+
+console.log("\n§8.2 — no surface decides a role for itself");
+{
+  /**
+   * Guards that spell a role literal instead of asking the matrix, and the two that may.
+   *
+   * WHY THIS IS A RULE AND NOT A STYLE. Six surfaces read `role === "owner"` — billing, the spend
+   * ceiling, the checkout, members, the audit log, export and delete — and every one of them was
+   * RIGHT, because `billing:manage`, `member:manage` and `workspace:manage` are all the owner's
+   * today. That is exactly what makes it worth a suite: nothing was broken, nothing would have
+   * been reported, and the day one of those capabilities moves to admin, six surfaces go on
+   * quietly meaning the old thing while the matrix, the relay and the server all mean the new one.
+   * Two of them even named the capability in a comment directly above the comparison.
+   *
+   * THE EXCEPTIONS ARE RULES ABOUT OWNERSHIP RATHER THAN CAPABILITIES, which is why they are
+   * listed here by their exact source line rather than by file — a second hardcode added to
+   * `WorkspacePanel` tomorrow is not covered by yesterday's reason.
+   */
+  const ALLOWED = new Map<string, string>([
+    [
+      'const canRename = role === "owner" || role === "admin";',
+      "§10.2's rename mirrors `/v1/workspaces/rename`, which checks the two roles directly rather " +
+        "than through the matrix — `ROUTE_CAPABILITY.workspaceRename` names `workspace:manage`, the " +
+        "owner's, and using it would hide the field from admins the route would have accepted",
+    ],
+    [
+      'if (!workspace || role === "owner") return null;',
+      "§6.5 — an owner may not leave. That is a fact about ownership, not a capability: " +
+        "`leaveWorkspace` is `member:read`, which every role holds, and the one who cannot use it " +
+        "is the one who holds the most",
+    ],
+  ]);
+
+  // `workspace?.role` as well as a bare `role`, because both name the VIEWER's membership.
+  // `member.role` deliberately does not match: a row's own role is what the list renders, not a
+  // decision about who may do what.
+  const GUARD = new RegExp(
+    '(?:^|[^A-Za-z0-9_.])role\\s*(?:===|!==)\\s*"(?:owner|admin|member)"' +
+      '|workspace\\??\\.role\\s*(?:===|!==)\\s*"(?:owner|admin|member)"',
+  );
+
+  const dir = fileURLToPath(new URL("../components/", import.meta.url));
+  const offenders: string[] = [];
+  let scanned = 0;
+  for (const file of readdirSync(dir)) {
+    if (!file.endsWith(".tsx") || file.includes(".test.")) continue;
+    scanned++;
+    // COMMENTS FIRST, for the reason the server parser strips them: the fixes for this rule
+    // explain themselves by quoting the comparison they replaced, and a scan of the raw text
+    // would report every one of those explanations as the thing it is explaining.
+    for (const line of withoutComments(readFileSync(dir + file, "utf8")).split(/\r?\n/)) {
+      const text = line.trim();
+      if (!GUARD.test(text)) continue;
+      if (ALLOWED.has(text)) continue;
+      offenders.push(`${file}: ${text}`);
+    }
+  }
+  check(scanned > 10, `every component was read (${scanned} files)`);
+  check(
+    offenders.length === 0,
+    `no component decides a membership role for itself${offenders.length ? ` — ${offenders.join(" | ")}` : ""}`,
+  );
+  // AND THE EXCEPTIONS ARE STILL THERE. An allow-list nothing matches is one somebody can delete
+  // along with the reason it records, and the reasons are the load-bearing half of this block.
+  const present = new Set<string>();
+  for (const file of readdirSync(dir)) {
+    if (!file.endsWith(".tsx") || file.includes(".test.")) continue;
+    for (const line of withoutComments(readFileSync(dir + file, "utf8")).split(/\r?\n/)) {
+      if (ALLOWED.has(line.trim())) present.add(line.trim());
+    }
+  }
+  for (const [line] of ALLOWED) {
+    check(present.has(line), `the allow-list still describes real code: ${line.slice(0, 52)}…`);
   }
 }
 

@@ -24,6 +24,7 @@ import { useSessionStore } from "../store/sessionStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { sendLoadUsage, sendLoadRun, sendSetSpendCeiling } from "../lib/socket.ts";
+import { useCanReach, useCanRun } from "../lib/useCapability.ts";
 import { startCheckout } from "../lib/workspaceApi.ts";
 import { fmtCost, fmtTokens } from "../lib/format.ts";
 import { ICON, STATUS, TEXT } from "../lib/tokens.ts";
@@ -87,10 +88,13 @@ function Cost({ row }: { row: UsageBreakdown }) {
  * as its own button rather than as an empty field, because clearing an input is not a statement.
  */
 function CeilingControl({ ceilingUsd, planCeilingUsd }: { ceilingUsd: number | null; planCeilingUsd: number | null }) {
-  const role = useSessionStore((s) => s.role());
+  // NAMES THE COMMAND IT SENDS. This was `role !== "owner"`, which is the same answer today and
+  // stops being one the moment `billing:manage` moves — and it is the guess §8.2 ends by ruling
+  // out. `sendSetSpendCeiling` is directly below; `canRun` is what knows what that needs.
+  const canSet = useCanRun("setSpendCeiling");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  if (role !== "owner") return null;
+  if (!canSet) return null;
 
   const commit = (): void => {
     const trimmed = draft.trim();
@@ -302,15 +306,15 @@ function QuotaMeter({
  */
 function PlanChoice({ usage }: { usage: UsageSnapshot }) {
   const workspaceId = useSessionStore((s) => s.workspaceId);
-  const role = useSessionStore((s) => s.role());
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // `billing:manage`, which is the owner's. Reading spend is a member's — a member whose run was
-  // refused for budget has to be able to see the number it was refused against — and CHANGING what
-  // may be spent is not.
-  const canBuy = role === "owner";
+  // `billing:manage`, asked of the matrix rather than spelled as a role. Reading spend is a
+  // member's — a member whose run was refused for budget has to be able to see the number it was
+  // refused against — and CHANGING what may be spent is not. `billingCheckout` names the route
+  // `startCheckout` calls, so a capability that moves moves this with it.
+  const canBuy = useCanReach("billingCheckout");
   const buyable = usage.plans.filter((p) => p.purchasable && !p.current);
   // Nothing to offer: no payments on this deployment, or already on the top tier. Saying nothing is
   // right for the first (the local path is not a degraded state) and for the second.

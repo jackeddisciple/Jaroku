@@ -28,6 +28,7 @@ import {
 import { useAuditStore } from "../store/auditStore.ts";
 import { useMemberStore, type Invite, type Member } from "../store/memberStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
+import { useCanRun, useCapability } from "../lib/useCapability.ts";
 import { useUiStore, type RightTab, type WorkspaceSection } from "../store/uiStore.ts";
 import { AccountSection } from "./AccountSection.tsx";
 import { absTime, fmtUntil, isExpired, relTime } from "../lib/format.ts";
@@ -738,10 +739,13 @@ function MembersSection() {
   const workspaces = useSessionStore((s) => s.workspaces);
   const userId = useSessionStore((s) => s.user?.id ?? null);
   const workspace = workspaces.find((w) => w.id === workspaceId);
-  // OFFERED FROM THE ROLE THIS TAB HOLDS, and refused again by the server. Hiding what an owner
-  // may do is honesty about what the next click will achieve, never the enforcement — see the
-  // capability matrix, which is the only thing that decides.
-  const canManage = workspace?.role === "owner";
+  // NAMES THE COMMAND, WHICH IS THE POINT OF THE MATRIX. This read `workspace?.role === "owner"`
+  // while its own comment said "see the capability matrix, which is the only thing that decides" —
+  // a guard that names a rule in prose and then does not consult it. `inviteMember` is what the
+  // form below sends, and `member:manage` is what it needs; neither of those is spelled here on
+  // purpose. Offered from the role this tab holds and refused again by the server: hiding what
+  // somebody may not do is honesty about what the next click achieves, never the enforcement.
+  const canManage = useCanRun("inviteMember");
 
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("member");
@@ -921,8 +925,8 @@ function AuditSection() {
   const error = useAuditStore((s) => s.error);
   const members = useMemberStore((s) => s.members);
   const workspaceId = useSessionStore((s) => s.workspaceId);
-  const role = useSessionStore((s) => s.role());
-  const canRead = role === "owner";
+  // `listAudit` — `workspace:manage`, which the matrix answers and this no longer guesses.
+  const canRead = useCanRun("listAudit");
 
   // Asked for on open. Nothing pushes an audit row — the log is append-only and there is no
   // broadcast for it — so this is a read whose signal is somebody looking.
@@ -1008,12 +1012,13 @@ function AuditSection() {
  */
 function DataSection() {
   const workspaceId = useSessionStore((s) => s.workspaceId);
-  const workspaces = useSessionStore((s) => s.workspaces);
-  const workspace = workspaces.find((w) => w.id === workspaceId);
-  // `workspace:manage`, which is the owner's. Disabled with a stated reason rather than hidden —
-  // the same discipline the composer's model rows follow: a control that vanishes reads as one the
-  // product does not have.
-  const canManage = workspace?.role === "owner";
+  // `workspace:manage`, asked of the matrix. Export and delete are the same capability, so one
+  // boolean rather than one each — see `Capable`'s note on when a `&&` beats a wrapper.
+  //
+  // THE COMMENT HERE USED TO SAY "disabled with a stated reason rather than hidden", which stopped
+  // being true when these two became absent, and a comment describing the opposite of the code is
+  // worse than none: it is the version a reader trusts.
+  const canManage = useCapability("workspace:manage");
 
   const [exportState, setExportState] = useState<ExportStatus | { status: "starting" } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);

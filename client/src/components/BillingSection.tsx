@@ -30,6 +30,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSessionStore } from "../store/sessionStore.ts";
+import { useCapability } from "../lib/useCapability.ts";
 import { openCheckout } from "../lib/deepLink.ts";
 import { sendSetByok } from "../lib/socket.ts";
 import {
@@ -97,12 +98,15 @@ function minimumSeats(tier: string): number {
 
 export function BillingSection() {
   const workspaceId = useSessionStore((s) => s.workspaceId);
-  const workspaces = useSessionStore((s) => s.workspaces);
-  const workspace = workspaces.find((w) => w.id === workspaceId);
-  // `billing:manage`, which is the owner's — the same capability the server checks. Disabled with a
-  // stated reason rather than hidden, as everywhere else in this panel: a control that vanishes
-  // reads as one the product does not have.
-  const canManage = workspace?.role === "owner";
+  // `billing:manage` — ASKED OF THE MATRIX RATHER THAN SPELLED AS A ROLE. This read
+  // `workspace?.role === "owner"`, which is the same answer today and a different question: it
+  // says who, where the rule is about what, and the day `billing:manage` moves this surface is one
+  // of four that would go on quietly meaning the old thing. §8.2 ends by saying not to guess which
+  // capabilities map to which roles, and a comparison against a role literal is that guess written
+  // down. One boolean rather than one per control, because both mutations in this panel — the BYOK
+  // toggle and the plan buttons — are the same capability; see `Capable`'s own note on when a `&&`
+  // beats a wrapper.
+  const canManage = useCapability("billing:manage");
 
   const [view, setView] = useState<SubscriptionView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -233,9 +237,9 @@ export function BillingSection() {
             one behind a paywall. The server says whether the control applies at all. */}
         {sub && (
           <div className="mt-3 rounded-control border border-hair px-3 py-2.5">
-            {/* §8.2 — "Usage / Billing / BYOK toggle / billing:manage", which is the owner's.
-                A CHECKBOX AND A SENTENCE FOR AN OWNER, A SENTENCE ALONE FOR EVERYBODY ELSE. It was
-                `disabled={!canManage}` with "Only an owner can change this" beneath it, which is
+            {/* §8.2 — "Usage / Billing / BYOK toggle / billing:manage".
+                A CHECKBOX AND A SENTENCE FOR WHOEVER HOLDS IT, A SENTENCE ALONE FOR EVERYBODY ELSE.
+                It was `disabled={!canManage}` with "Only an owner can change this" beneath it, which is
                 exactly the pattern §8 rules out — and here it also renders a checkbox somebody can
                 click at, which reports the state and refuses to change it. The STATE is still
                 shown, because whose keys the agents run on is a fact a member needs to read a bill
