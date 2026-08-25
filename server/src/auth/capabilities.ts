@@ -205,6 +205,23 @@ export function roleFor(capability: Capability): Role | null {
 }
 
 /**
+ * A role with the article it actually takes: "an admin", "a member", "an owner".
+ *
+ * `a ${ctx.role}` READ "a admin", WHICH IS THE ONE ROLE THAT SEES THIS. An owner is refused
+ * nothing and `system` holds everything, so `requireCapability` and the relay's refusal are
+ * reached by admins and members alone — and one of those two produced a sentence with the wrong
+ * article in it, in the copy a panel renders. It is the smallest possible defect and it is on the
+ * one screen somebody reads while already annoyed that a button did not work.
+ *
+ * BY THE LETTER RATHER THAN BY A LIST OF THE THREE, so a fourth role added later is right without
+ * anybody remembering this function exists. Roles are ASCII identifiers from `ROLE_LADDER`, not
+ * prose, so the vowel test is exact here in a way it would not be for arbitrary English.
+ */
+export function withArticle(role: string): string {
+  return /^[aeiou]/i.test(role) ? `an ${role}` : `a ${role}`;
+}
+
+/**
  * The one check. Throws a 403 naming the capability and the role that lacks it.
  *
  * Naming both is deliberate: "forbidden" with no subject sends somebody to read source, and
@@ -212,7 +229,7 @@ export function roleFor(capability: Capability): Role | null {
  */
 export function requireCapability(ctx: TenantContext, capability: Capability): void {
   if (!can(ctx.role, capability)) {
-    throw forbidden(`a ${ctx.role} cannot do this — it needs ${capability}`);
+    throw forbidden(`${withArticle(ctx.role)} cannot do this — it needs ${capability}`);
   }
 }
 

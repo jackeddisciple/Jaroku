@@ -18,7 +18,7 @@ import {
   KEEP_ALIVE_TIMEOUT_MS,
   REQUEST_READ_TIMEOUT_MS,
 } from "./http/security.ts";
-import { can, capabilityFor, roleFor } from "./auth/capabilities.ts";
+import { can, capabilityFor, roleFor, withArticle } from "./auth/capabilities.ts";
 
 export type RunCommand = {
   cmd: "run";
@@ -3059,7 +3059,7 @@ export class WsRelay {
       this.sendTo(ws, {
         channel: channelFor(cmd),
         type: "error",
-        message: `a ${ctx.role} cannot do this — it needs ${capability}`,
+        message: `${withArticle(ctx.role)} cannot do this — it needs ${capability}`,
         reason: "requires_role",
         role: roleFor(capability),
       });

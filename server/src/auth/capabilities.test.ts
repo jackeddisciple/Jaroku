@@ -20,6 +20,7 @@ import {
   capabilityFor,
   roleFor,
   requireCapability,
+  withArticle,
   type Capability,
 } from "./capabilities.ts";
 import type { TenantContext, Role } from "../db/tenant.ts";
@@ -97,6 +98,20 @@ console.log("\nrequireCapability");
   }
   check(/member/.test(message), "a refusal names the role that was refused");
   check(/deploy:manage/.test(message), "...and the capability it lacked");
+
+  // AND SAYS IT IN ENGLISH. `a ${ctx.role}` read "a admin", and admin is one of only two roles
+  // that ever reach a refusal — an owner is refused nothing. Asserted for every role rather than
+  // for the one that was wrong, so a fourth role is right without anybody remembering this exists.
+  let adminMessage = "";
+  try {
+    requireCapability(ctx("admin"), "member:manage");
+  } catch (e) {
+    adminMessage = (e as Error).message;
+  }
+  check(adminMessage.startsWith("an admin"), `an admin, not "a admin" (${adminMessage.slice(0, 20)}…)`);
+  check(withArticle("member") === "a member", "a member");
+  check(withArticle("owner") === "an owner", "an owner");
+  check(withArticle("system") === "a system", "and a system, which is refused nothing but would read correctly");
 
   let status = 0;
   try {
