@@ -208,6 +208,28 @@ jobs:
           # string: two empty-string invites compete for the one row the partial unique index gives
           # them, and the second silently revokes the first.
           npm run test:invite-flow
+          # PER-AGENT ACCESS, AND EVERY GATED COMMAND DRIVEN WITH THE CLIENT BYPASSED. §5 is
+          # explicit that the client's copy of the matrix is advisory — "used to hide buttons, never
+          # trusted" — so this stands a real relay on a real port and sends the JSON a `curl` would
+          # send. Nothing a component could politely refuse on the server's behalf is in the way.
+          #
+          # ITS TWO LOAD-BEARING ASSERTIONS BOTH LOOK REDUNDANT AND ARE NOT. A grant is refused at
+          # write time for exceeding a workspace role, AND a row written straight to the database is
+          # intersected down at read time anyway — because write-time validation is correct for
+          # exactly as long as nobody's role changes, and the read-time intersection is what makes a
+          # demotion bite without anybody rewriting grant rows. And a cross-workspace agent id
+          # answers "there is no such agent" on every command rather than refusing: a refusal
+          # confirms the id exists, which turns the socket into an enumeration oracle.
+          npm run test:access-resolver
+          # AND THE ROW THAT IS THE ONLY EVIDENCE A GRANT IS WRONG. Everything else the Access tab
+          # records is something somebody DID; `access.denied` records something the system refused,
+          # and the person on the wrong end of it does not file a ticket saying their capability is
+          # misconfigured — they try, fail, and eventually ask a colleague to do it for them, which
+          # is the outcome the whole feature exists to prevent. The suite asserts the row is written
+          # per refusal rather than deduplicated, because the PATTERN is the signal — and that a
+          # cross-tenant id writes nothing at all, since that branch is reachable by anybody who can
+          # open a socket, at whatever rate they choose.
+          npm run test:access-denied
           npm run test:relay
           npm run test:channels
 

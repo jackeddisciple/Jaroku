@@ -49,6 +49,8 @@ import { SecretPasscodeRepository } from "./db/repositories/secretPasscodes.ts";
 import { SecretElevationRepository } from "./db/repositories/secretElevations.ts";
 import { OAuthRepository } from "./db/repositories/oauth.ts";
 import { GithubRepository } from "./db/repositories/github.ts";
+import { AgentGrantRepository } from "./db/repositories/agentGrants.ts";
+import { holds, resolveCapabilities } from "./auth/capabilities.ts";
 import { KmsSecretStore } from "./secrets/kmsSecretStore.ts";
 import { LocalMasterKeyProvider } from "./secrets/masterKey.ts";
 import { hashState, newPkce, newState } from "./oauth/pkce.ts";
@@ -593,6 +595,15 @@ const SCOPED_API: Record<string, string[]> = {
     "link", "linkFor", "links", "patchLink", "unlink",
     "record", "events", "observeRemoteHead",
   ],
+  /**
+   * Per-agent access. Three methods, and each one leaks something different if it is not scoped.
+   *
+   * `find` IS THE ONE THAT MATTERS MOST and it is the least obvious: it is what the RESOLVER calls,
+   * on every agent-scoped command, so an unscoped one would not leak a row to a panel — it would
+   * apply one tenant's grant to another tenant's agent and answer yes. That is the only method in
+   * this whole table whose failure is an authorisation rather than a disclosure.
+   */
+  AgentGrantRepository: ["find", "listForAgent", "upsert", "remove"],
 };
 
 /**
@@ -1375,6 +1386,100 @@ async function githubIsolation(db: Db): Promise<void> {
   );
 }
 
+/**
+ * §18 — resolveCapabilities is scoped, and a cross-workspace read returns nothing.
+ *
+ * THE PROPERTY IS SHARPER THAN "A CANNOT READ B'S ROWS", in the same way the GitHub block above is
+ * sharper: a grant row is not history, it is an ANSWER — and an answer read across a boundary is
+ * one tenant's authorisation applied to another tenant's agent. So the reads below are aimed at B's
+ * real agent id and B's real user id by A, which is the shape somebody has once they have learned
+ * an id from anywhere at all.
+ */
+async function accessIsolation(db: Db): Promise<void> {
+  console.log("  · access: grants, and the resolver over them");
+
+  const identity = new IdentityRepository(db);
+  const agents = new AgentRepository(db);
+  const grants = new AgentGrantRepository(db);
+
+  const mkWorkspace = async (label: string): Promise<TenantContext> => {
+    const ws = await identity.createWorkspaceUnowned(systemContext(newRequestId()), {
+      name: `access ${label} ${randomUUID().slice(0, 6)}`,
+    });
+    return systemContextFor(ws.id, newRequestId());
+  };
+  const A = await mkWorkspace("a");
+  const B = await mkWorkspace("b");
+
+  // THE SAME SLUG IN BOTH, for the reason the GitHub block uses one: a lookup that resolved an
+  // agent without a workspace would find whichever row came first and be right half the time.
+  const agentA = await agents.create(A, { id: randomUUID(), slug: "weather", display_name: "A" });
+  const agentB = await agents.create(B, { id: randomUUID(), slug: "weather", display_name: "B" });
+
+  const userA = await identity.provisionUser(systemContext(newRequestId()), {
+    externalId: `acc-a-${randomUUID()}`,
+    email: `a-${randomUUID().slice(0, 6)}@x.test`,
+  });
+  const userB = await identity.provisionUser(systemContext(newRequestId()), {
+    externalId: `acc-b-${randomUUID()}`,
+    email: `b-${randomUUID().slice(0, 6)}@x.test`,
+  });
+  await identity.addMember(A, userA.user.id, "admin");
+  await identity.addMember(B, userB.user.id, "admin");
+
+  await grants.upsert(A, {
+    agentId: agentA.id,
+    userId: userA.user.id,
+    capabilities: ["view", "deploy"],
+    grantedBy: userA.user.id,
+  });
+  await grants.upsert(B, {
+    agentId: agentB.id,
+    userId: userB.user.id,
+    capabilities: ["view", "deploy"],
+    grantedBy: userB.user.id,
+  });
+
+  check((await grants.listForAgent(A, agentA.id)).length === 1, "A sees its own grant");
+  check((await grants.listForAgent(B, agentB.id)).length === 1, "B sees its own");
+  // THE CROSS READS, aimed at real ids. Empty rather than refused, because the scope is a WHERE
+  // rather than a check: there is nothing to refuse, which is what makes it impossible to forget.
+  check((await grants.listForAgent(A, agentB.id)).length === 0, "A reading B's agent gets nothing");
+  check(
+    (await grants.find(A, agentB.id, userB.user.id)) === undefined,
+    "...and cannot find B's grant by naming both ids exactly",
+  );
+
+  // AND THE RESOLVER OVER IT. A holds `deploy` on its OWN agent and reaches no grant at all on B's,
+  // so it falls back to the role's default set — which is the honest answer: the resolver is scoped
+  // by the context it was handed, and nothing about another tenant's agent can reach it.
+  const own = await resolveCapabilities({ ...A, actorUserId: userA.user.id, role: "admin" }, agentA.id, grants);
+  check(holds(own, "deploy"), "the resolver returns A's own grant in A's workspace");
+  const across = await resolveCapabilities({ ...A, actorUserId: userA.user.id, role: "admin" }, agentB.id, grants);
+  check(across.provenance.kind === "role", "...and reaches no grant at all for B's agent");
+
+  // A WRITE ACROSS THE BOUNDARY IS REFUSED BY THE DATABASE, not by a check somebody remembered —
+  // the composite foreign key is what expresses that, and migration 018 is why it exists.
+  let refused = false;
+  try {
+    await grants.upsert(A, {
+      agentId: agentB.id,
+      userId: userA.user.id,
+      capabilities: ["view"],
+      grantedBy: userA.user.id,
+    });
+  } catch {
+    refused = true;
+  }
+  check(refused, "and a grant written by A onto B's agent is refused by the key");
+
+  // The revoke, aimed at B's real row by A. It changes nothing rather than erroring, which is the
+  // same shape every other cross-tenant mutation in this file takes.
+  check((await grants.remove(A, agentB.id, userB.user.id)) === false, "A revoking B's grant removes nothing");
+  check((await grants.listForAgent(B, agentB.id)).length === 1, "...and B's grant is still there");
+}
+
+
 // --- run it -------------------------------------------------------------------------------
 
 const tmp = mkdtempSync(join(tmpdir(), "jaroku-tenancy-"));
@@ -1399,6 +1504,7 @@ await withScratchPostgres(async (db) => {
   await storageIsolation(db);
   await connectorIsolation(db);
   await githubIsolation(db);
+  await accessIsolation(db);
 });
 
 coverage();
