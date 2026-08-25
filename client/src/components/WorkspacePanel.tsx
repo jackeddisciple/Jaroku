@@ -17,8 +17,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  sendInviteMember, sendListAudit, sendListMembers, sendRemoveMember, sendRevokeInvite,
-  sendSetMemberRole,
+  sendInviteMember, sendLeaveWorkspace, sendListAudit, sendListMembers, sendRemoveMember,
+  sendRevokeInvite, sendSetMemberRole,
 } from "../lib/socket.ts";
 import { inviteUrl } from "../lib/invite.ts";
 import {
@@ -38,7 +38,7 @@ import { Chip } from "./Chip.tsx";
 import { EmptyState, LoadingLine } from "./EmptyState.tsx";
 import { Truncate } from "./Truncate.tsx";
 import {
-  ActivityIcon, AlertTriangleIcon, CheckIcon, UserCircleIcon, XIcon,
+  ActivityIcon, AlertTriangleIcon, CheckIcon, TicketIcon, UserCircleIcon, UserPlusIcon, XIcon,
 } from "./panelIcons.tsx";
 import { Select } from "./Select.tsx";
 import { BillingSection } from "./BillingSection.tsx";
@@ -75,11 +75,49 @@ const ROLES: { id: string; label: string; what: string }[] = [
   { id: "owner", label: "Owner", what: "…and membership, billing, and the workspace itself" },
 ];
 
-/** The invite link, which exists exactly once and is gone when this is dismissed. */
+/**
+ * §7.1's copyable link, which exists exactly once and takes itself away.
+ *
+ * THIRTY SECONDS, WHICH IS THE SPEC'S FIGURE AND ITS REASON: "the copyable field disappears after
+ * 30 seconds or on dismiss — the token is one-shot and should not linger". A live credential
+ * sitting on a panel somebody has walked away from is the failure it is protecting against, and it
+ * is a real one here: this box appears in a shared office on a screen its owner has stopped
+ * looking at, and the token in it is a membership in their workspace.
+ *
+ * IT IS NOT A SECURITY BOUNDARY and is not claimed as one — anybody who has the screen has had
+ * thirty seconds too. What it is is the difference between a link that is on screen while it is
+ * being copied and one that is on screen for the rest of the afternoon.
+ */
+const INVITE_LINK_SECONDS = 30;
+
 function InviteLink() {
   const link = useMemberStore((s) => s.inviteLink);
   const dismiss = useMemberStore((s) => s.dismissInviteLink);
   const [copied, setCopied] = useState(false);
+  const [left, setLeft] = useState(INVITE_LINK_SECONDS);
+
+  // A ticking count rather than one silent timeout, because a box that vanishes without warning
+  // while somebody is reaching for it reads as the app losing their invitation — which, since the
+  // token is one-shot and only a digest is stored, is exactly what has happened.
+  useEffect(() => {
+    if (!link) return;
+    setLeft(INVITE_LINK_SECONDS);
+    setCopied(false);
+    const started = Date.now();
+    const tick = setInterval(() => {
+      const remaining = INVITE_LINK_SECONDS - Math.floor((Date.now() - started) / 1000);
+      if (remaining <= 0) {
+        clearInterval(tick);
+        dismiss();
+        return;
+      }
+      setLeft(remaining);
+    }, 1000);
+    return () => clearInterval(tick);
+    // Keyed on the TOKEN, not on the object: a re-render that produced an equal object would
+    // otherwise restart the countdown, and a countdown that restarts never finishes.
+  }, [link?.token, dismiss]);
+
   if (!link) return null;
   const url = inviteUrl(window.location.origin, link.token);
 
@@ -88,9 +126,16 @@ function InviteLink() {
       <div className="flex items-start gap-2">
         <span className="mt-0.5 shrink-0 text-run"><AlertTriangleIcon size={ICON.xs} /></span>
         <div className="min-w-0 flex-1">
-          <p className="text-[12px] text-ink">
-            Send this to {link.email}. It is shown once — only a hash of it is stored here, so
-            dismissing this loses it and the invitation has to be reissued.
+          {/* TWO SENTENCES, BECAUSE THEY ARE TWO DIFFERENT CREDENTIALS. An addressed invitation is
+              only redeemable by an account signing in as that address, so a leak is inert; a link
+              invitation is redeemable by whoever holds it, and saying so here is the one moment
+              somebody can still decide they wanted the other kind. */}
+          <p className="text-[12px] leading-[1.55] text-ink">
+            {link.email
+              ? `Send this to ${link.email}. Only an account signing in as that address can use it.`
+              : "Anyone with this link can join this workspace. Send it only to people you mean to invite."}{" "}
+            It is shown once — only a hash of it is stored here, so dismissing this loses it and the
+            invitation has to be reissued.
           </p>
           {/* SELECTABLE AND WRAPPED rather than truncated. It is a credential somebody has to get
               out of this box by hand, and a middle-elided link cannot be read back if the copy
@@ -115,7 +160,12 @@ function InviteLink() {
               {copied ? "Copied" : "Copy link"}
             </button>
             <span className={`text-[11px] ${isExpired(link.expiresAt) ? "text-err" : "text-faint"}`}>expires {fmtUntil(link.expiresAt)}</span>
-            <button className={`${quietBtn} ml-auto`} onClick={dismiss}>Dismiss</button>
+            {/* THE COUNTDOWN IS ON THE DISMISS BUTTON rather than beside the expiry, because the
+                two numbers mean opposite things and would otherwise sit together looking alike:
+                the invitation is good for a week, and this BOX is good for thirty seconds. */}
+            <button className={`${quietBtn} ml-auto tabular-nums`} onClick={dismiss}>
+              Dismiss ({left}s)
+            </button>
           </div>
         </div>
       </div>
@@ -205,6 +255,85 @@ function TransferConfirm({ member, onDone }: { member: Member; onDone: () => voi
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * A confirmation with one button and nothing to type.
+ *
+ * §6.4 IS EXPLICIT ABOUT THE ASYMMETRY WITH THE TRANSFER ABOVE, and gives the reason in a clause:
+ * "single confirm button, no typing required (removing is reversible via re-invite, unlike
+ * delete)". A typed confirmation is a friction that should be spent only where the act cannot be
+ * undone — spend it on everything and it stops being read, which is how somebody ends up typing a
+ * workspace name to confirm the thing they meant to do and then typing it again for the thing they
+ * did not.
+ *
+ * The same shape serves §6.5's departure, which is the same act performed on yourself: one
+ * sentence naming what is lost, one button.
+ */
+function ConfirmDialog({
+  title,
+  body,
+  detail,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  body: string;
+  detail?: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-void/70 px-4"
+    >
+      <div className="w-full max-w-md rounded-modal border border-edge bg-panel p-4 shadow-overlay">
+        <div className={TYPE.sectionLabel}>{title}</div>
+        <p className="mt-2 text-[12px] leading-[1.55] text-ink">{body}</p>
+        {detail && <p className="mt-1.5 text-[11px] leading-[1.55] text-muted">{detail}</p>}
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            autoFocus
+            onClick={onConfirm}
+            className="rounded-control border border-err/40 bg-err/10 px-3 py-1.5 text-[12px] text-err transition-colors hover:bg-err/20"
+          >
+            {confirmLabel}
+          </button>
+          <button onClick={onCancel} className={quietBtn}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** §6.4's removal. The sentence is the spec's, because both halves of it are what is being asked. */
+function RemoveConfirm({ member, onDone }: { member: Member; onDone: () => void }) {
+  const workspaces = useSessionStore((s) => s.workspaces);
+  const workspaceId = useSessionStore((s) => s.workspaceId);
+  const name = workspaces.find((w) => w.id === workspaceId)?.name ?? "this workspace";
+  const who = member.display_name || member.email;
+
+  return (
+    <ConfirmDialog
+      title="Remove member"
+      body={`Remove ${who} from ${name}? They will lose access to all agents and threads.`}
+      // §6.4's other half, which the spec states as behaviour rather than as copy: the server
+      // closes their open socket. Somebody about to do this should know it takes effect on a
+      // colleague who may be mid-run rather than at their next sign-in.
+      detail="Their open session ends immediately. You can invite them back at any time."
+      confirmLabel="Remove"
+      onConfirm={() => {
+        sendRemoveMember(member.user_id);
+        onDone();
+      }}
+      onCancel={onDone}
+    />
   );
 }
 
@@ -314,50 +443,109 @@ function MemberRow({ member, canManage, isSelf }: { member: Member; canManage: b
         <TransferConfirm member={member} onDone={() => setTransferTo(null)} />
       )}
 
-      {canManage && (
-        confirmRemove ? (
-          <button
-            autoFocus
-            onBlur={() => setConfirmRemove(false)}
-            onClick={() => {
-              sendRemoveMember(member.user_id);
-              setConfirmRemove(false);
-            }}
-            className="shrink-0 rounded-control border border-err/40 bg-err/10 px-2 py-1 text-[11px] text-err"
-          >
-            Remove?
-          </button>
-        ) : (
-          <button
-            onClick={() => setConfirmRemove(true)}
-            title={isSelf ? "Leave this workspace" : `Remove ${member.email}`}
-            className="shrink-0 rounded-control px-1.5 py-1 text-[11px] text-faint transition-colors hover:bg-active active:bg-chrome hover:text-err"
-          >
-            <XIcon size={ICON.xs} />
-          </button>
-        )
+      {/* §6.4 — ON EVERY ROW EXCEPT THE OWNER'S. An owner is removed by being transferred out of
+          ownership first, which is what `TransferConfirm` above is; a remove button on their row
+          would be a button whose only outcome is the server's last-owner refusal. */}
+      {canManage && member.role !== "owner" && (
+        <button
+          onClick={() => setConfirmRemove(true)}
+          title={`Remove ${member.email}`}
+          aria-label={`Remove ${member.display_name || member.email}`}
+          className="shrink-0 rounded-control px-1.5 py-1 text-[11px] text-faint transition-colors hover:bg-active active:bg-chrome hover:text-err"
+        >
+          <XIcon size={ICON.xs} />
+        </button>
+      )}
+      {confirmRemove && (
+        <RemoveConfirm
+          member={member}
+          onDone={() => setConfirmRemove(false)}
+        />
       )}
     </div>
   );
 }
 
 function InviteRow({ invite, canManage }: { invite: Invite; canManage: boolean }) {
+  // §7.2 — "invited email (or 'Anyone with the link' if no email was specified)". The phrase is
+  // the spec's and is a warning rather than a placeholder: this row is the only place an admin
+  // finds out that a live credential is loose in a Slack channel somewhere.
+  const anyone = invite.email === null;
   return (
     <div className="flex items-center gap-2 border-b border-hair px-1 py-2 last:border-b-0">
-      <span className="shrink-0 text-faint"><UserCircleIcon size={ICON.sm} /></span>
+      <span className="shrink-0 text-faint">
+        {anyone ? <TicketIcon size={ICON.sm} /> : <UserCircleIcon size={ICON.sm} />}
+      </span>
       <div className="min-w-0 flex-1">
-        <Truncate className="text-[12px] text-muted" title={invite.email}>{invite.email}</Truncate>
-        <span className={`text-[11px] ${isExpired(invite.expires_at) ? "text-err" : "text-faint"}`}>invited · expires {fmtUntil(invite.expires_at)}</span>
+        <Truncate className={`text-[12px] ${anyone ? "text-faint" : "text-muted"}`} title={invite.email ?? undefined}>
+          {invite.email ?? "Anyone with the link"}
+        </Truncate>
+        {/* §7.2 asks for the CREATED date. The expiry is kept beside it because it is the half
+            that decides whether the row is still worth anything — a link created three days ago
+            with an hour left is a different thing to chase than one created an hour ago. */}
+        <span className={`text-[11px] ${isExpired(invite.expires_at) ? "text-err" : "text-faint"}`}>
+          <span title={absTime(invite.created_at)}>invited {relTime(invite.created_at)}</span>
+          {" · "}expires {fmtUntil(invite.expires_at)}
+        </span>
       </div>
       <Chip size="sm" tone="faint">{invite.role}</Chip>
+      {/* §7.2 — NO CONFIRMATION, and the spec gives the reason: "revoking an invite is harmless
+          (they just can't use the link anymore)". A dialog in front of it would be friction spent
+          on the one action here that costs nothing to get wrong, which is how the friction in
+          front of the two that DO cost something stops being read. */}
       {canManage && (
         <button
           onClick={() => sendRevokeInvite(invite.id)}
           title="Revoke this invitation"
+          aria-label={`Revoke the invitation for ${invite.email ?? "anyone with the link"}`}
           className="shrink-0 rounded-control px-1.5 py-1 text-[11px] text-faint transition-colors hover:bg-active active:bg-chrome hover:text-err"
         >
           <XIcon size={ICON.xs} />
         </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * §6.5's departure, at the foot of the members panel.
+ *
+ * ABSENT FOR THE OWNER, not disabled — §6.5 says so and §1.3's frozen rule says why. The server
+ * refuses an owner outright, so a disabled button would be an offer whose only outcome is a
+ * refusal; what an owner does instead is transfer, which the list above already offers.
+ *
+ * IT IS NOT A REMOVAL PERFORMED ON YOURSELF. `removeMember` needs `member:manage`, which is the
+ * owner's — so a member trying to leave through that command gets a 403, and the whole reason
+ * `leaveWorkspace` exists is that it needs no authority over anybody else. See capabilities.ts.
+ */
+function LeaveWorkspace() {
+  const workspaces = useSessionStore((s) => s.workspaces);
+  const workspaceId = useSessionStore((s) => s.workspaceId);
+  const role = useSessionStore((s) => s.role());
+  const [confirming, setConfirming] = useState(false);
+  const workspace = workspaces.find((w) => w.id === workspaceId);
+  if (!workspace || role === "owner") return null;
+
+  return (
+    <div className="border-t border-hair pt-3">
+      <button
+        onClick={() => setConfirming(true)}
+        className="rounded-control px-2 py-1 text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-err"
+      >
+        Leave {workspace.name}
+      </button>
+      {confirming && (
+        <ConfirmDialog
+          title="Leave workspace"
+          body={`Leave ${workspace.name}? You'll need a new invite to rejoin.`}
+          detail="Your agents, threads and runs stay where they are — they belong to the workspace, not to you."
+          confirmLabel="Leave"
+          onConfirm={() => {
+            sendLeaveWorkspace();
+            setConfirming(false);
+          }}
+          onCancel={() => setConfirming(false)}
+        />
       )}
     </div>
   );
@@ -382,6 +570,7 @@ function MembersSection() {
 
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("member");
+  const [inviting, setInviting] = useState(false);
 
   // Asked for on open, not held. The relay pushes the list in its initial snapshot for a team
   // workspace and re-broadcasts on every mutation, so this is the one case it cannot cover: a
@@ -392,10 +581,13 @@ function MembersSection() {
 
   const invite = (e: React.FormEvent): void => {
     e.preventDefault();
-    const address = email.trim();
-    if (!address) return;
-    sendInviteMember(address, role);
+    // §7.1 — THE ADDRESS IS OPTIONAL AND AN EMPTY ONE IS NOT A MISTAKE. This used to return early
+    // on a blank field, which made the form's only outcome an addressed invitation and left the
+    // link-for-anybody case unreachable from the product entirely. Blank now means exactly what it
+    // looks like: a link, for whoever the admin sends it to.
+    sendInviteMember(email.trim() || null, role);
     setEmail("");
+    setInviting(false);
   };
 
   return (
@@ -414,32 +606,55 @@ function MembersSection() {
         )}
       </div>
 
-      {canManage && (
-        <form onSubmit={invite} className="flex flex-wrap items-center gap-2">
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            type="email"
-            placeholder="colleague@example.com"
-            className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
-          />
-          <Select
-            value={role}
-            onChange={setRole}
-            ariaLabel="Role for the invitation"
-            className="w-[104px] shrink-0"
-            options={ROLES.map((r) => ({ value: r.id, label: r.label, detail: r.what }))}
-          />
-          <button type="submit" className={primaryBtn} disabled={email.trim().length === 0}>
-            Invite
-          </button>
-        </form>
+      {/* §7.1 — THE FORM IS BEHIND A BUTTON RATHER THAN PERMANENTLY OPEN. A members panel is read
+          far more often than it is written to; a form standing open at the top of it is a control
+          asking to be noticed for something nobody is doing, which is the same argument the
+          sidebar's search field settled the same way. */}
+      {canManage && !inviting && (
+        <button onClick={() => setInviting(true)} className={secondaryBtn}>
+          <UserPlusIcon size={ICON.xs} /> Invite
+        </button>
       )}
-      {canManage && (
-        <p className="-mt-2 text-[11px] leading-[1.55] text-faint">
-          {ROLES.find((r) => r.id === role)?.what}. There is no mail sender here — you get a link to
-          send, once.
-        </p>
+      {canManage && inviting && (
+        <div>
+          {/* INLINE, NOT A MODAL — §7.1 says so, and the reason is the list underneath: the thing
+              an inviter checks before inviting is whether that person is already here. */}
+          <form onSubmit={invite} className="flex flex-wrap items-center gap-2">
+            <input
+              autoFocus
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              type="email"
+              placeholder="colleague@example.com — or leave blank for a link"
+              aria-label="Email address for the invitation, optional"
+              className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
+            />
+            <Select
+              value={role}
+              onChange={setRole}
+              ariaLabel="Role for the invitation"
+              className="w-[104px] shrink-0"
+              // §7.1 — "Admin or Member; Owner is not invitable". A workspace gets its owner by
+              // being created and changes it by §6.3's transfer, both of which name a person who
+              // is already here; an invitation that handed ownership to an address would give the
+              // workspace away to whoever opened an email.
+              options={ROLES.filter((r) => r.id !== "owner").map((r) => ({
+                value: r.id,
+                label: r.label,
+                detail: r.what,
+              }))}
+            />
+            <button type="submit" className={primaryBtn}>Invite</button>
+            <button type="button" onClick={() => setInviting(false)} className={quietBtn}>Cancel</button>
+          </form>
+          <p className="mt-1.5 text-[11px] leading-[1.55] text-faint">
+            {ROLES.find((r) => r.id === role)?.what}. There is no mail sender here — you get a link
+            to send, once.{" "}
+            {email.trim()
+              ? "Only an account signing in as that address will be able to use it."
+              : "With no address, anyone you send it to can use it."}
+          </p>
+        </div>
       )}
 
       <InviteLink />
@@ -493,7 +708,10 @@ function MembersSection() {
       {invites.length > 0 && (
         <div>
           <div className="flex items-center px-1 pb-1">
-            <span className={TYPE.panelLabel}>Invited</span>
+            {/* §7.2's own words: "Invitations" normally, "Pending invites" when there are any.
+                The distinction is worth keeping — the heading is a list of things still waiting on
+                somebody, and calling it "Invited" implied they had arrived. */}
+            <span className={TYPE.panelLabel}>Pending invites</span>
             <span className="ml-auto text-[11px] text-faint">{invites.length}</span>
           </div>
           {invites.map((i) => (
@@ -501,6 +719,10 @@ function MembersSection() {
           ))}
         </div>
       )}
+
+      {/* §6.5, at the bottom, and absent for the owner. Last because it is the row that ends your
+          relationship with everything above it. */}
+      <LeaveWorkspace />
     </div>
   );
 }

@@ -1209,7 +1209,13 @@ export type ThreadMessage =
 /** Membership. Full snapshots, except `inviteLink`, which carries a credential once. */
 export type MemberMessage =
   | { channel: "members"; type: "members"; members: unknown[]; invites: unknown[] }
-  | { channel: "members"; type: "inviteLink"; email: string; role: string; token: string; expiresAt: string }
+  // `email` is null for §13.4 link invitation — the one that was not sent to anybody. The panel
+  // needs to know which of the two it is holding, because the sentence beside the link differs.
+  | { channel: "members"; type: "inviteLink"; email: string | null; role: string; token: string; expiresAt: string }
+  // §13.3 — the socket that asked to leave has stopped being a member. A message rather than a
+  // notice because the client has to ACT on it: this socket is scoped to a workspace this account
+  // no longer belongs to, so every command after it is refused and the next revalidation closes it.
+  | { channel: "members"; type: "left" }
   | { channel: "members"; type: "error"; message: string }
   | { channel: "members"; type: "notice"; message: string };
 
@@ -1755,7 +1761,12 @@ export type ClientCommand =
    */
   | { cmd: "loadEnforcement" }
   | { cmd: "appealEnforcement"; note: string }
-  | { cmd: "inviteMember"; email: string; role: string }
+  // §7.1 — `email` is optional. Absent means a link for whoever opens it; present means a token
+  // only an account signing in as that address can redeem. Two credentials, not one with a blank.
+  | { cmd: "inviteMember"; email?: string; role: string }
+  // §6.5 — give up your own membership. It carries no user id: the subject is whoever holds this
+  // socket, which is what lets it sit at the member-level capability. See server/src/wsRelay.ts.
+  | { cmd: "leaveWorkspace" }
   | { cmd: "revokeInvite"; inviteId: string }
   | { cmd: "setMemberRole"; userId: string; role: string }
   | { cmd: "removeMember"; userId: string }

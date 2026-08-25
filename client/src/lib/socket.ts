@@ -451,6 +451,7 @@ function dispatch(msg: ServerMessage): void {
       const m = useMemberStore.getState();
       if (msg.type === "members") m.setMembers(msg.members, msg.invites);
       else if (msg.type === "inviteLink") m.setInviteLink(msg);
+      else if (msg.type === "left") leftWorkspace();
       else if (msg.type === "error") m.setError(msg.message);
       else if (msg.type === "notice") m.setNotice(msg.message);
       break;
@@ -788,6 +789,42 @@ export function restartSocket(): void {
  * first snapshot merges into the previous one's rows, and a UI that briefly showed both is a
  * UI that showed one tenant the other's data. See store/reset.ts.
  */
+/**
+ * §6.5's landing — where somebody goes after they have left a workspace.
+ *
+ * "THEY LAND ON THEIR PERSONAL WORKSPACE", which is the one destination that is always there: it
+ * is created in the same transaction as the account and nothing can remove somebody from it,
+ * because leaving refuses an owner and they are its owner. Falling back to "the first one left" if
+ * it is somehow absent, and to a sign-out if there is nothing at all — an account with no
+ * workspace has nothing to render, and a tab sitting on an empty shell is worse than a screen that
+ * says what happened.
+ *
+ * THE MEMBERSHIP LIST IS PRUNED HERE, IN THE CLIENT. The session is fetched once per connect and
+ * the departure happened on a socket, so nothing would otherwise take the workspace out of the
+ * switcher until the next reconnect — and `switchWorkspace` refuses a target it cannot see a
+ * membership for, which is a guard that would refuse this switch if the list still contained the
+ * workspace being left. Removing it first is what makes the destination the personal one.
+ */
+function leftWorkspace(): void {
+  const session = useSessionStore.getState();
+  const gone = session.workspaceId;
+  const remaining = session.workspaces.filter((w) => w.id !== gone);
+  session.setWorkspaces(remaining);
+  const home = remaining.find((w) => w.kind === "personal") ?? remaining[0];
+  if (!home) {
+    session.signOut("you are no longer a member of any workspace");
+    return;
+  }
+  useUiStore.getState().setInviteNotice({
+    ok: true,
+    // Names the workspace being LEFT rather than the one being landed in, because the sentence is
+    // a confirmation of something irreversible-ish — §6.5's own wording is "you'll need a new
+    // invite to rejoin" — and the destination is visible in the switcher a moment later anyway.
+    message: `You left ${session.workspaces.find((w) => w.id === gone)?.name ?? "that workspace"}`,
+  });
+  switchWorkspace(home.id);
+}
+
 export function switchWorkspace(workspaceId: string): void {
   // The lock goes on FIRST, and `beginSwitch` is what decides whether there is a switch at all —
   // already there, not a membership, or one already in flight. Nothing below this line is
@@ -1322,8 +1359,30 @@ export function sendListAudit(limit?: number): void {
 export function sendListMembers(): void {
   send({ cmd: "listMembers" });
 }
-export function sendInviteMember(email: string, role: string): void {
-  send({ cmd: "inviteMember", email, role });
+/**
+ * §7.1 — an invitation, addressed or not.
+ *
+ * THE FIELD IS OMITTED RATHER THAN SENT EMPTY when there is no address. The server reads an absent
+ * `email` and an empty one identically, so this is not a correctness requirement — it is what makes
+ * the frame say what was meant: `{ cmd, role }` is a link for whoever opens it, and `{ cmd, email:
+ * "", role }` is a form somebody left blank, which is the same bytes and a different sentence in
+ * every log this passes through.
+ */
+export function sendInviteMember(email: string | null, role: string): void {
+  const address = email?.trim();
+  send(address ? { cmd: "inviteMember", email: address, role } : { cmd: "inviteMember", role });
+}
+
+/**
+ * §6.5 — give up your own membership.
+ *
+ * IT CARRIES NOTHING, and that is the safety rather than a convenience: the subject is whoever
+ * holds this socket, which the ticket already proved. The server refuses an owner outright — §6.5
+ * says ownership is transferred rather than dropped — and answers on the `members` channel, which
+ * is where the landing below is driven from.
+ */
+export function sendLeaveWorkspace(): void {
+  send({ cmd: "leaveWorkspace" });
 }
 export function sendRevokeInvite(inviteId: string): void {
   send({ cmd: "revokeInvite", inviteId });

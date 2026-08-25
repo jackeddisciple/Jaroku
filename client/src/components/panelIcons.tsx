@@ -396,6 +396,26 @@ export function UsersIcon(p: P) {
 }
 
 /**
+ * lucide:user-plus — §7.1's invite control. The plus is on a person, not on a list.
+ *
+ * A DIFFERENT GLYPH FROM `PlusIcon`, and the difference is what the button does. A bare plus in
+ * this product means "make one more of the thing this column lists" — a new agent, a new
+ * workspace, a new dataset. This one does not create a member: it mints a credential and hands it
+ * to somebody who has to accept it, and may not.
+ */
+export function UserPlusIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M19 8v6" />
+      <path d="M22 11h-6" />
+    </>,
+  );
+}
+
+/**
  * lucide:ticket — an invitation you were handed rather than one you made.
  *
  * NOT `PlusIcon` AND NOT A DOOR. The row above it in the menu creates a workspace and wears the

@@ -22,14 +22,23 @@ export interface Member {
 
 export interface Invite {
   id: string;
-  email: string;
+  /** §7.2 — null renders as "Anyone with the link". See `InviteLink.email` below. */
+  email: string | null;
   role: string;
   expires_at: string;
   created_at: string;
 }
 
 export interface InviteLink {
-  email: string;
+  /**
+   * Who it was sent to, or null for §7.1's link invitation — the one addressed to nobody.
+   *
+   * THE PANEL RENDERS A DIFFERENT SENTENCE FOR EACH, which is why this is null rather than "".
+   * "Send this to ada@example.com" is a reminder; "anyone with this link can join" is a warning,
+   * and the difference between them is the whole of what an inviter gave up by leaving the field
+   * blank. An empty string would collapse the two into one sentence with a gap in it.
+   */
+  email: string | null;
   role: string;
   token: string;
   expiresAt: string;
