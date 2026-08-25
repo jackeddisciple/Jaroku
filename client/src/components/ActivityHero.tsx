@@ -94,7 +94,7 @@ function SpendCard() {
               />
             ))}
           </div>
-          <span className="shrink-0 text-[10px] text-faint">{spend.by_provider[0]?.provider}</span>
+          <span className="shrink-0 text-tiny text-faint">{spend.by_provider[0]?.provider}</span>
         </div>
       )}
     </Card>
@@ -134,7 +134,7 @@ function BudgetRing({ share }: { share: number }) {
         x="19"
         y="22"
         textAnchor="middle"
-        className="fill-muted font-mono text-[9px] tabular-nums"
+        className="fill-muted text-tiny tabular-nums"
       >
         {Math.round(share * 100)}
       </text>
@@ -256,7 +256,7 @@ function HealthCard() {
                 outside the bar, because it is not part of the rate the bar is drawn from. */}
             {h.interrupted > 0 && (
               <span
-                className="shrink-0 text-[10px] tabular-nums text-faint"
+                className="shrink-0 text-tiny tabular-nums text-faint"
                 title="closed out by a restart or a cancellation — not counted as failures"
               >
                 {h.interrupted} interrupted
@@ -307,7 +307,7 @@ function PulseBand() {
     >
       {!anything ? (
         // §3.5: never an empty chart axis implying a flat line at zero.
-        <div className="flex h-[64px] items-center text-[12px] text-muted">
+        <div className="flex h-[64px] items-center text-caption text-muted">
           {EMPTY_FIGURE} nothing has run in {RANGE_PROSE[range]}
         </div>
       ) : (

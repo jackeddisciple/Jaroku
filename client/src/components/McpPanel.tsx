@@ -63,7 +63,7 @@ function ToolRow({ tool, serverId }: { tool: McpTool; serverId: string }) {
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-mono text-[12px] text-ink">{tool.name}</span>
+            <span className="text-caption text-ink">{tool.name}</span>
             {high ? (
               <StatusBadge state="pending" label="high impact" icon={ShieldAlertIcon}
                 title="A generated agent must ask before running this for the first time." />
@@ -88,9 +88,9 @@ function ToolRow({ tool, serverId }: { tool: McpTool; serverId: string }) {
             )}
           </div>
           {tool.description && (
-            <p className="mt-0.5 text-[11px] leading-[1.5] text-muted">{tool.description}</p>
+            <p className="mt-0.5 text-tiny leading-[1.5] text-muted">{tool.description}</p>
           )}
-          <p className="mt-0.5 text-[11px] leading-[1.5] text-faint">
+          <p className="mt-0.5 text-tiny leading-[1.5] text-faint">
             {tool.overridden ? `Jaroku said ${tool.computed_impact}: ` : ""}
             {tool.impact_reason}
           </p>
@@ -100,7 +100,7 @@ function ToolRow({ tool, serverId }: { tool: McpTool; serverId: string }) {
                 nobody can glyph. It was `hide schema` / `schema` — the state spelled out, which is
                 the second of the two word-disclosures in this client. */}
             <button
-              className={quietBtn + " !px-0 !text-[11px]"}
+              className={quietBtn + " !px-0 !text-tiny"}
               onClick={() => setOpen((v) => !v)}
               aria-expanded={open}
             >
@@ -121,7 +121,7 @@ function ToolRow({ tool, serverId }: { tool: McpTool; serverId: string }) {
               <>
                 <span className="text-faint">·</span>
                 <button
-                  className={quietBtn + " !px-0 !text-[11px]"}
+                  className={quietBtn + " !px-0 !text-tiny"}
                   onClick={() => sendSetMcpToolImpact(serverId, tool.name, high ? "low" : "high")}
                   title={high
                     ? "Stop asking before this runs."
@@ -135,7 +135,7 @@ function ToolRow({ tool, serverId }: { tool: McpTool; serverId: string }) {
               <>
                 <span className="text-faint">·</span>
                 <button
-                  className={quietBtn + " !px-0 !text-[11px]"}
+                  className={quietBtn + " !px-0 !text-tiny"}
                   onClick={() => sendSetMcpToolImpact(serverId, tool.name, null)}
                 >
                   use Jaroku's classification
@@ -145,7 +145,7 @@ function ToolRow({ tool, serverId }: { tool: McpTool; serverId: string }) {
           </div>
 
           {open && (
-            <pre className="mt-1.5 overflow-x-auto rounded-control border border-hair bg-bg/60 p-2 font-mono text-[10px] leading-[1.5] text-muted">
+            <pre className="mt-1.5 overflow-x-auto rounded-control border border-hair bg-bg/60 p-2 font-mono text-tiny leading-[1.5] text-muted">
               {JSON.stringify(tool.input_schema, null, 2)}
             </pre>
           )}
@@ -176,13 +176,13 @@ function ServerDetail({ server }: { server: McpServer }) {
             <StatusBadge state="neutral" variant="outline" label="credential stored" icon={KeyIcon}
               title={`Read from ${server.auth_env_key} in runtime/.env. Jaroku never displays it.`} />
           )}
-          <Truncate className="font-mono text-[11px] text-faint" title={server.endpoint}>{server.endpoint}</Truncate>
+          <Truncate className="text-tiny text-faint" title={server.endpoint}>{server.endpoint}</Truncate>
         </div>
 
         {server.server_name && (
-          <p className="mt-1 text-[11px] text-muted">
+          <p className="mt-1 text-tiny text-muted">
             Identifies itself as{" "}
-            <span className="font-mono text-ink">
+            <span className="text-ink">
               {server.server_name}
               {server.server_version ? ` ${server.server_version}` : ""}
             </span>
@@ -193,7 +193,7 @@ function ServerDetail({ server }: { server: McpServer }) {
         )}
 
         {server.last_error && (
-          <p className="mt-1 break-words rounded-control border border-err/30 px-2 py-1.5 text-[11px] leading-[1.5] text-err">
+          <p className="mt-1 break-words rounded-control border border-err/30 px-2 py-1.5 text-tiny leading-[1.5] text-err">
             {server.last_error}
           </p>
         )}
@@ -230,7 +230,7 @@ function ServerDetail({ server }: { server: McpServer }) {
               <input
                 type="password"
                 autoComplete="off"
-                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
                 placeholder="bearer token or API key"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
@@ -258,7 +258,7 @@ function ServerDetail({ server }: { server: McpServer }) {
               )}
             </div>
             {/* Saying where it goes matters more than saying it is safe. */}
-            <p className="mt-1.5 text-[11px] leading-[1.5] text-faint">
+            <p className="mt-1.5 text-tiny leading-[1.5] text-faint">
               Stored in <span className="font-mono">runtime/.env</span> as{" "}
               <span className="font-mono">{server.auth_env_key ?? `JAROKU_MCP_${server.id.toUpperCase()}_TOKEN`}</span>,
               which is gitignored. It is never logged and never sent back to this page.
@@ -281,7 +281,7 @@ function ServerDetail({ server }: { server: McpServer }) {
           />
         ) : (
           <>
-            <p className="px-2 py-1.5 text-[11px] text-faint">
+            <p className="px-2 py-1.5 text-tiny text-faint">
               {server.tools.length} tool{server.tools.length === 1 ? "" : "s"}
               {highCount > 0 && `, ${highCount} needing confirmation before first use`}
               {server.discovered_at && ` · last checked ${new Date(server.discovered_at).toLocaleString()}`}
@@ -341,7 +341,7 @@ export function McpPanel() {
           <span className="mt-0.5 shrink-0" style={{ color: ACCENT.mcp }}>
             <PlugIcon size={ICON.sm} />
           </span>
-          <p className="text-[11px] leading-[1.5] text-muted">
+          <p className="text-tiny leading-[1.5] text-muted">
             <span className="text-ink">MCP servers are third-party code Jaroku has not reviewed.</span>{" "}
             What a server says it can do is its own claim. Tools from here are marked
             everywhere they appear, an agent only receives the ones its plan asked for, and a
@@ -352,7 +352,7 @@ export function McpPanel() {
 
       {(error || notice) && (
         <div className="shrink-0 px-4 pt-2">
-          <div className={`flex items-start gap-2 rounded-control border px-2 py-1.5 text-[11px] leading-[1.5] ${
+          <div className={`flex items-start gap-2 rounded-control border px-2 py-1.5 text-tiny leading-[1.5] ${
             error ? "border-err/30 text-err" : "border-hair text-muted"}`}>
             <span className="min-w-0 flex-1 break-words">{error ?? notice}</span>
             <button className="shrink-0 text-faint hover:text-ink"
@@ -404,7 +404,7 @@ export function McpPanel() {
           <div className="rounded-card border border-edge bg-panel p-2 shadow-raised">
             <input
               autoFocus
-              className="w-full rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+              className="w-full rounded-control bg-bg px-2 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
               placeholder="https://example.com/mcp"
               value={endpoint}
               onChange={(e) => setEndpoint(e.target.value)}
@@ -412,7 +412,7 @@ export function McpPanel() {
             />
             <div className="mt-1.5 flex items-center gap-2">
               <input
-                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
                 placeholder="name (optional)"
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
@@ -421,7 +421,7 @@ export function McpPanel() {
               <input
                 type="password"
                 autoComplete="off"
-                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
                 placeholder="token (if it needs one)"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
@@ -432,7 +432,7 @@ export function McpPanel() {
                 {addingEndpoint ? "connecting…" : "Connect"}
               </button>
             </div>
-            <p className="mt-1.5 text-[11px] leading-[1.5] text-faint">
+            <p className="mt-1.5 text-tiny leading-[1.5] text-faint">
               Jaroku will ask the server what it can do and show you the answer. Nothing is
               granted to any agent until you select it while planning. Only http(s) endpoints
               are supported — stdio would mean running someone else's binary on your machine.

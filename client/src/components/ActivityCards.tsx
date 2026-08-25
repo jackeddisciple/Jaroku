@@ -109,7 +109,7 @@ export function LeaderboardCard() {
         if (key === sort) setDesc(!desc);
         else { setSort(key); setDesc(SORT_DESC[key]); }
       }}
-      className={`${align} w-full text-[10px] uppercase tracking-wider transition-colors duration-fast ${
+      className={`${align} w-full text-tiny uppercase tracking-wider transition-colors duration-fast ${
         key === sort ? "text-muted" : "text-faint hover:text-muted"
       }`}
       title={`Sort by ${label.toLowerCase()}`}
@@ -158,28 +158,28 @@ export function LeaderboardCard() {
                 >
                   <td className="max-w-0 py-1.5 pr-2">
                     <div className="flex items-center gap-1.5">
-                      <Truncate className="text-[12px] text-ink" title={r.name}>{r.name}</Truncate>
+                      <Truncate className="text-caption text-ink" title={r.name}>{r.name}</Truncate>
                       {/* An archived agent still spent money last week, so it stays in the table —
                           and says what it is, so nobody wonders why it is not in the Agents grid. */}
                       {r.archived && <Chip size="sm" tone="faint" variant="bare">archived</Chip>}
                     </div>
                   </td>
-                  <td className="py-1.5 text-right font-mono text-[11px] tabular-nums text-muted">{r.runs}</td>
-                  <td className="py-1.5 text-right font-mono text-[11px] tabular-nums">
+                  <td className="py-1.5 text-right text-tiny tabular-nums text-muted">{r.runs}</td>
+                  <td className="py-1.5 text-right text-tiny tabular-nums">
                     <span style={{ color: rateHue(r.success_rate) }}>{formatMetric("percent", r.success_rate)}</span>
                   </td>
                   <td
-                    className="py-1.5 text-right font-mono text-[11px] tabular-nums text-muted"
+                    className="py-1.5 text-right text-tiny tabular-nums text-muted"
                     // §2: a row whose spend is a floor says so, and never renders a confident number.
                     title={r.cost_known ? undefined : "a floor — this agent ran a model with no pricing entry"}
                   >
                     {formatMetric("usd", r.usd)}
                     {!r.cost_known && <span className="text-faint">+</span>}
                   </td>
-                  <td className="py-1.5 text-right font-mono text-[11px] tabular-nums text-muted">
+                  <td className="py-1.5 text-right text-tiny tabular-nums text-muted">
                     {formatMetric("ms", r.p95)}
                   </td>
-                  <td className="py-1.5 text-right text-[11px] tabular-nums text-faint">
+                  <td className="py-1.5 text-right text-tiny tabular-nums text-faint">
                     <span title={r.last_active ? absTime(r.last_active) : undefined}>{r.last_active ? relTime(r.last_active) : EMPTY_FIGURE}</span>
                   </td>
                 </tr>
@@ -187,7 +187,7 @@ export function LeaderboardCard() {
             </tbody>
           </table>
           {truncated && (
-            <div className="mt-1.5 text-[10px] text-faint">
+            <div className="mt-1.5 text-tiny text-faint">
               showing the first {rows.length} agents by spend
             </div>
           )}
@@ -284,10 +284,10 @@ export function ModelMixCard() {
                     style={{ background: modelHue(m.provider) }}
                     aria-hidden
                   />
-                  <Truncate className="min-w-0 flex-1 font-mono text-[11px] text-muted" title={`${m.provider}/${m.model}`}>
+                  <Truncate className="min-w-0 flex-1 text-tiny text-muted" title={`${m.provider}/${m.model}`}>
                     {m.model}
                   </Truncate>
-                  <span className="shrink-0 font-mono text-[11px] tabular-nums text-faint">
+                  <span className="shrink-0 text-tiny tabular-nums text-faint">
                     {Math.round((value / total) * 100)}%
                   </span>
                 </li>
@@ -298,7 +298,7 @@ export function ModelMixCard() {
           {/* §6: unpriced models are LABELLED rather than dropped silently. In the volume view they
               are already rows above; in the spend view this line is the whole of their presence. */}
           {view === "spend" && unpriced.length > 0 && (
-            <div className="mt-2 text-[10px] text-faint" title={unpriced.map((m) => m.model).join(", ")}>
+            <div className="mt-2 text-tiny text-faint" title={unpriced.map((m) => m.model).join(", ")}>
               {unpriced.length} model{unpriced.length === 1 ? "" : "s"} excluded — no pricing entry
             </div>
           )}
@@ -381,15 +381,15 @@ export function ReleasesCard() {
                   <span className="shrink-0" style={{ color: action.accent }} aria-hidden>
                     <action.Icon size={ICON.xs} />
                   </span>
-                  <Truncate className="min-w-0 flex-1 text-[12px] text-ink" title={e.agent_name}>
+                  <Truncate className="min-w-0 flex-1 text-caption text-ink" title={e.agent_name}>
                     {e.agent_name}
                   </Truncate>
                   {e.version !== null && (
-                    <span className="shrink-0 font-mono text-[10px] tabular-nums text-faint">v{e.version}</span>
+                    <span className="shrink-0 text-tiny tabular-nums text-faint">v{e.version}</span>
                   )}
-                  <span className="shrink-0 text-[10px] tabular-nums text-faint" title={absTime(e.at)}>{relTime(e.at)}</span>
+                  <span className="shrink-0 text-tiny tabular-nums text-faint" title={absTime(e.at)}>{relTime(e.at)}</span>
                 </div>
-                <div className="ml-[18px] text-[10px] text-muted">
+                <div className="ml-[18px] text-tiny text-muted">
                   {action.verb.toLowerCase()} · {e.detail}
                   {e.outcome === "error" && <span style={{ color: STATUS.error }}> · failed</span>}
                   {e.outcome === "running" && <span className="text-faint"> · in flight</span>}
@@ -469,7 +469,7 @@ export function ToolUsageCard() {
                 <span className="shrink-0 text-faint" aria-hidden>
                   <OriginIcon origin={t.origin} />
                 </span>
-                <Truncate className="min-w-0 flex-1 font-mono text-[11px] text-muted" title={t.name}>
+                <Truncate className="min-w-0 flex-1 text-tiny text-muted" title={t.name}>
                   {t.name}
                 </Truncate>
                 {/* §9: "MCP-sourced tools carry the MCP marking they carry everywhere else. A
@@ -488,11 +488,11 @@ export function ToolUsageCard() {
                   />
                 )}
                 {t.failures > 0 && (
-                  <span className="shrink-0 font-mono text-[10px] tabular-nums" style={{ color: STATUS.error }}>
+                  <span className="shrink-0 text-tiny tabular-nums" style={{ color: STATUS.error }}>
                     {t.failures}
                   </span>
                 )}
-                <span className="shrink-0 font-mono text-[11px] tabular-nums text-faint">{t.calls}</span>
+                <span className="shrink-0 text-tiny tabular-nums text-faint">{t.calls}</span>
               </li>
             ))}
           </ul>
@@ -500,7 +500,7 @@ export function ToolUsageCard() {
           {usage.tools.length > 5 && (
             <button
               onClick={() => setExpanded(!expanded)}
-              className="mt-1.5 flex items-center gap-1 text-[10px] text-faint transition-colors duration-fast hover:text-muted"
+              className="mt-1.5 flex items-center gap-1 text-tiny text-faint transition-colors duration-fast hover:text-muted"
               title={expanded ? "Show the top five tools" : `Show all ${usage.tools.length} tools`}
               aria-label={expanded ? "Collapse the tool list" : "Expand the tool list"}
               aria-expanded={expanded}
@@ -537,8 +537,8 @@ function Stat({
   const color = tone === "bad" ? STATUS.error : tone === "warn" ? TEXT.ink : TEXT.muted;
   return (
     <div title={hint}>
-      <div className="font-mono text-[15px] tabular-nums leading-none" style={{ color }}>{value}</div>
-      <div className="mt-1 text-[10px] uppercase tracking-wider text-faint">{label}</div>
+      <div className="text-title tabular-nums leading-none" style={{ color }}>{value}</div>
+      <div className="mt-1 text-tiny uppercase tracking-wider text-faint">{label}</div>
     </div>
   );
 }
@@ -554,8 +554,8 @@ function Stat({
  */
 function Empty({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-[64px] items-center gap-2 text-[12px] text-muted">
-      <span className="font-mono text-[15px] text-faint">{EMPTY_FIGURE}</span>
+    <div className="flex h-[64px] items-center gap-2 text-caption text-muted">
+      <span className="text-title text-faint">{EMPTY_FIGURE}</span>
       {children}
     </div>
   );

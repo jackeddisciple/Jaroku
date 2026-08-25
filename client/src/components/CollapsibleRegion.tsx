@@ -69,7 +69,7 @@ export function CollapsibleRegion({
           </h3>
           {/* Right-aligned, tabular, and only when there is a count to show. */}
           {count !== undefined && (
-            <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-faint">
+            <span className="ml-auto shrink-0 text-tiny tabular-nums text-faint">
               {count}
             </span>
           )}

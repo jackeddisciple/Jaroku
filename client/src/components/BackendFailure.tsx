@@ -60,22 +60,22 @@ export function BackendFailure({ status, onRetry }: { status: BackendStatus; onR
 
   return (
     <div className="mt-5 space-y-3 rounded-control border border-err/30 bg-err/5 px-3 py-3">
-      <p className="text-[13px] text-err">Jaroku&rsquo;s backend is not running.</p>
+      <p className="text-label text-err">Jaroku&rsquo;s backend is not running.</p>
       {/* The shell's own sentence, verbatim. It names the actual cause — a port, a missing
           payload, a runtime that would not unpack — and paraphrasing it here would be a second
           description of a failure that already has one. */}
-      {status.message && <p className="text-[12px] leading-relaxed text-muted">{status.message}</p>}
-      <p className="text-[11px] leading-relaxed text-faint">
+      {status.message && <p className="text-caption leading-relaxed text-muted">{status.message}</p>}
+      <p className="text-tiny leading-relaxed text-faint">
         Quitting Jaroku from the tray and opening it again starts it over. If it keeps happening, the log below has
         every step of the launch in it.
       </p>
-      {refusal && <p className="text-[11px] text-err">{refusal}</p>}
+      {refusal && <p className="text-tiny text-err">{refusal}</p>}
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => void retry()}
           disabled={busy}
-          className="rounded-control border border-edge px-2.5 py-1 text-[11px] text-ink outline-none hover:border-chrome focus-visible:shadow-focusring disabled:opacity-50"
+          className="rounded-control border border-edge px-2.5 py-1 text-tiny text-ink outline-none hover:border-chrome focus-visible:shadow-focusring disabled:opacity-50"
         >
           {busy ? "Starting…" : "Start it again"}
         </button>
@@ -83,14 +83,14 @@ export function BackendFailure({ status, onRetry }: { status: BackendStatus; onR
           <button
             type="button"
             onClick={() => void copyPath()}
-            className="rounded-control border border-edge px-2.5 py-1 text-[11px] text-muted outline-none hover:border-chrome hover:text-ink focus-visible:shadow-focusring"
+            className="rounded-control border border-edge px-2.5 py-1 text-tiny text-muted outline-none hover:border-chrome hover:text-ink focus-visible:shadow-focusring"
           >
             {copied ? "Path copied" : "Copy log path"}
           </button>
         )}
       </div>
       {status.logPath && (
-        <p className="select-all break-all font-mono text-[10px] text-faint">{status.logPath}</p>
+        <p className="select-all break-all font-mono text-tiny text-faint">{status.logPath}</p>
       )}
     </div>
   );

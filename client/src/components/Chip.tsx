@@ -29,9 +29,9 @@ export type ChipVariant = "fill" | "outline" | "bare";
  * smaller is a chip you miss.
  */
 const SIZE: Record<ChipSize, string> = {
-  sm: "gap-1 px-1.5 text-[10px]",
-  md: "gap-1.5 px-2 text-[11px]",
-  lg: "gap-1.5 px-2.5 text-[12px]",
+  sm: "gap-1 px-1.5 text-tiny",
+  md: "gap-1.5 px-2 text-tiny",
+  lg: "gap-1.5 px-2.5 text-caption",
 };
 
 // ON THE GRID. `py-[3px]` was an arbitrary pixel between two grid steps, and 2/3/4 across three
@@ -212,7 +212,7 @@ export function Chip({
       )}
       {children}
       {figure !== undefined && figure !== null && (
-        <span className="shrink-0 font-mono tabular-nums opacity-70">{figure}</span>
+        <span className="shrink-0 tabular-nums opacity-70">{figure}</span>
       )}
     </>
   );

@@ -63,7 +63,7 @@ function FirstAgentStart({ workspaceName }: { workspaceName: string | null }) {
   return (
     <div className="flex h-full flex-col items-center justify-center px-6">
       <div className="w-[min(560px,90%)]">
-        <div className="text-center text-[13px] text-ink">
+        <div className="text-center text-label text-ink">
           {workspaceName ? `No agents in ${workspaceName} yet` : "No agents yet"}
         </div>
         <div className="mt-3 flex items-center gap-2 rounded-control border border-edge bg-panel px-3 py-2">
@@ -77,9 +77,9 @@ function FirstAgentStart({ workspaceName }: { workspaceName: string | null }) {
               if (e.key === "Enter") start();
             }}
             placeholder="describe an agent"
-            className="min-w-0 flex-1 bg-transparent text-[13px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
+            className="min-w-0 flex-1 bg-transparent text-label text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
           />
-          <span className="shrink-0 text-[10px] text-faint">↵</span>
+          <span className="shrink-0 text-tiny text-faint">↵</span>
         </div>
       </div>
     </div>
@@ -131,12 +131,12 @@ function FilterMenu({
         title="Filter the grid"
         aria-label="Filter the grid"
         aria-expanded={open}
-        className={`flex items-center gap-1.5 rounded-control px-2 py-1.5 text-[12px] transition-colors duration-fast ${
+        className={`flex items-center gap-1.5 rounded-control px-2 py-1.5 text-caption transition-colors duration-fast ${
           active > 0 ? "bg-active text-ink" : "text-muted hover:bg-active active:bg-chrome hover:text-ink"
         }`}
       >
         <FilterIcon size={ICON.sm} />
-        {active > 0 && <span className="tabular-nums text-[11px]">{active}</span>}
+        {active > 0 && <span className="tabular-nums text-tiny">{active}</span>}
       </button>
       {open && (
         <>
@@ -162,7 +162,6 @@ function FilterMenu({
                   <Chip
                     key={c}
                     size="sm"
-                    mono
                     selected={filters.connector === c}
                     onClick={() => onChange({ ...filters, connector: filters.connector === c ? null : c })}
                   >
@@ -341,13 +340,13 @@ export function AgentsView() {
             rendered as ADARSHHCHOUDHARY20@GMAIL.COM: the widest and loudest text on the screen,
             in a treatment reserved for six-character headings, on an identifier rather than a
             heading. Title case at title size, like every other page name in the product. */}
-        <Truncate className="max-w-[320px] text-[13px] font-medium text-ink" title={workspaceName ?? undefined}>
+        <Truncate className="max-w-[320px] text-label text-ink" title={workspaceName ?? undefined}>
           {workspaceName ?? "Agents"}
         </Truncate>
-        <span className="text-[11px] tabular-nums text-faint">{cards.filter((c) => !c.archived_at).length}</span>
-        {workspaceName && <span className="text-[11px] text-faint">agents</span>}
+        <span className="text-tiny tabular-nums text-faint">{cards.filter((c) => !c.archived_at).length}</span>
+        {workspaceName && <span className="text-tiny text-faint">agents</span>}
         {!connected && (
-          <span className="text-[11px] text-muted" title="Changes here need a connection">
+          <span className="text-tiny text-muted" title="Changes here need a connection">
             reconnecting…
           </span>
         )}
@@ -365,7 +364,7 @@ export function AgentsView() {
             }}
             placeholder="search agents…"
             aria-label="Search agents by name or slug"
-            className="min-w-0 flex-1 bg-transparent text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
+            className="min-w-0 flex-1 bg-transparent text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
           />
           {filters.query && (
             <button
@@ -452,9 +451,9 @@ export function AgentsView() {
       </div>
 
       {/* A refusal is shown rather than swallowed, and it is dismissed by the next snapshot. */}
-      {error && <div className="shrink-0 border-b border-hair px-5 py-2 text-[11px] text-err">{error}</div>}
+      {error && <div className="shrink-0 border-b border-hair px-5 py-2 text-tiny text-err">{error}</div>}
       {notice && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-hair bg-active/40 px-5 py-1.5 text-[11px] text-muted">
+        <div className="flex shrink-0 items-center gap-2 border-b border-hair bg-active/40 px-5 py-1.5 text-tiny text-muted">
           <span>{notice}</span>
           <button
             onClick={() => useAgentGridStore.getState().setNotice(null)}

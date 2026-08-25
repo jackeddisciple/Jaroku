@@ -122,7 +122,7 @@ function RuntimeScreen({ progress }: { progress: FirstRunProgress }) {
         // The detail line lives here rather than under its row, because uv's output is one long
         // line and putting it inside a 420px card would either wrap to four lines or truncate the
         // only informative part. Outside, centred, quiet, and it changes as the install moves.
-        running?.detail ? <span className="font-mono text-[11px] text-faint">{running.detail}</span> : null
+        running?.detail ? <span className="text-tiny text-faint">{running.detail}</span> : null
       }
     >
       <ul className="flex flex-col gap-4">
@@ -142,7 +142,7 @@ function StepRow({ step }: { step: FirstRunStep }) {
       </span>
       <span className="min-w-0">
         <span
-          className={`block text-[13px] leading-[1.4] ${
+          className={`block text-label leading-[1.4] ${
             step.state === "pending" ? "text-faint" : "text-ink"
           } ${step.state === "running" ? "animate-stream-pulse motion-reduce:animate-none" : ""}`}
         >
@@ -153,7 +153,7 @@ function StepRow({ step }: { step: FirstRunStep }) {
             above, because it changes several times a second and a line that reflows inside a list
             makes the list jump. */}
         {step.detail && step.state === "done" && (
-          <span className="mt-0.5 block truncate text-[11px] leading-[1.4] text-faint">{step.detail}</span>
+          <span className="mt-0.5 block truncate text-tiny leading-[1.4] text-faint">{step.detail}</span>
         )}
       </span>
     </li>
@@ -216,12 +216,12 @@ function ReadyScreen({ onDone }: { onDone: () => void }) {
         </span>
       </Reveal>
       <Reveal delay={60}>
-        <h1 className="mt-7 font-serif text-[34px] font-normal leading-[1.15] text-ink">
+        <h1 className="mt-7 text-display text-ink">
           Your device is ready
         </h1>
       </Reveal>
       <Reveal delay={120}>
-        <p className="mx-auto mt-3 max-w-[34ch] font-serif text-[15px] leading-[1.5] text-muted">
+        <p className="mx-auto mt-3 max-w-[34ch] text-body text-muted">
           Next, sign in with your Google account or your email address.
         </p>
       </Reveal>
@@ -328,13 +328,13 @@ function Recovery({
 
   return (
     <AuthNotice>
-      <h1 className="font-serif text-[32px] font-normal leading-[1.15] text-ink">{title}</h1>
-      <p className="mx-auto mt-3 max-w-[40ch] text-[13px] leading-[1.6] text-muted">{body}</p>
+      <h1 className="text-display text-ink">{title}</h1>
+      <p className="mx-auto mt-3 max-w-[40ch] text-label leading-[1.6] text-muted">{body}</p>
 
       {/* WHICH STEP, NAMED. "Setup didn't finish" is the sentence; this is the fact somebody puts
           in a bug report, and it is the difference between a report that can be acted on and one
           that says the app did not work. */}
-      <p className="mt-4 text-[11px] uppercase tracking-wider text-faint">
+      <p className="mt-4 text-tiny uppercase tracking-wider text-faint">
         stopped at &ldquo;{step.label}&rdquo;
       </p>
 
@@ -359,7 +359,7 @@ function Recovery({
       </div>
 
       {refused && (
-        <p role="alert" className="mx-auto mt-5 max-w-[40ch] text-[12px] leading-[1.5] text-err">
+        <p role="alert" className="mx-auto mt-5 max-w-[40ch] text-caption leading-[1.5] text-err">
           {refused}
         </p>
       )}
@@ -367,7 +367,7 @@ function Recovery({
       {/* OFFERED, NEVER PRINTED. A log is something somebody copies into a bug report; it is not a
           UI, and forty lines of uv output on this screen would bury the three buttons. */}
       {logPath && (
-        <p className="mt-8 text-[11px] leading-[1.6] text-faint">
+        <p className="mt-8 text-tiny leading-[1.6] text-faint">
           The full log is at <span className="font-mono text-muted">{logPath}</span>
           {" — "}
           <TextLink href={HELP_URLS.firstRunHelp}>what to send us</TextLink>

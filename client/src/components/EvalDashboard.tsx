@@ -68,7 +68,7 @@ function QualityCell({ p }: { p: ProviderMetrics }) {
   return (
     <span className={`${tone} tabular-nums`}>
       {(p.qualityScore * 100).toFixed(0)}
-      <span className="text-faint text-[10px] ml-0.5">
+      <span className="text-faint text-tiny ml-0.5">
         /100{p.unscored > 0 && ` · ${p.unscored} unscored`}
       </span>
     </span>
@@ -108,7 +108,7 @@ export function ComparisonTable({
   return (
     <div className="space-y-3">
       <div className="overflow-x-auto">
-        <table className="w-full text-[12px] border-separate border-spacing-0">
+        <table className="w-full text-caption border-separate border-spacing-0">
           <thead>
             <tr className={TYPE.sectionLabel}>
               <th className="text-left font-normal pb-1.5 pr-3">Provider</th>
@@ -134,8 +134,8 @@ export function ComparisonTable({
                     thing being compared is the last text in a comparison table that should be
                     guessable. */}
                 <td className="py-1.5 pr-3">
-                  <span className="whitespace-nowrap font-mono text-ink">{p.model}</span>
-                  <span className="text-faint ml-1.5 text-[10px]">{p.provider}</span>
+                  <span className="whitespace-nowrap text-ink">{p.model}</span>
+                  <span className="text-faint ml-1.5 text-tiny">{p.provider}</span>
                 </td>
                 <td className="py-1.5 px-2 text-right">
                   <QualityCell p={p} />
@@ -164,7 +164,7 @@ export function ComparisonTable({
                     {p.succeeded}/{p.total}
                   </span>
                   {p.failed > 0 && (
-                    <span className="text-faint text-[10px] ml-1">{fmtPercent(p.successRate, "share")}</span>
+                    <span className="text-faint text-tiny ml-1">{fmtPercent(p.successRate, "share")}</span>
                   )}
                 </td>
               </tr>
@@ -176,7 +176,7 @@ export function ComparisonTable({
       {/* Spend, kept deliberately apart from the comparison figures above. The table answers
           "which provider is cheaper per run"; this answers "what did this eval cost me" —
           and includes the failed attempts and the judge, which the comparison excludes. */}
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px] pt-1">
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-tiny pt-1">
         <span className={TYPE.sectionLabel}>Spent</span>
         <span className={overBudget ? "text-err" : "text-ink"}>
           {fmtCost(totals.trueSpendUsd)} total

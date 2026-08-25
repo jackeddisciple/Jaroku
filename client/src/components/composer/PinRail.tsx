@@ -67,7 +67,7 @@ export function PinRail({
         type="button"
         onClick={onToggleCollapsed}
         aria-expanded={!collapsed}
-        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-[11px] text-muted transition-colors duration-fast hover:text-ink"
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-tiny text-muted transition-colors duration-fast hover:text-ink"
       >
         <Glyph icon={Icon.Pin} size={GLYPH.meta} />
         <span className="uppercase tracking-wider">Pinned</span>
@@ -96,7 +96,7 @@ export function PinRail({
                 // §5.3: "Click scrolls to the turn and flashes a highlight."
                 title="Scroll to this turn"
               >
-                <Truncate className="text-[12px] text-ink">{p.label}</Truncate>
+                <Truncate className="text-caption text-ink">{p.label}</Truncate>
               </button>
               {/* Only on hover, because a row of × marks turns a rail of anchors into a list of
                   things to delete. It stays keyboard-reachable through focus-within on the row. */}

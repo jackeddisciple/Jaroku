@@ -71,7 +71,7 @@ function ReviewCard({ view, comment }: { view: GithubView; comment: GithubReview
 
   return (
     <div className="rounded-control border border-hair p-2">
-      <div className="flex items-baseline gap-2 text-[11px]">
+      <div className="flex items-baseline gap-2 text-tiny">
         <span className="shrink-0 text-ink">@{comment.author ?? "someone"}</span>
         {comment.path && (
           <Truncate variant="path" className="min-w-0 flex-1 font-mono text-faint" title={comment.path}>
@@ -82,11 +82,11 @@ function ReviewCard({ view, comment }: { view: GithubView; comment: GithubReview
       </div>
 
       {/* The reviewer's own words, quoted rather than paraphrased and never edited. */}
-      <p className="mt-1 text-[11px] leading-[1.5] text-muted">{comment.body}</p>
+      <p className="mt-1 text-tiny leading-[1.5] text-muted">{comment.body}</p>
 
       <div className="mt-1.5 flex items-center gap-2">
         {comment.resolution === "applied" ? (
-          <span className="flex items-center gap-1 text-[11px] text-ok">
+          <span className="flex items-center gap-1 text-tiny text-ok">
             <CheckIcon size={ICON.xs} />
             applied{comment.resolvedVersion === null ? "" : ` as v${comment.resolvedVersion}`}
             {/* §B.5.3's other half. An edit that landed and a reply that did not are two different
@@ -114,7 +114,7 @@ function ReviewCard({ view, comment }: { view: GithubView; comment: GithubReview
                 comment somebody read and thought about is indistinguishable from one nobody opened.
                 It posts nothing: what to say back, if anything, is a conversation for GitHub. */}
             <button
-              className="text-[11px] text-faint hover:text-ink"
+              className="text-tiny text-faint hover:text-ink"
               title="Close this here without changing anything. Nothing is posted to GitHub."
               onClick={() => sendResolveReviewComment(view.agentId, comment.id, "dismissed")}
             >
@@ -123,7 +123,7 @@ function ReviewCard({ view, comment }: { view: GithubView; comment: GithubReview
           </>
         )}
         <a
-          className="ml-auto shrink-0 text-[11px] text-faint hover:text-ink"
+          className="ml-auto shrink-0 text-tiny text-faint hover:text-ink"
           href={view.pr?.url}
           target="_blank"
           rel="noreferrer"

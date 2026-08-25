@@ -73,21 +73,21 @@ export function EnforcementStrip() {
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-2">
-            <span className="text-[12px] font-medium text-ink">
+            <span className="text-caption font-medium text-ink">
               {RUNG_LABEL[state.level] ?? state.level}
             </span>
             {/* WHEN IT LAPSES, when it does. The three automatic rungs expire on their own, and
                 "this lifts itself on Thursday" is the single most useful fact on this strip for
                 somebody deciding whether to write anything at all. */}
             {state.expiresAt && (
-              <span className="text-[11px] text-faint">lifts {fmtUntil(state.expiresAt)}</span>
+              <span className="text-tiny text-faint">lifts {fmtUntil(state.expiresAt)}</span>
             )}
-            {state.byHuman && <span className="text-[11px] text-faint">applied by a person</span>}
+            {state.byHuman && <span className="text-tiny text-faint">applied by a person</span>}
           </div>
           {/* THE RUNG'S OWN SENTENCE, from the server, which is the same one a refusal carries. */}
-          <p className="mt-0.5 text-[11px] leading-[1.55] text-muted">{state.explain}</p>
+          <p className="mt-0.5 text-tiny leading-[1.55] text-muted">{state.explain}</p>
           {state.reason && (
-            <p className="mt-0.5 text-[11px] leading-[1.55] text-faint">Reason recorded: {state.reason}</p>
+            <p className="mt-0.5 text-tiny leading-[1.55] text-faint">Reason recorded: {state.reason}</p>
           )}
 
           {/* PREVIOUSLY, when there is one, and only three of them. `history()` exists because an
@@ -95,7 +95,7 @@ export function EnforcementStrip() {
               that has been applied and lifted twice before is a different situation from a first
               one, and reading it here is cheaper than opening the audit log to find out. */}
           {past.length > 0 && (
-            <p className="mt-0.5 text-[11px] leading-[1.55] text-faint">
+            <p className="mt-0.5 text-tiny leading-[1.55] text-faint">
               Previously:{" "}
               {past.slice(0, 3).map((h, i) => (
                 <span key={h.id}>
@@ -108,11 +108,11 @@ export function EnforcementStrip() {
             </p>
           )}
 
-          {notice && <p className="mt-1 text-[11px] text-ink">{notice}</p>}
-          {error && <p className="mt-1 text-[11px] text-err">{error}</p>}
+          {notice && <p className="mt-1 text-tiny text-ink">{notice}</p>}
+          {error && <p className="mt-1 text-tiny text-err">{error}</p>}
 
           {alreadyAppealed ? (
-            <p className="mt-1 text-[11px] text-faint">
+            <p className="mt-1 text-tiny text-faint">
               Appealed — a person reviews it, and nothing changes until they do.
             </p>
           ) : open ? (
@@ -124,7 +124,7 @@ export function EnforcementStrip() {
                 maxLength={4000}
                 onChange={(e) => setNote(e.target.value)}
                 placeholder="what happened, from your side"
-                className="w-full rounded-control border border-hair bg-void px-2 py-1.5 text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
+                className="w-full rounded-control border border-hair bg-void px-2 py-1.5 text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
               />
               {/* ONE ACTION AND A DISMISS. Two text buttons inside a strip that is already a
                   full-width interruption is the interruption interrupting itself; `Appeal` is the
@@ -134,7 +134,7 @@ export function EnforcementStrip() {
                 <button
                   onClick={submit}
                   disabled={note.trim().length === 0}
-                  className="rounded-control bg-panel px-2.5 py-1 text-[11px] text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-control bg-panel px-2.5 py-1 text-tiny text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Appeal
                 </button>
@@ -146,7 +146,7 @@ export function EnforcementStrip() {
                 >
                   <XIcon size={ICON.xs} />
                 </button>
-                <span className="text-[11px] text-faint">
+                <span className="text-tiny text-faint">
                   One note, not a conversation. It changes no limit by itself.
                 </span>
               </div>
@@ -154,7 +154,7 @@ export function EnforcementStrip() {
           ) : (
             <button
               onClick={() => setOpen(true)}
-              className="mt-1 text-[11px] text-muted underline decoration-hair underline-offset-2 transition-colors hover:text-ink"
+              className="mt-1 text-tiny text-muted underline decoration-hair underline-offset-2 transition-colors hover:text-ink"
             >
               Appeal this
             </button>

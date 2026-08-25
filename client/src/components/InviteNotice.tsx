@@ -28,7 +28,7 @@ export function InviteNotice() {
         <span className={`mt-0.5 shrink-0 ${notice.ok ? "text-ok" : "text-err"}`}>
           {notice.ok ? <CheckIcon size={ICON.xs} /> : <XIcon size={ICON.xs} />}
         </span>
-        <p className="min-w-0 flex-1 text-[12px] leading-[1.5] text-ink">{notice.message}</p>
+        <p className="min-w-0 flex-1 text-caption leading-[1.5] text-ink">{notice.message}</p>
         <button
           onClick={() => dismiss(null)}
           title="Dismiss"

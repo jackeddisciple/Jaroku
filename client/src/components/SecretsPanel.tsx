@@ -63,7 +63,7 @@ function HealthStrip() {
   // the brief asks for this specifically, and a badge on every affected row makes the list hard to
   // read while telling somebody nothing they can act on as a whole.
   return (
-    <div className="flex items-start gap-2 rounded-control border border-hair px-2 py-1.5 text-[11px] text-muted">
+    <div className="flex items-start gap-2 rounded-control border border-hair px-2 py-1.5 text-tiny text-muted">
       <AlertTriangleIcon size={ICON.xs} />
       <span className="min-w-0 flex-1">{items.join(" · ")}</span>
     </div>
@@ -74,7 +74,7 @@ function Countdown() {
   const remainingMs = useSecretsStore((s) => s.remainingMs);
   const finalMinute = isFinalMinute(remainingMs);
   return (
-    <span className="flex items-center gap-1 text-[11px]">
+    <span className="flex items-center gap-1 text-tiny">
       {/* THE ICON CHANGES IN THE LAST MINUTE, not only the colour. A countdown signalled by an
           amber tint alone is invisible to a meaningful number of people, and the brief says so. */}
       {finalMinute ? (
@@ -88,8 +88,8 @@ function Countdown() {
         aria-hidden="true"
         className={
           finalMinute
-            ? "font-mono text-run animate-stream-pulse motion-reduce:animate-none"
-            : "font-mono text-muted"
+            ? "text-run animate-stream-pulse motion-reduce:animate-none"
+            : "text-muted"
         }
       >
         {formatRemaining(remainingMs)}
@@ -215,7 +215,7 @@ export function SecretsPanel() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-2 border-b border-hair px-4 py-2">
-        <span className="flex items-center gap-1.5 text-[12px] text-ink">
+        <span className="flex items-center gap-1.5 text-caption text-ink">
           <LockIcon size={ICON.sm} /> Secrets
         </span>
         <div className="flex-1" />
@@ -250,7 +250,7 @@ export function SecretsPanel() {
         ) : (
           <div className="space-y-3">
             {error ? (
-              <div className="flex items-start gap-2 rounded-control border border-err/30 px-2 py-1.5 text-[11px] text-err">
+              <div className="flex items-start gap-2 rounded-control border border-err/30 px-2 py-1.5 text-tiny text-err">
                 <span className="min-w-0 flex-1 break-words">{error}</span>
                 <button
                   className="shrink-0 text-faint hover:text-ink"
@@ -262,7 +262,7 @@ export function SecretsPanel() {
               </div>
             ) : null}
             {notice ? (
-              <div className="flex items-start gap-2 rounded-control border border-hair px-2 py-1.5 text-[11px] text-muted">
+              <div className="flex items-start gap-2 rounded-control border border-hair px-2 py-1.5 text-tiny text-muted">
                 <span className="min-w-0 flex-1 break-words">{notice}</span>
                 <button
                   className="shrink-0 text-faint hover:text-ink"
@@ -274,7 +274,7 @@ export function SecretsPanel() {
               </div>
             ) : null}
             {pending ? (
-              <div className="rounded-control border border-hair px-2 py-1.5 text-[11px] text-muted">
+              <div className="rounded-control border border-hair px-2 py-1.5 text-tiny text-muted">
                 Waiting to finish: {pending.label}
               </div>
             ) : null}
@@ -369,7 +369,7 @@ function AddForm({ initialName = "", onDone }: { initialName?: string; onDone: (
           placeholder="name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="min-w-0 flex-1 rounded-control bg-bg px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+          className="min-w-0 flex-1 rounded-control bg-bg px-2.5 py-1.5 font-mono text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
         />
         <input
           type="password"
@@ -377,13 +377,13 @@ function AddForm({ initialName = "", onDone }: { initialName?: string; onDone: (
           placeholder="value"
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          className="min-w-0 flex-[2] rounded-control bg-bg px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+          className="min-w-0 flex-[2] rounded-control bg-bg px-2.5 py-1.5 font-mono text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
         />
         <button type="submit" className={primaryBtn} disabled={busy || !name || !value}>
           {busy ? "Saving…" : "Save"}
         </button>
       </div>
-      <p className="text-[11px] text-faint">
+      <p className="text-tiny text-faint">
         UPPER_SNAKE_CASE. A provider key is validated with the provider before it is stored.
       </p>
     </form>
@@ -409,7 +409,7 @@ function PasscodeForm({ onDone }: { onDone: () => void }) {
   const setError = useSecretsStore((s) => s.setError);
   const setNotice = useSecretsStore((s) => s.setNotice);
   const field =
-    "min-w-0 flex-1 rounded-control bg-bg px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-faint focus:shadow-focusring";
+    "min-w-0 flex-1 rounded-control bg-bg px-2.5 py-1.5 font-mono text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring";
   return (
     <form
       className="space-y-2 rounded-control border border-hair px-3 py-2"
@@ -472,7 +472,7 @@ function PasscodeForm({ onDone }: { onDone: () => void }) {
           {busy ? "Saving…" : "Change"}
         </button>
       </div>
-      <p className="text-[11px] text-faint">
+      <p className="text-tiny text-faint">
         Six to twelve characters. Changing it locks Secrets everywhere you are signed in.
       </p>
     </form>
@@ -511,13 +511,13 @@ function ImportForm({ onDone }: { onDone: () => void }) {
         placeholder={"Paste a .env, or a 1Password / Vault / Doppler export"}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        className="w-full rounded-control bg-bg px-2.5 py-1.5 font-mono text-[11px] text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+        className="w-full rounded-control bg-bg px-2.5 py-1.5 font-mono text-tiny text-ink outline-none placeholder:text-faint focus:shadow-focusring"
       />
       <div className="flex items-center gap-2">
         <button type="submit" className={primaryBtn} disabled={busy || !text.trim()}>
           {busy ? "Importing…" : "Import"}
         </button>
-        <span className="text-[11px] text-faint">Values are stored, never echoed back.</span>
+        <span className="text-tiny text-faint">Values are stored, never echoed back.</span>
       </div>
     </form>
   );

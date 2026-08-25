@@ -1,27 +1,26 @@
-/* Two families, one job each. Inter carries prose — plan explanations, notes, descriptions.
-   JetBrains Mono is reserved for things that are literally code: file paths, tool names, type
-   annotations, figures. Same three weights in both so the ladder matches across a switch. */
-@import "@fontsource/inter/400.css";
-@import "@fontsource/inter/500.css";
-@import "@fontsource/inter/600.css";
-@import "@fontsource/jetbrains-mono/400.css";
-@import "@fontsource/jetbrains-mono/500.css";
-@import "@fontsource/jetbrains-mono/600.css";
-/* Display. THE THIRD FAMILY, AND IT HAS EXACTLY ONE HOME: the screens somebody sees before they
-   have a session — first-run, sign-in, and account onboarding. Nothing inside the app uses it, and
-   `font-serif` appearing on a panel is a review comment rather than a style choice.
+/* typography.pdf §01. Two families, one job each, and the specification is explicit that there is
+   no third: Geist Sans is the primary typeface across the product, Geist Mono is reserved for
+   content that is actually code-like. See src/lib/typeScale.ts for the table both of them and the
+   eight-rung ladder come from.
 
-   Why a third family at all, when the type section of the design system argues for two. Those
-   screens are the only ones in this product that are a PAGE rather than an instrument: one line of
-   type is the whole of the hierarchy, there is no data on them, and Inter at 30px is the same
-   voice the status bar speaks in. A display serif is what makes the first thing somebody sees read
-   as a product rather than as a dialog — and confining it to the pre-session surface is what keeps
-   that from becoming decoration everywhere else.
+   THREE WEIGHTS, MATCHING §03's THREE RULES: 400 is the default reading weight, 500 is controls
+   and labels, 600 is headings and names. §03 also names 700 — "rare; reserved for strong emphasis,
+   not normal headings" — and that is precisely why it is not loaded. No rung of the ladder claims
+   it, so a heading reaching for bold has to add both the class and the font file, in a diff
+   somebody reads. Weights are loaded in both families so the ladder matches across a switch.
 
-   Two weights, not three. These headings are one size and one weight per screen; a ladder here
-   would be a ladder nothing climbs, and every unused weight is a font file in the bundle. */
-@import "@fontsource/newsreader/400.css";
-@import "@fontsource/newsreader/500.css";
+   THE THIRD FAMILY THAT WAS HERE IS GONE. A display serif (Newsreader) carried the pre-session
+   headings — first-run, sign-in, account onboarding — on the argument that those screens are a
+   PAGE rather than an instrument, with one line of type for the whole hierarchy, and that a
+   product's first screen should not speak in the voice of its status bar. It was a good argument
+   and §01 overrules it in as many words. Those headings stand on `text-display` now, and the
+   bundle carries one fewer family. */
+@import "@fontsource/geist-sans/400.css";
+@import "@fontsource/geist-sans/500.css";
+@import "@fontsource/geist-sans/600.css";
+@import "@fontsource/geist-mono/400.css";
+@import "@fontsource/geist-mono/500.css";
+@import "@fontsource/geist-mono/600.css";
 
 @tailwind base;
 @tailwind components;
@@ -42,14 +41,18 @@
      the app says is sentences, and only identifiers, paths and figures are literally code. */
   /* The page is the surface the app floats ON, not the app. The shell in App.tsx carries `bg`;
      everything visible out here is the few pixels of inset around it. */
-  /* 12px, because that is what the app actually renders. The base was 13px while the census found
-     432 elements overriding to 11px and 171 to 12px against 36 at 13 — so the default described
-     almost nothing on screen, and every component carried a size class to escape it. Setting the
-     base to the common case makes 13px the opt-in it should be: a row title, a card's name. */
+  /* `body`, which is §02's own name for the default: 14px/400 over 20px, "descriptions and normal
+     content". Written as a rung rather than as a pixel count so the base cannot drift off the
+     ladder the rest of the app stands on.
+
+     The base used to be 12px, picked because a census found that is what the app actually rendered
+     — 432 elements overriding to 11px and 171 to 12px against 36 at 13, so a 13px default
+     described almost nothing on screen. That reasoning was right about the method and the ladder
+     now answers it: every one of those call sites carries an explicit rung as of this pass, so the
+     base is no longer competing with them for what a component renders at. What it sets is the
+     size of text nobody sized, and §02 names exactly one step for that. */
   body {
-    @apply bg-void text-ink font-sans;
-    font-size: 12px;
-    line-height: 1.5;
+    @apply bg-void text-ink font-sans text-body;
     -webkit-font-smoothing: antialiased;
   }
   /* Muted, restrained scrollbars — content floats, chrome recedes.
@@ -100,10 +103,11 @@
      was a FOURTH spelling of "small caps label" — 10px at 0.12em against the token file's 11px at
      Tailwind's `tracking-wider` (0.05em) — which is the drift the radius scale was created to
      stop, happening to type. The values are written out here because cmdk owns this element and a
-     class cannot reach it; they are copied from the token deliberately and belong with it. */
+     class cannot reach it; they are §02's `tiny` rung, spelled out, and belong with it. */
   [cmdk-group-heading] {
     font-size: 11px;
     font-weight: 500;
+    line-height: 14px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: #52525b;
@@ -129,7 +133,7 @@
      mono in the markup; the prose around them is prose. */
   .graph-canvas .react-flow__node,
   .graph-canvas .react-flow__edgelabel-renderer {
-    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-family: "Geist Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   }
 
   /* React Flow chrome — recolour the built-in controls/minimap to the dark system. */

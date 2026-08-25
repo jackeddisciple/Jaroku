@@ -57,7 +57,7 @@ function FirstThreadStart({ workspaceName }: { workspaceName: string | null }) {
   return (
     <div className="flex h-full flex-col items-center justify-center px-6">
       <div className="w-[min(560px,90%)]">
-        <div className="text-center text-[13px] text-ink">
+        <div className="text-center text-label text-ink">
           {workspaceName ? `No threads in ${workspaceName} yet` : "No threads yet"}
         </div>
         <div className="mt-3 flex items-center gap-2 rounded-control border border-edge bg-panel px-3 py-2">
@@ -71,9 +71,9 @@ function FirstThreadStart({ workspaceName }: { workspaceName: string | null }) {
               if (e.key === "Enter") start();
             }}
             placeholder="describe an agent"
-            className="min-w-0 flex-1 bg-transparent text-[13px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
+            className="min-w-0 flex-1 bg-transparent text-label text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
           />
-          <span className="shrink-0 text-[10px] text-faint">↵</span>
+          <span className="shrink-0 text-tiny text-faint">↵</span>
         </div>
       </div>
     </div>
@@ -100,7 +100,7 @@ function ArchiveNotice() {
   const dismiss = useThreadStore((s) => s.dismissArchiveNotice);
   if (!notice) return null;
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-hair bg-active/40 px-5 py-1.5 text-[11px] text-muted">
+    <div className="flex shrink-0 items-center gap-2 border-b border-hair bg-active/40 px-5 py-1.5 text-tiny text-muted">
       <span className="text-ink">Archived</span>
       <span className="text-faint">·</span>
       <span>{notice.text}</span>
@@ -109,7 +109,7 @@ function ArchiveNotice() {
           sendRestoreThread(notice.threadId);
           dismiss();
         }}
-        className="ml-auto rounded-control px-2 py-0.5 text-[11px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
+        className="ml-auto rounded-control px-2 py-0.5 text-tiny text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
       >
         Undo
       </button>
@@ -189,14 +189,14 @@ export function ThreadsView() {
       {/* §4.1: the title, the count, and the one action this surface owns. */}
       <div className="flex shrink-0 items-center gap-3 border-b border-hair px-5 py-3">
         <span className={TYPE.panelLabel}>Threads</span>
-        <span className="text-faint text-[11px] tabular-nums">{counts.all}</span>
+        <span className="text-faint text-tiny tabular-nums">{counts.all}</span>
         {/* STATE WHAT'S TRUE, which is this product's own disabled-state rule and the one this view
             did not follow. Every mutation here goes over a transport that drops writes in silence,
             so while the socket is down `E`, Archive, Restore, rename and New thread all did nothing
             with nothing said. The composer has gated on `connected` since it was written; this is
             the same gate, and the strip is what stops a disabled button reading as a broken one. */}
         {!connected && (
-          <span className="text-[11px] text-muted" title="Changes here need a connection">
+          <span className="text-tiny text-muted" title="Changes here need a connection">
             reconnecting…
           </span>
         )}
@@ -237,7 +237,7 @@ export function ThreadsView() {
       {/* A refusal is shown rather than swallowed, and it is dismissed by the next snapshot rather
           than by a close button — the list being right again is what makes it stale. */}
       {error && (
-        <div className="shrink-0 border-b border-hair px-5 py-2 text-[11px] text-err">{error}</div>
+        <div className="shrink-0 border-b border-hair px-5 py-2 text-tiny text-err">{error}</div>
       )}
 
       <ArchiveNotice />
@@ -285,8 +285,8 @@ export function ThreadsView() {
                     to run BETWEEN the label and its count here and AFTER the count on the Inbox
                     board — the same header, two orders, two views apart. */}
                 <div className="flex items-center gap-2 px-5 pb-1 pt-3">
-                  <span className="text-[10px] font-medium uppercase tracking-wider text-faint">{section.label}</span>
-                  <span className="text-[10px] tabular-nums text-faint">{section.threads.length}</span>
+                  <span className="text-tiny uppercase tracking-wider text-faint">{section.label}</span>
+                  <span className="text-tiny tabular-nums text-faint">{section.threads.length}</span>
                   <span className="h-px flex-1 bg-hair" />
                 </div>
                 {section.threads.map((t) => (

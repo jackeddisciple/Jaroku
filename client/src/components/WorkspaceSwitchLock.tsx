@@ -43,7 +43,7 @@ export function WorkspaceSwitchLock() {
         {/* THE NAME, NOT "LOADING". A switch is the one transition in this product where what
             matters is WHICH thing is arriving — §9's whole argument is that knowing which
             workspace you are in prevents the mistake. */}
-        <span className="text-[12px] text-ink">Switching to {switching.name}…</span>
+        <span className="text-caption text-ink">Switching to {switching.name}…</span>
       </div>
     </div>
   );

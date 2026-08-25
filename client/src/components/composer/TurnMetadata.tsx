@@ -179,7 +179,7 @@ export function TurnMetadata({
     // WRAPPING TO TWO LINES ON NARROW WIDTHS is the spec's own allowance (§6) and is why this is
     // `flex-wrap` rather than the composer bar's `flex-nowrap`. A readout may wrap; a row of
     // controls may not, because wrapping moves the send button.
-    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted">
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-tiny text-muted">
       {/* WALKED IN THE FIXED ORDER AND OMITTED, never filtered and mapped — §6.5. The difference is
           the whole criterion: iterate the order and skip, and positions hold; iterate what is
           present, and they do not. */}

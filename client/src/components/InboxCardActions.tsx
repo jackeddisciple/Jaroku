@@ -123,7 +123,7 @@ function InlineForm({ item, action }: { item: InboxItemView; action: InboxAction
     // NOT "RESOLVED". The fix has gone out and the sweep is what decides whether the problem is
     // actually gone — a card that congratulated itself and then stayed would be worse than one that
     // said nothing. This says what happened and lets the board answer.
-    return <div className="ml-6 mt-2 text-[11px] text-muted">Sent. This card leaves when it takes effect.</div>;
+    return <div className="ml-6 mt-2 text-tiny text-muted">Sent. This card leaves when it takes effect.</div>;
   }
 
   return (
@@ -144,23 +144,23 @@ function InlineForm({ item, action }: { item: InboxItemView; action: InboxAction
           inputMode={isCeiling ? "decimal" : undefined}
           placeholder={label}
           aria-label={label}
-          className="min-w-0 flex-1 bg-transparent text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
+          className="min-w-0 flex-1 bg-transparent text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
         />
         <button
           type="button"
           onClick={() => void submit()}
           disabled={busy || !value.trim()}
-          className="shrink-0 rounded-control px-2 py-0.5 text-[11px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+          className="shrink-0 rounded-control px-2 py-0.5 text-tiny text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
         >
           {busy ? "Saving…" : "Save"}
         </button>
       </div>
-      {error && <div className="mt-1 text-[11px] text-err">{error}</div>}
+      {error && <div className="mt-1 text-tiny text-err">{error}</div>}
       {!isCeiling && (
         // WHAT THIS DOES WITH THE VALUE, said before it is typed rather than after. It is the same
         // guarded route the Secrets tab posts to, which is the whole of §6.4's reuse rule at the one
         // place it touches a credential.
-        <div className="mt-1 text-[10px] text-faint">
+        <div className="mt-1 text-tiny text-faint">
           Stored in this workspace&rsquo;s vault, the same way the Secrets tab stores one.
         </div>
       )}
@@ -194,7 +194,7 @@ function Overflow({ item, onClose }: { item: InboxItemView; onClose: () => void 
               sendSnoozeInboxItem(item.id, choice.id);
               onClose();
             }}
-            className="block w-full px-3 py-1.5 text-left text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
+            className="block w-full px-3 py-1.5 text-left text-caption text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
           >
             {choice.label}
           </button>
@@ -208,14 +208,14 @@ function Overflow({ item, onClose }: { item: InboxItemView; onClose: () => void 
                 runAction(action, item);
                 onClose();
               }}
-              className="block w-full px-3 py-1.5 text-left text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
+              className="block w-full px-3 py-1.5 text-left text-caption text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
             >
               {ACTION_LABEL[action]}
             </button>
           ))}
           <button
             onClick={() => setSnoozing(true)}
-            className="block w-full px-3 py-1.5 text-left text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
+            className="block w-full px-3 py-1.5 text-left text-caption text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
           >
             Snooze…
           </button>
@@ -228,7 +228,7 @@ function Overflow({ item, onClose }: { item: InboxItemView; onClose: () => void 
               sendResolveInboxItem(item.id);
               onClose();
             }}
-            className="block w-full px-3 py-1.5 text-left text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
+            className="block w-full px-3 py-1.5 text-left text-caption text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
           >
             Mark as done
           </button>

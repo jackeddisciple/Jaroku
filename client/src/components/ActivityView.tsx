@@ -91,7 +91,7 @@ function Header() {
           because a page that opens with your name is not a fault, but it stays at the size
           everything else in this product's chrome is. */}
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-medium text-ink">
+        <div className="text-label text-ink">
           {greeting(new Date())}
           {user?.displayName ? `, ${user.displayName.split(" ")[0]}` : ""}
         </div>
@@ -99,7 +99,7 @@ function Header() {
             its own capability behind it, and a second copy here would be a second place to leak
             it. As a breadcrumb rather than a bordered chip: it says where you are, and where you
             are is not something to press. */}
-        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-faint">
+        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-tiny text-faint">
           {name && <Truncate className="min-w-0 max-w-[220px]" title={name}>{name}</Truncate>}
           {name && <span aria-hidden>·</span>}
           <span className="shrink-0">{team ? "team" : "personal"}</span>
@@ -131,7 +131,7 @@ function Header() {
             onClick={() => choose(r)}
             aria-pressed={r === range}
             title={`Show ${RANGE_LABEL[r]}`}
-            className={`rounded-chip px-2 py-1 text-[11px] tabular-nums transition-colors duration-fast ${
+            className={`rounded-chip px-2 py-1 text-tiny tabular-nums transition-colors duration-fast ${
               r === range ? "bg-active text-ink" : "text-muted hover:text-ink"
             }`}
           >
@@ -212,7 +212,7 @@ export function ActivityView({ children }: { children?: React.ReactNode }) {
     <div className="flex h-full flex-col bg-bg">
       <Header />
       {error && (
-        <div className="shrink-0 border-b border-err/30 bg-err/10 px-5 py-2 text-[11px] text-err">
+        <div className="shrink-0 border-b border-err/30 bg-err/10 px-5 py-2 text-tiny text-err">
           {error}
         </div>
       )}
@@ -261,10 +261,10 @@ export function Card({
           </span>
         )}
         <h2 className={TYPE.panelLabel}>{title}</h2>
-        {freshness && <span className="ml-auto text-[10px] text-faint">{freshness}</span>}
+        {freshness && <span className="ml-auto text-tiny text-faint">{freshness}</span>}
       </div>
       {children}
-      {context && <div className="mt-1 text-[11px] text-muted">{context}</div>}
+      {context && <div className="mt-1 text-tiny text-muted">{context}</div>}
     </section>
   );
 }

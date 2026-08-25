@@ -67,7 +67,7 @@ export function AgentTagRow({ agent, className = "" }: { agent: TagInput; classN
           }}
           title={overflow.map((t) => t.label).join(" · ")}
           aria-label={`Show ${overflow.length} more: ${overflow.map((t) => t.label).join(", ")}`}
-          className="shrink-0 rounded-chip px-1.5 py-[2px] text-[10px] text-faint transition-colors duration-fast hover:text-ink"
+          className="shrink-0 rounded-chip px-1.5 py-[2px] text-tiny text-faint transition-colors duration-fast hover:text-ink"
         >
           +{overflow.length}
         </button>

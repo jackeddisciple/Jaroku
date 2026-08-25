@@ -149,10 +149,10 @@ export function AttachPicker({
           value={query}
           onValueChange={setQuery}
           placeholder={source.placeholder}
-          className="w-full border-b border-edge bg-bg px-4 py-3 text-[13px] text-ink outline-none placeholder:text-faint focus-visible:shadow-focusring"
+          className="w-full border-b border-edge bg-bg px-4 py-3 text-label text-ink outline-none placeholder:text-faint focus-visible:shadow-focusring"
         />
         <Command.List className="max-h-[52vh] overflow-auto p-2">
-          <Command.Empty className="px-3 py-6 text-center text-[12px] text-muted">
+          <Command.Empty className="px-3 py-6 text-center text-caption text-muted">
             {loading ? "Searching…" : error ? error : `Nothing matches “${query}”.`}
           </Command.Empty>
 
@@ -164,7 +164,7 @@ export function AttachPicker({
                 key={key}
                 value={key}
                 onSelect={() => take(row)}
-                className="flex cursor-pointer items-center gap-2 rounded-control px-3 py-2 text-[12px] text-muted data-[selected=true]:bg-active data-[selected=true]:text-ink"
+                className="flex cursor-pointer items-center gap-2 rounded-control px-3 py-2 text-caption text-muted data-[selected=true]:bg-active data-[selected=true]:text-ink"
               >
                 {/* A fixed slot whether or not it is ticked — a row that grew when you chose it
                     would reflow the list under the pointer. */}
@@ -176,17 +176,17 @@ export function AttachPicker({
                 </span>
                 <span className="min-w-0 flex-1">
                   <Truncate className="block text-ink">{row.label}</Truncate>
-                  {row.detail && <Truncate className="block text-[10px] text-faint">{row.detail}</Truncate>}
+                  {row.detail && <Truncate className="block text-tiny text-faint">{row.detail}</Truncate>}
                 </span>
                 {/* §4.2: a protected file is attachable and says it cannot be edited. The lock is
                     on the row rather than only on the chip, so the fact is known BEFORE choosing. */}
                 {row.protected && (
-                  <span className="shrink-0 text-[10px] text-faint" title="Read-only — attaching it never implies write access">
+                  <span className="shrink-0 text-tiny text-faint" title="Read-only — attaching it never implies write access">
                     🔒
                   </span>
                 )}
                 {/* The cost, so the budget is something to steer by rather than discover at send. */}
-                <span className="shrink-0 tabular-nums text-[10px] text-faint">
+                <span className="shrink-0 tabular-nums text-tiny text-faint">
                   {fmtTokens(row.token_estimate)}
                 </span>
               </Command.Item>
@@ -195,7 +195,7 @@ export function AttachPicker({
         </Command.List>
 
         {source.multi && (
-          <div className="flex items-center gap-2 border-t border-edge px-3 py-2 text-[11px] text-muted">
+          <div className="flex items-center gap-2 border-t border-edge px-3 py-2 text-tiny text-muted">
             <span className="min-w-0 flex-1">
               {picked.length === 0 ? "Pick one or more" : `${picked.length} selected`}
             </span>
@@ -203,7 +203,7 @@ export function AttachPicker({
               type="button"
               disabled={picked.length === 0}
               onClick={() => { onPick(picked); onClose(); }}
-              className="rounded-control bg-ink px-2.5 py-1 text-[11px] font-medium text-bg transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
+              className="rounded-control bg-ink px-2.5 py-1 text-tiny text-bg transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
             >
               Attach
             </button>

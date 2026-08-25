@@ -64,7 +64,7 @@ export function InboxUndoToast() {
   const verb = VERB[undo.action] ?? "Done";
   return (
     <div
-      className="flex shrink-0 items-center gap-2 border-t px-5 py-1.5 text-[11px] text-muted animate-panel-in motion-reduce:animate-none"
+      className="flex shrink-0 items-center gap-2 border-t px-5 py-1.5 text-tiny text-muted animate-panel-in motion-reduce:animate-none"
       style={{ borderColor: SURFACE.chrome, background: SURFACE.active, animationDuration: `${MOTION.fast}ms` }}
       role="status"
       // POLITE, not assertive: this reports something the person just did, and interrupting a screen
@@ -75,11 +75,11 @@ export function InboxUndoToast() {
       {undo.changed > 1 && <span className="text-faint">{undo.changed} items</span>}
       <button
         onClick={() => sendUndoInboxAction(undo.token)}
-        className="ml-auto rounded-control px-2 py-0.5 text-[11px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
+        className="ml-auto rounded-control px-2 py-0.5 text-tiny text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
       >
         Undo
       </button>
-      <span className="shrink-0 text-[10px] text-faint">⌘Z</span>
+      <span className="shrink-0 text-tiny text-faint">⌘Z</span>
     </div>
   );
 }

@@ -84,7 +84,7 @@ export function CheckEmailScreen({
       footnote={<LegalLine />}
     >
       <div className="flex flex-col gap-4 text-center">
-        <p className="text-[13px] leading-[1.7] text-muted">
+        <p className="text-label leading-[1.7] text-muted">
           We sent a sign-in link to the email address{" "}
           {/* THE ADDRESS IS RENDERED IN INK, because it is the one thing on this screen somebody has
               to check. The commonest reason a link "never arrives" is a typo, and the fix for that
@@ -92,24 +92,24 @@ export function CheckEmailScreen({
               word and a long one would otherwise widen the card. */}
           <span className="break-all font-medium text-ink">{email}</span>.
         </p>
-        <p className="text-[13px] leading-[1.7] text-muted">
+        <p className="text-label leading-[1.7] text-muted">
           Please open your inbox and click the link to continue signing in to your{" "}
           <span className="text-ink">Jaroku account</span>.
         </p>
-        <p className="text-[13px] leading-[1.7] text-muted">
+        <p className="text-label leading-[1.7] text-muted">
           The link expires in <span className="font-medium text-ink">{expiresInMinutes}</span>{" "}
           {expiresInMinutes === 1 ? "minute" : "minutes"}.
         </p>
 
         <div className="mt-2 flex flex-col gap-3 border-t border-hair pt-5">
-          <p className="text-[13px] leading-[1.6] text-muted">
+          <p className="text-label leading-[1.6] text-muted">
             Wrong email? <TextLink onClick={onStartOver}>Start over</TextLink>
           </p>
 
           {/* THE COUNTDOWN IS TEXT UNTIL IT IS A LINK. A disabled button that becomes enabled is the
               same control in two states and reads as one thing you cannot press yet; a sentence
               that turns into a link reads as a wait that ended. */}
-          <p className="text-[13px] leading-[1.6] text-muted" aria-live="polite">
+          <p className="text-label leading-[1.6] text-muted" aria-live="polite">
             {remaining > 0 ? (
               <>Didn&rsquo;t get it? Resend in {remaining}s</>
             ) : busy ? (
@@ -125,7 +125,7 @@ export function CheckEmailScreen({
               redundant with the three sentences above it; after a resend it is the only evidence
               that pressing the link did anything at all, since the screen is otherwise identical. */}
           {resent && remaining > 0 && !error && (
-            <p className="text-[12px] leading-[1.6] text-ok">Sent. Check your inbox again in a moment.</p>
+            <p className="text-caption leading-[1.6] text-ok">Sent. Check your inbox again in a moment.</p>
           )}
 
           {error && <FormError>{error}</FormError>}
@@ -133,7 +133,7 @@ export function CheckEmailScreen({
           {/* THE ONE PIECE OF ADVICE WORTH GIVING, and it is the one that actually resolves most of
               these. It is last and it is the quietest thing on the screen, because somebody whose
               mail arrived in two seconds should never have read it. */}
-          <p className="text-[11px] leading-[1.6] text-faint">
+          <p className="text-tiny leading-[1.6] text-faint">
             Still nothing? Check your spam folder — and if the address above is wrong, start over.
           </p>
         </div>

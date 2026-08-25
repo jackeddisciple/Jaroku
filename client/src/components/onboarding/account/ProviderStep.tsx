@@ -191,14 +191,14 @@ export function ProviderStep() {
               >
                 {provider === p.id && <span className="h-[7px] w-[7px] rounded-full bg-ink" />}
               </span>
-              <span className="flex min-w-0 flex-1 items-center gap-2 text-[13px] text-ink">
+              <span className="flex min-w-0 flex-1 items-center gap-2 text-label text-ink">
                 {p.label}
                 {p.recommended && <span className="text-muted">(recommended)</span>}
                 {/* §5.3's "re-shown for confirmation". A provider that already has a key says so,
                     so somebody who came back to this step knows what they are looking at rather
                     than assuming an empty field means nothing was saved. */}
                 {connected.has(p.id) && (
-                  <span className="ml-auto flex items-center gap-1 text-[11px] text-ok">
+                  <span className="ml-auto flex items-center gap-1 text-tiny text-ok">
                     <svg
                       width={ICON.badge}
                       height={ICON.badge}
@@ -221,7 +221,7 @@ export function ProviderStep() {
         </fieldset>
 
         <div className="flex flex-col gap-2">
-          <p className="text-[13px] leading-[1.5] text-ink">
+          <p className="text-label leading-[1.5] text-ink">
             {connected.has(provider) ? `Replace your ${chosen.label} key` : "API key"}
           </p>
           <TextField
@@ -240,13 +240,13 @@ export function ProviderStep() {
             disabled={state === "checking"}
             invalid={error !== null}
           />
-          <p className="text-[12px] leading-[1.5] text-muted">
+          <p className="text-caption leading-[1.5] text-muted">
             <TextLink onClick={() => void openExternal(HELP[provider])}>Where do I find this?</TextLink>
           </p>
         </div>
 
         {state === "valid" && (
-          <p className="flex items-center gap-2 text-[12px] text-ok" role="status">
+          <p className="flex items-center gap-2 text-caption text-ok" role="status">
             <svg
               width={ICON.xs}
               height={ICON.xs}

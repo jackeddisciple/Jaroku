@@ -35,7 +35,7 @@ function HunkLines({ file }: { file: FileDiff }) {
     <div className="mt-1.5 overflow-x-auto rounded-control border border-hair bg-bg/60 py-1.5 font-mono">
       {file.hunks.map((h, hi) => (
         <div key={hi} className={hi > 0 ? "mt-2" : ""}>
-          <div className="px-2 text-[11px] text-faint tabular-nums select-none">
+          <div className="px-2 text-tiny text-faint tabular-nums select-none">
             @@ −{h.oldStart},{h.oldLines} +{h.newStart},{h.newLines} @@
           </div>
           {h.lines.map((line, li) => {
@@ -49,7 +49,7 @@ function HunkLines({ file }: { file: FileDiff }) {
             return (
               // Code wants tighter leading than prose — a diff is read as a block of related
               // lines, and prose spacing pulls them apart into separate statements.
-              <div key={li} className={`px-2 text-[12px] leading-[1.45] whitespace-pre ${cls}`}>
+              <div key={li} className={`px-2 text-caption leading-[1.45] whitespace-pre ${cls}`}>
                 {line || " "}
               </div>
             );
@@ -78,7 +78,7 @@ function FileRow({
     // One container per file: the row and its hunks belong together, and a flat stack of eight
     // rows with eight loose hunk blocks under them gave no answer to "where does this file end".
     <div className="border-t border-hair px-2.5 py-2 first:border-t-0">
-      <div className="flex items-center gap-2 text-[12px]">
+      <div className="flex items-center gap-2 text-caption">
         {/* One mark that turns, not two glyphs — the same disclosure the plan card's sections
             use, so opening a file and opening a section are visibly the same gesture. */}
         <button
@@ -170,7 +170,7 @@ function VersionPicker({ current, count }: { current: number; count: number }) {
         aria-expanded={open}
         title={`Version ${current} of ${count}`}
       >
-        <span className="font-mono tabular-nums">v{current}</span>
+        <span className="tabular-nums">v{current}</span>
         <ChevronDownIcon size={ICON.xs} />
       </button>
       {open && (
@@ -183,7 +183,7 @@ function VersionPicker({ current, count }: { current: number; count: number }) {
           {Array.from({ length: count }, (_, i) => count - i).map((v) => (
             <div
               key={v}
-              className={`flex items-center gap-2 px-3 py-1 font-mono text-[12px] ${
+              className={`flex items-center gap-2 px-3 py-1 font-mono text-caption ${
                 v === current ? "text-ink" : "text-faint"
               }`}
             >
@@ -193,7 +193,7 @@ function VersionPicker({ current, count }: { current: number; count: number }) {
               v{v}
             </div>
           ))}
-          <div className="mt-1 border-t border-hair px-3 pt-1.5 pb-0.5 text-[10px] text-faint">
+          <div className="mt-1 border-t border-hair px-3 pt-1.5 pb-0.5 text-tiny text-faint">
             Switching versions isn’t built yet.
           </div>
         </div>
@@ -220,7 +220,7 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
   // Streaming: the model is rewriting files right now.
   if (turn.status === "streaming") {
     return (
-      <div className="text-[12px]">
+      <div className="text-caption">
         <div className="text-run">Proposing changes…</div>
         <div className="mt-2 space-y-0.5">
           {turn.streaming.map((f) => (
@@ -242,7 +242,7 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
 
   if (turn.status === "error") {
     return (
-      <div className="text-[12px]">
+      <div className="text-caption">
         <div className="text-err">Edit failed — {turn.error}</div>
         {turn.problems && turn.problems.length > 0 && (
           <ul className="mt-2 space-y-1 text-muted">
@@ -261,7 +261,7 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
   // No-op: the model declined and said why. Renders as a plain reply.
   if (turn.status === "noop") {
     return (
-      <div className="text-[12px] text-ink">
+      <div className="text-caption text-ink">
         <Prose text={turn.summary ?? ""} />
       </div>
     );
@@ -280,7 +280,7 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
   const isLatestApplied = turn.status === "applied" && turn.version === agent?.edit_count;
 
   return (
-    <div className="animate-slide-in text-[12px] motion-reduce:animate-none">
+    <div className="animate-slide-in text-caption motion-reduce:animate-none">
       {/* A change summary is mostly about named things — "added a LIMIT clause to pg_query" — so
           it is the sentence in the panel that most needs its identifiers marked. No vocabulary to
           pass here: a proposal carries no plan, so shape is all there is to go on. */}
@@ -288,7 +288,7 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
         <Prose text={turn.summary ?? ""} />
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[11px] text-muted">
+      <div className="mt-2 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-tiny text-muted">
         {/* The same shape as the generation stat row: a glyph to jump to, a tabular figure to
             read. Adds and removes stay a single paired stat — they are one fact about the diff,
             not two, and splitting them would imply they can be compared separately. */}
@@ -296,7 +296,7 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
           <span className="shrink-0 flex items-center opacity-70" aria-hidden>
             <FileIcon size={STAT_ICON} />
           </span>
-          <span className="font-mono tabular-nums">{nFiles}</span>
+          <span className="tabular-nums">{nFiles}</span>
           <span>{nFiles === 1 ? "file" : "files"}</span>
         </span>
         {/* No scale here: the totals bar is the whole change, so it fills. What it carries is
@@ -360,7 +360,7 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
             Discard
           </button>
           {turn.usage && (
-            <span className="ml-auto text-faint text-[11px] tabular-nums">
+            <span className="ml-auto text-faint text-tiny tabular-nums">
               {fmtCost(turn.usage.cost_usd)}
               {turn.usage.cache_read_input_tokens > 0 && " · cache hit"}
             </span>

@@ -38,7 +38,7 @@ function StatusDot({ status }: { status: string }) {
   const color = status === "running" ? "bg-run" : status === "draft" ? "bg-faint" : "bg-ok";
   const label = status === "running" ? "running" : status === "draft" ? "draft" : "ready";
   return (
-    <span className="inline-flex items-center gap-1.5 text-muted text-[12px]">
+    <span className="inline-flex items-center gap-1.5 text-muted text-caption">
       <span className={`w-1.5 h-1.5 rounded-full ${color} ${status === "running" ? "animate-stream-pulse motion-reduce:animate-none" : ""}`} />
       {label}
     </span>
@@ -102,13 +102,13 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
         <Chip size="lg" tone="ink" selected={open} icon={<ProviderMark provider={provider} />}>
           {providerLabelOf(models, provider)}
           {/* A model id is an identifier; the provider's name is prose. */}
-          {provider !== "fake" && <span className="font-mono text-faint">{model}</span>}
+          {provider !== "fake" && <span className="text-faint">{model}</span>}
         </Chip>
       </button>
       {open && (
         <div className="absolute right-0 top-full z-30 mt-1 w-[440px] max-w-[calc(100vw-2rem)] animate-slide-in rounded-card border border-edge bg-panel p-3 shadow-floating motion-reduce:animate-none">
           <div className={TYPE.sectionLabel}>Provider keys</div>
-          <p className="mt-1 text-[11px] leading-[1.55] text-faint">
+          <p className="mt-1 text-tiny leading-[1.55] text-faint">
             Kept in Secrets with every other credential, behind the passcode. Never logged, never
             sent back to this page.
           </p>
@@ -116,22 +116,22 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
             {providers.map((p) => (
               <div key={p.id} className="flex items-center gap-2">
                 <ProviderMark provider={p.id} size={12} />
-                <span className="text-[12px] text-ink">{providerLabelOf(models, p.id)}</span>
+                <span className="text-caption text-ink">{providerLabelOf(models, p.id)}</span>
                 {p.configured ? (
                   <StatusBadge state="ok" variant="outline" label="connected" icon={KeyIcon} />
                 ) : (
                   // DISABLED WITH A STATED REASON RATHER THAN ABSENT, the same rule the model
                   // selector follows: a provider that vanishes reads as one the product does not
                   // support.
-                  <span className="text-[11px] text-faint">no key</span>
+                  <span className="text-tiny text-faint">no key</span>
                 )}
                 {p.powers_jaroku && (
-                  <span className="ml-auto text-[11px] text-faint">powers planning &amp; generation</span>
+                  <span className="ml-auto text-tiny text-faint">powers planning &amp; generation</span>
                 )}
               </div>
             ))}
             {providers.length === 0 && (
-              <p className="text-[11px] text-faint">Not connected to the server.</p>
+              <p className="text-tiny text-faint">Not connected to the server.</p>
             )}
           </div>
           {/* WHO PAYS FOR JAROKU'S OWN THINKING, beside the row that says which provider does it.
@@ -173,7 +173,7 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
 
           <button
             type="button"
-            className="mt-2.5 w-full rounded-control border-t border-hair pt-2.5 text-left text-[12px] text-muted transition-colors duration-fast hover:text-ink"
+            className="mt-2.5 w-full rounded-control border-t border-hair pt-2.5 text-left text-caption text-muted transition-colors duration-fast hover:text-ink"
             onClick={() => {
               setRightTab("secrets");
               setOpen(false);
@@ -212,7 +212,6 @@ function GithubChip({ agentId }: { agentId: string }) {
     <Chip
       size="sm"
       tone="faint"
-      mono
       variant="bare"
       icon={<GithubIcon size={ICON.badge} />}
       onClick={openGithubBranches}
@@ -249,7 +248,7 @@ function Breadcrumb({ agentId }: { agentId: string }) {
   const branch = view?.link.branch;
   if (!workspace && !branch) return null;
   return (
-    <span className="flex min-w-0 items-center gap-1 text-[10px] text-faint">
+    <span className="flex min-w-0 items-center gap-1 text-tiny text-faint">
       {workspace && <Truncate className="min-w-0 max-w-[160px]">{workspace.name}</Truncate>}
       {workspace && branch && <span aria-hidden>·</span>}
       {branch && (
@@ -285,7 +284,7 @@ function SyncRing() {
 
   return (
     <span
-      className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted"
+      className="flex shrink-0 items-center gap-1.5 text-tiny text-muted"
       title={`Evaluating — ${progress.done} of ${progress.total} done${progress.failed > 0 ? `, ${progress.failed} failed` : ""}`}
     >
       <svg width={16} height={16} viewBox="0 0 16 16" className="-rotate-90 align-middle" aria-hidden>
@@ -302,7 +301,7 @@ function SyncRing() {
           className={done ? "text-ok" : "text-accent"}
         />
       </svg>
-      <span className="font-mono tabular-nums">{fmtPercent(ratio)}</span>
+      <span className="tabular-nums">{fmtPercent(ratio)}</span>
     </span>
   );
 }
@@ -338,7 +337,7 @@ export function TopBar() {
         <>
           <span className="text-faint">·</span>
           <span className="flex min-w-0 flex-col justify-center leading-tight">
-            <Truncate className="max-w-[280px] text-[13px] text-ink" title={agent.name}>{agent.name}</Truncate>
+            <Truncate className="max-w-[280px] text-label text-ink" title={agent.name}>{agent.name}</Truncate>
             <Breadcrumb agentId={agent.agent_id} />
           </span>
           <StatusDot status={status} />

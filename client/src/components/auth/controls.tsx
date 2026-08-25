@@ -53,7 +53,7 @@ export function PrimaryButton({
       disabled={disabled}
       autoFocus={autoFocus}
       className={`flex w-full items-center justify-center gap-2.5 rounded-control bg-ink px-4 py-3
-        text-[13px] font-medium text-void outline-none transition-all duration-base ease-state
+        text-label text-void outline-none transition-all duration-base ease-state
         hover:shadow-glow-cta focus-visible:shadow-focusring
         disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:shadow-none ${className}`}
     >
@@ -88,7 +88,7 @@ export function SecondaryButton({
       disabled={disabled}
       autoFocus={autoFocus}
       className={`flex w-full items-center justify-center gap-2.5 rounded-control border border-edge
-        bg-panel px-4 py-3 text-[13px] font-medium text-ink outline-none
+        bg-panel px-4 py-3 text-label text-ink outline-none
         transition-all duration-base ease-state hover:border-chrome hover:shadow-glow
         focus-visible:shadow-focusring disabled:cursor-not-allowed disabled:opacity-40 ${className}`}
     >
@@ -112,7 +112,7 @@ export function QuietButton({ children, onClick, disabled, className = "" }: But
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`rounded-control px-3 py-2 text-[12px] text-muted outline-none
+      className={`rounded-control px-3 py-2 text-caption text-muted outline-none
         transition-colors duration-fast hover:text-ink focus-visible:shadow-focusring
         disabled:cursor-not-allowed disabled:opacity-40 ${className}`}
     >
@@ -182,7 +182,7 @@ export function TextField({
         autoComplete={type === "email" ? "email" : undefined}
         // The one deliberate exception to the type ladder, and the same one the composer takes:
         // this is the thing you type into, and it is allowed to be the largest text on the screen.
-        className="w-full bg-transparent py-3 text-[14px] text-ink outline-none
+        className="w-full bg-transparent py-3 text-body text-ink outline-none
           placeholder:text-faint disabled:cursor-not-allowed disabled:opacity-50"
       />
     </div>
@@ -235,8 +235,8 @@ export function Checkbox({
         )}
       </span>
       <span className="min-w-0">
-        <span className="block text-[13px] font-medium leading-[1.4] text-ink">{label}</span>
-        {hint && <span className="mt-1 block text-[12px] leading-[1.5] text-muted">{hint}</span>}
+        <span className="block text-label leading-[1.4] text-ink">{label}</span>
+        {hint && <span className="mt-1 block text-caption leading-[1.5] text-muted">{hint}</span>}
       </span>
     </label>
   );
@@ -252,7 +252,7 @@ export function OrDivider({ label = "or" }: { label?: string }) {
   return (
     <div className="flex items-center gap-3" role="separator" aria-label={label}>
       <span aria-hidden className="h-px flex-1 bg-hair" />
-      <span className="text-[12px] text-muted">{label}</span>
+      <span className="text-caption text-muted">{label}</span>
       <span aria-hidden className="h-px flex-1 bg-hair" />
     </div>
   );
@@ -267,7 +267,7 @@ export function OrDivider({ label = "or" }: { label?: string }) {
  */
 export function FormError({ children }: { children: React.ReactNode }) {
   return (
-    <p role="alert" className="text-[12px] leading-[1.5] text-err">
+    <p role="alert" className="text-caption leading-[1.5] text-err">
       {children}
     </p>
   );

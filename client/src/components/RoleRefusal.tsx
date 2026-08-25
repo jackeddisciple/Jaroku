@@ -48,7 +48,7 @@ export function RoleRefusal() {
         className="pointer-events-auto flex max-w-lg items-start gap-2 rounded-card border border-edge bg-panel px-3 py-2 shadow-overlay"
       >
         <span className="mt-0.5 shrink-0 text-muted" aria-hidden><LockIcon size={ICON.xs} /></span>
-        <p className="min-w-0 flex-1 text-[12px] leading-[1.5] text-ink">
+        <p className="min-w-0 flex-1 text-caption leading-[1.5] text-ink">
           This action requires the {named} role.
         </p>
         <button

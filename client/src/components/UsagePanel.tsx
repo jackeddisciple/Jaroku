@@ -54,7 +54,7 @@ function day(iso: string): string {
 function Incomplete({ what = "some usage could not be priced" }: { what?: string }) {
   return (
     <span
-      className="inline-flex items-center gap-1 text-[11px]"
+      className="inline-flex items-center gap-1 text-tiny"
       style={{ color: STATUS.pending }}
       title={what}
     >
@@ -68,7 +68,7 @@ function Incomplete({ what = "some usage could not be priced" }: { what?: string
 function Cost({ row }: { row: UsageBreakdown }) {
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-      <span className="font-mono text-[12px] text-ink">{fmtCost(row.usd)}</span>
+      <span className="text-caption text-ink">{fmtCost(row.usd)}</span>
       {!row.costKnown && <Incomplete />}
     </span>
   );
@@ -123,7 +123,7 @@ function CeilingControl({ ceilingUsd, planCeilingUsd }: { ceilingUsd: number | n
 
   return (
     <span className="flex items-center gap-1.5">
-      <span className="text-[11px] text-faint">$</span>
+      <span className="text-tiny text-faint">$</span>
       <input
         autoFocus
         inputMode="decimal"
@@ -133,7 +133,7 @@ function CeilingControl({ ceilingUsd, planCeilingUsd }: { ceilingUsd: number | n
           if (e.key === "Enter") commit();
           if (e.key === "Escape") setEditing(false);
         }}
-        className="w-20 rounded-control border border-hair bg-void px-1.5 py-0.5 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring focus:border-edge"
+        className="w-20 rounded-control border border-hair bg-void px-1.5 py-0.5 text-tiny text-ink outline-none focus-visible:shadow-focusring focus:border-edge"
       />
       <button className={quietBtn} onClick={commit}>Save</button>
       {/* Only when there IS one to clear. Offering "use the plan's" while already on the plan's
@@ -183,12 +183,12 @@ function Meter({
   return (
     <div className="rounded-control border border-hair px-3 py-2.5">
       <div className="flex items-baseline justify-between gap-3">
-        <span className="text-[12px] text-muted">{label}</span>
+        <span className="text-caption text-muted">{label}</span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="font-mono text-[13px] text-ink">
+          <span className="text-label text-ink">
             {!costKnown && "at least "}{fmtCost(spentUsd)}
           </span>
-          <span className="text-[12px] text-faint">
+          <span className="text-caption text-faint">
             {ceilingUsd === null ? "of no limit" : `of ${fmtCost(ceilingUsd)}`}
           </span>
           {control}
@@ -202,9 +202,9 @@ function Meter({
           />
         </div>
       )}
-      {note && <div className="mt-1.5 text-[11px] leading-[1.5] text-faint">{note}</div>}
+      {note && <div className="mt-1.5 text-tiny leading-[1.5] text-faint">{note}</div>}
       {!costKnown && (
-        <div className="mt-1.5 flex items-center gap-1.5 text-[11px]" style={{ color: STATUS.pending }}>
+        <div className="mt-1.5 flex items-center gap-1.5 text-tiny" style={{ color: STATUS.pending }}>
           <AlertTriangleIcon size={ICON.sm} />
           <span>
             some usage in this period could not be priced, so the figure is a floor rather than a total
@@ -244,10 +244,10 @@ function QuotaMeter({
     return (
       <div className="rounded-control border border-hair px-3 py-2.5">
         <div className="flex items-baseline justify-between gap-3">
-          <span className="text-[12px] text-muted">{label}</span>
-          <span className="font-mono text-[13px] tabular-nums text-ink">
+          <span className="text-caption text-muted">{label}</span>
+          <span className="text-label tabular-nums text-ink">
             {used.toLocaleString()}
-            <span className="ml-1 text-[12px] text-faint">this period</span>
+            <span className="ml-1 text-caption text-faint">this period</span>
           </span>
         </div>
       </div>
@@ -262,10 +262,10 @@ function QuotaMeter({
   return (
     <div className="rounded-control border border-hair px-3 py-2.5">
       <div className="flex items-baseline justify-between gap-3">
-        <span className="text-[12px] text-muted">{label}</span>
-        <span className="font-mono text-[13px] tabular-nums text-ink">
+        <span className="text-caption text-muted">{label}</span>
+        <span className="text-label tabular-nums text-ink">
           {used.toLocaleString()}
-          <span className="ml-1 text-[12px] text-faint">of {limit.toLocaleString()}</span>
+          <span className="ml-1 text-caption text-faint">of {limit.toLocaleString()}</span>
         </span>
       </div>
       <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-active">
@@ -276,7 +276,7 @@ function QuotaMeter({
       </div>
       {(at || nearing) && (
         <div
-          className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-[1.5]"
+          className="mt-1.5 flex items-start gap-1.5 text-tiny leading-[1.5]"
           style={{ color: at ? STATUS.error : STATUS.pending }}
         >
           <span className="mt-0.5 shrink-0"><AlertTriangleIcon size={ICON.sm} /></span>
@@ -342,8 +342,8 @@ function PlanChoice({ usage }: { usage: UsageSnapshot }) {
         className="flex w-full items-center gap-2 text-left"
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="text-[12px] text-muted">Plans</span>
-        <span className="text-[11px] text-faint">
+        <span className="text-caption text-muted">Plans</span>
+        <span className="text-tiny text-faint">
           {buyable.length === 1 ? `${buyable[0]!.label} is available` : `${buyable.length} others available`}
         </span>
         <span className="ml-auto text-faint">
@@ -357,14 +357,14 @@ function PlanChoice({ usage }: { usage: UsageSnapshot }) {
             <div key={p.id} className="flex items-start gap-3 border-t border-hair pt-1.5 first:border-t-0 first:pt-0">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="text-[12px] text-ink">{p.label}</span>
-                  {p.current && <span className="text-[10px] uppercase tracking-wider text-faint">current</span>}
+                  <span className="text-caption text-ink">{p.label}</span>
+                  {p.current && <span className="text-tiny uppercase tracking-wider text-faint">current</span>}
                 </div>
                 {/* THE FACTS A CHOICE ACTUALLY TURNS ON, in the units the rest of the panel uses:
                     what it grants, what it lets you start, how long a trace survives, how many
                     people may be here. Not a marketing line — this panel's whole job is to be
                     believed. */}
-                <div className="text-[11px] leading-[1.55] text-faint">
+                <div className="text-tiny leading-[1.55] text-faint">
                   {fmtCost(p.monthlyCreditsUsd)} credit each period ·{" "}
                   {p.budgetCeilingUsd === null ? "no plan ceiling" : `up to ${fmtCost(p.budgetCeilingUsd)} started`} ·{" "}
                   {p.retentionDays}-day traces · {p.seats === null ? "unlimited seats" : `${p.seats} seats`}
@@ -390,12 +390,12 @@ function PlanChoice({ usage }: { usage: UsageSnapshot }) {
             </div>
           ))}
           {!canBuy && (
-            <p className="text-[11px] text-faint">
+            <p className="text-tiny text-faint">
               Only an owner can change the plan — spend is everybody&rsquo;s to see, and what may be
               spent is theirs to set.
             </p>
           )}
-          {error && <p className="text-[11px] text-err">{error}</p>}
+          {error && <p className="text-tiny text-err">{error}</p>}
         </div>
       )}
     </div>
@@ -429,9 +429,9 @@ export function UsagePanel() {
   return (
     <div className="h-full overflow-y-auto px-4 py-3">
       <div className="flex items-baseline justify-between gap-3">
-        <div className="text-[13px] font-medium text-ink">{usage.plan.label} plan</div>
+        <div className="text-label text-ink">{usage.plan.label} plan</div>
         <div className="flex items-baseline gap-3">
-          <span className="text-[11px] text-faint">
+          <span className="text-tiny text-faint">
             {day(usage.periodStart)} – {day(usage.periodEnd)}
           </span>
           {/* The same rule as the eval exports, on the newest surface: every caveat on this
@@ -511,11 +511,11 @@ export function UsagePanel() {
         {usage.balanceUsd > 0 && (
           <div className="rounded-control border border-hair px-3 py-2.5">
             <div className="flex items-baseline justify-between gap-3">
-              <span className="text-[12px] text-muted">Credit</span>
-              <span className="font-mono text-[13px] text-ink">{fmtCost(usage.availableUsd)}</span>
+              <span className="text-caption text-muted">Credit</span>
+              <span className="text-label text-ink">{fmtCost(usage.availableUsd)}</span>
             </div>
             {usage.reservedUsd > 0 && (
-              <div className="mt-1.5 text-[11px] text-faint">
+              <div className="mt-1.5 text-tiny text-faint">
                 {fmtCost(usage.reservedUsd)} is held for runs in flight and comes back when they finish
               </div>
             )}
@@ -528,7 +528,7 @@ export function UsagePanel() {
       <Section title="By agent" empty="Nothing has spent anything this period.">
         {usage.byAgent.map((a) => (
           <Row key={a.agentId ?? "platform"} label={a.label} sub={a.runs ? `${a.runs} run${a.runs === 1 ? "" : "s"}` : undefined}>
-            <span className="text-[11px] text-faint">{fmtTokens(a.tokens)}</span>
+            <span className="text-tiny text-faint">{fmtTokens(a.tokens)}</span>
             <Cost row={a} />
           </Row>
         ))}
@@ -549,7 +549,7 @@ export function UsagePanel() {
               setRightTab("trace");
             }}
           >
-            <span className="text-[11px] text-faint">{fmtTokens(r.tokens)}</span>
+            <span className="text-tiny text-faint">{fmtTokens(r.tokens)}</span>
             <Cost row={r} />
           </Row>
         ))}
@@ -562,13 +562,13 @@ export function UsagePanel() {
             label={k.kind}
             sub={k.payer === "workspace" ? "your key" : "our key"}
           >
-            <span className="text-[11px] text-faint">{k.tokens > 0 ? fmtTokens(k.tokens) : ""}</span>
+            <span className="text-tiny text-faint">{k.tokens > 0 ? fmtTokens(k.tokens) : ""}</span>
             <Cost row={k} />
           </Row>
         ))}
       </Section>
 
-      <div className="mt-4 flex items-start gap-1.5 text-[11px] leading-[1.55] text-faint">
+      <div className="mt-4 flex items-start gap-1.5 text-tiny leading-[1.55] text-faint">
         <span className="mt-0.5 shrink-0" style={{ color: TEXT.faint }}>
           <InfoIcon size={ICON.sm} />
         </span>
@@ -590,9 +590,9 @@ function Section({
 }) {
   return (
     <div className="mt-4">
-      <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-faint">{title}</div>
+      <div className="mb-1.5 text-tiny uppercase tracking-wider text-faint">{title}</div>
       {children.length === 0 ? (
-        <div className="px-1 py-2 text-[12px] text-faint">{empty}</div>
+        <div className="px-1 py-2 text-caption text-faint">{empty}</div>
       ) : (
         <div className="divide-y divide-hair">{children}</div>
       )}
@@ -611,8 +611,8 @@ function Row({
   const inner = (
     <div className="flex items-center justify-between gap-3 py-1.5">
       <div className="min-w-0">
-        <div className="truncate text-[12px] text-ink">{label}</div>
-        {sub && <div className="truncate font-mono text-[11px] text-faint">{sub}</div>}
+        <div className="truncate text-caption text-ink">{label}</div>
+        {sub && <div className="truncate text-tiny text-faint">{sub}</div>}
       </div>
       <div className="flex shrink-0 items-center gap-3">{children}</div>
     </div>

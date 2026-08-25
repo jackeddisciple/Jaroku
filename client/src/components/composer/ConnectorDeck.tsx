@@ -64,7 +64,7 @@ function Tile({
       {connector.logoUrl ? (
         <img src={connector.logoUrl} alt="" width={DECK.tile} height={DECK.tile} className="block object-cover" />
       ) : (
-        <span className="text-[10px] font-medium leading-none text-white/90" aria-hidden>
+        <span className="text-tiny leading-none text-white/90" aria-hidden>
           {monogramLetter(connector.label)}
         </span>
       )}
@@ -131,7 +131,7 @@ export function ConnectorDeck({
               // "+N in the same footprint" — the same 20px box, so the deck's width does not jump
               // between a workspace with three connectors and one with nine.
               <span
-                className="inline-flex shrink-0 items-center justify-center text-[9px] font-medium text-muted"
+                className="inline-flex shrink-0 items-center justify-center text-tiny text-muted"
                 style={{
                   width: DECK.tile, height: DECK.tile, borderRadius: DECK.radius,
                   marginLeft: tileOffset(1, hovered), background: SURFACE.active,
@@ -160,7 +160,7 @@ export function ConnectorDeck({
           />
         ) : (
           <>
-            <div className="px-2 pb-1 pt-0.5 text-[10px] uppercase tracking-wider text-faint">
+            <div className="px-2 pb-1 pt-0.5 text-tiny uppercase tracking-wider text-faint">
               Connectors available to this conversation
             </div>
             {connectors.map((c) => (
@@ -171,7 +171,7 @@ export function ConnectorDeck({
                 <span className="shrink-0">
                   <Tile connector={{ ...c, warning: null }} index={0} total={1} hovered={false} />
                 </span>
-                <Truncate className="min-w-0 flex-1 text-[12px] text-ink">{c.label}</Truncate>
+                <Truncate className="min-w-0 flex-1 text-caption text-ink">{c.label}</Truncate>
                 <Checkbox
                   checked={c.enabled}
                   onChange={() => onToggle(c.id, !c.enabled)}
@@ -184,7 +184,7 @@ export function ConnectorDeck({
             {connectors.filter((c) => c.warning).map((c) => (
               // The health row. Here rather than in a notification, because this is where somebody
               // is already thinking about connectors — §3.2.
-              <div key={`warn-${c.id}`} className="flex items-start gap-2 px-2 py-1.5 text-[11px]">
+              <div key={`warn-${c.id}`} className="flex items-start gap-2 px-2 py-1.5 text-tiny">
                 <span className="shrink-0" style={{ color: STATUS.warn }} aria-hidden>⚠</span>
                 <span className="min-w-0 flex-1 text-muted">{c.label} {c.warning}</span>
               </div>

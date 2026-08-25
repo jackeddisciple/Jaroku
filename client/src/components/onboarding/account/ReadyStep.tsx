@@ -50,11 +50,11 @@ export function ReadyStep() {
       </Reveal>
 
       <Reveal delay={60}>
-        <h1 className="mt-7 font-serif text-[34px] font-normal leading-[1.15] text-ink">You&rsquo;re all set</h1>
+        <h1 className="mt-7 text-display text-ink">You&rsquo;re all set</h1>
       </Reveal>
 
       <Reveal delay={120}>
-        <p className="mt-3 text-[13px] leading-[1.6] text-muted">A few things to try next:</p>
+        <p className="mt-3 text-label leading-[1.6] text-muted">A few things to try next:</p>
       </Reveal>
 
       <Reveal delay={180}>
@@ -62,7 +62,7 @@ export function ReadyStep() {
           {NEXT.map((item) => (
             <li key={item} className="flex items-baseline gap-3">
               <span aria-hidden className="h-1 w-1 shrink-0 rounded-full bg-muted" />
-              <span className="text-[13px] leading-[1.5] text-ink">{item}</span>
+              <span className="text-label leading-[1.5] text-ink">{item}</span>
             </li>
           ))}
         </ul>

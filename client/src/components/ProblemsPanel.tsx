@@ -91,11 +91,11 @@ export function ProblemsPanel({
   return (
     <div className="shrink-0 border-t border-hair">
       <div className="flex items-center gap-2 px-6 py-1.5">
-        <span className="text-[10px] uppercase tracking-wider text-faint">Problems</span>
-        <span className="text-[11px] text-faint tabular-nums">{diagnostics.length}</span>
+        <span className="text-tiny uppercase tracking-wider text-faint">Problems</span>
+        <span className="text-tiny text-faint tabular-nums">{diagnostics.length}</span>
         {/* Said once, at the top, rather than on every row. A person who has read it knows; a row
             that repeated it would be nine-tenths disclaimer. */}
-        <span className="ml-auto text-[11px] text-faint">
+        <span className="ml-auto text-tiny text-faint">
           advisory — Commit &amp; Push runs the full validator
         </span>
       </div>
@@ -103,7 +103,7 @@ export function ProblemsPanel({
         {diagnostics.map((d, i) => (
           <button
             key={`${d.line}:${d.column ?? 0}:${i}`}
-            className="flex w-full items-baseline gap-2 py-0.5 text-left text-[11px] transition-colors duration-fast hover:text-ink"
+            className="flex w-full items-baseline gap-2 py-0.5 text-left text-tiny transition-colors duration-fast hover:text-ink"
             onClick={() => onSelect?.(d.line)}
           >
             {/* MUTED, NOT A STATUS COLOUR. The palette reserves ok/err/run for meaning — green is
@@ -112,7 +112,7 @@ export function ProblemsPanel({
                 file may commit cleanly. Borrowing a status colour would say something the surface
                 is explicitly not allowed to say. */}
             <span className="shrink-0 text-muted" aria-hidden><AlertTriangleIcon size={ICON.xs} /></span>
-            <span className="shrink-0 font-mono text-faint tabular-nums">
+            <span className="shrink-0 text-faint tabular-nums">
               {d.line}
               {d.column === undefined ? "" : `:${d.column}`}
             </span>
@@ -123,7 +123,7 @@ export function ProblemsPanel({
                 rule rather than only the symptom. Absent for the contract checks, which are not
                 numbered — calling them rule 12 would invent a number the prompt does not use. */}
             {d.rule !== null && (
-              <span className="shrink-0 font-mono text-faint">rule {d.rule}</span>
+              <span className="shrink-0 text-faint">rule {d.rule}</span>
             )}
           </button>
         ))}

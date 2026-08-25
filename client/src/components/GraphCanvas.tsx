@@ -12,9 +12,11 @@
 // file, no command, and no field it reads that some other region does not also render.
 //
 // AND IT REUSES GRAPH VIEW'S VOCABULARY RATHER THAN INVENTING A SECOND ONE. Circular nodes, thin
-// connectors, JetBrains Mono labels — v0.1.1/v0.1.2 established those for the agent's own topology,
-// and a second graph aesthetic inside one product would make two pictures that mean different
-// things look like they mean the same thing.
+// connectors, the same label treatment — v0.1.1/v0.1.2 established those for the agent's own
+// topology, and a second graph aesthetic inside one product would make two pictures that mean
+// different things look like they mean the same thing. The labels were monospaced when that was
+// written; typography.pdf §04 made them Sans, in both graphs at once, which is the vocabulary
+// holding rather than breaking.
 
 import { useMemo } from "react";
 
@@ -159,7 +161,7 @@ export function GraphCanvas({ view }: { view: GithubView }) {
 
   if (nodes.length === 0) {
     return (
-      <p className="text-[11px] leading-[1.5] text-muted">
+      <p className="text-tiny leading-[1.5] text-muted">
         Nothing on the timeline yet. Versions, commits and deploys appear here as they happen.
       </p>
     );
@@ -178,7 +180,7 @@ export function GraphCanvas({ view }: { view: GithubView }) {
           if (row.length === 0) return null;
           return (
             <div key={lane.id} className="flex items-start gap-2 py-1.5">
-              <span className="w-20 shrink-0 truncate pt-1 font-mono text-[10px] text-faint" title={lane.label(view)}>
+              <span className="w-20 shrink-0 truncate pt-1 text-tiny text-faint" title={lane.label(view)}>
                 {lane.label(view)}
               </span>
               <div className="relative flex-1">
@@ -222,16 +224,16 @@ function CanvasDot({ node }: { node: CanvasNode }) {
       ) : (
         <span className="leading-none">{dot}</span>
       )}
-      <Truncate className="max-w-[52px] font-mono text-[9px] text-faint">{node.label}</Truncate>
+      <Truncate className="max-w-[52px] text-tiny text-faint">{node.label}</Truncate>
       {node.marker && (
         // BENEATH THE COMMIT IT RAN AGAINST, which is §B.8.2's placement and the reason the whole
         // canvas is worth drawing: one glance answers which commit is live, which scored best, and
         // how far main is from either.
-        <span className={`font-mono text-[9px] ${node.marker.ok ? "text-ok" : "text-err"}`} title={node.marker.title}>
+        <span className={`text-tiny ${node.marker.ok ? "text-ok" : "text-err"}`} title={node.marker.title}>
           {node.marker.label}
         </span>
       )}
-      {node.lane === "deploys" && <span className="text-[9px] text-ok" aria-hidden>▼</span>}
+      {node.lane === "deploys" && <span className="text-tiny text-ok" aria-hidden>▼</span>}
       <span className="sr-only">{relTime(node.at)}</span>
     </span>
   );

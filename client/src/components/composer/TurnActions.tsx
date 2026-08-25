@@ -62,7 +62,7 @@ export function ActionButton({
       <Glyph icon={icon} size={GLYPH.action} />
       {typeof count === "number" && count > 0 && (
         <span
-          className="absolute right-1 top-1 rounded-full bg-accent px-1 text-[9px] font-medium leading-[1.4] text-bg"
+          className="absolute right-1 top-1 rounded-full bg-accent px-1 text-tiny leading-[1.4] text-bg"
           aria-hidden
         >
           {count}
@@ -172,7 +172,7 @@ export function TurnActions({
               focus-visible:shadow-focusring disabled:cursor-not-allowed disabled:opacity-30"
             style={{ minWidth: HIT_TARGET / 1.6, minHeight: HIT_TARGET }}
           >
-            <span aria-hidden className="text-[13px] leading-none">⌄</span>
+            <span aria-hidden className="text-label leading-none">⌄</span>
           </button>
           <Popover
             open={menuOpen}

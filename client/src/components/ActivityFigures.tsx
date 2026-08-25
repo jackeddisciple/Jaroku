@@ -1,15 +1,22 @@
 // §3.2's discipline, as four components: the figure, the badge, the texture behind it, and the
 // quiet line that says how old it is.
 //
-// NUMBERS ARE THE HERO, CHARTS ARE NOT. "Every card leads with one large figure in the mono face
-// using tabular figures, with a muted context line beneath. v0.2.2 already moved the trace from
-// `1,204 tok · $0.0031 · 820 ms` inline to figures as tabular columns — the same discipline applies
-// here, and columns of numbers must align on the decimal."
+// NUMBERS ARE THE HERO, CHARTS ARE NOT. "Every card leads with one large figure ... with a muted
+// context line beneath. v0.2.2 already moved the trace from `1,204 tok · $0.0031 · 820 ms` inline
+// to figures as tabular columns — the same discipline applies here, and columns of numbers must
+// align on the decimal."
 //
-// TABULAR FIGURES ARE NOT DECORATION. A proportional `1` is narrower than a `4`, so a column of
-// spend figures updating live jitters sideways as the digits change, and two rows of a leaderboard
-// do not line up on the decimal even though they are the same width. `tabular-nums` is what makes a
-// column of numbers readable AS a column, which is the entire reason the leaderboard is a table.
+// §3.2 SAID "IN THE MONO FACE" AND TYPOGRAPHY.PDF §04 OVERRULES IT: a figure is metadata, not code,
+// and §05 is explicit that a font must not be switched merely because a string looks technical.
+// What §3.2 was actually asking for is the sentence below, and it survives the change intact —
+// alignment was always the requirement and the mono face was one way of getting it.
+//
+// TABULAR FIGURES ARE NOT DECORATION, AND THEY ARE WHAT ACTUALLY DOES THIS JOB. A proportional `1`
+// is narrower than a `4`, so a column of spend figures updating live jitters sideways as the digits
+// change, and two rows of a leaderboard do not line up on the decimal even though they are the same
+// width. `tabular-nums` is what makes a column of numbers readable AS a column — in Geist Sans
+// exactly as in a monospace face, because it is an OpenType feature rather than a property of the
+// family — which is the entire reason the leaderboard is a table.
 //
 // SPARKLINES SIT IN THE CARD BACKGROUND, NOT THE FOREGROUND. The chart is texture behind the number,
 // not the headline — §3.2 again, and the reason `Sparkline` is absolutely positioned with the figure
@@ -63,18 +70,20 @@ export function Figure({
   return (
     <div className="relative">
       <div className="flex items-baseline gap-2">
-        {/* 18px for a hero figure, not 26. The rule this product's typography is built on is that
-            hierarchy comes from WEIGHT and COLOUR, not from scale — and a 26px number (30px on the
-            hero card) was the loudest element in the entire application, three of them filling a
-            third of the viewport to say three things.
+        {/* ONE RUNG FOR BOTH SIZES, which is the same argument that got the hero down to 18px in
+            the first place and now finishes it. The rule this product's typography is built on is
+            that hierarchy comes from WEIGHT and COLOUR, not from scale — a 26px number (30px on
+            the hero card) was the loudest element in the entire application, three of them filling
+            a third of the viewport to say three things. 18 was the compromise, and it was off
+            §02's ladder entirely: the rungs either side of it are 16 and 24, and 24 is where 26
+            was. So both stand on `title`, and what separates a hero figure from an inline one is
+            the card around it and the space it is given, not two points of type.
 
             `leading-none` for the hero ONLY. At inline size it collided with the caption's own
             `mt-1.5` below: zero line-height removes the descender space, so the two lines sat a
             pixel closer than every other label/value pair on the page. */}
         <span
-          className={`font-mono tabular-nums text-ink ${
-            size === "hero" ? "text-[18px] leading-none" : "text-[15px]"
-          }`}
+          className={`tabular-nums text-ink text-title ${size === "hero" ? "leading-none" : ""}`}
           // The figure is the thing a screenshot is taken of, so it carries its own full precision
           // for anybody who hovers — the displayed form is shortened past a thousand.
           title={empty ? def.empty : String(value)}
@@ -83,7 +92,7 @@ export function Figure({
         </span>
         {!empty && <DeltaBadge delta={delta} />}
       </div>
-      <div className="mt-1.5 text-[11px] leading-[1.45] text-muted">
+      <div className="mt-1.5 text-tiny leading-[1.45] text-muted">
         {context ?? (empty ? def.empty : def.context(RANGE_PROSE[range]))}
       </div>
     </div>
@@ -105,7 +114,7 @@ export function DeltaBadge({ delta }: { delta: ReturnType<typeof deltaOf> }) {
   const color = tone === "good" ? STATUS.ok : tone === "bad" ? STATUS.error : TEXT.muted;
   return (
     <span
-      className="font-mono text-[11px] tabular-nums leading-none"
+      className="text-tiny tabular-nums leading-none"
       style={{ color }}
       title={
         delta

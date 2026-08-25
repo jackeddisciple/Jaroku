@@ -65,7 +65,7 @@ function FileRail() {
             key={f.path}
             onClick={() => selectFile(f.path)}
             title={f.readOnly ? `${f.path} (read-only)` : f.path}
-            className={`relative flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] transition-colors duration-fast ${
+            className={`relative flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-tiny transition-colors duration-fast ${
               active ? "bg-active text-ink" : "text-muted hover:text-ink"
             }`}
           >
@@ -138,7 +138,7 @@ export function CodeViewer() {
     return (
       // Inline, at the top of the pane. A full-height centred sentence for a condition that
       // clears the moment somebody clicks a row is a screen announcing its own emptiness.
-      <div className="px-6 py-3 text-[12px] text-muted">Select a file to view it.</div>
+      <div className="px-6 py-3 text-caption text-muted">Select a file to view it.</div>
     );
   }
 
@@ -147,8 +147,8 @@ export function CodeViewer() {
       <FileRail />
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center gap-2 px-6 py-2 shrink-0 border-b border-hair">
-          <Truncate className="text-[12px] text-ink" title={file.path}>{file.path}</Truncate>
-          <span className="text-faint text-[11px] shrink-0">{lang}</span>
+          <Truncate className="text-caption text-ink" title={file.path}>{file.path}</Truncate>
+          <span className="text-faint text-tiny shrink-0">{lang}</span>
           {/* §B.3.2: a PROTECTED file opens READ-ONLY, never as an editable buffer that merely
               refuses to save. The flag arrives on the file from the server — the block list is
               §3.3's, not a second one computed here, for the reason a block list a browser owns is
@@ -165,8 +165,8 @@ export function CodeViewer() {
               <LockIcon size={ICON.xs} />
             </span>
           )}
-          {!complete && <span className="shrink-0 animate-stream-pulse text-[11px] text-run motion-reduce:animate-none">writing…</span>}
-          <span className="ml-auto text-faint text-[11px] shrink-0 tabular-nums">
+          {!complete && <span className="shrink-0 animate-stream-pulse text-tiny text-run motion-reduce:animate-none">writing…</span>}
+          <span className="ml-auto text-faint text-tiny shrink-0 tabular-nums">
             {content.split("\n").length} lines
           </span>
         </div>
@@ -184,7 +184,7 @@ export function CodeViewer() {
         <div className="scroll-fade min-h-0 flex-1 overflow-auto p-3">
           <div className="min-h-full overflow-hidden rounded-card border border-hair bg-panel">
             <div className="flex items-center gap-1 border-b border-hair px-2 py-1">
-              <span className="font-mono text-[10px] text-faint">{lang}</span>
+              <span className="text-tiny text-faint">{lang}</span>
               <button
                 className={`${iconBtn} ml-auto`}
                 title={copied ? "Copied" : "Copy this file"}
@@ -208,9 +208,9 @@ export function CodeViewer() {
                 <ChevronDownIcon size={ICON.xs} />
               </button>
             </div>
-            <div className="flex min-w-0 text-[12px] leading-[1.5]">
+            <div className="flex min-w-0 text-caption leading-[1.5]">
               <div
-                className="shrink-0 select-none border-r border-hair px-2 py-3 text-right font-mono text-[11px] leading-[1.5] text-faint"
+                className="shrink-0 select-none border-r border-hair px-2 py-3 text-right font-mono text-tiny leading-[1.5] text-faint"
                 aria-hidden
               >
                 {content.split("\n").map((_, i) => (

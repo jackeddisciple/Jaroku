@@ -142,7 +142,7 @@ export function EventFeedCard() {
                 onClick={() => toggleKind(k)}
                 aria-pressed={on}
                 title={`${on ? "Stop showing only" : "Show only"} ${action.verb.toLowerCase()}`}
-                className={`flex items-center gap-1 rounded-chip px-1.5 py-0.5 text-[10px] transition-colors duration-fast ${
+                className={`flex items-center gap-1 rounded-chip px-1.5 py-0.5 text-tiny transition-colors duration-fast ${
                   on ? "bg-active text-ink" : "text-faint hover:text-muted"
                 }`}
               >
@@ -165,8 +165,8 @@ export function EventFeedCard() {
           aria-label="Event feed loading"
         />
       ) : visible.length === 0 ? (
-        <div className="flex h-[64px] items-center gap-2 text-[12px] text-muted">
-          <span className="font-mono text-[15px] text-faint">{EMPTY_FIGURE}</span>
+        <div className="flex h-[64px] items-center gap-2 text-caption text-muted">
+          <span className="text-title text-faint">{EMPTY_FIGURE}</span>
           {kinds.size > 0 ? "nothing of that kind in this range" : `nothing happened in ${RANGE_PROSE[range]}`}
         </div>
       ) : (
@@ -198,12 +198,12 @@ export function EventFeedCard() {
                       action={action}
                       state={r.outcome === "error" ? "error" : r.outcome === "refused" ? "pending" : "done"}
                       object={
-                        <Truncate className="inline-block max-w-[16ch] align-bottom font-mono text-[11px] text-ink" title={r.object ?? ""}>
+                        <Truncate className="inline-block max-w-[16ch] align-bottom text-tiny text-ink" title={r.object ?? ""}>
                           {r.object ?? r.agent_id ?? ""}
                         </Truncate>
                       }
                       detail={
-                        <span className="text-[11px]">
+                        <span className="text-tiny">
                           {r.agent_id && r.object !== r.agent_id ? r.agent_id : ""}
                           {r.num !== null && r.kind === "version" ? ` v${r.num}` : ""}
                           {r.outcome === "refused" && <span style={{ color: STATUS.error }}> refused</span>}
@@ -219,7 +219,7 @@ export function EventFeedCard() {
             </div>
           </div>
           {loading && (
-            <div className="py-1 text-center text-[10px] text-faint">loading more…</div>
+            <div className="py-1 text-center text-tiny text-faint">loading more…</div>
           )}
         </div>
       )}

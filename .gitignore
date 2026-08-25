@@ -47,6 +47,12 @@ jaroku-*-prompt.pdf
 # would also swallow a PDF somebody meant to ship — a fixture, a diagram, a licence.
 subscriptions.pdf
 teams.pdf
+# A fourth: the design-system specs are named after the SYSTEM rather than after a destination or
+# a feature, because neither is what they describe — they apply to every screen at once. Same
+# reason as the three above for naming them: what ships is the colour tokens and the type ladder
+# these two argue for, not the argument.
+colour_system.pdf
+typography.pdf
 
 # Cygwin drops one of these beside the repo when a bash process faults on Windows. It is a core
 # dump with a stack trace in it, not source, and it reappears whenever the shell falls over.

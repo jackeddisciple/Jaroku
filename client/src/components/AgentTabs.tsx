@@ -51,7 +51,7 @@ function Section({ label, children, hint }: { label: string; children: React.Rea
     <section className="min-w-0">
       <div className="mb-1.5 flex items-baseline gap-2">
         <span className={TYPE.sectionLabel}>{label}</span>
-        {hint && <span className="text-[10px] text-faint">{hint}</span>}
+        {hint && <span className="text-tiny text-faint">{hint}</span>}
       </div>
       {children}
     </section>
@@ -62,8 +62,8 @@ function Section({ label, children, hint }: { label: string; children: React.Rea
 function Stat({ label, value, title }: { label: string; value: React.ReactNode; title?: string }) {
   return (
     <div className="min-w-0 rounded-control border border-hair px-2.5 py-2" title={title}>
-      <div className="truncate text-[13px] tabular-nums text-ink">{value}</div>
-      <div className="mt-0.5 text-[10px] uppercase tracking-wider text-faint">{label}</div>
+      <div className="truncate text-label tabular-nums text-ink">{value}</div>
+      <div className="mt-0.5 text-tiny uppercase tracking-wider text-faint">{label}</div>
     </div>
   );
 }
@@ -75,7 +75,7 @@ function Capabilities({ detail }: { detail: AgentDetailView }) {
     <div className="space-y-5 p-4">
       <Section label="Reviewed connectors" hint="audited templates, copied in verbatim">
         {a.connectors.length === 0 ? (
-          <div className="text-[11px] text-faint">None.</div>
+          <div className="text-tiny text-faint">None.</div>
         ) : (
           <div className="flex flex-wrap gap-1.5">
             {a.connectors.map((c) => (
@@ -89,7 +89,7 @@ function Capabilities({ detail }: { detail: AgentDetailView }) {
 
       <Section label="Granted MCP tools" hint="third-party code Jaroku has not reviewed">
         {detail.tools.length === 0 ? (
-          <div className="text-[11px] text-faint">None granted.</div>
+          <div className="text-tiny text-faint">None granted.</div>
         ) : (
           <div className="space-y-1">
             {detail.tools.map((t) => (
@@ -99,7 +99,7 @@ function Capabilities({ detail }: { detail: AgentDetailView }) {
                       here would be a second thing to learn about the one mark whose whole job is to
                       be recognised instantly. */}
                   <McpBadge variant="compact" />
-                  <Truncate className="min-w-0 flex-1 font-mono text-[11px] text-ink" title={t.ref}>
+                  <Truncate className="min-w-0 flex-1 text-tiny text-ink" title={t.ref}>
                     {t.ref}
                   </Truncate>
                   {t.impact === "high" && <HighImpactBadge reason={t.reason ?? undefined} />}
@@ -113,7 +113,7 @@ function Capabilities({ detail }: { detail: AgentDetailView }) {
                 </div>
                 {/* THE STORED REASON, printed as stored. A classification summarised into one word
                     is a classification somebody has to take on trust. */}
-                {t.reason && <div className="text-[11px] leading-[1.5] text-muted">{t.reason}</div>}
+                {t.reason && <div className="text-tiny leading-[1.5] text-muted">{t.reason}</div>}
               </div>
             ))}
           </div>
@@ -122,22 +122,22 @@ function Capabilities({ detail }: { detail: AgentDetailView }) {
 
       <Section label="Credentials" hint="names only — no value is ever carried here">
         {detail.credentials.length === 0 ? (
-          <div className="text-[11px] text-faint">This agent requires none.</div>
+          <div className="text-tiny text-faint">This agent requires none.</div>
         ) : (
           <div className="space-y-0.5">
             {detail.credentials.map((c) => (
               <div key={c.name} className="flex min-w-0 items-center gap-2 rounded-control px-2 py-1">
                 <KeyIcon size={ICON.xs} className="shrink-0 text-faint" />
-                <Truncate className="min-w-0 flex-1 font-mono text-[11px] text-ink">{c.name}</Truncate>
+                <Truncate className="min-w-0 flex-1 text-tiny text-ink">{c.name}</Truncate>
                 {c.scope && (
-                  <span className="shrink-0 text-[10px] text-faint" title={`Scoped to the ${c.scope}`}>
+                  <span className="shrink-0 text-tiny text-faint" title={`Scoped to the ${c.scope}`}>
                     {c.scope}
                   </span>
                 )}
                 {/* ROSE, NOT AMBER, for the same reason the card's warning line is: amber means
                     running, and a missing credential is a problem rather than progress. */}
                 <span
-                  className="shrink-0 text-[10px] uppercase tracking-wider"
+                  className="shrink-0 text-tiny uppercase tracking-wider"
                   style={{ color: c.configured ? STATUS.ok : STATUS.error }}
                 >
                   {c.configured ? "configured" : "missing"}
@@ -168,7 +168,7 @@ function Health({ detail }: { detail: AgentDetailView }) {
   return (
     <div className="space-y-5 p-4">
       <Section label="Validator" hint="the verdict on the live version">
-        <div className="rounded-control border border-hair px-2.5 py-2 text-[12px]">
+        <div className="rounded-control border border-hair px-2.5 py-2 text-caption">
           {a.version_source === null ? (
             <span className="text-muted">
               Nothing has been published, so nothing has been validated.
@@ -187,7 +187,7 @@ function Health({ detail }: { detail: AgentDetailView }) {
 
       <Section label="Recent runs" hint="the last ~20 — click a bar to open its trace">
         {a.outcomes.length === 0 ? (
-          <div className="text-[11px] text-faint">Nothing has run yet.</div>
+          <div className="text-tiny text-faint">Nothing has run yet.</div>
         ) : (
           <AgentSparkline outcomes={a.outcomes} height={20} />
         )}
@@ -214,14 +214,14 @@ function Health({ detail }: { detail: AgentDetailView }) {
 
       {/* §6: "A model with no pricing entry shows cost unknown and is excluded from any ranking." */}
       {!a.spend_known && (
-        <div className="rounded-control border border-hair px-2.5 py-2 text-[11px]" style={{ color: STATUS.error }}>
+        <div className="rounded-control border border-hair px-2.5 py-2 text-tiny" style={{ color: STATUS.error }}>
           Something here ran on a model with no price entry, so every figure above is a floor.
         </div>
       )}
 
       {a.last_error && (
         <Section label="Last error">
-          <pre className="max-h-40 overflow-auto rounded-control border border-hair px-2.5 py-2 font-mono text-[11px] leading-[1.6] text-muted">
+          <pre className="max-h-40 overflow-auto rounded-control border border-hair px-2.5 py-2 font-mono text-tiny leading-[1.6] text-muted">
             {a.last_error}
           </pre>
         </Section>
@@ -257,15 +257,15 @@ function Deploy({ detail }: { detail: AgentDetailView }) {
             href={a.deployment.url}
             target="_blank"
             rel="noreferrer noopener"
-            className="flex min-w-0 items-center gap-1.5 rounded-control border border-hair px-2.5 py-2 text-[12px] text-ink transition-colors hover:border-edge"
+            className="flex min-w-0 items-center gap-1.5 rounded-control border border-hair px-2.5 py-2 text-caption text-ink transition-colors hover:border-edge"
           >
-            <Truncate className="min-w-0 flex-1 font-mono">{a.deployment.url}</Truncate>
+            <Truncate className="min-w-0 flex-1">{a.deployment.url}</Truncate>
             <ExternalLinkIcon size={ICON.xs} className="shrink-0 text-faint" />
           </a>
         ) : (
           // NEVER A GUESS AT WHAT THE URL WILL BE. The deploy store is explicit about this and the
           // panel has to be too: a URL that has not been issued is not a URL.
-          <div className="text-[11px] text-faint">The host has not issued one yet.</div>
+          <div className="text-tiny text-faint">The host has not issued one yet.</div>
         )}
       </Section>
 
@@ -284,7 +284,7 @@ function Deploy({ detail }: { detail: AgentDetailView }) {
 
       {a.drift && (
         <div
-          className="rounded-control border border-hair px-2.5 py-2 text-[12px]"
+          className="rounded-control border border-hair px-2.5 py-2 text-caption"
           style={{ color: STATUS.error }}
         >
           Serving v{a.drift.deployed}; this agent is now at v{a.drift.current}. Redeploy to catch it up.
@@ -293,7 +293,7 @@ function Deploy({ detail }: { detail: AgentDetailView }) {
 
       <Section label="Environment" hint="names only">
         {a.required_env.length === 0 ? (
-          <div className="text-[11px] text-faint">None.</div>
+          <div className="text-tiny text-faint">None.</div>
         ) : (
           <div className="flex flex-wrap gap-1.5">
             {a.required_env.map((name) => (
@@ -350,13 +350,13 @@ function Evals({ detail }: { detail: AgentDetailView }) {
     <div className="space-y-5 p-4">
       <Section label="Datasets" hint="belonging to this agent">
         {datasets.length === 0 ? (
-          <div className="text-[11px] text-faint">None.</div>
+          <div className="text-tiny text-faint">None.</div>
         ) : (
           <div className="space-y-0.5">
             {datasets.map((d) => (
               <div key={d.id} className="flex min-w-0 items-center gap-2 rounded-control px-2 py-1">
-                <Truncate className="min-w-0 flex-1 text-[12px] text-ink">{d.name}</Truncate>
-                <span className="shrink-0 text-[10px] tabular-nums text-faint">
+                <Truncate className="min-w-0 flex-1 text-caption text-ink">{d.name}</Truncate>
+                <span className="shrink-0 text-tiny tabular-nums text-faint">
                   {d.example_count} example{d.example_count === 1 ? "" : "s"}
                 </span>
               </div>
@@ -368,8 +368,8 @@ function Evals({ detail }: { detail: AgentDetailView }) {
       {last && (
         <Section label="Last eval">
           <div className="flex min-w-0 items-center gap-2 rounded-control border border-hair px-2.5 py-2">
-            <span className="text-[12px] text-ink">{last.status}</span>
-            <span className="text-[11px] text-faint" title={absTime(last.started_at)}>{relTime(last.started_at)}</span>
+            <span className="text-caption text-ink">{last.status}</span>
+            <span className="text-tiny text-faint" title={absTime(last.started_at)}>{relTime(last.started_at)}</span>
             {/* THE WINNING PROVIDER IS THE AGGREGATE'S ANSWER AND IS NOT RE-DERIVED HERE. §6 asks for
                 it, and the eval dashboard computes it from per-leg scores; a second computation would
                 be a second answer to "which provider won", and the two would disagree the first time
@@ -385,7 +385,7 @@ function Evals({ detail }: { detail: AgentDetailView }) {
 
       <button
         onClick={() => setTab("evals")}
-        className="flex w-full items-center justify-center gap-1.5 rounded-control border border-hair px-2 py-1.5 text-[12px] text-muted transition-colors hover:border-edge hover:bg-active active:bg-chrome hover:text-ink"
+        className="flex w-full items-center justify-center gap-1.5 rounded-control border border-hair px-2 py-1.5 text-caption text-muted transition-colors hover:border-edge hover:bg-active active:bg-chrome hover:text-ink"
       >
         <DatabaseIcon size={ICON.xs} /> Run an eval
       </button>
@@ -410,7 +410,7 @@ function ThreadsAndRuns({ detail }: { detail: AgentDetailView }) {
     <div className="space-y-5 p-4">
       <Section label="Threads" hint="sessions on this agent">
         {detail.threads.length === 0 ? (
-          <div className="text-[11px] text-faint">Nothing has been started on it yet.</div>
+          <div className="text-tiny text-faint">Nothing has been started on it yet.</div>
         ) : (
           <div className="space-y-0.5">
             {detail.threads.map((t) => (
@@ -426,11 +426,11 @@ function ThreadsAndRuns({ detail }: { detail: AgentDetailView }) {
                   t.archived ? "opacity-60" : ""
                 }`}
               >
-                <Truncate className="min-w-0 flex-1 text-[12px] text-ink">{t.title}</Truncate>
+                <Truncate className="min-w-0 flex-1 text-caption text-ink">{t.title}</Truncate>
                 {t.archived && (
-                  <span className="shrink-0 text-[10px] uppercase tracking-wider text-faint">archived</span>
+                  <span className="shrink-0 text-tiny uppercase tracking-wider text-faint">archived</span>
                 )}
-                <span className="shrink-0 text-[10px] text-faint" title={absTime(t.last_activity_at)}>{relTime(t.last_activity_at)}</span>
+                <span className="shrink-0 text-tiny text-faint" title={absTime(t.last_activity_at)}>{relTime(t.last_activity_at)}</span>
               </button>
             ))}
           </div>
@@ -439,7 +439,7 @@ function ThreadsAndRuns({ detail }: { detail: AgentDetailView }) {
 
       <Section label="Recent runs">
         {detail.runs.length === 0 ? (
-          <div className="text-[11px] text-faint">None.</div>
+          <div className="text-tiny text-faint">None.</div>
         ) : (
           <div className="space-y-0.5">
             {detail.runs.map((r) => (
@@ -463,8 +463,8 @@ function ThreadsAndRuns({ detail }: { detail: AgentDetailView }) {
                   }}
                   aria-hidden
                 />
-                <Truncate className="min-w-0 flex-1 font-mono text-[11px] text-muted">{r.model}</Truncate>
-                <span className="shrink-0 text-[10px] text-faint" title={absTime(r.started_at)}>{relTime(r.started_at)}</span>
+                <Truncate className="min-w-0 flex-1 text-tiny text-muted">{r.model}</Truncate>
+                <span className="shrink-0 text-tiny text-faint" title={absTime(r.started_at)}>{relTime(r.started_at)}</span>
               </button>
             ))}
           </div>

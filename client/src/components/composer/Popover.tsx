@@ -165,13 +165,13 @@ export function PopoverRow({
     >
       {icon && <span className="shrink-0 text-muted">{icon}</span>}
       <span className="min-w-0 flex-1">
-        <span className="block text-[12px] text-ink">{label}</span>
-        {detail && <span className="block text-[10px] text-faint">{detail}</span>}
+        <span className="block text-caption text-ink">{label}</span>
+        {detail && <span className="block text-tiny text-faint">{detail}</span>}
       </span>
       {/* A FIXED SLOT, occupied or not. Rendering the tick only when selected makes every row
           jump ~14px the moment you change the value — the same reason the connector chips in
           BuildPane reserve theirs. */}
-      <span className="inline-flex w-3 shrink-0 justify-center text-[11px] text-accent" aria-hidden>
+      <span className="inline-flex w-3 shrink-0 justify-center text-tiny text-accent" aria-hidden>
         {selected ? "✓" : ""}
       </span>
       {trailing}
@@ -182,7 +182,7 @@ export function PopoverRow({
 /** A hairline between groups of rows, and the footnote blocks the spec's popovers end with. */
 export function PopoverNote({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mt-1 border-t border-hair px-2 pb-1 pt-1.5 text-[10px] leading-relaxed text-faint">
+    <div className="mt-1 border-t border-hair px-2 pb-1 pt-1.5 text-tiny leading-relaxed text-faint">
       {children}
     </div>
   );

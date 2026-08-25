@@ -118,7 +118,7 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
 
   if (turn.status === "error") {
     return (
-      <div className="text-[12px]">
+      <div className="text-caption">
         <div className="text-err">Generation failed — {turn.error}</div>
         {turn.problems && turn.problems.length > 0 && (
           <ul className="mt-2 space-y-1 text-muted">
@@ -135,7 +135,7 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
   if (turn.status === "generating" && isLive) {
     const list = orderedFiles({ files, fileOrder });
     return (
-      <div className="text-[12px]">
+      <div className="text-caption">
         <div className="text-run">Generating…</div>
         <div className="mt-2 space-y-0.5">
           {list.map((f) => (
@@ -201,7 +201,7 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
     // is what happened.
     <StatRow
       leading={
-        <span className="inline-flex items-center gap-1.5 text-[12px] text-ok">
+        <span className="inline-flex items-center gap-1.5 text-caption text-ok">
           <StatusDot state="ok" size={ICON.badge} />
           Generated
         </span>
@@ -224,7 +224,7 @@ function ReplyTurnView({ turn }: { turn: ReplyTurn }) {
   // without this the caret sits still for a second and then a paragraph appears at once.
   const text = useStreamedText(turn.text, turn.status === "streaming");
   return (
-    <div className={`text-[13px] whitespace-pre-wrap break-words ${turn.status === "error" ? "text-err" : "text-ink"}`}>
+    <div className={`text-label whitespace-pre-wrap break-words ${turn.status === "error" ? "text-err" : "text-ink"}`}>
       <Prose text={text} />
       {turn.status === "streaming" && (
         <span className="animate-stream-pulse text-faint motion-reduce:animate-none">▋</span>
@@ -372,7 +372,7 @@ function Turn({ turn, isLastGen }: { turn: ChatTurn; isLastGen: boolean }) {
       // scrolled-back thread, the question is whose turn this was, and a face answers that faster
       // than punctuation does.
       <TurnRow marker={<UserCircleIcon size={ICON.sm} className="text-faint" />}>
-        <span className="text-ink text-[13px] whitespace-pre-wrap break-words">{turn.text}</span>
+        <span className="text-ink text-label whitespace-pre-wrap break-words">{turn.text}</span>
       </TurnRow>
     );
   }
@@ -408,7 +408,7 @@ function Turn({ turn, isLastGen }: { turn: ChatTurn; isLastGen: boolean }) {
   // mark, so the gutter stays a record of who spoke.
   return (
     <TurnRow>
-      <div className={`text-[12px] ${turn.tone === "error" ? "text-err" : "text-faint"}`}>
+      <div className={`text-caption ${turn.tone === "error" ? "text-err" : "text-faint"}`}>
         {turn.text}
       </div>
     </TurnRow>
@@ -470,7 +470,7 @@ function ModelSelector({
         icon={<ProviderMark provider={provider} size={12} />}
       >
         {/* "Dry run (free)" is prose; a model id is an identifier. Only the latter gets mono. */}
-        <span className={provider === "fake" ? undefined : "font-mono"}>{label}</span>
+        <span className={provider === "fake" ? undefined : ""}>{label}</span>
         {/* Points down at a closed menu and up at an open one — this popover opens upward, and a
             chevron that keeps pointing down while the list is above it is pointing at nothing. */}
         <span
@@ -497,7 +497,7 @@ function ModelSelector({
                 {!usableProviders.has(p.id) ? (
                   <button
                     type="button"
-                    className="ml-auto text-[10px] text-muted underline-offset-2 hover:text-ink hover:underline"
+                    className="ml-auto text-tiny text-muted underline-offset-2 hover:text-ink hover:underline"
                     onClick={() => {
                       openSecretsForProvider(p.id);
                       setOpen(false);
@@ -524,7 +524,7 @@ function ModelSelector({
                       setModel(m); // …then pin the chosen one
                       setOpen(false);
                     }}
-                    className={`flex w-full items-center gap-1.5 rounded-control px-2 py-1 text-left font-mono text-[12px] transition-colors duration-fast ${
+                    className={`flex w-full items-center gap-1.5 rounded-control px-2 py-1 text-left text-caption transition-colors duration-fast ${
                       !usable
                         ? "cursor-not-allowed text-faint opacity-60"
                         : active
@@ -537,7 +537,7 @@ function ModelSelector({
                       {active && <CheckIcon size={ICON.xs} />}
                     </span>
                     <span className="min-w-0 flex-1 truncate">{m}</span>
-                    {!usable ? <span className="shrink-0 text-[10px]">no API key</span> : null}
+                    {!usable ? <span className="shrink-0 text-tiny">no API key</span> : null}
                   </button>
                 );
               })}
@@ -555,7 +555,7 @@ function ModelSelector({
               openSecretsForProvider(null);
               setOpen(false);
             }}
-            className="mt-1 flex w-full items-center gap-1.5 rounded-control border-t border-hair px-2 pt-2 pb-1 text-left text-[12px] text-muted transition-colors duration-fast hover:text-ink"
+            className="mt-1 flex w-full items-center gap-1.5 rounded-control border-t border-hair px-2 pt-2 pb-1 text-left text-caption text-muted transition-colors duration-fast hover:text-ink"
           >
             <span className="inline-flex w-[11px] shrink-0 items-center justify-center" aria-hidden>
               +
@@ -589,7 +589,7 @@ function NoProviderKeyBanner() {
     // an action at the end of it — and it was wrapped in a bordered container, which turns prose
     // in the flow into a banner you have to dismiss in your head before reading what is under it.
     // Dropping the border is the entire difference between the two.
-    <div className="mb-2 flex items-center gap-2 px-0.5 text-[11px] text-muted">
+    <div className="mb-2 flex items-center gap-2 px-0.5 text-tiny text-muted">
       <span className="shrink-0 text-faint" aria-hidden><PlugIcon size={ICON.xs} /></span>
       <span className="min-w-0 flex-1">
         No provider key in this workspace yet — runs use the free dry-run model until you add one.
@@ -1476,7 +1476,7 @@ export function BuildPane({
           // case, and `min-w-0` is what lets it shrink at all inside this flex row. The tooltip
           // carries the untruncated original, which the client has always had and never shown.
           <Truncate
-            className="font-mono text-[12px] text-muted"
+            className="text-caption text-muted"
             title={fullTitle(agent.name, agent.description)}
           >
             {displayTitle(agent.name, agent.description)}
@@ -1549,7 +1549,7 @@ export function BuildPane({
           // label there, and stays a caption in the three-column app, where it is the only
           // label above the composer and an uppercase one would shout.
           <div className={`mb-2 flex flex-wrap items-center gap-2 ${standalone ? "mt-1" : ""}`}>
-            <span className={standalone ? `${TYPE.sectionLabel} mr-1` : "text-[11px] text-faint mr-1"}>
+            <span className={standalone ? `${TYPE.sectionLabel} mr-1` : "text-tiny text-faint mr-1"}>
               Connectors
             </span>
             {CONNECTORS.map((c) => {
@@ -1602,7 +1602,7 @@ export function BuildPane({
                   ? "The name is fixed once a plan is on the table — discard the plan to change it"
                   : "Optional. Otherwise the name is taken from your description."
               }
-              className="ml-auto w-40 bg-panel font-mono text-ink placeholder:text-faint rounded-control px-2.5 py-1 text-[12px] outline-none focus:shadow-focusring disabled:opacity-50"
+              className="ml-auto w-40 bg-panel text-ink placeholder:text-faint rounded-control px-2.5 py-1 text-caption outline-none focus:shadow-focusring disabled:opacity-50"
             />
           </div>
         )}
@@ -1621,7 +1621,7 @@ export function BuildPane({
             <button
               onClick={() => setMcpOpen((v) => !v)}
               disabled={busy}
-              className="inline-flex items-center gap-1.5 text-[11px] text-faint hover:text-muted transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 text-tiny text-faint hover:text-muted transition-colors disabled:opacity-50"
             >
               <span style={{ color: ACCENT.mcp }}>
                 <PlugIcon size={ICON.xs} />
@@ -1655,7 +1655,7 @@ export function BuildPane({
                       onClick={() => toggleMcp(t.ref)}
                       disabled={busy}
                       title={`${t.serverLabel} — ${t.impact_reason}`}
-                      className={`flex w-full items-center gap-1.5 rounded-control px-1.5 py-1 text-left text-[12px] transition-colors disabled:opacity-50 ${
+                      className={`flex w-full items-center gap-1.5 rounded-control px-1.5 py-1 text-left text-caption transition-colors disabled:opacity-50 ${
                         on ? "bg-active text-ink" : "text-muted hover:text-ink"
                       }`}
                     >
@@ -1664,7 +1664,7 @@ export function BuildPane({
                       <span className="inline-flex w-[11px] shrink-0 items-center justify-center" aria-hidden>
                         {on && <StatusDot state="ok" size={ICON.badge} color={ACCENT.mcp} />}
                       </span>
-                      <Truncate className="font-mono">{t.name}</Truncate>
+                      <Truncate className="">{t.name}</Truncate>
                       {/* Which server it came from is not decoration: two servers can
                           advertise the same tool name and mean different things. */}
                       <Truncate className="text-faint">{t.serverLabel}</Truncate>
@@ -1702,7 +1702,7 @@ export function BuildPane({
 
         {/* context chip + live routing hint (Chat mode) — so the one composer stays transparent */}
         {(contextLabel || text.trim() || moment.status) && (
-          <div className="mb-2 flex items-center gap-2 text-[11px]">
+          <div className="mb-2 flex items-center gap-2 text-tiny">
             {/* What the app is doing. The routing hint on the right says where a message would go;
                 this says what is going on regardless of whether anything has been typed. */}
             {moment.status && (
@@ -1788,7 +1788,7 @@ export function BuildPane({
               admin pins the mode, and a control that silently snapped back would read as the app
               being broken instead of as a rule being applied. */}
           {settingsError && (
-            <div className="mb-3 flex items-start gap-2 rounded-card border border-edge bg-bg px-2.5 py-2 text-[11px] text-muted">
+            <div className="mb-3 flex items-start gap-2 rounded-card border border-edge bg-bg px-2.5 py-2 text-tiny text-muted">
               <span className="shrink-0" style={{ color: STATUS.warn }} aria-hidden>
                 <AlertTriangleIcon size={ICON.xs} />
               </span>
@@ -1841,7 +1841,7 @@ export function BuildPane({
               possible behavior here — it produces a confident answer grounded in half a file." */}
           {attachments.length > 0 && budgetFraction !== null && budgetFraction >= WARN_AT && (
             <div
-              className="mb-2 flex items-start gap-2 rounded-card border border-edge bg-bg px-2.5 py-2 text-[11px]"
+              className="mb-2 flex items-start gap-2 rounded-card border border-edge bg-bg px-2.5 py-2 text-tiny"
               role="status"
             >
               <span className="shrink-0" style={{ color: overBudget ? STATUS.error : STATUS.warn }} aria-hidden>
@@ -1919,7 +1919,7 @@ export function BuildPane({
               // is the sentence the user writes and it should be the largest text on the screen —
               // but a half-pixel size that exists once, as an inline style, is a value nobody can
               // maintain or match.
-              className="w-full resize-none bg-transparent text-[14px] leading-[1.5] text-ink outline-none transition-opacity duration-base placeholder:text-muted focus-visible:shadow-focusring"
+              className="w-full resize-none bg-transparent text-body leading-[1.5] text-ink outline-none transition-opacity duration-base placeholder:text-muted focus-visible:shadow-focusring"
               style={{
                 minHeight: LINE_PX,
                 // In the dialog there is no 12-line cap — the box IS the editor, and it fills

@@ -67,23 +67,23 @@ export function RunFigures() {
   const sep = <span className="text-faint" aria-hidden>·</span>;
 
   return (
-    <span className="flex min-w-0 items-center gap-2 text-[11px] text-muted">
+    <span className="flex min-w-0 items-center gap-2 text-tiny text-muted">
       {/* The one variable-width element, and the only one that may shrink. A long model id used to
           push the cost and the duration off the right edge, because the row it lived in was a flex
           row with no `min-w-0` anywhere in it. */}
-      <span className="min-w-0 truncate font-mono" title={`${run.provider}/${run.model}`}>
+      <span className="min-w-0 truncate" title={`${run.provider}/${run.model}`}>
         {run.provider}/{run.model}
       </span>
       {sep}
       <span className="shrink-0">{run.status}</span>
       {sep}
-      <span className="shrink-0 font-mono tabular-nums">Step {count}</span>
+      <span className="shrink-0 tabular-nums">Step {count}</span>
       {sep}
-      <span className="shrink-0 font-mono tabular-nums">{fmtTokens(tokens)}</span>
+      <span className="shrink-0 tabular-nums">{fmtTokens(tokens)}</span>
       {sep}
-      <span className="shrink-0 font-mono tabular-nums">{fmtCost(cost)}</span>
+      <span className="shrink-0 tabular-nums">{fmtCost(cost)}</span>
       {sep}
-      <span className="shrink-0 font-mono tabular-nums">{fmtDuration(duration)}</span>
+      <span className="shrink-0 tabular-nums">{fmtDuration(duration)}</span>
     </span>
   );
 }
@@ -110,7 +110,7 @@ export function StatusBar() {
   const sep = <span className="text-faint" aria-hidden>·</span>;
 
   return (
-    <div className="flex h-7 shrink-0 items-center gap-3 border-t border-hair px-4 text-[11px] text-muted">
+    <div className="flex h-7 shrink-0 items-center gap-3 border-t border-hair px-4 text-tiny text-muted">
       {/* The dot moves while it is connecting. Every other in-flight mark in this app pulses —
           the agent dot, the run glyph, the deploy chip — and this one indicator, the one that says
           whether any of the others can update at all, was static in all three states with only its
@@ -124,7 +124,7 @@ export function StatusBar() {
         {/* THE ONE WORD CHANGES WHEN RETRYING IS NOT WHAT IS HAPPENING. Everything about this
             strip's design — a colour and a word, the sentence on hover — is kept; what changes is
             that the word stops claiming a recovery that the shell has already given up on. */}
-        <span className={`text-[10px] ${failed ? "text-err" : "text-faint"}`}>
+        <span className={`text-tiny ${failed ? "text-err" : "text-faint"}`}>
           {failed ? "backend stopped" : LABEL[connection]}
         </span>
       </span>
@@ -133,13 +133,13 @@ export function StatusBar() {
           while the user is reading something else entirely. It gets the far end of the strip. */}
       {deploying && (
         <>
-          <span className="ml-auto shrink-0 text-run">deploying <span className="font-mono">{deploying.agent_id}</span></span>
+          <span className="ml-auto shrink-0 text-run">deploying <span className="">{deploying.agent_id}</span></span>
           {sep}
           <span className="shrink-0 text-run">{deployStage ?? deploying.status}</span>
         </>
       )}
       {!deploying && live > 0 && (
-        <span className="ml-auto shrink-0"><span className="font-mono tabular-nums">{live}</span> deployed</span>
+        <span className="ml-auto shrink-0"><span className="tabular-nums">{live}</span> deployed</span>
       )}
     </div>
   );

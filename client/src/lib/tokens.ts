@@ -233,18 +233,20 @@ export const BRAND = {
 } as const;
 
 // ── Type ────────────────────────────────────────────────────────────────────
-// Three sizes and three weights, and hierarchy comes from the WEIGHT.
+// The roles, standing on typography.pdf's ladder. `typeScale.ts` holds the ladder itself — eight
+// rungs, each with its size, weight and line height — and this is the layer above it: which rung a
+// panel's name climbs, which one a row title does.
 //
-// The client had 11, 12, 13, 15, 12.5, 11.5 and 10, which is not a ladder — it is what happens
-// when each component picks a size against whatever was next to it. Worse, the differences were
-// carrying the hierarchy: a heading was smaller and greyer than its own content, which is how a
-// panel ends up with a title you have to hunt for. Weight can separate a heading from body text
-// at the same size, and at 11-13px on a dark background it separates them better than size can.
+// It used to hold the sizes too, as three hand-written pixel counts. The reasoning then was that
+// the client had 11, 12, 13, 15, 12.5, 11.5 and 10 — not a ladder but what happens when each
+// component picks a size against whatever is next to it — and that at 11-13px weight separates a
+// heading from its body better than size can. §02 supplies a real ladder for the first half of
+// that and §03 agrees with the second: "most of the hierarchy should come from size, spacing,
+// contrast and placement rather than repeatedly using 600/700".
 //
-// So: 11 / 12 / 13, and the jumps between them are deliberately small. 400 for body, 500 for
-// anything that names something, 600 for the one wordmark. Two deliberate exceptions, both
-// documented at their call site: a chip's 10px floor, and the composer's input, which is the
-// thing you type into and is allowed to be the largest text in the app.
+// So the rungs carry their own weight now and these strings no longer name one. `text-tiny` IS
+// 11px at 500; writing `font-medium` beside it would be a second opinion about a decision the
+// ladder already made, and the two would drift the day the rung moved.
 //
 // These are class strings rather than values because every consumer is a `className` — the same
 // reason SPACE_CLASS below is.
@@ -255,15 +257,15 @@ export const TYPE = {
    * at this size that is what separates a label from a very short sentence. Was three different
    * trackings and two sizes across five panels.
    */
-  panelLabel: "text-[11px] font-medium uppercase tracking-wider text-faint",
+  panelLabel: "text-tiny uppercase tracking-wider text-faint",
   /** A block inside a panel: a plan section, a step's payload, a table's header row. */
-  sectionLabel: "text-[11px] font-medium uppercase tracking-wider text-muted",
-  /** The name of the thing a card or row is about. */
-  title: "text-[13px] font-medium text-ink",
+  sectionLabel: "text-tiny uppercase tracking-wider text-muted",
+  /** The name of the thing a card or row is about. §02's Label — "navigation, buttons, controls". */
+  title: "text-label text-ink",
   /** Prose. The default, and the reason `font-sans` is on the body. */
-  body: "text-[12px] text-ink",
+  body: "text-caption text-ink",
   /** Subordinate prose — a caption, a hint, a reason. */
-  meta: "text-[11px] text-muted",
+  meta: "text-tiny text-muted",
 } as const;
 
 // ── Radius ──────────────────────────────────────────────────────────────────

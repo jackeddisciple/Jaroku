@@ -142,18 +142,18 @@ function ConnectorField({ field, onDone }: { field: ConnectionFieldView; onDone:
   return (
     <div className="mt-1.5">
       <div className="flex items-baseline gap-2">
-        <span className="text-[11px] text-ink">{field.label}</span>
-        <span className="font-mono text-[10px]" style={{ color: TEXT.muted }}>
+        <span className="text-tiny text-ink">{field.label}</span>
+        <span className="text-tiny" style={{ color: TEXT.muted }}>
           {field.name}
         </span>
         {!field.required ? (
-          <span className="text-[10px] text-faint">optional</span>
+          <span className="text-tiny text-faint">optional</span>
         ) : null}
       </div>
 
       {settled ? (
         <div className="mt-1 flex items-center gap-1.5">
-          <span className="flex items-center gap-1.5 text-[11px]" style={{ color: TEXT.muted }}>
+          <span className="flex items-center gap-1.5 text-tiny" style={{ color: TEXT.muted }}>
             <StatusDot state="ok" icon={CheckIcon} size={ICON.badge} />
             {field.maskedHint ?? "set"}
           </span>
@@ -172,11 +172,11 @@ function ConnectorField({ field, onDone }: { field: ConnectionFieldView; onDone:
         // A member reaching the unset state, which they can: the row renders for everybody and the
         // value has simply never been entered. Said rather than left blank, because a blank line
         // under a connector name reads as a panel that failed to load.
-        <p className="mt-1 text-[11px]" style={{ color: TEXT.muted }}>Not set. An admin can add it.</p>
+        <p className="mt-1 text-tiny" style={{ color: TEXT.muted }}>Not set. An admin can add it.</p>
       ) : (
         <div className="mt-1 flex items-center gap-1.5">
           <input
-            className="min-w-0 flex-1 rounded-control bg-panel px-2.5 py-1 font-mono text-[11px] text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+            className="min-w-0 flex-1 rounded-control bg-panel px-2.5 py-1 text-tiny text-ink outline-none placeholder:text-faint focus:shadow-focusring"
             type={field.secret ? "password" : "text"}
             value={value}
             autoComplete="off"
@@ -204,9 +204,9 @@ function ConnectorField({ field, onDone }: { field: ConnectionFieldView; onDone:
       )}
 
       {problem ? (
-        <p className="mt-1 text-[11px] text-err">{problem}</p>
+        <p className="mt-1 text-tiny text-err">{problem}</p>
       ) : (
-        <p className="mt-1 text-[11px]" style={{ color: TEXT.muted }}>
+        <p className="mt-1 text-tiny" style={{ color: TEXT.muted }}>
           {field.hint}
         </p>
       )}
@@ -236,14 +236,14 @@ function ConnectionRow({ connection }: { connection: ConnectionView }) {
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[12px] text-ink">{connection.label}</span>
+            <span className="text-caption text-ink">{connection.label}</span>
             {/* A DOT AND A WORD, NOT A CAPS PILL. `not connected` rendered as an outlined
                 uppercase badge beside the service's name — caps, plus an outline, plus the card's
                 own border, which made the ABSENCE of a connection the loudest element on it. A
                 binary state is a coloured dot and a lowercase label; that is what a dot is for. */}
             <span className="inline-flex shrink-0 items-center gap-1.5">
               <StatusDot state={status.state} icon={status.icon} size={ICON.badge} />
-              <span className="text-[10px] text-faint">
+              <span className="text-tiny text-faint">
                 {CONNECTION_STATUS_LABEL[connection.status] ?? connection.status}
               </span>
             </span>
@@ -251,7 +251,7 @@ function ConnectionRow({ connection }: { connection: ConnectionView }) {
                 different times has no other way to tell which mailbox its agents are reading,
                 and "disconnect the wrong one" is a coin flip without this. */}
             {connection.account ? (
-              <span className="font-mono text-[11px]" style={{ color: TEXT.muted }}>
+              <span className="text-tiny" style={{ color: TEXT.muted }}>
                 {connection.account}
               </span>
             ) : null}
@@ -260,10 +260,10 @@ function ConnectionRow({ connection }: { connection: ConnectionView }) {
           {/* THE BANNER THAT MATTERS. A revoked grant is a decision somebody made; this is the
               one state where agents are quietly failing and only a person can fix it. */}
           {needsReconnect ? (
-            <p className="mt-1 text-[12px] text-ink">
+            <p className="mt-1 text-caption text-ink">
               Agents using {connection.label} will fail until this is reconnected.
               {connection.lastError ? (
-                <span className="block font-mono text-[11px] mt-0.5" style={{ color: TEXT.muted }}>
+                <span className="block text-tiny mt-0.5" style={{ color: TEXT.muted }}>
                   {connection.lastError}
                 </span>
               ) : null}
@@ -278,7 +278,7 @@ function ConnectionRow({ connection }: { connection: ConnectionView }) {
               when it runs past the row. */}
           {!connected ? (
             <p
-              className="mt-1 flex items-start gap-1.5 text-[11px]"
+              className="mt-1 flex items-start gap-1.5 text-tiny"
               style={{ color: TEXT.muted }}
               title={connection.consent.join(" · ")}
             >
@@ -291,7 +291,7 @@ function ConnectionRow({ connection }: { connection: ConnectionView }) {
 
           {/* AND THE EXACT LIST, SECOND. What was GRANTED, which may be less than was asked for. */}
           {connected && connection.scopes.length ? (
-            <p className="mt-1 font-mono text-[11px] break-all" style={{ color: TEXT.muted }}>
+            <p className="mt-1 text-tiny break-all" style={{ color: TEXT.muted }}>
               {connection.scopes.join("  ")}
             </p>
           ) : null}
@@ -319,7 +319,7 @@ function ConnectionRow({ connection }: { connection: ConnectionView }) {
               says which two variables somebody has to set rather than hiding the connector, which
               would read as a missing feature. */}
           {!connection.available ? (
-            <p className="mt-1.5 flex items-start gap-1.5 text-[12px]" style={{ color: TEXT.muted }}>
+            <p className="mt-1.5 flex items-start gap-1.5 text-caption" style={{ color: TEXT.muted }}>
               <span className="mt-0.5 shrink-0">
                 <LockIcon size={ICON.xs} />
               </span>
@@ -445,7 +445,7 @@ export function ConnectionsPanel() {
         /* ONE DISMISSAL TREATMENT. These were the word `Dismiss`, twice, while `GitHubPanel`'s
             notice strip — the same idea, one panel over — closes with an XIcon. Two vocabularies
             for "close this transient message" is one of them being wrong. */
-        <div className="flex items-start gap-2 rounded-control border border-line px-3 py-2 text-[12px] text-ink">
+        <div className="flex items-start gap-2 rounded-control border border-line px-3 py-2 text-caption text-ink">
           <span className="min-w-0 flex-1">{error}</span>
           <button
             className={`${iconBtn} shrink-0`}
@@ -458,7 +458,7 @@ export function ConnectionsPanel() {
         </div>
       ) : null}
       {notice ? (
-        <div className="flex items-start gap-2 rounded-control border border-line px-3 py-2 text-[12px]" style={{ color: TEXT.muted }}>
+        <div className="flex items-start gap-2 rounded-control border border-line px-3 py-2 text-caption" style={{ color: TEXT.muted }}>
           <span className="min-w-0 flex-1">{notice}</span>
           <button
             className={`${iconBtn} shrink-0`}

@@ -64,9 +64,9 @@ export function ShadowRunsRegion({ view }: { view: GithubView }) {
 
       {/* FIRST, AND NOT IN A TOOLTIP. Somebody pressing a button next to Switch is asking exactly
           this, and §3.2 has spent three paragraphs teaching them that branch operations are heavy. */}
-      <p className="mt-1 text-[11px] leading-[1.5] text-muted">
+      <p className="mt-1 text-tiny leading-[1.5] text-muted">
         Not published — none of these affects{" "}
-        <span className="font-mono text-ink">{view.agentSlug}</span>'s live version. They are swept
+        <span className="text-ink">{view.agentSlug}</span>'s live version. They are swept
         after a while; their traces are not.
       </p>
 
@@ -86,7 +86,7 @@ function ShadowRow({ run }: { run: GithubShadowRun }) {
       kind={kindFor(run.status)}
       state={run.status === "staging" || run.status === "running" ? "active" : "done"}
       hideVerb
-      lead={<span className="w-4 text-center text-[11px] text-faint">◆</span>}
+      lead={<span className="w-4 text-center text-tiny text-faint">◆</span>}
       object={
         <span className="text-ink">
           <Truncate title={`${run.ref} at ${run.headSha}`}>{run.ref}</Truncate>
@@ -96,7 +96,7 @@ function ShadowRow({ run }: { run: GithubShadowRun }) {
         <span className="text-faint">
           {/* The sha, because a ref moves and this run was of one commit. Somebody comparing two
               shadow runs of the same branch a day apart needs to see which is which. */}
-          <span className="font-mono">{run.headSha.slice(0, 7)}</span> · {relTime(run.createdAt)}
+          <span className="">{run.headSha.slice(0, 7)}</span> · {relTime(run.createdAt)}
           {run.error && <span className="text-err"> · {run.error}</span>}
         </span>
       }

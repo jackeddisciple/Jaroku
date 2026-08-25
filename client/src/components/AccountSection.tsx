@@ -56,13 +56,13 @@ export function AccountSection() {
 
       <section className="flex flex-col gap-2 border-t border-hair pt-5">
         <h3 className={TYPE.sectionLabel}>Onboarding</h3>
-        <p className="text-[13px] leading-[1.5] text-ink">Restart onboarding tour</p>
-        <p className="text-[12px] leading-[1.6] text-muted">
+        <p className="text-label leading-[1.5] text-ink">Restart onboarding tour</p>
+        <p className="text-caption leading-[1.6] text-muted">
           Walk through the setup screens again. Your workspace, keys and agents won&rsquo;t change
           &mdash; only the tour resets.
         </p>
         {error && (
-          <p role="alert" className="text-[12px] leading-[1.5] text-err">
+          <p role="alert" className="text-caption leading-[1.5] text-err">
             {error}
           </p>
         )}
@@ -71,7 +71,7 @@ export function AccountSection() {
             type="button"
             onClick={() => void run()}
             disabled={busy}
-            className="rounded-control border border-edge px-3 py-1.5 text-[12px] text-ink outline-none
+            className="rounded-control border border-edge px-3 py-1.5 text-caption text-ink outline-none
               transition-colors duration-fast hover:border-chrome focus-visible:shadow-focusring
               disabled:cursor-not-allowed disabled:opacity-40"
           >
@@ -86,8 +86,8 @@ export function AccountSection() {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline gap-3">
-      <dt className="w-[110px] shrink-0 text-[12px] text-muted">{label}</dt>
-      <dd className="min-w-0 break-all text-[13px] text-ink">{value}</dd>
+      <dt className="w-[110px] shrink-0 text-caption text-muted">{label}</dt>
+      <dd className="min-w-0 break-all text-label text-ink">{value}</dd>
     </div>
   );
 }

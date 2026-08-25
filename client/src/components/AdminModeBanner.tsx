@@ -52,22 +52,22 @@ export function AdminModeBanner() {
     <div className="shrink-0 border-b border-err/50 bg-err/[0.12] px-4 py-2">
       <div className="flex items-center gap-2">
         <span className="shrink-0 text-err"><AlertTriangleIcon size={ICON.sm} /></span>
-        <span className="text-[12px] font-medium text-ink">
+        <span className="text-caption font-medium text-ink">
           Admin mode enabled — bypassing tier limits
         </span>
-        <span className="text-[11px] text-muted">
+        <span className="text-tiny text-muted">
           Every limit is off and every bypass is logged.
         </span>
         <button
           type="button"
-          className="ml-auto shrink-0 rounded-control border border-err/50 px-2.5 py-1 text-[11px] text-ink transition-colors hover:bg-err/20 focus-visible:outline-none focus-visible:shadow-focusring disabled:opacity-50"
+          className="ml-auto shrink-0 rounded-control border border-err/50 px-2.5 py-1 text-tiny text-ink transition-colors hover:bg-err/20 focus-visible:outline-none focus-visible:shadow-focusring disabled:opacity-50"
           disabled={busy}
           onClick={() => void turnOff()}
         >
           {busy ? "Turning off…" : "Turn off"}
         </button>
       </div>
-      {error && <p className="mt-1 text-[11px] text-err">Could not turn it off — {error}</p>}
+      {error && <p className="mt-1 text-tiny text-err">Could not turn it off — {error}</p>}
     </div>
   );
 }

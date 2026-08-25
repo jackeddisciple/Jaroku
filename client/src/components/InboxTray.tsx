@@ -61,7 +61,7 @@ export function InboxTray({
     >
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 px-5 py-2 text-left text-[11px] text-muted transition-colors hover:text-ink"
+        className="flex w-full items-center gap-2 px-5 py-2 text-left text-tiny text-muted transition-colors hover:text-ink"
         // §7's rule for an icon-only control applies to a control whose label is a computed
         // sentence too: the name says what pressing it does, which the sentence does not.
         aria-label={open ? "Collapse the snooze tray" : "Expand the snooze tray"}
@@ -88,10 +88,10 @@ export function InboxTray({
         <div className="max-h-[168px] overflow-y-auto border-t border-hair px-5 py-1">
           {snoozed.map((item) => (
             <div key={item.id} className="flex items-center gap-2 py-1">
-              <Truncate className="min-w-0 flex-1 text-[11px] text-muted" title={item.subject}>
+              <Truncate className="min-w-0 flex-1 text-tiny text-muted" title={item.subject}>
                 {item.subject}
               </Truncate>
-              <span className="shrink-0 text-[10px] tabular-nums text-faint">
+              <span className="shrink-0 text-tiny tabular-nums text-faint">
                 {item.snoozed_until ? shortDuration(Math.max(0, Date.parse(item.snoozed_until) - now)) : ""}
               </span>
               {/* UN-SNOOZE, WHICH §5.4 ASKS FOR PER ITEM. It is a snooze of zero rather than a fourth
@@ -102,7 +102,7 @@ export function InboxTray({
                 onClick={() => sendSnoozeInboxItem(item.id, "hour")}
                 title="Bring it back in an hour instead"
                 aria-label={`Bring ${item.subject} back in an hour instead`}
-                className="shrink-0 rounded-control px-1.5 py-0.5 text-[10px] text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
+                className="shrink-0 rounded-control px-1.5 py-0.5 text-tiny text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
               >
                 1h
               </button>

@@ -7,7 +7,7 @@ function Line({ sign, text }: { sign: "+" | "-"; text: string }) {
   const add = sign === "+";
   return (
     <div
-      className={`flex gap-2 px-2 py-0.5 rounded-chip text-[12px] leading-relaxed ${
+      className={`flex gap-2 px-2 py-0.5 rounded-chip text-caption leading-relaxed ${
         add ? "bg-ok/[0.07] text-ok" : "bg-err/[0.07] text-err"
       }`}
     >
@@ -30,12 +30,12 @@ function Entry({ entry }: { entry: DiffEntry }) {
   return (
     <div className="mt-2 first:mt-0">
       <div className="flex items-baseline gap-3">
-        <span className="font-mono text-muted text-[12px]">{entry.key}</span>
+        <span className="font-mono text-muted text-caption">{entry.key}</span>
         <span className="ml-auto">
           {entry.items ? (
             <DiffStat additions={added} deletions={removed} unit="items" />
           ) : (
-            <span className="text-faint text-[11px]">{entry.summary}</span>
+            <span className="text-faint text-tiny">{entry.summary}</span>
           )}
         </span>
       </div>
@@ -58,7 +58,7 @@ function Entry({ entry }: { entry: DiffEntry }) {
       </div>
 
       {entry.carriedOver ? (
-        <div className="mt-1 px-2 text-faint text-[11px]">
+        <div className="mt-1 px-2 text-faint text-tiny">
           {entry.carriedOver} earlier {entry.carriedOver === 1 ? "item" : "items"} unchanged
           {entry.partial && " · partial update, reducer-merged"}
         </div>
@@ -78,12 +78,12 @@ export function StateDiff({ before, after }: { before: unknown; after: unknown }
   return (
     <div>
       {visible.length === 0 ? (
-        <div className="text-faint text-[12px]">no state changes</div>
+        <div className="text-faint text-caption">no state changes</div>
       ) : (
         visible.map((entry) => <Entry key={entry.key} entry={entry} />)
       )}
       {unchangedCount > 0 && (
-        <div className="mt-2 text-faint text-[11px]">
+        <div className="mt-2 text-faint text-tiny">
           {unchangedCount} {unchangedCount === 1 ? "key" : "keys"} unchanged
         </div>
       )}

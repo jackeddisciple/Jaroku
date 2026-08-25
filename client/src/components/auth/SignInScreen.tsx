@@ -194,7 +194,7 @@ export function SignInScreen({
           token, a server that stopped trusting this session. Above the controls, because it is the
           answer to the question somebody is asking as the screen appears. */}
       {message && (
-        <p className="mb-5 rounded-control border border-edge bg-void px-3 py-2.5 text-[12px] leading-[1.5] text-muted">
+        <p className="mb-5 rounded-control border border-edge bg-void px-3 py-2.5 text-caption leading-[1.5] text-muted">
           {message}
         </p>
       )}
@@ -204,13 +204,13 @@ export function SignInScreen({
           token stays in the URL until there is a session to spend it with — see lib/invite.ts — so
           nothing here has to carry it. */}
       {invited && (
-        <p className="mb-5 rounded-control border border-edge bg-void px-3 py-2.5 text-[12px] leading-[1.5] text-muted">
+        <p className="mb-5 rounded-control border border-edge bg-void px-3 py-2.5 text-caption leading-[1.5] text-muted">
           You have been invited to a workspace. Sign in and it will be accepted for you.
         </p>
       )}
 
       {methods === null && (
-        <p className="py-2 text-center text-[13px] text-muted">Checking how this server signs people in…</p>
+        <p className="py-2 text-center text-label text-muted">Checking how this server signs people in…</p>
       )}
 
       {methods !== null && realMethods && (
@@ -257,7 +257,7 @@ export function SignInScreen({
           local issuer and no real provider configured, which is `npm run dev` and nothing else. */}
       {devOnly && (
         <form onSubmit={devSubmit} className="flex flex-col gap-4">
-          <p className="text-[11px] leading-[1.6] text-muted">
+          <p className="text-tiny leading-[1.6] text-muted">
             This server is running its own local issuer. The token it mints is real and is verified
             exactly the way a provider&rsquo;s is &mdash; but there is no password, so anyone who can
             reach this port can sign in as anyone. Development only.
@@ -289,16 +289,16 @@ export function SignInScreen({
           is in front of it and this app is not where you sign in. It used to be a screen with
           nothing on it to press. */}
       {methods !== null && !realMethods && !devOnly && (
-        <div className="space-y-3 text-[13px] leading-[1.6] text-muted">
+        <div className="space-y-3 text-label leading-[1.6] text-muted">
           <p>This server verifies tokens against an external identity provider.</p>
-          <p className="text-[11px]">
+          <p className="text-tiny">
             Sign in there and this window will pick the session up. The server has no sign-in form of
             its own &mdash; it never sees a password, only a token it can verify.
           </p>
           <button
             type="button"
             onClick={() => setAttempt((n) => n + 1)}
-            className="rounded-control border border-edge px-2.5 py-1 text-[11px] text-muted outline-none hover:border-chrome hover:text-ink focus-visible:shadow-focusring"
+            className="rounded-control border border-edge px-2.5 py-1 text-tiny text-muted outline-none hover:border-chrome hover:text-ink focus-visible:shadow-focusring"
           >
             Check again
           </button>

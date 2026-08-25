@@ -99,7 +99,7 @@ export function GitHubAttachItems({
 
   return (
     <>
-      <div className="px-2 pb-1 pt-0.5 text-[10px] uppercase tracking-wider text-faint">
+      <div className="px-2 pb-1 pt-0.5 text-tiny uppercase tracking-wider text-faint">
         Attach from {view.link.repo_full_name}
       </div>
 
@@ -176,8 +176,8 @@ function MenuItem({
         className="flex w-full items-start gap-2 rounded-control px-2 py-1 text-left transition-colors duration-fast hover:bg-active/40 disabled:cursor-not-allowed disabled:opacity-40"
       >
         <span className="min-w-0 flex-1">
-          <span className="block text-[12px] text-ink">{label}</span>
-          {detail && <span className="block text-[10px] text-faint">{detail}</span>}
+          <span className="block text-caption text-ink">{label}</span>
+          {detail && <span className="block text-tiny text-faint">{detail}</span>}
         </span>
         {expand && (
           <span className={`shrink-0 text-faint transition-transform duration-fast ${open ? "rotate-90" : ""}`} aria-hidden>
@@ -196,7 +196,7 @@ function CommitList({ view, onPick }: { view: GithubView; onPick: (sha: string) 
     ...view.pushed.filter((v) => v.sha).map((v) => ({ sha: v.sha!, message: v.summary })),
     ...view.remoteOnly.map((c) => ({ sha: c.sha, message: c.message })),
   ];
-  if (rows.length === 0) return <p className="px-1 py-1 text-[11px] text-muted">nothing pushed yet</p>;
+  if (rows.length === 0) return <p className="px-1 py-1 text-tiny text-muted">nothing pushed yet</p>;
   return (
     <div className="max-h-40 overflow-auto">
       {rows.map((r) => (
@@ -206,8 +206,8 @@ function CommitList({ view, onPick }: { view: GithubView; onPick: (sha: string) 
           onClick={() => onPick(r.sha)}
           className="flex w-full items-baseline gap-2 rounded-control px-1 py-0.5 text-left transition-colors duration-fast hover:bg-active/40"
         >
-          <span className="shrink-0 font-mono text-[10px] text-faint">{r.sha.slice(0, 7)}</span>
-          <Truncate className="min-w-0 flex-1 text-[11px] text-muted">{r.message}</Truncate>
+          <span className="shrink-0 text-tiny text-faint">{r.sha.slice(0, 7)}</span>
+          <Truncate className="min-w-0 flex-1 text-tiny text-muted">{r.message}</Truncate>
         </button>
       ))}
     </div>
@@ -222,7 +222,7 @@ function FilePicker({ view, onPick }: { view: GithubView; onPick: (path: string,
   return (
     <div className="space-y-1 py-1">
       <input
-        className="w-full rounded-control bg-bg px-1.5 py-1 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+        className="w-full rounded-control bg-bg px-1.5 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
         placeholder="tools/weather.py"
         value={path}
         onChange={(e) => setPath(e.target.value)}
@@ -231,7 +231,6 @@ function FilePicker({ view, onPick }: { view: GithubView; onPick: (path: string,
         }}
       />
       <Select
-        mono
         value={refName}
         onChange={setRefName}
         ariaLabel="Branch"
@@ -263,7 +262,11 @@ export function GitHubAttachChips({
           key={attachmentId(a)}
           size="sm"
           tone="muted"
-          mono
+          // A file attachment is a path and keeps the mono face; a ref or a PR is a label and does
+          // not. It was mono for both, which is the shape §04 is about — the same chip carrying two
+          // kinds of string, set in the face that suits one of them. `AttachmentRail` next door
+          // already made this distinction; this is the same rule in the same words.
+          mono={a.kind === "file"}
           icon={<GithubIcon size={ICON.badge} />}
           className="max-w-[240px]"
         >
@@ -357,7 +360,7 @@ export function GitHubTriggerPicker({
           remove — and the caption says what it does, because a bare `!` is the shortcut most
           likely to be misread as an imperative when it still only attaches context. */}
       {trigger.kind === "sync" && (
-        <div className="px-2 pb-1 pt-0.5 text-[10px] leading-[1.4] text-faint">
+        <div className="px-2 pb-1 pt-0.5 text-tiny leading-[1.4] text-faint">
           Attaches the diff. It does not pull.
         </div>
       )}
@@ -377,10 +380,10 @@ export function GitHubTriggerPicker({
             i === cursor ? "bg-active text-ink" : "hover:bg-active/40"
           }`}
         >
-          <span className="shrink-0 font-mono text-[11px] text-faint">{row.lead}</span>
+          <span className="shrink-0 text-tiny text-faint">{row.lead}</span>
           <Truncate
             variant={trigger.kind === "file" ? "path" : "prose"}
-            className="min-w-0 flex-1 text-[11px] text-muted"
+            className="min-w-0 flex-1 text-tiny text-muted"
           >
             {row.label}
           </Truncate>

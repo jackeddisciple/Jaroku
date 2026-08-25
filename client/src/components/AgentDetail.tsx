@@ -110,7 +110,7 @@ export function AgentDetail() {
         {!loading && (
           <button
             onClick={() => sendLoadAgentDetail(openAgentId)}
-            className="pt-4 text-[11px] text-muted underline decoration-dotted hover:text-ink"
+            className="pt-4 text-tiny text-muted underline decoration-dotted hover:text-ink"
           >
             Ask again
           </button>

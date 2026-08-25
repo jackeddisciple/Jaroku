@@ -112,10 +112,10 @@ function ExampleRow({
       >
         <Icon size={ICON.sm} />
       </span>
-      <span className="min-w-0 flex-1 text-[13px] leading-[1.5] text-muted transition-colors duration-fast group-hover:text-ink group-focus-visible:text-ink">
+      <span className="min-w-0 flex-1 text-label leading-[1.5] text-muted transition-colors duration-fast group-hover:text-ink group-focus-visible:text-ink">
         {text}
       </span>
-      <span className="shrink-0 text-[11px] text-faint">{hint}</span>
+      <span className="shrink-0 text-tiny text-faint">{hint}</span>
       <span
         className="shrink-0 -translate-x-1 text-faint opacity-0 transition-[transform,opacity,color] duration-base ease-state
           group-hover:translate-x-0 group-hover:opacity-100
@@ -153,13 +153,13 @@ function BandHeading({
       <span className="text-muted">
         <JarokuGlyph size={BRAND.screen} />
       </span>
-      <h2 className="mt-3 flex items-center gap-2 text-[19px] font-semibold tracking-[-0.01em] text-ink">
+      <h2 className="mt-3 flex items-center gap-2 text-page tracking-[-0.01em] text-ink">
         <span style={tone ? { color: tone } : undefined} className={tone ? undefined : "text-muted"}>
           <Icon size={ICON.md} />
         </span>
         {title}
       </h2>
-      <p className="mt-2 max-w-[64ch] text-[13px] leading-[1.6] text-muted">{children}</p>
+      <p className="mt-2 max-w-[64ch] text-label leading-[1.6] text-muted">{children}</p>
     </div>
   );
 }
@@ -254,7 +254,7 @@ export function ComposerColumn({ phase }: { phase: OnboardingPhase }) {
         {/* Two audiences reach this screen now: someone with no key, and someone who has one
             and chose to look around first. Telling the second to go connect a key is telling
             them to do something they have already done. */}
-        <p className="mt-4 text-center text-[11px] leading-[1.6] text-faint">
+        <p className="mt-4 text-center text-tiny leading-[1.6] text-faint">
           {canBuild(providers)
             ? "Describing an agent of your own goes through Anthropic, which is already connected — build one whenever you are ready."
             : "Describing an agent of your own goes through Anthropic — add a key in the Secrets tab whenever you want to build one."}

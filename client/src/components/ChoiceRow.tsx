@@ -54,7 +54,7 @@ export function ChoiceRow({
         <button
           type="button"
           onClick={onSkip}
-          className="ml-auto text-[11px] text-faint transition-colors duration-fast hover:text-ink"
+          className="ml-auto text-tiny text-faint transition-colors duration-fast hover:text-ink"
           title="Hide these and just type"
         >
           Skip
@@ -84,10 +84,10 @@ export function ChoiceRow({
                 <Icon size={ICON.sm} />
               </span>
               <span className="min-w-0">
-                <span className={`block text-[12px] ${c.primary ? "font-medium text-ink" : "text-ink"}`}>
+                <span className={`block text-caption ${c.primary ? "font-medium text-ink" : "text-ink"}`}>
                   {c.label}
                 </span>
-                {c.hint && <span className="mt-0.5 block text-[11px] text-muted">{c.hint}</span>}
+                {c.hint && <span className="mt-0.5 block text-tiny text-muted">{c.hint}</span>}
               </span>
             </button>
           );

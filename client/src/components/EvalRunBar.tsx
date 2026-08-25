@@ -98,7 +98,7 @@ export function EvalRunBar() {
   return (
     <div className="px-4 py-3 shrink-0 space-y-2">
       {/* provider selection */}
-      <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
+      <div className="flex flex-wrap items-center gap-1.5 text-caption">
         {catalogue.flatMap((p) =>
           p.models.map((m) => {
             const t: EvalTarget = { provider: p.id, model: m };
@@ -110,8 +110,9 @@ export function EvalRunBar() {
                 onClick={() => toggle(t)}
                 selected={on}
                 disabled={running}
-                // "Dry run (free)" is prose; a model id is an identifier. Only the latter is mono.
-                mono={!free}
+                // "Dry run (free)" is prose and a model id is an identifier, and this used to set
+                // the latter in mono for that reason. §04 lists model labels as Sans and §05 is
+                // explicit that looking technical is not the test, so both are prose now.
                 title={free ? "Free — no API calls" : `${p.label} · billed per token`}
                 className="whitespace-nowrap"
               >
@@ -126,10 +127,10 @@ export function EvalRunBar() {
       {confirming && (
         <div className="rounded-card border border-edge bg-panel px-3 py-2 space-y-1.5 shadow-raised">
           {!estimate ? (
-            <div className="text-[11px] text-muted">estimating…</div>
+            <div className="text-tiny text-muted">estimating…</div>
           ) : (
             <>
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[11px]">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-tiny">
                 <span className="text-ink">
                   {estimate.examples} example{estimate.examples === 1 ? "" : "s"} ×{" "}
                   {estimate.targets} provider{estimate.targets === 1 ? "" : "s"} ={" "}
@@ -147,30 +148,30 @@ export function EvalRunBar() {
               </div>
 
               {estimate.notes.map((n, i) => (
-                <div key={i} className="text-[10px] text-faint">· {n}</div>
+                <div key={i} className="text-tiny text-faint">· {n}</div>
               ))}
 
               <div className="flex items-center gap-2 pt-1">
-                <label className="text-[11px] text-muted">Stop at</label>
-                <span className="text-muted text-[11px]">$</span>
+                <label className="text-tiny text-muted">Stop at</label>
+                <span className="text-muted text-tiny">$</span>
                 <input
                   value={ceiling}
                   onChange={(e) => setCeiling(e.target.value)}
                   inputMode="decimal"
-                  className="w-20 bg-active text-ink rounded-control px-2 py-1 text-[11px] tabular-nums outline-none focus:shadow-focusring"
+                  className="w-20 bg-active text-ink rounded-control px-2 py-1 text-tiny tabular-nums outline-none focus:shadow-focusring"
                 />
                 {/* Says what the ceiling actually does. It is checked against real spend
                     before anything is DISPATCHED, so runs already in flight finish and pay
                     out — with providers running two at a time, a small eval can dispatch
                     every cell before the first cost lands and overshoot several times over.
                     "hard ceiling" alone read as a cap on the bill, which it is not. */}
-                <span className="text-[10px] text-faint">
+                <span className="text-tiny text-faint">
                   checked against real spend before each dispatch — runs already started
                   still finish, so the total can overshoot
                 </span>
                 <button
                   onClick={() => { setConfirming(false); setEstimate(null); }}
-                  className="ml-auto text-[11px] text-faint hover:text-ink transition-colors"
+                  className="ml-auto text-tiny text-faint hover:text-ink transition-colors"
                 >
                   Cancel
                 </button>
@@ -189,19 +190,19 @@ export function EvalRunBar() {
 
       {/* run control */}
       {!confirming && (
-        <div className="flex items-center gap-2.5 text-[12px]">
+        <div className="flex items-center gap-2.5 text-caption">
           <span className="text-faint tabular-nums whitespace-nowrap">
             {examples.length} × {targets.length} = {examples.length * targets.length} run
             {examples.length * targets.length === 1 ? "" : "s"}
           </span>
           {needsConfirm && (
-            <span className="text-run text-[11px] whitespace-nowrap">real providers — billed</span>
+            <span className="text-run text-tiny whitespace-nowrap">real providers — billed</span>
           )}
           <span className="ml-auto" />
           {running ? (
             <button
               onClick={() => progress && sendCancelEval(progress.evalId)}
-              className="rounded-control px-3 py-1.5 text-[12px] text-err hover:bg-active active:bg-chrome transition-colors whitespace-nowrap"
+              className="rounded-control px-3 py-1.5 text-caption text-err hover:bg-active active:bg-chrome transition-colors whitespace-nowrap"
             >
               Cancel
             </button>

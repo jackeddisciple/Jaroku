@@ -102,7 +102,7 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
   // button that refuses.
   if (!canWrite) {
     return (
-      <span className="font-mono text-[11px] text-muted">
+      <span className="text-tiny text-muted">
         <Truncate title={view.link.branch}>{view.link.branch}</Truncate>
       </span>
     );
@@ -111,7 +111,7 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
   return (
     <div ref={ref} className="relative">
       <button
-        className="flex items-center gap-1 font-mono text-[11px] text-muted transition-colors duration-fast hover:text-ink"
+        className="flex items-center gap-1 text-tiny text-muted transition-colors duration-fast hover:text-ink"
         onClick={() => setOpen((v) => !v)}
       >
         <Truncate title={view.link.branch}>{view.link.branch}</Truncate>
@@ -126,7 +126,7 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
             <span className="shrink-0 text-faint"><SearchIcon size={ICON.xs} /></span>
             <input
               autoFocus
-              className="min-w-0 flex-1 bg-transparent text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+              className="min-w-0 flex-1 bg-transparent text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
               placeholder="filter branches…"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
@@ -135,7 +135,7 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
 
           <div className="max-h-56 overflow-auto py-1">
             {branches.length === 0 ? (
-              <p className="px-2 py-1 text-[11px] text-muted">nothing matches</p>
+              <p className="px-2 py-1 text-tiny text-muted">nothing matches</p>
             ) : (
               branches.map((b) => (
                 // A ROW RATHER THAN A BUTTON, since §B.2.1 puts two actions on it. Switch is still
@@ -158,11 +158,11 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
                       {b.current && <CheckIcon size={ICON.xs} />}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <Truncate className="font-mono text-[11px]" title={b.name}>{b.name}</Truncate>
+                      <Truncate className="text-tiny" title={b.name}>{b.name}</Truncate>
                       {b.isDefault && (
                         // Named rather than hidden. Jaroku never writes to it on its own, and knowing
                         // which one that is before switching is the point of the label.
-                        <span className="block text-[10px] text-faint">default — Jaroku does not push here</span>
+                        <span className="block text-tiny text-faint">default — Jaroku does not push here</span>
                       )}
                     </span>
                   </button>
@@ -186,7 +186,7 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
           <div className="border-t border-hair p-1">
             <div className="flex items-center gap-1.5">
               <input
-                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+                className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
                 placeholder="+ Create branch from current…"
                 value={creating}
                 onChange={(e) => setCreating(e.target.value)}
@@ -205,12 +205,12 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
 
       {pending && (
         <div className="absolute left-0 top-full z-30 mt-1 w-[300px] animate-slide-in rounded-card border border-edge bg-panel p-2.5 shadow-floating motion-reduce:animate-none">
-          <div className="text-[12px] text-ink">
+          <div className="text-caption text-ink">
             {view.ahead} unpushed version{view.ahead === 1 ? "" : "s"}
           </div>
-          <p className="mt-1 text-[11px] leading-[1.5] text-muted">
+          <p className="mt-1 text-tiny leading-[1.5] text-muted">
             Switching re-materialises this agent from{" "}
-            <span className="font-mono text-ink">{pending}</span>. Your unpushed work is not lost
+            <span className="text-ink">{pending}</span>. Your unpushed work is not lost
             either way — but it is not on that branch.
           </p>
           <div className="mt-2 flex items-center gap-1.5">
@@ -284,7 +284,7 @@ export function ChangesRegion({ view }: { view: GithubView }) {
             trailing={<DiffStat additions={c.additions} deletions={c.deletions} className="shrink-0" />}
           />
         ))}
-        {changed.length === 0 && <p className="text-[11px] text-muted">nothing since the last push</p>}
+        {changed.length === 0 && <p className="text-tiny text-muted">nothing since the last push</p>}
       </div>
 
       {/* §A.4's FROM REMOTE group. Its own heading rather than mixed into the list above, because
@@ -318,7 +318,7 @@ export function ChangesRegion({ view }: { view: GithubView }) {
       {untouched.length > 0 && (
         <div className="mt-2">
           <button
-            className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-faint transition-colors duration-fast hover:text-muted"
+            className="flex items-center gap-1 text-tiny uppercase tracking-wider text-faint transition-colors duration-fast hover:text-muted"
             aria-expanded={showProtected}
             onClick={() => setShowProtected((v) => !v)}
           >
@@ -341,7 +341,7 @@ export function ChangesRegion({ view }: { view: GithubView }) {
 function FileGroup({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mt-2">
-      <div className="text-[10px] uppercase tracking-wider text-faint">{label}</div>
+      <div className="text-tiny uppercase tracking-wider text-faint">{label}</div>
       <div className="mt-1 space-y-0.5">{children}</div>
     </div>
   );
@@ -369,7 +369,7 @@ function FileRow({
   const descriptor = fileStatusFor(status);
   const TypeIcon = iconForPath(path);
   return (
-    <div className="flex items-center gap-2 text-[11px]" title={descriptor.label}>
+    <div className="flex items-center gap-2 text-tiny" title={descriptor.label}>
       {/* Fixed width, so the filenames line up as a column whatever glyph precedes them. A status
           column whose width changed per row would be worse than no column at all. */}
       <span
@@ -429,7 +429,7 @@ export function PullRequestCard({ view }: { view: GithubView }) {
           >
             <GitPullRequestIcon size={ICON.sm} />
           </button>
-          <span className="text-[11px] text-faint">
+          <span className="text-tiny text-faint">
             Resolving on GitHub keeps both histories.
           </span>
         </div>
@@ -448,13 +448,13 @@ export function PullRequestCard({ view }: { view: GithubView }) {
         <div className="flex items-start gap-2">
           <span className="mt-[2px] shrink-0 text-muted"><GitPullRequestIcon size={ICON.xs} /></span>
           <span className="min-w-0 flex-1">
-            <Truncate className="text-[12px] text-ink" title={pr.title}>#{pr.number} {pr.title}</Truncate>
-            <span className="mt-0.5 block font-mono text-[11px] text-faint">
+            <Truncate className="text-caption text-ink" title={pr.title}>#{pr.number} {pr.title}</Truncate>
+            <span className="mt-0.5 block text-tiny text-faint">
               {view.link.branch} → {view.branches.find((b) => b.isDefault)?.name ?? "main"}
             </span>
           </span>
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-tiny">
           <span className={checkTone}>
             {pr.checks === "success"
               ? "✓ checks passing"
@@ -538,7 +538,7 @@ export function HistoryRegion({ view }: { view: GithubView }) {
           whether to draw one of them or the pair interleaved. The word "show" is what makes the
           pair read as options rather than as two more buttons to press. */}
       <div className="flex items-center justify-end gap-1.5">
-        <span className="text-[10px] uppercase tracking-wider text-faint">Show</span>
+        <span className="text-tiny uppercase tracking-wider text-faint">Show</span>
         {(["versions", "both"] as const).map((m) => (
           <Chip
             key={m}
@@ -567,15 +567,15 @@ export function HistoryRegion({ view }: { view: GithubView }) {
               <span className="z-10 mt-[6px] h-[7px] w-[7px] shrink-0 rounded-full bg-ink" aria-hidden />
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline gap-2">
-                  <span className="shrink-0 font-mono text-[11px] text-faint">v{row.version}</span>
-                  <Truncate className="min-w-0 flex-1 text-[12px] text-ink" title={row.summary}>
+                  <span className="shrink-0 text-tiny text-faint">v{row.version}</span>
+                  <Truncate className="min-w-0 flex-1 text-caption text-ink" title={row.summary}>
                     {row.summary}
                   </Truncate>
-                  <span className="w-[68px] shrink-0 text-right text-[11px] tabular-nums text-faint" title={absTime(row.at)}>{relTime(row.at)}</span>
+                  <span className="w-[68px] shrink-0 text-right text-tiny tabular-nums text-faint" title={absTime(row.at)}>{relTime(row.at)}</span>
                 </span>
-                <span className="mt-0.5 block text-[11px] text-muted">
+                <span className="mt-0.5 block text-tiny text-muted">
                   {row.sha && row.url ? (
-                    <a href={row.url} target="_blank" rel="noreferrer" className="font-mono hover:underline">
+                    <a href={row.url} target="_blank" rel="noreferrer" className="hover:underline">
                       {row.sha.slice(0, 7)} · pushed
                     </a>
                   ) : (
@@ -597,16 +597,16 @@ export function HistoryRegion({ view }: { view: GithubView }) {
               />
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline gap-2">
-                  <Truncate className="min-w-0 flex-1 text-[12px] text-muted" title={row.message}>
+                  <Truncate className="min-w-0 flex-1 text-caption text-muted" title={row.message}>
                     {row.message}
                   </Truncate>
-                  <span className="w-[68px] shrink-0 text-right text-[11px] tabular-nums text-faint" title={absTime(row.at)}>{relTime(row.at)}</span>
+                  <span className="w-[68px] shrink-0 text-right text-tiny tabular-nums text-faint" title={absTime(row.at)}>{relTime(row.at)}</span>
                 </span>
                 <a
                   href={row.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="mt-0.5 block font-mono text-[11px] text-faint hover:underline"
+                  className="mt-0.5 block text-tiny text-faint hover:underline"
                 >
                   {row.sha.slice(0, 7)}
                   {row.author ? ` · @${row.author}` : ""} · not in Jaroku
@@ -626,7 +626,7 @@ export function HistoryRegion({ view }: { view: GithubView }) {
             .filter((e) => e.outcome !== "ok" || e.kind === "force_override")
             .slice(0, 5)
             .map((e) => (
-              <div key={e.id} className="flex items-start gap-2 text-[11px]">
+              <div key={e.id} className="flex items-start gap-2 text-tiny">
                 <span
                   className="mt-[2px] shrink-0"
                   style={{ color: e.kind === "force_override" ? STATUS.error : STATUS.pending }}

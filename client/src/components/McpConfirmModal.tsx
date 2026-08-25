@@ -120,10 +120,10 @@ export function McpConfirmModal() {
             <span style={{ color: STATUS.pending }}>
               <ShieldAlertIcon size={ICON.md} />
             </span>
-            <h2 id="mcp-confirm-title" className="text-[13px] text-ink">
+            <h2 id="mcp-confirm-title" className="text-label text-ink">
               A tool is waiting for you
             </h2>
-            <span className="ml-auto font-mono text-[11px] tabular-nums text-faint">
+            <span className="ml-auto text-tiny tabular-nums text-faint">
               {/* Counting down to a DENIAL. Saying which way it falls matters: a bare timer
                   reads as "hurry up", not as "doing nothing refuses this". */}
               denies in {mm}:{ss}
@@ -135,11 +135,11 @@ export function McpConfirmModal() {
                 recognise the mark instantly, and a hand-drawn near-match would be the version
                 they had never seen before. */}
             <McpBadge title="From an MCP server — third-party code Jaroku has not reviewed" />
-            <span className="font-mono text-[13px] text-ink">{request.tool}</span>
-            <span className="text-[11px] text-muted">on {request.server}</span>
+            <span className="text-label text-ink">{request.tool}</span>
+            <span className="text-tiny text-muted">on {request.server}</span>
           </div>
 
-          <p className="mt-1.5 text-[11px] leading-[1.5] text-muted">
+          <p className="mt-1.5 text-tiny leading-[1.5] text-muted">
             <span className="text-ink">This runs on a third-party server Jaroku has not reviewed.</span>{" "}
             It was classified high-impact because {request.impactReason}.
           </p>
@@ -151,13 +151,13 @@ export function McpConfirmModal() {
           <p className={TYPE.sectionLabel}>
             Arguments the agent produced
           </p>
-          <pre className="mt-1 max-h-56 overflow-auto rounded-control border border-hair bg-bg/60 p-2.5 font-mono text-[11px] leading-[1.55] text-ink">
+          <pre className="mt-1 max-h-56 overflow-auto rounded-control border border-hair bg-bg/60 p-2.5 font-mono text-tiny leading-[1.55] text-ink">
             {formatArgs(request.args)}
           </pre>
         </div>
 
         <div className="mt-3 flex items-center gap-2 px-5 pb-4">
-          <span className="font-mono text-[10px] text-faint">
+          <span className="text-tiny text-faint">
             run {request.runId.slice(0, 8)}
             {queued > 0 && ` · ${queued} more waiting`}
           </span>
@@ -165,9 +165,9 @@ export function McpConfirmModal() {
               something says why — and this is the one place in the product where saying nothing
               means the run gets denied on a clock the user cannot see. */}
           {!connected && (
-            <span className="text-[10px] text-muted">reconnecting — this cannot be answered yet</span>
+            <span className="text-tiny text-muted">reconnecting — this cannot be answered yet</span>
           )}
-          {connected && answered && <span className="text-[10px] text-muted">sent…</span>}
+          {connected && answered && <span className="text-tiny text-muted">sent…</span>}
           <div className="ml-auto flex items-center gap-2">
             {/* Deny sits first and unstyled: refusing must be as reachable as allowing, and
                 the two allow buttons must not be the only things that look clickable. */}

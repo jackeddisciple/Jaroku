@@ -43,7 +43,7 @@ const SIZE: Record<InboxSeverity, { pad: string; title: string; elevation: strin
   // Large. The inline resolve form is visible without expanding, and evidence has room.
   blocking: {
     pad: "px-3 py-2.5",
-    title: "text-[13px] font-medium",
+    title: "text-label",
     elevation: ELEVATION.overlay,
     border: SURFACE.edge,
   },
@@ -51,14 +51,14 @@ const SIZE: Record<InboxSeverity, { pad: string; title: string; elevation: strin
   // and the position do the work amber is not allowed to.
   attention: {
     pad: "px-3 py-2",
-    title: "text-[12px] font-medium",
+    title: "text-caption font-medium",
     elevation: ELEVATION.floating,
     border: SURFACE.edge,
   },
   // Compact. A proposal is a question, not a problem, and it should not out-weigh one.
   proposal: {
     pad: "px-2.5 py-1.5",
-    title: "text-[12px]",
+    title: "text-caption",
     elevation: ELEVATION.raised,
     border: "#1e1e22",
   },
@@ -102,7 +102,7 @@ function CountBadge({ count }: { count: number }) {
   if (count < 2) return null;
   return (
     <span
-      className="shrink-0 rounded-chip px-1 py-px text-[10px] tabular-nums text-muted"
+      className="shrink-0 rounded-chip px-1 py-px text-tiny tabular-nums text-muted"
       style={{ background: SURFACE.active, borderRadius: RADIUS.chip }}
       title={`${count} occurrences, collapsed into one item`}
     >
@@ -198,7 +198,7 @@ export function InboxCard({
 
       {/* The context line: what it is about, and how long it has been waiting. Indented to the
           subject's column, so the icon gutter stays a gutter. */}
-      <div className="ml-6 mt-0.5 flex items-center gap-1.5 text-[11px] text-muted">
+      <div className="ml-6 mt-0.5 flex items-center gap-1.5 text-tiny text-muted">
         <span className="text-faint" title={absTime(item.first_seen_at)}>{relTime(item.first_seen_at)}</span>
         {item.snoozed_until && (
           <>

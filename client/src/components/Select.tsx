@@ -87,7 +87,7 @@ export function Select<T extends string>({
           if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
           if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
         }}
-        className={`flex w-full min-w-0 items-center gap-1.5 rounded-control border border-hair bg-panel px-2 py-1 text-[12px] transition-colors duration-fast hover:border-edge focus-visible:outline-none focus-visible:shadow-focusring disabled:cursor-not-allowed disabled:opacity-40 ${
+        className={`flex w-full min-w-0 items-center gap-1.5 rounded-control border border-hair bg-panel px-2 py-1 text-caption transition-colors duration-fast hover:border-edge focus-visible:outline-none focus-visible:shadow-focusring disabled:cursor-not-allowed disabled:opacity-40 ${
           open ? "border-edge text-ink" : "text-ink"
         } ${mono ? "font-mono" : ""}`}
       >
@@ -118,8 +118,8 @@ export function Select<T extends string>({
                 o.value === value ? "bg-active text-ink" : "text-muted hover:bg-active/40 hover:text-ink"
               }`}
             >
-              <span className={`text-[12px] ${mono ? "font-mono" : ""}`}>{o.label}</span>
-              {o.detail && <span className="text-[10px] leading-[1.4] text-faint">{o.detail}</span>}
+              <span className={`text-caption ${mono ? "font-mono" : ""}`}>{o.label}</span>
+              {o.detail && <span className="text-tiny leading-[1.4] text-faint">{o.detail}</span>}
             </button>
           ))}
         </div>

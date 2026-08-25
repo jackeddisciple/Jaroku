@@ -60,7 +60,7 @@ export function StreamingFileRow({
             size={STAT_ICON}
             title={state === "done" ? (rewrite ? "Rewritten" : "Written") : "Still writing"}
           />
-          <span className="font-mono text-faint">{bytes.toLocaleString()} B</span>
+          <span className="text-faint">{bytes.toLocaleString()} B</span>
         </>
       }
       className="animate-slide-in motion-reduce:animate-none"

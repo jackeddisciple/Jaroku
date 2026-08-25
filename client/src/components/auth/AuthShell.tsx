@@ -111,7 +111,7 @@ export function AuthShell({
         )}
         {title && (
           <h1
-            className={`${mark ? "mt-6" : ""} text-center font-serif text-[34px] font-normal leading-[1.15] tracking-[-0.005em] text-ink`}
+            className={`${mark ? "mt-6" : ""} text-center text-display tracking-[-0.005em] text-ink`}
           >
             {title}
           </h1>
@@ -119,7 +119,7 @@ export function AuthShell({
         {subtitle && (
           // The serif carries down into the subtitle, which is what makes the two read as one
           // block of voice rather than as a heading with a caption stuck under it.
-          <p className="mt-3 max-w-[38ch] text-center font-serif text-[15px] leading-[1.5] text-muted">
+          <p className="mt-3 max-w-[38ch] text-center text-body text-muted">
             {subtitle}
           </p>
         )}
@@ -132,7 +132,7 @@ export function AuthShell({
         </div>
 
         {footnote && (
-          <div className="mt-6 max-w-[440px] text-center text-[12px] leading-[1.6] text-muted">
+          <div className="mt-6 max-w-[440px] text-center text-caption leading-[1.6] text-muted">
             {footnote}
           </div>
         )}

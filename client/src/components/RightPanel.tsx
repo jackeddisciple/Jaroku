@@ -112,7 +112,7 @@ function GithubBadge({ badge, syncing }: { badge: string; syncing: boolean }) {
           that reason, and a refresh mark that does not turn while something is refreshing is the
           one glyph in the app whose shape makes a promise its motion breaks. */}
       <Glyph size={ICON.badge} className={syncing ? "animate-spin motion-reduce:animate-none" : undefined} />
-      {count && <span className="font-mono text-[10px] tabular-nums">{count}</span>}
+      {count && <span className="text-tiny tabular-nums">{count}</span>}
     </span>
   );
 }

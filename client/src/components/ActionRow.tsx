@@ -144,7 +144,7 @@ export function ActionRow({
           {icon ?? <Icon size={ICON.sm} />}
         </span>
 
-        <span className="min-w-0 flex-1 text-[12px]">
+        <span className="min-w-0 flex-1 text-caption">
           {!hideVerb && <span className="text-muted">{word} </span>}
           {object}
           {badges && <span className="ml-1.5 inline-flex items-center gap-1 align-middle">{badges}</span>}
@@ -152,7 +152,7 @@ export function ActionRow({
         </span>
 
         {trailing !== undefined && (
-          <span className="shrink-0 flex h-[19px] items-center gap-2 whitespace-nowrap pl-1 text-[11px] tabular-nums">
+          <span className="shrink-0 flex h-[19px] items-center gap-2 whitespace-nowrap pl-1 text-tiny tabular-nums">
             {trailing}
           </span>
         )}

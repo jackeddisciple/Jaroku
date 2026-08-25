@@ -97,7 +97,7 @@ export function EvalsPanel() {
         {tab("dataset", "Dataset", DatabaseIcon)}
         {tab("results", "Results", ActivityIcon)}
         {running && (
-          <span className="ml-2 text-[11px] text-run animate-stream-pulse motion-reduce:animate-none">
+          <span className="ml-2 text-tiny text-run animate-stream-pulse motion-reduce:animate-none">
             {progress.scoring && progress.status ? "scoring…" : `running ${progress.done}/${progress.total}`}
           </span>
         )}
@@ -138,7 +138,7 @@ export function EvalsPanel() {
                     if (shown < evals.length) setShown(shown + 12);
                     else sendListEvals(selectedDatasetId ?? undefined, Math.min(evalsWindow * 2, 500));
                   }}
-                  className="rounded-control px-2 py-1 text-[11px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
+                  className="rounded-control px-2 py-1 text-tiny text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
                 >
                   older…
                 </button>
@@ -147,7 +147,7 @@ export function EvalsPanel() {
           )}
 
           {progress && !progress.status && (
-            <div className="text-[11px] text-muted pb-3">
+            <div className="text-tiny text-muted pb-3">
               {progress.done}/{progress.total} runs done · {progress.running} in flight
               {progress.queued > 0 && ` · ${progress.queued} queued`}
               {progress.failed > 0 && <span className="text-err"> · {progress.failed} failed</span>}

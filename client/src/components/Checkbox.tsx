@@ -90,7 +90,7 @@ export function CheckboxField({
       title={title}
       disabled={disabled}
       onClick={onChange}
-      className={`flex w-full gap-2 text-left text-[11px] text-muted transition-colors duration-fast hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring disabled:cursor-not-allowed disabled:opacity-40 ${
+      className={`flex w-full gap-2 text-left text-tiny text-muted transition-colors duration-fast hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring disabled:cursor-not-allowed disabled:opacity-40 ${
         align === "start" ? "items-start" : "items-center"
       }`}
     >

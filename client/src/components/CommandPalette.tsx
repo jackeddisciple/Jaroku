@@ -168,10 +168,10 @@ export function CommandPalette() {
           // A VISIBLE FIELD. It was transparent on the card, so the one control that is focused
           // the instant this opens had no box at all — you could see the placeholder and not the
           // thing you were typing into.
-          className="w-full border-b border-edge bg-bg px-4 py-3 text-[13px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+          className="w-full border-b border-edge bg-bg px-4 py-3 text-label text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
         />
         <Command.List className="max-h-[52vh] overflow-auto p-2">
-          <Command.Empty className="px-3 py-6 text-center text-muted text-[12px]">No results.</Command.Empty>
+          <Command.Empty className="px-3 py-6 text-center text-muted text-caption">No results.</Command.Empty>
 
           {mode === "agents" ? (
             <Command.Group heading="Agents" className="mb-1">
@@ -186,7 +186,7 @@ export function CommandPalette() {
                   meta={a.health === "healthy" ? undefined : a.health}
                 >
                   <Truncate>{a.name}</Truncate>
-                  <span className="shrink-0 font-mono text-[11px] text-faint">{a.slug}</span>
+                  <span className="shrink-0 text-tiny text-faint">{a.slug}</span>
                 </Item>
               ))}
             </Command.Group>
@@ -198,7 +198,7 @@ export function CommandPalette() {
                 // threads to find the one with the pending diff.
                 <Item key={t.id} onSelect={run(() => openThread(t))} meta={relTime(t.last_activity_at)}>
                   <Truncate>{t.title}</Truncate>
-                  {t.fragment && <span className="shrink-0 text-faint text-[11px]">{t.fragment}</span>}
+                  {t.fragment && <span className="shrink-0 text-faint text-tiny">{t.fragment}</span>}
                 </Item>
               ))}
             </Command.Group>
@@ -304,10 +304,10 @@ function Item({
     <Command.Item
       onSelect={onSelect}
       disabled={disabled}
-      className="flex items-center justify-between gap-3 px-3 py-2 rounded-control text-[13px] text-muted cursor-pointer data-[selected=true]:bg-active data-[selected=true]:text-ink data-[disabled=true]:opacity-40"
+      className="flex items-center justify-between gap-3 px-3 py-2 rounded-control text-label text-muted cursor-pointer data-[selected=true]:bg-active data-[selected=true]:text-ink data-[disabled=true]:opacity-40"
     >
       <span className="flex items-center gap-2 min-w-0">{children}</span>
-      {meta && <span className="shrink-0 text-[11px] tabular-nums text-faint">{meta}</span>}
+      {meta && <span className="shrink-0 text-tiny tabular-nums text-faint">{meta}</span>}
       {/* A KEY LOOKS LIKE A KEY. Unstyled grey text reads as metadata, which is precisely the
           confusion this slot was already in; the app has a chip primitive with a hairline for
           exactly this shape of thing. */}

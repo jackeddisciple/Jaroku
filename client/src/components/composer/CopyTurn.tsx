@@ -61,7 +61,7 @@ export function CopyTurn({
         title={state === "failed" ? "Couldn't reach the clipboard" : "Copy the markdown source"}
         className={`inline-flex items-center justify-center rounded-control transition-colors duration-fast
           focus-visible:outline-none focus-visible:shadow-focusring
-          ${copied ? "text-ok" : state === "failed" ? "text-error" : "text-muted hover:bg-active hover:text-ink"}
+          ${copied ? "text-ok" : state === "failed" ? "text-err" : "text-muted hover:bg-active hover:text-ink"}
           ${className}`}
         style={{ minWidth: HIT_TARGET, minHeight: HIT_TARGET }}
       >

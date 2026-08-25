@@ -65,8 +65,8 @@ export function StepRow({ step }: { step: Step }) {
         state={step.error ? "error" : "done"}
         selected={selected}
         className="-mx-2 px-2"
-        lead={<span className="w-8 text-right font-mono">#{step.seq}</span>}
-        object={<span className="font-mono font-medium text-ink [overflow-wrap:anywhere]">{step.name}</span>}
+        lead={<span className="w-8 text-right">#{step.seq}</span>}
+        object={<span className="font-medium text-ink [overflow-wrap:anywhere]">{step.name}</span>}
         // Derived from the AGENT's manifest, not from the step: the frozen Step schema has
         // no provenance field and must not grow one.
         badges={
@@ -75,9 +75,9 @@ export function StepRow({ step }: { step: Step }) {
         trailing={
           <>
             {/* Figures, so mono and tabular: eight rows of these are a column to compare. */}
-            {step.tokens != null && <span className="font-mono text-muted">{fmtTokens(step.tokens)}</span>}
-            {step.cost != null && <span className="font-mono text-muted">{fmtCost(step.cost)}</span>}
-            <span className="font-mono text-muted">{fmtDuration(step.latency_ms)}</span>
+            {step.tokens != null && <span className="text-muted">{fmtTokens(step.tokens)}</span>}
+            {step.cost != null && <span className="text-muted">{fmtCost(step.cost)}</span>}
+            <span className="text-muted">{fmtDuration(step.latency_ms)}</span>
             {/* Only failures get a mark. A green check on every row is a column of green checks,
                 and the figures beside it are already the evidence that a step completed. */}
             {step.error && <StatusDot state="error" size={ICON.xs} title="This step failed" />}

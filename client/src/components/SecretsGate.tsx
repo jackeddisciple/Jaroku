@@ -37,7 +37,7 @@ function PasscodeField(props: {
     <div className="space-y-1">
       {/* A real label, associated by id — not a placeholder, which disappears exactly when
           somebody with a screen reader needs it and is invisible to one that reads the field. */}
-      <label htmlFor={props.id} className="block text-[11px] text-muted">
+      <label htmlFor={props.id} className="block text-tiny text-muted">
         {props.label}
       </label>
       <input
@@ -54,7 +54,7 @@ function PasscodeField(props: {
         // surface is the same colour, and the only thing that drew the box was the focus ring —
         // so the Confirm label on the passcode gate appeared with nothing beneath it, on the one
         // screen that stands between somebody and their credentials.
-        className="w-full rounded-control border border-hair bg-bg px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-faint focus:border-transparent focus:shadow-focusring disabled:opacity-40"
+        className="w-full rounded-control border border-hair bg-bg px-2.5 py-1.5 font-mono text-caption text-ink outline-none placeholder:text-faint focus:border-transparent focus:shadow-focusring disabled:opacity-40"
       />
     </div>
   );
@@ -188,7 +188,7 @@ export function SecretsGate({ onUnlocked }: { onUnlocked: () => void }) {
           ref={errorRef}
           aria-live="polite"
           role="status"
-          className={`min-h-[16px] text-[11px] ${error ? "text-err" : "text-faint"}`}
+          className={`min-h-[16px] text-tiny ${error ? "text-err" : "text-faint"}`}
         >
           {error ?? ""}
         </p>
@@ -208,7 +208,7 @@ export function SecretsGate({ onUnlocked }: { onUnlocked: () => void }) {
           ) : null}
         </div>
 
-        <p className="text-[11px] text-faint">
+        <p className="text-tiny text-faint">
           <LockIcon size={ICON.xs} />{" "}
           {choosingNew
             ? "Six to twelve characters, and it is per person, not per workspace."

@@ -89,7 +89,7 @@ export function AttachmentRail({
               no middle worth losing. */}
           <Truncate>{a.kind === "file" ? truncatePath(a.label, 32) : a.label}</Truncate>
           {a.protected && (
-            <span className="shrink-0 text-[9px] text-faint" aria-label="read-only" title="Read-only">
+            <span className="shrink-0 text-tiny text-faint" aria-label="read-only" title="Read-only">
               🔒
             </span>
           )}
@@ -109,7 +109,7 @@ export function AttachmentRail({
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="rounded-chip px-2 py-1 text-[11px] text-muted transition-colors duration-fast hover:text-ink"
+          className="rounded-chip px-2 py-1 text-tiny text-muted transition-colors duration-fast hover:text-ink"
         >
           +{hidden} more
         </button>
@@ -118,7 +118,7 @@ export function AttachmentRail({
         <button
           type="button"
           onClick={() => setExpanded(false)}
-          className="rounded-chip px-2 py-1 text-[11px] text-faint transition-colors duration-fast hover:text-ink"
+          className="rounded-chip px-2 py-1 text-tiny text-faint transition-colors duration-fast hover:text-ink"
         >
           show fewer
         </button>

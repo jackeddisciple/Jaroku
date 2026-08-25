@@ -90,7 +90,7 @@ export function GitHubCommitBox({ view }: { view: GithubView }) {
     <div>
       <textarea
         rows={4}
-        className="w-full resize-y rounded-control bg-panel px-2.5 py-2 text-[12px] leading-[1.55] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+        className="w-full resize-y rounded-control bg-panel px-2.5 py-2 text-caption leading-[1.55] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
         placeholder="what changed, and why"
         value={message}
         onChange={(e) => {
@@ -122,7 +122,7 @@ export function GitHubCommitBox({ view }: { view: GithubView }) {
         </button>
         {/* The count, in the same numeric weight the region headers use. Zero is a real answer
             here and is shown as one — it is what the disabled reasons below are about. */}
-        <span className="text-[11px] tabular-nums text-faint">
+        <span className="text-tiny tabular-nums text-faint">
           {included} file{included === 1 ? "" : "s"} in this push
         </span>
       </div>
@@ -138,7 +138,7 @@ export function GitHubCommitBox({ view }: { view: GithubView }) {
               competing for attention. */}
           <span className="inline-flex overflow-hidden rounded-control bg-panel">
             <button
-              className="px-3 py-1.5 text-[12px] text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
+              className="px-3 py-1.5 text-caption text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
               disabled={Boolean(commitState.reason)}
               onClick={() => commit(false)}
             >

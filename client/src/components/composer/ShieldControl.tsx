@@ -109,7 +109,7 @@ export function ShieldControl({
               shield with three settings and no statement of what none of them can do would read as
               "Fast means anything goes". */}
           Protected files are never writable in any mode. Reviewed connectors,{" "}
-          <code className="font-mono text-[10px]">tools/__init__.py</code> and the MCP bridge stay
+          <code className="font-mono text-tiny">tools/__init__.py</code> and the MCP bridge stay
           read-only.
         </PopoverNote>
       </Popover>

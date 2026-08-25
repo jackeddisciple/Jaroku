@@ -20,7 +20,7 @@ import { agentMcpToolNames } from "../store/mcpStore.ts";
 
 function Kv({ label, value, tag }: { label: string; value: string; tag?: boolean }) {
   return (
-    <div className="flex items-baseline justify-between py-1 text-[12px]">
+    <div className="flex items-baseline justify-between py-1 text-caption">
       <span className="text-muted">{label}</span>
       <span className="flex items-center gap-2">
         <span className="text-ink tabular-nums">{value}</span>
@@ -84,7 +84,7 @@ export function StepDetailPanel() {
             <ActionRow
               action={actionForStep(step)}
               state={step.error ? "error" : "done"}
-              object={<span className="font-mono font-medium text-ink [overflow-wrap:anywhere]">{step.name}</span>}
+              object={<span className="font-medium text-ink [overflow-wrap:anywhere]">{step.name}</span>}
               badges={step.type === "tool_call" && mcpNames.has(step.name) ? <McpBadge /> : undefined}
               trailing={
                 <Chip mono size="sm" color={STEP_TYPE[step.type].fg} background={STEP_TYPE[step.type].bg}>
@@ -93,7 +93,7 @@ export function StepDetailPanel() {
               }
             />
             {/* Outcome, in the app's own status mark rather than a coloured bullet character. */}
-            <div className="mt-1.5 flex items-center gap-1.5 pl-[22px] text-[11px]">
+            <div className="mt-1.5 flex items-center gap-1.5 pl-[22px] text-tiny">
               <StatusDot state={step.error ? "error" : "ok"} />
               <span className={step.error ? "text-err" : "text-ok"}>{step.error ? "failed" : "ok"}</span>
             </div>

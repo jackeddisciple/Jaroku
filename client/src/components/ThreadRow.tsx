@@ -222,7 +222,7 @@ export function ThreadRow({
               if (e.key === "Enter") commit();
               else if (e.key === "Escape") { cancelled.current = true; stopEditing(); }
             }}
-            className="min-w-0 flex-1 rounded-control bg-void px-1.5 py-0.5 text-[13px] text-ink outline-none focus-visible:shadow-focusring ring-1 ring-edge"
+            className="min-w-0 flex-1 rounded-control bg-void px-1.5 py-0.5 text-label text-ink outline-none focus-visible:shadow-focusring ring-1 ring-edge"
           />
         ) : (
           // The double-click sits on a wrapper rather than on Truncate: that component measures its
@@ -235,7 +235,7 @@ export function ThreadRow({
             onDoubleClick={(e) => { e.stopPropagation(); if (connected) setLocallyEditing(true); }}
           >
             <Truncate
-              className={`text-[13px] ${thread.archived_at ? "text-muted" : "text-ink"}`}
+              className={`text-label ${thread.archived_at ? "text-muted" : "text-ink"}`}
               title={thread.title}
             >
               {thread.title}
@@ -250,19 +250,19 @@ export function ThreadRow({
             Nothing outstanding means no hint (`resumeHint` returns null) and the time simply stays —
             the click already means "open", and four words saying so on every idle row is noise. */}
         {hint ? (
-          <span className="ml-auto hidden shrink-0 items-center gap-1 rounded-control bg-void px-1.5 py-0.5 text-[10px] text-muted group-hover:flex">
+          <span className="ml-auto hidden shrink-0 items-center gap-1 rounded-control bg-void px-1.5 py-0.5 text-tiny text-muted group-hover:flex">
             {hint}
           </span>
         ) : null}
         <span
-          className={`ml-auto shrink-0 text-[11px] text-faint tabular-nums ${hint ? "group-hover:hidden" : ""}`}
+          className={`ml-auto shrink-0 text-tiny text-faint tabular-nums ${hint ? "group-hover:hidden" : ""}`}
         >
           {relTime(thread.last_activity_at)}
         </span>
       </div>
 
       {/* line 2: the agent, the one decision-relevant fact, the cost, and who opened it */}
-      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-5 text-[11px] text-muted">
+      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-5 text-tiny text-muted">
         {/* The chip navigates to the AGENT; the row navigates into the thread. Two destinations one
             pixel apart, so the click has to be stopped here — and `Chip.onClick` takes no event, on
             purpose, so the stopping happens on the span around it. */}
@@ -272,7 +272,6 @@ export function ThreadRow({
           <Chip
             size="sm"
             tone="faint"
-            mono
             variant="bare"
             title={thread.agent_id ? `Go to ${agentChipLabel(thread)}` : undefined}
             className={`${thread.agent_deleted ? "opacity-60" : ""} ${thread.agent_id ? "hover:text-ink" : ""}`}
@@ -294,7 +293,7 @@ export function ThreadRow({
             which is a thing to know and not a thing that has gone wrong. */}
         {thread.agent_active > 1 && (
           <span
-            className="shrink-0 text-[10px] tabular-nums"
+            className="shrink-0 text-tiny tabular-nums"
             style={{ color: STATUS.pending }}
             title={`${thread.agent_active} threads on this agent are blocked or running`}
           >
@@ -356,7 +355,7 @@ export function ThreadRow({
               <ArchiveIcon size={ICON.xs} />
               {/* THE KEY, BESIDE THE ACTION. `e` archives and always has; the sidebar teaches ⌘K
                   exactly this way and no list action in the app did. */}
-              <kbd className="font-mono text-[9px] leading-none text-faint">E</kbd>
+              <kbd className="text-tiny leading-none text-faint">E</kbd>
             </button>
           ) : (
             <button
@@ -367,7 +366,7 @@ export function ThreadRow({
               className="inline-flex items-center gap-1 rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
             >
               <ArchiveRestoreIcon size={ICON.xs} />
-              <kbd className="font-mono text-[9px] leading-none text-faint">E</kbd>
+              <kbd className="text-tiny leading-none text-faint">E</kbd>
             </button>
           )}
         </span>
@@ -383,7 +382,7 @@ export function ThreadRow({
           because a row that grows under the pointer moves the row below it. */}
       {thread.preview && (
         <div className="mt-0.5 hidden pl-5 group-hover:block">
-          <Truncate className="text-[11px] italic text-faint" title={thread.preview}>
+          <Truncate className="text-tiny italic text-faint" title={thread.preview}>
             “{thread.preview}”
           </Truncate>
         </div>

@@ -31,7 +31,7 @@ const list = (item: InboxItemView, key: string): string[] =>
 
 /** One line of evidence. Indented to the subject's column, so the icon gutter stays a gutter. */
 function Line({ children }: { children: React.ReactNode }) {
-  return <div className="ml-6 mt-1 text-[11px] leading-[1.5] text-muted">{children}</div>;
+  return <div className="ml-6 mt-1 text-tiny leading-[1.5] text-muted">{children}</div>;
 }
 
 export function InboxEvidence({ item }: { item: InboxItemView }) {
@@ -54,7 +54,7 @@ export function InboxEvidence({ item }: { item: InboxItemView }) {
             <Line>
               {/* Already bounded and redacted on the way into the payload — see the server's
                   `boundPayload`. What reaches here has been through the same filter the log sinks use. */}
-              <Truncate className="text-[11px] text-muted" title={error}>{error}</Truncate>
+              <Truncate className="text-tiny text-muted" title={error}>{error}</Truncate>
             </Line>
           )}
           {str(item, "provider") && (
@@ -150,7 +150,7 @@ export function InboxEvidence({ item }: { item: InboxItemView }) {
         <>
           {instruction && (
             <Line>
-              <Truncate className="text-[11px] text-ink" title={instruction}>&ldquo;{instruction}&rdquo;</Truncate>
+              <Truncate className="text-tiny text-ink" title={instruction}>&ldquo;{instruction}&rdquo;</Truncate>
             </Line>
           )}
           <Line>

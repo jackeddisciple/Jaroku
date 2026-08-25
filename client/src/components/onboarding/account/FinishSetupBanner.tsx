@@ -34,13 +34,13 @@ export function FinishSetupBanner() {
 
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-edge bg-panel px-4 py-2">
-      <span className="text-[12px] leading-[1.5] text-muted">
+      <span className="text-caption leading-[1.5] text-muted">
         Your workspace isn&rsquo;t set up yet.
       </span>
       <button
         type="button"
         onClick={resume}
-        className="group inline-flex items-center gap-1.5 rounded-control px-1.5 py-0.5 text-[12px]
+        className="group inline-flex items-center gap-1.5 rounded-control px-1.5 py-0.5 text-caption
           font-medium text-ink outline-none transition-colors duration-fast hover:text-ember
           focus-visible:shadow-focusring"
       >

@@ -31,8 +31,8 @@ import type { AgentDetailView } from "../types.ts";
 function Fact({ label, value, title }: { label: string; value: React.ReactNode; title?: string }) {
   return (
     <div className="min-w-0" title={title}>
-      <div className="text-[10px] uppercase tracking-wider text-faint">{label}</div>
-      <div className="mt-0.5 truncate text-[12px] text-ink">{value}</div>
+      <div className="text-tiny uppercase tracking-wider text-faint">{label}</div>
+      <div className="mt-0.5 truncate text-caption text-ink">{value}</div>
     </div>
   );
 }
@@ -111,7 +111,7 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
                   if (e.key === "Escape") cancel();
                 }}
                 aria-label={`Rename ${a.name}`}
-                className="w-full rounded-control border border-edge bg-panel px-2 py-1 text-[13px] font-medium text-ink outline-none focus-visible:shadow-focusring"
+                className="w-full rounded-control border border-edge bg-panel px-2 py-1 text-label text-ink outline-none focus-visible:shadow-focusring"
               />
             ) : (
               <div className="flex min-w-0 items-center gap-1.5">
@@ -145,7 +145,7 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
             hover rather than a scan across forty cards. */}
         <AgentTagRow agent={a} />
 
-        {a.description && <p className="text-[12px] leading-[1.55] text-muted">{a.description}</p>}
+        {a.description && <p className="text-caption leading-[1.55] text-muted">{a.description}</p>}
 
         <div className="grid grid-cols-2 gap-3 rounded-control border border-hair p-2.5 sm:grid-cols-4">
           <Fact
@@ -180,7 +180,7 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
             detail would be a second thing to learn. */}
         {a.outcomes.length > 0 && (
           <div className="flex min-w-0 items-center gap-2">
-            <span className="shrink-0 text-[10px] uppercase tracking-wider text-faint">Recent runs</span>
+            <span className="shrink-0 text-tiny uppercase tracking-wider text-faint">Recent runs</span>
             <AgentSparkline outcomes={a.outcomes} height={14} />
           </div>
         )}

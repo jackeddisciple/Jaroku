@@ -87,14 +87,14 @@ function ExampleRow({
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commit(); }
         }}
         rows={Math.min(draft.split("\n").length + 1, 6)}
-        className="w-full resize-none bg-active text-ink rounded-control px-2 py-1 text-[12px] outline-none focus:shadow-focusring"
+        className="w-full resize-none bg-active text-ink rounded-control px-2 py-1 text-caption outline-none focus:shadow-focusring"
       />
     ) : (
       <button
         type="button"
         onClick={() => begin(which)}
         title="Click to edit"
-        className={`w-full text-left text-[12px] rounded-control px-2 py-1 -mx-2 hover:bg-active/50 transition-colors whitespace-pre-wrap break-words ${
+        className={`w-full text-left text-caption rounded-control px-2 py-1 -mx-2 hover:bg-active/50 transition-colors whitespace-pre-wrap break-words ${
           text ? (which === "input" ? "text-ink" : "text-muted") : "text-faint italic"
         }`}
       >
@@ -104,7 +104,7 @@ function ExampleRow({
 
   return (
     <div className="group flex gap-3 py-2">
-      <span className="text-faint text-[11px] tabular-nums pt-1 w-6 shrink-0 text-right select-none">
+      <span className="text-faint text-tiny tabular-nums pt-1 w-6 shrink-0 text-right select-none">
         {index + 1}
       </span>
       <div className="min-w-0 flex-1 space-y-0.5">
@@ -181,8 +181,8 @@ function RubricEditor({ datasetId }: { datasetId: string }) {
         className="flex w-full items-center gap-2 py-1.5 text-left"
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="text-[11px] uppercase tracking-wider text-faint">Judge rubric</span>
-        <span className="text-[11px] text-muted">
+        <span className="text-tiny uppercase tracking-wider text-faint">Judge rubric</span>
+        <span className="text-tiny text-muted">
           {isDefault ? "built-in" : (rubric?.name ?? "custom")} · {criteria.length} criteria
         </span>
         <span className="ml-auto text-faint">
@@ -192,7 +192,7 @@ function RubricEditor({ datasetId }: { datasetId: string }) {
 
       {open && (
         <div className="space-y-2 pb-1">
-          <p className="text-[11px] leading-[1.55] text-faint">
+          <p className="text-tiny leading-[1.55] text-faint">
             Each criterion is scored 0–4 against shared anchors and combined by weight; weights are
             normalised, so they do not have to add up. Saving writes a rubric for{" "}
             <span className="text-muted">this dataset only</span> and never changes the built-in one.
@@ -204,14 +204,14 @@ function RubricEditor({ datasetId }: { datasetId: string }) {
                   value={c.label}
                   onChange={(e) => edit(i, { label: e.target.value })}
                   placeholder="name"
-                  className="min-w-0 flex-1 rounded-control bg-active px-2 py-1 text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
+                  className="min-w-0 flex-1 rounded-control bg-active px-2 py-1 text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
                 />
                 {/* THE ID IS NOT EDITABLE ONCE IT EXISTS. It is what a stored verdict's
                     per-criterion score is keyed by, so renaming it would orphan every score
                     already recorded against this dataset — the drill-down would show a column of
                     blanks beside a criterion that looks identical. The label is the display name
                     and is free to change. */}
-                <span className="shrink-0 font-mono text-[10px] text-faint" title="the key stored verdicts are recorded against">
+                <span className="shrink-0 text-tiny text-faint" title="the key stored verdicts are recorded against">
                   {c.id}
                 </span>
                 <input
@@ -219,7 +219,7 @@ function RubricEditor({ datasetId }: { datasetId: string }) {
                   onChange={(e) => edit(i, { weight: Number(e.target.value) })}
                   inputMode="decimal"
                   title="Relative weight"
-                  className="w-14 shrink-0 rounded-control bg-active px-1.5 py-1 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring"
+                  className="w-14 shrink-0 rounded-control bg-active px-1.5 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring"
                 />
                 <button
                   onClick={() => setDraft(criteria.filter((_, j) => j !== i))}
@@ -234,14 +234,14 @@ function RubricEditor({ datasetId }: { datasetId: string }) {
                 onChange={(e) => edit(i, { description: e.target.value })}
                 rows={2}
                 placeholder="what the judge should look for, phrased so a higher score is better"
-                className="mt-1 w-full resize-none rounded-control bg-active px-2 py-1 text-[11px] leading-[1.5] text-muted placeholder:text-faint outline-none focus-visible:shadow-focusring"
+                className="mt-1 w-full resize-none rounded-control bg-active px-2 py-1 text-tiny leading-[1.5] text-muted placeholder:text-faint outline-none focus-visible:shadow-focusring"
               />
             </div>
           ))}
 
           <div className="flex flex-wrap items-center gap-2">
             <button
-              className="rounded-control px-2 py-1 text-[11px] text-muted transition-colors hover:text-ink"
+              className="rounded-control px-2 py-1 text-tiny text-muted transition-colors hover:text-ink"
               onClick={() =>
                 setDraft([
                   ...criteria,
@@ -255,11 +255,11 @@ function RubricEditor({ datasetId }: { datasetId: string }) {
             >
               + Criterion
             </button>
-            <span className="text-[11px] text-faint">weights total {total.toFixed(2)}</span>
+            <span className="text-tiny text-faint">weights total {total.toFixed(2)}</span>
             <button
               onClick={save}
               disabled={!connected || !dirty || criteria.length === 0}
-              className="ml-auto rounded-control bg-active px-2.5 py-1 text-[11px] text-ink transition-opacity disabled:opacity-30"
+              className="ml-auto rounded-control bg-active px-2.5 py-1 text-tiny text-ink transition-opacity disabled:opacity-30"
             >
               {dirty ? "Save rubric" : "Saved"}
             </button>
@@ -363,7 +363,7 @@ export function DatasetBuilder() {
         <button
           onClick={() => sendCreateDataset(activeAgentId, nextDatasetName())}
           disabled={!connected}
-          className="rounded-control px-2.5 py-1 text-[12px] text-faint hover:text-ink transition-colors disabled:opacity-40 shrink-0"
+          className="rounded-control px-2.5 py-1 text-caption text-faint hover:text-ink transition-colors disabled:opacity-40 shrink-0"
         >
           + New dataset
         </button>
@@ -421,7 +421,7 @@ export function DatasetBuilder() {
       {selected && <RubricEditor datasetId={selected.id} />}
 
       {(error || importNote) && (
-        <div className="px-4 pb-2 shrink-0 flex items-center gap-2 text-[11px]">
+        <div className="px-4 pb-2 shrink-0 flex items-center gap-2 text-tiny">
           <span className={error ? "text-err" : "text-muted"}>{error ?? importNote}</span>
           <button
             onClick={() => { setError(null); setImportNote(null); }}
@@ -464,7 +464,7 @@ export function DatasetBuilder() {
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addExample(); } }}
             disabled={!connected}
             placeholder="an input the agent should handle"
-            className="flex-1 bg-panel text-ink placeholder:text-faint rounded-control px-2.5 py-1.5 text-[12px] outline-none focus:shadow-focusring disabled:opacity-50"
+            className="flex-1 bg-panel text-ink placeholder:text-faint rounded-control px-2.5 py-1.5 text-caption outline-none focus:shadow-focusring disabled:opacity-50"
           />
           <button
             onClick={addExample}

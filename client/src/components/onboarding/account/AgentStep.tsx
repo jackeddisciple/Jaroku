@@ -93,7 +93,7 @@ export function AgentStep() {
             autoFocus
             // The one deliberate exception to the type ladder, the same one the composer takes:
             // this is the thing you type into, and it is allowed to be the largest text here.
-            className="w-full resize-none rounded-control border border-edge bg-void px-3.5 py-3 text-[14px]
+            className="w-full resize-none rounded-control border border-edge bg-void px-3.5 py-3 text-body
               leading-[1.6] text-ink outline-none transition-colors duration-fast placeholder:text-faint
               focus-visible:shadow-focusring focus:border-chrome disabled:opacity-50"
           />
@@ -136,8 +136,8 @@ function Option({
         {checked && <span className="h-[7px] w-[7px] rounded-full bg-ink" />}
       </span>
       <span className="min-w-0">
-        <span className="block text-[13px] leading-[1.4] text-ink">{title}</span>
-        <span className="mt-1 block text-[12px] leading-[1.5] text-muted">{detail}</span>
+        <span className="block text-label leading-[1.4] text-ink">{title}</span>
+        <span className="mt-1 block text-caption leading-[1.5] text-muted">{detail}</span>
       </span>
     </label>
   );

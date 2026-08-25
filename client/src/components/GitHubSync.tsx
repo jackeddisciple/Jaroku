@@ -106,13 +106,13 @@ function VerdictLine({ view }: { view: GithubView }) {
     <div>
       <div className="flex items-start gap-2">
         <span className={`mt-[2px] shrink-0 ${tone}`} aria-hidden>{glyph}</span>
-        <span className="min-w-0 flex-1 text-[12px] text-ink">
+        <span className="min-w-0 flex-1 text-caption text-ink">
           <Truncate title={view.verdict}>{view.verdict}</Truncate>
           {/* The one detail the sentence cannot carry: WHICH file moved upstream. §3.5's mock puts
               it here — "1 commit behind — weather.py edited on GitHub" — because "behind" alone
               does not tell you whether to look before pulling. */}
           {view.state === "behind" && view.remoteOnly[0] && (
-            <span className="block text-[11px] text-muted">
+            <span className="block text-tiny text-muted">
               <Truncate title={view.remoteOnly[0].message}>
                 {view.remoteOnly[0].message}
                 {view.remoteOnly[0].author ? ` · @${view.remoteOnly[0].author}` : ""}
@@ -297,11 +297,11 @@ function ForcePushConfirm({
     <div className="mt-2 rounded-card border p-2.5" style={{ borderColor: `${STATUS.error}55` }}>
       <div className="flex items-center gap-2">
         <span className="shrink-0 text-err"><AlertTriangleIcon size={ICON.sm} /></span>
-        <span className="text-[12px] font-medium text-ink">Force push to {view.link.branch}</span>
+        <span className="text-caption font-medium text-ink">Force push to {view.link.branch}</span>
         <button className="ml-auto shrink-0 text-faint hover:text-ink" onClick={onClose}>dismiss</button>
       </div>
 
-      <p className="mt-1.5 text-[11px] leading-[1.5] text-muted">
+      <p className="mt-1.5 text-tiny leading-[1.5] text-muted">
         {losing > 0 ? (
           <>
             <span className="text-ink">
@@ -312,14 +312,14 @@ function ForcePushConfirm({
         ) : (
           <>Overwrites the branch with this agent's versions, whatever is on it now. </>
         )}
-        Type <span className="font-mono text-ink">{view.agentSlug}</span> to confirm — it is
+        Type <span className="text-ink">{view.agentSlug}</span> to confirm — it is
         recorded against your account.
       </p>
 
       <div className="mt-2 flex items-center gap-2">
         <input
           autoFocus
-          className="min-w-0 flex-1 rounded-control bg-panel px-2 py-1 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+          className="min-w-0 flex-1 rounded-control bg-panel px-2 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
           placeholder={view.agentSlug}
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
@@ -380,12 +380,12 @@ function ProgressRail({ agentId, progress }: { agentId: string; progress: Github
     <div>
       <div className="flex items-center gap-2">
         <span className="shrink-0 text-run"><RefreshIcon size={ICON.xs} /></span>
-        <span className="min-w-0 flex-1 text-[12px] text-ink">
+        <span className="min-w-0 flex-1 text-caption text-ink">
           {progress.op === "push" ? "Pushing" : "Pulling"}…
         </span>
         {/* A live timer rather than a bar. The stages say how far; this says how long, and one
             honest number beats a percentage nobody computed. */}
-        <span className="shrink-0 text-[11px] tabular-nums text-muted">{fmtDuration(elapsed)}</span>
+        <span className="shrink-0 text-tiny tabular-nums text-muted">{fmtDuration(elapsed)}</span>
       </div>
       {/* The rail. Steps float on it — the trace timeline's shape, for the same reason: it is what
           makes a sequence read as one thing rather than as a table of rows. */}
@@ -410,7 +410,7 @@ function ProgressRail({ agentId, progress }: { agentId: string; progress: Github
       {/* A failed stage leaves the previous state intact — §2.4 — and the panel says so rather
           than leaving somebody to wonder what half-landed. */}
       {Object.values(progress.stages).includes("error") && (
-        <p className="mt-1.5 pl-1 text-[11px] leading-[1.5] text-muted">
+        <p className="mt-1.5 pl-1 text-tiny leading-[1.5] text-muted">
           Stopped at the stage above. Nothing was written past it —
           {progress.op === "push" ? " the branch is where it was." : " your agent is unchanged."}
           <button className="ml-1.5 text-ink underline-offset-2 hover:underline" onClick={() => sendRefreshGithub(agentId)}>
@@ -459,7 +459,7 @@ function ScanRefusalCard({ view, refusal }: { view: GithubView; refusal: GithubS
     <div className="rounded-card border p-2.5" style={{ borderColor: `${STATUS.error}55` }}>
       <div className="flex items-center gap-2">
         <span className="shrink-0 text-err"><AlertTriangleIcon size={ICON.sm} /></span>
-        <span className="text-[12px] font-medium text-ink">{refusal.message}</span>
+        <span className="text-caption font-medium text-ink">{refusal.message}</span>
         <button className="ml-auto shrink-0 text-faint hover:text-ink" onClick={() => clearScanRefusal(view.agentId)}>
           dismiss
         </button>
@@ -468,17 +468,17 @@ function ScanRefusalCard({ view, refusal }: { view: GithubView; refusal: GithubS
       <div className="mt-1.5 space-y-1.5">
         {refusal.findings.map((f) => (
           <div key={`${f.path} ${f.rule}`}>
-            <div className="font-mono text-[11px] text-ink">
+            <div className="text-tiny text-ink">
               <Truncate variant="path" title={f.path}>
                 {f.path}{f.line === null ? "" : `:${f.line}`}
               </Truncate>
             </div>
-            <div className="text-[11px] leading-[1.5] text-muted">→ {f.message}</div>
+            <div className="text-tiny leading-[1.5] text-muted">→ {f.message}</div>
           </div>
         ))}
       </div>
 
-      <p className="mt-2 text-[11px] leading-[1.5] text-ink">
+      <p className="mt-2 text-tiny leading-[1.5] text-ink">
         Nothing was pushed. <span className="text-muted">
           The branch is exactly where it was — the files were uploaded as loose objects nothing
           points at, and GitHub collects those.
@@ -493,7 +493,7 @@ function ScanRefusalCard({ view, refusal }: { view: GithubView; refusal: GithubS
 
       {overriding && (
         <div className="mt-2 border-t border-hair pt-2">
-          <p className="text-[11px] leading-[1.5] text-muted">
+          <p className="text-tiny leading-[1.5] text-muted">
             {secrets.length > 0 ? (
               <>
                 A credential in a commit stays in the reflog after the commit is deleted, so the fix
@@ -530,22 +530,22 @@ function RefusalCard({ view, refusal }: { view: GithubView; refusal: GithubRefus
     <div className="rounded-card border p-2.5" style={{ borderColor: `${STATUS.error}55` }}>
       <div className="flex items-center gap-2">
         <span className="shrink-0 text-err"><AlertTriangleIcon size={ICON.sm} /></span>
-        <span className="text-[12px] font-medium text-ink">Pull refused — validation failed</span>
+        <span className="text-caption font-medium text-ink">Pull refused — validation failed</span>
         <button className="ml-auto shrink-0 text-faint hover:text-ink" onClick={() => clearRefusal(view.agentId)}>
           dismiss
         </button>
       </div>
 
       {refusal.path && (
-        <div className="mt-1.5 font-mono text-[11px] text-ink">
+        <div className="mt-1.5 text-tiny text-ink">
           {/* §A.3 applies here too: the whole card is about WHICH file, so the filename is the
               half that must survive the width. */}
           <Truncate variant="path">{refusal.path}</Truncate>
         </div>
       )}
-      <div className="mt-0.5 text-[11px] leading-[1.5] text-muted">→ {refusal.message}</div>
+      <div className="mt-0.5 text-tiny leading-[1.5] text-muted">→ {refusal.message}</div>
 
-      <p className="mt-2 text-[11px] leading-[1.5] text-ink">
+      <p className="mt-2 text-tiny leading-[1.5] text-ink">
         {refusal.check === "protected"
           ? "This would have replaced reviewed code Jaroku keeps read-only."
           : refusal.check === "contract"
@@ -570,14 +570,14 @@ function RefusalCard({ view, refusal }: { view: GithubView; refusal: GithubRefus
 
       {forcing && (
         <div className="mt-2 border-t border-hair pt-2">
-          <p className="text-[11px] leading-[1.5] text-muted">
+          <p className="text-tiny leading-[1.5] text-muted">
             Publishing a candidate that failed validation makes it this agent's current version.
-            Type <span className="font-mono text-ink">{view.agentSlug}</span> to confirm — it is
+            Type <span className="text-ink">{view.agentSlug}</span> to confirm — it is
             recorded against your account.
           </p>
           <div className="mt-1.5 flex items-center gap-2">
             <input
-              className="min-w-0 flex-1 rounded-control bg-panel px-2 py-1 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+              className="min-w-0 flex-1 rounded-control bg-panel px-2 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
               placeholder={view.agentSlug}
               value={typed}
               onChange={(e) => setTyped(e.target.value)}

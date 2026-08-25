@@ -138,7 +138,7 @@ function NewWorkspaceForm({ onDone }: { onDone: () => void }) {
         maxLength={NAME_MAX}
         placeholder="My team"
         aria-label="Workspace name"
-        className="w-full rounded-control border border-hair bg-void px-2 py-1.5 text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
+        className="w-full rounded-control border border-hair bg-void px-2 py-1.5 text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
       />
       {/* THE KIND IS ASKED, NEVER DEFAULTED SILENTLY. It decides whether the workspace has a
           members list, roles and an author column at all, and it is not changeable afterwards —
@@ -151,7 +151,7 @@ function NewWorkspaceForm({ onDone }: { onDone: () => void }) {
               type="button"
               onClick={() => setKind(k.id)}
               title={k.what}
-              className={`flex-1 rounded-control px-2 py-1 text-[11px] transition-colors ${
+              className={`flex-1 rounded-control px-2 py-1 text-tiny transition-colors ${
                 kind === k.id ? "bg-active text-ink" : "text-muted hover:text-ink"
               }`}
             >
@@ -164,17 +164,17 @@ function NewWorkspaceForm({ onDone }: { onDone: () => void }) {
           words that mean nothing to somebody who has not read the tenancy model. Rendered even
           when there is only one option left, because that is exactly the case where the label is
           alone and unexplained. */}
-      <p className="mt-1.5 text-[11px] leading-[1.5] text-faint">{KINDS.find((k) => k.id === kind)?.what}</p>
-      {error && <p role="alert" className="mt-1.5 text-[11px] text-err">{error}</p>}
+      <p className="mt-1.5 text-tiny leading-[1.5] text-faint">{KINDS.find((k) => k.id === kind)?.what}</p>
+      {error && <p role="alert" className="mt-1.5 text-tiny text-err">{error}</p>}
       <div className="mt-2 flex items-center gap-2">
         <button
           type="submit"
           disabled={busy || trimmed.length === 0}
-          className="rounded-control bg-panel px-2.5 py-1 text-[11px] text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-control bg-panel px-2.5 py-1 text-tiny text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
         >
           {busy ? "Creating…" : "Create"}
         </button>
-        <button type="button" onClick={onDone} className="px-1 text-[11px] text-muted hover:text-ink">
+        <button type="button" onClick={onDone} className="px-1 text-tiny text-muted hover:text-ink">
           Cancel
         </button>
       </div>
@@ -264,21 +264,21 @@ function JoinWorkspaceForm({ onDone }: { onDone: () => void }) {
         spellCheck={false}
         autoCapitalize="off"
         autoCorrect="off"
-        className="w-full rounded-control border border-hair bg-void px-2 py-1.5 font-mono text-[11px] text-ink placeholder:font-sans placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
+        className="w-full rounded-control border border-hair bg-void px-2 py-1.5 text-tiny text-ink placeholder:font-sans placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
       />
-      <p className="mt-1.5 text-[11px] leading-[1.5] text-faint">
+      <p className="mt-1.5 text-tiny leading-[1.5] text-faint">
         The whole link or just the code after it — either works.
       </p>
-      {error && <p role="alert" className="mt-1.5 text-[11px] leading-[1.5] text-err">{error}</p>}
+      {error && <p role="alert" className="mt-1.5 text-tiny leading-[1.5] text-err">{error}</p>}
       <div className="mt-2 flex items-center gap-2">
         <button
           type="submit"
           disabled={busy || pasted.trim().length === 0}
-          className="rounded-control bg-panel px-2.5 py-1 text-[11px] text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-control bg-panel px-2.5 py-1 text-tiny text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
         >
           {busy ? "Joining…" : "Join"}
         </button>
-        <button type="button" onClick={onDone} className="px-1 text-[11px] text-muted hover:text-ink">
+        <button type="button" onClick={onDone} className="px-1 text-tiny text-muted hover:text-ink">
           Cancel
         </button>
       </div>
@@ -300,7 +300,7 @@ function MenuRow({
     <button
       role="menuitem"
       onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-control px-2 py-2 text-left text-[12px] text-muted transition-colors hover:bg-active/40 active:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+      className="flex w-full items-center gap-2 rounded-control px-2 py-2 text-left text-caption text-muted transition-colors hover:bg-active/40 active:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
     >
       <span className="shrink-0" aria-hidden><Icon size={ICON.xs} /></span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
@@ -428,13 +428,13 @@ export function WorkspaceSwitcher() {
         <span className="shrink-0 text-muted" aria-hidden>
           <KindIcon size={ICON.sm} />
         </span>
-        <Truncate className="min-w-0 flex-1 text-[13px] text-ink" title={current?.name}>
+        <Truncate className="min-w-0 flex-1 text-label text-ink" title={current?.name}>
           {current?.name ?? "workspace"}
         </Truncate>
         {expiring && (
           // The token behind this socket is nearly out. Said quietly rather than as a modal:
           // nothing has failed yet, and the reconnect will renew it.
-          <span className="shrink-0 text-[10px] text-run" title="your session is about to end">
+          <span className="shrink-0 text-tiny text-run" title="your session is about to end">
             ●
           </span>
         )}
@@ -457,7 +457,7 @@ export function WorkspaceSwitcher() {
       {switchError && (
         <div role="alert" className="flex items-start gap-2 border-t border-hair bg-err/5 px-3 py-1.5">
           <span className="mt-0.5 shrink-0 text-err" aria-hidden><AlertTriangleIcon size={ICON.xs} /></span>
-          <span className="min-w-0 flex-1 text-[11px] leading-[1.5] text-err">{switchError}</span>
+          <span className="min-w-0 flex-1 text-tiny leading-[1.5] text-err">{switchError}</span>
           <button
             onClick={clearSwitchError}
             title="Dismiss"
@@ -495,7 +495,7 @@ export function WorkspaceSwitcher() {
                   // twice, and the second statement is the one that makes a quiet menu loud. The
                   // row is `text-ink` against the others' `text-muted`, which is "visually distinct
                   // but not loud" without a background.
-                  className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-active/40 active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring"
+                  className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-caption transition-colors hover:bg-active/40 active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring"
                 >
                   <span className={`shrink-0 ${active ? "text-ink" : "text-faint"}`} aria-hidden>
                     <RowKind size={ICON.xs} />

@@ -684,6 +684,15 @@ jobs:
       - name: the client's own suites
         working-directory: client
         run: |
+          # typography.pdf's ladder, and the two rules about which face carries what. It is here
+          # rather than further down because most of what it asserts is a property of the WHOLE
+          # client — no call site writes its own pixel size, no `text-` class names something
+          # Tailwind will not emit, the mono face reaches only the files that are about code — and
+          # a rule like that is worth what it can be broken by, which is any of three hundred
+          # files. It found one the first time it ran: a copy button whose failed state asked for
+          # `text-error` against a palette whose red is `err`, so the one state that had to be
+          # noticed rendered with no colour at all and had done since it shipped.
+          npm run test:type-scale
           npm run test:reset
           npm run test:thread-store
           npm run test:thread-cost

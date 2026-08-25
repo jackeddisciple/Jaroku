@@ -218,7 +218,7 @@ function FlowNode({ data }: NodeProps) {
     const showModel = d.ports?.model;
     const showTool = d.ports?.tool;
     return (
-      <div className="relative select-none font-mono" style={{ width: AGENT_W, height: AGENT_H }}>
+      <div className="relative select-none" style={{ width: AGENT_W, height: AGENT_H }}>
         <div
           className="relative flex items-center gap-4 rounded-card px-5 h-full overflow-hidden"
           style={{ background: stateBg(d), border: `1px solid ${BORDER}` }}
@@ -232,8 +232,8 @@ function FlowNode({ data }: NodeProps) {
             <Icon size={NODE_ICON.agent} />
           </span>
           <span className="flex flex-col min-w-0 leading-tight gap-1">
-            <Truncate className="font-mono text-[13px] font-semibold text-ink">{d.title}</Truncate>
-            <Truncate className="text-[11px] text-muted">{d.subtitle}</Truncate>
+            <Truncate className="text-label font-semibold text-ink">{d.title}</Truncate>
+            <Truncate className="text-tiny text-muted">{d.subtitle}</Truncate>
           </span>
         </div>
 
@@ -260,7 +260,7 @@ function FlowNode({ data }: NodeProps) {
 
   // compact card (trigger / tool / action / terminal) — centred icon, label BELOW the card
   return (
-    <div className="relative select-none font-mono" style={{ width: CARD_W, height: CARD_H }}>
+    <div className="relative select-none" style={{ width: CARD_W, height: CARD_H }}>
       <div
         className="relative flex items-center justify-center rounded-card h-full overflow-hidden"
         style={{ background: stateBg(d), border: `1px solid ${BORDER}` }}
@@ -288,12 +288,12 @@ function FlowNode({ data }: NodeProps) {
 
       {/* label beneath the card */}
       <div className="absolute left-1/2 -translate-x-1/2 text-center" style={{ top: CARD_H + 8, width: 200 }}>
-        <Truncate fade="both" className="font-mono text-[12px] font-medium leading-tight text-ink">
+        <Truncate fade="both" className="text-caption font-medium leading-tight text-ink">
           {d.title}
         </Truncate>
         <Truncate
           fade="both"
-          className={`text-[11px] leading-tight ${d.mcp ? "" : "text-muted"}`}
+          className={`text-tiny leading-tight ${d.mcp ? "" : "text-muted"}`}
         >
           <span style={d.mcp ? { color: ACCENT_MCP } : undefined}>{d.subtitle}</span>
         </Truncate>
@@ -312,7 +312,7 @@ function ResourceNode({ data }: NodeProps) {
   const d = data as ResourceData;
   const Icon = d.Icon;
   return (
-    <div className="relative select-none flex flex-col items-center font-mono" style={{ width: RES_D }}>
+    <div className="relative select-none flex flex-col items-center" style={{ width: RES_D }}>
       <div
         className="flex items-center justify-center rounded-full"
         style={{ width: RES_D, height: RES_D, background: CARD_BG, border: `1px solid ${BORDER}` }}
@@ -320,7 +320,7 @@ function ResourceNode({ data }: NodeProps) {
         <Icon size={NODE_ICON.resource} />
       </div>
       <div className="absolute left-1/2 -translate-x-1/2 text-center" style={{ top: RES_D + 9, width: 112 }}>
-        <Truncate fade="both" className="font-mono text-[11px] leading-tight text-ink">{d.label}</Truncate>
+        <Truncate fade="both" className="text-tiny leading-tight text-ink">{d.label}</Truncate>
       </div>
       <Handle id="in" type="target" position={Position.Top} className={HANDLE_HIDDEN} />
       <Diamond style={{ left: RES_D / 2, top: 0 }} />
@@ -368,7 +368,7 @@ function FlowEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPo
           return (
             <EdgeLabelRenderer>
               <div
-                className="nodrag nopan absolute text-[11px] font-mono"
+                className="nodrag nopan absolute text-tiny"
                 style={{
                   transform: `translate(-50%,-50%) translate(${lx}px, ${ly}px)`,
                   color: hot ? "#fbbf24" : "#9a9aa4",
@@ -397,7 +397,7 @@ function ResourceEdge({ sourceX, sourceY, targetX, targetY, data }: EdgeProps) {
       {label && (
         <EdgeLabelRenderer>
           <div
-            className="nodrag nopan absolute text-[11px] text-muted font-mono"
+            className="nodrag nopan absolute text-tiny text-muted"
             style={{ transform: `translate(-50%,-50%) translate(${mx}px, ${my - 4}px)`, pointerEvents: "none" }}
           >
             {label}
@@ -605,7 +605,7 @@ function NodeInspector({ nodeId, ntype, onClose }: { nodeId: string; ntype: stri
   const toolFiles = findToolFiles(files);
 
   return (
-    <div className="absolute top-2 right-2 bottom-2 w-64 bg-panel rounded-card border border-edge p-3 overflow-auto text-[12px] shadow-floating">
+    <div className="absolute top-2 right-2 bottom-2 w-64 bg-panel rounded-card border border-edge p-3 overflow-auto text-caption shadow-floating">
       <div className="flex items-center justify-between mb-3">
         <Truncate className="text-ink" title={nodeId}>{nodeId}</Truncate>
         <button className="text-muted transition-colors duration-fast hover:text-ink" title="Close (Esc)" aria-label="Close" onClick={onClose}>
@@ -616,15 +616,15 @@ function NodeInspector({ nodeId, ntype, onClose }: { nodeId: string; ntype: stri
       {ntype === "agent" && run && <Row label="Model" value={run.model} />}
       {ntype === "agent" && prompt && (
         <Section title="Prompt">
-          <pre className="whitespace-pre-wrap text-muted text-[11px] leading-relaxed">{prompt.slice(0, 1200)}</pre>
+          <pre className="whitespace-pre-wrap text-muted text-tiny leading-relaxed">{prompt.slice(0, 1200)}</pre>
         </Section>
       )}
       {ntype === "tool" && toolFiles.length > 0 && (
         <Section title={`Tools (${toolFiles.length})`}>
           {toolFiles.map((f) => (
             <div key={f.path} className="mb-3">
-              <div className="text-faint text-[10px] mb-1">{f.path}</div>
-              <pre className="whitespace-pre-wrap text-muted text-[11px] leading-relaxed">{f.content.slice(0, 800)}</pre>
+              <div className="text-faint text-tiny mb-1">{f.path}</div>
+              <pre className="whitespace-pre-wrap text-muted text-tiny leading-relaxed">{f.content.slice(0, 800)}</pre>
             </div>
           ))}
         </Section>
@@ -946,7 +946,7 @@ function Empty({ title, hint, detail }: { title: string; hint?: string; detail?:
         title={title}
         hint={
           detail ? (
-            <Truncate variant="path" className="mx-auto max-w-full font-mono text-[11px] text-faint" title={detail}>
+            <Truncate variant="path" className="mx-auto max-w-full font-mono text-tiny text-faint" title={detail}>
               {detail}
             </Truncate>
           ) : (

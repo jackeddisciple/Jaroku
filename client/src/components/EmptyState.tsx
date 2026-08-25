@@ -56,7 +56,7 @@ export function EmptyState({
 
   if (size === "line") {
     return (
-      <div className={`flex items-baseline gap-2 px-4 py-3 text-[12px] leading-[1.5] text-muted ${className}`}>
+      <div className={`flex items-baseline gap-2 px-4 py-3 text-caption leading-[1.5] text-muted ${className}`}>
         {Icon && (
           <span className="shrink-0 text-faint" aria-hidden>
             <Icon size={ICON.xs} />
@@ -85,9 +85,9 @@ export function EmptyState({
             <Icon size={ICON.md} />
           </div>
         )}
-        <div className={`font-medium text-ink ${full ? "text-[13px]" : "text-[12px]"}`}>{title}</div>
+        <div className={`font-medium text-ink ${full ? "text-label" : "text-caption"}`}>{title}</div>
         {hint && (
-          <div className="mx-auto mt-1 max-w-[38ch] text-[12px] leading-[1.55] text-muted">{hint}</div>
+          <div className="mx-auto mt-1 max-w-[38ch] text-caption leading-[1.55] text-muted">{hint}</div>
         )}
       </div>
     </div>
@@ -108,7 +108,7 @@ export function EmptyState({
  */
 export function LoadingLine({ label = "Loading…" }: { label?: string }) {
   return (
-    <div role="status" className="flex items-center gap-2 px-4 py-3 text-[12px] text-muted">
+    <div role="status" className="flex items-center gap-2 px-4 py-3 text-caption text-muted">
       <span className="shrink-0 text-faint" aria-hidden>
         <LoaderIcon size={ICON.xs} className="animate-spin motion-reduce:animate-none" />
       </span>

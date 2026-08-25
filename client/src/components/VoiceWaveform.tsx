@@ -88,7 +88,7 @@ export function VoiceWaveform({
       <canvas ref={canvasRef} className="w-full" style={{ height: Math.max(22, height - 20) }} />
       <div
         ref={capRef}
-        className="text-[11px] text-muted whitespace-nowrap overflow-hidden mt-1"
+        className="text-tiny text-muted whitespace-nowrap overflow-hidden mt-1"
         title={transcript}
       >
         {transcript || <span className="text-faint">Listening…</span>}

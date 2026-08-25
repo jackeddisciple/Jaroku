@@ -64,7 +64,7 @@ function Overflow({
         setOpen(false);
         onPick();
       }}
-      className={`flex w-full items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-[12px] transition-colors duration-fast hover:bg-active active:bg-chrome ${
+      className={`flex w-full items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-caption transition-colors duration-fast hover:bg-active active:bg-chrome ${
         danger ? "text-err hover:text-err" : "text-muted hover:text-ink"
       }`}
     >
@@ -201,9 +201,12 @@ export function AgentCard({
             <Truncate className={TYPE.title} title={agent.name}>
               {agent.name}
             </Truncate>
-            {/* The slug in the mono face at the smaller size — §5.2. It is an identifier, and the
-                prose/code split is what tells a reader which of the two lines they can type. */}
-            <Truncate className="mt-0.5 font-mono text-[11px] text-faint" title={agent.slug}>
+            {/* The slug at the smaller size — §5.2. It was also in the mono face, on the argument
+                that it is an identifier and the prose/code split tells a reader which of the two
+                lines they can type. typography.pdf §04 names "agent IDs/slugs" in its Sans list
+                explicitly, so what separates the two lines now is size and colour, which is what
+                §03 says hierarchy is supposed to come from anyway. */}
+            <Truncate className="mt-0.5 text-tiny text-faint" title={agent.slug}>
               {agent.slug}
             </Truncate>
           </div>
@@ -259,16 +262,16 @@ export function AgentCard({
           <div className="min-w-0">
             {agent.latest_thread ? (
               <>
-                <Truncate className="text-[12px] text-ink" title={agent.latest_thread.title}>
+                <Truncate className="text-caption text-ink" title={agent.latest_thread.title}>
                   {agent.latest_thread.title}
                 </Truncate>
                 <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
                   {agent.latest_thread.last_turn ? (
-                    <Truncate className="min-w-0 flex-1 text-[11px] text-muted" title={agent.latest_thread.last_turn}>
+                    <Truncate className="min-w-0 flex-1 text-tiny text-muted" title={agent.latest_thread.last_turn}>
                       {agent.latest_thread.last_turn}
                     </Truncate>
                   ) : (
-                    <span className="flex-1 text-[11px] text-faint">Nothing said in it yet</span>
+                    <span className="flex-1 text-tiny text-faint">Nothing said in it yet</span>
                   )}
                   <Chip size="sm" mono tone="faint" className="shrink-0" title="The model this agent runs on">
                     {agent.default_provider}
@@ -278,7 +281,7 @@ export function AgentCard({
             ) : (
               // NOTHING IS FABRICATED. §5.2: "If the agent has no threads, the line reads 'Not
               // started yet'." No invented summary, no placeholder title.
-              <div className="text-[12px] text-faint">Not started yet</div>
+              <div className="text-caption text-faint">Not started yet</div>
             )}
           </div>
         )}
@@ -287,7 +290,7 @@ export function AgentCard({
             rather than amber, because amber means running and a warning must never wear it. */}
         {agent.missing_env.length > 0 && (
           <div
-            className="flex min-w-0 items-center gap-1.5 text-[11px]"
+            className="flex min-w-0 items-center gap-1.5 text-tiny"
             style={{ color: STATUS.error }}
             title={`No credential is configured for ${agent.missing_env.join(", ")}`}
           >
@@ -308,7 +311,7 @@ export function AgentCard({
           <AgentSparkline outcomes={agent.outcomes} max={compact ? 12 : 20} height={compact ? 10 : 12} />
           {agent.deployment?.status === "live" && (
             <span
-              className="ml-auto flex shrink-0 items-center gap-1 text-[10px]"
+              className="ml-auto flex shrink-0 items-center gap-1 text-tiny"
               style={{ color: agent.drift ? STATUS.error : STATUS.ok }}
               title={
                 agent.drift
@@ -325,7 +328,7 @@ export function AgentCard({
         {/* §5.2's footer, and the one action the card owns. `mt-auto` so a card with a short
             current-work line still puts its footer on the bottom edge — a grid whose footers sit at
             different heights reads as misaligned rather than as varied. */}
-        <div className="mt-auto flex min-w-0 items-center gap-2 border-t border-hair pt-2 text-[11px] text-faint">
+        <div className="mt-auto flex min-w-0 items-center gap-2 border-t border-hair pt-2 text-tiny text-faint">
           <span className="tabular-nums" title={`${agent.thread_count} open thread${agent.thread_count === 1 ? "" : "s"}`}>
             {agent.thread_count} thread{agent.thread_count === 1 ? "" : "s"}
           </span>
@@ -362,7 +365,7 @@ export function AgentCard({
               // initial-avatars in one app at two shapes, two sizes and two ink levels. And it
               // was `aria-hidden` while carrying a `title`, so the tooltip sat on an element
               // removed from the accessibility tree and reached nobody.
-              className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-active text-[11px] text-ink"
+              className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-active text-tiny text-ink"
               title="Who created this agent"
               role="img"
               aria-label="Who created this agent"

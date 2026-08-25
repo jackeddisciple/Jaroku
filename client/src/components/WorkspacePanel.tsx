@@ -163,19 +163,19 @@ function GeneralSection() {
               onChange={(e) => { setName(e.target.value); setSaved(false); }}
               onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
               aria-label="Workspace name"
-              className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 text-[12px] text-ink outline-none focus-visible:shadow-focusring focus:border-edge"
+              className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 text-caption text-ink outline-none focus-visible:shadow-focusring focus:border-edge"
             />
             <button className={secondaryBtn} onClick={() => void save()} disabled={busy || !dirty}>
               {busy ? "Saving…" : "Save"}
             </button>
-            {saved && !dirty && <span className="text-[11px] text-ok">Saved</span>}
+            {saved && !dirty && <span className="text-tiny text-ok">Saved</span>}
           </div>
         ) : (
           // Absent rather than disabled — §8. A member reads the name they already see at the top
           // of the sidebar; what is gone is the box that would refuse to save.
-          <p className="mt-1.5 text-[12px] text-ink">{workspace.name}</p>
+          <p className="mt-1.5 text-caption text-ink">{workspace.name}</p>
         )}
-        {error && <p className="mt-1.5 text-[11px] text-err">{error}</p>}
+        {error && <p className="mt-1.5 text-tiny text-err">{error}</p>}
       </div>
 
       <div className="grid grid-cols-2 gap-4">
@@ -185,8 +185,8 @@ function GeneralSection() {
               whether the workspace has a members list, roles and a Threads author column at all,
               and it cannot change after creation. A control that looked editable would be offering
               the one field the product genuinely cannot move. */}
-          <p className="mt-1.5 text-[12px] text-ink">{workspace.kind}</p>
-          <p className="mt-0.5 text-[11px] leading-[1.5] text-faint">
+          <p className="mt-1.5 text-caption text-ink">{workspace.kind}</p>
+          <p className="mt-0.5 text-tiny leading-[1.5] text-faint">
             {workspace.kind === "team"
               ? "Members, roles and invitations. Threads show who did what."
               : "Just you. No members list and no author column."}
@@ -198,16 +198,16 @@ function GeneralSection() {
           {/* A server that predates §13.1's `createdAt` sends nothing. A dash rather than an
               invented date, which is the same rule §3.5 of the Activity spec sets for an unknown
               figure: `--`, never a zero that looks like an answer. */}
-          <p className="mt-1.5 text-[12px] text-ink" title={workspace.createdAt ? absTime(workspace.createdAt) : undefined}>
+          <p className="mt-1.5 text-caption text-ink" title={workspace.createdAt ? absTime(workspace.createdAt) : undefined}>
             {workspace.createdAt ? absTime(workspace.createdAt) : "—"}
           </p>
-          <p className="mt-0.5 break-all font-mono text-[11px] text-faint select-all">{workspace.id}</p>
+          <p className="mt-0.5 break-all text-tiny text-faint select-all">{workspace.id}</p>
         </div>
       </div>
 
       <div className="border-t border-hair pt-3">
         <div className={TYPE.sectionLabel}>Everything else about this workspace</div>
-        <p className="mt-1 text-[11px] leading-[1.55] text-muted">
+        <p className="mt-1 text-tiny leading-[1.55] text-muted">
           These live in the right panel, where the surfaces they belong to already are. Opening one
           closes this.
         </p>
@@ -220,8 +220,8 @@ function GeneralSection() {
             >
               <span className="mt-0.5 shrink-0 text-faint" aria-hidden><t.Icon size={ICON.xs} /></span>
               <span className="min-w-0">
-                <span className="block text-[12px] text-ink">{t.label}</span>
-                <span className="block text-[11px] leading-[1.5] text-faint">{t.what}</span>
+                <span className="block text-caption text-ink">{t.label}</span>
+                <span className="block text-tiny leading-[1.5] text-faint">{t.what}</span>
               </span>
             </button>
           ))}
@@ -306,7 +306,7 @@ function InviteLink() {
               only redeemable by an account signing in as that address, so a leak is inert; a link
               invitation is redeemable by whoever holds it, and saying so here is the one moment
               somebody can still decide they wanted the other kind. */}
-          <p className="text-[12px] leading-[1.55] text-ink">
+          <p className="text-caption leading-[1.55] text-ink">
             {link.email
               ? `Send this to ${link.email}. Only an account signing in as that address can use it.`
               : "Anyone with this link can join this workspace. Send it only to people you mean to invite."}{" "}
@@ -316,7 +316,7 @@ function InviteLink() {
           {/* SELECTABLE AND WRAPPED rather than truncated. It is a credential somebody has to get
               out of this box by hand, and a middle-elided link cannot be read back if the copy
               button is the thing that failed. */}
-          <p className="mt-1.5 break-all rounded-chip bg-void px-2 py-1.5 font-mono text-[11px] text-muted select-all">
+          <p className="mt-1.5 break-all rounded-chip bg-void px-2 py-1.5 text-tiny text-muted select-all">
             {url}
           </p>
           <div className="mt-1.5 flex items-center gap-2">
@@ -335,7 +335,7 @@ function InviteLink() {
               {copied ? <CheckIcon size={ICON.xs} /> : null}
               {copied ? "Copied" : "Copy link"}
             </button>
-            <span className={`text-[11px] ${isExpired(link.expiresAt) ? "text-err" : "text-faint"}`}>expires {fmtUntil(link.expiresAt)}</span>
+            <span className={`text-tiny ${isExpired(link.expiresAt) ? "text-err" : "text-faint"}`}>expires {fmtUntil(link.expiresAt)}</span>
             {/* THE COUNTDOWN IS ON THE DISMISS BUTTON rather than beside the expiry, because the
                 two numbers mean opposite things and would otherwise sit together looking alike:
                 the invitation is good for a week, and this BOX is good for thirty seconds. */}
@@ -399,22 +399,22 @@ function TransferConfirm({ member, onDone }: { member: Member; onDone: () => voi
         {/* §6.3's sentence, close to verbatim, because both halves of it are the point: who is
             getting it, and what happens to you. An owner who reads only the first half is an owner
             who has not been told they are about to stop being one. */}
-        <p className="mt-2 text-[12px] leading-[1.55] text-ink">
+        <p className="mt-2 text-caption leading-[1.55] text-ink">
           Transfer ownership of <span className="text-ink">{name}</span> to{" "}
           <span className="text-ink">{who}</span>? You will become an Admin.
         </p>
-        <p className="mt-1.5 text-[11px] leading-[1.55] text-muted">
+        <p className="mt-1.5 text-tiny leading-[1.55] text-muted">
           An Admin cannot change membership, billing, or delete the workspace. Only {who} will be
           able to give it back.
         </p>
-        <p className="mt-2.5 break-all text-[11px] text-faint select-all">{name}</p>
+        <p className="mt-2.5 break-all text-tiny text-faint select-all">{name}</p>
         <input
           autoFocus
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
           placeholder="type the workspace name above to confirm"
           aria-label="Workspace name"
-          className="mt-1.5 w-full rounded-control border border-hair bg-void px-2.5 py-1.5 text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
+          className="mt-1.5 w-full rounded-control border border-hair bg-void px-2.5 py-1.5 text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
         />
         <div className="mt-3 flex items-center gap-2">
           <button
@@ -423,7 +423,7 @@ function TransferConfirm({ member, onDone }: { member: Member; onDone: () => voi
             // somebody cannot type twice the same way, and this is a confirmation rather than a
             // checksum — the gesture is what is being asked for.
             disabled={typed.trim() !== name.trim() || name.trim() === ""}
-            className="rounded-control border border-err/40 bg-err/10 px-3 py-1.5 text-[12px] text-err transition-colors hover:bg-err/20 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-control border border-err/40 bg-err/10 px-3 py-1.5 text-caption text-err transition-colors hover:bg-err/20 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Transfer ownership
           </button>
@@ -471,13 +471,13 @@ function ConfirmDialog({
     >
       <div className="w-full max-w-md rounded-modal border border-edge bg-panel p-4 shadow-overlay">
         <div className={TYPE.sectionLabel}>{title}</div>
-        <p className="mt-2 text-[12px] leading-[1.55] text-ink">{body}</p>
-        {detail && <p className="mt-1.5 text-[11px] leading-[1.55] text-muted">{detail}</p>}
+        <p className="mt-2 text-caption leading-[1.55] text-ink">{body}</p>
+        {detail && <p className="mt-1.5 text-tiny leading-[1.55] text-muted">{detail}</p>}
         <div className="mt-3 flex items-center gap-2">
           <button
             autoFocus
             onClick={onConfirm}
-            className="rounded-control border border-err/40 bg-err/10 px-3 py-1.5 text-[12px] text-err transition-colors hover:bg-err/20"
+            className="rounded-control border border-err/40 bg-err/10 px-3 py-1.5 text-caption text-err transition-colors hover:bg-err/20"
           >
             {confirmLabel}
           </button>
@@ -572,7 +572,7 @@ function MemberRow({ member, canManage, isSelf }: { member: Member; canManage: b
           somebody, and this is what makes a row findable again once you have seen it. See
           lib/memberList.ts for why the palette is deliberately off-token. */}
       <span
-        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control text-[11px] font-medium text-void"
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control text-tiny text-void"
         style={{ background: avatarColor(member.user_id) }}
         aria-hidden
       >
@@ -580,7 +580,7 @@ function MemberRow({ member, canManage, isSelf }: { member: Member; canManage: b
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <Truncate className="text-[12px] text-ink" title={member.email}>
+          <Truncate className="text-caption text-ink" title={member.email}>
             {member.display_name || member.email}
           </Truncate>
           {isSelf && <Chip size="sm" tone="faint" variant="bare">you</Chip>}
@@ -591,9 +591,9 @@ function MemberRow({ member, canManage, isSelf }: { member: Member; canManage: b
             "who is here". */}
         <div className="flex min-w-0 items-baseline gap-2">
           {member.display_name && (
-            <Truncate className="min-w-0 text-[11px] text-faint" title={member.email}>{member.email}</Truncate>
+            <Truncate className="min-w-0 text-tiny text-faint" title={member.email}>{member.email}</Truncate>
           )}
-          <span className="shrink-0 text-[11px] text-faint" title={absTime(member.created_at)}>
+          <span className="shrink-0 text-tiny text-faint" title={absTime(member.created_at)}>
             joined {relTime(member.created_at)}
           </span>
         </div>
@@ -627,7 +627,7 @@ function MemberRow({ member, canManage, isSelf }: { member: Member; canManage: b
           onClick={() => setConfirmRemove(true)}
           title={`Remove ${member.email}`}
           aria-label={`Remove ${member.display_name || member.email}`}
-          className="shrink-0 rounded-control px-1.5 py-1 text-[11px] text-faint transition-colors hover:bg-active active:bg-chrome hover:text-err"
+          className="shrink-0 rounded-control px-1.5 py-1 text-tiny text-faint transition-colors hover:bg-active active:bg-chrome hover:text-err"
         >
           <XIcon size={ICON.xs} />
         </button>
@@ -653,13 +653,13 @@ function InviteRow({ invite, canManage }: { invite: Invite; canManage: boolean }
         {anyone ? <TicketIcon size={ICON.sm} /> : <UserCircleIcon size={ICON.sm} />}
       </span>
       <div className="min-w-0 flex-1">
-        <Truncate className={`text-[12px] ${anyone ? "text-faint" : "text-muted"}`} title={invite.email ?? undefined}>
+        <Truncate className={`text-caption ${anyone ? "text-faint" : "text-muted"}`} title={invite.email ?? undefined}>
           {invite.email ?? "Anyone with the link"}
         </Truncate>
         {/* §7.2 asks for the CREATED date. The expiry is kept beside it because it is the half
             that decides whether the row is still worth anything — a link created three days ago
             with an hour left is a different thing to chase than one created an hour ago. */}
-        <span className={`text-[11px] ${isExpired(invite.expires_at) ? "text-err" : "text-faint"}`}>
+        <span className={`text-tiny ${isExpired(invite.expires_at) ? "text-err" : "text-faint"}`}>
           <span title={absTime(invite.created_at)}>invited {relTime(invite.created_at)}</span>
           {" · "}expires {fmtUntil(invite.expires_at)}
         </span>
@@ -674,7 +674,7 @@ function InviteRow({ invite, canManage }: { invite: Invite; canManage: boolean }
           onClick={() => sendRevokeInvite(invite.id)}
           title="Revoke this invitation"
           aria-label={`Revoke the invitation for ${invite.email ?? "anyone with the link"}`}
-          className="shrink-0 rounded-control px-1.5 py-1 text-[11px] text-faint transition-colors hover:bg-active active:bg-chrome hover:text-err"
+          className="shrink-0 rounded-control px-1.5 py-1 text-tiny text-faint transition-colors hover:bg-active active:bg-chrome hover:text-err"
         >
           <XIcon size={ICON.xs} />
         </button>
@@ -706,7 +706,7 @@ function LeaveWorkspace() {
     <div className="border-t border-hair pt-3">
       <button
         onClick={() => setConfirming(true)}
-        className="rounded-control px-2 py-1 text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-err"
+        className="rounded-control px-2 py-1 text-caption text-muted transition-colors hover:bg-active active:bg-chrome hover:text-err"
       >
         Leave {workspace.name}
       </button>
@@ -779,7 +779,7 @@ function MembersSection() {
         <span className={TYPE.sectionLabel}>{workspace?.name ?? "This workspace"}</span>
         <Chip size="sm" tone="faint" caps>{workspace?.kind ?? "workspace"}</Chip>
         {workspace?.kind === "personal" && (
-          <span className="text-[11px] text-faint">
+          <span className="text-tiny text-faint">
             Threads show no author column in a personal workspace
           </span>
         )}
@@ -806,7 +806,7 @@ function MembersSection() {
               type="email"
               placeholder="colleague@example.com — or leave blank for a link"
               aria-label="Email address for the invitation, optional"
-              className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
+              className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
             />
             <Select
               value={role}
@@ -826,7 +826,7 @@ function MembersSection() {
             <button type="submit" className={primaryBtn}>Invite</button>
             <button type="button" onClick={() => setInviting(false)} className={quietBtn}>Cancel</button>
           </form>
-          <p className="mt-1.5 text-[11px] leading-[1.55] text-faint">
+          <p className="mt-1.5 text-tiny leading-[1.55] text-faint">
             {ROLES.find((r) => r.id === role)?.what}. There is no mail sender here — you get a link
             to send, once.{" "}
             {email.trim()
@@ -847,13 +847,13 @@ function MembersSection() {
       <UpsellCard channel="members" onUpgrade={() => openBilling("billing")} />
 
       {error && (
-        <p className="rounded-control border border-err/30 px-2 py-1.5 text-[11px] text-err">{error}</p>
+        <p className="rounded-control border border-err/30 px-2 py-1.5 text-tiny text-err">{error}</p>
       )}
 
       <div>
         <div className="flex items-center px-1 pb-1">
           <span className={TYPE.panelLabel}>Members</span>
-          <span className="ml-auto text-[11px] text-faint">{members.length}</span>
+          <span className="ml-auto text-tiny text-faint">{members.length}</span>
         </div>
         {!loaded ? (
           <LoadingLine />
@@ -891,7 +891,7 @@ function MembersSection() {
                 The distinction is worth keeping — the heading is a list of things still waiting on
                 somebody, and calling it "Invited" implied they had arrived. */}
             <span className={TYPE.panelLabel}>Pending invites</span>
-            <span className="ml-auto text-[11px] text-faint">{invites.length}</span>
+            <span className="ml-auto text-tiny text-faint">{invites.length}</span>
           </div>
           {invites.map((i) => (
             <InviteRow key={i.id} invite={i} canManage={canManage} />
@@ -946,7 +946,7 @@ function AuditSection() {
 
   if (!canRead) {
     return (
-      <p className="text-[12px] leading-[1.55] text-muted">
+      <p className="text-caption leading-[1.55] text-muted">
         The audit trail is an owner&rsquo;s. Its rows name who revealed which credential, who
         overrode a push refusal and who removed whom.
       </p>
@@ -957,9 +957,9 @@ function AuditSection() {
     <div>
       <div className="flex items-center pb-1">
         <span className={TYPE.panelLabel}>Newest first</span>
-        <span className="ml-auto text-[11px] text-faint">{entries.length}</span>
+        <span className="ml-auto text-tiny text-faint">{entries.length}</span>
       </div>
-      {error && <p className="mb-2 text-[11px] text-err">{error}</p>}
+      {error && <p className="mb-2 text-tiny text-err">{error}</p>}
       {!loaded ? (
         <LoadingLine />
       ) : entries.length === 0 ? (
@@ -976,16 +976,16 @@ function AuditSection() {
           return (
             <div key={e.id} className="border-b border-hair py-1.5 last:border-b-0">
               <div className="flex items-baseline gap-2">
-                <span className="font-mono text-[11px] text-ink">{e.action}</span>
-                {who && <span className="text-[11px] text-muted">{who}</span>}
+                <span className="text-tiny text-ink">{e.action}</span>
+                {who && <span className="text-tiny text-muted">{who}</span>}
                 {/* An action with no actor is the SERVER acting on its own behalf — a sweeper, a
                     reconciliation, a webhook. Named as such rather than left blank, because "nobody
                     did this" and "we do not know who did this" are different answers. */}
-                {!who && !e.actor_user_id && <span className="text-[11px] text-faint">the server</span>}
-                <span className="ml-auto shrink-0 text-[11px] text-faint" title={absTime(e.created_at)}>{relTime(e.created_at)}</span>
+                {!who && !e.actor_user_id && <span className="text-tiny text-faint">the server</span>}
+                <span className="ml-auto shrink-0 text-tiny text-faint" title={absTime(e.created_at)}>{relTime(e.created_at)}</span>
               </div>
               {(e.target_type || detail || e.ip) && (
-                <div className="mt-0.5 break-words font-mono text-[10px] leading-[1.5] text-faint">
+                <div className="mt-0.5 break-words text-tiny leading-[1.5] text-faint">
                   {e.target_type && <span>{e.target_type}{e.target_id ? ` ${e.target_id}` : ""}</span>}
                   {detail && <span>{e.target_type ? " · " : ""}{detail}</span>}
                   {e.ip && <span> · {e.ip}</span>}
@@ -1077,7 +1077,7 @@ function DataSection() {
     <div className="space-y-5">
       <div>
         <div className={TYPE.sectionLabel}>Export everything</div>
-        <p className="mt-1 text-[11px] leading-[1.55] text-muted">
+        <p className="mt-1 text-tiny leading-[1.55] text-muted">
           Every table this workspace owns as NDJSON, plus each agent&rsquo;s current source, in one
           archive. It is written by a worker and can take minutes; the link it produces expires.
         </p>
@@ -1093,7 +1093,7 @@ function DataSection() {
             </button>
           )}
           {exportState?.status === "pending" && (
-            <span className="text-[11px] text-faint">
+            <span className="text-tiny text-faint">
               Reading every run, step and trace payload. This stays true if you close the panel.
             </span>
           )}
@@ -1110,12 +1110,12 @@ function DataSection() {
               >
                 Download {(exportState.bytes / 1_000_000).toFixed(1)} MB
               </a>
-              <span className={`text-[11px] ${isExpired(exportState.expiresAt) ? "text-err" : "text-faint"}`}>link expires {fmtUntil(exportState.expiresAt)}</span>
+              <span className={`text-tiny ${isExpired(exportState.expiresAt) ? "text-err" : "text-faint"}`}>link expires {fmtUntil(exportState.expiresAt)}</span>
             </>
           )}
         </div>
         {exportError && (
-          <p className="mt-1.5 text-[11px] text-err">{exportError}</p>
+          <p className="mt-1.5 text-tiny text-err">{exportError}</p>
         )}
       </div>
 
@@ -1126,14 +1126,14 @@ function DataSection() {
           // destroyed and is entitled to the count of what was — including whatever could not be
           // revoked at a third party, which is the half a silent success would hide.
           <div className="mt-2 rounded-control border border-edge bg-void px-2.5 py-2">
-            <p className="text-[12px] text-ink">This workspace is gone. What was destroyed:</p>
-            <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px] text-muted">
+            <p className="text-caption text-ink">This workspace is gone. What was destroyed:</p>
+            <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-tiny text-muted">
               {JSON.stringify(receipt, null, 2)}
             </pre>
           </div>
         ) : (
           <>
-            <p className="mt-1 text-[11px] leading-[1.55] text-muted">
+            <p className="mt-1 text-tiny leading-[1.55] text-muted">
               Rows, objects, checkpoints, queued work, and the grants at the third parties this
               workspace connected. It cannot be undone — export first if you want any of it.
             </p>
@@ -1147,25 +1147,25 @@ function DataSection() {
                 asks for; the box that would spend it does not. */}
             {canManage && (
               <>
-                <p className="mt-2 break-all font-mono text-[11px] text-faint select-all">{workspaceId}</p>
+                <p className="mt-2 break-all text-tiny text-faint select-all">{workspaceId}</p>
                 <div className="mt-1.5 flex flex-wrap items-center gap-2">
                   <input
                     value={confirm}
                     onChange={(e) => setConfirm(e.target.value)}
                     placeholder="type the id above to confirm"
-                    className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 font-mono text-[11px] text-ink placeholder:font-sans placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
+                    className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 text-tiny text-ink placeholder:font-sans placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
                   />
                   <button
                     onClick={() => void destroy()}
                     disabled={deleting || confirm.trim() !== workspaceId}
-                    className="rounded-control border border-err/40 bg-err/10 px-3 py-1.5 text-[12px] text-err transition-colors hover:bg-err/20 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="rounded-control border border-err/40 bg-err/10 px-3 py-1.5 text-caption text-err transition-colors hover:bg-err/20 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {deleting ? "Deleting…" : "Delete permanently"}
                   </button>
                 </div>
               </>
             )}
-            {deleteError && <p className="mt-1.5 text-[11px] text-err">{deleteError}</p>}
+            {deleteError && <p className="mt-1.5 text-tiny text-err">{deleteError}</p>}
           </>
         )}
       </div>
@@ -1244,7 +1244,7 @@ export function WorkspacePanel() {
               <button
                 key={s.id}
                 onClick={() => open(s.id)}
-                className={`rounded-control px-2.5 py-1 text-[12px] transition-colors ${
+                className={`rounded-control px-2.5 py-1 text-caption transition-colors ${
                   shown === s.id ? "bg-active text-ink" : "text-muted hover:text-ink"
                 }`}
               >

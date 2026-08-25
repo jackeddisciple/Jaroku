@@ -176,7 +176,7 @@ export function StagingRegion({ view }: { view: GithubView }) {
           HISTORY — which is §3.4's existing answer for a hand-staged subset and is worth stating
           before somebody presses the button, not after they notice the dot is hollow. */}
       {!whole && (
-        <p className="mt-2 text-[11px] leading-[1.5] text-muted">
+        <p className="mt-2 text-tiny leading-[1.5] text-muted">
           This is a hand-staged subset, so it does not map onto one version: it lands as a single
           commit with no version dot in History, and your versions stay exactly where they are.
         </p>
@@ -188,20 +188,20 @@ export function StagingRegion({ view }: { view: GithubView }) {
         // plus a parenthetical, inside a field that erases itself on the first keystroke, which is
         // exactly when the instruction is needed.
         <textarea
-          className="mt-2 h-16 w-full resize-none rounded-control bg-panel px-2 py-1.5 font-mono text-[11px] leading-[1.5] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+          className="mt-2 h-16 w-full resize-none rounded-control bg-panel px-2 py-1.5 font-mono text-tiny leading-[1.5] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
           placeholder="what does this subset do?"
           value={message}
           onChange={(e) => setMessage(e.target.value)}
         />
       )}
       {!whole && (
-        <p className="mt-1 text-[10px] text-faint">
+        <p className="mt-1 text-tiny text-faint">
           A staged subset has no version instruction to borrow.
         </p>
       )}
 
       <div className="mt-2 flex items-center gap-2">
-        <span className="text-[11px] text-faint">
+        <span className="text-tiny text-faint">
           {total === 0 ? "nothing staged" : whole ? "everything staged" : `${total} hunk${total === 1 ? "" : "s"}`}
         </span>
         <button
@@ -247,7 +247,7 @@ function StagedFileRow({
 
   return (
     <div>
-      <div className="flex items-center gap-2 text-[11px]">
+      <div className="flex items-center gap-2 text-tiny">
         <Checkbox
           checked={state === "partial" ? "mixed" : state === "on"}
           onChange={onToggleFile}
@@ -322,7 +322,7 @@ function HunkRow({
   const [open, setOpen] = useState(false);
   return (
     <div className="rounded-control border border-hair">
-      <div className="flex items-center gap-2 px-1.5 py-1 text-[11px]">
+      <div className="flex items-center gap-2 px-1.5 py-1 text-tiny">
         <Checkbox checked={checked} onChange={onToggle} label={`stage ${hunk.header}`} />
         <button className="min-w-0 flex-1 text-left" onClick={() => setOpen((v) => !v)}>
           <Truncate className="font-mono text-faint" title={hunk.header}>{hunk.header}</Truncate>
@@ -330,7 +330,7 @@ function HunkRow({
         <DiffStat additions={hunk.additions} deletions={hunk.deletions} className="shrink-0" />
       </div>
       {open && (
-        <pre className="overflow-x-auto border-t border-hair px-1.5 py-1 font-mono text-[10px] leading-[1.5]">
+        <pre className="overflow-x-auto border-t border-hair px-1.5 py-1 font-mono text-tiny leading-[1.5]">
           {hunk.lines.map((line, i) => (
             <div
               key={i}
@@ -446,7 +446,7 @@ export function RestackRegion({ view }: { view: GithubView }) {
                 setDragging(null);
               }}
               onDragEnd={() => setDragging(null)}
-              className={`flex items-center gap-2 rounded-control px-1 py-1 text-[11px] ${
+              className={`flex items-center gap-2 rounded-control px-1 py-1 text-tiny ${
                 failed ? "border border-err/40 bg-err/5" : "border border-transparent"
               } ${dragging === index ? "opacity-50" : ""}`}
             >
@@ -488,18 +488,18 @@ export function RestackRegion({ view }: { view: GithubView }) {
           named tools.helper" tells somebody exactly which move to undo. */}
       {refusal && (
         <div className="mt-2 rounded-control border border-err/30 px-2 py-1.5">
-          <p className="text-[11px] leading-[1.5] text-err">{refusal.message}</p>
+          <p className="text-tiny leading-[1.5] text-err">{refusal.message}</p>
           {refusal.problems.slice(0, 3).map((p, i) => (
-            <p key={i} className="mt-0.5 font-mono text-[10px] leading-[1.5] text-muted">{p}</p>
+            <p key={i} className="mt-0.5 font-mono text-tiny leading-[1.5] text-muted">{p}</p>
           ))}
-          <p className="mt-1 text-[11px] leading-[1.5] text-faint">
+          <p className="mt-1 text-tiny leading-[1.5] text-faint">
             Nothing was written. Your versions are exactly where they were.
           </p>
         </div>
       )}
 
       <div className="mt-2 flex items-center gap-2">
-        <span className="text-[11px] text-faint">
+        <span className="text-tiny text-faint">
           drag to reorder · squash folds into the row below · nothing is written until you push
         </span>
         <button

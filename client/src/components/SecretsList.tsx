@@ -81,11 +81,11 @@ function ValueOnce({ value, onDone }: { value: string; onDone: () => void }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="space-y-2 rounded-control border border-hair px-3 py-2">
-      <p className="text-[11px] text-muted">
+      <p className="text-tiny text-muted">
         Save this now. It is shown once — afterwards only a masked hint is stored, and the way back
         to a value is rotating it.
       </p>
-      <code className="block break-all rounded-control bg-bg px-2 py-1.5 font-mono text-[12px] text-ink">
+      <code className="block break-all rounded-control bg-bg px-2 py-1.5 font-mono text-caption text-ink">
         {value}
       </code>
       <div className="flex items-center gap-2">
@@ -139,7 +139,7 @@ function ValueForm({
         placeholder={label}
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        className="min-w-0 flex-1 rounded-control bg-bg px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+        className="min-w-0 flex-1 rounded-control bg-bg px-2.5 py-1.5 font-mono text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
       />
       <button type="submit" className={primaryBtn} disabled={busy || !value}>
         {busy ? "Saving…" : "Save"}
@@ -175,7 +175,7 @@ function RevokeForm({
   if (!needsTyping) {
     return (
       <div className="flex items-center gap-2 pt-1">
-        <span className="text-[11px] text-muted">Revoke {name}?</span>
+        <span className="text-tiny text-muted">Revoke {name}?</span>
         <button className={primaryBtn} disabled={busy} onClick={() => onConfirm()}>
           {busy ? "Revoking…" : "Revoke"}
         </button>
@@ -193,7 +193,7 @@ function RevokeForm({
         if (typed === name) onConfirm(typed);
       }}
     >
-      <p className="text-[11px] text-err">
+      <p className="text-tiny text-err">
         {name} is referenced by this workspace. Type its name to confirm — a quiet revoke breaks a
         deployed agent at three in the morning.
       </p>
@@ -203,7 +203,7 @@ function RevokeForm({
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
           placeholder={name}
-          className="min-w-0 flex-1 rounded-control bg-bg px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+          className="min-w-0 flex-1 rounded-control bg-bg px-2.5 py-1.5 font-mono text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
         />
         <button type="submit" className={primaryBtn} disabled={busy || typed !== name}>
           {busy ? "Revoking…" : "Revoke"}
@@ -237,13 +237,13 @@ function RevokeForm({
 function RotationHistory({ rotations }: { rotations: RotationRecord[] }) {
   if (!rotations.length) {
     return (
-      <p className="pt-1 text-[11px] text-faint">
+      <p className="pt-1 text-tiny text-faint">
         Never rotated. The first rotation is recorded here, with whatever reason is given for it.
       </p>
     );
   }
   return (
-    <div className="space-y-1 pt-1 text-[11px]">
+    <div className="space-y-1 pt-1 text-tiny">
       {rotations.map((r) => (
         <div key={r.rotated_at} className="flex items-start gap-2">
           <span className="shrink-0 text-faint">{new Date(r.rotated_at).toLocaleString()}</span>
@@ -265,14 +265,14 @@ function UsageView({ sites }: { sites: UsageSite[] }) {
   const runtime = sites.filter((s) => s.source === "runtime_read");
   if (!sites.length) {
     return (
-      <p className="pt-1 text-[11px] text-faint">
+      <p className="pt-1 text-tiny text-faint">
         Nothing references this — no mention in any agent&rsquo;s current source, and no run has
         received it.
       </p>
     );
   }
   return (
-    <div className="space-y-2 pt-1 text-[11px]">
+    <div className="space-y-2 pt-1 text-tiny">
       <div>
         <div className="text-faint">Referenced in source</div>
         {staticHits.length === 0 ? (
@@ -567,9 +567,9 @@ function Group({
 }) {
   return (
     <section className="space-y-1.5">
-      <h3 className="text-[10px] font-medium uppercase tracking-wider text-faint">{title}</h3>
+      <h3 className="text-tiny uppercase tracking-wider text-faint">{title}</h3>
       {secrets.length === 0 ? (
-        <p className="px-1 text-[11px] text-faint">{empty}</p>
+        <p className="px-1 text-tiny text-faint">{empty}</p>
       ) : (
         secrets.map((s) => <SecretRow key={`${s.name}:${s.agentId ?? ""}`} secret={s} onChanged={onChanged} />)
       )}

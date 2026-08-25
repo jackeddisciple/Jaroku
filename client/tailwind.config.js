@@ -91,36 +91,52 @@ export default {
       transitionTimingFunction: {
         state: "cubic-bezier(0.2, 0, 0, 1)",
       },
+      // Type. Both halves of this block are a transcription of src/lib/typeScale.ts, which is the
+      // file that holds typography.pdf's table — and `typeScale.test.ts` compares the two rather
+      // than trusting that a person copied ten numbers correctly twice. A Tailwind config cannot
+      // import a `.ts` module without moving the whole config to TypeScript, so the values are
+      // written out here and the agreement is a test rather than an import.
       fontFamily: {
-        // Prose. The body default — plan explanations, notes, descriptions, labels.
+        // §01. The product's voice — everything users read and interact with. There is no third
+        // family any more: the display serif that carried the pre-session headings is gone,
+        // because §01 says Geist Sans is the primary typeface *across the product* and §05 makes
+        // that a principle rather than a preference.
         sans: [
-          "Inter",
-          "ui-sans-serif",
+          "Geist Sans",
           "system-ui",
           "-apple-system",
           "Segoe UI",
           "sans-serif",
         ],
-        // Code. Opted into explicitly, and only for things that are literally identifiers:
-        // file paths, tool names, type annotations, diff hunks, figures.
+        // §01. Code's voice, and only code's: source, snippets, terminal output, logs, stack
+        // traces, diffs, and the file paths and line numbers that sit beside them. §05 is the rule
+        // that matters here — do not switch fonts merely because a string looks technical. Slugs,
+        // versions, timestamps, model names and every figure in the app are Sans now.
         mono: [
-          "JetBrains Mono",
+          "Geist Mono",
           "ui-monospace",
           "SFMono-Regular",
           "Menlo",
           "monospace",
         ],
-        // Display, and ONLY on the screens before there is a session — first-run, sign-in,
-        // account onboarding. See the note beside the @import in src/index.css for why a third
-        // family exists and why it is confined to that surface.
-        serif: [
-          "Newsreader",
-          "ui-serif",
-          "Georgia",
-          "Cambria",
-          "Times New Roman",
-          "serif",
-        ],
+      },
+      // §02's eight rungs. Each carries its line height AND its weight, so `text-title` is a whole
+      // decision rather than a size that still needs `font-semibold` beside it to mean anything.
+      //
+      // These REPLACE eight hundred hand-written pixel counts. The client rendered 9, 10, 11, 12,
+      // 13, 15, 18, 19, 32 and 34 — ten sizes, four of which existed because a component was
+      // matched to whatever sat next to it. `section` and `title` are identical numbers on purpose:
+      // §02 lists them as two rows because they are two jobs, and collapsing them would cost the
+      // distinction at every call site.
+      fontSize: {
+        display: ["32px", { lineHeight: "40px", fontWeight: "600" }],
+        page: ["24px", { lineHeight: "30px", fontWeight: "600" }],
+        section: ["16px", { lineHeight: "22px", fontWeight: "600" }],
+        title: ["16px", { lineHeight: "22px", fontWeight: "600" }],
+        body: ["14px", { lineHeight: "20px", fontWeight: "400" }],
+        label: ["13px", { lineHeight: "18px", fontWeight: "500" }],
+        caption: ["12px", { lineHeight: "16px", fontWeight: "400" }],
+        tiny: ["11px", { lineHeight: "14px", fontWeight: "500" }],
       },
       keyframes: {
         // Trace steps slide in — perceptible, never sluggish (doc §4.6).

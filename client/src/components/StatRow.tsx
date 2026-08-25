@@ -37,7 +37,7 @@ export function StatRow({ leading, stats }: { leading?: React.ReactNode; stats: 
   return (
     // `gap-x-3` rather than `gap-x-3.5`: fourteen pixels is off the four-pixel grid and appeared
     // nowhere else in the client.
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-tiny">
       {leading}
       {stats.map((s, i) => (
         <span
@@ -53,7 +53,7 @@ export function StatRow({ leading, stats }: { leading?: React.ReactNode; stats: 
           <span className="shrink-0 flex items-center opacity-70" aria-hidden>
             {s.icon}
           </span>
-          <span className="font-mono tabular-nums">{s.value}</span>
+          <span className="tabular-nums">{s.value}</span>
           {s.label && s.keepLabel && <span>{s.label}</span>}
         </span>
       ))}

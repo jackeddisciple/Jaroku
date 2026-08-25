@@ -45,7 +45,7 @@ export function ThreadFilterBar({
           value={query}
           onChange={(e) => onQuery(e.target.value)}
           placeholder="filter…"
-          className="min-w-0 flex-1 bg-transparent text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
+          className="min-w-0 flex-1 bg-transparent text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
         />
         {query && (
           <button
@@ -69,7 +69,7 @@ export function ThreadFilterBar({
               // Dimmed at zero rather than disabled: clicking "Archived 0" is a legitimate thing to do
               // — it answers "have I archived anything" — and the empty state that follows says so.
               // A disabled chip would refuse a question it could perfectly well answer.
-              className={`rounded-control px-2 py-1 text-[11px] transition-colors ${
+              className={`rounded-control px-2 py-1 text-tiny transition-colors ${
                 active ? "bg-active text-ink" : count === 0 ? "text-faint hover:text-muted" : "text-muted hover:text-ink"
               }`}
             >

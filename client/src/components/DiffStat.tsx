@@ -38,7 +38,7 @@ export function DiffStat({
     : `${additions} added, ${deletions} removed`;
   return (
     <span
-      className={`inline-flex items-center gap-2 font-mono text-[11px] tabular-nums ${className}`}
+      className={`inline-flex items-center gap-2 text-tiny tabular-nums ${className}`}
       title={label}
     >
       <span className="inline-flex items-center gap-1.5">

@@ -118,7 +118,7 @@ export function GitHubPanel() {
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 animate-slide-in px-4 pt-2 motion-reduce:animate-none">
           <div
             role="status"
-            className={`pointer-events-auto flex items-start gap-2 rounded-card border bg-panel px-2 py-1.5 text-[11px] leading-[1.5] shadow-floating ${
+            className={`pointer-events-auto flex items-start gap-2 rounded-card border bg-panel px-2 py-1.5 text-tiny leading-[1.5] shadow-floating ${
               error ? "border-err/30 text-err" : "border-hair text-muted"
             }`}
           >
@@ -241,7 +241,7 @@ function NotConnected() {
             <GithubIcon size={ICON.xs} /> {busy ? "Opening GitHub…" : "Connect GitHub"}
           </button>
         </div>
-        {problem && <p className="mt-2 text-center text-[11px] leading-[1.5] text-err">{problem}</p>}
+        {problem && <p className="mt-2 text-center text-tiny leading-[1.5] text-err">{problem}</p>}
         {/* THE SCOPE OF ACCESS, STATED ACCURATELY — which it was not.
 
             The old copy recommended a fine-grained token with `Contents: read and write`, scoped to
@@ -252,13 +252,13 @@ function NotConnected() {
             What replaces it is not a better instruction. It is no instruction: the permissions
             below are the ones the server's manifest declares, GitHub shows them on the approval
             screen in its own words, and there is nothing here for a person to get wrong. */}
-        <p className="mt-3 text-[11px] leading-[1.55] text-faint">
+        <p className="mt-3 text-tiny leading-[1.55] text-faint">
           You pick the repositories on GitHub's own screen, and Jaroku gets{" "}
           <span className="text-muted">code</span>, <span className="text-muted">pull requests</span>,{" "}
           <span className="text-muted">checks</span> and <span className="text-muted">workflows</span>{" "}
           on those and nothing else. Change or revoke it any time from GitHub settings.
         </p>
-        <p className="mt-1.5 text-[11px] leading-[1.55] text-faint">
+        <p className="mt-1.5 text-tiny leading-[1.55] text-faint">
           Nothing is copied or pasted. Jaroku holds no long-lived key for your account — access is
           issued for an hour at a time and renewed while the installation is live.
         </p>
@@ -328,7 +328,7 @@ function RepoPicker({ agentId }: { agentId: string }) {
     <div className="space-y-4 p-4">
       <div className="flex items-center gap-2">
         <span style={{ color: STATUS.ok }}><CheckIcon size={ICON.xs} /></span>
-        <span className="font-mono text-[12px] text-ink">@{accountLogin}</span>
+        <span className="text-caption text-ink">@{accountLogin}</span>
         <button
           className={`${quietBtn} ml-auto`}
           title="Forgets the token. Every agent's link stays, and nothing in your GitHub account is touched."
@@ -346,7 +346,7 @@ function RepoPicker({ agentId }: { agentId: string }) {
           <div className="mt-1.5 pl-5">
             <div className="flex items-center gap-2">
               <input
-                className="min-w-0 flex-1 rounded-control bg-panel px-2 py-1.5 font-mono text-[12px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+                className="min-w-0 flex-1 rounded-control bg-panel px-2 py-1.5 text-caption text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="weather-agent"
@@ -363,7 +363,7 @@ function RepoPicker({ agentId }: { agentId: string }) {
                 ]}
               />
             </div>
-            <div className="mt-1 flex items-center gap-2 font-mono text-[11px] text-faint">
+            <div className="mt-1 flex items-center gap-2 text-tiny text-faint">
               <Truncate title={`github.com/${accountLogin}/${trimmedName}`}>
                 github.com/{accountLogin}/{trimmedName}
               </Truncate>
@@ -372,7 +372,7 @@ function RepoPicker({ agentId }: { agentId: string }) {
                 rendering it as "available" would show a green tick under a name nobody has asked
                 about yet. */}
             {trimmedName && (
-              <div className={`mt-1 text-[11px] ${availability === false ? "text-err" : availability ? "text-ok" : "text-faint"}`}>
+              <div className={`mt-1 text-tiny ${availability === false ? "text-err" : availability ? "text-ok" : "text-faint"}`}>
                 {availability === null ? "checking…" : availability ? "✓ available" : "that name is taken"}
               </div>
             )}
@@ -387,7 +387,7 @@ function RepoPicker({ agentId }: { agentId: string }) {
             <div className="flex items-center gap-2 rounded-control bg-active px-2.5 py-1.5">
               <span className="shrink-0 text-faint"><SearchIcon size={ICON.xs} /></span>
               <input
-                className="min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+                className="min-w-0 flex-1 bg-transparent text-caption text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
                 placeholder="search your repos…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -395,11 +395,11 @@ function RepoPicker({ agentId }: { agentId: string }) {
             </div>
             <div className="mt-1.5 max-h-48 space-y-0.5 overflow-auto">
               {reposLoading && repos.length === 0 ? (
-                <p className="text-[11px] text-muted">reading your repositories…</p>
+                <p className="text-tiny text-muted">reading your repositories…</p>
               ) : filtered.length === 0 ? (
                 // The list is already filtered server-side to repositories this token can WRITE
                 // to — offering a read-only one would produce a link whose first push fails.
-                <p className="text-[11px] text-muted">
+                <p className="text-tiny text-muted">
                   {repos.length === 0 ? "no repositories this token can write to" : "nothing matches"}
                 </p>
               ) : (
@@ -407,14 +407,14 @@ function RepoPicker({ agentId }: { agentId: string }) {
                   <button
                     key={r.fullName}
                     onClick={() => setChosen(r.fullName)}
-                    className={`flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-[12px] transition-colors duration-fast ${
+                    className={`flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-caption transition-colors duration-fast ${
                       chosen === r.fullName ? "bg-active text-ink" : "text-muted hover:bg-active/40 hover:text-ink"
                     }`}
                   >
                     <span className="inline-flex w-[11px] shrink-0 items-center justify-center" aria-hidden>
                       {chosen === r.fullName && <CheckIcon size={ICON.xs} />}
                     </span>
-                    <Truncate className="min-w-0 flex-1 font-mono" title={r.fullName}>{r.fullName}</Truncate>
+                    <Truncate className="min-w-0 flex-1" title={r.fullName}>{r.fullName}</Truncate>
                     {r.private && <Chip size="sm" tone="faint" caps>private</Chip>}
                     {r.empty && <Chip size="sm" tone="faint" caps title="No commits yet — the first push creates them">empty</Chip>}
                   </button>
@@ -453,7 +453,7 @@ function RepoPicker({ agentId }: { agentId: string }) {
             {/* Jaroku owns `jaroku/<slug>` and never writes to a default branch on its own — §3.1.
                 A user pointing this at `main` is their repository and their decision, and nothing
                 here proposes it. */}
-            <p className="text-[11px] leading-[1.5] text-faint">
+            <p className="text-tiny leading-[1.5] text-faint">
               Jaroku pushes to this branch and never to your default one. Reconciliation is always
               through a pull request.
             </p>
@@ -486,7 +486,7 @@ function ModeRow({ selected, onSelect, label }: { selected: boolean; onSelect: (
   return (
     <button
       onClick={onSelect}
-      className={`flex w-full items-center gap-2 text-left text-[12px] transition-colors duration-fast ${
+      className={`flex w-full items-center gap-2 text-left text-caption transition-colors duration-fast ${
         selected ? "text-ink" : "text-muted hover:text-ink"
       }`}
     >
@@ -510,10 +510,10 @@ function Field({
   mono?: boolean;
 }) {
   return (
-    <label className="flex items-center gap-2 text-[11px] text-muted">
+    <label className="flex items-center gap-2 text-tiny text-muted">
       <span className="w-[86px] shrink-0">{label}</span>
       <input
-        className={`min-w-0 flex-1 rounded-control bg-panel px-2 py-1 text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint ${mono ? "font-mono" : ""}`}
+        className={`min-w-0 flex-1 rounded-control bg-panel px-2 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint ${mono ? "" : ""}`}
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
@@ -672,7 +672,7 @@ function HistoryView({ view }: { view: GithubView }) {
           {(["list", "graph"] as const).map((m) => (
             <button
               key={m}
-              className={`rounded-control px-2 py-0.5 text-[11px] capitalize transition-colors duration-fast ${
+              className={`rounded-control px-2 py-0.5 text-tiny capitalize transition-colors duration-fast ${
                 mode === m ? "bg-panel text-ink" : "text-muted hover:text-ink"
               }`}
               onClick={() => setMode(m)}
@@ -705,7 +705,7 @@ function RepoHeader({ view }: { view: GithubView }) {
       <div className="flex items-center gap-2">
         <span className="shrink-0 text-ink"><GithubIcon size={ICON.sm} /></span>
         <a
-          className="min-w-0 flex-1 font-mono text-[12px] text-ink hover:underline"
+          className="min-w-0 flex-1 text-caption text-ink hover:underline"
           href={view.repoUrl}
           target="_blank"
           rel="noreferrer"
@@ -718,7 +718,7 @@ function RepoHeader({ view }: { view: GithubView }) {
           </button>
         )}
       </div>
-      <div className="mt-0.5 flex items-center gap-2 pl-6 font-mono text-[11px] text-muted">
+      <div className="mt-0.5 flex items-center gap-2 pl-6 text-tiny text-muted">
         <BranchSwitcher view={view} />
         {view.link.subdirectory && (
           <Chip size="sm" tone="faint" mono variant="bare" title="Only this directory is pushed and pulled">
@@ -731,7 +731,7 @@ function RepoHeader({ view }: { view: GithubView }) {
           {/* Said before the button rather than after it. §6's rule is absolute — Jaroku never
               deletes a user's repository — and the only way somebody knows that before clicking is
               if it is written where the click is. */}
-          <p className="text-[11px] leading-[1.5] text-muted">
+          <p className="text-tiny leading-[1.5] text-muted">
             Unlinking stops Jaroku pushing here. The repository, the branch and every commit
             already on it are untouched.
           </p>
@@ -809,7 +809,7 @@ function VersionRow({ row }: { row: GithubVersionRow }) {
       kind={row.sha ? "done" : "wait"}
       state={row.sha ? "done" : "pending"}
       hideVerb
-      lead={<span className="w-8 text-right font-mono text-[11px]">v{row.version}</span>}
+      lead={<span className="w-8 text-right text-tiny">v{row.version}</span>}
       object={<span className="text-ink"><Truncate title={row.summary}>{row.summary}</Truncate></span>}
       detail={
         <span className="text-faint">

@@ -63,18 +63,18 @@ export function StateBranchEditor({ step }: { step: Step }) {
     <div className="mt-4 border-t border-hair pt-3">
       <div className="flex items-center gap-2 mb-2">
         <span className={TYPE.panelLabel}>Branch from here</span>
-        {node && <span className="text-[10px] text-muted">node: {node}</span>}
+        {node && <span className="text-tiny text-muted">node: {node}</span>}
       </div>
 
       {fieldKeys.length === 0 ? (
-        <p className="text-[11px] text-muted mb-2">
+        <p className="text-tiny text-muted mb-2">
           No editable domain fields at this step. You can still re-run the graph from this point.
         </p>
       ) : (
         <div className="space-y-2 mb-2">
           {fieldKeys.map((k) => (
             <label key={k} className="block">
-              <span className="text-[11px] text-muted">{k}</span>
+              <span className="text-tiny text-muted">{k}</span>
               <textarea
                 value={draft[k]}
                 onChange={(e) => {
@@ -86,24 +86,24 @@ export function StateBranchEditor({ step }: { step: Step }) {
                 }}
                 spellCheck={false}
                 rows={Math.min(6, (draft[k]?.split("\n").length ?? 1) + 1)}
-                className="w-full mt-1 bg-bg text-ink text-[11px] font-mono rounded-control p-2 resize-y
+                className="w-full mt-1 bg-bg text-ink text-tiny font-mono rounded-control p-2 resize-y
                   outline-none focus-visible:shadow-focusring border border-hair focus:border-faint leading-relaxed"
               />
             </label>
           ))}
-          <p className="text-[10px] text-faint">
+          <p className="text-tiny text-faint">
             messages is read-only in v1. Edits replace the field value on the branch.
           </p>
         </div>
       )}
 
-      {error && <p className="text-[11px] text-err mb-2">{error}</p>}
+      {error && <p className="text-tiny text-err mb-2">{error}</p>}
 
       <div className="flex items-center gap-2">
         <button
           onClick={() => branch(true)}
           disabled={dirtyKeys.length === 0}
-          className="flex-1 rounded-control py-1.5 text-[12px] border border-hair text-ink
+          className="flex-1 rounded-control py-1.5 text-caption border border-hair text-ink
             enabled:hover:bg-active active:bg-chrome disabled:opacity-40 disabled:cursor-not-allowed"
           title={dirtyKeys.length === 0 ? "Edit a field to branch with changes" : "Fork a new run with these edits"}
         >
@@ -111,7 +111,7 @@ export function StateBranchEditor({ step }: { step: Step }) {
         </button>
         <button
           onClick={() => branch(false)}
-          className="rounded-control px-3 py-1.5 text-[12px] border border-hair text-muted hover:bg-active active:bg-chrome hover:text-ink"
+          className="rounded-control px-3 py-1.5 text-caption border border-hair text-muted hover:bg-active active:bg-chrome hover:text-ink"
           title="Fork a new run from this checkpoint without changes"
         >
           Re-run from here

@@ -72,9 +72,9 @@ import type { InboxItemView, InboxSeverity } from "../types.ts";
 function NothingNeedsYou({ cleared }: { cleared: number }) {
   return (
     <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-      <div className="text-[18px] font-medium text-ink">Nothing needs you</div>
+      <div className="text-page text-ink">Nothing needs you</div>
       {cleared > 0 && (
-        <div className="mt-2 text-[12px] text-muted">
+        <div className="mt-2 text-caption text-muted">
           Cleared {cleared} item{cleared === 1 ? "" : "s"} this week.
         </div>
       )}
@@ -146,7 +146,7 @@ function LeftRail({
                 a count of 0 beside a chip is noise, and the chip staying in place is what keeps the
                 keyboard's 1–6 a stable address. */}
             {value[f] > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 rounded-chip bg-bg px-0.5 text-[10px] leading-[13px] tabular-nums text-faint">
+              <span className="absolute -right-0.5 -top-0.5 rounded-chip bg-bg px-0.5 text-tiny leading-[13px] tabular-nums text-faint">
                 {value[f]}
               </span>
             )}
@@ -168,7 +168,7 @@ function LeftRail({
                 // CLICKING THE ACTIVE ONE CLEARS IT, because the rail has no "all agents" row and a
                 // filter somebody cannot turn off is a filter they have to reload the tab to escape.
                 onClick={() => onAgent(active ? null : a.agent_id)}
-                className={`relative flex w-full items-center gap-2 rounded-control px-2.5 py-1 text-left text-[11px] transition-colors ${
+                className={`relative flex w-full items-center gap-2 rounded-control px-2.5 py-1 text-left text-tiny transition-colors ${
                   active ? "bg-active text-ink" : "text-muted hover:bg-active/50 hover:text-ink"
                 }`}
                 title={a.name}
@@ -244,14 +244,14 @@ function Column({
       }`}
     >
       <div className="flex shrink-0 items-center gap-2 px-1 pb-2">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-faint">{COLUMN_LABEL[severity]}</span>
-        <span className="text-[10px] tabular-nums text-faint">{items.length}</span>
+        <span className="text-tiny uppercase tracking-wider text-faint">{COLUMN_LABEL[severity]}</span>
+        <span className="text-tiny tabular-nums text-faint">{items.length}</span>
         <span className="h-px flex-1 bg-hair" />
       </div>
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
         {items.length === 0 ? (
           // §5.3: per-column empties get a quiet line of their own, and each says its own thing.
-          <div className="px-1 py-3 text-[11px] text-faint">{COLUMN_EMPTY[severity]}</div>
+          <div className="px-1 py-3 text-tiny text-faint">{COLUMN_EMPTY[severity]}</div>
         ) : (
           items.map((item) => (
             <div
@@ -450,9 +450,9 @@ export function InboxView() {
       {/* §4.1: the title, the count, and the one thing this surface can ask for. */}
       <div className="flex shrink-0 items-center gap-3 border-b border-hair px-5 py-3">
         <span className={TYPE.panelLabel}>Inbox</span>
-        <span className="text-[11px] tabular-nums text-faint">{counts.all}</span>
+        <span className="text-tiny tabular-nums text-faint">{counts.all}</span>
         {!connected && (
-          <span className="text-[11px] text-muted" title="Changes here need a connection">
+          <span className="text-tiny text-muted" title="Changes here need a connection">
             reconnecting…
           </span>
         )}
@@ -470,7 +470,7 @@ export function InboxView() {
       </div>
 
       {error && (
-        <div className="shrink-0 border-b border-hair px-5 py-2 text-[11px] text-err">{error}</div>
+        <div className="shrink-0 border-b border-hair px-5 py-2 text-tiny text-err">{error}</div>
       )}
 
       <div className="flex min-h-0 flex-1">
@@ -500,7 +500,7 @@ export function InboxView() {
             // one thing.
             <div className="h-full space-y-2 overflow-y-auto pr-1">
               {visible.length === 0 ? (
-                <div className="px-1 py-3 text-[11px] text-faint">
+                <div className="px-1 py-3 text-tiny text-faint">
                   Nothing under {INBOX_FILTER_LABEL[filter]}
                 </div>
               ) : (
@@ -581,7 +581,7 @@ export function InboxView() {
           sentence reads as data that has gone missing. Rendered here rather than inside the zero
           state so the celebration stays the largest thing on the screen. */}
       {empty && workspaceName && (
-        <div className="shrink-0 pb-6 text-center text-[11px] text-faint">in {workspaceName}</div>
+        <div className="shrink-0 pb-6 text-center text-tiny text-faint">in {workspaceName}</div>
       )}
     </div>
   );

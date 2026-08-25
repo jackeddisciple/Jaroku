@@ -52,15 +52,15 @@ function TeamCard() {
       context={members.length > 0 ? `contribution, ${RANGE_PROSE[range]}` : undefined}
     >
       {members.length === 0 ? (
-        <div className="flex h-[64px] items-center gap-2 text-[12px] text-muted">
-          <span className="font-mono text-[15px] text-faint">{EMPTY_FIGURE}</span>
+        <div className="flex h-[64px] items-center gap-2 text-caption text-muted">
+          <span className="text-title text-faint">{EMPTY_FIGURE}</span>
           nobody built anything in {RANGE_PROSE[range]}
         </div>
       ) : (
         <>
           <table className="mt-2 w-full border-collapse">
             <thead>
-              <tr className="border-b border-hair text-[10px] uppercase tracking-wider text-faint">
+              <tr className="border-b border-hair text-tiny uppercase tracking-wider text-faint">
                 <th className="pb-1 text-left font-normal">Member</th>
                 <th className="pb-1 text-right font-normal" title="agents created in this range">Agents</th>
                 <th className="pb-1 text-right font-normal" title="versions published whose source is an edit">Edits</th>
@@ -71,20 +71,20 @@ function TeamCard() {
               {members.slice(0, 8).map((m) => (
                 <tr key={m.user_id ?? "unknown"} className="border-b border-hair/50">
                   <td className="max-w-0 py-1.5 pr-2">
-                    <Truncate className="text-[12px] text-ink" title={nameOf(m.user_id)}>
+                    <Truncate className="text-caption text-ink" title={nameOf(m.user_id)}>
                       {nameOf(m.user_id)}
                     </Truncate>
                   </td>
-                  <td className="py-1.5 text-right font-mono text-[11px] tabular-nums text-muted">{m.agents_created}</td>
-                  <td className="py-1.5 text-right font-mono text-[11px] tabular-nums text-muted">{m.edits_applied}</td>
-                  <td className="py-1.5 text-right font-mono text-[11px] tabular-nums text-muted">{m.threads_started}</td>
+                  <td className="py-1.5 text-right text-tiny tabular-nums text-muted">{m.agents_created}</td>
+                  <td className="py-1.5 text-right text-tiny tabular-nums text-muted">{m.edits_applied}</td>
+                  <td className="py-1.5 text-right text-tiny tabular-nums text-muted">{m.threads_started}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           {/* THE HONEST GAP, ON THE CARD. Two of §10's five columns cannot be filled by anything in
               this schema, and saying so is better than four zeros nobody can act on. */}
-          <div className="mt-2 text-[10px] text-faint">
+          <div className="mt-2 text-tiny text-faint">
             runs, spend and deploys record no author, so they are not attributed here
           </div>
         </>
@@ -110,8 +110,8 @@ function PersonalCard() {
       context={quiet ? undefined : `${RANGE_PROSE[range]}`}
     >
       {quiet ? (
-        <div className="flex h-[64px] items-center gap-2 text-[12px] text-muted">
-          <span className="font-mono text-[15px] text-faint">{EMPTY_FIGURE}</span>
+        <div className="flex h-[64px] items-center gap-2 text-caption text-muted">
+          <span className="text-title text-faint">{EMPTY_FIGURE}</span>
           nothing ran in {RANGE_PROSE[range]}
         </div>
       ) : (
@@ -122,11 +122,11 @@ function PersonalCard() {
               className="flex w-full items-baseline gap-2 text-left"
               title={`Open ${me.mostActiveAgent.name}`}
             >
-              <span className="text-[10px] uppercase tracking-wider text-faint">Most active</span>
-              <Truncate className="min-w-0 flex-1 text-[12px] text-ink" title={me.mostActiveAgent.name}>
+              <span className="text-tiny uppercase tracking-wider text-faint">Most active</span>
+              <Truncate className="min-w-0 flex-1 text-caption text-ink" title={me.mostActiveAgent.name}>
                 {me.mostActiveAgent.name}
               </Truncate>
-              <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted">
+              <span className="shrink-0 text-tiny tabular-nums text-muted">
                 {me.mostActiveAgent.runs}
               </span>
             </button>
@@ -179,12 +179,12 @@ function Figure({
             <StreakIcon size={ICON.xs} />
           </span>
         )}
-        <span className="font-mono text-[15px] tabular-nums leading-none" style={{ color: TEXT.ink }}>
+        <span className="text-title tabular-nums leading-none" style={{ color: TEXT.ink }}>
           {value}
         </span>
-        {suffix && <span className="text-[11px] text-faint">{suffix}</span>}
+        {suffix && <span className="text-tiny text-faint">{suffix}</span>}
       </div>
-      <div className="mt-1 text-[10px] uppercase tracking-wider text-faint">{label}</div>
+      <div className="mt-1 text-tiny uppercase tracking-wider text-faint">{label}</div>
     </div>
   );
 }

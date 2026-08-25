@@ -43,7 +43,7 @@ export function WelcomeStep({ firstName }: { firstName: string | null }) {
             {PLAN.map((item) => (
               <li key={item.text} className="flex items-baseline gap-3">
                 <span aria-hidden className="mt-[1px] h-1 w-1 shrink-0 rounded-full bg-muted" />
-                <span className="text-[13px] leading-[1.5] text-ink">
+                <span className="text-label leading-[1.5] text-ink">
                   {item.text}
                   {/* SAID ON THE SCREEN THAT SETS EXPECTATIONS, not only on the step itself.
                       Somebody deciding whether to spend a minute on this needs to know that two of

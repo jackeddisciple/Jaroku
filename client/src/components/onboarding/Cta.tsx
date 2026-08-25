@@ -40,7 +40,7 @@ export function PrimaryCta({ children, onClick, autoFocus, kbd, title, className
       onClick={onClick}
       autoFocus={autoFocus}
       title={title}
-      className={`group inline-flex items-center gap-2.5 rounded-control px-5 py-2.5 text-[13px]
+      className={`group inline-flex items-center gap-2.5 rounded-control px-5 py-2.5 text-label
         font-medium outline-none focus-visible:shadow-focusring transition-shadow duration-base ease-state
         hover:shadow-glow-cta focus-visible:shadow-focusring ${className}`}
       style={{ background: TEXT.ink, color: SURFACE.bg }}
@@ -51,7 +51,7 @@ export function PrimaryCta({ children, onClick, autoFocus, kbd, title, className
         // in a border colour from the dark-theme scale — which would be invisible here.
         <kbd
           aria-hidden
-          className="rounded-chip px-1.5 py-0.5 font-mono text-[10px] leading-none"
+          className="rounded-chip px-1.5 py-0.5 text-tiny leading-none"
           style={{ background: "rgba(13,13,15,0.14)", color: SURFACE.bg }}
         >
           {kbd}
@@ -77,14 +77,14 @@ export function GhostCta({ children, onClick, autoFocus, kbd, title, className =
       autoFocus={autoFocus}
       title={title}
       className={`inline-flex items-center gap-2.5 rounded-control border border-edge px-5 py-2.5
-        text-[13px] font-medium text-ink outline-none focus-visible:shadow-focusring transition-shadow duration-base ease-state
+        text-label text-ink outline-none focus-visible:shadow-focusring transition-shadow duration-base ease-state
         hover:shadow-glow focus-visible:shadow-focusring ${className}`}
     >
       {children}
       {kbd && (
         <kbd
           aria-hidden
-          className="rounded-chip bg-active px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted"
+          className="rounded-chip bg-active px-1.5 py-0.5 text-tiny leading-none text-muted"
         >
           {kbd}
         </kbd>

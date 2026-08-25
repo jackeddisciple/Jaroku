@@ -1,7 +1,10 @@
 // Finding the code inside a sentence.
 //
-// The panel already draws a hard line between prose and code: Inter for explanation, JetBrains Mono
-// for anything that is literally an identifier (tool names, state fields, file paths, diff hunks).
+// The panel already draws a hard line between prose and code: Geist Sans for explanation, Geist
+// Mono for anything that is literally code (file paths, diff hunks, payloads, a type annotation).
+// That line moved with typography.pdf §04 — a tool name and a state field are identifiers but they
+// are not code, and §05 refuses to switch a face because a string looks technical — but it moved
+// as a whole, so everything below still holds.
 // That line held everywhere the two were in separate slots — and broke the moment they shared a
 // sentence. `pg_query` in a tool row was a monospace name; the same `pg_query` two lines below, in
 // "pg_query is read-only and takes a static SQL string", was an ordinary word. Same thing, two

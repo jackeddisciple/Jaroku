@@ -189,7 +189,7 @@ export function BillingSection() {
       <section>
         <h3 className={TYPE.panelLabel}>Plan</h3>
         <div className="mt-2 flex flex-wrap items-baseline gap-2">
-          <span className="text-[15px] font-medium text-ink">{TIER_LABEL[tier] ?? tier}</span>
+          <span className="text-title text-ink">{TIER_LABEL[tier] ?? tier}</span>
           {/* A STATUS BADGE RATHER THAN A CHIP, and the distinction is the design system's own:
               a Chip says what KIND of thing something is and carries a category accent, while a
               StatusBadge says how it is DOING and carries the status palette. "Payment failed" is
@@ -206,7 +206,7 @@ export function BillingSection() {
         {status?.alarming && (
           <div className="mt-2 flex items-start gap-2 rounded-control border border-run/40 bg-run/[0.06] px-3 py-2">
             <span className="mt-0.5 shrink-0 text-run"><AlertTriangleIcon size={ICON.sm} /></span>
-            <p className="text-[11px] leading-[1.55] text-ink">
+            <p className="text-tiny leading-[1.55] text-ink">
               Your agents keep running while this is retried. Nothing is deleted, and your plan does
               not change until the retries are exhausted.
             </p>
@@ -218,12 +218,12 @@ export function BillingSection() {
             {sub.currentPeriodEnd && (
               <div className="flex items-baseline justify-between gap-4">
                 <dt className={TYPE.meta}>{sub.cancelAtPeriodEnd ? "Access until" : "Renews"}</dt>
-                <dd className="text-[12px] tabular-nums text-ink">{absTime(sub.currentPeriodEnd)}</dd>
+                <dd className="text-caption tabular-nums text-ink">{absTime(sub.currentPeriodEnd)}</dd>
               </div>
             )}
             <div className="flex items-baseline justify-between gap-4">
               <dt className={TYPE.meta}>Seats</dt>
-              <dd className="text-[12px] tabular-nums text-ink">{sub.seatCount}</dd>
+              <dd className="text-caption tabular-nums text-ink">{sub.seatCount}</dd>
             </div>
           </dl>
         )}
@@ -258,11 +258,11 @@ export function BillingSection() {
                 </span>
               )}
               <span className="min-w-0">
-                <span className="text-[12px] text-ink">Use my own provider keys</span>
+                <span className="text-caption text-ink">Use my own provider keys</span>
                 {/* INSTANT, AND SAID SO. Inference is usage-based rather than seat-based, so there
                     is nothing to prorate — and the moment anybody reaches for this is the moment
                     they have just noticed a bill, when "takes effect next month" is useless. */}
-                <span className="mt-0.5 block text-[11px] leading-[1.5] text-muted">
+                <span className="mt-0.5 block text-tiny leading-[1.5] text-muted">
                   {sub.byokEnabled
                     ? "Your agents run on the keys in the Secrets tab. You pay the plan fee and no inference charges."
                     : "Your agents run on our keys, against the credit your plan includes. Switching is instant — the next run routes the other way."}
@@ -275,7 +275,7 @@ export function BillingSection() {
 
         {/* WHERE THE SPEND FIGURES LIVE, said out loud rather than duplicated here. Two screens
             rendering the same number from two computations is how they come to disagree. */}
-        <p className="mt-2 text-[11px] leading-[1.55] text-faint">
+        <p className="mt-2 text-tiny leading-[1.55] text-faint">
           This month's spend, and the budget ceiling it is measured against, are on the Usage tab.
         </p>
       </section>
@@ -286,10 +286,10 @@ export function BillingSection() {
           <div className="flex items-start gap-2">
             <span className="mt-0.5 shrink-0 text-faint"><InfoIcon size={ICON.sm} /></span>
             <div className="min-w-0 flex-1">
-              <p className="text-[12px] text-ink">Confirming your subscription…</p>
+              <p className="text-caption text-ink">Confirming your subscription…</p>
               {/* NOT "welcome to Pro". Arriving back means somebody returned, not that the payment
                   settled — the webhook decides that, and this poll is what waits for it. */}
-              <p className="mt-0.5 text-[11px] leading-[1.55] text-muted">
+              <p className="mt-0.5 text-tiny leading-[1.55] text-muted">
                 Finish in your browser if you haven't yet. This updates on its own once the payment
                 clears, usually within a few seconds.
               </p>
@@ -321,17 +321,17 @@ export function BillingSection() {
                 }`}
               >
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-[12px] font-medium text-ink">{t.label}</span>
+                  <span className="text-caption font-medium text-ink">{t.label}</span>
                   {current && <span className="text-accent"><CheckIcon size={ICON.xs} /></span>}
                 </div>
                 <div className="mt-0.5 flex items-baseline gap-0.5">
-                  <span className="text-[15px] font-medium tabular-nums text-ink">{t.price}</span>
-                  <span className="text-[11px] text-faint">{t.per}</span>
+                  <span className="text-title tabular-nums text-ink">{t.price}</span>
+                  <span className="text-tiny text-faint">{t.per}</span>
                 </div>
-                <p className="mt-1 text-[11px] leading-[1.5] text-muted">{t.line}</p>
+                <p className="mt-1 text-tiny leading-[1.5] text-muted">{t.line}</p>
                 <ul className="mt-1.5 space-y-0.5">
                   {t.points.map((p) => (
-                    <li key={p} className="text-[11px] leading-[1.5] text-faint">— {p}</li>
+                    <li key={p} className="text-tiny leading-[1.5] text-faint">— {p}</li>
                   ))}
                 </ul>
 
@@ -365,12 +365,12 @@ export function BillingSection() {
                           max={20}
                           value={seats}
                           onChange={(e) => setSeats(Number(e.target.value))}
-                          className="w-16 rounded-control border border-edge bg-bg px-2 py-1 text-right text-[12px] tabular-nums text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+                          className="w-16 rounded-control border border-edge bg-bg px-2 py-1 text-right text-caption tabular-nums text-ink focus-visible:outline-none focus-visible:shadow-focusring"
                         />
                       </label>
                     )}
                     {t.id !== "free" && (
-                      <p className="mt-1.5 text-[11px] tabular-nums text-muted">
+                      <p className="mt-1.5 text-tiny tabular-nums text-muted">
                         {t.id === "team"
                           ? `${Math.max(minimumSeats(t.id), seats)} × $40 = $${Math.max(minimumSeats(t.id), seats) * 40}/month`
                           : "$20/month"}
@@ -378,7 +378,7 @@ export function BillingSection() {
                     )}
                     {/* SAYING WHERE THE NEXT CLICK GOES. The specification calls being upfront
                         about leaving the app part of the same honesty as the pricing. */}
-                    <p className="mt-1 text-[11px] leading-[1.5] text-faint">
+                    <p className="mt-1 text-tiny leading-[1.5] text-faint">
                       {t.id === "free"
                         ? "Takes effect at the end of the period you have paid for. Nothing is deleted."
                         : "Opens your browser to pay. Payment happens there, then you come back here."}
@@ -403,13 +403,13 @@ export function BillingSection() {
       {/* Above twenty members a workspace is an Enterprise conversation rather than a bigger
           number, and the handoff is a mailto rather than a refusal — a cap that only says no is one
           somebody works around by opening a second workspace. */}
-      <p className="text-[11px] leading-[1.55] text-faint">
+      <p className="text-tiny leading-[1.55] text-faint">
         More than 20 people, SSO, or an on-premises deployment?{" "}
         <a className="text-muted underline" href="mailto:contact@jaroku.dev">contact@jaroku.dev</a>
       </p>
 
       {error && (
-        <p className="text-[11px] leading-[1.55] text-err">{error}</p>
+        <p className="text-tiny leading-[1.55] text-err">{error}</p>
       )}
     </div>
   );

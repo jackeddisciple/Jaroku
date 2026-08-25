@@ -13,7 +13,7 @@ function Section({ label, value }: { label: string; value: unknown }) {
       {/* The payload is what this panel exists to show, and it was flowing text against the
           panel's own surface — three sections in a row read as one long blob. A well bounds
           each one. */}
-      <pre className="whitespace-pre-wrap break-words rounded-control border border-hair bg-bg/60 p-2 text-[12px] leading-relaxed text-[#a1a1aa]">
+      <pre className="whitespace-pre-wrap break-words rounded-control border border-hair bg-bg/60 p-2 text-caption leading-relaxed text-[#a1a1aa]">
         {text}
       </pre>
     </div>
@@ -34,7 +34,7 @@ function StateView({ step }: { step: Step }) {
         <button
           type="button"
           onClick={() => setRaw((v) => !v)}
-          className="ml-auto text-[11px] text-faint hover:text-muted underline underline-offset-2"
+          className="ml-auto text-tiny text-faint hover:text-muted underline underline-offset-2"
         >
           {raw ? "show diff" : "show raw"}
         </button>
@@ -60,7 +60,7 @@ export function StepDetail({ step }: { step: Step }) {
       {step.error && (
         <div className="mt-3 first:mt-0">
           <div className={`mb-1 ${TYPE.sectionLabel} !text-err`}>error</div>
-          <pre className="whitespace-pre-wrap break-words rounded-control border border-err/25 bg-err/[0.04] p-2 text-[12px] leading-relaxed text-err">
+          <pre className="whitespace-pre-wrap break-words rounded-control border border-err/25 bg-err/[0.04] p-2 text-caption leading-relaxed text-err">
             {step.error}
           </pre>
           {/* One-Click Fix is now the unified composer: select this step and type "fix this"

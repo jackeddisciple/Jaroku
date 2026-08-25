@@ -68,7 +68,7 @@ export function ControlButton({
       title={title ?? name}
       // `px-1.5` only when there is a label — an icon-only control is centred in its minimum box,
       // and padding it would make the box wider than the minimum for no reason.
-      className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-control text-[12px]
+      className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-control text-caption
         transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring
         disabled:cursor-not-allowed disabled:opacity-30
         ${label ? "px-1.5" : ""}

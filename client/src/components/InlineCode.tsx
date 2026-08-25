@@ -1,9 +1,16 @@
 // Prose that knows which of its words are code.
 //
-// The panel's one typographic rule is that monospace means "this is literally an identifier". That
-// rule held in every structured slot — tool rows, state fields, file paths — and quietly broke
-// inside sentences, where `pg_query` rendered as an ordinary word. The same thing looked like two
-// different things depending on which slot it happened to be in.
+// The panel's one typographic rule is that monospace means "this is literally code". That rule held
+// in every structured slot — file paths, diff hunks, payloads — and quietly broke inside sentences,
+// where `pg_query` rendered as an ordinary word. The same thing looked like two different things
+// depending on which slot it happened to be in.
+//
+// THIS IS THE ONE PLACE typography.pdf §05 DOES NOT ARGUE AGAINST. Its rule is "do not switch fonts
+// merely because a string looks technical", and everywhere else in this pass that is what removed
+// the mono face — from slugs, versions, timestamps, model names and every figure. Here the switch
+// is not because the string looks technical: it is a `<code>` element, on a chip, with a fill and a
+// radius, and the whole reason it exists is that a reader cannot otherwise tell an identifier from
+// the sentence carrying it. That is a code snippet in prose, which is §04's first line.
 //
 // <Prose> is the fix: pass it a string instead of interpolating one, and the identifiers inside it
 // come out wearing the same chip the plan card already uses for connector provenance. Same radius,

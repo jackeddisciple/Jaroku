@@ -52,18 +52,18 @@ function FileRow({
         <span className="shrink-0 text-faint" aria-hidden>
           <Icon size={ICON.xs} />
         </span>
-        <Truncate variant="path" className="min-w-0 flex-1 font-mono text-[11px] text-ink">
+        <Truncate variant="path" className="min-w-0 flex-1 font-mono text-tiny text-ink">
           {file.path}
         </Truncate>
         {/* §6's per-file blame. Absent rather than guessed for a path no version recorded a change
             to — an imported project records no file stats at all, and claiming v1 would be an
             invention. */}
         {file.last_changed_in !== null && (
-          <span className="shrink-0 text-[10px] tabular-nums text-faint" title={`Last changed in v${file.last_changed_in}`}>
+          <span className="shrink-0 text-tiny tabular-nums text-faint" title={`Last changed in v${file.last_changed_in}`}>
             v{file.last_changed_in}
           </span>
         )}
-        <span className="shrink-0 text-[10px] tabular-nums text-faint">{fmtBytes(file.bytes)}</span>
+        <span className="shrink-0 text-tiny tabular-nums text-faint">{fmtBytes(file.bytes)}</span>
         {file.read_only && (
           <span
             className="shrink-0"
@@ -81,13 +81,13 @@ function FileRow({
         <div className="mb-1 ml-2 rounded-control border border-hair bg-bg">
           {file.read_only && file.read_only_reason && (
             <div
-              className="border-b border-hair px-2.5 py-1.5 text-[11px]"
+              className="border-b border-hair px-2.5 py-1.5 text-tiny"
               style={{ color: ACCENT.reviewed }}
             >
               {file.read_only_reason}
             </div>
           )}
-          <pre className="max-h-[420px] overflow-auto px-2.5 py-2 font-mono text-[11px] leading-[1.6] text-muted">
+          <pre className="max-h-[420px] overflow-auto px-2.5 py-2 font-mono text-tiny leading-[1.6] text-muted">
             {file.content}
           </pre>
         </div>
@@ -167,17 +167,17 @@ export function AgentFiles({ detail }: { detail: AgentDetailView }) {
               ))}
             </div>
           ) : (
-            <div className="px-2 py-1.5 text-[11px] text-faint">Nothing published for this agent yet.</div>
+            <div className="px-2 py-1.5 text-tiny text-faint">Nothing published for this agent yet.</div>
           )
         ) : files.length === 0 ? (
-          <div className="px-2 py-1.5 text-[11px] text-faint">v{showing.version} contains no files.</div>
+          <div className="px-2 py-1.5 text-tiny text-faint">v{showing.version} contains no files.</div>
         ) : (
           <>
             {/* WHICH VERSION IS BEING BROWSED, always stated. The version history above can point
                 this at any of them, and a file list that did not name its version would be one
                 somebody reads as the current code. */}
             {showing.version !== detail.card.current_version && (
-              <div className="mb-1.5 flex items-center gap-2 px-2 text-[11px] text-muted">
+              <div className="mb-1.5 flex items-center gap-2 px-2 text-tiny text-muted">
                 <Chip size="sm" tone="faint">v{showing.version}</Chip>
                 <span>is not the live version.</span>
                 <button

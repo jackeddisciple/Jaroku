@@ -142,7 +142,7 @@ export function DeployPanel() {
           <span style={{ color: ACCENT.mcp }} className="mt-[1px] shrink-0">
             <RocketIcon size={ICON.sm} />
           </span>
-          <p className="text-[11px] leading-[1.5] text-muted">
+          <p className="text-tiny leading-[1.5] text-muted">
             <span className="text-ink">A deploy goes to your own Railway account.</span> Jaroku
             packages the agent, hands your credentials to Railway over HTTPS, and returns the
             URL. It hosts nothing and keeps no copy of anything it sends.
@@ -153,7 +153,7 @@ export function DeployPanel() {
       {(error || notice) && (
         <div className="shrink-0 px-4 pt-2">
           <div
-            className={`flex items-start gap-2 rounded-control border px-2 py-1.5 text-[11px] leading-[1.5] ${
+            className={`flex items-start gap-2 rounded-control border px-2 py-1.5 text-tiny leading-[1.5] ${
               error ? "border-err/30 text-err" : "border-hair text-muted"
             }`}
           >
@@ -315,7 +315,7 @@ function DeployForm({
             </Chip>
           ))}
         </div>
-        <p className="mt-1.5 text-[11px] leading-[1.5] text-faint">
+        <p className="mt-1.5 text-tiny leading-[1.5] text-faint">
           The dry-run provider is not deployable — it answers with placeholder text, so a
           deployed one would be a URL that looks like it works.
         </p>
@@ -324,9 +324,9 @@ function DeployForm({
       <div>
         <div className={TYPE.sectionLabel}>Credentials to hand over</div>
         {planning && !plan ? (
-          <p className="mt-1.5 text-[11px] text-muted">checking…</p>
+          <p className="mt-1.5 text-tiny text-muted">checking…</p>
         ) : secrets.length === 0 ? (
-          <p className="mt-1.5 text-[11px] text-muted">This agent needs none.</p>
+          <p className="mt-1.5 text-tiny text-muted">This agent needs none.</p>
         ) : (
           <div className="mt-1.5 space-y-0.5">
             {secrets.map((s) => {
@@ -345,7 +345,7 @@ function DeployForm({
                   detail={<span className="text-faint">{s.reason}</span>}
                   trailing={
                     <button
-                      className="text-[11px] text-muted hover:text-ink"
+                      className="text-tiny text-muted hover:text-ink"
                       onClick={() =>
                         setExcluded((prev) => {
                           const next = new Set(prev);
@@ -364,7 +364,7 @@ function DeployForm({
           </div>
         )}
         {/* The same promise the MCP panel and the provider form make, in the same words. */}
-        <p className="mt-1.5 text-[11px] leading-[1.5] text-faint">
+        <p className="mt-1.5 text-tiny leading-[1.5] text-faint">
           Values are read from <span className="font-mono">runtime/.env</span> at the moment
           they are sent, go straight into an HTTPS request body to Railway, and are never
           logged, written to Jaroku's database, or sent back to this page. Only the names are.
@@ -372,7 +372,7 @@ function DeployForm({
       </div>
 
       {withheld.length > 0 && !allowMissing && (
-        <div className="flex items-start gap-2 text-[11px] leading-[1.5] text-err">
+        <div className="flex items-start gap-2 text-tiny leading-[1.5] text-err">
           <span className="mt-[2px] shrink-0"><AlertTriangleIcon size={ICON.xs} /></span>
           <span className="min-w-0 flex-1">
             not sending: {withheld.join(", ")}. The agent's tools raise without them, so it
@@ -384,7 +384,7 @@ function DeployForm({
       {plan?.problems.length ? (
         <div className="space-y-1">
           {plan.problems.map((p) => (
-            <div key={p} className="flex items-start gap-2 text-[11px] leading-[1.5] text-err">
+            <div key={p} className="flex items-start gap-2 text-tiny leading-[1.5] text-err">
               <span className="mt-[2px] shrink-0"><AlertTriangleIcon size={ICON.xs} /></span>
               <span className="min-w-0 flex-1">{p}</span>
             </div>
@@ -399,7 +399,7 @@ function DeployForm({
       )}
 
       {plan?.warnings.map((w) => (
-        <div key={w} className="flex items-start gap-2 text-[11px] leading-[1.5] text-run">
+        <div key={w} className="flex items-start gap-2 text-tiny leading-[1.5] text-run">
           <span className="mt-[2px] shrink-0"><AlertTriangleIcon size={ICON.xs} /></span>
           <span className="min-w-0 flex-1">{w}</span>
         </div>
@@ -408,7 +408,7 @@ function DeployForm({
       {plan?.redeploy && (
         // "Replace what is live" and "put a second one up" are different decisions, and only
         // the user knows which they meant. Said before the button, not after.
-        <p className="text-[11px] leading-[1.5] text-muted">
+        <p className="text-tiny leading-[1.5] text-muted">
           This agent already has a Railway service. Deploying replaces what is running there —
           same project, same URL — rather than creating a second one you would also be billed
           for.
@@ -499,11 +499,11 @@ function DeployDetail({ deployment }: { deployment: Deployment }) {
           pulse={running}
           title={STATUS_COPY[deployment.status].label}
         />
-        <span className="text-[13px] font-medium text-ink">{deployment.agent_id}</span>
-        <span className="font-mono text-[11px] text-faint">
+        <span className="text-label text-ink">{deployment.agent_id}</span>
+        <span className="text-tiny text-faint">
           {deployment.provider}/{deployment.model}
         </span>
-        <span className="ml-auto text-[11px] tabular-nums text-muted">
+        <span className="ml-auto text-tiny tabular-nums text-muted">
           {running ? (
             <span className="text-run">Deploying {fmtDuration(elapsed)}</span>
           ) : (
@@ -517,7 +517,7 @@ function DeployDetail({ deployment }: { deployment: Deployment }) {
           href={deployment.url}
           target="_blank"
           rel="noreferrer"
-          className="mt-2 inline-flex items-center gap-1.5 font-mono text-[12px] text-ink hover:underline"
+          className="mt-2 inline-flex items-center gap-1.5 text-caption text-ink hover:underline"
         >
           <span style={{ color: STATUS.ok }}><GlobeIcon size={ICON.xs} /></span>
           {deployment.url}
@@ -525,7 +525,7 @@ function DeployDetail({ deployment }: { deployment: Deployment }) {
       )}
 
       {deployment.error && (
-        <div className="mt-2 rounded-control border border-err/30 px-2 py-1.5 text-[11px] leading-[1.5] text-err">
+        <div className="mt-2 rounded-control border border-err/30 px-2 py-1.5 text-tiny leading-[1.5] text-err">
           {deployment.error}
         </div>
       )}
@@ -553,7 +553,7 @@ function DeployDetail({ deployment }: { deployment: Deployment }) {
       {narration.length > 0 && (
         <div className="mt-3 space-y-0.5">
           {narration.map((l) => (
-            <div key={l.seq} className="text-[11px] leading-[1.5] text-muted [overflow-wrap:anywhere]">
+            <div key={l.seq} className="text-tiny leading-[1.5] text-muted [overflow-wrap:anywhere]">
               {l.text}
             </div>
           ))}
@@ -571,7 +571,7 @@ function DeployDetail({ deployment }: { deployment: Deployment }) {
           {/* Somebody else's text, rendered with no interpretation. */}
           <pre
             ref={scrollRef}
-            className="mt-1 max-h-72 overflow-auto rounded-control border border-hair bg-bg/60 p-2.5 font-mono text-[11px] leading-[1.55] text-ink"
+            className="mt-1 max-h-72 overflow-auto rounded-control border border-hair bg-bg/60 p-2.5 font-mono text-tiny leading-[1.55] text-ink"
           >
             {buildLines.map((l) => (
               <div key={l.seq} className={l.stream === "build-err" ? "text-run" : undefined}>
@@ -585,7 +585,7 @@ function DeployDetail({ deployment }: { deployment: Deployment }) {
       <div className="mt-3 flex items-center gap-2 border-t border-hair pt-3">
         {running && canDeploy ? (
           <button
-            className="rounded-control px-3 py-1.5 text-[12px] text-err transition-colors hover:bg-active active:bg-chrome"
+            className="rounded-control px-3 py-1.5 text-caption text-err transition-colors hover:bg-active active:bg-chrome"
             onClick={() => sendCancelDeploy(deployment.id)}
           >
             Cancel deploy
@@ -628,13 +628,13 @@ function ServeTokenCard({ onDismiss }: { onDismiss: () => void }) {
       >
         <div className="flex items-center gap-2">
           <span style={{ color: STATUS.ok }}><KeyIcon size={ICON.sm} /></span>
-          <span className="text-[12px] font-medium text-ink">Your endpoint's bearer token</span>
+          <span className="text-caption font-medium text-ink">Your endpoint's bearer token</span>
           <button className="ml-auto text-faint hover:text-ink" title="Dismiss" aria-label="Dismiss" onClick={onDismiss}>
             <XIcon size={ICON.xs} />
           </button>
         </div>
         <div className="mt-1.5 flex items-center gap-2">
-          <code className="min-w-0 flex-1 truncate rounded-control bg-bg/60 px-2 py-1 font-mono text-[11px] text-ink">
+          <code className="min-w-0 flex-1 truncate rounded-control bg-bg/60 px-2 py-1 font-mono text-tiny text-ink">
             {reveal.token}
           </code>
           <button
@@ -648,7 +648,7 @@ function ServeTokenCard({ onDismiss }: { onDismiss: () => void }) {
           </button>
         </div>
         {/* Saying it is shown once matters more than saying it is secret. */}
-        <p className="mt-1.5 text-[11px] leading-[1.5] text-faint">
+        <p className="mt-1.5 text-tiny leading-[1.5] text-faint">
           Shown once. Jaroku generated it, set it on Railway, and kept no copy — reloading this
           page loses it. Send it as{" "}
           <span className="font-mono">Authorization: Bearer …</span> to{" "}
@@ -674,7 +674,7 @@ function RailwayTokenRow({ configured }: { configured: boolean }) {
           state={configured ? "ok" : "pending"}
           title={configured ? "a Railway token is set" : "no Railway token"}
         />
-        <span className="text-[11px] text-muted">
+        <span className="text-tiny text-muted">
           {configured ? "Railway connected" : "No Railway token"}
         </span>
         <button className={`${quietBtn} ml-auto`} onClick={() => setOpen((v) => !v)}>
@@ -698,7 +698,7 @@ function RailwayTokenRow({ configured }: { configured: boolean }) {
               autoFocus
               type="password"
               autoComplete="off"
-              className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 font-mono text-[11px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+              className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 font-mono text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
               placeholder="railway account token"
               value={token}
               onChange={(e) => setToken(e.target.value)}
@@ -733,7 +733,7 @@ function RailwayTokenRow({ configured }: { configured: boolean }) {
           </div>
           {testResult && (
             <div
-              className={`mt-1.5 flex items-center gap-1.5 text-[11px] ${
+              className={`mt-1.5 flex items-center gap-1.5 text-tiny ${
                 testResult.ok ? "text-ok" : "text-err"
               }`}
             >
@@ -741,7 +741,7 @@ function RailwayTokenRow({ configured }: { configured: boolean }) {
               {testResult.message ?? (testResult.ok ? "connected" : "rejected")}
             </div>
           )}
-          <p className="mt-1.5 text-[11px] leading-[1.5] text-faint">
+          <p className="mt-1.5 text-tiny leading-[1.5] text-faint">
             Create one at{" "}
             <span className="font-mono">railway.com/account/tokens</span> (an account token,
             not a project token). Stored in <span className="font-mono">runtime/.env</span> as{" "}

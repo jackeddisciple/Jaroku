@@ -61,7 +61,7 @@ export function NoteControl({ turnId, disabled = false }: { turnId: string; disa
       />
       <Popover open={open} onClose={close} triggerRef={triggerRef} label="Note on this turn" width={320}>
         <div className="px-1 pb-1">
-          <div className="px-1 pb-1.5 text-[10px] uppercase tracking-wider text-faint">Note on this turn</div>
+          <div className="px-1 pb-1.5 text-tiny uppercase tracking-wider text-faint">Note on this turn</div>
           <textarea
             autoFocus
             value={draft}
@@ -71,13 +71,13 @@ export function NoteControl({ turnId, disabled = false }: { turnId: string; disa
             }}
             rows={3}
             placeholder="This plan looks right but it drops the retry on 429."
-            className="w-full resize-none rounded-control bg-bg px-2 py-1.5 text-[12px] text-ink outline-none placeholder:text-faint focus-visible:shadow-focusring"
+            className="w-full resize-none rounded-control bg-bg px-2 py-1.5 text-caption text-ink outline-none placeholder:text-faint focus-visible:shadow-focusring"
           />
           <div className="mt-1.5 flex items-center justify-end gap-1.5">
             <button
               type="button"
               onClick={close}
-              className="rounded-control px-2 py-1 text-[11px] text-muted transition-colors duration-fast hover:text-ink"
+              className="rounded-control px-2 py-1 text-tiny text-muted transition-colors duration-fast hover:text-ink"
             >
               Cancel
             </button>
@@ -86,7 +86,7 @@ export function NoteControl({ turnId, disabled = false }: { turnId: string; disa
               onClick={save}
               disabled={!draft.trim()}
               title="⌘↵"
-              className="rounded-control bg-ink px-2.5 py-1 text-[11px] font-medium text-bg transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
+              className="rounded-control bg-ink px-2.5 py-1 text-tiny text-bg transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
             >
               Save
             </button>
@@ -97,7 +97,7 @@ export function NoteControl({ turnId, disabled = false }: { turnId: string; disa
           <div className="mt-1 border-t border-hair pt-1">
             {notes.map((n) => (
               <div key={n.id} className="px-2 py-1.5">
-                <div className="flex items-baseline gap-1.5 text-[10px] text-faint">
+                <div className="flex items-baseline gap-1.5 text-tiny text-faint">
                   <span className="text-muted">{n.author_name ?? "Someone"}</span>
                   <span>{relTime(n.created_at)}</span>
                   {/* §9's pending treatment, and the failure that must never be silent. */}
@@ -113,7 +113,7 @@ export function NoteControl({ turnId, disabled = false }: { turnId: string; disa
                     ×
                   </button>
                 </div>
-                <p className={`mt-0.5 whitespace-pre-wrap break-words text-[12px] ${n.pending ? "text-muted" : "text-ink"}`}>
+                <p className={`mt-0.5 whitespace-pre-wrap break-words text-caption ${n.pending ? "text-muted" : "text-ink"}`}>
                   {n.body}
                 </p>
               </div>
@@ -188,7 +188,7 @@ export function FeedbackControls({
           className={summary.mine === -1 ? "!text-warn" : ""}
         />
         <Popover open={open} onClose={() => setOpen(false)} triggerRef={downRef} label="What went wrong" width={300}>
-          <div className="px-2 pb-1 pt-0.5 text-[10px] uppercase tracking-wider text-faint">What went wrong?</div>
+          <div className="px-2 pb-1 pt-0.5 text-tiny uppercase tracking-wider text-faint">What went wrong?</div>
           <div className="px-2">
             {FEEDBACK_REASONS.map((r) => (
               <div key={r.id} className="py-1">
@@ -203,13 +203,13 @@ export function FeedbackControls({
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               placeholder="Anything else? (optional)"
-              className="mt-1 w-full rounded-control bg-bg px-2 py-1 text-[11px] text-ink outline-none placeholder:text-faint focus-visible:shadow-focusring"
+              className="mt-1 w-full rounded-control bg-bg px-2 py-1 text-tiny text-ink outline-none placeholder:text-faint focus-visible:shadow-focusring"
             />
             <div className="mt-1.5 flex items-center justify-end gap-1.5 pb-1">
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="rounded-control px-2 py-1 text-[11px] text-muted transition-colors duration-fast hover:text-ink"
+                className="rounded-control px-2 py-1 text-tiny text-muted transition-colors duration-fast hover:text-ink"
               >
                 Cancel
               </button>
@@ -219,7 +219,7 @@ export function FeedbackControls({
                   void setFeedback(turnId, -1, reasons, comment.trim() || null);
                   setOpen(false);
                 }}
-                className="rounded-control bg-ink px-2.5 py-1 text-[11px] font-medium text-bg"
+                className="rounded-control bg-ink px-2.5 py-1 text-tiny text-bg"
               >
                 Send
               </button>
@@ -247,7 +247,7 @@ export function FeedbackControls({
       {/* §5.5: "workspace-visible in aggregate (counts on the turn)". Only above one, because a
           count of one beside a filled thumb is the same fact written twice. */}
       {summary.up + summary.down > 1 && (
-        <span className="ml-0.5 self-center text-[10px] tabular-nums text-faint" aria-hidden>
+        <span className="ml-0.5 self-center text-tiny tabular-nums text-faint" aria-hidden>
           {summary.up > 0 && `+${summary.up}`}
           {summary.up > 0 && summary.down > 0 && " "}
           {summary.down > 0 && `−${summary.down}`}

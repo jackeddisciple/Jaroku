@@ -99,7 +99,7 @@ function VersionRow({
           onClick={onPick}
           title={picked ? "Remove from the comparison" : "Compare from here"}
           aria-pressed={picked}
-          className="shrink-0 font-mono text-[11px] tabular-nums text-muted transition-colors hover:text-ink"
+          className="shrink-0 text-tiny tabular-nums text-muted transition-colors hover:text-ink"
         >
           v{version.version}
         </button>
@@ -119,7 +119,7 @@ function VersionRow({
             undone
           </Chip>
         )}
-        <span className="ml-auto shrink-0 text-[10px] text-faint" title={version.created_at}>
+        <span className="ml-auto shrink-0 text-tiny text-faint" title={version.created_at}>
           {relTime(version.created_at)}
         </span>
       </div>
@@ -127,12 +127,12 @@ function VersionRow({
       {/* The summary is what the model said it did; the instruction is what was asked for. Both are
           on the row already (014), and an edit is the only source that has an instruction. */}
       {version.summary && (
-        <Truncate className="text-[12px] text-ink" title={version.summary}>
+        <Truncate className="text-caption text-ink" title={version.summary}>
           {version.summary}
         </Truncate>
       )}
       {version.instruction && (
-        <Truncate className="text-[11px] text-muted" title={version.instruction}>
+        <Truncate className="text-tiny text-muted" title={version.instruction}>
           “{version.instruction}”
         </Truncate>
       )}
@@ -143,16 +143,16 @@ function VersionRow({
         ) : (
           // AN EMPTY STAT IS A TRUTHFUL CLAIM, not a gap: migration 014's default is an empty array
           // and its header says why — nobody recorded a diff for a version published as-is.
-          <span className="text-[11px] text-faint">no diff recorded</span>
+          <span className="text-tiny text-faint">no diff recorded</span>
         )}
-        <span className="text-[10px] text-faint">{fmtBytes(version.total_bytes)}</span>
+        <span className="text-tiny text-faint">{fmtBytes(version.total_bytes)}</span>
         <div className="ml-auto flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-fast group-hover:opacity-100 focus-within:opacity-100">
           <button
             type="button"
             onClick={onOpenFiles}
             title={`Browse the files of v${version.version}`}
             aria-label={`Browse the files of v${version.version}`}
-            className="rounded-control px-1.5 py-0.5 text-[11px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
+            className="rounded-control px-1.5 py-0.5 text-tiny text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
           >
             Files
           </button>
@@ -203,7 +203,7 @@ export function AgentVersions({ detail }: { detail: AgentDetailView }) {
       onToggle={() => setOpen((v) => !v)}
     >
       {detail.versions.length === 0 ? (
-        <div className="px-2.5 py-2 text-[11px] text-faint">
+        <div className="px-2.5 py-2 text-tiny text-faint">
           Nothing has been published for this agent yet.
         </div>
       ) : (
@@ -211,7 +211,7 @@ export function AgentVersions({ detail }: { detail: AgentDetailView }) {
           {both && (
             <div className="mb-1.5 rounded-control border border-edge bg-panel p-2.5">
               <div className="flex items-center gap-2">
-                <span className="text-[11px] text-ink">
+                <span className="text-tiny text-ink">
                   v{Math.min(selection.from!, selection.to!)} → v{Math.max(selection.from!, selection.to!)}
                 </span>
                 {/* TWO WORDS OF CHROME AT THE END OF A ROW THAT ALREADY CARRIES THREE FACTS — a
@@ -226,19 +226,19 @@ export function AgentVersions({ detail }: { detail: AgentDetailView }) {
                 </button>
               </div>
               {changes.length === 0 ? (
-                <div className="mt-1.5 text-[11px] text-faint">
+                <div className="mt-1.5 text-tiny text-faint">
                   No file changes were recorded between these two.
                 </div>
               ) : (
                 <div className="mt-1.5 space-y-1">
                   {changes.map(([path, stat]) => (
                     <div key={path} className="flex min-w-0 items-center gap-2">
-                      <Truncate variant="path" className="min-w-0 flex-1 font-mono text-[11px] text-muted">
+                      <Truncate variant="path" className="min-w-0 flex-1 font-mono text-tiny text-muted">
                         {path}
                       </Truncate>
                       <DiffStat additions={stat.additions} deletions={stat.deletions} />
                       {stat.touched > 1 && (
-                        <span className="shrink-0 text-[10px] text-faint" title="Versions that touched this file">
+                        <span className="shrink-0 text-tiny text-faint" title="Versions that touched this file">
                           ×{stat.touched}
                         </span>
                       )}

@@ -85,7 +85,7 @@ export function SplitButton({
       <span className="inline-flex overflow-hidden rounded-control bg-panel">
         <button
           type="button"
-          className="px-3 py-1.5 text-[12px] text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
+          className="px-3 py-1.5 text-caption text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
           disabled={!primary || primaryBlocked}
           title={primary?.title}
           onClick={() => primary?.onSelect()}
@@ -140,7 +140,7 @@ function MenuRow({ action, onDone }: { action: SplitAction; onDone: () => void }
           action.onSelect();
           onDone();
         }}
-        className={`flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-[12px] transition-colors duration-fast disabled:cursor-not-allowed ${
+        className={`flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-caption transition-colors duration-fast disabled:cursor-not-allowed ${
           action.danger
             ? "text-err hover:bg-active active:bg-chrome disabled:opacity-40"
             : "text-muted hover:bg-active/40 hover:text-ink disabled:opacity-40"
@@ -158,7 +158,7 @@ function MenuRow({ action, onDone }: { action: SplitAction; onDone: () => void }
       {/* §A.2 inside the menu too: a dimmed row with no explanation is the same silent failure a
           dimmed button is, and a menu is where somebody has gone LOOKING for the action. */}
       {action.reason && (
-        <div className="px-2 pb-1 text-[10px] leading-[1.4] text-faint">{action.reason}</div>
+        <div className="px-2 pb-1 text-tiny leading-[1.4] text-faint">{action.reason}</div>
       )}
     </div>
   );

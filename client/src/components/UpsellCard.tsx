@@ -84,7 +84,7 @@ export function UpsellCard({ channel, onUpgrade }: { channel: string; onUpgrade?
               <div className="h-1 w-full overflow-hidden rounded-chip bg-chrome">
                 <div className="h-full rounded-chip bg-run" style={{ width: "100%" }} />
               </div>
-              <p className="mt-1 text-[11px] tabular-nums text-muted">
+              <p className="mt-1 text-tiny tabular-nums text-muted">
                 {refusal.current} of {refusal.limit} {label(refusal.kind)} used
               </p>
             </div>
@@ -93,7 +93,7 @@ export function UpsellCard({ channel, onUpgrade }: { channel: string; onUpgrade?
           {/* THE PROMISE THAT MAKES THIS NOT A THREAT. The specification's second principle is that
               nothing is ever destroyed for stopping paying, and the moment somebody most needs to
               hear it is the moment they have just been refused. */}
-          <p className="mt-1 text-[11px] leading-[1.55] text-muted">
+          <p className="mt-1 text-tiny leading-[1.55] text-muted">
             {refusal.error === "quota_exceeded"
               ? `${nextTier(refusal.tier)} raises this limit. Everything you have already made stays exactly as it is.`
               : `${nextTier(refusal.tier)} turns this on. Nothing you have already made changes.`}

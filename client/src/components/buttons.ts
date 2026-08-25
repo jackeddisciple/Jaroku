@@ -46,7 +46,7 @@
  * one line and "Connect GitHub" on the next.
  */
 export const primaryBtn =
-  "inline-flex items-center gap-1.5 rounded-control px-3 py-1.5 text-[12px] bg-ink text-bg font-medium hover:bg-ink/90 active:bg-ink/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+  "inline-flex items-center gap-1.5 rounded-control px-3 py-1.5 text-label bg-ink text-bg hover:bg-ink/90 active:bg-ink/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
 /**
  * A real action that is not *the* action — the second button in a pair, or the primary of a card
@@ -55,7 +55,7 @@ export const primaryBtn =
  * This is the recipe `primaryBtn` used to be. It was never a bad button; it was a bad *primary*.
  */
 export const outlineBtn =
-  "inline-flex items-center gap-1.5 rounded-control px-3 py-1.5 text-[12px] bg-panel text-ink hover:bg-active active:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+  "inline-flex items-center gap-1.5 rounded-control px-3 py-1.5 text-label bg-panel text-ink hover:bg-active active:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
 /**
  * The other answer. Same box as primary so the two sit level, but no surface until you hover —
@@ -67,14 +67,14 @@ export const outlineBtn =
  * a word somebody happened to make clickable.
  */
 export const quietBtn =
-  "inline-flex items-center gap-1.5 rounded-control px-3 py-1.5 text-[12px] text-muted hover:bg-active hover:text-ink active:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+  "inline-flex items-center gap-1.5 rounded-control px-3 py-1.5 text-label text-muted hover:bg-active hover:text-ink active:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
 /**
  * Not a decision. Same surface and radius as primary, one size down and muted until you reach for
  * it. `inline-flex` because everything at this weight carries an icon.
  */
 export const secondaryBtn =
-  "inline-flex items-center gap-1.5 rounded-control px-2.5 py-1 text-[11px] bg-panel text-muted hover:text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+  "inline-flex items-center gap-1.5 rounded-control px-2.5 py-1 text-tiny bg-panel text-muted hover:text-ink hover:bg-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
 /**
  * A glyph on its own — a dismiss, a disclosure chevron, a row's edit or archive.
@@ -100,7 +100,7 @@ export const iconBtn =
 export const tabBtn = (active: boolean, size: "sm" | "md" = "md"): string =>
   [
     "relative inline-flex items-center gap-1.5 rounded-control transition-colors",
-    size === "sm" ? "px-2 py-1 text-[11px]" : "px-3 py-1.5 text-[12px]",
+    size === "sm" ? "px-2 py-1 text-tiny" : "px-3 py-1.5 text-label",
     "focus-visible:outline-none focus-visible:shadow-focusring",
     active
       ? "text-accent after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:rounded-full after:bg-accent"

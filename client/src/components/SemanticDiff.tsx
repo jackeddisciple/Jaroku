@@ -57,14 +57,14 @@ export function SemanticDiffRegion({ view }: { view: GithubView }) {
   return (
     <section className="mt-3">
       <div className="flex items-center gap-2">
-        <span className="text-[10px] uppercase tracking-wider text-faint">
+        <span className="text-tiny uppercase tracking-wider text-faint">
           v{view.pushed[0]?.version ?? view.unpushed[0]?.version ?? "?"} → {view.link.branch}
         </span>
         <div className="ml-auto flex items-center gap-0.5 rounded-control bg-active p-0.5">
           {(["lines", "agent"] as const).map((m) => (
             <button
               key={m}
-              className={`rounded-control px-2 py-0.5 text-[11px] transition-colors duration-fast ${
+              className={`rounded-control px-2 py-0.5 text-tiny transition-colors duration-fast ${
                 mode === m ? "bg-panel text-ink" : "text-muted hover:text-ink"
               }`}
               onClick={() => setMode(m)}
@@ -83,12 +83,12 @@ export function SemanticDiffRegion({ view }: { view: GithubView }) {
       {mode === "agent" && (
         <div className="mt-1.5">
           {rows === null ? (
-            <p className="text-[11px] text-muted">reading both trees…</p>
+            <p className="text-tiny text-muted">reading both trees…</p>
           ) : rows.length === 0 ? (
             // A REAL ANSWER RATHER THAN AN EMPTY LIST. Two trees can differ in every line and not at
             // all in the agent — a reformat, a docstring, a comment — and saying so is the most
             // useful thing this view does on that commit.
-            <p className="text-[11px] leading-[1.5] text-muted">
+            <p className="text-tiny leading-[1.5] text-muted">
               Nothing changed about the agent. The tools, the state, the graph and the MCP grant are
               the same on both sides — whatever moved, moved inside them.
             </p>
@@ -100,7 +100,7 @@ export function SemanticDiffRegion({ view }: { view: GithubView }) {
               file is mid-edit would be the view refusing to be useful at the moment somebody is
               looking at a branch in progress. */}
           {diff?.partial && (
-            <p className="mt-1.5 text-[11px] leading-[1.5] text-faint">
+            <p className="mt-1.5 text-tiny leading-[1.5] text-faint">
               One side did not fully parse ({diff.partial}), so this may be incomplete. The Lines
               view is unaffected.
             </p>

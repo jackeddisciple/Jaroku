@@ -36,7 +36,7 @@ export function InboxPointer({ agentUuid }: { agentUuid: string | null }) {
       onClick={() => openInboxForAgent(agentUuid)}
       // The whole strip is the target rather than a link inside it: it is one sentence and one
       // destination, and a hit area smaller than the thing it describes is a control people miss.
-      className="flex w-full shrink-0 items-center gap-2 border-b border-hair px-4 py-1.5 text-left text-[11px] text-muted transition-colors hover:bg-active/40 hover:text-ink"
+      className="flex w-full shrink-0 items-center gap-2 border-b border-hair px-4 py-1.5 text-left text-tiny text-muted transition-colors hover:bg-active/40 hover:text-ink"
       title="Open the Inbox, filtered to this agent"
     >
       <span className="shrink-0 text-faint" aria-hidden>

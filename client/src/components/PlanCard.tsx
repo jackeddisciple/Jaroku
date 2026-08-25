@@ -132,7 +132,7 @@ function Section({
         {/* Normally the count is only worth showing for more than one row. Collapsed, it is the
             only thing left saying how much is behind the header, so it always shows. */}
         {count !== undefined && (count > 1 || !open) && (
-          <span className="font-mono text-[11px] text-faint tabular-nums">{count}</span>
+          <span className="text-tiny text-faint tabular-nums">{count}</span>
         )}
         {/* Right-aligned rather than leading, so opening a section doesn't shift the icon and
             label the rest of the card is aligned to. Rotation rather than two glyphs: the same
@@ -148,7 +148,7 @@ function Section({
       </button>
       {open && (
         <>
-          {note && <div className="mt-1 text-[11px] text-faint">{note}</div>}
+          {note && <div className="mt-1 text-tiny text-faint">{note}</div>}
           {/* A shallow well, one step under the card. Five sections stacked with nothing but
               margins between them read as one list with headings in it; this says each heading
               owns what follows it. Deliberately no border — at five repetitions a hairline
@@ -194,7 +194,7 @@ function GraphStep({
         // A step's mark IS its position — that is what makes the list ordered rather than a set,
         // and a repeated action icon down the column would carry no information at all.
         icon={
-          <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-active font-mono text-[10px] leading-none text-muted tabular-nums">
+          <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-active text-tiny leading-none text-muted tabular-nums">
             {n}
           </span>
         }
@@ -221,7 +221,6 @@ function ConnectorChip({ id }: { id: string }) {
     // The same Chip as every other label in the app. Muted rather than ink because this is a
     // label *about* the tool, not the tool's own name.
     <Chip
-      mono
       tone="muted"
       icon={
         brand ? (
@@ -267,7 +266,7 @@ function ToolRow({
   return (
     <ActionRow
       action={actionForToolOrigin(origin)}
-      object={<span className="font-mono font-medium text-ink [overflow-wrap:anywhere]">{name}</span>}
+      object={<span className="font-medium text-ink [overflow-wrap:anywhere]">{name}</span>}
       detail={description}
       trailing={status}
       className="py-1"
@@ -328,7 +327,7 @@ function Note({ text, vocabulary }: { text: string; vocabulary: readonly string[
  */
 function Card({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-card border border-edge bg-panel/40 px-3.5 py-3 text-[12px] shadow-raised">
+    <div className="rounded-card border border-edge bg-panel/40 px-3.5 py-3 text-caption shadow-raised">
       {children}
     </div>
   );
@@ -411,7 +410,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
       <div className="flex animate-slide-in items-center gap-2 border-b border-hair pb-2.5 motion-reduce:animate-none">
         <span className="text-ink font-medium">Here’s the plan</span>
         {turn.revision > 1 && (
-          <span className="font-mono text-faint text-[11px] tabular-nums">
+          <span className="text-faint text-tiny tabular-nums">
             revision {turn.revision}
           </span>
         )}
@@ -574,7 +573,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                         <DatabaseIcon size={ICON.xs} />
                       </span>
                     }
-                    object={<span className="font-mono text-ink [overflow-wrap:anywhere]">{f.name}</span>}
+                    object={<span className="text-ink [overflow-wrap:anywhere]">{f.name}</span>}
                     detail={
                       <>
                         {f.type && (
@@ -612,7 +611,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             )}
 
             {!plan.complete && (
-              <div className="mt-5 flex gap-2 text-[11px] text-faint">
+              <div className="mt-5 flex gap-2 text-tiny text-faint">
                 <span className="shrink-0 mt-[3px]">
                   <AlertTriangleIcon size={ICON.xs} />
                 </span>
@@ -627,7 +626,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
         {turn.warnings.length > 0 && (
           <div className="mt-5 space-y-1">
             {turn.warnings.map((w, i) => (
-              <div key={i} className="flex gap-2 text-[11px] text-run">
+              <div key={i} className="flex gap-2 text-tiny text-run">
                 <span className="shrink-0 mt-[3px]">
                   <AlertTriangleIcon size={ICON.xs} />
                 </span>
@@ -641,7 +640,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
       </div>
 
       {turn.status === "stale" && (
-        <div className="mt-4 text-[11px] text-muted">
+        <div className="mt-4 text-tiny text-muted">
           The connectors changed after this was written — say what you want and it will be
           re-planned against the new selection.
         </div>
@@ -673,9 +672,9 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
           >
             Discard
           </button>
-          <span className="text-faint text-[11px]">or say what to change</span>
+          <span className="text-faint text-tiny">or say what to change</span>
           {turn.usage && (
-            <span className="ml-auto font-mono text-faint text-[11px] tabular-nums">
+            <span className="ml-auto text-faint text-tiny tabular-nums">
               {fmtCost(turn.usage.cost_usd)}
             </span>
           )}

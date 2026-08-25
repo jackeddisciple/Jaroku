@@ -142,11 +142,12 @@ export function metric(id: MetricId): MetricDef {
 
 // --- formatting -------------------------------------------------------------------------------
 //
-// §3.2: "Every card leads with one large figure in the mono face using tabular figures." The mono
-// face and the tabular figures are the component's business; what is decided here is how many
-// characters the number is allowed to be, because a hero figure that grows from `$9.40` to
-// `$12,481.02` and pushes its own delta badge off the card is a layout bug that only appears in a
-// busy workspace.
+// §3.2: "Every card leads with one large figure ... using tabular figures." (It said "in the mono
+// face" too; typography.pdf §04 puts figures in Sans, and `tabular-nums` is what was carrying the
+// alignment either way.) The face and the tabular figures are the component's business; what is
+// decided here is how many characters the number is allowed to be, because a hero figure that grows
+// from `$9.40` to `$12,481.02` and pushes its own delta badge off the card is a layout bug that
+// only appears in a busy workspace.
 
 /** How money is written. Two decimals under four figures, none above — see `formatMetric`. */
 function usd(value: number): string {

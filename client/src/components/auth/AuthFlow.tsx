@@ -92,10 +92,10 @@ export function AuthFlow() {
     return (
       <AuthNotice>
         <Reveal>
-          <h1 className="font-serif text-[32px] font-normal leading-[1.15] text-ink">Signing you in</h1>
+          <h1 className="text-display text-ink">Signing you in</h1>
         </Reveal>
         <Reveal delay={60}>
-          <p className="mx-auto mt-3 max-w-[34ch] font-serif text-[15px] leading-[1.5] text-muted">
+          <p className="mx-auto mt-3 max-w-[34ch] text-body text-muted">
             One moment — finishing up.
           </p>
         </Reveal>
@@ -106,8 +106,8 @@ export function AuthFlow() {
   if (screen.at === "expired") {
     return (
       <AuthNotice>
-        <h1 className="font-serif text-[32px] font-normal leading-[1.15] text-ink">That link expired</h1>
-        <p className="mx-auto mt-3 max-w-[38ch] text-[13px] leading-[1.6] text-muted">
+        <h1 className="text-display text-ink">That link expired</h1>
+        <p className="mx-auto mt-3 max-w-[38ch] text-label leading-[1.6] text-muted">
           Sign-in links are good for a minute and can only be used once. Starting again takes a
           couple of seconds.
         </p>
@@ -181,7 +181,7 @@ export function SignInSwapPrompt() {
     // above every pane and below the top bar. It is about the whole session rather than about
     // whatever is on screen, which is exactly what those two are about too.
     <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-edge bg-panel px-4 py-2.5">
-      <span className="text-[12px] leading-[1.5] text-ink">
+      <span className="text-caption leading-[1.5] text-ink">
         A sign-in link opened Jaroku.
         {email ? (
           <span className="text-muted"> Continuing will sign out {email}.</span>
@@ -193,7 +193,7 @@ export function SignInSwapPrompt() {
         <button
           type="button"
           onClick={cancel}
-          className="rounded-control px-2.5 py-1 text-[12px] text-muted outline-none transition-colors duration-fast hover:text-ink focus-visible:shadow-focusring"
+          className="rounded-control px-2.5 py-1 text-caption text-muted outline-none transition-colors duration-fast hover:text-ink focus-visible:shadow-focusring"
         >
           Cancel
         </button>
@@ -212,7 +212,7 @@ export function SignInSwapPrompt() {
               m.offerAuthCallback({ ticket: pending });
             });
           }}
-          className="rounded-control bg-ink px-2.5 py-1 text-[12px] font-medium text-void outline-none transition-shadow duration-base hover:shadow-glow-cta focus-visible:shadow-focusring"
+          className="rounded-control bg-ink px-2.5 py-1 text-caption font-medium text-void outline-none transition-shadow duration-base hover:shadow-glow-cta focus-visible:shadow-focusring"
         >
           Continue
         </button>

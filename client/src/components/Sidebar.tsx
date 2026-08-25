@@ -126,8 +126,8 @@ function RunRow({ run }: { run: RunSummary }) {
           </>
         )}
         <StatusGlyph status={run.status} />
-        <Truncate className={`text-[12px] ${active ? "text-accent" : "text-ink"}`} title={run.agent_id}>{run.agent_id}</Truncate>
-        <span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[11px] tabular-nums text-faint">
+        <Truncate className={`text-caption ${active ? "text-accent" : "text-ink"}`} title={run.agent_id}>{run.agent_id}</Truncate>
+        <span className="ml-auto flex shrink-0 items-center gap-1.5 text-tiny tabular-nums text-faint">
           <span>{run.provider}</span>
           {run.step_count != null && <span>{run.step_count} steps</span>}
           {run.parent_run_id != null && run.branch_from_seq != null && (
@@ -195,7 +195,7 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
             sendArchiveAgent(agent.agent_id);
             setConfirming(false);
           }}
-          className="rounded-control border border-hair px-1.5 py-0.5 text-[11px] text-ink"
+          className="rounded-control border border-hair px-1.5 py-0.5 text-tiny text-ink"
         >
           Archive?
         </button>
@@ -306,7 +306,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
               }}
               // The click that lands in the field must not also select the agent underneath it.
               onClick={(e) => e.stopPropagation()}
-              className="min-w-0 flex-1 rounded-control bg-void px-1.5 py-0.5 text-[13px] text-ink outline-none focus-visible:shadow-focusring"
+              className="min-w-0 flex-1 rounded-control bg-void px-1.5 py-0.5 text-label text-ink outline-none focus-visible:shadow-focusring"
             />
           ) : (
             <Truncate className={active ? "text-accent" : "text-ink"} title={agent.name}>{agent.name}</Truncate>
@@ -314,7 +314,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
           {archived && <Chip size="sm" tone="faint" variant="bare">archived</Chip>}
           {github?.badge && (
             <span
-              className={`ml-auto shrink-0 font-mono text-[10px] tabular-nums ${
+              className={`ml-auto shrink-0 text-tiny tabular-nums ${
                 github.badge === "↕" || github.badge === "⚠" ? "text-err" : "text-faint"
               }`}
               title={github.verdict}
@@ -324,7 +324,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
           )}
           {last && (
             <span
-              className={`shrink-0 text-[11px] tabular-nums text-faint ${github?.badge ? "" : "ml-auto"}`}
+              className={`shrink-0 text-tiny tabular-nums text-faint ${github?.badge ? "" : "ml-auto"}`}
               title={absTime(last.started_at)}
             >
               {relTime(last.started_at)}
@@ -417,7 +417,7 @@ function NavRail() {
             {badge > 0 && (
               <span
                 title={badgeTitle}
-                className={`absolute -right-0.5 -top-0.5 min-w-[13px] rounded-chip px-0.5 text-center text-[10px] leading-[13px] tabular-nums ${
+                className={`absolute -right-0.5 -top-0.5 min-w-[13px] rounded-chip px-0.5 text-center text-tiny leading-[13px] tabular-nums ${
                   id === "threads" ? "text-run" : "text-ink"
                 }`}
                 style={id === "threads" ? undefined : { background: SURFACE.chrome }}
@@ -487,10 +487,10 @@ function AccountRow() {
         className="flex min-w-0 flex-1 items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-active active:bg-chrome"
       >
         {/* The first letter of whoever is actually here, uppercased. */}
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-active text-[11px] text-ink">
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-active text-tiny text-ink">
           {(name ?? "?").trim().charAt(0).toUpperCase()}
         </span>
-        <Truncate className="min-w-0 flex-1 text-[12px] text-ink" title={name}>{name}</Truncate>
+        <Truncate className="min-w-0 flex-1 text-caption text-ink" title={name}>{name}</Truncate>
         {/* Only when the session carries one. A chip is a claim about what the workspace is paying,
             and inventing a default for it is how the hardcoded `Free` got there in the first place. */}
         {workspace?.plan?.label && (
@@ -555,7 +555,7 @@ function AdminModeToggle() {
     return (
       <button
         onClick={() => void apply(false)}
-        className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-[11px] text-err transition-colors hover:bg-active"
+        className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-tiny text-err transition-colors hover:bg-active"
       >
         <span className="shrink-0"><AlertTriangleIcon size={ICON.badge} /></span>
         <span>Admin mode on — turn off</span>
@@ -566,7 +566,7 @@ function AdminModeToggle() {
   if (confirming) {
     return (
       <div className="mt-0.5 rounded-control border border-run/40 bg-run/[0.06] px-2 py-1.5">
-        <p className="text-[11px] leading-[1.5] text-ink">
+        <p className="text-tiny leading-[1.5] text-ink">
           Enable admin mode? This bypasses every tier limit and feature gate. Everything you do
           while it is on is logged as admin-privileged.
         </p>
@@ -576,7 +576,7 @@ function AdminModeToggle() {
             Cancel
           </button>
         </div>
-        {error && <p className="mt-1 text-[11px] text-err">{error}</p>}
+        {error && <p className="mt-1 text-tiny text-err">{error}</p>}
       </div>
     );
   }
@@ -584,7 +584,7 @@ function AdminModeToggle() {
   return (
     <button
       onClick={() => setConfirming(true)}
-      className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-[11px] text-faint transition-colors hover:bg-active hover:text-muted"
+      className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-tiny text-faint transition-colors hover:bg-active hover:text-muted"
     >
       <span>Admin mode</span>
       <span className="ml-auto shrink-0">off</span>
@@ -610,7 +610,7 @@ function SectionHeader({ label, count, first = false }: { label: string; count: 
       className={`sticky top-0 z-10 flex items-center bg-bg px-4 py-1.5 ${first ? "" : "mt-1 border-t border-hair"}`}
     >
       <span className={TYPE.panelLabel}>{label}</span>
-      <span className="ml-auto text-[11px] tabular-nums text-faint">{count}</span>
+      <span className="ml-auto text-tiny tabular-nums text-faint">{count}</span>
     </div>
   );
 }
@@ -686,7 +686,7 @@ function FilterMenu({
       >
         <FilterIcon size={ICON.sm} />
         {filtering && current?.count != null && (
-          <span className="text-[10px] tabular-nums">{current.count}</span>
+          <span className="text-tiny tabular-nums">{current.count}</span>
         )}
       </button>
       {open && (
@@ -698,13 +698,13 @@ function FilterMenu({
                 setFilter(e.id);
                 setOpen(false);
               }}
-              className={`flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-[12px] transition-colors duration-fast ${
+              className={`flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-caption transition-colors duration-fast ${
                 filter === e.id ? "bg-active text-ink" : "text-muted hover:bg-active/40 hover:text-ink"
               }`}
             >
               {e.label}
               {e.count != null && e.count > 0 && (
-                <span className="ml-auto text-[11px] tabular-nums text-faint">{e.count}</span>
+                <span className="ml-auto text-tiny tabular-nums text-faint">{e.count}</span>
               )}
             </button>
           ))}
@@ -819,7 +819,7 @@ export function Sidebar() {
                 if (e.key === "Escape") { setQuery(""); setSearching(false); }
               }}
               placeholder="search agents…"
-              className="min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+              className="min-w-0 flex-1 bg-transparent text-caption text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
             />
             {query && (
               <button
@@ -921,7 +921,7 @@ export function Sidebar() {
         {runList.length >= historyWindow && !historyComplete && (
           <button
             onClick={() => sendLoadHistory(Math.min(historyWindow * 2, 500))}
-            className="w-full px-4 py-2 text-left text-[11px] text-muted transition-colors hover:bg-active/40 hover:text-ink"
+            className="w-full px-4 py-2 text-left text-tiny text-muted transition-colors hover:bg-active/40 hover:text-ink"
           >
             Load older runs…
           </button>
@@ -930,7 +930,7 @@ export function Sidebar() {
             searching for last month's run used to be told there was no such run. Said plainly rather
             than left to be inferred, and only while there is more to load. */}
         {q && !historyComplete && (
-          <p className="px-4 pb-2 text-[11px] leading-[1.5] text-faint">
+          <p className="px-4 pb-2 text-tiny leading-[1.5] text-faint">
             Searching the {runList.length} loaded runs. Load older ones to search further back.
           </p>
         )}

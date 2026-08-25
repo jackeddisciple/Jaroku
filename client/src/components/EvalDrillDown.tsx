@@ -42,9 +42,11 @@ function ScoreChip({ cell, active, onClick }: { cell: ExampleCell; active: boole
     <Chip
       onClick={onClick}
       selected={active}
-      // The model id is the identifier and stays mono; the score rides in the figure slot, which
-      // is tabular everywhere, so a column of these lines up.
-      mono
+      // The score rides in the figure slot, which is tabular everywhere, so a column of these
+      // lines up. The model id used to be set in mono beside it, on the argument that it is an
+      // identifier — typography.pdf §04 puts "provider and model labels" in its Sans list and §05
+      // refuses the argument in as many words, and the alignment was always `tabular-nums` doing
+      // the work rather than the face.
       tone="muted"
       title={`${cell.model}${failed ? ` — ${cell.error ?? cell.status}` : cell.score === null ? ` — ${cell.scoreError ?? "unscored"}` : ""}`}
       figure={<span className={tone}>{label}</span>}
@@ -70,8 +72,8 @@ function CellDetail({ cell, criteria }: { cell: ExampleCell; criteria: string[] 
 
   return (
     <div className="mt-2 ml-6 space-y-2 border-l border-hair pl-3">
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[11px]">
-        <span className="font-mono text-ink">{cell.model}</span>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-tiny">
+        <span className="text-ink">{cell.model}</span>
         <span className={cell.status === "succeeded" ? "text-muted" : "text-err"}>{cell.status}</span>
         {/* The floor marker, where the number is. `cost_complete` has ridden the per-leg rollup
             since the dashboard was written and never reached the cell — so a cost that was an
@@ -100,14 +102,14 @@ function CellDetail({ cell, criteria }: { cell: ExampleCell; criteria: string[] 
         )}
       </div>
 
-      {cell.error && <div className="text-[11px] text-err whitespace-pre-wrap break-words">{cell.error}</div>}
+      {cell.error && <div className="text-tiny text-err whitespace-pre-wrap break-words">{cell.error}</div>}
 
       {/* Per-criterion breakdown: what the overall score is actually made of. */}
       {cell.perCriterion && (
-        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-tiny">
           {criteria.map((id) => (
             <span key={id} className="text-muted">
-              {id} <span className="font-mono text-ink tabular-nums">{cell.perCriterion?.[id] ?? "—"}</span>
+              {id} <span className="text-ink tabular-nums">{cell.perCriterion?.[id] ?? "—"}</span>
               <span className="text-faint">/4</span>
             </span>
           ))}
@@ -115,14 +117,14 @@ function CellDetail({ cell, criteria }: { cell: ExampleCell; criteria: string[] 
       )}
 
       {cell.rationale && (
-        <div className="text-[11px] text-muted whitespace-pre-wrap break-words leading-relaxed">
+        <div className="text-tiny text-muted whitespace-pre-wrap break-words leading-relaxed">
           {cell.rationale}
         </div>
       )}
 
       {/* Unscored is not zero, and the reason matters — a judge failure is not a bad answer. */}
       {cell.score === null && cell.status === "succeeded" && (
-        <div className="text-[11px] text-faint">{cell.scoreError ?? "not scored"}</div>
+        <div className="text-tiny text-faint">{cell.scoreError ?? "not scored"}</div>
       )}
     </div>
   );
@@ -148,13 +150,13 @@ export function ExampleDrillDown({ results }: { results: EvalResults }) {
           return (
             <div key={row.exampleId} className="py-1.5">
               <div className="flex items-start gap-3">
-                <span className="text-faint text-[11px] tabular-nums w-5 shrink-0 text-right select-none pt-1">
+                <span className="text-faint text-tiny tabular-nums w-5 shrink-0 text-right select-none pt-1">
                   {i + 1}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[12px] text-ink break-words">{row.input}</div>
+                  <div className="text-caption text-ink break-words">{row.input}</div>
                   {row.expected && (
-                    <div className="text-[11px] text-faint break-words mt-0.5">
+                    <div className="text-tiny text-faint break-words mt-0.5">
                       expected: {row.expected}
                     </div>
                   )}

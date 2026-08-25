@@ -69,7 +69,7 @@ export function ScanHistoryRegion({ view }: { view: GithubView }) {
           {/* THE COUNT THAT MATTERS IS THE OVERRIDES, and only when there are some. A workspace with
               refusals and no overrides is a workspace where the guard worked; one with overrides is
               the case somebody comes looking for later. */}
-          {overridden > 0 && <span className="text-[11px] text-err">{overridden} overridden</span>}
+          {overridden > 0 && <span className="text-tiny text-err">{overridden} overridden</span>}
           <span className="ml-auto text-faint">{open ? "−" : "+"}</span>
         </button>
       </RegionLabel>
@@ -77,20 +77,20 @@ export function ScanHistoryRegion({ view }: { view: GithubView }) {
       {open && (
         <div className="mt-1.5 space-y-1">
           {findings === undefined ? (
-            <p className="text-[11px] text-faint">Reading…</p>
+            <p className="text-tiny text-faint">Reading…</p>
           ) : findings.length === 0 ? (
-            <p className="text-[11px] leading-[1.55] text-faint">
+            <p className="text-tiny leading-[1.55] text-faint">
               Nothing has ever been refused on this agent. A scan runs between tree-build and
               commit-create on every push, so an empty record means every push was clean.
             </p>
           ) : (
             findings.map((f) => (
-              <div key={`${f.created_at} ${f.path} ${f.rule}`} className="flex items-start gap-2 text-[11px]">
+              <div key={`${f.created_at} ${f.path} ${f.rule}`} className="flex items-start gap-2 text-tiny">
                 <span className={`mt-[2px] shrink-0 ${f.overridden ? "text-err" : "text-muted"}`}>
                   <XIcon size={ICON.badge} />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block font-mono text-muted">
+                  <span className="block text-muted">
                     {f.path}{f.line === null ? "" : `:${f.line}`}
                   </span>
                   <span className="text-faint">
@@ -134,7 +134,7 @@ export function ChecksRegion({ view }: { view: GithubView }) {
       <RegionLabel>
         <button className="flex w-full items-center gap-2 text-left" onClick={() => setOpen((v) => !v)}>
           <span>Pull-request checks</span>
-          <span className={`text-[11px] ${on ? "text-ok" : "text-faint"}`}>
+          <span className={`text-tiny ${on ? "text-ok" : "text-faint"}`}>
             {on ? (dataset ? `on · ${dataset.name}` : "on") : "off"}
           </span>
           <span className="ml-auto text-faint">{open ? "−" : "+"}</span>
@@ -143,7 +143,7 @@ export function ChecksRegion({ view }: { view: GithubView }) {
 
       {open && (
         <div className="mt-1.5 space-y-2">
-          <p className="text-[11px] leading-[1.55] text-faint">
+          <p className="text-tiny leading-[1.55] text-faint">
             When a pull request touches this agent, run a dataset against it and post the pass rate,
             the cost per run and the latency as a check — with the delta against the base branch.
             Off by default: unbounded spend on every push to a pull request is not a default.
@@ -153,7 +153,7 @@ export function ChecksRegion({ view }: { view: GithubView }) {
               nothing to enable without one — and two controls where one decides would let somebody
               turn checks on and have nothing happen. */}
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-muted">Dataset</span>
+            <span className="text-tiny text-muted">Dataset</span>
             <Select
               value={ci?.datasetId ?? ""}
               disabled={!connected}
@@ -170,13 +170,13 @@ export function ChecksRegion({ view }: { view: GithubView }) {
             />
           </div>
           {datasets.length === 0 && (
-            <p className="text-[11px] text-faint">
+            <p className="text-tiny text-faint">
               This agent has no datasets yet — build one in Evals and it will appear here.
             </p>
           )}
 
           <div>
-            <div className="text-[11px] text-muted">Who may spend</div>
+            <div className="text-tiny text-muted">Who may spend</div>
             <div className="mt-1 flex flex-wrap gap-1">
               {POLICIES.map((p) => (
                 <button
@@ -184,7 +184,7 @@ export function ChecksRegion({ view }: { view: GithubView }) {
                   disabled={!connected}
                   onClick={() => sendSetAgentCiConfig(view.agentId, { policy: p.id })}
                   title={p.what}
-                  className={`rounded-control px-2 py-1 text-[11px] transition-colors disabled:opacity-40 ${
+                  className={`rounded-control px-2 py-1 text-tiny transition-colors disabled:opacity-40 ${
                     policy === p.id ? "bg-active text-ink" : "text-muted hover:text-ink"
                   }`}
                 >
@@ -193,7 +193,7 @@ export function ChecksRegion({ view }: { view: GithubView }) {
                 </button>
               ))}
             </div>
-            <p className="mt-1 text-[11px] leading-[1.55] text-faint">
+            <p className="mt-1 text-tiny leading-[1.55] text-faint">
               {POLICIES.find((p) => p.id === policy)?.what}
             </p>
           </div>
@@ -201,7 +201,7 @@ export function ChecksRegion({ view }: { view: GithubView }) {
           {/* WHAT ACTUALLY HAPPENED, from the markers already on the snapshot. Without this the
               section says what it is configured to do and nothing about whether it does it. */}
           {latest && (
-            <div className="flex items-center gap-2 border-t border-hair pt-2 text-[11px]">
+            <div className="flex items-center gap-2 border-t border-hair pt-2 text-tiny">
               <span className={latest.conclusion === "failure" ? "text-err" : "text-muted"}>
                 {latest.conclusion === "failure" ? <XIcon size={ICON.xs} /> : <CheckIcon size={ICON.xs} />}
               </span>

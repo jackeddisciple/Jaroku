@@ -64,7 +64,7 @@ export function SetUpAccountScreen() {
           {/* THE QUESTION IS THE LABEL. Every field on these screens is preceded by a question in
               prose, and a `<label>` repeating it two lines lower would be furniture — so the field
               carries an `aria-label` instead and the question is what everybody reads. */}
-          <p className="text-[13px] leading-[1.5] text-ink">What should we call you?</p>
+          <p className="text-label leading-[1.5] text-ink">What should we call you?</p>
           <TextField
             value={name}
             onChange={setName}
@@ -76,7 +76,7 @@ export function SetUpAccountScreen() {
             invalid={error !== null}
             name="name"
           />
-          <p className="text-[12px] leading-[1.5] text-muted">
+          <p className="text-caption leading-[1.5] text-muted">
             Displayed in your workspace and on things you share with teammates.
           </p>
         </div>

@@ -78,12 +78,12 @@ export function DisabledReason({
           <button
             type="button"
             onClick={state.onReveal}
-            className="max-w-[22ch] text-left text-[11px] leading-[1.4] text-muted underline-offset-2 transition-colors duration-fast hover:text-ink hover:underline"
+            className="max-w-[22ch] text-left text-tiny leading-[1.4] text-muted underline-offset-2 transition-colors duration-fast hover:text-ink hover:underline"
           >
             {state.reason}
           </button>
         ) : (
-          <span className="max-w-[22ch] text-[11px] leading-[1.4] text-faint">{state.reason}</span>
+          <span className="max-w-[22ch] text-tiny leading-[1.4] text-faint">{state.reason}</span>
         )
       )}
     </div>

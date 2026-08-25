@@ -36,7 +36,7 @@ function FirstTraceHint() {
 
   return (
     <div className="mb-3 flex items-start gap-2 rounded-card border border-edge bg-panel px-3 py-2">
-      <p className="text-[12px] leading-[1.55] text-muted">
+      <p className="text-caption leading-[1.55] text-muted">
         This is your agent’s execution — every decision it made, in order.
       </p>
       <button
@@ -98,10 +98,10 @@ export function TraceTimeline() {
         {run ? (
           <>
             {/* A provider, a model id and a run id are all identifiers. */}
-            <span className="font-mono text-[11px] text-muted">
+            <span className="text-tiny text-muted">
               {run.provider}/{run.model} · {run.id.slice(0, 8)}
             </span>
-            <span className="ml-auto flex items-center gap-4 font-mono text-[11px] tabular-nums">
+            <span className="ml-auto flex items-center gap-4 text-tiny tabular-nums">
               <PauseResumeControls />
               {running ? (
                 <span className="text-run">Working {fmtDuration(elapsed)}</span>
@@ -115,7 +115,7 @@ export function TraceTimeline() {
             </span>
           </>
         ) : (
-          <span className="text-muted text-[12px]">no run selected</span>
+          <span className="text-muted text-caption">no run selected</span>
         )}
       </div>
 
