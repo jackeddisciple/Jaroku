@@ -1219,6 +1219,29 @@ export type MemberMessage =
   | { channel: "members"; type: "error"; message: string }
   | { channel: "members"; type: "notice"; message: string };
 
+/**
+ * Per-agent access. Every read is answered to the socket that asked; `recheck` is broadcast.
+ *
+ * `recheck` HAS NO FIELDS AND THAT IS THE CONTRACT rather than an omission — see the server's
+ * `AccessEvent`. It reaches every socket in the workspace, so a field naming who changed what would
+ * be a notification about an administrator's decision delivered to people who cannot read the log
+ * it came from. Typed with no payload here so that a client cannot start depending on one.
+ */
+export type AccessMessage =
+  | {
+      channel: "access";
+      type: "access";
+      agentId: string;
+      agentSlug: string;
+      people: unknown[];
+      orphans: unknown[];
+      viewer: string[];
+    }
+  | { channel: "access"; type: "exposure"; exposure: unknown }
+  | { channel: "access"; type: "recheck" }
+  | { channel: "access"; type: "error"; message: string }
+  | { channel: "access"; type: "notice"; message: string };
+
 
 // --- GitHub (see server/src/wsRelay.ts GithubEvent, and the design spec's §0–§8) ---
 //
@@ -1664,6 +1687,7 @@ export type ServerMessage =
   | ActivityMessage
   | SessionMessage
   | MemberMessage
+  | AccessMessage
   | ThreadMessage
   // Its own channel, parallel to `threads` and for the same reason: what is waiting on you is not a
   // session. The one thing that is genuinely different about it is that a SNAPSHOT here is per
@@ -2026,7 +2050,37 @@ export type ClientCommand =
       resolution: "applied" | "dismissed";
       version?: number;
       reply?: string;
-    };
+    }
+  // --- per-agent access ---------------------------------------------------------------------
+  //
+  // `agentId` MAY BE A UUID OR A SLUG on the way out — the Agents grid holds one and the composer
+  // holds the other, and the server resolves both against its own workspace. What comes back is
+  // always the uuid, so the cache and every guard read one spelling.
+  | { cmd: "loadAccess"; agentId: string }
+  | { cmd: "loadExposure"; agentId: string }
+  /**
+   * `expiresAt` IS AN INSTANT, NEVER A DURATION. §11.1's picker offers 1 hour through 30 days plus
+   * a custom date, and the client turns whichever was chosen into an ISO string here — because a
+   * duration on the wire is measured from whenever the server happens to process it, which is a
+   * different moment from the one on the screen somebody was looking at.
+   */
+  | {
+      cmd: "grantAccess";
+      agentId: string;
+      userId: string;
+      capabilities: string[];
+      expiresAt?: string | null;
+      note?: string | null;
+    }
+  | {
+      cmd: "modifyGrant";
+      agentId: string;
+      userId: string;
+      capabilities: string[];
+      expiresAt?: string | null;
+      note?: string | null;
+    }
+  | { cmd: "revokeGrant"; agentId: string; userId: string };
 
 // --- the Inbox: what is waiting on you --------------------------------------------------------
 //

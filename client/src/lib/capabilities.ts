@@ -313,3 +313,198 @@ export function canRun(role: string | null | undefined, cmd: string): boolean {
   const capability = capabilityFor(cmd);
   return capability === undefined ? false : can(role, capability);
 }
+
+// --- the same idea, one level down: what may this account do to ONE agent ----------------------
+//
+// A COPY OF THE SERVER'S AGENT-LEVEL MATRIX, held to it by `test:permission-ui` exactly as the
+// table above is, and copied for the same reason §8.1 gives: the alternative puts a resolved set on
+// the session that has to be recomputed and re-sent every time anything changes — and here things
+// change more often, because a grant can be written by somebody else while this tab is open.
+//
+// WHAT IS **NOT** COPIED IS THE GRANT ITSELF. The ceiling and the implications are data and live
+// here; the grant is a row and lives in `accessStore`, fetched by `loadAccess` per agent. Those two
+// are combined by `useCapability(cap, agentId)` — one function, the same shape as the server's
+// resolver, and deliberately not a second hook. See `useCapability`'s own note for why a
+// `useAgentCapability` would be the two-resolver drift this whole feature exists to prevent.
+
+/** The seven, in the order the panel renders them. Spelled exactly as the server spells them. */
+export const AGENT_CAPABILITIES = [
+  "view", "run", "edit", "eval", "deploy", "secrets", "admin",
+] as const;
+
+export type AgentCapability = (typeof AGENT_CAPABILITIES)[number];
+
+/**
+ * Whether a string is one of the seven.
+ *
+ * THE TWO VOCABULARIES ARE DISJOINT ON PURPOSE — every workspace capability carries a colon and no
+ * agent capability does — and this is what lets `useCapability` tell which question it is being
+ * asked. A guard that passed `"deploy:manage"` with an agent id is asking about a workspace and
+ * naming an agent, which is a mistake rather than a request, and answering it as either would be
+ * answering a question nobody asked.
+ */
+export function isAgentCapability(v: unknown): v is AgentCapability {
+  return typeof v === "string" && (AGENT_CAPABILITIES as readonly string[]).includes(v);
+}
+
+/**
+ * What each capability drags in with it. The server's `AGENT_IMPLIES`, copied.
+ *
+ * THE GRANT DIALOG READS THIS, which is the reason it is data rather than three lines in a
+ * checkbox handler: §11.1 asks that ticking `edit` light up `run` and that unticking `view` clear
+ * everything, and a handler implementing that would be a second copy of a rule the server applies
+ * again when it stores the row. Two copies means a dialog that shows a set the server will not
+ * honour, or honours one the dialog never showed.
+ */
+const AGENT_IMPLIES: Record<AgentCapability, readonly AgentCapability[]> = {
+  view: [],
+  run: ["view"],
+  // Transitively `view`, through `run`.
+  edit: ["run"],
+  eval: ["view"],
+  deploy: ["view"],
+  secrets: ["view"],
+  admin: ["view"],
+};
+
+/**
+ * A capability set with everything it implies, transitively.
+ *
+ * A WALK RATHER THAN ONE PASS, for the reason the server's is: `edit` names `run` and `run` names
+ * `view`, so a single pass produces {edit, run} and loses the capability every other capability
+ * implies. The failure hides things — somebody granted `edit` would see an agent they can edit and
+ * cannot open.
+ */
+export function closeAgentCapabilities(set: Iterable<string>): Set<AgentCapability> {
+  const out = new Set<AgentCapability>();
+  const pending = [...set];
+  while (pending.length > 0) {
+    const next = pending.pop() as AgentCapability;
+    if (!(AGENT_CAPABILITIES as readonly string[]).includes(next) || out.has(next)) continue;
+    out.add(next);
+    pending.push(...AGENT_IMPLIES[next]);
+  }
+  return out;
+}
+
+/** What a member holds on every agent by default. The server's `AGENT_MEMBER`. */
+const AGENT_MEMBER: readonly AgentCapability[] = ["view", "run", "edit", "eval"];
+
+/**
+ * The default set each workspace role holds on any agent — which is also its CEILING.
+ *
+ * ONE LIST FOR BOTH, as on the server, because that is invariant B as a data structure: a grant may
+ * narrow this or widen within it and nothing can widen past it, so two lists would make "a grant
+ * that exceeds the role" a state this client could represent and therefore eventually render.
+ *
+ * ADMIN AND OWNER HOLD ALL SEVEN, which is not a missing distinction: everything separating the two
+ * — membership, billing, the workspace itself — is above this scope entirely, and there is no
+ * per-agent act an owner may perform and an admin may not.
+ */
+export const ROLE_AGENT_CAPABILITIES: Record<Role, readonly AgentCapability[]> = {
+  member: AGENT_MEMBER,
+  admin: AGENT_CAPABILITIES,
+  owner: AGENT_CAPABILITIES,
+};
+
+/**
+ * The ceiling a workspace role puts on any grant.
+ *
+ * A NULL OR UNKNOWN ROLE HOLDS NOTHING, which is the state before a session lands and after a sign
+ * out — the same answer `can` gives one scope up, and for the same reason: answering otherwise
+ * would flash every control on screen for the frame before the session arrives, on every load.
+ */
+export function agentCeiling(role: string | null | undefined): Set<AgentCapability> {
+  const declared = role ? ROLE_AGENT_CAPABILITIES[role as Role] : undefined;
+  return closeAgentCapabilities(declared ?? []);
+}
+
+/**
+ * The effective set: the role's ceiling, narrowed or widened by a grant, closed under implication.
+ *
+ * THE SERVER'S `resolveCapabilities`, ONE STEP SHORTER. Steps 1, 2, 4 and 5 are here; step 3 —
+ * loading the grant and checking its expiry — happened when `loadAccess` answered, so what arrives
+ * is the set the server already decided was live. The intersection is repeated anyway, for the
+ * reason the server repeats it: a role can change in this tab, in place, on a revalidation tick,
+ * without the grant being refetched.
+ *
+ * AND NONE OF THIS IS ENFORCEMENT. Every command is resolved again by the relay against the same
+ * matrix; what this decides is what to RENDER.
+ */
+export function effectiveAgentCapabilities(
+  role: string | null | undefined,
+  grant: readonly string[] | null,
+): Set<AgentCapability> {
+  const ceiling = agentCeiling(role);
+  if (!grant) return ceiling;
+  return closeAgentCapabilities([...grant].filter((c) => ceiling.has(c as AgentCapability)));
+}
+
+/**
+ * Which AGENT-level capability each agent-scoped command needs. The server's table, copied.
+ *
+ * WHY A GUARD SHOULD REACH FOR THIS RATHER THAN NAMING A CAPABILITY, for the reason the workspace
+ * table above gives: `canRunOnAgent(role, grant, "deploy")` names the button's own command, where
+ * `useCapability("deploy", id)` names a conclusion somebody drew about it — and the conclusion is
+ * the half that looks equally plausible in review when it is wrong.
+ */
+export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
+  loadAgentDetail: "view",
+  loadAgentFiles: "view",
+  loadAgentGraph: "view",
+  loadAgentVersion: "view",
+  explain: "view",
+  listDatasets: "view",
+  estimateEval: "view",
+  getActivityFeed: "view",
+  planDeploy: "view",
+  forkAgent: "view",
+  createThread: "view",
+  listGithub: "view",
+  refreshGithub: "view",
+  listScanFindings: "view",
+  listShadowRuns: "view",
+  semanticDiffGithub: "view",
+  diagnoseFile: "view",
+  loadAccess: "view",
+  loadExposure: "view",
+
+  run: "run",
+  shadowRunGithub: "run",
+
+  edit: "edit",
+  undoEdit: "edit",
+  archiveAgent: "edit",
+  restoreAgent: "edit",
+  renameAgent: "edit",
+  restoreAgentVersion: "edit",
+
+  startEval: "eval",
+  createDataset: "eval",
+  deleteDataset: "eval",
+  promoteTestInput: "eval",
+
+  deploy: "deploy",
+  linkGithub: "deploy",
+  unlinkGithub: "deploy",
+  pushGithub: "deploy",
+  pullGithub: "deploy",
+  createGithubBranch: "deploy",
+  switchGithubBranch: "deploy",
+  openGithubPr: "deploy",
+  commitGithub: "deploy",
+  generateGithubMessage: "deploy",
+  resolveReviewComment: "deploy",
+  setAgentCiConfig: "deploy",
+
+  grantAccess: "admin",
+  modifyGrant: "admin",
+  revokeGrant: "admin",
+};
+
+/** The agent-level capability a command needs, or undefined for one that is not agent-scoped. */
+export function agentCapabilityFor(cmd: string): AgentCapability | undefined {
+  return Object.prototype.hasOwnProperty.call(COMMAND_AGENT_CAPABILITY, cmd)
+    ? COMMAND_AGENT_CAPABILITY[cmd]
+    : undefined;
+}

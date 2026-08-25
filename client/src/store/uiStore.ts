@@ -290,6 +290,23 @@ interface UiState {
   setRightTab: (t: RightTab) => void;
 
   /**
+   * Which agent's Access tab is on screen, or null.
+   *
+   * WHY THIS IS IN THE UI STORE AND NOT IN `accessStore`. It is not access data — it is which pane
+   * somebody is looking at, which is the same class of thing as `rightTab` beside it and lives
+   * under the same exclusion from the workspace reset. `accessStore` holds a cache keyed by agent
+   * and has no idea which of its entries anybody can see.
+   *
+   * IT EXISTS BECAUSE §7's RECHECK CARRIES NOTHING. The socket receives "re-resolve" with no agent
+   * id, empties the cache, and then has to decide whether to refetch — and the honest answer is
+   * "only if somebody is looking", because refetching every agent ever opened would turn one
+   * administrator's click into a burst of reads from every tab in the workspace. One id, written
+   * when the tab mounts and cleared when it unmounts.
+   */
+  accessAgentId: string | null;
+  setAccessAgentId: (agentId: string | null) => void;
+
+  /**
    * Which provider the Secrets tab should open its add form for, when it was reached from a dead
    * end rather than from the tab bar.
    *
@@ -489,6 +506,9 @@ export const useUiStore = create<UiState>((set) => ({
 
   rightTab: "trace",
   setRightTab: (rightTab) => set({ rightTab }),
+
+  accessAgentId: null,
+  setAccessAgentId: (accessAgentId) => set({ accessAgentId }),
 
   secretsAddProvider: null,
   // Both fields in one call, so the tab and the reason for being there can never be set apart.

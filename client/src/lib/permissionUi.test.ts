@@ -29,12 +29,17 @@ import { fileURLToPath } from "node:url";
 import React from "react";
 
 import {
+  AGENT_CAPABILITIES,
   CAPABILITIES,
+  COMMAND_AGENT_CAPABILITY,
   COMMAND_CAPABILITY,
+  ROLE_AGENT_CAPABILITIES,
   ROLE_CAPABILITIES,
   ROUTE_CAPABILITY,
   can,
   canRun,
+  effectiveAgentCapabilities,
+  isAgentCapability,
   type Role,
 } from "./capabilities.ts";
 import { markup, seed, sessionAs } from "./testRender.ts";
@@ -434,6 +439,95 @@ console.log("\n§8.2's members surface is the owner's alone");
   check(!canRun("admin", "setMemberRole"), "...nor change a role");
   check(canRun("admin", "listMembers"), "...but does see the list, like every member");
   check(canRun("owner", "inviteMember"), "and an owner can invite");
+}
+
+// The agent-level half of the same copy, and the same rule: the client's tables are the server's,
+// held to them as text. It matters more here than above, because a drift in the agent matrix is not
+// a button that 403s — it is a guard asking a question about an agent and getting an answer about a
+// workspace, which looks correct on every screen somebody happens to be an owner on.
+console.log("\n§8.1 — the agent-level copy is the original too");
+{
+  const serverAgentCaps = quoted(body(server, "export const AGENT_CAPABILITIES"));
+  const serverAgentCommands = new Map<string, string>(
+    [...body(server, "export const COMMAND_AGENT_CAPABILITY").matchAll(
+      /([A-Za-z_$][\w$]*)\s*:\s*"([^"]+)"/g,
+    )].map((m) => [m[1]!, m[2]!]),
+  );
+  const serverAgentRoles = new Map<string, string[]>([
+    ["member", quoted(body(server, "const AGENT_MEMBER:"))],
+  ]);
+
+  // The parser sanity check first, for the reason the one above it exists: the failure mode of a
+  // source-reading suite is that it PASSES, by comparing two empty sets.
+  check(serverAgentCaps.length === 7, `the server's seven agent capabilities parsed (${serverAgentCaps.length})`);
+  check(serverAgentCommands.size > 30, `...and its agent-level command table (${serverAgentCommands.size})`);
+
+  const capsNotHere = serverAgentCaps.filter((c) => !(AGENT_CAPABILITIES as readonly string[]).includes(c));
+  const capsNotThere = [...AGENT_CAPABILITIES].filter((c) => !serverAgentCaps.includes(c));
+  check(capsNotHere.length === 0, `every agent capability the server declares exists here${capsNotHere.length ? ` — ${capsNotHere.join(", ")}` : ""}`);
+  check(capsNotThere.length === 0, `...and none here is invented${capsNotThere.length ? ` — ${capsNotThere.join(", ")}` : ""}`);
+
+  const notHere: string[] = [];
+  const disagree: string[] = [];
+  for (const [cmd, capability] of serverAgentCommands) {
+    if (!Object.prototype.hasOwnProperty.call(COMMAND_AGENT_CAPABILITY, cmd)) notHere.push(cmd);
+    else if (COMMAND_AGENT_CAPABILITY[cmd] !== capability) {
+      disagree.push(`${cmd} (${COMMAND_AGENT_CAPABILITY[cmd]} vs ${capability})`);
+    }
+  }
+  const notThere = Object.keys(COMMAND_AGENT_CAPABILITY).filter((c) => !serverAgentCommands.has(c));
+  check(notHere.length === 0, `every agent-scoped command the server classifies is classified here${notHere.length ? ` — missing ${notHere.join(", ")}` : ""}`);
+  check(notThere.length === 0, `...and none here names a command the server does not gate${notThere.length ? ` — ${notThere.join(", ")}` : ""}`);
+  check(disagree.length === 0, `...and the two agree on which capability each needs${disagree.length ? ` — ${disagree.join(", ")}` : ""}`);
+
+  // THE CEILINGS. A member's is the one that can differ meaningfully — admin and owner both hold
+  // all seven — and it is the one whose drift would be a security bug rather than a missing button:
+  // a client that thought a member's ceiling included `deploy` would render Deploy for every member
+  // in every team.
+  const theirMember = serverAgentRoles.get("member")!;
+  const mine = ROLE_AGENT_CAPABILITIES.member;
+  check(
+    theirMember.every((c) => (mine as readonly string[]).includes(c)) &&
+      mine.every((c) => theirMember.includes(c)),
+    `a member's ceiling is the server's (${[...mine].sort().join(", ")})`,
+  );
+  check(
+    ROLE_AGENT_CAPABILITIES.admin.length === 7 && ROLE_AGENT_CAPABILITIES.owner.length === 7,
+    "...and an admin's and an owner's are all seven, as the server declares them",
+  );
+}
+
+console.log("\n§8.2 — the grant cache narrows, and its absence does not");
+{
+  // THE FALLBACK, WHICH IS THE ONE RULE IN §8.2 THAT IS EASY TO GET BACKWARDS. With no grant
+  // fetched, an agent-scoped guard answers from the workspace ceiling rather than `false`.
+  // Asserted here rather than described, because "safe" is ambiguous in this direction and the
+  // spec picks a side: briefly showing a button that will be removed costs one refused click;
+  // briefly hiding one that should be there is a feature somebody concludes is not in the product.
+  check(
+    effectiveAgentCapabilities("member", null).has("edit"),
+    "with no grant, a member's guard answers from their role's ceiling",
+  );
+  check(
+    !effectiveAgentCapabilities("member", null).has("deploy"),
+    "...which is still a ceiling — no grant cannot mean everything",
+  );
+  check(
+    effectiveAgentCapabilities("member", ["view"]).size === 1,
+    "a narrowing grant narrows, and the closure adds nothing to `view`",
+  );
+  check(
+    !effectiveAgentCapabilities("member", ["view", "deploy", "admin"]).has("deploy"),
+    "a stored set above a member's ceiling is intersected down here as well as on the server",
+  );
+  check(
+    [...effectiveAgentCapabilities("admin", ["edit"])].sort().join(",") === "edit,run,view",
+    "and the implication closure is the server's — edit brings run, and run brings view",
+  );
+  // A capability from the WRONG VOCABULARY answers nothing rather than something. The two are
+  // disjoint by spelling, which is what lets one hook take both kinds of question.
+  check(!isAgentCapability("deploy:manage"), "a workspace capability is not an agent capability");
+  check(isAgentCapability("deploy"), "...and the agent one is");
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

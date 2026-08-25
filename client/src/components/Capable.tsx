@@ -36,19 +36,34 @@ export function Capable({
   cmd,
   route,
   capability,
+  agentId,
   children,
 }: {
   cmd?: string;
   route?: keyof typeof ROUTE_CAPABILITY;
   capability?: string;
+  /**
+   * The agent this affordance acts on, when it acts on one.
+   *
+   * PASSED THROUGH RATHER THAN A FOURTH PROP-KIND, which keeps the "exactly one of the three"
+   * rule intact: `agentId` does not choose WHICH question is asked, it narrows the scope the
+   * question is asked at. `<Capable cmd="deploy" agentId={agent.id}>` is still asking about a
+   * command; it is asking about it for one agent.
+   *
+   * A `route` with an agent id is meaningless — the four HTTP surfaces are all workspace-level —
+   * and it is simply ignored rather than refused, for the reason `useCanRun` ignores it on a
+   * non-agent command: a caller threading `agent.id` through a helper must not silently lose
+   * affordances that have nothing to do with any agent.
+   */
+  agentId?: string | null;
   children: ReactNode;
 }) {
   // All three hooks run every render regardless of which prop was passed — hooks cannot be
   // conditional, and each is a cheap store read. The empty strings are values `can` and `canRun`
   // answer `false` for, which is the same answer as "not asked".
-  const byCommand = useCanRun(cmd ?? "");
+  const byCommand = useCanRun(cmd ?? "", agentId);
   const byRoute = useCanReach((route ?? "") as keyof typeof ROUTE_CAPABILITY);
-  const byCapability = useCapability(capability ?? "");
+  const byCapability = useCapability(capability ?? "", agentId);
   const allowed = cmd ? byCommand : route ? byRoute : capability ? byCapability : false;
   return allowed ? <>{children}</> : null;
 }

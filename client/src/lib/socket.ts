@@ -16,6 +16,8 @@ import { useGithubStore } from "../store/githubStore.ts";
 import { useDiagnosticsStore } from "../store/diagnosticsStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useMemberStore } from "../store/memberStore.ts";
+import { useAccessStore, type AccessPerson, type Exposure } from "../store/accessStore.ts";
+import type { AgentCapability } from "./capabilities.ts";
 import { useAuditStore } from "../store/auditStore.ts";
 import { useEnforcementStore } from "../store/enforcementStore.ts";
 import { isRefusal, useEntitlementStore } from "../store/entitlementStore.ts";
@@ -461,6 +463,33 @@ function dispatch(msg: ServerMessage): void {
       const a = useAuditStore.getState();
       if (msg.type === "audit") a.setEntries(msg.entries);
       else if (msg.type === "error") a.setError(msg.message);
+      break;
+    }
+    case "access": {
+      const a = useAccessStore.getState();
+      if (msg.type === "access") {
+        a.setAccess({
+          agentId: msg.agentId,
+          agentSlug: msg.agentSlug,
+          people: msg.people as AccessPerson[],
+          orphans: msg.orphans as AccessPerson[],
+          viewer: msg.viewer as AgentCapability[],
+        });
+      } else if (msg.type === "exposure") a.setExposure(msg.exposure as Exposure);
+      else if (msg.type === "recheck") {
+        // §7 AND §8.2 — THE CACHE GOES, AND THEN THE PANEL ASKS AGAIN IF IT IS OPEN.
+        //
+        // In that order, and both halves are needed. Emptying alone would leave every guard on the
+        // fallback — the workspace default — which is wider than a narrowing grant and would put
+        // affordances back on screen that had just been taken away. Refetching alone would leave
+        // the old set rendering until the answer landed, which is the same wrongness for a shorter
+        // time. Emptied, then refetched, means the interval between them is spent at the workspace
+        // default, which is exactly the state §8.2 says is acceptable and why.
+        a.invalidate();
+        const open = useUiStore.getState().accessAgentId;
+        if (open) sendLoadAccess(open);
+      } else if (msg.type === "error") a.setError(msg.message);
+      else if (msg.type === "notice") console.info("[access]", msg.message);
       break;
     }
     case "members": {
@@ -1370,6 +1399,50 @@ export function sendAppealEnforcement(note: string): boolean {
  */
 export function sendListAudit(limit?: number): void {
   send(limit === undefined ? { cmd: "listAudit" } : { cmd: "listAudit", limit });
+}
+
+// --- per-agent access ---------------------------------------------------------------------------
+//
+// `agentId` IS WHATEVER THE CALLER HAS — a uuid from the Agents grid, a slug from the composer —
+// and the server resolves both. What comes BACK is always keyed by the uuid, which is what the
+// store caches under and what `useCapability` is called with, so the two spellings never meet.
+
+/** Ask for one agent's people, provenance and effective sets. Marks the agent as loading first. */
+export function sendLoadAccess(agentId: string): void {
+  // MARKED BEFORE THE SEND, so a panel can distinguish "we have not asked" from "nobody has
+  // access" for the round trip in between. Those render identically without it, and one of them is
+  // alarming.
+  useAccessStore.getState().markLoading(agentId);
+  send({ cmd: "loadAccess", agentId });
+}
+
+/** Ask what can reach this agent without going through Jaroku at all. */
+export function sendLoadExposure(agentId: string): void {
+  send({ cmd: "loadExposure", agentId });
+}
+
+export function sendGrantAccess(opts: {
+  agentId: string;
+  userId: string;
+  capabilities: string[];
+  expiresAt?: string | null;
+  note?: string | null;
+}): void {
+  send({ cmd: "grantAccess", ...opts });
+}
+
+export function sendModifyGrant(opts: {
+  agentId: string;
+  userId: string;
+  capabilities: string[];
+  expiresAt?: string | null;
+  note?: string | null;
+}): void {
+  send({ cmd: "modifyGrant", ...opts });
+}
+
+export function sendRevokeGrant(agentId: string, userId: string): void {
+  send({ cmd: "revokeGrant", agentId, userId });
 }
 
 export function sendListMembers(): void {

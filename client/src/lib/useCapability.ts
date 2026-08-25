@@ -18,32 +18,93 @@
 // hidden, and these are what an affordance asks in order to be absent.
 
 import { useSessionStore } from "../store/sessionStore.ts";
-import { can, canRun, ROUTE_CAPABILITY } from "./capabilities.ts";
+import { useAccessStore } from "../store/accessStore.ts";
+import {
+  agentCapabilityFor, agentCeiling, can, canRun, effectiveAgentCapabilities, isAgentCapability,
+  ROUTE_CAPABILITY,
+  type AgentCapability,
+} from "./capabilities.ts";
 
 /**
- * Whether this account holds a capability in the current workspace.
+ * Whether this account holds a capability — in the workspace, or on ONE AGENT.
  *
- * `useCapability("connector:manage") && <ConnectButton />` — §8.1's own shape. Prefer
- * `useCanRun` where the affordance sends a command; this one is for the surfaces that do not, and
- * for a guard over several controls that share one capability.
+ * ONE FUNCTION WITH AN OPTIONAL SECOND ARGUMENT, AND NOT A SECOND HOOK. A `useAgentCapability`
+ * would be the two-resolver drift the whole per-agent feature exists to prevent, one layer out from
+ * the server where the same rule is written: two things that answer "may this person" will
+ * eventually disagree, and the one that drifts OPEN is the one nobody reports, because nothing
+ * fails. So the signature widened rather than forking.
+ *
+ * WITHOUT `agentId` — the workspace-level check, unchanged, and every existing call site keeps
+ * meaning exactly what it meant. `useCapability("connector:manage")` is still §8.1's own shape.
+ *
+ * WITH `agentId` — the same resolution the server makes: the workspace role's ceiling, narrowed or
+ * widened by whatever grant `loadAccess` returned, closed under implication. The vocabularies are
+ * disjoint on purpose — `deploy:manage` is a workspace capability and `deploy` is an agent one — so
+ * a call that passed the wrong string with the wrong argument answers `false` rather than
+ * accidentally answering something.
+ *
+ * AND WHEN NO GRANT HAS BEEN FETCHED, it falls back to the WORKSPACE-level check rather than to
+ * `false`. §8.2's rule, and the direction is the safe one: the pane has only just opened,
+ * `loadAccess` has not answered, and affordances appear at their workspace default until it does —
+ * possibly narrowing a moment later. Briefly showing a button that will be removed costs one
+ * refused click; briefly hiding one that should be there is a feature somebody concludes is not in
+ * the product. The server enforces regardless, which is what makes the choice available at all.
  */
-export function useCapability(capability: string): boolean {
+export function useCapability(capability: string, agentId?: string | null): boolean {
   const role = useSessionStore((s) => s.role());
-  return can(role, capability);
+  // SUBSCRIBED, NOT READ ONCE, for the reason the role is: a teammate can write a grant while this
+  // tab is open, the recheck empties this map, and the next `loadAccess` refills it — a component
+  // that read the store imperatively would keep rendering the answer it got at mount.
+  const grant = useAccessStore((s) => (agentId ? s.byAgent[agentId]?.viewer ?? null : null));
+  if (!agentId) return can(role, capability);
+  // Not an agent capability at all — a workspace capability passed with an agent id, or a typo.
+  // Answered as false rather than falling through to the workspace check, because a guard written
+  // that way is asking a question about an agent and must not be answered about a workspace.
+  if (!isAgentCapability(capability)) return false;
+  // The fallback. `null` is "not fetched"; an empty array is a real narrowing grant.
+  if (grant === null) return workspaceFallbackFor(role, capability);
+  return effectiveAgentCapabilities(role, grant).has(capability);
 }
 
 /**
- * Whether this account may send a command.
+ * What a workspace role alone would answer for an agent capability, before any grant has landed.
  *
- * THE ONE TO REACH FOR. `useCanRun("deploy")` names the thing the button does; `useCapability(
- * "deploy:manage")` names a conclusion somebody drew about it, and a wrong conclusion looks
- * exactly as plausible in review as a right one. §8.2's own checklist files Deploy under
- * `agent:write`, which is a member capability — every member in every team would have seen a
- * Deploy button that 403s — and that is the mistake this signature removes rather than documents.
+ * IT ASKS THE CEILING, which is the only honest answer available at that moment: with no grant
+ * fetched, a person's effective set IS their role's default set — that is step 2 of the server's
+ * resolver, and it is what the server itself would answer for somebody with no grant row.
  */
-export function useCanRun(cmd: string): boolean {
+function workspaceFallbackFor(role: string | null, capability: AgentCapability): boolean {
+  return agentCeiling(role).has(capability);
+}
+
+/**
+ * Whether this account may send a command — in the workspace, or against ONE AGENT.
+ *
+ * THE ONE TO REACH FOR. `useCanRun("deploy", agent.id)` names the thing the button does;
+ * `useCapability("deploy", agent.id)` names a conclusion somebody drew about it, and a wrong
+ * conclusion looks exactly as plausible in review as a right one. §8.2's own checklist files
+ * Deploy under `agent:write`, which is a member capability — every member in every team would have
+ * seen a Deploy button that 403s — and that is the mistake this signature removes rather than
+ * documents.
+ *
+ * BOTH GATES, IN SERIES, when an agent is named: the workspace capability the command needs AND the
+ * agent capability it needs. That mirrors the relay, which asks both at one dispatch point — and
+ * it matters for exactly the commands where the two differ, like the GitHub writes, which are an
+ * admin's at the workspace scope and `deploy` at the agent scope.
+ *
+ * A COMMAND THAT IS NOT AGENT-SCOPED IGNORES THE ID rather than refusing. `listAgents` passed an
+ * agent id is still a workspace read, and answering `false` for it would make the argument a trap:
+ * a caller threading `agent.id` through a helper would silently lose affordances that have nothing
+ * to do with any agent.
+ */
+export function useCanRun(cmd: string, agentId?: string | null): boolean {
   const role = useSessionStore((s) => s.role());
-  return canRun(role, cmd);
+  const grant = useAccessStore((s) => (agentId ? s.byAgent[agentId]?.viewer ?? null : null));
+  if (!canRun(role, cmd)) return false;
+  const agentCapability = agentId ? agentCapabilityFor(cmd) : undefined;
+  if (!agentCapability) return true;
+  if (grant === null) return workspaceFallbackFor(role, agentCapability);
+  return effectiveAgentCapabilities(role, grant).has(agentCapability);
 }
 
 /**

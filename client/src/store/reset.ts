@@ -19,6 +19,7 @@
 // looks empty in the devtools panel somebody happens to open, and the field nobody looked at
 // still holds the last tenant's data.
 
+import { useAccessStore } from "./accessStore.ts";
 import { useActivityStore } from "./activityStore.ts";
 import { useAgentGridStore } from "./agentGridStore.ts";
 import { useAuditStore } from "./auditStore.ts";
@@ -82,6 +83,21 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
   // agents under another tenant's name, and the `+ New thread` button on each card would offer to
   // start work against an agent the new workspace cannot see.
   agentGridStore: useAgentGridStore as unknown as Resettable,
+  // Who may do what to each agent, keyed by agent uuid — and, on the viewer's own row, the exact
+  // set of things this client will render controls for. Two reasons this one matters more than it
+  // looks, and the second is the sharper.
+  //
+  // It holds PEOPLE: names, email addresses, workspace roles and who is connected right now, which
+  // is the same class of data as the member list beside it. And an agent uuid from the previous
+  // workspace can never be asked for again, so nothing would ever overwrite these entries — they
+  // would sit in the store for the life of the tab.
+  //
+  // But the `viewer` set is why it cannot be left: `useCapability(cap, agentId)` reads it to decide
+  // what to draw, and a stale entry is one workspace's answer to "may I deploy this" rendered over
+  // another workspace's agent. The server refuses the command either way, so the cost is a button
+  // that 403s rather than a leak — and a control offering an authority the person does not have is
+  // exactly the failure §8 rules out `disabled` and `hidden` to avoid.
+  accessStore: useAccessStore as unknown as Resettable,
   // Who revealed which credential, who overrode a secret-scan refusal, who removed whom. The most
   // person-identifying list in the client after the member list, and for the same reason it is here:
   // held across a switch it would show one workspace's decisions under another workspace's name.
