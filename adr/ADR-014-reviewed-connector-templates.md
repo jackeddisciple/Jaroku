@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted. Introduced in v0.0.3 (21 July 2026). Wiring protection extended in v0.1.12, and
-per-connector install requirements added in v0.2.3.
+Accepted. Introduced in v0.0.3 (21 July 2026). Wiring protection extended in v0.1.12,
+per-connector install requirements added in v0.2.3, and three connectors added in v0.3.6.
 
 ## Context
 
@@ -38,13 +38,16 @@ projects. They are never written by a model and never rewritten by one.**
 signatures into the generation prompt, to copy the right files into a project, and to build
 `.env.example` from each connector's `required_env`.
 
-Three connectors ship today, and each carries an explicit safety posture:
+Six connectors ship today, and each carries an explicit safety posture:
 
 | Connector | Tools | Required env | Safety posture |
 |---|---|---|---|
 | Gmail | `gmail_search`, `gmail_create_draft` | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | Creates drafts only, never sends |
+| Google Calendar | `gcal_list_events`, `gcal_get_event`, `gcal_create_event`, `gcal_update_event` | `GCAL_CLIENT_ID`, `GCAL_CLIENT_SECRET`, `GCAL_REFRESH_TOKEN` | No delete. Writes are irreversible and the prompt says so. Scope is `calendar.events`, not the wide `calendar` |
 | Slack | `slack_list_channels`, `slack_read_channel`, `slack_post_message` | `SLACK_BOT_TOKEN` | Posting is immediate and irreversible, and the prompt says so explicitly |
+| Stripe | `stripe_get_customer`, `stripe_list_payments`, `stripe_get_payment`, `stripe_list_invoices`, `stripe_get_invoice`, `stripe_get_balance` | `STRIPE_SECRET_KEY` | Read only, enforced twice: only `retrieve`/`list`/`search` are called, asserted from the file's own syntax tree, and a full-access `sk_live_` key is refused at save |
 | Postgres | `pg_query` | `DATABASE_URL` | Read only, enforced twice: a statement check and a read-only transaction. One statement, `SELECT` or `WITH ... SELECT` only, capped at 100 rows |
+| HTTP/Webhook | `http_request` | `HTTP_ALLOWED_DOMAINS` | HTTPS to exact hostnames only, no wildcards; private ranges refused whatever a name resolves to; DNS pinned at request time; redirects reported, never followed |
 
 Four rules make the guarantee hold.
 
@@ -150,12 +153,21 @@ the `check_catalog()` verification in `tool_templates/__init__.py`.
 
 ## Implementation Notes
 
-- Templates live in `runtime/tool_templates/`: `gmail.py`, `slack.py`, `postgres.py`, plus
-  `mcp_bridge.py` and `serve.py`, which are reviewed templates for different purposes.
+- Templates live in `runtime/tool_templates/`: `gmail.py`, `google_calendar.py`, `slack.py`,
+  `stripe_connector.py`, `postgres.py`, `http_connector.py`, plus `mcp_bridge.py` and `serve.py`,
+  which are reviewed templates for different purposes.
 - `catalog.json` is the registry: ids, tool signatures, `required_env` and the install
   requirements used to build a deployment image.
-- `check_catalog()` in `tool_templates/__init__.py` verifies a new entry, and should be run when
-  adding one.
+- `check_catalog()` in `tool_templates/__init__.py` verifies a new entry, and **CI runs it** as of
+  v0.3.6. Before then, three documents told a contributor to run it and nothing did — so a catalog
+  entry naming a file that is not there, a `required_env` that disagreed with its module, or a
+  `pip_requires` outside the extra could each have merged on the word of whoever last typed it into
+  a REPL. `npm run test:connector-catalog` is that check, plus `check_failures_raise()`.
+- The per-connector suites live in `runtime/tool_templates/tests/` — inside the package, so an
+  ordinary relative import reaches the template, and unreachable by the generator, which copies
+  connectors one named file at a time. None of them touches a network or a real SDK: each fakes
+  its SDK into `sys.modules` before the template's lazy import runs, which is also the only way to
+  assert what a template SENDS rather than merely that it did not crash.
 - Each template lazy-imports its SDK inside the function that needs it, so importing the module
   never fails on a missing dependency.
 - Hard rule 7 requires tools to raise on failure rather than return an error string, and it
@@ -175,6 +187,39 @@ the `check_catalog()` verification in `tool_templates/__init__.py`.
 - **f-string SQL is a hard validation failure** in generated code, enforced by AST analysis
   requiring actual query shape. It is an injection vector even against a read-only connection.
 - **The Gmail connector creates drafts only.** It never sends.
+- **The Google Calendar connector never deletes.** It creates and updates, both of which are
+  irreversible in the sense that matters — an invitation cannot be unsent and the attendees have
+  already seen it — so both the catalog description and the tool docstrings say so where the model
+  reads them. Deleting somebody's meeting has no undo at all and takes two clicks in the calendar
+  UI, so there is no `gcal_delete_event` and there should not be one. The scope asked for is
+  `calendar.events` rather than `calendar`: the wide one grants creating, deleting and sharing
+  CALENDARS, which no tool here does, and it is what the consent screen would then say.
+- **The Stripe connector cannot mutate anything, and that is proven from the file rather than
+  reviewed into it.** The way "this connector cannot charge anybody" stops being true is a
+  seventh tool or a fourth branch, neither of which exists to be called until it has already been
+  written — so `test:connector-stripe` walks the template's own syntax tree and refuses any SDK
+  call whose method is not `retrieve`, `list` or `search`. A tree rather than a substring scan,
+  because `getattr(sdk.Refund, verb)(...)` passes a text search and is the whole vulnerability.
+  The second layer is Stripe's: a full-access `sk_live_` key is refused at save, on every write
+  path including the bulk `.env` import, so "use a restricted key" is enforcement rather than
+  advice. Returned fields are an allowlist, never a denylist, and nothing is `expand`ed —
+  a denylist is wrong the first time Stripe adds a field.
+- **The HTTP connector's allowlist is the connector.** Without it correct there is no connector,
+  only a request-forger running model-written Python inside somebody's infrastructure. HTTPS only;
+  exact hostnames with no wildcards, because the domain anybody would want a wildcard on is a
+  shared platform and a wildcard there grants every tenant of it; credential-in-URL refused before
+  anything is sent and never quoted back into a stored trace; and the name resolved once with
+  EVERY answer checked, the socket dialled at a literal address while TLS still validates the
+  certificate against the hostname. A redirect is reported and never followed — a redirect is the
+  one thing a server at an approved address controls completely, and following it hands the choice
+  of destination to whoever answered, which is how an allowlist becomes advisory.
+- **The private-range refusal is written twice, deliberately.** `sandbox/egressPolicy.ts` refuses
+  for the policy and `http_connector.py` refuses again inside the sandbox, because the control
+  plane cannot make this check for a request the sandbox originates and the sandbox cannot call
+  TypeScript. Two copies of a rule is normally how they drift, so `test:egress-connectors` reads
+  the other language's source and holds them to each other in both directions. Delegating the
+  Python half to `ipaddress`'s own predicates was tried first and had a hole in it: `100.64.0.0/10`
+  is not `is_private` in Python 3.12, having been in that table in earlier versions.
 - **The Slack connector can post**, which is irreversible, and both the catalog description and
   the generation prompt state that explicitly rather than leaving it implied.
 - Credentials are read from the environment at the moment of use. Templates never hold, log or

@@ -173,8 +173,23 @@ GOOGLE_API_KEY=...
 GMAIL_CLIENT_ID=
 GMAIL_CLIENT_SECRET=
 GMAIL_REFRESH_TOKEN=
+# Google Calendar's own three, not Gmail's — the two are separate connections under one OAuth
+# app, so revoking either leaves the other working, and a project generated with only Calendar
+# asks for only these.
+GCAL_CLIENT_ID=
+GCAL_CLIENT_SECRET=
+GCAL_REFRESH_TOKEN=
 SLACK_BOT_TOKEN=
+# A RESTRICTED key with read permissions only (rk_live_… / rk_test_…). A full-access sk_live_
+# key is refused at save: the connector's read-only posture is enforced twice, and this is the
+# half Stripe enforces rather than the half our template does.
+STRIPE_SECRET_KEY=rk_live_...
 DATABASE_URL=postgres://...
+# The HTTP connector's allowlist IS its safety model: comma-separated EXACT hostnames, no
+# scheme, no path, no port, no wildcards. An empty value refuses every request.
+HTTP_ALLOWED_DOMAINS=api.example.com,hooks.example.net
+# Optional. Sent on every HTTP-connector request — either a bare value or a whole header line.
+HTTP_AUTH_HEADER=
 
 # MCP server credentials are written here by the MCP panel, never by hand:
 # JAROKU_MCP_<SERVER>_TOKEN=
@@ -1151,8 +1166,11 @@ signatures into the generation prompt, to copy the right files into a project, a
 | Connector | Tools | Required env | Safety posture |
 |---|---|---|---|
 | **Gmail** | `gmail_search`, `gmail_create_draft` | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | Creates drafts only — **never sends** |
+| **Google Calendar** | `gcal_list_events`, `gcal_get_event`, `gcal_create_event`, `gcal_update_event` | `GCAL_CLIENT_ID`, `GCAL_CLIENT_SECRET`, `GCAL_REFRESH_TOKEN` | **No delete.** Creating and updating change a real calendar and send invitations — irreversible, and the prompt says so. Scope is `calendar.events`, never the wide `calendar`, so it cannot create, delete or share a calendar |
 | **Slack** | `slack_list_channels`, `slack_read_channel`, `slack_post_message` | `SLACK_BOT_TOKEN` | Posting is immediate and irreversible; the prompt says so explicitly |
+| **Stripe (read-only)** | `stripe_get_customer`, `stripe_list_payments`, `stripe_get_payment`, `stripe_list_invoices`, `stripe_get_invoice`, `stripe_get_balance` | `STRIPE_SECRET_KEY` | Read-only, enforced twice: the template calls **only** `retrieve`/`list`/`search` — asserted by a scan of its own syntax tree — *and* a full-access `sk_live_` key is **refused at save**, so it takes a restricted key. Returned fields are an allowlist; nothing is `expand`ed |
 | **Postgres** | `pg_query` | `DATABASE_URL` | Read-only, enforced twice: a statement check *and* a read-only transaction. One statement, `SELECT`/`WITH … SELECT` only, capped at 100 rows |
+| **HTTP/Webhook** | `http_request` | `HTTP_ALLOWED_DOMAINS` (+ optional `HTTP_AUTH_HEADER`) | HTTPS only, to **exact hostnames with no wildcards**. Credential-in-URL refused, private/link-local/reserved ranges refused whatever a name resolves to, DNS pinned at request time, redirects reported but never followed, response capped at 256 KB, `Set-Cookie` and `Authorization` stripped on the way back |
 
 Each template lazy-imports its SDK, so the base install stays light and a missing SDK
 produces a clear message rather than an import crash. Install them with
@@ -1161,10 +1179,27 @@ produces a clear message rather than an import crash. Install them with
 Adding a connector means: write the template, add its entry to `catalog.json` — including its
 `auth` mode — and run the `check_catalog()` verification in `tool_templates/__init__.py`.
 
-Hosted, **the required env above is no longer something a user pastes in for Gmail and Slack**:
-Jaroku owns the OAuth app, the user clicks Connect, and a short-lived access token reaches the
-run under the same variable name the template already reads. Postgres stays a `user_secret`.
-See [Connector OAuth and the credential vault](#connector-oauth-and-the-credential-vault).
+Hosted, **the required env above is no longer something a user pastes in for the OAuth
+connectors**: Jaroku owns the OAuth app, the user clicks Connect, and a short-lived access token
+reaches the run under the same variable name the template already reads. Postgres, Stripe and
+HTTP stay `user_secret` — there is no consent screen for "the database at the other end of this
+connection string", and none for a Stripe key or a domain list either. All six appear in the
+**Connections** tab; the `user_secret` three end in fields rather than a Connect button, and the
+value is posted over the elevation-gated `POST /v1/secrets` rather than the WebSocket, which
+cannot carry an elevation header. See
+[Connector OAuth and the credential vault](#connector-oauth-and-the-credential-vault).
+
+**Google Calendar is a second Google connection, not a wider Gmail one.** Both use the same OAuth
+app, and merging them would save a click at the cost of the thing people actually want: one grant
+is one revocation, so somebody stopping an agent from reading their mail would lose the scheduling
+assistant with it. Two connections make "disconnect Gmail, keep Calendar" expressible.
+
+**Two known limits on the HTTP connector, recorded rather than discovered.** There are no wildcard
+domains — `*.example.com` is refused, because the domain anybody would want one on is a shared
+platform and a wildcard there grants every tenant of it. And there is **no `http_webhook_listen`**:
+a hosted run's sandbox is outbound-only, its egress policy has no concept of accepting a
+connection, and a tool that worked on a laptop and raised everywhere the product actually runs
+would be worse than an absent one. Both are future items, not oversights.
 
 ---
 
@@ -2180,6 +2215,8 @@ npm run test:branch      # a fork copies rows; the parent is hashed before and a
 # sandboxed execution — see "Sandboxed execution and the distributed control plane"
 npm run test:sandbox-image # digest pinning, and boot.py's archive extraction against hostile tars
 npm run test:egress-policy # every named private/link-local/reserved range, DNS rebinding, pinning
+npm run test:egress-connectors # an ALLOWED domain resolving privately is refused; and the Node
+                               # and Python block lists held to each other by reading both sources
 npm run test:database-url  # a workspace's own DATABASE_URL, the SSRF cases
 npm run test:event-bus     # the push/long-poll transport a hosted run's control plane rides on
 npm run test:run-tokens    # minting, scoping, expiry, revocation
@@ -2198,13 +2235,24 @@ npm run test:tenancy-isolation # two workspaces, two run tokens, neither reaches
 # connector OAuth and MCP at scale — see "Connector OAuth and the credential vault"
 npm run test:oauth-state     # PKCE, and a state that works once even when two callbacks race
 npm run test:oauth-service   # the flow end to end; tokens appear in nothing it returns or stores
-npm run test:oauth-google    # the scopes asked for, and the four that are not
+npm run test:oauth-google    # the scopes asked for, and the seven that are not; and that a
+                             # Calendar connection shares no credential with a Gmail one
 npm run test:oauth-slack     # errors arriving with a 200; a user token refused as a bot token
 npm run test:oauth-refresh   # twelve concurrent callers, ONE call to the token endpoint
 npm run test:oauth-injection # a run gets the access token; no token reaches any file
 npm run test:oauth-revoke    # disconnect tells the provider, and forgets it either way
 npm run test:connector-auth  # every connector declares where its credential comes from
-npm run test:connector-secrets # DATABASE_URL: refused at save, re-pinned at run
+npm run test:connector-secrets # DATABASE_URL refused at save and re-pinned at run; the HTTP
+                               # allowlist checked for shape AND for where it points; a
+                               # full-access sk_live_ Stripe key refused outright
+
+# the connector templates themselves — Python, no SDKs, no network. See "Connectors".
+npm run test:connector-catalog # check_catalog() and check_failures_raise(), which nothing ran
+npm run test:connector-gcal    # the outgoing call, not the reply: singleEvents, the clamp, the
+                               # fetch-merge update, and a cache that cannot outlive its credential
+npm run test:connector-stripe  # read-only proven from the syntax tree, and the scanner fed
+                               # violations because a check nobody has watched refuse is suspect
+npm run test:connector-http    # the adversarial one: every refusal counted, not read
 npm run test:mcp-tenancy     # two workspaces, one endpoint, two credentials
 npm run test:mcp-url         # the hostile fixtures, at discovery AND at re-discovery
 npm run test:mcp-discovery-queue # off the request path, collapsed, and the tool list survives
@@ -2800,8 +2848,10 @@ A sandbox is granted exactly what a run declares it needs, computed fresh every 
 
 ```
 provider   → api.anthropic.com  OR  api.openai.com, never both, never for the "fake" provider
-connectors → each connector's fixed hosts (gmail.googleapis.com, slack.com, …)
+connectors → each connector's fixed hosts (gmail.googleapis.com, www.googleapis.com,
+             api.stripe.com, slack.com, …)
 postgres   → only the workspace's own validated DATABASE_URL, never a fixed host
+http       → only the workspace's own HTTP_ALLOWED_DOMAINS, resolved and pinned per run
 ```
 
 Every host is resolved and **pinned** before the sandbox starts — the sandbox is handed literal
@@ -2811,10 +2861,26 @@ including the cloud metadata endpoint (`169.254.169.254`) and its IPv4-mapped IP
 host is refused *whole* if even one of its resolved answers lands in one of them, not merely
 filtered down to the answers that didn't.
 
-A workspace's own `DATABASE_URL` is the one egress host that is genuinely user-supplied, and is
+A workspace's own `DATABASE_URL` is one of the egress hosts that is genuinely user-supplied, and is
 validated separately (`validateDatabaseUrl`): scheme, a small port allowlist (5432, 5433, 6543 —
 never an arbitrary port a scan of the workspace's own infrastructure could use), and the identical
 private-range refusal every other host goes through.
+
+The HTTP connector's `HTTP_ALLOWED_DOMAINS` is the third such host — the same shape, handled the
+same way. Parsed and normalised at save (and a domain resolving into a private range is refused
+*there*, so `metadata.internal` is answered while somebody is looking at it), then **resolved
+fresh and pinned per run** by `ConnectorSecrets.httpEgress`, which is the check that actually
+holds. Refusal is **per domain rather than per run**: one entry that has since been repointed at a
+private address contributes no rule and is logged, while the other three still work — the same
+judgement `mcpEgressRules` makes about a server that no longer validates.
+
+**Being on the allowlist buys nothing against the address check**, and `test:egress-connectors`
+exists to say so: an *allowed* domain that resolves to `169.254.169.254` is refused. Allowed is
+not the same as reachable, and a builder that trusted its own allowlist would make a text field
+into a read of the metadata server. That suite also holds the two private-range block lists to
+each other by reading the other language's source — the rule is written twice on purpose, because
+the control plane cannot check a request the sandbox originates and the sandbox cannot call
+TypeScript, so the only way it fails is drift.
 
 ### The sandbox image
 
@@ -3398,11 +3464,21 @@ prompt tells the model about where a value comes from.
 | Connector | `auth` | What a run receives | What the user does |
 |---|---|---|---|
 | **Gmail** | `oauth` | `GMAIL_ACCESS_TOKEN` — short-lived | clicks Connect |
+| **Google Calendar** | `oauth` | `GCAL_ACCESS_TOKEN` — short-lived | clicks Connect (a *second* time, deliberately) |
 | **Slack** | `oauth` | `SLACK_BOT_TOKEN` — `xoxb-…`, no expiry | clicks Connect |
+| **Stripe** | `user_secret` | `STRIPE_SECRET_KEY` | pastes a **restricted** key |
 | **Postgres** | `user_secret` | `DATABASE_URL` | pastes a connection string |
+| **HTTP/Webhook** | `user_secret` | `HTTP_ALLOWED_DOMAINS`, `HTTP_AUTH_HEADER` | lists the domains it may reach |
 
-Postgres stays a `user_secret` and always will: there is no consent screen for "the database at
-the other end of this connection string", and the string *is* the credential.
+The three `user_secret` connectors stay that way and always will: there is no consent screen for
+"the database at the other end of this connection string", none for a Stripe API key, and none
+for a list of domains. In each case the value *is* the credential or the policy.
+
+**Calendar is its own connection under the same Google OAuth app**, with its own scopes and its
+own `GCAL_` names. One grant is one revocation, and somebody who no longer wants an agent reading
+their mail should not thereby lose their scheduling assistant — so the two are separate rows that
+revoke independently, at the cost of one extra click. A project generated with Calendar and not
+Gmail therefore asks for Calendar credentials and nothing else.
 
 **The names stay in `.env.example` either way, and that is deliberate.** A generated project is
 portable — the README has always promised it runs standalone, and `test:acceptance` proves it — so

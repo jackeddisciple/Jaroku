@@ -181,14 +181,26 @@ dropped and never zero.** Dropping it makes an unpriced model look like a model 
 zeroing it makes a paid call look free. Both turn a workspace's total into a confident undercount
 instead of a flagged one. `npm run test:metering` asserts each.
 
-## A new connector needs an auth mode, and a credential needs a lifetime
+## A new connector needs an auth mode, a suite, and a credential with a lifetime
 
-Two rules, and the second is the one that is easy to get wrong in the safe-looking direction.
+Three rules, and the middle one is the one that is easy to get wrong in the safe-looking direction.
 
 **Every connector in `catalog.json` declares `auth`**: `oauth`, `user_secret` or `none`.
 `check_catalog()` refuses a connector without one, because a missing mode reads as
 `user_secret` everywhere — which for an OAuth connector means `.env.example` telling somebody to
 obtain by hand the credential the Connect button exists to obtain for them.
+
+**Every connector template has a suite, and it fakes its SDK rather than installing one.**
+`runtime/tool_templates/tests/<id>.py`, run as `npm run test:connector-<id>`, registered in
+`server/package.json` AND in the `runtime` job of `.github/workflows/ci.yml`. Faked rather than
+real because half of what is worth asserting is what the template SENDS — that a cap a caller
+argued past was clamped before the request left, that an update merged onto the current object
+rather than replacing it — and a recorded response can say nothing about any of those. It also
+keeps the suite runnable on the base install, and a suite that needs `--extra connectors` is one
+that skips on the machines least likely to be checking. Put the connector's own safety posture
+under test in the form it actually takes: `test:connector-stripe` proves read-only from the
+template's syntax tree, because a seventh tool does not exist to be called until somebody has
+written it.
 
 **A credential that reaches a sandbox is the SHORT-LIVED half.** What executes there is
 model-written Python responding to a stranger's prompt. An access token is an hour; a refresh
