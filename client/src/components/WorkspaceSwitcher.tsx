@@ -1,5 +1,19 @@
 // Which workspace this tab is in, how to change it, and how to make another one.
 //
+// AT THE TOP OF THE SIDEBAR, ABOVE THE FOUR DESTINATIONS, and it used to be in the top bar's right
+// group beside the provider chip. §9 gives the reason in one sentence: "deploying to the wrong
+// workspace is the team-scale equivalent of rm -rf /". A workspace is the widest scope on screen —
+// every agent, thread, secret and deployment in the window belongs to exactly one — and putting
+// the name of that scope in the same cluster as the model picker filed it with the settings for
+// one conversation. It spans the rail AND the column rather than sitting inside either, because
+// both of them are inside it: the four destinations are views of this workspace, and the agent
+// list beneath them is this workspace's agents.
+//
+// SO THERE IS EXACTLY ONE OF IT. The top bar's copy is gone rather than kept as a second door,
+// which sounds like a loss of discoverability and is the opposite: two controls rendering one fact
+// is two places to read the workspace from, and the failure §9 is about is somebody reading the
+// wrong one.
+//
 // A switch is a new socket, not a mutation on the current one — see lib/socket.ts. From here
 // that means the click does three things in a fixed order: close, empty every store, open
 // again with a ticket for the other workspace. The user sees the app go briefly blank, which
@@ -22,7 +36,11 @@ import { signOut, switchWorkspace } from "../lib/socket.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { ICON } from "../lib/tokens.ts";
-import { CheckIcon, PlusIcon, UserCircleIcon } from "./panelIcons.tsx";
+import { Chip } from "./Chip.tsx";
+import { Truncate } from "./Truncate.tsx";
+import {
+  CheckIcon, ChevronDownIcon, PlusIcon, UserCircleIcon, UserIcon, UsersIcon,
+} from "./panelIcons.tsx";
 
 /** The two kinds, in the terms that decide which one somebody wants. */
 const KINDS: { id: "personal" | "team"; label: string; what: string }[] = [
@@ -139,31 +157,57 @@ export function WorkspaceSwitcher() {
     if (!open) setCreating(false);
   }, [open]);
 
-  // Nothing to show before there is a session. The top bar renders during the connecting
-  // state too, and an empty chip is quieter than a placeholder that flashes.
-  if (!user || !workspaceId) return null;
+  // Nothing to show before there is a session. The sidebar renders during the connecting state
+  // too, and an empty row is quieter than a placeholder that flashes into somebody else's
+  // workspace name. A fixed height, so the four destinations beneath it do not jump when the
+  // session lands.
+  if (!user || !workspaceId) return <div className="h-9 shrink-0 border-b border-hair" />;
   const current = workspaces.find((w) => w.id === workspaceId);
+  const KindIcon = current?.kind === "team" ? UsersIcon : UserIcon;
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative shrink-0 border-b border-hair">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 rounded-control px-2 py-1 text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
-        title={`${user.email} — ${current?.role ?? ""}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        // THE MOST PROMINENT TEXT IN THE SIDEBAR — §9.1: larger than the tab labels, smaller than
+        // a page title. 13px against the 12px the agent rows and the account row use, which is one
+        // step and is enough: this is the thing every other row in the column is scoped BY, and a
+        // heading twice the size of its list would be a banner.
+        className={`flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-active/40 active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring ${
+          open ? "bg-active/40" : ""
+        }`}
+        title={`${current?.name ?? "workspace"} — ${current?.kind ?? ""}, you are ${current?.role ?? "a member"}`}
       >
-        <span className="max-w-[14ch] truncate text-ink">{current?.name ?? "workspace"}</span>
+        {/* THE KIND, BESIDE THE NAME. `kind` is the field that cannot change after creation and it
+            decides whether the members list, the roles and the Threads author column exist at all
+            — so the one place it is always visible is beside the name it qualifies. */}
+        <span className="shrink-0 text-muted" aria-hidden>
+          <KindIcon size={ICON.sm} />
+        </span>
+        <Truncate className="min-w-0 flex-1 text-[13px] text-ink" title={current?.name}>
+          {current?.name ?? "workspace"}
+        </Truncate>
         {expiring && (
           // The token behind this socket is nearly out. Said quietly rather than as a modal:
           // nothing has failed yet, and the reconnect will renew it.
-          <span className="text-[10px] text-run" title="your session is about to end">
+          <span className="shrink-0 text-[10px] text-run" title="your session is about to end">
             ●
           </span>
         )}
-        <span className="text-faint">▾</span>
+        {/* THE PLAN, FROM THE SESSION, NEVER MAPPED HERE. `planFor` on the server is the same
+            function the budget gate resolves limits through, so the chip in this row and the figure
+            in the Usage panel are one computation — see the footer's own note for the paid
+            workspace that read "Free" in one place and "Pro" in the other. */}
+        {current?.plan?.label && (
+          <Chip caps size="sm" tone="faint" className="shrink-0">{current.plan.label}</Chip>
+        )}
+        <span className="shrink-0 text-faint" aria-hidden><ChevronDownIcon size={ICON.xs} /></span>
       </button>
 
       {open && (
-        <div className="absolute right-0 z-30 mt-1 w-72 animate-slide-in overflow-hidden rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none">
+        <div className="absolute left-2 right-2 z-30 mt-1 w-auto animate-slide-in overflow-hidden rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none">
           <div className="border-b border-hair px-3 py-2">
             <div className="truncate text-[12px] text-ink">{user.displayName || user.email}</div>
             <div className="truncate text-[11px] text-faint">{user.email}</div>

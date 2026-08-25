@@ -22,6 +22,7 @@ import { useGithubStore } from "../store/githubStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { useInboxStore } from "../store/inboxStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher.tsx";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
@@ -761,12 +762,20 @@ export function Sidebar() {
   const historyComplete = useTraceStore((st) => st.historyComplete);
 
   return (
-    // rail | column. §2's four destinations become the rail — the sidebar itself still never
-    // collapses and never hides, and clicking one still replaces the centre pane and the right
-    // panel with one full-width view while leaving this column exactly as it is, selection
+    // header over (rail | column). §2's four destinations are the rail — the sidebar itself still
+    // never collapses and never hides, and clicking one still replaces the centre pane and the
+    // right panel with one full-width view while leaving this column exactly as it is, selection
     // included. What changes is that they cost forty pixels of width instead of a hundred pixels
     // of height plus a divider, and the column beside them belongs entirely to the list.
-    <div className="flex h-full bg-bg">
+    //
+    // THE SWITCHER SPANS BOTH, which is the one thing in this layout that is not free: it costs a
+    // row the agent list would otherwise have. §2.1 asks for it "at the top of the sidebar, above
+    // the four tab destinations", and above BOTH is the only reading that is true — the four
+    // destinations are views of this workspace and the list beneath them is this workspace's
+    // agents, so a switcher inside the column would be scoped by something it scopes.
+    <div className="flex h-full flex-col bg-bg">
+      <WorkspaceSwitcher />
+      <div className="flex min-h-0 flex-1">
       <NavRail />
       <div className="flex min-w-0 flex-1 flex-col border-l border-hair">
       {/* THE COLUMN'S HEADER ROW. `+ New Agent` was a full-width text button spending a whole row
@@ -912,6 +921,7 @@ export function Sidebar() {
       <div className="shrink-0 border-t border-hair px-3 py-2.5">
         <AccountRow />
         </div>
+      </div>
       </div>
     </div>
   );

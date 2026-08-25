@@ -356,6 +356,45 @@ export function UserCircleIcon(p: P) {
   );
 }
 
+/**
+ * lucide:user — a personal workspace. One person, no members list, no roles.
+ *
+ * NOT `UserCircleIcon` ABOVE IT, even though both draw a person, because the two answer different
+ * questions in the same window: that one means "the speaker" on a turn and "a member" in the
+ * members list, and this one means "the KIND this workspace is". At 12px in the sidebar header the
+ * circle is the whole silhouette, so borrowing it would put the members glyph beside the workspace
+ * name and read as "members" rather than as "personal".
+ */
+export function UserIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </>,
+  );
+}
+
+/**
+ * lucide:users — a team workspace. Members, roles, invitations, an author column on Threads.
+ *
+ * THE PAIR IS THE POINT rather than either glyph: `kind` is the one field that cannot change after
+ * creation, and it decides whether half the surfaces in the product exist. Two silhouettes that
+ * differ by a second head are legible at 12px in a way a badge reading "team" would not be at the
+ * top of a column whose whole job is the list beneath it.
+ */
+export function UsersIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </>,
+  );
+}
+
 // ── Status ──────────────────────────────────────────────────────────────────
 
 /** lucide:check — approved, audited, done. */

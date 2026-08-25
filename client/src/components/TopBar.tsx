@@ -10,7 +10,6 @@
 // Share still has no backend, and is still an honest stub.
 
 import { useEffect, useRef } from "react";
-import { WorkspaceSwitcher } from "./WorkspaceSwitcher.tsx";
 import { useBuildStore } from "../store/buildStore.ts";
 import { providerLabelOf, useProviderStore } from "../store/providerStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
@@ -340,10 +339,14 @@ export function TopBar() {
 
       <div className="flex shrink-0 items-center gap-2">
         <SyncRing />
-        {/* Which workspace this tab is in, and the way out of it. Furthest left of the right
-            group because it is the widest scope on screen: everything to its right is a fact
-            about one workspace, and this is which one. */}
-        <WorkspaceSwitcher />
+        {/* WHICH WORKSPACE THIS TAB IS IN IS NOT HERE ANY MORE. It was the furthest left of this
+            group, on the argument that it is the widest scope on screen — which is right about the
+            scope and wrong about the place. Everything in this bar is a fact about ONE AGENT and
+            one run: its name, its provider, its model, how far its current run has got. A control
+            naming the tenant those things belong to, filed among them, reads as a fourth setting
+            for the conversation rather than as the thing all three are inside.
+            It is at the top of the sidebar now — §2.1 and §9.1 — where the four destinations and
+            the agent list beneath it are all views of the workspace it names. */}
 
         {/* The provider chip, now also the way in to the keys behind it. */}
         <ProviderMenu provider={provider} model={model} />
