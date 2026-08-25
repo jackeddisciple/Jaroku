@@ -97,6 +97,23 @@ fail when they do.
   `find(kind === "personal")`, and the switcher pins *the* personal workspace to the top. Found by
   walking §12.3 against a running server; `test:session` asserted the opposite and now asserts the
   refusal.
+- **Two of the three routes that provision an account let an identity conflict escape as a 500.**
+  `provisionUser` refuses to hand one verified address to a second `sub` — a person whose provider
+  changed under them — as a typed error rather than a unique violation, precisely so that somebody
+  gets a sentence instead of "your sign-in is broken". Only `/v1/auth/session` was converting it,
+  so `/v1/invites/accept` and `POST /v1/workspaces` answered 500 — and the invite route is the one
+  an invitee reaches first, because §12.2 has them redeem before they have ever signed in.
+- **Six capability guards named a capability in the comment above them and then compared against a
+  role literal.** Billing, the spend ceiling, the checkout, members, the audit log and the data
+  section all read `role === "owner"`, and all six were *right*, because `billing:manage`,
+  `member:manage` and `workspace:manage` are the owner's today. That is what makes it worth a rule
+  rather than a fix: nothing was broken, so the day one of those moves to admin, six surfaces would
+  go on quietly meaning the old thing. `test:permission-ui` now reads the components and allows
+  two, both rules about ownership rather than capabilities — §10.2's rename, which mirrors the
+  route's own two-role check, and §6.5's "an owner may not leave".
+- **Every capability refusal an admin has ever seen began "a admin".** `a ${ctx.role}` is right for
+  two of the three roles and wrong for the one that reads it — an owner is refused nothing, so the
+  sentence reaches admins and members alone.
 
 ### Migrations
 
@@ -106,8 +123,12 @@ arrived with `059_link_invites`. `schema/events.md` is untouched: nothing here i
 
 ### Verified
 
-- Fifteen commits, each pushed to `origin/main` on its own and each left with CI green before the
-  next.
+- Fifteen commits for the specification's own plan, each pushed to `origin/main` on its own and
+  each left with CI green before the next; then three more for what a bug sweep found afterwards.
+- **§6 was walked against a running server as well as §12.3** — an admin refused every membership
+  command, an owner promoting and demoting, a member leaving and losing their ticket, an owner
+  refused the same departure, and a removal closing the removed member's *already open* socket
+  (code 4001) rather than leaving it until they next reconnect.
 - **`test:permission-ui` reads `server/src/auth/capabilities.ts` as text** rather than importing
   it, and fails in both directions. The direction that matters is the one nobody watches: a
   capability the client grants and the server does not is a button that 403s and gets reported the
@@ -129,6 +150,11 @@ arrived with `059_link_invites`. `schema/events.md` is untouched: nothing here i
 - **The golden path was walked over HTTP and the socket, not in a browser.** §14.3 asks for a
   browser against the running server; the click-through half is covered structurally by the client
   suites, which render the real components, and not by anything that drives a real DOM.
+- **No unread count on the switcher's rows**, which §2.2 offers "only if you've implemented an
+  unread-count-per-workspace endpoint" and asks to be noted rather than faked if not. There is no
+  such endpoint: the Inbox badge is computed for the one workspace this socket is in, and a socket
+  is scoped to one workspace for its whole life. Counting the others means either a second socket
+  per workspace or an HTTP route that runs the derivation per membership on every hydration.
 - **No per-member spend attribution**, which §11.3 names and v0.3.3 already recorded: runs carry a
   workspace and not an actor, so "who spent this" is not a question the data can answer yet.
 - **Seats are Team-plan only.** Free and Pro are solo by design, so §12.1's "open the Members panel
