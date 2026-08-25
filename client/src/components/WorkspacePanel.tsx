@@ -31,6 +31,7 @@ import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore, type WorkspaceSection } from "../store/uiStore.ts";
 import { AccountSection } from "./AccountSection.tsx";
 import { absTime, fmtUntil, isExpired, relTime } from "../lib/format.ts";
+import { avatarColor, avatarLetter, orderMembers } from "../lib/memberList.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
@@ -122,8 +123,127 @@ function InviteLink() {
   );
 }
 
+/**
+ * §6.3's ownership transfer — the one action on this screen that cannot be taken back.
+ *
+ * TYPING THE WORKSPACE NAME, which is the pattern §6.3 names by reference: "confirm with the
+ * workspace name typed out (same pattern as workspace delete)". The two acts are alike in the way
+ * that matters — after either one, the person who did it cannot undo it — and unlike a removal,
+ * which §6.4 gives a single button precisely because re-inviting exists.
+ *
+ * IT IS TWO COMMANDS, NOT ONE, AND THAT IS VISIBLE HERE RATHER THAN HIDDEN IN THE SERVER. §6.3
+ * says a transfer demotes the current owner to Admin; the repository's `setMemberRole` changes one
+ * membership and says nothing about a second, and §16 is explicit about not growing server-side
+ * business logic beyond §13's list. So the promotion goes first and the demotion second, in that
+ * order and not the other: promoting first means the workspace has two owners for the moment in
+ * between, and demoting first would mean it has none — which `setMemberRole`'s last-owner guard
+ * would refuse anyway, turning the whole transfer into a no-op with an error on it.
+ *
+ * IF THE SECOND COMMAND IS LOST the workspace has two owners, which is a state the product already
+ * supports, is visible in the list directly beneath this, and either of them can finish. That is
+ * the honest failure for a two-step change on a socket: recoverable and legible, rather than
+ * atomic and invented.
+ */
+function TransferConfirm({ member, onDone }: { member: Member; onDone: () => void }) {
+  const workspaces = useSessionStore((s) => s.workspaces);
+  const workspaceId = useSessionStore((s) => s.workspaceId);
+  const selfId = useSessionStore((s) => s.user?.id ?? null);
+  const workspace = workspaces.find((w) => w.id === workspaceId);
+  const [typed, setTyped] = useState("");
+  const name = workspace?.name ?? "";
+  const who = member.display_name || member.email;
+
+  const transfer = (): void => {
+    sendSetMemberRole(member.user_id, "owner");
+    // The demotion names the person doing it, read from the session rather than passed in, because
+    // this control is only ever rendered on a row an owner is looking at.
+    if (selfId) sendSetMemberRole(selfId, "admin");
+    onDone();
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Transfer ownership of ${name}`}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-void/70 px-4"
+    >
+      <div className="w-full max-w-md rounded-modal border border-edge bg-panel p-4 shadow-overlay">
+        <div className={TYPE.sectionLabel}>Transfer ownership</div>
+        {/* §6.3's sentence, close to verbatim, because both halves of it are the point: who is
+            getting it, and what happens to you. An owner who reads only the first half is an owner
+            who has not been told they are about to stop being one. */}
+        <p className="mt-2 text-[12px] leading-[1.55] text-ink">
+          Transfer ownership of <span className="text-ink">{name}</span> to{" "}
+          <span className="text-ink">{who}</span>? You will become an Admin.
+        </p>
+        <p className="mt-1.5 text-[11px] leading-[1.55] text-muted">
+          An Admin cannot change membership, billing, or delete the workspace. Only {who} will be
+          able to give it back.
+        </p>
+        <p className="mt-2.5 break-all text-[11px] text-faint select-all">{name}</p>
+        <input
+          autoFocus
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          placeholder="type the workspace name above to confirm"
+          aria-label="Workspace name"
+          className="mt-1.5 w-full rounded-control border border-hair bg-void px-2.5 py-1.5 text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
+        />
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            onClick={transfer}
+            // TRIMMED ON THE TYPED SIDE ONLY. A workspace name with a trailing space is a name
+            // somebody cannot type twice the same way, and this is a confirmation rather than a
+            // checksum — the gesture is what is being asked for.
+            disabled={typed.trim() !== name.trim() || name.trim() === ""}
+            className="rounded-control border border-err/40 bg-err/10 px-3 py-1.5 text-[12px] text-err transition-colors hover:bg-err/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Transfer ownership
+          </button>
+          <button onClick={onDone} className={quietBtn}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MemberRow({ member, canManage, isSelf }: { member: Member; canManage: boolean; isSelf: boolean }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
+  /**
+   * §6.3's ownership transfer, held here until the workspace name has been typed.
+   *
+   * IT IS THE MOST DANGEROUS ACTION ON THIS SCREEN and it does not look like one: it is a
+   * selection in a dropdown, one row below two selections that are ordinary. Promoting somebody to
+   * Admin is reversible by the person who did it; promoting somebody to Owner is reversible only
+   * by the person it was done TO, because the act of doing it is the act of giving away the
+   * authority to undo it.
+   */
+  const [transferTo, setTransferTo] = useState<string | null>(null);
+
+  /**
+   * §6.3 — "the owner cannot demote themselves", so their own row has a badge rather than a
+   * dropdown.
+   *
+   * THE SERVER REFUSES THIS TOO, and differently: `setMemberRole` refuses the LAST owner, which
+   * lets an owner step back once a second owner exists. That is the right rule for the repository
+   * — it is about the workspace staying administrable — and it is not the rule this control wants.
+   * From here the only way to stop being the owner is §6.3's transfer, which names the person
+   * taking over in the same gesture; a bare "make me an Admin" would be an owner leaving the
+   * workspace without an owner in every case except the one where somebody else already is one.
+   */
+  const roleIsFixed = isSelf && member.role === "owner";
+
+  const changeRole = (next: string): void => {
+    if (next === member.role) return;
+    // Promotion to owner is not sent from here. It goes through the confirmation below, which is
+    // the only path that also demotes the person doing it — see `TransferConfirm`.
+    if (next === "owner") {
+      setTransferTo(next);
+      return;
+    }
+    sendSetMemberRole(member.user_id, next);
+  };
 
   return (
     // NO PER-ROW RULE. This was the only list in the app with a divider between every row, and
@@ -134,12 +254,24 @@ function MemberRow({ member, canManage, isSelf }: { member: Member; canManage: b
     // everybody — on the one screen where several people appear at once. The 20px rounded square
     // is the account row's treatment, which is the canonical one; the card's 16px circle at 9px
     // muted was the third.
-    <div className="flex items-center gap-2 rounded-control px-1 py-2 transition-colors hover:bg-active/40">
+    <div
+      // §6.2 — "the current user's own row has a SUBTLE highlight". A background at the same
+      // weight the list uses for hover, permanently: enough to find yourself in a column of six,
+      // not enough to read as a selection.
+      className={`flex items-center gap-2 rounded-control px-1 py-2 transition-colors ${
+        isSelf ? "bg-active/30" : "hover:bg-active/40"
+      }`}
+    >
+      {/* §6.2's stable colour, from the user id through the same FNV-1a the agent gradients use.
+          It is a mnemonic rather than a status: the letter and the name are what identify
+          somebody, and this is what makes a row findable again once you have seen it. See
+          lib/memberList.ts for why the palette is deliberately off-token. */}
       <span
-        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-active text-[11px] text-ink"
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control text-[11px] font-medium text-void"
+        style={{ background: avatarColor(member.user_id) }}
         aria-hidden
       >
-        {(member.display_name || member.email || "?").trim().charAt(0).toUpperCase()}
+        {avatarLetter(member)}
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
@@ -148,18 +280,27 @@ function MemberRow({ member, canManage, isSelf }: { member: Member; canManage: b
           </Truncate>
           {isSelf && <Chip size="sm" tone="faint" variant="bare">you</Chip>}
         </div>
-        {member.display_name && (
-          <Truncate className="text-[11px] text-faint" title={member.email}>{member.email}</Truncate>
-        )}
+        {/* §6.2 asks for the email AND a "Joined" date on every row. The address only when there
+            is a name above it — otherwise the row would print it twice — and the date always,
+            because "who has been here longest" is the question a members list is read for after
+            "who is here". */}
+        <div className="flex min-w-0 items-baseline gap-2">
+          {member.display_name && (
+            <Truncate className="min-w-0 text-[11px] text-faint" title={member.email}>{member.email}</Truncate>
+          )}
+          <span className="shrink-0 text-[11px] text-faint" title={absTime(member.created_at)}>
+            joined {relTime(member.created_at)}
+          </span>
+        </div>
       </div>
 
       {/* THE ROLE IS THE CONTROL, not a label with a control beside it. A select that shows the
           current role is one element saying what is true and offering the change; a label plus an
           "Edit" button is two, and the second one only ever opens the first. */}
-      {canManage ? (
+      {canManage && !roleIsFixed ? (
         <Select
           value={member.role}
-          onChange={(v) => sendSetMemberRole(member.user_id, v)}
+          onChange={changeRole}
           title={ROLES.find((r) => r.id === member.role)?.what}
           ariaLabel={`Role for ${member.display_name || member.email}`}
           align="right"
@@ -168,6 +309,9 @@ function MemberRow({ member, canManage, isSelf }: { member: Member; canManage: b
         />
       ) : (
         <Chip size="sm" tone="faint">{member.role}</Chip>
+      )}
+      {transferTo && (
+        <TransferConfirm member={member} onDone={() => setTransferTo(null)} />
       )}
 
       {canManage && (
@@ -327,7 +471,11 @@ function MembersSection() {
             hint={canManage ? "Invite somebody above." : undefined}
           />
         ) : (
-          members.map((m) => (
+          // §6.2's order — owner, admins, members, each group alphabetical — applied here rather
+          // than expected of the server. The relay re-broadcasts this list on every mutation and
+          // the SQL behind it has no ORDER BY that means anything to a reader, so a list that
+          // trusted the arrival order would reshuffle itself every time somebody's role changed.
+          orderMembers(members).map((m) => (
             <MemberRow
               key={m.user_id}
               member={m}
