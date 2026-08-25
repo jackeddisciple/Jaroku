@@ -584,14 +584,18 @@ async function connect(): Promise<void> {
     ticket = issued.ticket;
   } catch (err) {
     const failure = err as AuthFailure;
+    useTraceStore.getState().setConnection("closed");
+    // §5.2 — A SWITCH IN FLIGHT TAKES NEITHER OF THE TWO BRANCHES BELOW. Both of them are right
+    // for the workspace this tab is already in and wrong for one it is trying to enter: signing
+    // out over a 403 would end the session in A because B refused, and backing off would leave the
+    // tab behind a scrim retrying a workspace it is never going to reach. See `revertSwitch`.
+    if (revertSwitch(failure.message)) return;
     if (!failure.retryable) {
       // 401 or 403. The token is bad, or this account may not be here. Stop.
       useSessionStore.getState().signOut(failure.message);
-      useTraceStore.getState().setConnection("closed");
       return;
     }
     useSessionStore.getState().setStatus("connecting", failure.message);
-    useTraceStore.getState().setConnection("closed");
     scheduleReconnect();
     return;
   }
@@ -615,6 +619,14 @@ async function connect(): Promise<void> {
     attempt = 0;
     useTraceStore.getState().setConnection("open");
     useSessionStore.getState().setStatus("ready");
+    // §5.1 STEP 7 — UNLOCK, AND HERE RATHER THAN AFTER THE SNAPSHOTS. `onopen` is the moment the
+    // relay has accepted the ticket and the Origin, which is the last thing that can refuse this
+    // switch; the snapshots that follow are data arriving into stores the UI already renders
+    // empty. Waiting for them would mean holding the scrim over a working application until the
+    // slowest channel answered, and would need a rule for which channels count — a workspace with
+    // no agents sends an empty agent list, which is indistinguishable from one that has not sent.
+    disarmSwitchDeadline();
+    useSessionStore.getState().endSwitch();
     // WHAT THE INITIAL SNAPSHOT DOES NOT CARRY. The relay pushes history, agents, mcp, providers,
     // deploy, threads and members on connect; a workspace's STANDING is not among them, and it is
     // the one fact that changes what every other surface is allowed to do. Asked for here rather
@@ -641,6 +653,11 @@ async function connect(): Promise<void> {
     if (superseded()) return;
     useTraceStore.getState().setConnection("closed");
     if (stopped) return;
+    // §5.2 — THE HANDSHAKE IS THE OTHER THING THAT CAN REFUSE A SWITCH, and it refuses by closing
+    // rather than by rejecting. A socket that closes before it ever opened, while a switch is in
+    // flight, is the target workspace saying no — a revoked ticket, a membership that ended
+    // between the ticket and the upgrade, an Origin the relay does not allow.
+    if (revertSwitch("could not open that workspace")) return;
     if (ev.code === CLOSE_UNAUTHORISED) {
       // The server told us why on the `session` channel a moment ago, and the code is here in
       // case that frame did not land. Either way: stop, do not retry.
@@ -737,6 +754,9 @@ export function stopSocket(): void {
   stopped = true;
   started = false;
   attempt = 0;
+  // The deadline belongs to the attempt this is ending. `switchWorkspace` re-arms it immediately
+  // afterwards; every other caller — sign out, a plain restart — has no switch to time out.
+  disarmSwitchDeadline();
   // Every reconnect armed before this moment, and every connect attempt mid-await, now belongs to
   // an era that has ended. See `generation`.
   generation++;
@@ -769,9 +789,10 @@ export function restartSocket(): void {
  * UI that showed one tenant the other's data. See store/reset.ts.
  */
 export function switchWorkspace(workspaceId: string): void {
-  const session = useSessionStore.getState();
-  if (session.workspaceId === workspaceId) return;
-  if (!session.workspaces.some((w) => w.id === workspaceId)) return;
+  // The lock goes on FIRST, and `beginSwitch` is what decides whether there is a switch at all —
+  // already there, not a membership, or one already in flight. Nothing below this line is
+  // reversible, so the guard cannot be after it.
+  if (!useSessionStore.getState().beginSwitch(workspaceId)) return;
 
   stopSocket();
   resetWorkspaceStores();
@@ -781,8 +802,74 @@ export function switchWorkspace(workspaceId: string): void {
   // snapshot landed — a panel showing the wrong tenant's shape, briefly, which is the thing the
   // reset ordering exists to prevent.
   useUiStore.getState().closeWorkspacePanel();
-  useSessionStore.setState({ workspaceId, status: "connecting", message: null });
+  armSwitchDeadline();
   startSocket();
+}
+
+/**
+ * §5.2's upper bound on the lock.
+ *
+ * FIFTEEN SECONDS, WHICH IS NOT THE SPEC'S FIGURE AND IS NOT MEANT TO BE. §5.2 asks for the whole
+ * transition to take "under 500ms on a local connection and under 2 seconds on a typical remote
+ * connection" — that is a performance target, and a deadline set to a performance target reverts
+ * the switches that were merely slow. This is the other kind of number: the point past which
+ * nothing is going to arrive, and staying locked is worse than being wrong. A tab that has been
+ * showing a scrim over an empty app for fifteen seconds has already failed.
+ *
+ * IT EXISTS BECAUSE NOT EVERY FAILURE HAS AN EVENT. A refused ticket rejects, a refused handshake
+ * closes — both reach `connect` and both revert. A socket that opens and never completes its
+ * upgrade, a request to a host that black-holes packets, a machine that suspends mid-exchange: no
+ * error, no close, no frame, and the lock has nothing to be cleared by.
+ */
+const SWITCH_DEADLINE_MS = 15_000;
+let switchDeadline: ReturnType<typeof setTimeout> | null = null;
+
+function armSwitchDeadline(): void {
+  if (switchDeadline) clearTimeout(switchDeadline);
+  const era = generation;
+  switchDeadline = setTimeout(() => {
+    // A deadline armed for a switch that has since been superseded — by a second switch, a sign
+    // out, a reconnect — belongs to an era that has ended. The same guard the reconnect timer
+    // needs, for the same reason.
+    if (era !== generation) return;
+    revertSwitch("that workspace did not answer");
+  }, SWITCH_DEADLINE_MS);
+}
+
+function disarmSwitchDeadline(): void {
+  if (switchDeadline) clearTimeout(switchDeadline);
+  switchDeadline = null;
+}
+
+/**
+ * Give up on a switch in flight and reconnect to the workspace it left. §5.2 and §5.5.
+ *
+ * WHAT MAKES THIS DIFFERENT FROM AN ORDINARY RECONNECT is which failures reach it. Outside a
+ * switch, a retryable failure backs off and tries again — correctly, because the workspace it is
+ * retrying is one this tab was already in and will be in again. Inside a switch there is no such
+ * workspace: retrying means retrying the TARGET, and a target that refused a ticket will refuse
+ * the next one too, so the tab would sit behind a scrim backing off against a workspace it is
+ * never going to enter while the one it came from is a keystroke away.
+ *
+ * AND IT CATCHES THE 403 THAT USED TO SIGN PEOPLE OUT. `fetchTicket` answers 403 for a workspace
+ * you are not a member of, `AuthFailure` marks that not-retryable, and `connect`'s handling of
+ * not-retryable is `signOut`. Correct for the workspace you are already in — a membership revoked
+ * under you is the end of that session — and badly wrong for a switch: being refused entry to B
+ * ended the session in A. Somebody removed from a team while their tab was open would click it in
+ * the switcher and land on the sign-in screen.
+ */
+function revertSwitch(message: string): boolean {
+  const session = useSessionStore.getState();
+  if (!session.switching) return false;
+  disarmSwitchDeadline();
+  // Cleared BEFORE the reconnect, so what follows is an ordinary connect to an ordinary workspace
+  // — otherwise the revert's own failures would be read as this switch's and revert again.
+  session.failSwitch(message);
+  storeWorkspace(useSessionStore.getState().workspaceId);
+  // `restartSocket` rather than `connect`: it bumps the generation, which supersedes the attempt
+  // this was called from and every timer armed by it.
+  restartSocket();
+  return true;
 }
 
 /**

@@ -40,7 +40,7 @@ import { orderWorkspaces, roleLabel, shouldScroll } from "../lib/workspaceList.t
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import {
-  CheckIcon, ChevronDownIcon, PlusIcon, SettingsIcon, UserIcon, UsersIcon,
+  AlertTriangleIcon, CheckIcon, ChevronDownIcon, PlusIcon, SettingsIcon, UserIcon, UsersIcon, XIcon,
 } from "./panelIcons.tsx";
 
 /** The two kinds, in the terms that decide which one somebody wants. */
@@ -153,6 +153,8 @@ export function WorkspaceSwitcher() {
   const workspaces = useSessionStore((s) => s.workspaces);
   const workspaceId = useSessionStore((s) => s.workspaceId);
   const expiring = useSessionStore((s) => s.expiring);
+  const switchError = useSessionStore((s) => s.switchError);
+  const clearSwitchError = useSessionStore((s) => s.clearSwitchError);
   const openWorkspacePanel = useUiStore((s) => s.openWorkspacePanel);
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -281,6 +283,27 @@ export function WorkspaceSwitcher() {
         )}
         <span className="shrink-0 text-faint" aria-hidden><ChevronDownIcon size={ICON.xs} /></span>
       </button>
+
+      {/* §5.2 — "show an error inline in the switcher and revert to the previous workspace".
+          BENEATH THE ROW RATHER THAN INSIDE THE DROPDOWN, because by the time it exists the
+          dropdown has closed: the click that started the switch closed it, and a message that only
+          appears when somebody reopens the menu is a message about something they have already
+          concluded did not work. The name above it is the workspace they are back in, which is the
+          other half of what they need to know. */}
+      {switchError && (
+        <div role="alert" className="flex items-start gap-2 border-t border-hair bg-err/5 px-3 py-1.5">
+          <span className="mt-0.5 shrink-0 text-err" aria-hidden><AlertTriangleIcon size={ICON.xs} /></span>
+          <span className="min-w-0 flex-1 text-[11px] leading-[1.5] text-err">{switchError}</span>
+          <button
+            onClick={clearSwitchError}
+            title="Dismiss"
+            aria-label="Dismiss"
+            className="shrink-0 text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+          >
+            <XIcon size={ICON.xs} />
+          </button>
+        </div>
+      )}
 
       {open && (
         <div

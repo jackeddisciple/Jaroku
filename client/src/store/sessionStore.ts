@@ -56,6 +56,32 @@ interface SessionState {
   /** Whether this server offers the local dev sign-in, so the screen knows what to render. */
   localIssuer: boolean;
 
+  /**
+   * §5 — a workspace switch in flight, or null.
+   *
+   * IT HOLDS `from` BECAUSE THE ONLY WAY OUT OF A FAILED SWITCH IS BACKWARDS. §5.2: "if the new
+   * ws-ticket request or the socket handshake fails, show an error inline in the switcher and
+   * revert to the previous workspace (do not leave the user in a blank state)". By the time that
+   * failure arrives every store has already been emptied and the old socket is closed — the
+   * teardown is deliberately irreversible and happens first, because doing it after the new socket
+   * opened is the window in which one tenant's snapshot merges into another's rows. So the id of
+   * the workspace being left is the only thing that makes the failure recoverable, and it has to
+   * be written down before the teardown rather than derived after it.
+   *
+   * `name` IS CARRIED RATHER THAN LOOKED UP for the overlay's sake: it is what the lock says it is
+   * waiting for, and a lookup would resolve against `workspaceId`, which has already moved.
+   */
+  switching: { from: string; to: string; name: string } | null;
+  /**
+   * Why the last switch failed, or null.
+   *
+   * SEPARATE FROM `message`, which is the SESSION's state — "your session expired", "connecting".
+   * This one is about a workspace that could not be entered while the session itself is fine, and
+   * conflating them would put "that workspace did not answer" where the sign-in screen reads its
+   * reason from.
+   */
+  switchError: string | null;
+
   setStatus: (status: SessionStatus, message?: string | null) => void;
   applySession: (view: SessionView, workspaceId: string) => void;
   setWorkspaces: (workspaces: SessionWorkspace[]) => void;
@@ -87,6 +113,22 @@ interface SessionState {
   signOut: (message?: string | null) => void;
   /** The role this tab holds in its current workspace, or null. Drives what the UI offers. */
   role: () => string | null;
+
+  /**
+   * Begin §5's transition. Answers whether one actually started.
+   *
+   * THE ANSWER IS THE GUARD, and it is here rather than in the caller because it reads state the
+   * caller would otherwise have to read twice. Three ways it declines: already there, not a
+   * membership this session can see, and — the one that matters — a switch already in flight. Two
+   * overlapping switches would each tear down and rebuild, and the second's `from` would be a
+   * workspace that has no socket, so a failure would revert to a blank.
+   */
+  beginSwitch: (to: string) => boolean;
+  /** The new socket opened. Clears the lock and whatever the last failure said. */
+  endSwitch: () => void;
+  /** Give up: put `workspaceId` back where it was and say why. See `switching`. */
+  failSwitch: (message: string) => void;
+  clearSwitchError: () => void;
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
@@ -98,6 +140,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   expiring: false,
   message: null,
   localIssuer: false,
+  switching: null,
+  switchError: null,
 
   setStatus: (status, message = null) => set({ status, message }),
 
@@ -161,6 +205,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       expiresAt: null,
       expiring: false,
       message,
+      // AND THE SWITCH LOCK, which nothing else would ever clear. §5's overlay renders while
+      // `switching` is set; signing out mid-transition — a token that expired during the ticket
+      // exchange is the way it happens — would otherwise leave a scrim reading "Switching to
+      // Acme…" over the sign-in screen, blocking the form underneath it.
+      switching: null,
+      switchError: null,
     });
   },
 
@@ -168,4 +218,49 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const { workspaceId, workspaces } = get();
     return workspaces.find((w) => w.id === workspaceId)?.role ?? null;
   },
+
+  beginSwitch: (to) => {
+    const { workspaceId, workspaces, switching } = get();
+    if (switching) return false;
+    if (!workspaceId || workspaceId === to) return false;
+    const target = workspaces.find((w) => w.id === to);
+    // A workspace this session cannot see a membership for. The server would refuse the ticket
+    // anyway; declining here is what stops the tab tearing itself down to find that out.
+    if (!target) return false;
+    set({
+      switching: { from: workspaceId, to, name: target.name },
+      // MOVED NOW, NOT WHEN THE SOCKET OPENS. Everything on screen is about to be emptied, and a
+      // header still naming the workspace being left would be the one moment in the product where
+      // the name above the data is the wrong one — which is the failure §9 exists to prevent.
+      workspaceId: to,
+      status: "connecting",
+      message: null,
+      // The previous failure is not this switch's. Cleared on the way in rather than on success,
+      // so a second attempt does not carry the first's sentence while it is still in flight.
+      switchError: null,
+    });
+    return true;
+  },
+
+  endSwitch: () => {
+    if (!get().switching) return;
+    set({ switching: null, switchError: null });
+  },
+
+  failSwitch: (message) => {
+    const { switching } = get();
+    if (!switching) return;
+    set({
+      switching: null,
+      switchError: message,
+      // BACK WHERE IT WAS. The stores stay empty — they were emptied on the way out and there is
+      // no way to un-empty them — so what this recovers is not the data but the ANSWER: a socket
+      // is about to be opened, and this is which workspace it is for. The snapshots that arrive on
+      // it are what refills the app.
+      workspaceId: switching.from,
+      status: "connecting",
+    });
+  },
+
+  clearSwitchError: () => set({ switchError: null }),
 }));

@@ -15,6 +15,7 @@ import { FullScreenView } from "./components/FullScreenView.tsx";
 import { AdminModeBanner } from "./components/AdminModeBanner.tsx";
 import { EnforcementStrip } from "./components/EnforcementStrip.tsx";
 import { WorkspacePanel } from "./components/WorkspacePanel.tsx";
+import { WorkspaceSwitchLock } from "./components/WorkspaceSwitchLock.tsx";
 import { InviteNotice } from "./components/InviteNotice.tsx";
 import { redeemPendingInvite } from "./lib/invite.ts";
 import { switchWorkspace } from "./lib/socket.ts";
@@ -302,6 +303,10 @@ export function App() {
       <WorkspacePanel />
       {/* What became of the invitation this tab was opened with, if it was opened with one. */}
       <InviteNotice />
+      {/* §5.1 — the lock over the shell while a workspace switch is in flight. Above the workspace
+          panel and below the MCP modal: it must cover the panel it just closed, and it must not
+          cover a run halted mid-graph waiting for an answer. */}
+      <WorkspaceSwitchLock />
       {/* Mounted last so it sits above everything. A run is halted mid-graph waiting for
           this answer, on a timer, and nothing else on screen can be more important — including
           during onboarding, where a generated agent can reach an MCP tool on its first run. */}
