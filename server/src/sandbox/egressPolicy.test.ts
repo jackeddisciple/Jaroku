@@ -204,6 +204,42 @@ await (async () => {
 })();
 
 await (async () => {
+  // The two Google connectors share the token endpoint and nothing else. The assertion worth
+  // having is the second one: selecting Calendar must not quietly grant the Gmail API host, or
+  // the egress policy would be handing a scheduling agent the network position to read mail —
+  // which is precisely the separation the two connections exist to keep.
+  const resolver = fakeResolver({
+    "www.googleapis.com": { v4: ["142.250.80.14"] },
+    "gmail.googleapis.com": { v4: ["142.250.80.10"] },
+    "oauth2.googleapis.com": { v4: ["142.250.80.11"] },
+  });
+  const policy = await buildEgressPolicy(
+    { runId: "r8", provider: "fake", connectors: ["google_calendar"] },
+    resolver,
+  );
+  const hosts = policy.rules.map((r) => r.host).sort();
+  check(
+    "google_calendar grants the Calendar API host and the token endpoint",
+    hosts.join(",") === "oauth2.googleapis.com,www.googleapis.com",
+    hosts.join(","),
+  );
+  check("...and NOT the Gmail API host", !hosts.includes("gmail.googleapis.com"));
+
+  const both = await buildEgressPolicy(
+    { runId: "r9", provider: "fake", connectors: ["gmail", "google_calendar"] },
+    resolver,
+  );
+  check(
+    "selecting both grants each connector its own rule, token endpoint included twice",
+    both.rules.filter((r) => r.host === "oauth2.googleapis.com").length === 2,
+  );
+  check(
+    "...and each rule says which connector asked for it",
+    new Set(both.rules.filter((r) => r.host === "oauth2.googleapis.com").map((r) => r.reason)).size === 2,
+  );
+})();
+
+await (async () => {
   // Postgres is the one connector without a fixed host — its host is whatever the workspace's
   // own DATABASE_URL validated to (databaseUrl.ts), threaded through as an already-pinned value.
   const resolver = fakeResolver({});

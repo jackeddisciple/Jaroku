@@ -51,6 +51,13 @@ const PROVIDER_HOSTS: Record<string, string> = {
  *  unlike these three it is user-supplied and is exactly the SSRF vector the spec calls out. */
 const CONNECTOR_HOSTS: Record<string, string[]> = {
   gmail: ["gmail.googleapis.com", "oauth2.googleapis.com"],
+  // Calendar answers on `www.googleapis.com` rather than on a per-API subdomain the way Gmail
+  // does, so the two connectors' lists overlap at the token endpoint and nowhere else. That
+  // overlap is fine and is not deduplicated here: a run with both selected gets two rules for
+  // one host, pinned to the same addresses, and each carries the reason it was granted — which
+  // is what a denial message and an audit row are read for. Collapsing them would save a row and
+  // lose the ability to say WHICH connector needed it.
+  google_calendar: ["www.googleapis.com", "oauth2.googleapis.com"],
   slack: ["slack.com"],
 };
 

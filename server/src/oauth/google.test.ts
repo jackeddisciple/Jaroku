@@ -17,7 +17,7 @@
 //
 //   npm run test:oauth-google
 
-import { GMAIL_SCOPES, GOOGLE, IDENTITY_SCOPES } from "./google.ts";
+import { CALENDAR_SCOPES, GMAIL_SCOPES, GOOGLE, IDENTITY_SCOPES } from "./google.ts";
 
 let failures = 0;
 const check = (ok: boolean, msg: string, detail = ""): void => {
@@ -56,6 +56,55 @@ for (const forbidden of [
 check(
   (gmail?.consent ?? []).some((line) => /cannot send/i.test(line)),
   "and the consent copy says out loud that it cannot send",
+);
+
+const calendar = GOOGLE.connectors.find((c) => c.connectorId === "google_calendar");
+
+console.log("\nand Calendar's are the narrowest that make ITS connector work");
+check(calendar !== undefined, "Google offers the google_calendar connector");
+check(calendar?.scopes.includes(CALENDAR_SCOPES[0] ?? "") === true, "it asks to read and write events");
+check(calendar?.scopes.includes(CALENDAR_SCOPES[1] ?? "") === true, "...and to read them when only that is granted");
+check(calendar?.scopes.length === 4, "and nothing else at all", calendar?.scopes.join(" "));
+
+// The wide scope is the one a tutorial hands you, and it grants deleting a calendar — which no
+// tool in the template does and which is not what the consent screen would then say.
+for (const forbidden of [
+  "https://www.googleapis.com/auth/calendar",
+  "https://www.googleapis.com/auth/calendar.settings.readonly",
+  "https://www.googleapis.com/auth/calendar.acls",
+]) {
+  check(
+    !(calendar?.scopes ?? []).includes(forbidden),
+    `it does not ask for ${forbidden.replace("https://www.googleapis.com/auth/", "")}`,
+  );
+}
+check(
+  (calendar?.consent ?? []).some((line) => /cannot delete an event/i.test(line)),
+  "and the consent copy says out loud that it cannot delete an event",
+);
+
+// THE SEPARATION, WHICH IS THE DECISION THIS RELEASE MADE RATHER THAN A DETAIL OF IT. One OAuth
+// app, two connections, and the property that makes the split worth its extra click is that
+// neither can reach the other's credential: disconnecting Gmail must not take the scheduling
+// assistant with it, and it cannot, because the two connections store under different names.
+console.log("\nand a Calendar connection shares no credential with a Gmail one");
+check(
+  calendar?.accessSecretName !== gmail?.accessSecretName,
+  "the access tokens land under different names",
+  `${gmail?.accessSecretName} vs ${calendar?.accessSecretName}`,
+);
+check(
+  calendar?.refreshSecretName !== gmail?.refreshSecretName,
+  "...and so do the refresh tokens, so revoking one leaves the other's grant intact",
+);
+check(
+  !(calendar?.scopes ?? []).some((s) => s.includes("gmail")) &&
+    !(gmail?.scopes ?? []).some((s) => s.includes("calendar")),
+  "...and neither connection's scope set reaches into the other's API",
+);
+check(
+  new Set(GOOGLE.connectors.map((c) => c.connectorId)).size === GOOGLE.connectors.length,
+  "every connector under this provider has its own id",
 );
 
 console.log("\nthe authorize parameters are what make a refresh token exist");

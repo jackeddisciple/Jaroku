@@ -50,6 +50,30 @@ export const GMAIL_SCOPES = [
 ];
 
 /**
+ * Calendar's two, and the same discipline applied to a different API.
+ *
+ * `calendar.events` RATHER THAN `calendar`, and the difference is not a nuance. The wide scope
+ * grants management of the calendar LIST — creating calendars, deleting them, changing who they
+ * are shared with — and no tool in `google_calendar.py` does any of those. `calendar.events` is
+ * read and write on the events of calendars the user already has, which is exactly the four
+ * tools' blast radius. It is also what the consent screen renders, so the narrower one is the
+ * difference between a person reading "manage your calendars" and "manage events".
+ *
+ * `calendar.readonly` sits beside it because Google's consent screen lets somebody grant one box
+ * and not another. A user who agrees to reading and declines writing should get the two read
+ * tools working rather than a connection that fails at every call — and `service.missingScopes`
+ * is what tells the panel to say which half they withheld.
+ *
+ * NOT `calendar.settings.readonly`, NOT `calendar.acls`, and emphatically not
+ * `https://www.googleapis.com/auth/calendar` — the same list of near-misses the Gmail scopes have
+ * a suite refusing by name.
+ */
+export const CALENDAR_SCOPES = [
+  "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/calendar.readonly",
+];
+
+/**
  * The two that buy the panel an account label, and nothing else.
  *
  * `openid` is what makes Google return an `id_token` at all; `email` is what puts an address in
@@ -124,6 +148,31 @@ export const GOOGLE: OAuthProvider = {
         "Read the messages in your mailbox, so an agent can search it",
         "Create draft replies in your mailbox",
         "It cannot send mail, delete anything, or change your settings",
+      ],
+    },
+    {
+      // A SECOND CONNECTION UNDER THE SAME OAUTH APP, NOT A WIDER GMAIL ONE.
+      //
+      // Google would happily put both scope sets behind one grant — `include_granted_scopes` is
+      // already on, and merging them would save a click. The click is worth paying for, because
+      // one grant is one revocation: a person who decides an agent should stop reading their
+      // mail would, under a merged connection, also lose the scheduling assistant, and the panel
+      // would have no way to offer them anything else. Two connections make "disconnect Gmail,
+      // keep Calendar" expressible, which is the state somebody actually wants to be in.
+      //
+      // It also keeps the exported-project story honest. `required_env` for this connector is
+      // the GCAL_ triple; a project generated with Calendar and not Gmail asks for Calendar
+      // credentials and nothing else, which a shared connection could not have produced.
+      connectorId: "google_calendar",
+      label: "Google Calendar",
+      scopes: [...IDENTITY_SCOPES, ...CALENDAR_SCOPES],
+      // The names `google_calendar.py` reads — its own, not Gmail's, for the reason above.
+      accessSecretName: "GCAL_ACCESS_TOKEN",
+      refreshSecretName: "GCAL_REFRESH_TOKEN",
+      consent: [
+        "See the events on your calendars, so an agent can answer questions about your week",
+        "Create and change events, which sends invitations to the people on them",
+        "It cannot delete an event, and it cannot create, delete or share a calendar",
       ],
     },
   ],
