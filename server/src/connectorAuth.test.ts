@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   authModeOf,
+  configuredUserSecretConnectors,
   connectionSuppliedEnv,
   isConnectorAuth,
   loadConnectors,
@@ -79,6 +80,71 @@ console.log("\nthe two lists .env.example is built from");
     "and between them the two lists are still exactly required_env — nothing was dropped",
     union.join(","),
   );
+}
+
+// THE COMPOSER DECK'S PRESENCE RULE, which had a wrong answer that looked right for two releases.
+// The deck asked "does this connector have a live OAuth connection", which is not a question a
+// `user_secret` connector can answer — so Postgres was invisible in the deck, read as an oversight
+// nobody chased, and became three of six the moment Stripe and HTTP arrived. The consequence was
+// not only a missing tile: a connector absent from the deck has no per-conversation toggle, so
+// §12.10's promise that disabling one removes its tools from that conversation's dispatch could
+// not be kept for any of the three.
+console.log("\nwhich user_secret connectors a workspace counts as having");
+{
+  const none = configuredUserSecretConnectors(all, () => false);
+  check(none.length === 0, "a workspace that has set up nothing has an empty deck", none.map((c) => c.connector.id).join(","));
+
+  const every = configuredUserSecretConnectors(all, () => true);
+  const userSecretIds = all.filter((c) => authModeOf(c) === "user_secret").map((c) => c.id);
+  check(
+    every.map((c) => c.connector.id).join(",") === userSecretIds.join(","),
+    "one that has set up everything sees every user_secret connector, in catalog order",
+    every.map((c) => c.connector.id).join(","),
+  );
+  check(every.every((c) => c.missing.length === 0), "...with nothing missing on any of them");
+  check(userSecretIds.length >= 3, "and there are three of them to be wrong about", userSecretIds.join(","));
+
+  // The OAuth ones are the other branch's business entirely. A function that returned them here
+  // would put two tiles in the deck for one connector.
+  check(
+    !every.some((c) => authModeOf(c.connector) === "oauth"),
+    "an OAuth connector never comes out of this — it is the other branch's",
+  );
+}
+
+console.log("\nand one halfway through being set up is present, saying what it lacks");
+{
+  // Stripe needs one name; HTTP needs one. Postgres needs one. So the multi-name case is built
+  // rather than found — the rule has to be right the day a connector needs two, and the day that
+  // happens is not the day to discover it was written against a catalog where none did.
+  const twoNames = { ...all[0]!, id: "pair", auth: "user_secret" as const, required_env: ["A_KEY", "B_KEY"] };
+  const catalog = [...all, twoNames];
+
+  const half = configuredUserSecretConnectors(catalog, (n) => n === "A_KEY");
+  const pair = half.find((c) => c.connector.id === "pair");
+  check(pair !== undefined, "one name set is enough to be in the deck");
+  check(pair?.missing.join(",") === "B_KEY", "...and it reports exactly what is still missing", pair?.missing.join(","));
+
+  const neither = configuredUserSecretConnectors(catalog, () => false).find((c) => c.connector.id === "pair");
+  check(neither === undefined, "no names set is 'never set up', which is an option rather than a capability");
+
+  const both = configuredUserSecretConnectors(catalog, (n) => n === "A_KEY" || n === "B_KEY").find((c) => c.connector.id === "pair");
+  check(both?.missing.length === 0, "and both set is ready, with no warning to carry");
+}
+
+console.log("\nthe real catalog's own three, one at a time");
+for (const id of ["postgres", "stripe", "http"]) {
+  const entry = all.find((c) => c.id === id);
+  check(entry !== undefined, `${id} is in the catalog`);
+  if (!entry) continue;
+  check(authModeOf(entry) === "user_secret", `${id} is a user_secret, so the deck's OAuth test could never see it`);
+  const present = configuredUserSecretConnectors(all, (n) => entry.required_env.includes(n));
+  check(
+    present.length === 1 && present[0]?.connector.id === id,
+    `configuring only ${id} puts exactly ${id} in the deck`,
+    present.map((c) => c.connector.id).join(","),
+  );
+  check(present[0]?.missing.length === 0, `...ready, because its own names are the ones that were set`);
 }
 
 console.log("\nan agent with no connectors");

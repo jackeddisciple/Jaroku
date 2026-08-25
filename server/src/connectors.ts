@@ -103,6 +103,51 @@ export function connectionSuppliedEnv(selected: Connector[]): string[] {
   return requiredEnv(selected.filter((c) => authModeOf(c) === "oauth"));
 }
 
+/** One `user_secret` connector this workspace has begun setting up, and what it still lacks. */
+export interface ConfiguredConnector {
+  connector: Connector;
+  /** Required names with no value yet. Empty means it is ready to use. */
+  missing: string[];
+}
+
+/**
+ * Which `user_secret` connectors a workspace counts as HAVING, and what each still needs.
+ *
+ * THE COMPOSER DECK'S PRESENCE RULE, as a function rather than as a closure in `index.ts`, because
+ * it is a rule with a wrong answer that looks right. The wrong answer shipped: the deck asked
+ * "does it have a live OAuth connection", which hid every `user_secret` connector — one of three
+ * when it was written, three of six now. A workspace with a working Stripe key saw no Stripe tile,
+ * and the per-conversation toggle had nothing to toggle, so §12.10's promise that disabling a
+ * connector removes its tools from that conversation's dispatch could not be kept for any of them.
+ *
+ * AT LEAST ONE REQUIRED NAME, NOT ALL OF THEM, and that is the decision worth stating. It mirrors
+ * the OAuth branch, where a connection that needs reauthorising still appears — carrying a warning
+ * — rather than vanishing. A connector halfway through being set up, or one whose second field
+ * somebody just cleared, is a thing this workspace HAS and cannot currently use, and a tile saying
+ * so is the whole point of the deck's health row. A connector with NONE of its names set has never
+ * been set up: that is an option rather than a capability, and it stays absent, or the deck becomes
+ * a picture of the product instead of a picture of this workspace.
+ *
+ * `isConfigured` is asked per NAME rather than handed a store, so this stays pure and so the caller
+ * keeps deciding what "configured" means — which for the one caller is the secret registry's own
+ * flag, a fact about the vault that never involves reading a value.
+ */
+export function configuredUserSecretConnectors(
+  all: Connector[],
+  isConfigured: (name: string) => boolean,
+): ConfiguredConnector[] {
+  const out: ConfiguredConnector[] = [];
+  for (const connector of all) {
+    if (authModeOf(connector) !== "user_secret") continue;
+    const missing = connector.required_env.filter((name) => !isConfigured(name));
+    // Every name missing is "never set up". A connector that declares no required env at all would
+    // land here too, and absent is the right answer for it: nothing has been decided about it.
+    if (missing.length === connector.required_env.length) continue;
+    out.push({ connector, missing });
+  }
+  return out;
+}
+
 /**
  * Union of PyPI requirements the selected connectors need, in catalog order, de-duplicated.
  * Mirror of `tool_templates.pip_requires` — one field, two readers, same as required_env.

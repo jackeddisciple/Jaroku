@@ -106,7 +106,9 @@ import {
 import { IdentityRepository } from "./db/repositories/identity.ts";
 import { isMemberRole } from "./db/tenant.ts";
 import { resolveDevTenancy, type DevTenancy } from "./devTenancy.ts";
-import { authModeOf, loadConnectors, templatesDir } from "./connectors.ts";
+import {
+  authModeOf, configuredUserSecretConnectors, loadConnectors, templatesDir,
+} from "./connectors.ts";
 import { buildArtifacts } from "./dockerfile.ts";
 import {
   isSafeAgentId, listProjectFiles, readOnlyPaths, readOnlyReason, type ProjectFile,
@@ -3130,10 +3132,26 @@ for (const route of conversationRoutes({
    * distinction that matters (reviewed versus unreviewed code) is carried by the MCP badge in the
    * plan and by the confirmation gate, not by whether a logo is in the deck.
    *
-   * A reviewed connector counts as present only when it has a live OAuth connection, because a
-   * catalogue entry nobody has connected is an option rather than a capability — a deck listing all
-   * three templates on a workspace that has connected none would be a picture of the product rather
-   * than of this workspace.
+   * A reviewed connector counts as present only when it has been SET UP, because a catalogue entry
+   * nobody has configured is an option rather than a capability — a deck listing every template on
+   * a workspace that has set up none would be a picture of the product rather than of this
+   * workspace.
+   *
+   * "SET UP" MEANT "HAS A LIVE OAUTH CONNECTION" UNTIL v0.3.6, AND THAT WAS THE WRONG TEST ALL
+   * ALONG — it just did not show. When the reviewed set was Gmail, Slack and Postgres, the rule
+   * hid exactly one connector, and Postgres being absent from the deck read as an oversight nobody
+   * chased. Three of the six are now `user_secret`, so the rule was hiding half the catalogue: a
+   * workspace with a Stripe key configured and working saw no Stripe tile, and — worse — the
+   * per-conversation toggle had nothing to toggle, so §12.10's promise that disabling a connector
+   * removes its tools from that conversation's dispatch could not be kept for any of the three.
+   *
+   * So the test is now "is its credential there", asked of whichever store holds it. An OAuth
+   * connector is present when it has a row; a `user_secret` one is present when at least one of its
+   * required names is configured. AT LEAST ONE, NOT ALL, for the same reason a `reauth_required`
+   * OAuth connection still appears with a warning rather than vanishing: a connector halfway
+   * through being set up, or one whose second field somebody just cleared, is a thing this
+   * workspace HAS and cannot currently use — and a tile carrying that sentence is the whole point
+   * of §3.2's health row. Zero of them is the "never set up" case and stays absent.
    */
   workspaceConnectors: async (ctx) => {
     const rows: {
@@ -3154,6 +3172,30 @@ for (const route of conversationRoutes({
         // §3.2's health row: "This is the surface where a user is thinking about connectors, so
         // it's the right place to learn a token is dying."
         warning: connectorWarning(conn),
+      });
+    }
+
+    // AND THE CONNECTORS NOBODY CAN CONNECT FOR YOU, between the OAuth ones and the MCP servers.
+    // Position is not cosmetic: the deck renders three tiles then a counter and never sorts, so
+    // the reviewed connectors stay together and an MCP server is never the thing that displaces
+    // one. Whether a `user_secret` connector is set up is a fact about the vault, which is what
+    // the secret registry records — names and `configured`, never a value.
+    const configured = new Map((await secretsManager.list(ctx).catch(() => [])).map((s) => [s.name, s.configured]));
+    for (const { connector: entry, missing } of configuredUserSecretConnectors(
+      [...catalogue.values()],
+      (name) => configured.get(name) === true,
+    )) {
+      rows.push({
+        id: entry.id,
+        label: entry.label,
+        // Null for the same reason the OAuth branch passes null: their marks live in the client's
+        // own icon set with the right brand colours.
+        logoUrl: null,
+        toolCount: entry.tools.length,
+        // The health row's sentence, in the same voice `connectorWarning` uses for a dying token.
+        // A connector missing one of two names is one an agent will fail on at its first call, and
+        // this is the surface where somebody is already thinking about connectors.
+        warning: missing.length > 0 ? `needs ${missing.join(" and ")}` : null,
       });
     }
 
