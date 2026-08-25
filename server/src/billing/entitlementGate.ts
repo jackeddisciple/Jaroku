@@ -34,13 +34,18 @@ import type { Limit, TierEntitlements } from "./entitlements.ts";
 /**
  * The checks that exist, and the four that are declared with nothing yet to check.
  *
- * `perAgentAccessGrants`, `approvalBatchApprove`, `policyEngine` and `evalCiGate` are tier flags in
- * `TierEntitlements` because the pricing sells them, and they appear in no row of the table below
- * because the surfaces they gate — the Access tab, the Approval System, the Policy Engine, an eval
- * that can fail a pull request — are other specifications and are not built. Declaring them now and
- * wiring them when the surface lands is the right order: the alternative is inventing a command to
- * hang them on, which is how `bulkInboxAction` would have quietly become "batch approvals" and put
- * a shipped Inbox feature behind Pro on the strength of a similar-sounding name.
+ * `approvalBatchApprove`, `policyEngine` and `evalCiGate` are tier flags in `TierEntitlements`
+ * because the pricing sells them, and they appear in no row of the table below because the surfaces
+ * they gate — the Approval System, the Policy Engine, an eval that can fail a pull request — are
+ * other specifications and are not built. Declaring them and wiring them when the surface lands is
+ * the right order: the alternative is inventing a command to hang them on, which is how
+ * `bulkInboxAction` would have quietly become "batch approvals" and put a shipped Inbox feature
+ * behind Pro on the strength of a similar-sounding name.
+ *
+ * `perAgentAccessGrants` WAS THE FOURTH OF THOSE AND IS NOW WIRED, which is what that paragraph was
+ * promising. The Access tab exists, `grantAccess` and `modifyGrant` are the commands the flag
+ * describes, and the two reads beside them are deliberately NOT gated — see their rows for why a
+ * paywall on "who can deploy this" would be the wrong half of the feature to sell.
  */
 export type EntitlementKind =
   | "canCreateAgent"
@@ -51,7 +56,8 @@ export type EntitlementKind =
   | "canInviteMember"
   | "canCreateWorkspace"
   | "githubPhase1"
-  | "githubPhase2";
+  | "githubPhase2"
+  | "perAgentAccessGrants";
 
 /** The word for "this command has no tier dimension", written rather than implied. */
 export const NO_ENTITLEMENT = "none" as const;
@@ -204,14 +210,33 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   // it is a less safe one, and the party it costs is the customer paying us least. The same
   // argument the `leaveWorkspace` and `setByok` rows below make from the other direction: a gate
   // that stops somebody REDUCING what is reachable is a gate that sells risk.
+  // WRITING A GRANT IS THE THING THE PRICING SELLS, and this is the flag being wired to a surface
+  // for the first time. `perAgentAccessGrants` has been in `TierEntitlements` and in the plan table
+  // since v0.3.4 — off on Free and Pro, on for Team — declared with nothing to check because the
+  // Access tab was another specification and was not built. It is built now. Leaving the flag
+  // unwired would be exactly the failure this file's header names: a feature the pricing page sells,
+  // unlimited on every tier forever, with nothing anywhere saying so.
+  grantAccess: "perAgentAccessGrants",
+  modifyGrant: "perAgentAccessGrants",
+  // AND READING IS NOT GATED, WHICH IS THE HALF WORTH ARGUING. What Team buys is the ability to
+  // NARROW somebody's access to one agent; what every workspace gets is the ability to see who can
+  // reach what. Gating the reads would mean a Free workspace could not answer "who can deploy
+  // this", which is not a smaller product — it is a less safe one, sold to the customer paying us
+  // least. The Exposure section is the sharpest case: it exists to say a deployed agent is
+  // reachable by anyone holding its URL, and that warning behind a paywall would be indefensible.
   loadAccess: NO_ENTITLEMENT,
   loadExposure: NO_ENTITLEMENT,
-  grantAccess: NO_ENTITLEMENT,
-  modifyGrant: NO_ENTITLEMENT,
-  // And revoking least of all, by the argument `cancelDeploy` and `removeMcpServer` make: a gate
-  // in front of NARROWING somebody's access would be a tier refusing an admin the right to take a
-  // capability away, and the workspace most likely to hit it is the one that most needs to.
+  // REVOKING IS NEVER GATED, by the argument `cancelDeploy` and `removeMcpServer` make and which
+  // matters more here than for either of them: a workspace that downgrades KEEPS its grants — the
+  // second principle is that a downgrade gates features off and never destroys data — so it has to
+  // be able to remove them. A gate here would trap a narrowing grant in place on a plan that can no
+  // longer edit it, which is the worst of both.
   revokeGrant: NO_ENTITLEMENT,
+  // Neither of these is a grant. Reading who is connected and closing one socket take nothing away
+  // and give nothing, and a tier check in front of "somebody left a laptop logged in" would be a
+  // plan deciding how long that stays true.
+  loadSessions: NO_ENTITLEMENT,
+  endSession: NO_ENTITLEMENT,
   loadUsage: NO_ENTITLEMENT,
   setSpendCeiling: NO_ENTITLEMENT,
   // CHOOSING TO PAY FOR YOUR OWN INFERENCE IS NEVER GATED. A workspace turning BYOK on is asking to
@@ -301,6 +326,7 @@ const QUOTA_CHECKS: Record<string, { limit: keyof TierEntitlements; name: string
 const FEATURE_CHECKS: Record<string, keyof TierEntitlements> = {
   githubPhase1: "githubPhase1",
   githubPhase2: "githubPhase2",
+  perAgentAccessGrants: "perAgentAccessGrants",
 };
 
 /**

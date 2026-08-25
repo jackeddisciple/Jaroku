@@ -1238,6 +1238,7 @@ export type AccessMessage =
       viewer: string[];
     }
   | { channel: "access"; type: "exposure"; exposure: unknown }
+  | { channel: "access"; type: "sessions"; agentId: string; sessions: unknown[] }
   | { channel: "access"; type: "recheck" }
   | { channel: "access"; type: "error"; message: string }
   | { channel: "access"; type: "notice"; message: string };
@@ -2080,7 +2081,12 @@ export type ClientCommand =
       expiresAt?: string | null;
       note?: string | null;
     }
-  | { cmd: "revokeGrant"; agentId: string; userId: string };
+  | { cmd: "revokeGrant"; agentId: string; userId: string }
+  | { cmd: "loadSessions"; agentId: string }
+  // §14.2 — ONE SOCKET, NAMED BY A HANDLE THAT MEANS NOTHING ELSE. Not a user id: one person with
+  // three tabs is three sockets, and ending "their session" would end all of them, which is not
+  // what the button says.
+  | { cmd: "endSession"; agentId: string; sessionId: string };
 
 // --- the Inbox: what is waiting on you --------------------------------------------------------
 //

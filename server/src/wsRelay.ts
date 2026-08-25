@@ -2,6 +2,7 @@
 // serves the static debug client over the same HTTP port. On connect, a client receives the
 // run history snapshot; thereafter it receives live events as they arrive.
 
+import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { readFile } from "node:fs/promises";
@@ -1001,6 +1002,17 @@ const AUDIT_COMMANDS = new Set(["listAudit"]);
  */
 export type LoadAccessCommand = { cmd: "loadAccess"; agentId: string };
 export type LoadExposureCommand = { cmd: "loadExposure"; agentId: string };
+export type LoadSessionsCommand = { cmd: "loadSessions"; agentId: string };
+/**
+ * §14.2 — close one socket.
+ *
+ * IT DOES NOT REVOKE ANYTHING, and the command's shape says so: there is no capability set and no
+ * user id on it, only the handle of one connection. The person can reconnect immediately if their
+ * access still allows it, which is exactly right — this is for "somebody left a session open on a
+ * laptop in a meeting room", not for taking access away. Taking access away is `revokeGrant`, and
+ * the confirmation on this button has to say which of the two somebody is about to do.
+ */
+export type EndSessionCommand = { cmd: "endSession"; agentId: string; sessionId: string };
 
 /**
  * Create or replace one person's grant on one agent.
@@ -1037,12 +1049,15 @@ export type RevokeGrantCommand = { cmd: "revokeGrant"; agentId: string; userId: 
 export type AccessCommand =
   | LoadAccessCommand
   | LoadExposureCommand
+  | LoadSessionsCommand
+  | EndSessionCommand
   | GrantAccessCommand
   | ModifyGrantCommand
   | RevokeGrantCommand;
 
 const ACCESS_COMMANDS = new Set([
-  "loadAccess", "loadExposure", "grantAccess", "modifyGrant", "revokeGrant",
+  "loadAccess", "loadExposure", "loadSessions", "endSession",
+  "grantAccess", "modifyGrant", "revokeGrant",
 ]);
 
 /** One person on the Access tab's People list, with WHY they have what they have. */
@@ -1091,6 +1106,32 @@ export interface ExposurePayload {
   auth: string | null;
 }
 
+/**
+ * One open connection, as §14.1 allows it to be described.
+ *
+ * THE ABSENCES ARE THE SPECIFICATION. No IP address, no ticket, no token, no raw User-Agent, no
+ * session id that means anything outside this process. §14.1 is explicit about the first — "an
+ * internal access panel is not the place to expose colleagues' network locations. The data is
+ * available in audit_log for anyone with a genuine investigative need" — and the rest follow from
+ * the same reading: this list exists so an administrator can recognise a session and end it, not so
+ * they can profile a colleague's machine.
+ *
+ * `startedAt` RATHER THAN A DURATION, so the number on screen keeps counting without the client
+ * asking again. A duration computed server-side is stale the moment it is sent, and a panel showing
+ * "4 minutes" for an hour is worse than one showing nothing.
+ */
+export interface LiveSession {
+  /** The handle `endSession` takes. Meaningless outside this process, by design. */
+  id: string;
+  userId: string | null;
+  name: string;
+  /** "Chrome on macOS", or null when nothing said. Never the raw header. */
+  device: string | null;
+  startedAt: string;
+  /** Whether this socket is looking at the agent being asked about. See `SocketSession.agentId`. */
+  onThisAgent: boolean;
+}
+
 export type AccessEvent =
   | {
       type: "access";
@@ -1108,6 +1149,7 @@ export type AccessEvent =
       viewer: string[];
     }
   | { type: "exposure"; exposure: ExposurePayload }
+  | { type: "sessions"; agentId: string; sessions: LiveSession[] }
   /**
    * §7 — "something about access in this workspace changed; re-resolve."
    *
@@ -2508,7 +2550,17 @@ export type SessionEvent =
   // Still a member, at a different role. The socket stays open and re-authorises against the
   // new one; a demotion does not need to interrupt somebody mid-sentence, it needs to stop
   // them doing the thing they no longer may.
-  | { type: "role_changed"; role: string };
+  | { type: "role_changed"; role: string }
+  /**
+   * §14.2 — an administrator closed this connection. It is not a revocation and does not say so.
+   *
+   * A MESSAGE OF ITS OWN rather than reusing `revoked`, and the distinction is the whole point of
+   * the feature: `revoked` means "you are no longer a member" and a client acting on it sends
+   * somebody to a sign-in screen or another workspace. This means "that tab is closed" — the person
+   * may reconnect immediately if their access still allows it, which is usually the case, because
+   * the button that produced this is for a session left open rather than for a person.
+   */
+  | { type: "ended"; reason: string };
 
 /**
  * Why a socket was closed, in the 4000–4999 application range.
@@ -2519,6 +2571,16 @@ export type SessionEvent =
  */
 export const CLOSE_UNAUTHORISED = 4001;
 export const CLOSE_RECONNECT = 4002;
+/**
+ * §14.2's End session — reconnecting is allowed, so this is on the reconnect side of that one bit.
+ *
+ * A THIRD CODE RATHER THAN REUSING `CLOSE_RECONNECT`, because the two differ in what a client
+ * should do about the reconnect: a token that expired should be refreshed and retried at once, and
+ * a session an administrator ended should not immediately reopen itself. A tab that came straight
+ * back would make the button appear not to work, and would put an administrator into a loop with a
+ * laptop in another building.
+ */
+export const CLOSE_ENDED_BY_ADMIN = 4003;
 
 export type DebugEvent =
   | { type: "paused"; runId: string; seq: number }
@@ -2540,6 +2602,40 @@ export interface SocketSession {
   /** Unix seconds, or null when the socket was opened without a token (the dev path). */
   expiresAt?: number | null;
   userId?: string | null;
+  /**
+   * A handle for THIS connection, so §14.2's End session can name one socket.
+   *
+   * MINTED HERE AND NEVER DERIVED FROM ANYTHING THE CLIENT SENT. A ticket id would have been the
+   * obvious key and is the wrong one: it is a credential, it identifies the person rather than the
+   * connection, and one person with three tabs would be three sockets under one name — so ending a
+   * session would end all of them, which is not what the button says.
+   */
+  socketId?: string;
+  /** When this socket opened. §14.1's duration is computed from it rather than stored. */
+  connectedAt?: number;
+  /**
+   * A short human description of what connected — "Chrome on macOS".
+   *
+   * DERIVED FROM THE USER-AGENT AND DELIBERATELY LOSSY. §14.1 asks for "browser/device" and that is
+   * all this is: enough for somebody to recognise their own session in a list of four, and not a
+   * fingerprint. The raw header is not kept, because a raw User-Agent carries a version string, a
+   * build number and often a device model — which is a description of a colleague's machine, on an
+   * internal panel, for no reason anybody asked for.
+   */
+  device?: string | null;
+  /**
+   * The agent this socket is currently looking at, or null.
+   *
+   * §14.3's per-socket agent context, and the mechanism is the simplest one available: the client
+   * asks `loadAccess` or `loadAgentDetail` when it opens an agent, and the relay remembers which
+   * one it asked about. Not a new command and not a heartbeat — a socket that is looking at an
+   * agent has already said so, and this is reading what it said.
+   *
+   * IT IS ADVISORY AND THE PANEL SAYS SO. A tab left open on an agent last Tuesday still reports
+   * that agent; a tab on the Threads view reports whatever it last opened. What it answers well is
+   * "who is in here right now", which is the question the section is read for.
+   */
+  agentId?: string | null;
 }
 
 /**
@@ -2612,6 +2708,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // which section is empty and why.
   loadAccess: "access", loadExposure: "access",
   grantAccess: "access", modifyGrant: "access", revokeGrant: "access",
+  loadSessions: "access", endSession: "access",
   loadEnforcement: "enforcement", appealEnforcement: "enforcement",
   // All six on `threads`, the reads included. The channel HAS an error shape, so unlike
   // `loadAgentFiles` there is nowhere better for a refusal to go — and a refusal about a rename
@@ -3022,8 +3119,32 @@ export class WsRelay {
       const pending: Promise<TenantContext> = authorized
         ? Promise.resolve(authorized.context)
         : Promise.resolve(asSession(this.opts.contextFor(req) as TenantContext)).then((s) => s.context);
-      if (authorized) this.sessions.set(ws, authorized);
-      pending.then((ctx) => this.contexts.set(ws, ctx)).catch(() => {});
+      // §14 — WHAT THIS CONNECTION IS, stamped once at the moment it opens.
+      //
+      // A handle, a clock and a short description of the browser, and nothing else. The raw
+      // User-Agent is read here and thrown away: §14.1 asks for "browser/device" and a raw header
+      // carries a version, a build and often a device model, which is a description of a
+      // colleague's machine on an internal panel for no reason anybody asked for.
+      //
+      // The session map is what `liveSessions` and `endSession` read, so an unauthenticated dev
+      // socket gets a row here too rather than being invisible — a list that silently omitted
+      // connections would be worse than one that says a session it cannot name is open.
+      const opened: SocketSession = {
+        ...(authorized ?? { context: undefined as unknown as TenantContext }),
+        socketId: randomUUID(),
+        connectedAt: Date.now(),
+        device: describeClient(req.headers["user-agent"]),
+        agentId: null,
+      };
+      if (authorized) this.sessions.set(ws, opened);
+      pending
+        .then((ctx) => {
+          this.contexts.set(ws, ctx);
+          // The dev path has no authorised session, so its row is written once the context
+          // resolves. Without this an unauthenticated socket is live and unlistable.
+          if (!authorized) this.sessions.set(ws, { ...opened, context: ctx });
+        })
+        .catch(() => {});
       const withContext = async (fn: (ctx: TenantContext) => Promise<void> | void): Promise<void> => {
         await fn(await pending);
       };
@@ -3098,6 +3219,22 @@ export class WsRelay {
           // It happens here, once, rather than in fifty handlers, and a command with no
           // capability is refused rather than allowed, so a command added without an entry in
           // the matrix fails loudly instead of arriving ungated.
+          // §14.3's per-socket agent context, recorded BEFORE the authorisation check and
+          // deliberately so: what this remembers is what the tab is LOOKING at, and a refused read
+          // is still a tab looking at an agent. Recording it after the gate would mean a person
+          // whose access was just narrowed vanished from the sessions list at the moment somebody
+          // was most likely to be looking for them.
+          //
+          // Two commands rather than all of them, because these two are the ones a client sends
+          // when an agent detail pane opens. Every other command carrying an `agentId` is an
+          // action, and an action is not a place somebody is.
+          if (msg.cmd === "loadAgentDetail" || msg.cmd === "loadAccess") {
+            const session = this.sessions.get(ws);
+            const named = (msg as { agentId?: unknown }).agentId;
+            if (session && typeof named === "string") {
+              this.sessions.set(ws, { ...session, agentId: named });
+            }
+          }
           void this.authorized(ws, msg.cmd, pending, msg).then((allowed) => {
             if (allowed) this.dispatch(ws, msg, pending);
           });
@@ -3151,7 +3288,7 @@ export class WsRelay {
         // run out should not cost a database round trip to close.
         if (typeof session.expiresAt === "number") {
           if (nowS >= session.expiresAt) {
-            this.endSession(ws, { type: "expired" }, CLOSE_UNAUTHORISED);
+            this.endSocket(ws, { type: "expired" }, CLOSE_UNAUTHORISED);
             continue;
           }
           if (session.expiresAt - nowS <= EXPIRY_WARNING_S && !this.warned.has(ws)) {
@@ -3166,13 +3303,13 @@ export class WsRelay {
         const verdict = await revalidate(session);
         if (!verdict.ok) {
           if (verdict.reason === "workspace_gone") {
-            this.endSession(
+            this.endSocket(
               ws,
               { type: "workspace_changed", message: "that workspace no longer exists" },
               CLOSE_RECONNECT,
             );
           } else {
-            this.endSession(
+            this.endSocket(
               ws,
               { type: "revoked", message: "your access to this workspace was removed" },
               CLOSE_UNAUTHORISED,
@@ -3201,7 +3338,7 @@ export class WsRelay {
   }
 
   /** Tell the socket why, then close it with a code that survives a dropped frame. */
-  private endSession(ws: WebSocket, event: SessionEvent, code: number): void {
+  private endSocket(ws: WebSocket, event: SessionEvent, code: number): void {
     this.sendTo(ws, { channel: "session", ...event });
     console.log(`[relay] closing a socket: ${event.type}`);
     // A beat, so the frame above is written before the close. `ws.close()` flushes queued
@@ -4091,6 +4228,65 @@ export class WsRelay {
    * SOCKETS, NOT SESSIONS. Somebody with three tabs open appears once, because the question the
    * dot answers is "is this person here", not "how many browsers do they have".
    */
+  /**
+   * §14 — every open connection in this workspace, with the ones on this agent marked.
+   *
+   * THE WHOLE WORKSPACE RATHER THAN ONLY THIS AGENT, and the flag is what makes that honest. §14.3
+   * offers a fallback — "show all workspace sessions (not per-agent) and document the limitation" —
+   * and this is a third thing: every session is listed and each says whether it is on this agent,
+   * because both answers are useful and hiding the others would be a count that disagrees with the
+   * presence dots two sections above it.
+   *
+   * NAMES ARE RESOLVED BY THE CALLER, which is why this takes a lookup. The relay holds no identity
+   * repository and should not grow one — the same rule that makes `entitles` and `resolvesAgent`
+   * callbacks rather than dependencies.
+   */
+  liveSessions(
+    ctx: TenantContext,
+    agentId: string,
+    nameOf: (userId: string | null) => string,
+  ): LiveSession[] {
+    const out: LiveSession[] = [];
+    for (const [ws, session] of this.sessions) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (session.context.workspaceId !== ctx.workspaceId) continue;
+      if (!session.socketId) continue;
+      out.push({
+        id: session.socketId,
+        userId: session.context.actorUserId,
+        name: nameOf(session.context.actorUserId),
+        device: session.device ?? null,
+        startedAt: new Date(session.connectedAt ?? Date.now()).toISOString(),
+        onThisAgent: session.agentId === agentId,
+      });
+    }
+    // Newest last, so a list that grows while somebody watches it grows downward rather than
+    // reordering under the pointer.
+    return out.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+  }
+
+  /**
+   * §14.2 — close one socket in this workspace. Returns whether there was one to close.
+   *
+   * SCOPED BEFORE ANYTHING ELSE. A socket id is opaque and unguessable, and that is not what makes
+   * this safe: the workspace comparison is. Without it an id that leaked from one tenant's panel
+   * would close a connection in another, which is the one thing on this relay that a caller could
+   * do to somebody they cannot otherwise reach.
+   *
+   * `endSession`, NOT `revoked`. The close code and the message say the connection ended, because
+   * that is what happened — telling a client its access was revoked when it was not would send
+   * somebody to an administrator about a permission that is fine.
+   */
+  endSession(ctx: TenantContext, sessionId: string): boolean {
+    for (const [ws, session] of this.sessions) {
+      if (session.socketId !== sessionId) continue;
+      if (session.context.workspaceId !== ctx.workspaceId) return false;
+      this.endSocket(ws, { type: "ended", reason: "an administrator ended this session" }, CLOSE_ENDED_BY_ADMIN);
+      return true;
+    }
+    return false;
+  }
+
   liveUsers(ctx: TenantContext): Set<string> {
     const out = new Set<string>();
     for (const [ws, session] of this.sessions) {
@@ -4257,4 +4453,51 @@ export class WsRelay {
       this.sendTo(ws, { channel: "agents", type: "grid", ...(await building) });
     });
   }
+}
+
+/**
+ * A User-Agent, reduced to the two words §14.1 asks for: "Chrome on macOS".
+ *
+ * DELIBERATELY LOSSY, AND THE LOSS IS THE FEATURE. A raw User-Agent carries a version, a build
+ * number and often a device model, and none of that helps anybody recognise their own session in a
+ * list of four — it is a fingerprint, on an internal panel, about a colleague. So the header is
+ * read once at connection time, reduced to a browser and an operating system, and never stored.
+ *
+ * ORDER MATTERS IN BOTH LISTS, and both are ordered most-specific-first for the same reason: every
+ * Chromium browser claims to be Chrome and Chrome claims to be Safari, so a scan that checked
+ * "Safari" first would report Safari for practically every browser there is. Edge before Chrome,
+ * Chrome before Safari.
+ *
+ * AN UNRECOGNISED AGENT IS `null`, NOT "Unknown". The panel renders nothing for a null and would
+ * render a word for a string — and "Unknown browser" beside somebody's name reads as a warning
+ * about their session rather than as an absence of a header.
+ */
+export function describeClient(userAgent: string | undefined): string | null {
+  if (!userAgent) return null;
+  const ua = userAgent;
+  const browser =
+    /\bEdg\//.test(ua) ? "Edge"
+    : /\bOPR\/|\bOpera\//.test(ua) ? "Opera"
+    : /\bFirefox\//.test(ua) ? "Firefox"
+    : /\bChrome\//.test(ua) ? "Chrome"
+    : /\bSafari\//.test(ua) ? "Safari"
+    // The desktop wrapper's own WebView, which is what most sessions actually are. Named rather
+    // than falling through to a browser, because "Chrome on Windows" for somebody using the
+    // desktop app is a wrong answer that looks like a right one.
+    : /\bTauri\/|\bwv\b|\bElectron\//.test(ua) ? "Jaroku desktop"
+    : null;
+  const os =
+    /\bWindows NT\b/.test(ua) ? "Windows"
+    // iOS AND ANDROID BEFORE macOS AND LINUX, and this is the ordering the comment above claims
+    // rather than the one it originally had. An iPhone's User-Agent contains the literal string
+    // "like Mac OS X" and an Android's contains "Linux", so a scan that asked about the desktop
+    // first reported "Safari on macOS" for every iPhone — a wrong answer that looks like a right
+    // one, on a row whose whole job is helping somebody recognise their own session.
+    : /\b(iPhone|iPad|iPod)\b/.test(ua) ? "iOS"
+    : /\bAndroid\b/.test(ua) ? "Android"
+    : /\b(Macintosh|Mac OS X)\b/.test(ua) ? "macOS"
+    : /\b(Linux|X11)\b/.test(ua) ? "Linux"
+    : null;
+  if (browser && os) return `${browser} on ${os}`;
+  return browser ?? os ?? null;
 }

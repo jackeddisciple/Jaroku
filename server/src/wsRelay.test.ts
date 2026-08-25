@@ -17,7 +17,7 @@ import WebSocket from "ws";
 import { openTestSqlite } from "./db/testDb.ts";
 import { newRequestId, systemContextFor, type TenantContext } from "./db/tenant.ts";
 import { TraceStore } from "./store.ts";
-import { MAX_WS_MESSAGE_BYTES, WsRelay, CLOSE_RECONNECT, CLOSE_UNAUTHORISED, type ForwardedCommand, type SessionVerdict } from "./wsRelay.ts";
+import { MAX_WS_MESSAGE_BYTES, WsRelay, describeClient, CLOSE_RECONNECT, CLOSE_UNAUTHORISED, type ForwardedCommand, type SessionVerdict } from "./wsRelay.ts";
 import type { Run, Step } from "./types.ts";
 
 let failures = 0;
@@ -428,6 +428,53 @@ console.log("\na socket does not outlive the membership that authorised it");
   const gone = a.inbox.slice(beforeGone).find((m: any) => m.channel === "session" && m.type === "workspace_changed") as any;
   check(!!gone, "a workspace that no longer exists is announced as workspace_changed, not revoked");
   check(a.closed() === CLOSE_RECONNECT, `...with the reconnect close code (${a.closed()})`);
+}
+
+// §14.1's "browser/device", and the two orderings that make it right rather than plausible.
+//
+// THIS IS A PURE FUNCTION AND IT STILL EARNS A SUITE, because both of its lists are ordered by a
+// rule that is invisible in the code and load-bearing in the answer. Every Chromium browser claims
+// to be Chrome and Chrome claims to be Safari; an iPhone claims "like Mac OS X" and an Android
+// claims "Linux". A scan that asked the general question first is not subtly wrong — it reports
+// Safari for every browser and macOS for every phone, confidently, on a row whose entire job is
+// helping somebody recognise their own session in a list of four. The iOS case shipped wrong here
+// and this is what found it.
+console.log("\nwhat connected, in two words");
+{
+  const seen = (ua: string | undefined): string | null => describeClient(ua);
+  check(
+    seen("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36") === "Chrome on macOS",
+    "Chrome is Chrome, not the Safari it claims to be",
+  );
+  check(
+    seen("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36 Edg/131.0") === "Edge on Windows",
+    "...and Edge is Edge, not the Chrome it also claims to be",
+  );
+  check(
+    seen("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile/15E148 Safari/604.1") === "Safari on iOS",
+    "an iPhone is iOS, despite saying `like Mac OS X`",
+  );
+  check(
+    seen("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36") === "Chrome on Android",
+    "...and an Android is Android, despite saying `Linux`",
+  );
+  check(
+    seen("Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0") === "Firefox on Linux",
+    "a real Linux desktop is still Linux",
+  );
+
+  // AN UNRECOGNISED AGENT IS NULL, NOT A WORD. The panel renders nothing for a null and would
+  // render "Unknown" for a string — and "Unknown browser" beside somebody's name reads as a warning
+  // about their session rather than as an absent header.
+  check(seen(undefined) === null, "a missing header is null rather than a word");
+  check(seen("") === null, "...and so is an empty one");
+  check(seen("curl/8.4.0") === null, "...and so is something nobody has a name for");
+
+  // AND NOTHING OF THE RAW HEADER SURVIVES. §14.1 asks for browser and device; a version string or
+  // a device model is a fingerprint of a colleague's machine on an internal panel.
+  const described = seen("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/131.0.6778.85 Mobile Safari/537.36") ?? "";
+  check(!/\d/.test(described), `no version number reaches the panel ("${described}")`);
+  check(!/Pixel/.test(described), "...and no device model");
 }
 
 a.ws.close();

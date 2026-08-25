@@ -227,6 +227,10 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   grantAccess: "member:read",
   modifyGrant: "member:read",
   revokeGrant: "member:read",
+  // §14's two, at the same floor and gated at `admin` on the agent — they read and END connections
+  // rather than change permissions, which is why they are not filed with the audit log.
+  loadSessions: "member:read",
+  endSession: "member:read",
   listAudit: "workspace:manage",
   inviteMember: "member:manage",
   revokeInvite: "member:manage",
@@ -500,6 +504,8 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   grantAccess: "admin",
   modifyGrant: "admin",
   revokeGrant: "admin",
+  loadSessions: "admin",
+  endSession: "admin",
 };
 
 /** The agent-level capability a command needs, or undefined for one that is not agent-scoped. */

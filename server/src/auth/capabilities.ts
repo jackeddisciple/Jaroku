@@ -792,6 +792,13 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   grantAccess: "member:read",
   modifyGrant: "member:read",
   revokeGrant: "member:read",
+  // §14's two, at the same floor and gated at `admin` on the agent for the same reason. They read
+  // and end CONNECTIONS rather than change permissions, which is why they are not `workspace:manage`
+  // beside `listAudit`: ending a session takes nothing away — the person reconnects if their access
+  // still allows it — and a floor only an owner could pass would put "somebody left a laptop logged
+  // in" on the one person in the workspace most likely to be elsewhere.
+  loadSessions: "member:read",
+  endSession: "member:read",
   listAudit: "workspace:manage",
   inviteMember: "member:manage",
   revokeInvite: "member:manage",
@@ -945,6 +952,11 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   grantAccess: "admin",
   modifyGrant: "admin",
   revokeGrant: "admin",
+  // §14.1 — the session list names colleagues and says how long each has been connected, which is
+  // `admin` rather than `view` because it is a fact about PEOPLE rather than about the agent.
+  // Everything else on this tab describes the agent; this describes who is at it right now.
+  loadSessions: "admin",
+  endSession: "admin",
 
   loadAccess: "view",
   // AND THE EXPOSURE READ IS `view` FOR A SHARPER REASON. It is the section that says a deployed

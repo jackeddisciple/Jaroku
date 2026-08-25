@@ -57,6 +57,22 @@ export interface Exposure {
   auth: string | null;
 }
 
+/**
+ * One open connection, as the server describes it — see `LiveSession` in wsRelay.ts.
+ *
+ * THE ABSENCES ARE THE CONTRACT. No IP, no ticket, no raw User-Agent. Restated here rather than
+ * imported for the reason every wire shape in this client is restated: the server and the client
+ * are two programs, and a field added to a payload should be a deliberate decision to render.
+ */
+export interface LiveSession {
+  id: string;
+  userId: string | null;
+  name: string;
+  device: string | null;
+  startedAt: string;
+  onThisAgent: boolean;
+}
+
 /** One agent's answer to `loadAccess`. */
 export interface AgentAccess {
   agentId: string;
@@ -88,12 +104,21 @@ interface AccessState {
    */
   bySlug: Record<string, string>;
   exposure: Record<string, Exposure>;
+  /**
+   * Open connections, keyed by the agent whose panel asked.
+   *
+   * KEYED BY AGENT EVEN THOUGH THE LIST IS WORKSPACE-WIDE, because `onThisAgent` is computed
+   * against the agent that asked — the same sockets answered for a different agent are the same
+   * rows with a different flag. One shared list would be right until two panels were open.
+   */
+  sessions: Record<string, LiveSession[]>;
   /** Which agent ids have a `loadAccess` in flight, so a panel can say "loading" rather than "nobody". */
   loading: Record<string, boolean>;
   error: string | null;
 
   setAccess: (access: AgentAccess) => void;
   setExposure: (exposure: Exposure) => void;
+  setSessions: (agentId: string, sessions: LiveSession[]) => void;
   markLoading: (agentId: string) => void;
   setError: (message: string | null) => void;
   /** §8.2 — the recheck invalidates everything, because a role change moves every ceiling at once. */
@@ -104,6 +129,7 @@ const EMPTY = {
   byAgent: {} as Record<string, AgentAccess>,
   bySlug: {} as Record<string, string>,
   exposure: {} as Record<string, Exposure>,
+  sessions: {} as Record<string, LiveSession[]>,
   loading: {} as Record<string, boolean>,
   error: null as string | null,
 };
@@ -125,6 +151,9 @@ export const useAccessStore = create<AccessState>((set) => ({
   setExposure: (exposure) =>
     set((s) => ({ exposure: { ...s.exposure, [exposure.agentId]: exposure } })),
 
+  setSessions: (agentId, sessions) =>
+    set((s) => ({ sessions: { ...s.sessions, [agentId]: sessions } })),
+
   markLoading: (agentId) => set((s) => ({ loading: { ...s.loading, [agentId]: true } })),
 
   setError: (error) => set({ error }),
@@ -145,7 +174,11 @@ export const useAccessStore = create<AccessState>((set) => ({
   // The alias map goes with it. It is derived from the answers, so keeping it would leave slugs
   // pointing at uuids whose entries no longer exist — a lookup that resolves to nothing, which is
   // the same as no alias and one more thing to be wrong.
-  invalidate: () => set({ byAgent: {}, bySlug: {}, loading: {} }),
+  // THE SESSION LIST GOES TOO, and for a different reason from the grants: it is not invalidated by
+  // a permission change, it is simply the most perishable thing in this store. A list of who is
+  // connected is stale within seconds of anything happening, and the recheck is the one moment the
+  // panel is already going to ask again.
+  invalidate: () => set({ byAgent: {}, bySlug: {}, sessions: {}, loading: {} }),
 }));
 
 /**

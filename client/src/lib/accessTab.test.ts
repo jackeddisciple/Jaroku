@@ -27,6 +27,8 @@ import { useSessionStore } from "../store/sessionStore.ts";
 import { useAccessStore, type AccessPerson, type AgentAccess } from "../store/accessStore.ts";
 import { AccessPeople } from "../components/AccessPeople.tsx";
 import { GrantDialog } from "../components/GrantDialog.tsx";
+import { AccessExposure } from "../components/AccessExposure.tsx";
+import { AccessSessions } from "../components/AccessSessions.tsx";
 import type { AgentCapability } from "./capabilities.ts";
 
 let failures = 0;
@@ -446,6 +448,102 @@ console.log("\na note is required for the three that need one six months later")
     }),
   );
   check(!viewOnly.includes("required for"), "a view-only grant does not demand one");
+}
+
+// ---------------------------------------------------------------------------------------------
+// §13 and §14 — Exposure, and the sessions list.
+// ---------------------------------------------------------------------------------------------
+
+console.log("\nexposure says what is reachable, in words, whether or not anything is");
+{
+  const deployed = markup(
+    React.createElement(AccessExposure, {
+      exposure: {
+        agentId: AGENT,
+        deployed: true,
+        url: "https://billing-bot.up.railway.app",
+        status: "live",
+        version: 7,
+        deployedByName: "Priya",
+        deployedAt: "2026-01-01T00:00:00.000Z",
+        auth: "No authentication — anyone with the URL can invoke this agent. Nothing above governs it.",
+      },
+    }),
+  );
+  check(deployed.includes("billing-bot.up.railway.app"), "the live URL is shown prominently");
+  // §13.1 — A SENTENCE, NOT A PILL. The whole assertion is that the words are on screen: a client
+  // that reduced this to a badge would pass any test that only checked for a truthy field.
+  check(deployed.includes("No authentication"), "the auth posture is stated in plain language");
+  check(deployed.includes("anyone with the URL"), "...naming who can reach it");
+  check(deployed.includes("Nothing above governs it"), "...and that nothing in this panel covers it");
+  check(deployed.includes("Priya"), "who deployed it");
+  check(deployed.includes("View deploy") && deployed.includes("Take down"), "and §13.1's two actions");
+  // NO DEPLOY LOGIC HERE. Both actions open the Deploy tab, which already has redeploy, cancel and
+  // the build log — a second copy of a control is a second set of promises about what it does.
+  check(!deployed.includes("Redeploy"), "...which are links rather than a second set of deploy controls");
+
+  const idle = markup(
+    React.createElement(AccessExposure, {
+      exposure: {
+        agentId: AGENT, deployed: false, url: null, status: null, version: null,
+        deployedByName: null, deployedAt: null, auth: null,
+      },
+    }),
+  );
+  // §13.2 — THE SECTION DOES NOT DISAPPEAR. Its absence would be read as safety, which is the one
+  // reading nobody should take from silence about what is on the internet.
+  check(idle.includes("Not deployed"), "an undeployed agent gets an explicit line rather than nothing");
+  check(idle.includes("only through Jaroku"), "...saying what that means");
+  check(idle.length > 40, "...and the section renders at all rather than collapsing to empty");
+
+  // AN UNRECORDED ACTOR SAYS SO. Migration 061 is never backfilled, and naming the workspace's
+  // owner beside a public URL they may not have published would be a confident lie.
+  const unrecorded = markup(
+    React.createElement(AccessExposure, {
+      exposure: {
+        agentId: AGENT, deployed: true, url: "https://x.example", status: "live", version: null,
+        deployedByName: null, deployedAt: null, auth: "No authentication — anyone with the URL can invoke this agent.",
+      },
+    }),
+  );
+  check(unrecorded.includes("unrecorded"), "a deploy from before the column existed names nobody");
+}
+
+console.log("\nthe sessions list carries no network location and no raw agent string");
+{
+  const sessions = [
+    { id: "s1", userId: "sam", name: "Sam", device: "Chrome on macOS", startedAt: "2026-01-01T00:00:00.000Z", onThisAgent: true },
+    { id: "s2", userId: "kim", name: "Kim", device: null, startedAt: "2026-01-01T00:10:00.000Z", onThisAgent: false },
+  ];
+  const asAdmin = markup(
+    React.createElement(AccessSessions, { sessions, canAdmin: true, onEnd: () => undefined }),
+  );
+  check(asAdmin.includes("Sam") && asAdmin.includes("Kim"), "every open session is listed");
+  check(asAdmin.includes("Chrome on macOS"), "...with two words about the browser");
+  // §14.1 — NO IP ADDRESSES, IN THE UI OR THE PAYLOAD. Asserted on the markup because a type is a
+  // claim and markup is what somebody can read.
+  check(!/\b\d{1,3}(\.\d{1,3}){3}\b/.test(asAdmin), "and no address anywhere in the rendered list");
+  // A NULL DEVICE RENDERS NOTHING rather than "Unknown", which beside somebody's name reads as a
+  // warning about their session rather than as a missing header.
+  check(!asAdmin.includes("Unknown"), "a session with no device string says nothing rather than `Unknown`");
+  check(asAdmin.includes(">here<"), "the sessions on this agent are marked rather than the others hidden");
+  check(asAdmin.includes("End session"), "an admin gets End session");
+  // §17's polite live region on the COUNT rather than the list.
+  check(/aria-live="polite"/.test(asAdmin), "the count is announced politely");
+  check(/aria-live="polite"[^>]*>\s*<\/p>|2 sessions open/.test(asAdmin), "...and it is the count that is announced");
+
+  const asMember = markup(
+    React.createElement(AccessSessions, { sessions, canAdmin: false, onEnd: () => undefined }),
+  );
+  check(asMember.includes("Sam"), "a non-admin still sees who is connected");
+  // ABSENT, not disabled — §8, and §14.1 says the button is admin-only.
+  check(!asMember.includes("End session"), "...and no End session control");
+  check(!/disabled/.test(asMember), "...not even a disabled one");
+
+  const empty = markup(
+    React.createElement(AccessSessions, { sessions: [], canAdmin: true, onEnd: () => undefined }),
+  );
+  check(empty.includes("Nobody has a session open"), "no sessions is a sentence rather than a blank");
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

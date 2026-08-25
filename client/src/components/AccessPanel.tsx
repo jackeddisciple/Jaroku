@@ -23,10 +23,14 @@ import { useEffect, useState } from "react";
 import { CollapsibleRegion } from "./CollapsibleRegion.tsx";
 import { AccessPeople } from "./AccessPeople.tsx";
 import { GrantDialog } from "./GrantDialog.tsx";
+import { AccessExposure } from "./AccessExposure.tsx";
+import { AccessSessions } from "./AccessSessions.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { AlertTriangleIcon, LockIcon } from "./panelIcons.tsx";
 import { quietBtn } from "./buttons.ts";
-import { sendLoadAccess, sendRevokeGrant } from "../lib/socket.ts";
+import {
+  sendEndSession, sendLoadAccess, sendLoadExposure, sendLoadSessions, sendRevokeGrant,
+} from "../lib/socket.ts";
 import { STATUS, TYPE } from "../lib/tokens.ts";
 import { accessFor, useAccessStore, type AccessPerson } from "../store/accessStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
@@ -38,6 +42,8 @@ export function AccessPanel({ detail }: { detail: AgentDetailView }) {
   const access = useAccessStore((s) => accessFor(s, agentUuid));
   const loading = useAccessStore((s) => s.loading[agentUuid] ?? false);
   const error = useAccessStore((s) => s.error);
+  const exposure = useAccessStore((s) => s.exposure[agentUuid]);
+  const sessions = useAccessStore((s) => s.sessions[agentUuid]);
   const setAccessAgentId = useUiStore((s) => s.setAccessAgentId);
 
   // §9.2 — `admin` ON THIS AGENT, not a workspace role. A workspace admin holds it by default and a
@@ -60,11 +66,26 @@ export function AccessPanel({ detail }: { detail: AgentDetailView }) {
     return () => setAccessAgentId(null);
   }, [agentUuid, setAccessAgentId]);
 
-  // The detail pane already asked when it opened — see AgentDetail — so this is the retry path and
-  // the case where somebody reached the tab without the pane having mounted.
+  // The detail pane already asked for the ACCESS when it opened — see AgentDetail — so this is the
+  // retry path and the case where somebody reached the tab without the pane having mounted.
   useEffect(() => {
     if (!access && !loading) sendLoadAccess(agentUuid);
   }, [agentUuid, access, loading]);
+
+  // EXPOSURE AND SESSIONS ARE ASKED FOR HERE AND NOT BY THE DETAIL PANE, which is the one place the
+  // two fetches differ. The grant feeds every guard in the client, so it is worth fetching whenever
+  // an agent opens; these two feed nothing but this panel, and a socket list nobody is looking at
+  // is a read that goes stale before anybody sees it.
+  useEffect(() => {
+    sendLoadExposure(agentUuid);
+    sendLoadSessions(agentUuid);
+  }, [agentUuid]);
+
+  // ...and again when the cache is emptied, which is what §7's recheck does. `sessions` going
+  // undefined is the signal — the store cleared it, and this is the panel noticing.
+  useEffect(() => {
+    if (!sessions) sendLoadSessions(agentUuid);
+  }, [agentUuid, sessions]);
 
   const [open, setOpen] = useState<Record<string, boolean>>({ people: true });
   const toggle = (id: string): void => setOpen((o) => ({ ...o, [id]: !o[id] }));
@@ -148,6 +169,31 @@ export function AccessPanel({ detail }: { detail: AgentDetailView }) {
         onToggle={() => toggle("people")}
       >
         <AccessPeople access={access} canAdmin={canAdmin} onGrant={onGrant} onEdit={onEdit} onRevoke={onRevoke} />
+      </CollapsibleRegion>
+
+      {/* §13.2 — ALWAYS RENDERED, deployed or not. A section that disappeared when nothing was on
+          the internet would have its absence read as safety, which is the one conclusion nobody
+          should draw from silence about what is reachable. */}
+      <CollapsibleRegion
+        label="Exposure"
+        open={open["exposure"] !== false}
+        onToggle={() => toggle("exposure")}
+      >
+        <AccessExposure exposure={exposure} />
+      </CollapsibleRegion>
+
+      {/* §14.1's count is the section's own, so it is legible before anybody expands it. */}
+      <CollapsibleRegion
+        label="Live sessions"
+        count={sessions?.length}
+        open={open["sessions"] !== false}
+        onToggle={() => toggle("sessions")}
+      >
+        <AccessSessions
+          sessions={sessions}
+          canAdmin={canAdmin}
+          onEnd={(sessionId) => sendEndSession(access.agentId, sessionId)}
+        />
       </CollapsibleRegion>
 
       {dialog && (

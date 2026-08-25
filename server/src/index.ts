@@ -50,6 +50,7 @@ import {
   type GrantAccessCommand,
   type ModifyGrantCommand,
   type RevokeGrantCommand,
+  type EndSessionCommand,
   type MemberCommand,
   type ProviderCommand,
   type AgentCardView,
@@ -6558,7 +6559,8 @@ async function handleMemberCommand(ctx: TenantContext, cmd: MemberCommand): Prom
 // per-person by construction.
 
 const ACCESS_COMMAND_NAMES = new Set([
-  "loadAccess", "loadExposure", "grantAccess", "modifyGrant", "revokeGrant",
+  "loadAccess", "loadExposure", "loadSessions", "endSession",
+  "grantAccess", "modifyGrant", "revokeGrant",
 ]);
 
 /**
@@ -6962,6 +6964,78 @@ async function revokeGrant(ctx: TenantContext, cmd: RevokeGrantCommand): Promise
   accessChanged(ctx);
 }
 
+/**
+ * §14 — who is connected to this workspace right now, and which of them is on this agent.
+ *
+ * THE CONNECTION REGISTRY IS THE SOURCE, not a heartbeat column somebody has to remember to write.
+ * The relay already knows which sockets are open and which workspace each belongs to; asking it is
+ * one map walk, and the answer cannot disagree with the presence dots two sections above because it
+ * comes from the same place.
+ *
+ * TICKETS ARE IN POSTGRES SO THIS WOULD BE ANSWERABLE ACROSS REPLICAS — and it is not, yet, and
+ * that is worth saying rather than leaving somebody to discover it. This process reports the
+ * sockets IT holds. On a single gateway that is every session; behind two, each replica sees its
+ * own, and the list is short by however many are on the other one. Closing that means routing an
+ * `endSession` to whichever replica holds the socket, which is the event bridge's job and a larger
+ * change than this section. The count is honest about what it counted: it is a count of sessions
+ * this server can see and can end.
+ */
+async function sendSessions(ctx: TenantContext, agentId: string): Promise<void> {
+  const agent = await agentForCommand(ctx, agentId);
+  if (!agent) {
+    refuseAccess(ctx, `there is no agent "${agentId}" in this workspace`);
+    return;
+  }
+  const members = await identityRepo.listMembers(ctx);
+  const byId = new Map(members.map((m) => [m.user_id, m]));
+  const sessions = relay.liveSessions(ctx, agent.id, (userId) => {
+    const m = userId ? byId.get(userId) : undefined;
+    // A SOCKET WHOSE PERSON IS NOT IN THE MEMBER LIST IS STILL LISTED. It is somebody who has just
+    // been removed and whose socket has not been closed yet, which is precisely the session an
+    // administrator opening this section is most likely to be looking for.
+    return m ? m.display_name || m.email : "somebody no longer in this workspace";
+  });
+  relay.sendAccess(ctx, ctx.requestId, { type: "sessions", agentId: agent.id, sessions });
+}
+
+/**
+ * §14.2 — close one socket, and write down that somebody did.
+ *
+ * IT REVOKES NOTHING, and the audit row says `session_ended` rather than anything permission-shaped
+ * for the same reason the confirmation dialog does: the person may reconnect a second later if
+ * their access still allows it, and a log implying otherwise would send whoever reads it in six
+ * months looking for a revocation that never happened.
+ */
+async function endSession(ctx: TenantContext, cmd: EndSessionCommand): Promise<void> {
+  const agent = await agentForCommand(ctx, String(cmd.agentId ?? ""));
+  if (!agent) {
+    refuseAccess(ctx, `there is no agent "${cmd.agentId}" in this workspace`);
+    return;
+  }
+  const sessionId = String(cmd.sessionId ?? "");
+  // SCOPED INSIDE THE RELAY, not here — a socket id is opaque, and what makes ending one safe is
+  // the workspace comparison rather than the id being hard to guess.
+  const ended = relay.endSession(ctx, sessionId);
+  if (!ended) {
+    // ONE SENTENCE FOR "ALREADY GONE" AND FOR "NOT YOURS", which is §1.C applied to a socket id:
+    // distinguishing them would tell somebody holding an id from another tenant that it is real.
+    refuseAccess(ctx, "that session is no longer open");
+    return;
+  }
+
+  await identityRepo.appendAudit(ctx, {
+    action: "access.session_ended",
+    targetType: "agent",
+    targetId: agent.id,
+    // NO SOCKET ID AND NO DEVICE IN THE ROW. The id is meaningless the moment the process restarts,
+    // and the device string is a description of a colleague's machine that this table has no
+    // question to answer with. Who did it and which agent they were looking at is the record.
+    metadata: { agent: agent.slug },
+  });
+
+  await sendSessions(ctx, agent.id);
+}
+
 /** A member's workspace role, or `none` for somebody who has left. Feeds the fallback above. */
 async function roleOf(ctx: TenantContext, userId: string): Promise<TenantContext["role"]> {
   const members = await identityRepo.listMembers(ctx);
@@ -6984,6 +7058,14 @@ async function handleAccessCommand(ctx: TenantContext, cmd: AccessCommand): Prom
     }
     if (cmd.cmd === "revokeGrant") {
       await revokeGrant(ctx, cmd);
+      return;
+    }
+    if (cmd.cmd === "loadSessions") {
+      await sendSessions(ctx, String(cmd.agentId ?? ""));
+      return;
+    }
+    if (cmd.cmd === "endSession") {
+      await endSession(ctx, cmd);
       return;
     }
   } catch (err) {

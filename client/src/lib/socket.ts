@@ -16,7 +16,9 @@ import { useGithubStore } from "../store/githubStore.ts";
 import { useDiagnosticsStore } from "../store/diagnosticsStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useMemberStore } from "../store/memberStore.ts";
-import { useAccessStore, type AccessPerson, type Exposure } from "../store/accessStore.ts";
+import {
+  useAccessStore, type AccessPerson, type Exposure, type LiveSession,
+} from "../store/accessStore.ts";
 import type { AgentCapability } from "./capabilities.ts";
 import { useAuditStore } from "../store/auditStore.ts";
 import { useEnforcementStore } from "../store/enforcementStore.ts";
@@ -476,6 +478,7 @@ function dispatch(msg: ServerMessage): void {
           viewer: msg.viewer as AgentCapability[],
         });
       } else if (msg.type === "exposure") a.setExposure(msg.exposure as Exposure);
+      else if (msg.type === "sessions") a.setSessions(msg.agentId, msg.sessions as LiveSession[]);
       else if (msg.type === "recheck") {
         // §7 AND §8.2 — THE CACHE GOES, AND THEN THE PANEL ASKS AGAIN IF IT IS OPEN.
         //
@@ -1443,6 +1446,16 @@ export function sendModifyGrant(opts: {
 
 export function sendRevokeGrant(agentId: string, userId: string): void {
   send({ cmd: "revokeGrant", agentId, userId });
+}
+
+/** Who is connected. Asked when the Access tab opens, and again on §7's recheck. */
+export function sendLoadSessions(agentId: string): void {
+  send({ cmd: "loadSessions", agentId });
+}
+
+/** §14.2 — close one socket. It revokes nothing; see the confirmation the caller shows first. */
+export function sendEndSession(agentId: string, sessionId: string): void {
+  send({ cmd: "endSession", agentId, sessionId });
 }
 
 export function sendListMembers(): void {
