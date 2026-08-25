@@ -78,6 +78,7 @@ import { authenticate, sessionRoutes } from "./auth/session.ts";
 import { conversationRoutes } from "./http/conversations.ts";
 import { ConversationSettingsStore, DEFAULT_PERMISSION_MODE, type PermissionMode } from "./conversationSettings.ts";
 import { ConversationConnectorStore } from "./conversationConnectors.ts";
+import { TurnInteractionStore } from "./turnInteraction.ts";
 import { classOf, mustConfirm } from "./permissionShield.ts";
 import { turnRoutes, type Attachable } from "./http/turns.ts";
 import { AttachmentStore } from "./attachmentStore.ts";
@@ -3041,6 +3042,33 @@ mountSecretsRoutes(router, {
  */
 const conversationSettings = new ConversationSettingsStore(store.database());
 const conversationConnectors = new ConversationConnectorStore(store.database());
+const turnInteraction = new TurnInteractionStore(store.database());
+
+/**
+ * Display names for the people who wrote notes.
+ *
+ * RESOLVED SERVER-SIDE, because the client has no member directory for a workspace it is not
+ * administering — and a note signed with a uuid is a note nobody knows who wrote. Scoped through
+ * the workspace's own membership rather than a bare users lookup: a note's author is someone in
+ * this workspace, and looking them up any other way would be a path that could name a person from
+ * another tenant.
+ */
+async function displayNamesFor(ctx: TenantContext, userIds: readonly string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (userIds.length === 0) return out;
+  const wanted = new Set(userIds);
+  try {
+    for (const m of await identityRepo.listMembers(ctx)) {
+      if (!wanted.has(m.user_id)) continue;
+      // The name, or the email's local part, or nothing. Never the raw uuid: a byline that shows an
+      // id is worse than one that shows nothing, because it looks like it is telling you something.
+      out.set(m.user_id, m.display_name?.trim() || m.email?.split("@")[0] || "");
+    }
+  } catch (err) {
+    console.warn("[notes] could not resolve author names:", (err as Error)?.message ?? err);
+  }
+  return out;
+}
 
 /**
  * §3.2's health row, in one sentence.
@@ -3073,6 +3101,7 @@ for (const route of conversationRoutes({
   },
   settings: conversationSettings,
   connectors: conversationConnectors,
+  interaction: turnInteraction,
   /**
    * WHAT THIS WORKSPACE HAS CONNECTED — both kinds, in one list.
    *
@@ -3217,6 +3246,8 @@ for (const route of turnRoutes({
     return { ctx: session.context, userId: session.userId, ip: req.ip };
   },
   attachments: attachmentStore,
+  interaction: turnInteraction,
+  displayNames: displayNamesFor,
   // Through the thread store's own scoped read, so "does this turn exist" is answered by the same
   // WHERE that answers every other question about it.
   turnExists: async (ctx, turnId) => {

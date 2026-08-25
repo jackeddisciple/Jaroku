@@ -997,6 +997,16 @@ export interface ThreadCounts {
  * it caused — never a transcript of the answers.
  */
 export interface ThreadItemView {
+  /**
+   * The `thread_items` row id — Jaroku's durable turn id, and what every table in the composer
+   * spec's §7 keys on.
+   *
+   * IT USED TO BE DROPPED ON THE WAY IN, and the cost was that notes, pins and feedback had
+   * nothing to attach to: a hydrated turn's id was a local counter (`t1`, `t2`) that changed on
+   * every reload, so a note filed against one would have been filed against a different turn the
+   * next time the thread was opened. This is the id the server knows a turn by.
+   */
+  id: string;
   kind: "run" | "eval" | "plan" | "generation" | "proposal" | "message";
   ref_id: string | null;
   role: "user" | null;

@@ -182,6 +182,17 @@ export const EXPORTED_TABLES = [
   // `usage_events` answers per run, and it is the only place a clamp is recorded: an export
   // without it could not answer "we asked for XHigh, what did we actually get?" about any turn.
   "turn_variants",
+  // WHAT PEOPLE SAID ABOUT THE WORK, and what they thought of it. Notes are the clearest case in
+  // this whole list: the feature exists because that knowledge otherwise lives in Slack, detached
+  // from the artifact it is about, and an export that left it behind would put it back there.
+  //
+  // Pins go too, and they are the one row here that is per-USER rather than per-workspace — which
+  // is exactly why they belong: a team leaving with their threads should leave with their own
+  // anchors in them. None of the three holds a credential, which is the only question this list
+  // asks; `turn_feedback.comment` is somebody's sentence about a response and is theirs to take.
+  "turn_notes",
+  "turn_pins",
+  "turn_feedback",
   // WHAT NEEDED SOMEBODY, AND WHEN IT STOPPED. An inbox item is the workspace's own operational
   // record — which credential was missing, which deploy failed, which agent was drifting, and how
   // long each of those was true before it was fixed. It answers "when did this start going wrong"

@@ -30,6 +30,24 @@ export interface UserTurn {
   id: string;
   role: "user";
   text: string;
+  /** See `TurnAnchor`. */
+  itemId?: string;
+}
+
+/**
+ * THE DURABLE TURN ID, on every turn that has one.
+ *
+ * `id` is a render key minted in this file and it changes on every reload — which is exactly what
+ * a key should be and exactly what a foreign key must not be. `itemId` is the `thread_items` row
+ * the server knows this turn by, and it is what §7's notes, pins, feedback and attachments hang
+ * off.
+ *
+ * OPTIONAL, BECAUSE A LIVE TURN DOES NOT HAVE ONE YET. A turn appended by a socket event exists in
+ * this store before the server has filed its row; the action row renders its annotation controls
+ * only once the id arrives, which is honest — there is nothing to annotate until then.
+ */
+export interface TurnAnchor {
+  itemId?: string;
 }
 
 /** The pre-generation plan (server/src/planProtocol.ts) awaiting the user's decision.
@@ -47,7 +65,7 @@ export type PlanStatus =
   | "discarded"
   | "error";
 
-export interface PlanTurn {
+export interface PlanTurn extends TurnAnchor {
   id: string;
   role: "jaroku";
   kind: "plan";
@@ -67,7 +85,7 @@ export interface PlanTurn {
 
 /** A generation in flight / finished. Live file streaming stays in buildStore; this turn
  *  only records the outcome. */
-export interface GenTurn {
+export interface GenTurn extends TurnAnchor {
   id: string;
   role: "jaroku";
   kind: "gen";
@@ -91,7 +109,7 @@ export type ProposalStatus =
   | "discarded"
   | "error";
 
-export interface ProposalTurn {
+export interface ProposalTurn extends TurnAnchor {
   id: string;
   role: "jaroku";
   kind: "proposal";
@@ -108,7 +126,7 @@ export interface ProposalTurn {
   problems?: string[];
 }
 
-export interface InfoTurn {
+export interface InfoTurn extends TurnAnchor {
   id: string;
   role: "jaroku";
   kind: "info";
@@ -118,7 +136,7 @@ export interface InfoTurn {
 
 /** A conversational answer with no code change — the unified composer's "explain" intent.
  *  Streams token-by-token like generation, but produces prose, not files. */
-export interface ReplyTurn {
+export interface ReplyTurn extends TurnAnchor {
   id: string;
   role: "jaroku";
   kind: "reply";
@@ -235,10 +253,14 @@ export const useChatStore = create<ChatState>((set) => ({
     set((s) => ({
       threads: {
         ...s.threads,
+        // THE ROW'S OWN ID IS CARRIED THROUGH as `itemId`. It used to be discarded here, which is
+        // why notes and pins had nothing to attach to: the local `id` beside it is a render key
+        // that changes on every reload, and a note keyed on one would move to a different turn the
+        // next time somebody opened the thread.
         [threadId]: items.map((it): ChatTurn =>
           it.kind === "message" && it.role === "user"
-            ? { id: turnId(), role: "user", text: it.body ?? "" }
-            : { id: turnId(), role: "jaroku", kind: "info", tone: "muted", text: stubText(it) },
+            ? { id: turnId(), itemId: it.id, role: "user", text: it.body ?? "" }
+            : { id: turnId(), itemId: it.id, role: "jaroku", kind: "info", tone: "muted", text: stubText(it) },
         ),
       },
     })),

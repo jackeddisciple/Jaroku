@@ -131,6 +131,20 @@ export default {
         // A step, a file or a task finished. The mark scales up past its resting size and settles,
         // which is what makes it read as *landing* rather than as having quietly always been there.
         // Fast, and it never repeats: this is a state change, not a status.
+        // A turn somebody jumped to from the pinned rail. Scrolling to a row in a long thread
+        // lands the reader somewhere with no indication of WHICH row was meant, so the flash is
+        // doing real work rather than decorating — it is the only thing that says "this one".
+        //
+        // A BACKGROUND WASH RATHER THAN A BORDER OR A SCALE. A border would shift the row's
+        // geometry for the duration and reflow everything under it; a scale would move the thing
+        // the reader is trying to read. The accent at low alpha changes nothing about the layout.
+        // It is skipped entirely under `prefers-reduced-motion` — the caller checks, because the
+        // static alternative is simply arriving there, which is fine.
+        "flash-highlight": {
+          "0%": { backgroundColor: "rgba(107,138,253,0)" },
+          "35%": { backgroundColor: "rgba(107,138,253,0.16)" },
+          "100%": { backgroundColor: "rgba(107,138,253,0)" },
+        },
         "check-in": {
           "0%": { opacity: "0", transform: "scale(0.4)" },
           "60%": { opacity: "1", transform: "scale(1.15)" },
@@ -191,6 +205,9 @@ export default {
         "pulse-node": "pulse-node 2.4s ease-in-out infinite",
         "check-in": "check-in 180ms cubic-bezier(0.2, 0, 0, 1)",
         "stream-pulse": "stream-pulse 1.4s ease-in-out infinite",
+        // 400ms rather than the spec's 200: at 200 the wash is gone before a smooth scroll has
+        // finished arriving, so the one thing it exists to say is said to an empty screen.
+        "flash-highlight": "flash-highlight 400ms ease-out",
       },
     },
   },

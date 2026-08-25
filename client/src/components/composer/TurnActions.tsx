@@ -18,6 +18,8 @@ import { useRef, useState } from "react";
 import { Glyph, Icon, GLYPH, HIT_TARGET } from "../icons.ts";
 import { CopyTurn } from "./CopyTurn.tsx";
 import { Popover, PopoverRow } from "./Popover.tsx";
+import { FeedbackControls, NoteControl } from "./TurnNotes.tsx";
+import { useTurnInteractionStore } from "../../store/turnInteractionStore.ts";
 
 /** One glyph in the row. The geometry is shared so five of them form an even strip. */
 export function ActionButton({
@@ -80,6 +82,12 @@ export function TurnActions({
   onRegenerateWith,
   /** The models offered by "Regenerate with different model". From the server's catalogue. */
   models = [],
+  /** The durable turn id — a `thread_items` row. Absent on a turn the server has not filed yet. */
+  turnId = null,
+  conversationId = null,
+  /** §5.5: a thumbs-down on a code-producing turn offers eval-dataset promotion. */
+  producedVersion = false,
+  onPromoteToDataset,
   className = "",
 }: {
   source: string;
@@ -88,10 +96,16 @@ export function TurnActions({
   onRegenerate?: () => void;
   onRegenerateWith?: (opts: { modelId?: string; effort?: "high" | "xhigh" }) => void;
   models?: { id: string; label: string }[];
+  turnId?: string | null;
+  conversationId?: string | null;
+  producedVersion?: boolean;
+  onPromoteToDataset?: () => void;
   className?: string;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const kebabRef = useRef<HTMLButtonElement>(null);
+  const isPinned = useTurnInteractionStore((s) => (turnId ? s.pins.includes(turnId) : false));
+  const togglePin = useTurnInteractionStore((s) => s.togglePin);
 
   return (
     <div
@@ -104,6 +118,25 @@ export function TurnActions({
       aria-label="Response actions"
     >
       <CopyTurn source={source} />
+
+      {/* §5's order is Copy · Note · Pin · Regenerate · Feedback, and it is fixed for the same
+          reason the metadata row's is: a strip of five glyphs is read by position long before it
+          is read by shape.
+
+          NOTE, PIN AND FEEDBACK NEED A DURABLE TURN ID. A turn the server has not filed yet — one
+          still streaming — has nothing to annotate, and rendering the controls disabled would be
+          five greyed glyphs under every in-flight response. They appear when the turn does. */}
+      {turnId && <NoteControl turnId={turnId} />}
+      {turnId && conversationId && (
+        <ActionButton
+          icon={Icon.Pin}
+          name={isPinned ? "Unpin this turn" : "Pin this turn"}
+          title={isPinned ? "Remove from your pinned rail" : "Pin to your rail — only you see it"}
+          pressed={isPinned}
+          onClick={() => void togglePin(conversationId, turnId)}
+          className={isPinned ? "!text-accent" : ""}
+        />
+      )}
 
       {onRegenerate && (
         <ActionButton
@@ -163,6 +196,14 @@ export function TurnActions({
             ))}
           </Popover>
         </div>
+      )}
+
+      {turnId && (
+        <FeedbackControls
+          turnId={turnId}
+          producedVersion={producedVersion}
+          onPromoteToDataset={onPromoteToDataset}
+        />
       )}
     </div>
   );

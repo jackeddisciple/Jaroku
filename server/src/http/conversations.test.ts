@@ -20,6 +20,7 @@ import { conversationRoutes, type ConversationCaller } from "./conversations.ts"
 import { HttpError, type HttpRequest } from "./router.ts";
 import { ConversationSettingsStore, type PermissionMode } from "../conversationSettings.ts";
 import { ConversationConnectorStore } from "../conversationConnectors.ts";
+import { TurnInteractionStore } from "../turnInteraction.ts";
 import { openTestSqlite, testContext } from "../db/testDb.ts";
 import { newRequestId } from "../db/tenant.ts";
 
@@ -77,6 +78,7 @@ async function harness() {
 
   const settings = new ConversationSettingsStore(db);
   const connectors = new ConversationConnectorStore(db);
+  const interaction = new TurnInteractionStore(db);
   const audits: AuditRow[] = [];
 
   const seedThread = async (workspaceId: string): Promise<string> => {
@@ -101,6 +103,7 @@ async function harness() {
       return row !== undefined;
     },
     connectors,
+    interaction,
     // Two connectors, one of them with a dying credential — enough for the deck's join and for
     // §3.2's health row without standing up an OAuth flow in a route suite.
     workspaceConnectors: async () => [

@@ -49,6 +49,8 @@ import { EffortControl, effortLabel } from "./composer/EffortControl.tsx";
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
 import { ConnectorDeck } from "./composer/ConnectorDeck.tsx";
 import { TurnActions } from "./composer/TurnActions.tsx";
+import { PinRail, pinLabel, type PinnedTurn } from "./composer/PinRail.tsx";
+import { useTurnInteractionStore } from "../store/turnInteractionStore.ts";
 import { TurnMetadata } from "./composer/TurnMetadata.tsx";
 import { turnSource, metaForTurn, promptForRegenerate } from "../lib/turnSource.ts";
 import {
@@ -291,6 +293,12 @@ function AssistantTurn({
   const turns = useChatStore((s) => threadFor({ threads: s.threads, pending: s.pending }, threadId));
   const meta = metaForTurn(turn);
   const source = turnSource(turn);
+  const loadTurn = useTurnInteractionStore((s) => s.loadTurn);
+
+  // The DURABLE id, or nothing. A turn the server has not filed yet has no row to annotate, and
+  // the action row renders its note, pin and feedback controls only once one exists.
+  const itemId = turn.itemId ?? null;
+  useEffect(() => { if (itemId) void loadTurn(itemId); }, [itemId, loadTurn]);
 
   return (
     // `group/turn` is what lets the action row appear on hover of the WHOLE turn rather than of the
@@ -308,6 +316,12 @@ function AssistantTurn({
             // The three most recent models from the catalogue. The whole list would be a menu
             // longer than the response it is offering to replace.
             models={models.slice(0, 3).map((m) => ({ id: m.id, label: m.label }))}
+            turnId={itemId}
+            conversationId={threadId}
+            // §5.5's promotion offer is only shown on a turn that PRODUCED a version, because that
+            // is the only kind whose input can become a regression test.
+            producedVersion={Boolean(meta?.versionLabel)}
+            onPromoteToDataset={() => useUiStore.getState().setRightTab("evals")}
           />
           {meta && <TurnMetadata meta={meta} streaming={isLast && streaming} />}
         </div>
@@ -708,6 +722,26 @@ export function BuildPane({
   // the menu twice, and a boolean that is already true is a keystroke that does nothing.
   const [attachChordNonce, setAttachChordNonce] = useState(0);
 
+  // §5.3's rail. The pins are this user's — the server scoped the read — and the collapsed state
+  // is remembered per conversation in LOCAL state only: collapsing a rail in one thread says
+  // nothing about the next, because the reason to collapse it is that THIS thread's anchors are
+  // not what somebody is looking at right now.
+  const pins = useTurnInteractionStore((s) => s.pins);
+  const loadPins = useTurnInteractionStore((s) => s.loadPins);
+  const togglePin = useTurnInteractionStore((s) => s.togglePin);
+  const [railCollapsedBy, setRailCollapsedBy] = useState<Record<string, boolean>>({});
+  const railCollapsed = railCollapsedBy[activeThreadId ?? "__none"] ?? false;
+  const setRailCollapsed = useCallback(
+    (next: boolean | ((v: boolean) => boolean)) =>
+      setRailCollapsedBy((m) => {
+        const key = activeThreadId ?? "__none";
+        const now = typeof next === "function" ? next(m[key] ?? false) : next;
+        return { ...m, [key]: now };
+      }),
+    [activeThreadId],
+  );
+  useEffect(() => { if (activeThreadId) void loadPins(activeThreadId); }, [activeThreadId, loadPins]);
+
   // §3.2's settings, mirrored from the server. The store never decides — a workspace can pin the
   // permission mode and disallow Fast, so what somebody picked and what is in effect are different
   // values, and only the server knows the second one.
@@ -772,6 +806,53 @@ export function BuildPane({
   // the connector selection changes, is what gets invalidated.
   const planId = pendingPlanId(turns);
   const busy = genStatus === "generating" || streamingAgentId !== null || isPlanning(turns);
+
+  /**
+   * The rail's rows — a pinned turn id resolved against the thread it belongs to.
+   *
+   * §5.3: "Pin label = first ~60 chars of the turn, or its plan title if the turn produced a plan."
+   * Resolved here rather than stored on the pin, because a plan's title can change when the plan is
+   * revised and a stored label would go stale against the turn it names.
+   *
+   * A PIN WHOSE TURN IS GONE IS DROPPED — §9's "Pinned turn deleted: pin removed from the rail
+   * automatically". Silently, because there is nothing for the user to do about it.
+   */
+  const pinnedTurns = useMemo((): PinnedTurn[] => {
+    const byItem = new Map(turns.filter((t) => t.itemId).map((t) => [t.itemId!, t]));
+    return pins.flatMap((itemId) => {
+      const t = byItem.get(itemId);
+      if (!t || t.role === "user") return [];
+      if (t.kind === "info") return [];
+      const label = t.kind === "plan"
+        // A plan has no name of its own — the brief it was written for is what identifies it,
+        // and it is also what somebody would recognise in a rail.
+        ? (t.prompt || "Plan")
+        : t.kind === "reply"
+          ? t.text
+          : t.kind === "proposal"
+            ? (t.summary ?? "Proposed an edit")
+            : "Generated an agent";
+      return [{ turnId: itemId, label: pinLabel(label), kind: t.kind }];
+    });
+  }, [pins, turns]);
+
+  /**
+   * §5.3: "Click scrolls to the turn and flashes a highlight (200ms)."
+   *
+   * THE FLASH IS SKIPPED UNDER `prefers-reduced-motion` (§10). Scrolling to a turn in a long thread
+   * lands the reader somewhere with no indication of which row was meant, so the flash is doing
+   * real work — but it is a flash, and the static alternative is simply arriving there.
+   */
+  const scrollToTurn = useCallback((itemId: string) => {
+    const local = turns.find((t) => t.itemId === itemId);
+    if (!local) return;
+    const el = scrollRef.current?.querySelector(`[data-turn-id="${local.id}"]`);
+    if (!(el instanceof HTMLElement)) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    el.classList.add("animate-flash-highlight");
+    window.setTimeout(() => el.classList.remove("animate-flash-highlight"), 400);
+  }, [turns]);
 
   // §3.3's two window-level chords.
   //
@@ -1400,6 +1481,17 @@ export function BuildPane({
           anchored ? "shrink-0" : "flex-1 min-h-0 overflow-y-auto py-2 space-y-6"
         }`}
       >
+        {/* §5.3's pinned rail. Sticky at the top of the thread, and PERSONAL — the ids in it came
+            from a read scoped to this user, and nothing here could ask for anybody else's. */}
+        {!anchored && (
+          <PinRail
+            pins={pinnedTurns}
+            collapsed={railCollapsed}
+            onToggleCollapsed={() => setRailCollapsed((v) => !v)}
+            onOpen={scrollToTurn}
+            onUnpin={(itemId) => void togglePin(activeThreadId ?? "", itemId)}
+          />
+        )}
         {turns.length === 0 && emptySlot}
         {turns.length === 0 && !emptySlot &&
           (mode === "generate" ? (

@@ -89,6 +89,7 @@
     "test:permission-shield": "tsx src/permissionShield.test.ts",
     "test:attachments": "tsx src/attachments.test.ts",
     "test:turn-variants": "tsx src/turnVariants.test.ts",
+    "test:turn-interaction": "tsx src/turnInteraction.test.ts",
     "test:plans": "tsx src/billing/plans.test.ts",
     "test:entitlements": "tsx src/billing/entitlements.test.ts",
     "test:metering": "tsx src/billing/metering.test.ts",

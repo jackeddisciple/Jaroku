@@ -74,6 +74,16 @@ export interface Thread {
 export type ThreadItemKind = "message" | "plan" | "generation" | "proposal" | "run" | "eval";
 
 export interface ThreadItem {
+  /**
+   * The row's own id — Jaroku's durable TURN id.
+   *
+   * It was not on this shape until the composer's notes, pins, feedback and attachments needed
+   * something to key on: every table in that spec's §7 references `thread_items(id)`, and a client
+   * that never received it had nothing to send back. The local ids the chat store mints are render
+   * keys and change on every reload, so a note filed against one would have moved to a different
+   * turn the next time somebody opened the thread.
+   */
+  id: string;
   thread_id: string;
   kind: ThreadItemKind;
   /** The id in the owning table. Null on a message, which owns itself. */
@@ -492,12 +502,13 @@ export class ThreadStore {
    */
   async allItems(ctx: TenantContext): Promise<ThreadItem[]> {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
-      `SELECT thread_id, kind, ref_id, role, body, created_at FROM thread_items
+      `SELECT id, thread_id, kind, ref_id, role, body, created_at FROM thread_items
         WHERE workspace_id = ?
         ORDER BY created_at ASC, id ASC`,
       [ctx.workspaceId],
     );
     return rows.map((r) => ({
+      id: String(r["id"]),
       thread_id: String(r["thread_id"]),
       kind: r["kind"] as ThreadItemKind,
       ref_id: (r["ref_id"] as string | null) ?? null,
@@ -520,12 +531,13 @@ export class ThreadStore {
    */
   async itemsFor(ctx: TenantContext, threadId: string): Promise<ThreadItem[]> {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
-      `SELECT thread_id, kind, ref_id, role, body, created_at FROM thread_items
+      `SELECT id, thread_id, kind, ref_id, role, body, created_at FROM thread_items
         WHERE workspace_id = ? AND thread_id = ?
         ORDER BY created_at ASC, id ASC`,
       [ctx.workspaceId, threadId],
     );
     return rows.map((r) => ({
+      id: String(r["id"]),
       thread_id: String(r["thread_id"]),
       kind: r["kind"] as ThreadItemKind,
       ref_id: (r["ref_id"] as string | null) ?? null,

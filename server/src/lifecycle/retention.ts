@@ -191,6 +191,9 @@ export const RETENTION_KEPT_TABLES: Record<string, string> = {
   turn_attachments: "what a turn was looking at, and it leaves when that turn does — the row cascades from thread_items, which this sweep already removes. Sweeping it on its own clock would leave a turn whose context is unreconstructible while the turn itself still renders, which is the one thing §4.4 says the table exists to prevent",
   conversation_connectors: "which connectors a conversation may reach. A decision, not an event — and one that must outlive the runs it shaped, because 'why could this thread not see Slack' is asked long after those traces have been swept",
   turn_variants: "what each response was — which model, which effort, what it cost. It leaves with the turn, which cascades, and never on its own clock: sweeping it would leave a variant switcher counting responses whose metadata is gone",
+  turn_notes: "somebody's words about a turn, and the whole reason the feature exists is that this knowledge otherwise lives in Slack. It leaves with the turn, which cascades. A note is also already soft-deleted by its author, so a sweep would be a second, silent delete nobody asked for",
+  turn_pins: "a personal anchor in a conversation, with no age — it stops being relevant when its owner unpins it or the turn goes, and both of those already remove it",
+  turn_feedback: "one opinion per person per turn, and the input to an eval case. Sweeping it would quietly reset the counts a team reads to decide what to fix",
 };
 
 /** How many rows a sweep actually took, across every table it touches. */

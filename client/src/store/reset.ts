@@ -41,6 +41,7 @@ import { useProviderStore } from "./providerStore.ts";
 import { useSecretsStore } from "./secretsStore.ts";
 import { useThreadStore } from "./threadStore.ts";
 import { useTraceStore } from "./traceStore.ts";
+import { useTurnInteractionStore } from "./turnInteractionStore.ts";
 import { forgetElevation } from "../lib/secrets.ts";
 
 /** Enough of a zustand store for this file. Avoids importing its generics for one call. */
@@ -143,6 +144,11 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
   // beside it would offer to open a thread the new workspace cannot see.
   threadStore: useThreadStore as unknown as Resettable,
   traceStore: useTraceStore as unknown as Resettable,
+  // Notes, pins and feedback, keyed by turn id. Two reasons this one matters more than it looks:
+  // a note is somebody's words about ANOTHER tenant's turn, quoted verbatim, and the pins are one
+  // PERSON's — carried across a switch they would render a rail of anchors into a conversation the
+  // new workspace cannot open, under a heading claiming they are yours.
+  turnInteractionStore: useTurnInteractionStore as unknown as Resettable,
 };
 
 /**

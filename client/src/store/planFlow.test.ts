@@ -166,13 +166,19 @@ const userTexts = () => turns().filter((t) => t.role === "user").map((t) => (t a
 {
   reset();
   store().hydrate(T, [
-    { kind: "message", role: "user", body: "why is it 401ing?", ref_id: null, created_at: "2026-08-17T00:00:00.000Z" },
-    { kind: "proposal", role: null, body: null, ref_id: "prop-1", created_at: "2026-08-17T00:00:01.000Z" },
+    { id: "item-1", kind: "message", role: "user", body: "why is it 401ing?", ref_id: null, created_at: "2026-08-17T00:00:00.000Z" },
+    { id: "item-2", kind: "proposal", role: null, body: null, ref_id: "prop-1", created_at: "2026-08-17T00:00:01.000Z" },
   ]);
   const texts = turns().map((t) => (t.role === "user" ? t.text : (t as { text?: string }).text));
   check("the user's own turn comes back", texts[0] === "why is it 401ing?", texts);
   check("and what it caused, as a note rather than a revived card", texts[1] === "Proposed an edit.", texts);
   check("a hydrate is a replace", turns().length === 2, turns().length);
+  // THE DURABLE ID SURVIVES, which is what §7's notes, pins, feedback and attachments key on. It
+  // used to be dropped here, so a hydrated turn's only id was a local counter that changed on every
+  // reload — and a note filed against one would have moved to a different turn the next time the
+  // thread was opened.
+  const anchors = turns().map((t) => (t as { itemId?: string }).itemId);
+  check("each turn keeps the row id the server knows it by", anchors.join("|") === "item-1|item-2", anchors);
 }
 
 // 8 — an UNPLANNED generation still appends its own user turn (the pre-gate behaviour, which

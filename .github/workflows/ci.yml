@@ -542,6 +542,15 @@ jobs:
           # the published pointer, reading a response would be deploying one, so the suite
           # asserts the store has no publish path to reach.
           npm run test:turn-variants
+          # NOTES, PINS AND FEEDBACK — §12.18, §12.19, §12.20 and §12.23. Two of these are the
+          # same question with opposite answers, which is the whole reason both features exist:
+          # a note is SHARED and a pin is PERSONAL. Neither failure produces an error and both
+          # look completely correct to whoever is testing alone — a note that turned out to be
+          # private is a warning a teammate never sees, and a pin that turned out to be shared is
+          # a rail full of somebody else's bookmarks. The suite also holds §12.19, which is
+          # really an assertion about the schema: notes hang off the TURN, so there is no column
+          # that could point at a variant and make them vanish on a regeneration.
+          npm run test:turn-interaction
           npm run test:plans
           # The entitlement resolver, and the audit that is the reason it is a suite rather than a note.
           # It reads wsRelay.ts for every command the relay accepts and fails on one that has neither a

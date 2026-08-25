@@ -29,6 +29,7 @@ import {
 } from "../conversationSettings.ts";
 import { isEffort, type Effort } from "../effort.ts";
 import type { ConversationConnectorStore } from "../conversationConnectors.ts";
+import type { TurnInteractionStore } from "../turnInteraction.ts";
 
 export interface ConversationRoute {
   method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
@@ -50,6 +51,8 @@ export interface ConversationRouteDeps {
   /** Whether this conversation exists IN THIS WORKSPACE. A 404 either way — see `requireThread`. */
   threadExists(ctx: TenantContext, conversationId: string): Promise<boolean>;
   connectors: ConversationConnectorStore;
+  /** §5.3's rail reads through here. Personal — every call carries the user. */
+  interaction: TurnInteractionStore;
   /**
    * Every connector the WORKSPACE has, with what the deck needs to draw it.
    *
@@ -167,6 +170,15 @@ export function conversationRoutes(deps: ConversationRouteDeps): ConversationRou
       prefix: true,
       handler: async (req) => {
         const caller = await deps.callerFor(req);
+        if (req.path.endsWith("/pins")) {
+          const id = idFrom(req.path, "/pins");
+          await requireThread(deps, caller, id);
+          // §12.20: a pin is invisible to anybody else, and the user in this call is what makes
+          // that true. There is no shape of this request that could ask for somebody else's — the
+          // id comes from the token, not from the URL.
+          if (!caller.userId) return { body: { pins: [] } };
+          return { body: { pins: await deps.interaction.pinsFor(caller.ctx, id, caller.userId) } };
+        }
         if (req.path.endsWith("/connectors")) {
           const id = idFrom(req.path, "/connectors");
           await requireThread(deps, caller, id);
