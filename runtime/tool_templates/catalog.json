@@ -27,6 +27,28 @@
       ]
     },
     {
+      "id": "google_calendar",
+      "label": "Google Calendar",
+      "file": "google_calendar.py",
+      "module": "google_calendar",
+      "description": "Read the user's calendar events within a date range. Reads only — this entry gains its write tools in the next commit.",
+      "required_env": ["GCAL_CLIENT_ID", "GCAL_CLIENT_SECRET", "GCAL_REFRESH_TOKEN"],
+      "auth": "oauth",
+      "pip_requires": ["google-api-python-client>=2.100.0", "google-auth>=2.23.0"],
+      "tools": [
+        {
+          "name": "gcal_list_events",
+          "signature": "gcal_list_events(calendar_id: str = 'primary', time_min: str = '', time_max: str = '', max_results: int = 10) -> str",
+          "summary": "List events on a calendar within an ISO 8601 window, soonest first, capped at 50. Recurring series are expanded into their instances."
+        },
+        {
+          "name": "gcal_get_event",
+          "signature": "gcal_get_event(event_id: str, calendar_id: str = 'primary') -> str",
+          "summary": "Get one event's full details by id, including its description, organiser and link."
+        }
+      ]
+    },
+    {
       "id": "slack",
       "label": "Slack",
       "file": "slack.py",
