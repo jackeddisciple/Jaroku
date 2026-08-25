@@ -22,6 +22,7 @@ import {
   connectionSuppliedEnv,
   isConnectorAuth,
   loadConnectors,
+  optionalEnv,
   requiredEnv,
   resolveSelected,
   userSuppliedEnv,
@@ -145,6 +146,49 @@ for (const id of ["postgres", "stripe", "http"]) {
     present.map((c) => c.connector.id).join(","),
   );
   check(present[0]?.missing.length === 0, `...ready, because its own names are the ones that were set`);
+}
+
+// THE SECOND DOOR, AND THE ONE THAT FAILS WITHOUT AN ERROR ANYWHERE. A name the Connections panel
+// offers is a name a user will paste a value under. If a run does not resolve it, the vault holds
+// the value, the panel reports it configured, and the sandbox authenticates with nothing — which
+// is the exact shape of "a key stored under a name the runtime does not read", a failure this
+// project has already paid for once. So the panel's list and the run's list must be ONE list.
+console.log("\nthe optional names a run resolves are the ones the panel offers");
+{
+  const http = all.find((c) => c.id === "http")!;
+  check(http.optional_env?.includes("HTTP_AUTH_HEADER") === true, "http declares its optional header in the catalog");
+  check(!http.required_env.includes("HTTP_AUTH_HEADER"), "...and NOT in required_env, which a deploy refuses over");
+
+  const selected = resolveSelected(all, ["http"]);
+  check(optionalEnv(selected).join(",") === "HTTP_AUTH_HEADER", "so a run selecting http resolves it", optionalEnv(selected).join(","));
+  check(
+    !requiredEnv(selected).includes("HTTP_AUTH_HEADER"),
+    "...while the required list a deploy checks stays free of it, or a deploy would refuse over an optional value",
+  );
+
+  // The panel's own list, assembled the way `connectionSnapshot` assembles it. This is the
+  // assertion that would have caught the gap: the field was offered from a table in index.ts and
+  // resolved from `required_env`, so the two lists were different lists.
+  const offered = [...http.required_env, ...(http.optional_env ?? [])];
+  const resolved = [...requiredEnv(selected), ...optionalEnv(selected)];
+  check(
+    offered.every((name) => resolved.includes(name)),
+    "every name the panel offers is one a run resolves",
+    `offered ${offered.join(",")} vs resolved ${resolved.join(",")}`,
+  );
+}
+
+console.log("\nand a connector with no optional names contributes none");
+{
+  for (const id of ["gmail", "slack", "postgres", "stripe", "google_calendar"]) {
+    const one = resolveSelected(all, [id]);
+    check(optionalEnv(one).length === 0, `${id} declares no optional_env`, optionalEnv(one).join(","));
+  }
+  // Gmail and Calendar DO read an optional name — their hosted access token — and it is
+  // deliberately not here: it comes from the OAuth spec's `accessSecretName` and is injected by
+  // `connectorRunEnv`. Listing it in the catalog too would be a second place for that name to
+  // live, which is the thing `optional_env` exists to stop rather than to create.
+  check(optionalEnv(resolveSelected(all, ["gmail", "google_calendar"])).length === 0, "...including the two whose access token the OAuth service fills");
 }
 
 console.log("\nan agent with no connectors");

@@ -23,7 +23,8 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative } from "node:path";
 import { anthropicClient, emptyUsage, summarizeUsage, type UsageSummary } from "./claude.ts";
 import {
-  connectionSuppliedEnv, loadConnectors, requiredEnv, resolveSelected, templatesDir, type Connector,
+  connectionSuppliedEnv, loadConnectors, optionalEnv, requiredEnv, resolveSelected, templatesDir,
+  type Connector,
 } from "./connectors.ts";
 import { FileProtocolParser, type ProtocolEvent } from "./fileProtocol.ts";
 import { round8 } from "./pricing.ts";
@@ -519,6 +520,19 @@ export class Generator extends EventEmitter<GeneratorEvents> {
         "# workspace made. Set them by hand only if you are running this project on your",
         "# own, outside Jaroku:",
         ...documented.map((k) => `# ${k}=`),
+      );
+    }
+    // AND THE OPTIONAL ONES, AS A THIRD BLOCK. They are not in `env` — that list is built from
+    // `required_env`, which is what a deploy refuses over — so without this they appear in no
+    // file at all, and a copy of this project running outside Jaroku has no way to learn the
+    // name exists. Commented rather than blank, like the connection-filled block above and for
+    // the same reason: a blank says "fill this in or nothing works", which is false here.
+    const optional = optionalEnv(meta.selected).filter((k) => !existing.includes(k) && !env.includes(k));
+    if (optional.length) {
+      blocks.push(
+        "",
+        "# Optional. These connectors read them when set and work without them:",
+        ...optional.map((k) => `# ${k}=`),
       );
     }
     if (blocks.length) {

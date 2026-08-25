@@ -1,5 +1,6 @@
 {
   "comment": "Connector registry. The Node builder reads this to (a) render connector signatures into the generation prompt, (b) copy the right template files into a generated project, (c) build .env.example from required_env, and (d) build a deployed image's dependency list from pip_requires. Keep in sync with the .py files — tool_templates/__init__.py has a check_catalog() that verifies it.",
+  "optional_env_comment": "Names a connector READS but does not need. `required_env` is what nothing works without; this is the second door — an optional default header, a hosted access token. It exists because a name offered to a user and not resolved into a run is the worst failure this system has: the value is stored, the panel says so, and the run authenticates with nothing. The names here must be a subset of the module's own OPTIONAL_ENV, which check_catalog() verifies, so the catalog can never offer a name the template does not read.",
   "auth_comment": "How a workspace supplies this connector's credential. `oauth` means Jaroku owns the OAuth app and the user grants it access by clicking Connect — the value reaching a run is a short-lived access token the control plane minted, and `required_env` still lists the names a HAND-CONFIGURED install uses, because an exported project has no Jaroku to ask. `user_secret` means the user supplies the value themselves and it goes into the vault under those exact names. `none` means the connector needs no credential at all. The field decides what the connections panel offers, what .env.example says about each key, and what the generation prompt tells the model about where a credential comes from.",
   "pip_requires_comment": "The PyPI requirements each connector's template lazy-imports, as they appear in runtime/pyproject.toml's `connectors` extra. Split per connector because a deployed image should install what its agent actually uses, not the union — an agent with one Postgres tool has no business pulling in the Google API client. check_catalog() proves every entry is still a subset of the extra, so the two cannot drift.",
   "schema_version": 1,
@@ -151,6 +152,7 @@
       "module": "http_connector",
       "description": "Make HTTPS requests to domains this workspace has explicitly allowed. SSRF-safe: https only, exact hostnames with no wildcards, private ranges refused whatever a name resolves to, credential-in-URL rejected, redirects reported rather than followed.",
       "required_env": ["HTTP_ALLOWED_DOMAINS"],
+      "optional_env": ["HTTP_AUTH_HEADER"],
       "auth": "user_secret",
       "pip_requires": [],
       "tools": [

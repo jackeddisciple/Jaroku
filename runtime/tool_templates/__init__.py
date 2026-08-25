@@ -64,6 +64,28 @@ def check_catalog() -> list[str]:
                 f"vs module {sorted(actual)}"
             )
 
+        # AND THE SECOND DOOR, which is the one that fails silently. `optional_env` is what the
+        # connections panel offers BEYOND the required names — an optional default auth header, a
+        # hosted access token — and a name offered there that the module does not actually read
+        # produces the worst outcome available here: the user types a value, the vault stores it,
+        # the panel reports it configured, and the run authenticates with nothing. That is the
+        # failure "a key stored under a name the runtime does not read" already cost this project
+        # once, in onboarding, and it looks like success from every angle except the one that matters.
+        #
+        # A SUBSET RATHER THAN AN EQUALITY, unlike `required_env` above. A module may read a name
+        # the catalog does not offer: `GMAIL_ACCESS_TOKEN` is gmail.py's OPTIONAL_ENV and is filled
+        # by the OAuth service from the connector spec's `accessSecretName`, so listing it here too
+        # would be a second place for that name to live and a second place to forget it. The
+        # direction that must hold is the other one — everything the catalog offers is read.
+        declared_optional = set(entry.get("optional_env", []))
+        module_optional = set(getattr(module, "OPTIONAL_ENV", []))
+        unread = declared_optional - module_optional
+        if unread:
+            problems.append(
+                f"{cid}: optional_env {sorted(unread)} is offered to users but "
+                f"{entry['module']} never reads it — a value stored under it would do nothing"
+            )
+
         # `auth` decides what the connections panel offers, what .env.example says about each
         # key, and what the generation prompt tells the model about where a credential comes
         # from. A connector with none of those decided would quietly behave as `user_secret`

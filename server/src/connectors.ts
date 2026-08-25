@@ -43,6 +43,22 @@ export interface Connector {
   module: string;
   description: string;
   required_env: string[];
+  /**
+   * Names this connector READS but does not need, and which a user may therefore be offered.
+   *
+   * `required_env` is what nothing works without. This is the second door — the HTTP connector's
+   * optional default auth header — and it is a catalog field rather than a table beside one for
+   * the reason `auth` is: a second place to say "http also reads this" is a second place to forget
+   * it, and forgetting it here has a specific, silent shape. A name offered in the Connections tab
+   * and absent from a run's environment means the user pastes a value, the vault stores it, the
+   * panel reports it configured, and every request goes out unauthenticated.
+   *
+   * NOT the OAuth access-token names. Those are read from the connector's own spec
+   * (`accessSecretName`) and injected by `connectorRunEnv`, and listing them here as well would be
+   * that same second place. `check_catalog()` holds this list to a subset of the module's own
+   * `OPTIONAL_ENV`, so the catalog can never offer a name the template does not read.
+   */
+  optional_env?: string[];
   /** See ConnectorAuth. Absent in a catalog written before this existed, which reads as
    *  `user_secret` — the behaviour every connector had then, so an old catalog is unchanged. */
   auth?: ConnectorAuth;
@@ -101,6 +117,25 @@ export function userSuppliedEnv(selected: Connector[]): string[] {
 /** The mirror: keys a connection fills in, which the file documents rather than demands. */
 export function connectionSuppliedEnv(selected: Connector[]): string[] {
   return requiredEnv(selected.filter((c) => authModeOf(c) === "oauth"));
+}
+
+/**
+ * Union of the OPTIONAL env keys the selected connectors read, in catalog order, de-duplicated.
+ *
+ * Kept separate from `requiredEnv` rather than folded into it, because the two are read by callers
+ * that must treat them differently. `required_env` is what a deploy REFUSES over when it is
+ * missing — an unconfigured template raises on every call, so that container deploys green and is
+ * dead — and an optional name in that list would refuse a deploy over a value nobody needs. What
+ * both callers agree on is narrower and is the whole point of this function: a run resolves both,
+ * because a name the panel offers and the sandbox never sees is a credential stored under a name
+ * the runtime does not read.
+ */
+export function optionalEnv(selected: Connector[]): string[] {
+  const seen: string[] = [];
+  for (const c of selected) {
+    for (const key of c.optional_env ?? []) if (!seen.includes(key)) seen.push(key);
+  }
+  return seen;
 }
 
 /** One `user_secret` connector this workspace has begun setting up, and what it still lacks. */

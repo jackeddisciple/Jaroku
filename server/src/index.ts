@@ -107,7 +107,7 @@ import { IdentityRepository } from "./db/repositories/identity.ts";
 import { isMemberRole } from "./db/tenant.ts";
 import { resolveDevTenancy, type DevTenancy } from "./devTenancy.ts";
 import {
-  authModeOf, configuredUserSecretConnectors, loadConnectors, templatesDir,
+  authModeOf, configuredUserSecretConnectors, loadConnectors, optionalEnv, resolveSelected, templatesDir,
 } from "./connectors.ts";
 import { buildArtifacts } from "./dockerfile.ts";
 import {
@@ -4483,8 +4483,6 @@ const CONNECTOR_FIELD_COPY: Record<string, { label: string; hint: string; secret
   },
 };
 
-/** Which optional names a `user_secret` connector accepts beyond its required ones. */
-const CONNECTOR_OPTIONAL_ENV: Record<string, string[]> = { http: ["HTTP_AUTH_HEADER"] };
 
 async function connectionSnapshot(ctx: TenantContext): Promise<ConnectionView[]> {
   const rows = new Map((await oauthRepo.list(ctx)).map((r) => [r.connector_id, r]));
@@ -4520,8 +4518,11 @@ async function connectionSnapshot(ctx: TenantContext): Promise<ConnectionView[]>
   const secretRows: ConnectionView[] = loadConnectors(RUNTIME_DIR)
     .filter((c) => authModeOf(c) === "user_secret")
     .map((c) => {
-      const optional = CONNECTOR_OPTIONAL_ENV[c.id] ?? [];
-      const fields = [...c.required_env, ...optional].map((name) => {
+      // From the catalog, not from a table beside it. The panel offering a name is what makes a
+      // user store a value under it, and the run resolving that same list is what makes the value
+      // do anything — so the two have to read one field or they will eventually disagree, and the
+      // way that disagreement presents is a credential stored under a name nothing reads.
+      const fields = [...c.required_env, ...(c.optional_env ?? [])].map((name) => {
         const copy = CONNECTOR_FIELD_COPY[name] ?? { label: name, hint: "", secret: true };
         const summary = stored.get(name);
         return {
@@ -9346,6 +9347,23 @@ async function runAgent(
     const agent = agentId ? await agentRepo.bySlug(ctx, agentId) : undefined;
     const names = (agent?.required_env ?? []).filter(isSecretName);
     if (names.length) Object.assign(env, await secrets.getForRun(runId, names));
+
+    // AND THE OPTIONAL NAMES ITS CONNECTORS READ, which `required_env` deliberately does not carry.
+    //
+    // THIS IS THE GAP THAT MAKES A STORED VALUE DO NOTHING. `agents.required_env` is the list a
+    // DEPLOY refuses over — an unconfigured template raises on every call, so a container missing
+    // one of those names deploys green and is dead — which is exactly why an optional name must
+    // not be in it. But the run resolution read that same list, so `HTTP_AUTH_HEADER` could be
+    // typed into the Connections tab, written to the vault, and reported configured, while the
+    // sandbox never saw it and every request went out unauthenticated. No error anywhere: the
+    // template reads `os.environ` and correctly concludes there is no default header.
+    //
+    // From the AGENT'S OWN connector list, never from anything a client sent — the same rule the
+    // required half above and the OAuth half below both follow.
+    const optional = optionalEnv(resolveSelected(loadConnectors(RUNTIME_DIR), agent?.connectors ?? []))
+      .filter(isSecretName)
+      .filter((name) => !names.includes(name));
+    if (optional.length) Object.assign(env, await secrets.getForRun(runId, optional));
     // AND THE WORKSPACE'S OWN PROVIDER KEY — for the provider this run actually names, and no
     // other. An agent on Anthropic does not receive OPENAI_API_KEY even when the workspace has
     // configured one: that is the same least-privilege rule the egress policy applies to the
