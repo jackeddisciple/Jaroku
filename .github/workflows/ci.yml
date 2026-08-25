@@ -899,3 +899,12 @@ jobs:
           # The scanner is then re-run against snippets that violate each rule, because a check
           # nobody has watched refuse anything might be stuck at true.
           npm run test:connector-stripe
+          # THE ADVERSARIAL ONE, and most of its assertions are about requests that must NOT
+          # happen — counted rather than read, because a message saying "refused" while a socket
+          # was opened passes a text check. The template's own socket module is a shim that
+          # scripts DNS and records every dial, so resolution, pinning, redirect handling, header
+          # stripping and truncation all run for real against a server that reports what it got.
+          # TLS is a pass-through whose one job is to record the server_hostname it was handed,
+          # since that value IS the pinning property: the socket goes to a literal address while
+          # the certificate is still checked against the name.
+          npm run test:connector-http

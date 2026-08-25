@@ -147,6 +147,7 @@
     "test:connector-catalog": "uv run --directory ../runtime python -m tool_templates.tests.catalog",
     "test:connector-gcal": "uv run --directory ../runtime python -m tool_templates.tests.gcal",
     "test:connector-stripe": "uv run --directory ../runtime python -m tool_templates.tests.stripe",
+    "test:connector-http": "uv run --directory ../runtime python -m tool_templates.tests.http",
     "test:providers": "tsx src/providers.test.ts",
     "test:deploy-artifacts": "tsx src/deployArtifacts.test.ts",
     "test:deploy-secrets": "tsx src/deploySecrets.test.ts",

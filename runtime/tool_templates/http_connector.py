@@ -513,18 +513,32 @@ def http_request(
     truncated = len(raw) > MAX_BODY_BYTES
     text = raw[:MAX_BODY_BYTES].decode("utf-8", errors="replace")
 
+    # STRIPPED FIRST, THEN CAPPED, and the order is not cosmetic. Capping first would let a server
+    # push the headers worth reading out of view behind forty Set-Cookies — and the count is the
+    # server's to choose, which makes it the server's choice what an agent gets to see.
     shown = []
-    for name, value in list(response.headers.items())[:MAX_RESPONSE_HEADERS]:
+    for name, value in response.headers.items():
         if name.lower() in STRIPPED_RESPONSE_HEADERS:
             continue
+        if len(shown) >= MAX_RESPONSE_HEADERS:
+            shown.append(f"  (further headers omitted)")
+            break
         shown.append(f"  {name}: {value}")
 
     location = response.headers.get("Location")
     if 300 <= status < 400 and location:
-        # Reported rather than followed. The Location is shown so the agent can decide to ask for
-        # it explicitly — at which point it goes through every check above again, which is the
-        # whole reason not to follow it here.
-        shown.append(f"  (redirect to {location[:200]} — NOT followed; ask for that URL directly if it is allowed)")
+        # REPORTED, NEVER FOLLOWED, and the report says whether the target would even be allowed.
+        # A redirect is the one thing a server at an approved address controls completely, so
+        # following it hands the choice of destination to whoever answered — which is how an
+        # allowlist becomes advisory. Saying whether the target passes is what makes this useful
+        # rather than merely safe: an agent redirected to an allowed host can ask for that URL
+        # directly, at which point every check above runs again, on purpose.
+        try:
+            check_url(urllib.parse.urljoin(target, location), allowed)
+            verdict = "it IS an allowed host, so ask for that URL directly"
+        except HttpRefused as why:
+            verdict = f"and it would be refused anyway — {why}"
+        shown.append(f"  (redirect to {location[:200]} — NOT followed; {verdict})")
 
     return "\n".join(
         [
@@ -532,11 +546,9 @@ def http_request(
             *shown,
             "",
             text,
-            *(
-                [f"\n(response truncated at {MAX_BODY_BYTES} bytes)"]
-                if truncated
-                else []
-            ),
+            # No leading newline of its own: `join` already puts one there, and two produced a
+            # blank line nobody asked for between the body and the note about it.
+            *([f"(response truncated at {MAX_BODY_BYTES} bytes — ask for a narrower resource)"] if truncated else []),
         ]
     )
 
