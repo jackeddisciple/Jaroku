@@ -106,7 +106,7 @@ import {
 import { IdentityRepository } from "./db/repositories/identity.ts";
 import { isMemberRole } from "./db/tenant.ts";
 import { resolveDevTenancy, type DevTenancy } from "./devTenancy.ts";
-import { loadConnectors, templatesDir } from "./connectors.ts";
+import { authModeOf, loadConnectors, templatesDir } from "./connectors.ts";
 import { buildArtifacts } from "./dockerfile.ts";
 import {
   isSafeAgentId, listProjectFiles, readOnlyPaths, readOnlyReason, type ProjectFile,
@@ -2855,7 +2855,14 @@ for (const route of lifecycleRoutes({
 const secretPasscodes = new SecretPasscodes({ passcodes: new SecretPasscodeRepository(db) });
 const secretElevations = new SecretElevations({ elevations: new SecretElevationRepository(db) });
 const secretUsages = new SecretUsageRepository(db);
-const secretsManager = new SecretsManager({ secrets, refs: secretRefs, usages: secretUsages });
+const secretsManager = new SecretsManager({
+  secrets,
+  refs: secretRefs,
+  usages: secretUsages,
+  // The connector rules, on `store` rather than on a route — so a pasted `.env` carrying
+  // HTTP_ALLOWED_DOMAINS=*.example.com is refused by the same check the form goes through.
+  validateConnectorValue: (name, value) => connectorSecrets.unstorableConnectorValue(name, value),
+});
 
 // The one place in this process that ever holds a GitHub token as a value, and the one place that
 // hands out a client without one. Everything else — push, pull, fetch, link — asks it for an api
@@ -4400,14 +4407,53 @@ async function handleMcpCommand(ctx: TenantContext, cmd: McpCommand): Promise<vo
 // feature rather than an unconfigured one — so an unavailable connector is rendered with the
 // reason instead of hidden.
 
+/**
+ * What a `user_secret` connector asks a person for, per connector.
+ *
+ * A TABLE HERE RATHER THAN A FIELD IN catalog.json, and the reason is what the two files are for.
+ * `required_env` already says WHICH names a connector needs, and this says how to ASK for them —
+ * a label, a sentence of help, and whether the value is a credential or a policy. That is
+ * interface copy, it changes for reasons the catalog never changes for, and putting it in the
+ * catalog would mean the generation prompt and a deployed image's dependency list carry the
+ * wording of a form. `required_env` stays the source of truth for the names: anything listed
+ * there and missing here still renders, with the variable name as its own label.
+ */
+const CONNECTOR_FIELD_COPY: Record<string, { label: string; hint: string; secret: boolean }> = {
+  DATABASE_URL: {
+    label: "Connection string",
+    hint: "postgresql://user:password@host:5432/dbname — read-only credentials are strongly advised; the connector refuses writes either way.",
+    secret: true,
+  },
+  STRIPE_SECRET_KEY: {
+    label: "Restricted key",
+    hint: "rk_live_… — create one under Developers → API keys → Restricted keys with READ permissions only. A full-access sk_live_ key is refused.",
+    secret: true,
+  },
+  HTTP_ALLOWED_DOMAINS: {
+    label: "Allowed domains",
+    hint: "Comma-separated exact hostnames: api.example.com,hooks.example.net. No scheme, no path, no port, and no wildcards. Every request to anything else is refused.",
+    secret: false,
+  },
+  HTTP_AUTH_HEADER: {
+    label: "Default auth header (optional)",
+    hint: "Sent on every request. Either a bare value (Bearer sk-…) or a whole line (X-Api-Key: sk-…).",
+    secret: true,
+  },
+};
+
+/** Which optional names a `user_secret` connector accepts beyond its required ones. */
+const CONNECTOR_OPTIONAL_ENV: Record<string, string[]> = { http: ["HTTP_AUTH_HEADER"] };
+
 async function connectionSnapshot(ctx: TenantContext): Promise<ConnectionView[]> {
   const rows = new Map((await oauthRepo.list(ctx)).map((r) => [r.connector_id, r]));
-  return oauth.connectors().map(({ provider, spec }) => {
+  const oauthRows: ConnectionView[] = oauth.connectors().map(({ provider, spec }) => {
     const row = rows.get(spec.connectorId);
     return {
       connectorId: spec.connectorId,
       label: spec.label,
       provider: provider.id,
+      auth: "oauth" as const,
+      fields: [],
       // "disconnected" rather than absent, so the panel renders one row per connector in a
       // stable order rather than a list that reshuffles as things are connected.
       status: row?.status ?? "disconnected",
@@ -4421,6 +4467,62 @@ async function connectionSnapshot(ctx: TenantContext): Promise<ConnectionView[]>
       available: oauth.configured(spec.connectorId),
     };
   });
+
+  // AND THE CONNECTORS NOBODY CAN CONNECT FOR YOU, from the catalog rather than from the OAuth
+  // service — which is why they were missing. `oauth.connectors()` is the set of things with a
+  // consent screen, and Postgres, Stripe and HTTP have none: the value IS the credential. They
+  // still belong on the screen named for connections, because "is Stripe set up in this
+  // workspace" is the same question about all six and being sent to a different tab to answer it
+  // for three of them is the interface admitting it is organised around our implementation.
+  const stored = new Map((await secretsManager.list(ctx)).map((s) => [s.name, s]));
+  const secretRows: ConnectionView[] = loadConnectors(RUNTIME_DIR)
+    .filter((c) => authModeOf(c) === "user_secret")
+    .map((c) => {
+      const optional = CONNECTOR_OPTIONAL_ENV[c.id] ?? [];
+      const fields = [...c.required_env, ...optional].map((name) => {
+        const copy = CONNECTOR_FIELD_COPY[name] ?? { label: name, hint: "", secret: true };
+        const summary = stored.get(name);
+        return {
+          name,
+          label: copy.label,
+          hint: copy.hint,
+          required: c.required_env.includes(name),
+          secret: copy.secret,
+          configured: summary?.configured === true,
+          maskedHint: summary?.maskedHint ?? null,
+          // NO VALUE, NOT EVEN THE NON-SECRET ONE. An allowlist a person cannot re-read is one
+          // they retype from memory, and retyping an allowlist is how a domain gets dropped from
+          // it — so the panel does let them see it, through `POST /v1/secrets/:name/reveal`,
+          // which is the existing elevation-gated route. Putting it on this frame instead would
+          // put a stored value on a socket, and the reason that rule has no exceptions is that
+          // "this one is not really a secret" is a judgement made per field, forever, by whoever
+          // adds the next one.
+        };
+      });
+      // "Connected" is every REQUIRED field having a value — the same word the OAuth rows use,
+      // meaning the same thing: an agent selecting this connector will find what it needs.
+      const ready = fields.filter((f) => f.required).every((f) => f.configured);
+      return {
+        connectorId: c.id,
+        label: c.label,
+        provider: "",
+        auth: "user_secret" as const,
+        fields,
+        status: ready ? "active" : "disconnected",
+        scopes: [],
+        // The catalog's own sentence. It is already written for a person deciding whether to
+        // hand a connector their credentials, which is exactly what this line is for.
+        consent: [c.description],
+        account: null,
+        connectedAt: null,
+        lastError: null,
+        // Always. There is no deployment-level OAuth app to be missing — the only thing that can
+        // be absent is the value, which is what `status` says.
+        available: true,
+      };
+    });
+
+  return [...oauthRows, ...secretRows];
 }
 
 async function broadcastConnections(ctx: TenantContext): Promise<void> {

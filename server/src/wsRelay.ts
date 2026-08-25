@@ -1307,10 +1307,52 @@ export type ProviderEvent =
 // is the whole of what a browser is ever told.
 
 /** One connection, as a browser sees it. Not one field of this is a token. */
+/**
+ * One value a `user_secret` connector needs a person to supply.
+ *
+ * NAMES AND SHAPE, NEVER A VALUE, and `configured` is the whole of what this says about what is
+ * stored. That is the same rule the providers channel follows — a provider reports
+ * `configured: true/false`, which is a variable being set and never what is in it — and it is why
+ * this can ride the connections channel at all. The VALUE goes the other way, over
+ * `POST /v1/secrets`, because that route is behind the elevation gate and a WebSocket frame cannot
+ * carry an elevation header. A credential command on this socket would be one nothing can gate.
+ */
+export interface ConnectionField {
+  /** The environment variable the connector's template reads. */
+  name: string;
+  label: string;
+  /** What to type, in the words somebody filling it in needs. Rendered under the input. */
+  hint: string;
+  required: boolean;
+  /**
+   * Whether this is a credential or a policy.
+   *
+   * `HTTP_ALLOWED_DOMAINS` is not secret — it is a list of hostnames, and hiding it behind dots
+   * would make the one field a person most needs to re-read the one they cannot. `STRIPE_SECRET_KEY`
+   * and `HTTP_AUTH_HEADER` are credentials and are masked, never echoed, and never sent back.
+   */
+  secret: boolean;
+  /** Whether a value is stored under this name. Never the value. */
+  configured: boolean;
+  /** The vault's own mask for a configured secret — last few characters, or null. */
+  maskedHint: string | null;
+}
+
 export interface ConnectionView {
   connectorId: string;
   label: string;
   provider: string;
+  /**
+   * How this connector is credentialed, from the catalog's own `auth` field.
+   *
+   * The panel used to list only what the OAuth service offered, which meant Postgres — and now
+   * Stripe and HTTP — were absent from the one screen named for connections, and a user looking
+   * for them was sent to the Secrets tab to type a variable name from memory. The row is the same
+   * row either way; what differs is whether it ends in a Connect button or in fields.
+   */
+  auth: "oauth" | "user_secret";
+  /** For a `user_secret` connector: what a person fills in. Empty for an OAuth one. */
+  fields: ConnectionField[];
   /** `active` | `reauth_required` | `revoked` | `disconnected` — the last meaning never connected. */
   status: string;
   /** What the user actually granted, in the provider's own vocabulary. */

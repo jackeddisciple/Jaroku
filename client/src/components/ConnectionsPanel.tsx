@@ -21,12 +21,13 @@
 // do — and a connection's status is a fact about a token this browser has never seen, so a
 // component asserting one would be a component making it up.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   CONNECTION_STATUS_LABEL,
   useConnectionStore,
 } from "../store/connectionStore.ts";
 import { sendConnectConnector, sendDisconnectConnector, sendListConnections } from "../lib/socket.ts";
+import { createSecret, revealSecret } from "../lib/secrets.ts";
 import { ICON, TEXT } from "../lib/tokens.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { iconBtn, outlineBtn, quietBtn } from "./buttons.ts";
@@ -35,7 +36,7 @@ import {
   AlertTriangleIcon, CheckIcon, LockIcon, PlugIcon, RefreshIcon, ShieldCheckIcon, XIcon,
 } from "./panelIcons.tsx";
 import { UnpluggedIcon } from "./inboxIcons.tsx";
-import type { ConnectionView } from "../types.ts";
+import type { ConnectionField as ConnectionFieldView, ConnectionView } from "../types.ts";
 
 /** What each status means, in the words somebody would use to decide what to do next. */
 const STATUS_COPY: Record<string, { state: "ok" | "error" | "pending" | "neutral"; icon: typeof CheckIcon }> = {
@@ -44,6 +45,155 @@ const STATUS_COPY: Record<string, { state: "ok" | "error" | "pending" | "neutral
   revoked: { state: "neutral", icon: XIcon },
   disconnected: { state: "neutral", icon: PlugIcon },
 };
+
+// --- the connectors nobody can connect FOR you --------------------------------
+//
+// Postgres has no consent screen, and neither do Stripe or HTTP: the value IS the credential, so
+// there is nothing to redirect to and nobody to ask on the user's behalf. They were therefore
+// absent from the one screen named for connections, and somebody looking for "is Stripe set up in
+// this workspace" was sent to the Secrets tab to type a variable name from memory. The row is the
+// same row; what differs is that it ends in fields instead of a button.
+//
+// THE VALUE DOES NOT GO OVER THE SOCKET. Everything else on this panel rides the connections
+// channel, and this deliberately does not: `POST /v1/secrets` is behind the elevation gate, a
+// WebSocket frame cannot carry an elevation header, and a credential command on a socket is a
+// credential command nothing can gate. So the field posts over HTTPS to the route the Secrets tab
+// already uses, and the snapshot that comes back afterwards is what updates the row.
+//
+// AND THE NON-SECRET ONE CAN BE READ BACK. `HTTP_ALLOWED_DOMAINS` is a policy, not a credential —
+// masking it would make the field somebody most needs to re-read the one they cannot, and an
+// allowlist retyped from memory is how a domain silently drops off it. It is fetched through the
+// same elevation-gated reveal route the Secrets tab uses, on demand, and held in local state for
+// as long as the field is on screen.
+
+function ConnectorField({ field, onDone }: { field: ConnectionFieldView; onDone: () => void }) {
+  const [value, setValue] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  // Validated on blur as well as on save, which §7.3 asks for and which is worth the duplication:
+  // a person pasting a list of six domains should learn that one of them has a scheme on it while
+  // the cursor is still in the box, not after a round trip. The SERVER still decides — this is the
+  // shape check, and it deliberately does not try to reproduce the private-range refusal, which
+  // needs DNS and is the server's alone.
+  const shapeProblem = (raw: string): string | null => {
+    if (field.name !== "HTTP_ALLOWED_DOMAINS") return null;
+    const bad = raw
+      .split(",")
+      .map((d) => d.trim())
+      .filter(Boolean)
+      .filter((d) => /[*/:@\s]/.test(d) || !d.includes(".") || d.startsWith(".") || d.includes(".."));
+    if (bad.length === 0) return null;
+    return `not a hostname: ${bad.slice(0, 3).join(", ")} — bare hostnames only, no scheme, path, port or wildcard`;
+  };
+
+  const save = async () => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    const local = shapeProblem(trimmed);
+    if (local) {
+      setProblem(local);
+      return;
+    }
+    setBusy(true);
+    setProblem(null);
+    try {
+      await createSecret({ name: field.name, value: trimmed, kind: "custom" });
+      setValue("");
+      setEditing(false);
+      onDone();
+    } catch (err) {
+      // The server's sentence, which is written in this codebase and safe to render — the same
+      // rule the panel's own error strip follows. It is the one that knows a domain resolves into
+      // a private range, and the one that refuses a full-access Stripe key.
+      setProblem(err instanceof Error ? err.message : "that value could not be stored");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const show = async () => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      setValue(await revealSecret(field.name));
+      setEditing(true);
+    } catch (err) {
+      setProblem(err instanceof Error ? err.message : "that value could not be read");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const settled = field.configured && !editing;
+
+  return (
+    <div className="mt-1.5">
+      <div className="flex items-baseline gap-2">
+        <span className="text-[11px] text-ink">{field.label}</span>
+        <span className="font-mono text-[10px]" style={{ color: TEXT.muted }}>
+          {field.name}
+        </span>
+        {!field.required ? (
+          <span className="text-[10px] text-faint">optional</span>
+        ) : null}
+      </div>
+
+      {settled ? (
+        <div className="mt-1 flex items-center gap-1.5">
+          <span className="flex items-center gap-1.5 text-[11px]" style={{ color: TEXT.muted }}>
+            <StatusDot state="ok" icon={CheckIcon} size={ICON.badge} />
+            {field.maskedHint ?? "set"}
+          </span>
+          {/* A non-secret field can be read back and edited; a credential can only be replaced.
+              Rotating a credential from here writes a new value over the old one, which is what
+              the Secrets tab's own Rotate does and is the only safe verb for a value nothing can
+              show you. */}
+          <button className={quietBtn} disabled={busy} onClick={field.secret ? () => setEditing(true) : show}>
+            {field.secret ? "Replace" : busy ? "Reading…" : "Edit"}
+          </button>
+        </div>
+      ) : (
+        <div className="mt-1 flex items-center gap-1.5">
+          <input
+            className="min-w-0 flex-1 rounded-control bg-panel px-2.5 py-1 font-mono text-[11px] text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+            type={field.secret ? "password" : "text"}
+            value={value}
+            autoComplete="off"
+            spellCheck={false}
+            disabled={busy}
+            placeholder={field.name}
+            onChange={(e) => {
+              setValue(e.target.value);
+              if (problem) setProblem(null);
+            }}
+            onBlur={() => setProblem(shapeProblem(value.trim()))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void save();
+              if (e.key === "Escape") {
+                setValue("");
+                setEditing(false);
+                setProblem(null);
+              }
+            }}
+          />
+          <button className={outlineBtn} disabled={busy || !value.trim()} onClick={() => void save()}>
+            {busy ? "Saving…" : "Save"}
+          </button>
+        </div>
+      )}
+
+      {problem ? (
+        <p className="mt-1 text-[11px] text-err">{problem}</p>
+      ) : (
+        <p className="mt-1 text-[11px]" style={{ color: TEXT.muted }}>
+          {field.hint}
+        </p>
+      )}
+    </div>
+  );
+}
 
 // --- one connector -----------------------------------------------------------
 
@@ -121,6 +271,25 @@ function ConnectionRow({ connection }: { connection: ConnectionView }) {
             </p>
           ) : null}
 
+          {/* THE FIELDS, for a connector nobody can connect on your behalf. Under the consent
+              line and above the buttons, in the same place the OAuth rows put their scope list:
+              this is the "what am I agreeing to, and what does it need" part of the row, and a
+              person reading down it should meet the same things in the same order whichever kind
+              of connector they are looking at. */}
+          {connection.auth === "user_secret"
+            ? connection.fields.map((field) => (
+                <ConnectorField
+                  key={field.name}
+                  field={field}
+                  // The snapshot is what updates the row — nothing here patches a field in from
+                  // what it just posted, for the same reason nothing on this panel invents a
+                  // status: what is stored is a fact about the vault, and a component asserting
+                  // one would be a component making it up.
+                  onDone={() => sendListConnections()}
+                />
+              ))
+            : null}
+
           {/* An unconfigured deployment is not an error state — see ConnectionView.available. It
               says which two variables somebody has to set rather than hiding the connector, which
               would read as a missing feature. */}
@@ -138,7 +307,12 @@ function ConnectionRow({ connection }: { connection: ConnectionView }) {
         </div>
       </div>
 
-      <div className="flex items-center gap-1.5">
+      {/* NO BUTTONS ON A `user_secret` ROW, and their absence is the honest shape rather than a
+          gap. Connect would have nowhere to send anybody; Disconnect would mean "delete this
+          value", which is the Secrets tab's Revoke and carries its own confirmation because the
+          credential may be referenced by a running agent. Emptying the field is the verb here,
+          and it is where the value is. */}
+      <div className={`flex items-center gap-1.5 ${connection.auth === "user_secret" ? "hidden" : ""}`}>
         {connected ? (
           <>
             <button

@@ -77,6 +77,21 @@ export interface SecretsManagerDeps {
   usages: SecretUsageRepository;
   /** Injected so a test can prove the reject path without reaching a provider. */
   verify?: (provider: ProviderId, key: string) => Promise<{ ok: boolean; message: string | null }>;
+  /**
+   * Why this value cannot be stored under this name, for the connector credentials that have a
+   * rule — or null when there is nothing to say.
+   *
+   * INJECTED RATHER THAN IMPORTED, the same way `verify` is, so this module keeps knowing about
+   * the vault and nothing else. The rules themselves are the connectors' and live beside them.
+   *
+   * AND IT HANGS OFF `store` RATHER THAN OFF THE ROUTE, which is the half that matters. The route
+   * guards the three verbs a person presses; `store` is also what the bulk `.env` import calls, so
+   * a pasted file containing `HTTP_ALLOWED_DOMAINS=*.example.com` would walk straight past a check
+   * that only lived on the form. That is the same reasoning the managed-kind backstop below is
+   * written for, applied to a value whose correctness is a safety property rather than an
+   * authorisation one.
+   */
+  validateConnectorValue?: (name: string, value: string) => Promise<string | null>;
 }
 
 /** Which provider a credential name belongs to, or null when it is not a provider key. */
@@ -142,6 +157,15 @@ export class SecretsManager {
     const name = assertSecretName(input.name);
     const unstorable = unstorableReason(input.value);
     if (unstorable) return { ok: false, message: unstorable };
+
+    // Step 1b: the connector rules, before anything is written and before any provider is asked.
+    // A `HTTP_ALLOWED_DOMAINS` that is not a list of hostnames is not a credential that will fail
+    // at first use — it is an allowlist that silently matches nothing, whose symptom is every
+    // request being refused with a message about a host that looks like it is on the list.
+    const connectorProblem = this.deps.validateConnectorValue
+      ? await this.deps.validateConnectorValue(name, input.value)
+      : null;
+    if (connectorProblem) return { ok: false, message: connectorProblem };
 
     const before = await this.deps.refs.get(ctx, name);
     const rotated = Boolean(before?.configured);

@@ -192,6 +192,74 @@ console.log("\nand one workspace's connection string is not another's");
   check((await store.postgresEgress(runFor(B))) !== null, "...and leaves B's alone");
 }
 
+// --- the two v0.3.6 user_secret connectors ---------------------------------------------------------
+//
+// Neither is a connection string, and neither fails the way one does. A bad DATABASE_URL fails
+// visibly at the first query; a bad HTTP_ALLOWED_DOMAINS is an allowlist that silently matches
+// nothing, and a full-access Stripe key is a connector whose second layer of read-only enforcement
+// quietly does not exist. Both are therefore refused at the moment somebody types them.
+
+console.log("\nthe HTTP allowlist is checked for shape and for where it points");
+{
+  const store = new ConnectorSecrets({ secrets, resolver: publicAnswer });
+  const ok = await store.unstorableConnectorValue("HTTP_ALLOWED_DOMAINS", "api.example.com, hooks.example.net");
+  check(ok === null, "a list of bare hostnames is accepted", ok ?? "");
+
+  for (const [bad, why] of [
+    ["*.example.com", "a wildcard, which on a shared platform grants every tenant of it"],
+    ["https://api.example.com", "a scheme"],
+    ["api.example.com/v1", "a path"],
+    ["api.example.com:8443", "a port"],
+    ["localhost", "a name with no dot in it"],
+    ["", "nothing at all"],
+  ] as const) {
+    const problem = await store.unstorableConnectorValue("HTTP_ALLOWED_DOMAINS", bad);
+    check(problem !== null, `${why} is refused`, problem ?? "it was accepted");
+  }
+
+  // THE SPLIT WORTH ASSERTING. A domain pointing into a private range is refused NOW, because
+  // `metadata.internal` typed into a text field should be answered while somebody is looking at
+  // it. A domain that does not resolve at all is ALLOWED, because refusing it would make
+  // configuring the connector depend on somebody else's DNS in the second they pressed Save.
+  const priv = new ConnectorSecrets({ secrets, resolver: metadataAnswer });
+  const refused = await priv.unstorableConnectorValue("HTTP_ALLOWED_DOMAINS", "metadata.example.com");
+  check(refused !== null && /private or reserved/.test(refused), "a domain resolving into a private range is refused at save", refused ?? "");
+
+  const nxdomain = new ConnectorSecrets({
+    secrets,
+    resolver: async () => {
+      throw new Error("NXDOMAIN");
+    },
+  });
+  const unresolved = await nxdomain.unstorableConnectorValue("HTTP_ALLOWED_DOMAINS", "not-yet.example.com");
+  check(unresolved === null, "...while one that does not resolve at all is still saveable", unresolved ?? "");
+}
+
+console.log("\nand the Stripe key has to be one the connector's posture is actually true of");
+{
+  const store = new ConnectorSecrets({ secrets, resolver: publicAnswer });
+  check((await store.unstorableConnectorValue("STRIPE_SECRET_KEY", "rk_live_51abcdef")) === null, "a restricted live key is accepted");
+  check((await store.unstorableConnectorValue("STRIPE_SECRET_KEY", "sk_test_51abcdef")) === null, "...and a test key, which cannot touch a real account");
+
+  // THE ONE THAT MAKES THE SECOND LAYER REAL. "Use a restricted key" was a sentence in a catalog
+  // description, which is not a layer — a full-access live key can refund, cancel and delete, and
+  // the only thing between it and those was our template being correct forever.
+  const full = await store.unstorableConnectorValue("STRIPE_SECRET_KEY", "sk_live_51abcdef");
+  check(full !== null, "a full-access live key is REFUSED rather than warned about");
+  check(/rk_live/.test(full ?? ""), "...and the message names what to create instead", full ?? "");
+  check(!/51abcdef/.test(full ?? ""), "...and never quotes the key back");
+
+  const shape = await store.unstorableConnectorValue("STRIPE_SECRET_KEY", "not-a-key");
+  check(shape !== null && !/not-a-key/.test(shape), "something that is not a Stripe key at all is refused, unquoted", shape ?? "");
+}
+
+console.log("\nand a name with no connector rule is left entirely alone");
+{
+  const store = new ConnectorSecrets({ secrets, resolver: publicAnswer });
+  check((await store.unstorableConnectorValue("ANTHROPIC_API_KEY", "sk-ant-whatever")) === null, "a provider key is not this module's business");
+  check((await store.unstorableConnectorValue("MY_OWN_THING", "*.anything at all")) === null, "...nor is a custom value that happens to look like a domain list");
+}
+
 await db.close();
 for (const d of scratch) rmSync(d, { recursive: true, force: true });
 

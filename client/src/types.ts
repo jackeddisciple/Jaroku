@@ -628,10 +628,34 @@ export type ProviderMessage =
 
 export type ConnectionStatus = "active" | "reauth_required" | "revoked" | "disconnected";
 
+/**
+ * One value a `user_secret` connector needs somebody to supply.
+ *
+ * NAMES AND SHAPE, NEVER A VALUE. `configured` is the whole of what this says about what is
+ * stored, exactly as `configured: true` is on the providers channel. The value travels the other
+ * way — over `POST /v1/secrets`, which is behind the elevation gate — because a WebSocket frame
+ * cannot carry an elevation header, so a credential command on this socket is one nothing can gate.
+ */
+export interface ConnectionField {
+  /** The environment variable the connector's template reads. */
+  name: string;
+  label: string;
+  hint: string;
+  required: boolean;
+  /** Masked input and never echoed. False for the HTTP allowlist, which is a policy, not a secret. */
+  secret: boolean;
+  configured: boolean;
+  maskedHint: string | null;
+}
+
 export interface ConnectionView {
   connectorId: string;
   label: string;
   provider: string;
+  /** `oauth` ends the row in a Connect button; `user_secret` ends it in fields. */
+  auth: "oauth" | "user_secret";
+  /** What a person fills in. Empty for an OAuth connector. */
+  fields: ConnectionField[];
   status: ConnectionStatus;
   /** What was GRANTED — never what was asked for. A partial consent must read as partial. */
   scopes: string[];

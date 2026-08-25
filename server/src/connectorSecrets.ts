@@ -48,6 +48,12 @@ export const DATABASE_URL_NAME = "DATABASE_URL";
 /** The env name the HTTP connector reads. The allowlist IS that connector's whole safety model. */
 export const HTTP_ALLOWED_DOMAINS_NAME = "HTTP_ALLOWED_DOMAINS";
 
+/** Optional. A raw header the HTTP connector sends on every request — a credential like any other. */
+export const HTTP_AUTH_HEADER_NAME = "HTTP_AUTH_HEADER";
+
+/** The env name the Stripe connector reads. Expected to be a RESTRICTED key — see the rules below. */
+export const STRIPE_SECRET_KEY_NAME = "STRIPE_SECRET_KEY";
+
 /**
  * One allowlist entry, normalised, or null when it is not a bare hostname.
  *
@@ -217,6 +223,76 @@ export class ConnectorSecrets {
       return { ok: false, message: written.warning ?? "that value could not be stored", warning: null, reachable: null };
     }
     return { ok: true, message: null, warning: written.warning, reachable: null };
+  }
+
+  /**
+   * Why this value cannot be stored under this name, or null when there is nothing to say.
+   *
+   * THE ONE ENTRY POINT EVERY WRITE GOES THROUGH — the Connections panel, the Secrets tab and the
+   * bulk `.env` import all reach `SecretsManager.store`, and this hangs off that rather than off a
+   * form. A rule that only lived on the form would be one a pasted file walks past.
+   *
+   * DNS IS CONSULTED FOR THE ALLOWLIST AND A FAILURE TO RESOLVE IS NOT A REFUSAL, which is the
+   * split worth stating. A domain that resolves into a private range TODAY is refused here,
+   * because `metadata.internal` typed into a text field should be answered at the moment of the
+   * mistake rather than at the first tool call — that is `validateMcpUrl`'s posture, and this is
+   * the same class of value. A domain that does not resolve at all is ALLOWED, because refusing
+   * it would make configuring the connector depend on the state of somebody else's DNS in the
+   * second somebody pressed Save. Neither decision weakens anything: `httpEgress` re-resolves and
+   * re-refuses at policy-build time, which is the check that actually holds.
+   */
+  async unstorableConnectorValue(name: string, value: string): Promise<string | null> {
+    if (name === HTTP_ALLOWED_DOMAINS_NAME) {
+      const { domains, rejected } = parseAllowedDomains(value);
+      if (rejected.length > 0) {
+        return (
+          `not a hostname: ${rejected.slice(0, 3).map((r) => JSON.stringify(r)).join(", ")}. Entries are ` +
+          `bare exact hostnames — no scheme, no path, no port, and no wildcards.`
+        );
+      }
+      if (domains.length === 0) return "no domains listed — an empty allowlist refuses every request";
+      for (const domain of domains) {
+        try {
+          await resolveAndPin(domain, this.resolver);
+        } catch (err) {
+          // Only the private-range refusal is fatal. "Did not resolve" is the other thing
+          // `resolveAndPin` throws, and it is exactly the case that must stay saveable.
+          if (err instanceof EgressPolicyError && /private|link-local|reserved/.test(err.message)) {
+            return `${domain} resolves inside a private or reserved range, so it cannot be allowed`;
+          }
+        }
+      }
+      return null;
+    }
+
+    if (name === STRIPE_SECRET_KEY_NAME) {
+      const key = value.trim();
+      if (!/^(rk|sk)_(test|live)_/.test(key)) {
+        return "that does not look like a Stripe secret key — they begin rk_ or sk_";
+      }
+      // THE SECOND LAYER OF THE READ-ONLY POSTURE, MADE REAL RATHER THAN DESCRIBED.
+      //
+      // The connector's whole safety story is double enforcement: the template exposes only
+      // retrieve/list/search, AND the key itself cannot mutate. The second half is Stripe's to
+      // enforce and ours to insist on — and until something checked, it was a sentence in a
+      // catalog description, which is not a layer. `sk_live_` is a full-access key on a real
+      // account: it can refund, it can cancel a subscription, it can delete a customer, and the
+      // only thing standing between it and those is our own template being correct forever.
+      //
+      // Refused rather than warned, because a warning on this is a warning everybody clicks past
+      // and the failure it prevents is somebody's money. `rk_` keys are free to create and take
+      // under a minute, and the message says so.
+      if (key.startsWith("sk_live_")) {
+        return (
+          "that is a full-access live Stripe key. This connector is read-only and asks for a " +
+          "RESTRICTED key (rk_live_…) with read permissions only — create one under Developers → " +
+          "API keys → Restricted keys, so that even a modified template could not charge anybody."
+        );
+      }
+      return null;
+    }
+
+    return null;
   }
 
   /**
