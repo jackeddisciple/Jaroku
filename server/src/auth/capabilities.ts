@@ -175,6 +175,170 @@ export function can(role: Role, capability: Capability): boolean {
   return ROLE_CAPABILITIES[role]?.includes(capability) ?? false;
 }
 
+// --- the same idea, one level down: what may this person do to THIS agent ----------------------
+//
+// EVERYTHING ABOVE IS ABOUT A WORKSPACE and answers "may this person deploy". Everything below is
+// about ONE AGENT and answers "may this person deploy THIS". They are the same mechanism at two
+// scopes — data, read in one place, with a test that fails when something is added without a
+// decision — and they are deliberately in one file rather than two.
+//
+// THAT IS THE WHOLE POINT AND IT IS WORTH BEING BLUNT ABOUT. The value of the table above was
+// never the table; it was that there is exactly ONE of it. A second file with a second vocabulary
+// and a second `can` would be two tables that drift, and the one that drifts OPEN is the one
+// nobody notices — a `canUserDoX` somewhere that says yes where this says no is not a bug anybody
+// reports, because nothing fails. So per-agent access is an extension of this matrix, checked by
+// the same resolver, and there is no second checker anywhere in the codebase.
+//
+// A SEPARATE VOCABULARY, THOUGH, and that is not a contradiction. `agent:write` is a statement
+// about a workspace — may this person build agents here at all — and `edit` is a statement about
+// one agent. Collapsing them into one list would mean either a workspace capability that is
+// sometimes agent-scoped, or seven more strings in a list whose every existing member means
+// something workspace-wide. Two vocabularies, one resolver.
+
+/**
+ * The seven, in the order the panel renders them: widening authority, left to right.
+ *
+ * NAMED WITHOUT A PREFIX, unlike the workspace capabilities above. `deploy` rather than
+ * `agent:deploy`, because the noun is already fixed by the function that asks —
+ * `resolveCapabilities(ctx, agentId)` takes the agent — and a prefix repeating it would be
+ * decoration. It also makes the two vocabularies impossible to confuse at a call site, which is
+ * the property that matters most: `can(role, "deploy:manage")` and `holds(set, "deploy")` cannot
+ * be mistyped into each other.
+ */
+export const AGENT_CAPABILITIES = [
+  /** See the agent at all: its graph, its trace, its versions, its history. */
+  "view",
+  /** Execute it, and pause, resume, branch or answer a confirmation on a run. */
+  "run",
+  /** Change its code — plan, generate, apply an edit, undo one. */
+  "edit",
+  /** Start and cancel evaluations, and edit the datasets they run against. */
+  "eval",
+  /** Put it on a public URL, or take it down. */
+  "deploy",
+  /** Manage the credentials scoped to this agent. */
+  "secrets",
+  /** Manage who may do any of the above to this agent. Everything in the Access tab. */
+  "admin",
+] as const;
+
+export type AgentCapability = (typeof AGENT_CAPABILITIES)[number];
+
+export function isAgentCapability(v: unknown): v is AgentCapability {
+  return typeof v === "string" && (AGENT_CAPABILITIES as readonly string[]).includes(v);
+}
+
+/**
+ * What each capability drags in with it, as data.
+ *
+ * IMPLICATION IS IN THE TABLE AND NOT IN A CHECKBOX HANDLER, which is the one structural decision
+ * in this block. The grant dialog has to apply these rules while somebody is ticking boxes — check
+ * `edit` and `run` lights up; untick `view` and everything goes out — and the obvious place to put
+ * that is the handler, where it is a rule about a form. Then the resolver applies its own closure
+ * server-side, from a second copy, and the two disagree the first time one is edited: the dialog
+ * shows a set the server will not honour, or honours one the dialog never showed. So there is one
+ * table, the closure is a function over it, and the dialog calls that function.
+ *
+ * THE THREE NON-IMPLICATIONS ARE THE INTERESTING ENTRIES, and each is a decision rather than an
+ * omission:
+ *
+ *   `secrets` does not imply `edit`, and `edit` does not imply `secrets`. A contractor who writes
+ *   an agent's code and a person who holds the production credentials it runs on are genuinely
+ *   different roles, and a product that could not express the difference would have one of them
+ *   holding the other's authority in every workspace that hired either.
+ *
+ *   `admin` does not imply `secrets`. Managing who has access is not the same as holding the keys,
+ *   and the person who administers access is precisely the one who should not silently acquire
+ *   them by being made an administrator.
+ *
+ *   `admin` does not imply `edit`, `run`, `deploy` or `eval` either. An access administrator who
+ *   automatically became able to publish is an escalation with one click and no record of it.
+ */
+const AGENT_IMPLIES: Record<AgentCapability, readonly AgentCapability[]> = {
+  // There is no such thing as "can deploy but cannot see", so every other capability names this
+  // one. Written on each of them rather than as a special case in the closure, because a special
+  // case is a rule the dialog would have to know about separately.
+  view: [],
+  run: ["view"],
+  // Transitively `view`, through `run`. You cannot meaningfully change what you cannot execute:
+  // an editor who could not run would be publishing code they had no way to have tried.
+  edit: ["run"],
+  eval: ["view"],
+  deploy: ["view"],
+  secrets: ["view"],
+  admin: ["view"],
+};
+
+/**
+ * A capability set with everything it implies, transitively.
+ *
+ * TRANSITIVE RATHER THAN ONE HOP, which is the whole reason this is a walk and not a `flatMap`:
+ * `edit` names `run` and `run` names `view`, so a single pass over `AGENT_IMPLIES` produces
+ * {edit, run} and loses the one capability that every other capability implies. The failure is
+ * quiet in the direction that hides things — somebody granted `edit` and nothing else would see
+ * an agent they can edit and cannot open.
+ */
+export function closeAgentCapabilities(set: Iterable<AgentCapability>): Set<AgentCapability> {
+  const out = new Set<AgentCapability>();
+  const pending = [...set];
+  while (pending.length > 0) {
+    const next = pending.pop()!;
+    if (!isAgentCapability(next) || out.has(next)) continue;
+    out.add(next);
+    pending.push(...AGENT_IMPLIES[next]);
+  }
+  return out;
+}
+
+/** What a member holds on every agent by default: the product, and nothing that commits the workspace. */
+const AGENT_MEMBER: readonly AgentCapability[] = ["view", "run", "edit", "eval"];
+
+/**
+ * The default set each workspace role holds on any agent — which is also its CEILING.
+ *
+ * DEFAULT AND CEILING ARE ONE LIST, deliberately, and that is invariant B expressed as a data
+ * structure rather than as two tables that could disagree. A grant may narrow this set or widen
+ * within it; nothing can widen past it. Two lists — "what you get" and "what you could be given"
+ * — would make "a grant that exceeds the role" a state the schema could represent, and anything
+ * the schema can represent eventually exists.
+ *
+ * THE SPECIFICATION'S FOUR ROLES ARE THIS SCHEMA'S THREE. §3.3 lists owner / admin / member /
+ * viewer; `workspace_members.role` has a CHECK constraint admitting owner, admin and member and
+ * nothing else, and migration 003 is explicit about why. So `viewer` is not mapped to something
+ * approximate here — it is absent, and the row it would have held is absent with it. Inventing a
+ * fourth role in this table that no membership row can carry would be a set of defaults nobody can
+ * ever be assigned, sitting in the file that is supposed to be the answer.
+ *
+ * ADMIN HOLDS ALL SEVEN AND SO DOES OWNER, which looks like a missing distinction and is not.
+ * Everything that separates the two at the WORKSPACE level — membership, billing, the workspace's
+ * own existence — is above this scope entirely: there is no per-agent act that an owner may
+ * perform and an admin may not. Making `admin` narrower here would be inventing a difference to
+ * make the table look more interesting.
+ *
+ * `system` HOLDS EVERYTHING, for the reason it does above: it is the server acting on its own
+ * behalf, it is never resolvable from a membership row, and a reconciliation refused access to an
+ * agent it is reconciling is a background job that silently does nothing.
+ */
+export const ROLE_AGENT_CAPABILITIES: Record<Role, readonly AgentCapability[]> = {
+  member: AGENT_MEMBER,
+  admin: AGENT_CAPABILITIES,
+  owner: AGENT_CAPABILITIES,
+  system: AGENT_CAPABILITIES,
+};
+
+/**
+ * The ceiling a workspace role puts on any grant, closed under implication.
+ *
+ * CLOSED HERE TOO, even though every default set is already closed by inspection. The closure is
+ * cheap and the alternative is a rule that holds because somebody checked once: a capability added
+ * to `AGENT_MEMBER` later without its implications would produce a ceiling that refuses `view` to
+ * a member who holds `eval`, and the symptom would be an agent that cannot be opened by the person
+ * evaluating it.
+ */
+export function agentCeiling(role: Role): Set<AgentCapability> {
+  return closeAgentCapabilities(ROLE_AGENT_CAPABILITIES[role] ?? []);
+}
+
 /**
  * The MEMBERSHIP roles, weakest first. `system` is deliberately not among them.
  *

@@ -13,14 +13,20 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
 import {
+  AGENT_CAPABILITIES,
   CAPABILITIES,
   COMMAND_CAPABILITY,
+  ROLE_AGENT_CAPABILITIES,
   ROLE_CAPABILITIES,
+  agentCeiling,
   can,
   capabilityFor,
+  closeAgentCapabilities,
+  isAgentCapability,
   roleFor,
   requireCapability,
   withArticle,
+  type AgentCapability,
   type Capability,
 } from "./capabilities.ts";
 import type { TenantContext, Role } from "../db/tenant.ts";
@@ -127,6 +133,82 @@ console.log("\nrequireCapability");
   // that does not guard it returns Object.prototype and reads as "classified". Same reasoning
   // as the MCP tool-name refusal.
   check(capabilityFor("__proto__") === undefined, "...including __proto__, which is not an entry");
+}
+
+// The seven agent-level capabilities, their implication closure, and the ceilings the three
+// membership roles put on them. All of it is data in the same file as the matrix above, so all of
+// it is asserted here rather than in the resolver's suite: what the resolver does with the ceiling
+// is one question, and whether the ceiling is the right shape is another.
+console.log("\nthe agent-level vocabulary");
+{
+  check(AGENT_CAPABILITIES.length === 7, `there are seven of them (${AGENT_CAPABILITIES.join(", ")})`);
+  check(
+    AGENT_CAPABILITIES.every((c) => !c.includes(":")),
+    "...and none is spelled like a workspace capability, so the two cannot be mistyped into each other",
+  );
+  check(!isAgentCapability("agent:write"), "a workspace capability is not an agent capability");
+  check(!isAgentCapability("__proto__"), "...and neither is __proto__, which is not an entry");
+
+  // §3.2's four rules, each asserted as the sentence it is written as.
+  const closed = (...set: AgentCapability[]): string[] => [...closeAgentCapabilities(set)].sort();
+
+  check(
+    AGENT_CAPABILITIES.filter((c) => c !== "view").every((c) => closed(c).includes("view")),
+    "view is implied by every other capability — there is no `can deploy but cannot see`",
+  );
+  check(closed("edit").includes("run"), "edit implies run — you cannot meaningfully edit what you cannot execute");
+  // TRANSITIVE, which is the assertion the walk exists for: a single pass over the table would
+  // produce {edit, run} and drop the one capability everything implies.
+  check(closed("edit").join(",") === "edit,run,view", `...and view through it (${closed("edit").join(", ")})`);
+
+  check(!closed("secrets").includes("edit"), "secrets does not imply edit");
+  check(!closed("edit").includes("secrets"), "...and edit does not imply secrets — they are genuinely different roles");
+  check(!closed("admin").includes("secrets"), "admin does not imply secrets — managing access is not holding the keys");
+  check(
+    ["edit", "run", "deploy", "eval"].every((c) => !closed("admin").includes(c as AgentCapability)),
+    "...nor anything else, so being made an administrator is not an escalation with one click",
+  );
+
+  check(closed().length === 0, "an empty set closes to an empty set");
+  check(closed("nonsense" as AgentCapability).length === 0, "...and an unknown capability contributes nothing");
+}
+
+console.log("\nthe ceiling each workspace role puts on a grant");
+{
+  const ceiling = (role: Role): string[] => [...agentCeiling(role)].sort();
+
+  check(ceiling("owner").length === 7, "an owner's ceiling is all seven");
+  check(ceiling("admin").length === 7, "...and so is an admin's — nothing per-agent separates the two");
+  check(ceiling("system").length === 7, "...and `system` holds everything here as it does above");
+  check(
+    ceiling("member").join(",") === "edit,eval,run,view",
+    `a member's ceiling is the product and nothing that commits the workspace (${ceiling("member").join(", ")})`,
+  );
+  check(
+    !ceiling("member").includes("deploy") && !ceiling("member").includes("secrets") && !ceiling("member").includes("admin"),
+    "...so no grant can give a member deploy, secrets or admin on any agent",
+  );
+
+  // EVERY CEILING IS ALREADY CLOSED, which is what makes `agentCeiling`'s closure a floor rather
+  // than a behaviour — and the day somebody adds a capability to a default set without its
+  // implications, this is what says so rather than an agent that cannot be opened by the person
+  // evaluating it.
+  const unclosed = (["member", "admin", "owner", "system"] as Role[]).filter((role) => {
+    const declared = ROLE_AGENT_CAPABILITIES[role];
+    return declared.length !== agentCeiling(role).size;
+  });
+  check(unclosed.length === 0, `every declared default set is already closed (${unclosed.join(", ") || "all are"})`);
+
+  // The nesting the workspace matrix has, one scope down: a member's ceiling is a subset of an
+  // admin's, which is a subset of an owner's. Written as a check rather than by construction
+  // because the three lists here are not built from each other — `AGENT_MEMBER` is its own list,
+  // and the day it gains something the other two do not have is the day a member holds an
+  // authority over an agent that an owner does not.
+  check(
+    ceiling("member").every((c) => ceiling("admin").includes(c)) &&
+      ceiling("admin").every((c) => ceiling("owner").includes(c)),
+    "the three ceilings nest, exactly as the workspace roles do",
+  );
 }
 
 // §13.5 — what a refusal tells somebody to DO about it. A capability is precise and is addressed
