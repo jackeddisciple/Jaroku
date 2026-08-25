@@ -161,7 +161,16 @@ export function defaultWorkspace<T extends { kind: WorkspaceKind; created_at: st
 export interface Invite {
   id: string;
   workspace_id: string;
-  email: string;
+  /**
+   * Who this invitation was sent to, or null for one that was not sent to anybody.
+   *
+   * §13.4 — NULL IS "WHOEVER OPENS THE LINK", and it is a different KIND of invitation rather
+   * than a missing field. An addressed invitation is checked against the account redeeming it,
+   * which is the whole of what makes a leaked link useless to whoever found it; a link invitation
+   * has given that up on purpose, in exchange for being shareable in a channel where the sender
+   * does not know everybody's address. See migration 059 for why it is NULL and not `''`.
+   */
+  email: string | null;
   role: MemberRole;
   invited_by: string | null;
   expires_at: string;
@@ -1015,11 +1024,18 @@ export class IdentityRepository {
 
   async createInvite(
     ctx: TenantContext,
-    input: { email: string; role: MemberRole; ttlHours?: number },
+    input: { email?: string | null; role: MemberRole; ttlHours?: number },
   ): Promise<{ invite: Invite; token: string } | { error: string }> {
     if (!isMemberRole(input.role)) throw new Error(`not a membership role: ${input.role}`);
-    const email = input.email.trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(email) || email.length > 254) {
+    // §13.4 — AN OMITTED ADDRESS IS A DECISION, NOT A BLANK FIELD. An empty string and an absent
+    // one both mean "this link is for whoever opens it", because those are what a form with
+    // nothing typed into it and a caller that passed nothing look like, and they are the same
+    // intent. Anything else is validated exactly as before: a half-typed address is a mistake, and
+    // silently turning it into an anonymous link would hand somebody a shareable credential when
+    // they thought they were writing to one person.
+    const typed = (input.email ?? "").trim().toLowerCase();
+    const email: string | null = typed === "" ? null : typed;
+    if (email !== null && (!/^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(email) || email.length > 254)) {
       return { error: `"${email.slice(0, 64)}" is not an email address` };
     }
 
@@ -1032,23 +1048,30 @@ export class IdentityRepository {
     // users, workspace_members, audit_log — are deliberately policy-free, so scoping the
     // transaction costs them nothing.
     return this.db.scoped(ctx.workspaceId, async (tx) => {
-      // Already in? Then this is not an invite, it is a role change — and saying so is more
-      // useful than an invite that succeeds and then does nothing when it is accepted.
-      const member = await tx.get<{ user_id: string }>(
-        `SELECT m.user_id FROM workspace_members m
-           JOIN users u ON u.id = m.user_id
-          WHERE m.workspace_id = ? AND u.email = ? AND u.deleted_at IS NULL`,
-        [ctx.workspaceId, email],
-      );
-      if (member) return { error: `${email} is already a member of this workspace` };
+      // BOTH OF THESE ARE ABOUT AN ADDRESS, so neither applies to a link invitation — and
+      // skipping them is the decision rather than an oversight. There is nobody to already be a
+      // member, and there is no address whose pending invitation this one replaces: two link
+      // invitations are two links, both live, which is the whole point of migration 059 keeping
+      // NULL out of the partial unique index's way.
+      if (email !== null) {
+        // Already in? Then this is not an invite, it is a role change — and saying so is more
+        // useful than an invite that succeeds and then does nothing when it is accepted.
+        const member = await tx.get<{ user_id: string }>(
+          `SELECT m.user_id FROM workspace_members m
+             JOIN users u ON u.id = m.user_id
+            WHERE m.workspace_id = ? AND u.email = ? AND u.deleted_at IS NULL`,
+          [ctx.workspaceId, email],
+        );
+        if (member) return { error: `${email} is already a member of this workspace` };
 
-      // A pending invite is replaced rather than duplicated: the partial unique index forbids
-      // two, and "invite again" almost always means "the first link got lost".
-      await tx.run(
-        `UPDATE workspace_invites SET revoked_at = ?
-          WHERE workspace_id = ? AND email = ? AND accepted_at IS NULL AND revoked_at IS NULL`,
-        [nowIso(), ctx.workspaceId, email],
-      );
+        // A pending invite is replaced rather than duplicated: the partial unique index forbids
+        // two, and "invite again" almost always means "the first link got lost".
+        await tx.run(
+          `UPDATE workspace_invites SET revoked_at = ?
+            WHERE workspace_id = ? AND email = ? AND accepted_at IS NULL AND revoked_at IS NULL`,
+          [nowIso(), ctx.workspaceId, email],
+        );
+      }
 
       const secret = randomBytes(32).toString("base64url");
       const invite: Invite = {
@@ -1168,7 +1191,14 @@ export class IdentityRepository {
       // The address is checked, and this is the one refusal that says what happened — because
       // a person who signed in with the wrong account can fix it, and "invalid link" would send
       // them hunting for a problem with the link instead.
-      if (invite.email.toLowerCase() !== user.email.trim().toLowerCase()) {
+      //
+      // §13.4 — A NULL ADDRESS SKIPS THE CHECK RATHER THAN FAILING IT, which is the one line where
+      // a link invitation gives something up. `null.toLowerCase()` would have thrown, and a
+      // comparison that coerced would have refused every redemption of a link nobody is addressed
+      // by — so the branch has to be explicit, and what it says is exactly the trade the inviter
+      // made: this one is redeemable by whoever holds it, and the 256-bit secret is all the proof
+      // there is. Everything above this line — expiry, revocation, one-shot — still applies.
+      if (invite.email !== null && invite.email.toLowerCase() !== user.email.trim().toLowerCase()) {
         return { ok: false, reason: `that invitation was sent to ${invite.email}, not ${user.email}` };
       }
 
@@ -1178,6 +1208,26 @@ export class IdentityRepository {
         [workspaceId],
       );
       if (!workspace) return { ok: false, reason: "that workspace no longer exists" };
+
+      // ALREADY IN, WHICH ONLY BECAME REACHABLE WITH §13.4's LINK INVITATIONS — and if it is not
+      // caught here it is a demotion. `insertMemberIn` is an upsert that sets `role =
+      // excluded.role`, so an OWNER who opens a `member` link that was shared in the team channel
+      // stops being the owner, in one click, with a success message.
+      //
+      // An addressed invitation could not reach this: `createInvite` refuses one for somebody who
+      // is already a member. A link invitation has nobody to check, so the check moves here.
+      //
+      // REFUSED WITHOUT CONSUMING, rather than succeeding as a no-op. The link is one-shot and was
+      // shared with somebody; spending it on a member who already has what it offers would take it
+      // away from the person it was for, and they would get "already used" with no way to tell
+      // that it was used by a colleague opening it out of curiosity.
+      const already = await tx.get<{ role: string }>(
+        `SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?`,
+        [workspaceId, user.id],
+      );
+      if (already) {
+        return { ok: false, reason: `you are already a ${already.role} of ${workspace.name}` };
+      }
 
       await this.insertMemberIn(tx, workspaceId, user.id, invite.role);
       await tx.run(

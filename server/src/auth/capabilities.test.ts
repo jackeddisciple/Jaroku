@@ -18,6 +18,7 @@ import {
   ROLE_CAPABILITIES,
   can,
   capabilityFor,
+  roleFor,
   requireCapability,
   type Capability,
 } from "./capabilities.ts";
@@ -111,6 +112,48 @@ console.log("\nrequireCapability");
   // that does not guard it returns Object.prototype and reads as "classified". Same reasoning
   // as the MCP tool-name refusal.
   check(capabilityFor("__proto__") === undefined, "...including __proto__, which is not an entry");
+}
+
+// §13.5 — what a refusal tells somebody to DO about it. A capability is precise and is addressed
+// to whoever can read this file; a role is the thing a person can actually be granted.
+console.log("\nthe role a refusal names");
+{
+  check(roleFor("agent:read") === "member", "a member capability names the member");
+  check(roleFor("connector:manage") === "admin", "an admin capability names the admin");
+  check(roleFor("workspace:manage") === "owner", "an owner capability names the owner");
+
+  // THE WEAKEST ROLE THAT HOLDS IT, and this is the assertion the function exists for. The
+  // ladder is nested, so every capability is held by more than one role above its floor — and
+  // returning the WIDEST would answer "owner" for every question, which is advice that costs a
+  // round trip to the one person on holiday in a workspace whose admin could have done it.
+  const ladder: Role[] = ["member", "admin", "owner"];
+  const overshot = CAPABILITIES.filter((cap) => {
+    const named = roleFor(cap);
+    if (named === null) return false;
+    return ladder.slice(0, ladder.indexOf(named)).some((weaker) => can(weaker, cap));
+  });
+  check(
+    overshot.length === 0,
+    `no capability names a role stronger than the weakest one holding it (overshot: ${overshot.join(", ") || "none"})`,
+  );
+
+  // DERIVED FROM `ROLE_CAPABILITIES`, NEVER FROM A SECOND TABLE, which is what this asserts by
+  // construction: a hand-kept map is the copy that goes stale the day a capability moves between
+  // roles, and its symptom is a refusal telling somebody to ask the wrong person.
+  const unreachable = CAPABILITIES.filter((c) => roleFor(c) === null);
+  check(
+    unreachable.length === 0,
+    `every capability names a membership role that holds it (unnamed: ${unreachable.join(", ") || "none"})`,
+  );
+
+  // `system` IS NOT ON THE LADDER. It is the server acting on its own behalf and is never
+  // resolvable from a membership row, so a refusal that named it would be telling somebody to ask
+  // a thing that is not a person and cannot be granted.
+  check(
+    CAPABILITIES.every((c) => roleFor(c) !== ("system" as Role)),
+    "...and never names `system`, which nobody can be promoted to",
+  );
+  check(roleFor("nonsense" as Capability) === null, "an unknown capability names nobody");
 }
 
 console.log("\nevery command the relay accepts is classified");

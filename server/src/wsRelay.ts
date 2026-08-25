@@ -18,7 +18,7 @@ import {
   KEEP_ALIVE_TIMEOUT_MS,
   REQUEST_READ_TIMEOUT_MS,
 } from "./http/security.ts";
-import { can, capabilityFor } from "./auth/capabilities.ts";
+import { can, capabilityFor, roleFor } from "./auth/capabilities.ts";
 
 export type RunCommand = {
   cmd: "run";
@@ -887,7 +887,15 @@ const CONNECTION_COMMANDS = new Set(["listConnections", "connectConnector", "dis
 // no socket scoped to the workspace they are joining — it is `POST /v1/invites/accept`, over
 // HTTP, with a bearer token and nothing else. See auth/session.ts.
 export type ListMembersCommand = { cmd: "listMembers" };
-export type InviteMemberCommand = { cmd: "inviteMember"; email: string; role: string };
+/**
+ * `email` is OPTIONAL, and its absence is §13.4's link invitation rather than a missing field.
+ *
+ * The two shapes are two different credentials. With an address, the token is only redeemable by
+ * an account that signs in as that address — so a link that leaks is useless to whoever found it.
+ * Without one, it is redeemable by whoever holds it, which is the whole reason it can be pasted
+ * into a channel where the sender does not know everybody's address.
+ */
+export type InviteMemberCommand = { cmd: "inviteMember"; email?: string; role: string };
 export type RevokeInviteCommand = { cmd: "revokeInvite"; inviteId: string };
 export type SetMemberRoleCommand = { cmd: "setMemberRole"; userId: string; role: string };
 export type RemoveMemberCommand = { cmd: "removeMember"; userId: string };
@@ -926,7 +934,10 @@ const MEMBER_COMMANDS = new Set([
 // chance anybody has to see it, exactly like `serveToken`.
 export type MemberEvent =
   | { type: "members"; members: unknown[]; invites: unknown[] }
-  | { type: "inviteLink"; email: string; role: string; token: string; expiresAt: string }
+  // `email` is null for §13.4's link invitation — the one that was not sent to anybody. It stays
+  // on the message rather than being omitted, because the panel renders the sentence "send this to
+  // X" and needs to know which of the two things it is holding.
+  | { type: "inviteLink"; email: string | null; role: string; token: string; expiresAt: string }
   /**
    * The socket that asked to leave has stopped being a member.
    *
@@ -3035,10 +3046,22 @@ export class WsRelay {
       return false;
     }
     if (!can(ctx.role, capability)) {
+      // §13.5 — THE SENTENCE STAYS AND THE STRUCTURE RIDES BESIDE IT, exactly as the entitlement
+      // refusal below does and for the same reason: every panel already knows how to render a
+      // `type: "error"` string, and a refusal that replaced it would disappear on any surface that
+      // has not learned the new shape. The string still names the capability, because the audience
+      // for a server log is somebody who can read this file.
+      //
+      // WHAT THE CLIENT READS IS `role`, and it is the weakest role that could have done this
+      // rather than the one the command's entry happens to sit under. "This action requires the
+      // Admin role" is something a person can act on; `connector:manage` is not a thing anybody
+      // can be granted, and a toast naming it sends somebody to ask a question they cannot phrase.
       this.sendTo(ws, {
         channel: channelFor(cmd),
         type: "error",
         message: `a ${ctx.role} cannot do this — it needs ${capability}`,
+        reason: "requires_role",
+        role: roleFor(capability),
       });
       return false;
     }

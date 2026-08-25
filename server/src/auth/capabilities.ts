@@ -176,6 +176,35 @@ export function can(role: Role, capability: Capability): boolean {
 }
 
 /**
+ * The MEMBERSHIP roles, weakest first. `system` is deliberately not among them.
+ *
+ * It is the server acting on its own behalf, never resolvable from a membership row, so putting it
+ * in an ordering that a refusal reads from would let a client be told to "ask a system" — which is
+ * not a person, not a role anybody can be promoted to, and not an answer.
+ */
+const ROLE_LADDER: readonly Role[] = ["member", "admin", "owner"];
+
+/**
+ * The weakest membership role that holds a capability, or null if none does.
+ *
+ * §13.5 — WHAT A REFUSAL NAMES. The server has always said "a member cannot do this — it needs
+ * connector:manage", which is precise and is addressed to whoever reads the source. `connector:
+ * manage` is not a thing anybody can be granted: what a person actually does about a refusal is
+ * ask somebody with a role, so the refusal has to carry the role.
+ *
+ * THE WEAKEST ONE, not the one that happens to be first in the table, because the answer is
+ * advice: "ask an admin" is actionable in a workspace with an admin and an owner, and "ask an
+ * owner" sent to somebody whose admin could have done it is advice that costs a round trip to the
+ * one person on holiday. The ladder is walked upwards for exactly that reason, and it reads from
+ * `ROLE_CAPABILITIES` rather than from a second table — a hand-maintained "which role for which
+ * capability" map is the copy that goes stale the day a capability moves between roles, and the
+ * symptom is a refusal telling somebody to ask the wrong person.
+ */
+export function roleFor(capability: Capability): Role | null {
+  return ROLE_LADDER.find((role) => can(role, capability)) ?? null;
+}
+
+/**
  * The one check. Throws a 403 naming the capability and the role that lacks it.
  *
  * Naming both is deliberate: "forbidden" with no subject sends somebody to read source, and

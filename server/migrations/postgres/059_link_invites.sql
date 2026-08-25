@@ -1,0 +1,32 @@
+-- 059_link_invites — §13.4. An invitation that is not addressed to anybody.
+--
+-- WHAT CHANGES: `workspace_invites.email` becomes nullable, and NULL means "whoever opens this
+-- link". Nothing else moves. The token is still one-shot, still stored as a digest, still scoped
+-- by the workspace id in front of it — this migration widens who a live invite may be redeemed
+-- BY, and nothing about how it is proved.
+--
+-- WHY NULL RATHER THAN AN EMPTY STRING, which is the change that needs no migration at all and is
+-- the reason this file exists. `workspace_invites_pending` is a partial UNIQUE index on
+-- (workspace_id, email), so it is the shape of the value that decides how many open link
+-- invitations a workspace may hold at once:
+--
+--   ''    — one. A second one collides, and `createInvite`'s "re-inviting replaces the lost link"
+--           branch would revoke the first. An admin sending three people three separate links
+--           would find each new link silently killing the one before it, with the symptom landing
+--           on the invitee ("this invite has already been used") rather than on the sender.
+--   NULL  — as many as somebody makes. NULL is distinct from NULL in a unique index, in both
+--           dialects, so link invitations do not compete for the row an addressed one occupies.
+--
+-- The second is also the honest reading: an empty address is a claim that this invitation was sent
+-- to nobody, and NULL is a statement that it was not sent to an ADDRESS at all. Those are the same
+-- sentence in English and different rows to anything that later asks "who was this for".
+--
+-- WHY THE ADDRESSED FORM STAYS. An invitation with an email is checked against the account
+-- redeeming it, and that check is what makes a leaked link useless to the person who found it.
+-- Making every invitation anonymous would have been simpler and would have removed the only
+-- defence an addressed invitation has. Both shapes exist; the inviter chooses.
+--
+-- LOOSENING, so this is compatible with the version still serving: existing rows all have an
+-- address, every reader already handles a string, and nothing that writes one stops.
+
+ALTER TABLE workspace_invites ALTER COLUMN email DROP NOT NULL;

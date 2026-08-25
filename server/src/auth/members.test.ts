@@ -166,6 +166,59 @@ async function suite(driver: string, db: Db): Promise<void> {
     check(!(await identity.revokeInvite(owner, randomUUID())), "revoking an invite that does not exist is refused");
   }
 
+  // §13.4 — an invitation that is not addressed to anybody. Everything an addressed one refuses
+  // it still refuses; what it gives up is exactly one check, and the claims below are about the
+  // three things that were not obvious until the column became nullable.
+  console.log("  · a link nobody is addressed by");
+  {
+    const link = await identity.createInvite(owner, { role: "member" });
+    check("token" in link, "an invitation can be made with no address at all");
+    if (!("token" in link)) return;
+    check(link.invite.email === null, "...and the row says so with NULL rather than an empty string");
+
+    // THE ONE THAT MIGRATION 059 IS FOR. `workspace_invites_pending` is a partial UNIQUE index on
+    // (workspace_id, email); with `''` the second of these would collide and `createInvite`'s
+    // replace-the-lost-link branch would revoke the first, so an admin sending three people three
+    // links would silently be sending one. NULL is distinct from NULL in a unique index.
+    const second = await identity.createInvite(owner, { role: "admin" });
+    check("token" in second, "a second link invitation does not collide with the first");
+    const live = await identity.listInvites(owner);
+    check(
+      live.filter((i) => i.email === null).length === 2,
+      `...and both are live (${live.filter((i) => i.email === null).length})`,
+    );
+
+    // Whoever holds it. `dan` was never named anywhere near this invitation.
+    const dan = await identity.provisionUser(sys, { externalId: `m-dan-${label}`, email: `m-dan-${label}@example.com` });
+    const joined = await identity.acceptInvite(sys, link.token, dan.user);
+    check(joined.ok, "anybody signed in can redeem it");
+    check(
+      joined.ok && joined.role === "member",
+      "...at the role the link was made for, not one they chose",
+    );
+    check(
+      !(await identity.acceptInvite(sys, link.token, dan.user)).ok,
+      "...and it is still one-shot",
+    );
+
+    // AND THE DEMOTION THIS OPENED THE DOOR TO. `insertMemberIn` is an upsert that sets `role =
+    // excluded.role`, and an addressed invitation could never reach it for an existing member
+    // because `createInvite` refuses one. A link has nobody to refuse — so an owner opening a
+    // `member` link shared in the team channel would stop being the owner, in one click, with a
+    // success message. It is refused WITHOUT consuming the token, so the link is still there for
+    // the person it was shared with.
+    const ownerClicks = await identity.acceptInvite(sys, ("token" in second ? second.token : ""), ada.user);
+    check(!ownerClicks.ok, "an existing member opening a link is refused rather than re-roled");
+    check(
+      (await identity.listMembers(owner)).find((m) => m.user_id === ada.user.id)?.role === "owner",
+      "...and is still the owner they were",
+    );
+    check(
+      (await identity.listInvites(owner)).some((i) => "token" in second && i.id === second.invite.id),
+      "...and the link is still live for whoever it was actually shared with",
+    );
+  }
+
   console.log("  · roles");
   {
     const promoted = await identity.setMemberRole(owner, cat.user.id, "admin");

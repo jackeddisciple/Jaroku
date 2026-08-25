@@ -6307,12 +6307,17 @@ async function handleMemberCommand(ctx: TenantContext, cmd: MemberCommand): Prom
         });
         return;
       }
-      const result = await identityRepo.createInvite(ctx, { email: String(cmd.email ?? ""), role });
+      // §13.4 — AN ABSENT `email` REACHES THE REPOSITORY AS ABSENT. It used to become `""` here
+      // via `String(cmd.email ?? "")`, which was a validation failure by the time it arrived; now
+      // an omitted field and an empty one both mean "a link for whoever opens it", and only a
+      // string that was actually typed is passed on to be checked as an address.
+      const typed = typeof cmd.email === "string" ? cmd.email : null;
+      const result = await identityRepo.createInvite(ctx, { email: typed, role });
       if ("error" in result) {
         relay.broadcastMembers(ctx, { type: "error", message: result.error });
         return;
       }
-      console.log(`[members] invited ${result.invite.email} as ${role}`);
+      console.log(`[members] invited ${result.invite.email ?? "anyone with the link"} as ${role}`);
       // To the asking socket only. It is a credential.
       relay.sendMembers(ctx, ctx.requestId, {
         type: "inviteLink",
