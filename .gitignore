@@ -46,6 +46,7 @@ jaroku-*-prompt.pdf
 # than under either convention. Named rather than globbed to `*.pdf`, because a blanket rule
 # would also swallow a PDF somebody meant to ship — a fixture, a diagram, a licence.
 subscriptions.pdf
+teams.pdf
 
 # Cygwin drops one of these beside the repo when a bash process faults on Windows. It is a core
 # dump with a stack trace in it, not source, and it reappears whenever the shell falls over.

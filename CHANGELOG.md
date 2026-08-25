@@ -8,6 +8,137 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.3.7 : Teams & Workspaces — The Surface That Reaches a Backend That Was Already There
+
+Almost nothing in this release is a new capability. The tables landed in v0.2.5, the socket has
+been scoped to one immutable workspace since v0.2.6, every store has emptied on a workspace change
+since then, and the commands to invite, remove and re-role somebody have all been checked against
+the capability matrix since the day they were written. What was missing was the way in: there was
+no switcher, so `POST /v1/ws-ticket` only ever asked for the default workspace; no client called
+`POST /v1/workspaces`, so the only way to make a team was an environment variable; and an
+invitation could be minted but not pasted.
+
+So this is a wiring release, and the two places wiring goes wrong are both about *ordering*.
+Switching workspace is a teardown and a rebuild, and the difference between doing it right and
+leaking one tenant's rows into another tenant's panel is which of six steps happens first. And an
+affordance a role cannot use has to be **absent** rather than disabled — which means the client
+needs the server's capability matrix, which means the two can drift, which means something has to
+fail when they do.
+
+### Added
+
+- **The workspace switcher, in the sidebar header.** The workspace name was a label; it is now the
+  control. Collapsed it carries the kind icon, the plan chip from the session, and a chevron.
+  Expanded it lists the personal workspace first and teams alphabetically by `localeCompare` — the
+  ordering rules are where the wrong answers are, and every one of them looks right on the
+  four-workspace account somebody develops against: byte order puts `Zebra` above `acme co`, and a
+  personal workspace sorted among the teams moves the one fixed point in the menu every time
+  anybody renames anything. Arrow keys, Enter, Escape, outside click.
+- **The switch transition.** Lock, close the old socket, empty every store, fetch a ticket, open a
+  new socket, unlock. Closing before opening and emptying before refilling are the two orderings
+  that matter, and both are cross-tenant leaks in the UI when they are wrong. A failure at any step
+  **reverts to the workspace it came from** and says why, rather than leaving somebody behind a
+  scrim or on a sign-in screen.
+- **Create workspace**, from the switcher rather than an environment variable. Name, kind, trimmed
+  before sending, auto-selected on success.
+- **Join workspace by pasted code**, beside the deep link that already worked. It takes a whole URL
+  or a bare token and refuses what cannot be one before anything is sent — the truncated paste is
+  the case the refusals exist for, because it is the one that otherwise reaches the server looking
+  like a valid secret.
+- **The members and invitations surface**, wired to the four commands that were already there:
+  role changes with an owner-transfer confirmation, removal, an invitation shown once and copyable
+  for thirty seconds, and a pending list with revoke. An owner cannot leave; everybody else can.
+- **`useCapability`, `useCanRun`, `useCanReach`, `useCanTake`, and `<Capable>`.** A guard should
+  name the *command* rather than the capability: `useCanRun("deploy")` asks the table, where
+  `useCapability("agent:write")` asks whoever wrote the component to remember a mapping — and a
+  wrong answer there looks exactly as plausible in review as a right one.
+- **Workspace identity in the chrome.** The Tauri window title is now `Jaroku — <workspace>`,
+  because nothing the page wrote to `document.title` reached the native window and alt-tabbing
+  between two workspaces showed two windows called Jaroku.
+- **Five new suites**, all wired into `ci.yml`: `test:workspace-switcher`, `test:workspace-switch`,
+  `test:join-flow`, `test:permission-ui` (client) and `test:invite-flow` (server).
+
+### Changed
+
+- **The audit sweep replaced four disabled-with-a-reason controls with absent ones** — export,
+  delete, the BYOK toggle and the plan buttons. A greyed control with "only an owner can do this"
+  beside it has decided somebody should keep looking at it, and §8 of the specification rules out
+  both that and hiding with CSS. The BYOK *state* still renders for everybody, because whose keys
+  the agents run on is a fact a member needs in order to read a bill; what is absent is the switch.
+- **Two places where the specification and the server disagreed were resolved toward the server**,
+  which is what the specification itself asks for in bold. Its checklist files Deploy under
+  `agent:write` — a member capability, so following it would have put a Deploy button in the title
+  bar of every member's window — and lists members, export, delete and billing as "Owner, Admin"
+  where `COMMAND_CAPABILITY` puts all of them in `OWNER` alone. And it asks for three distinct
+  invite-failure messages where the server deliberately collapses expired, revoked and used into
+  one, so that a stolen link learns nothing about which it is.
+
+### Fixed
+
+- **Being refused entry to one workspace ended the session in the one you were already in.**
+  `fetchTicket` answers 403 for a workspace you are not a member of, `AuthFailure` marks a 403
+  not-retryable, and the connect path's handling of not-retryable is `signOut` — correct for the
+  workspace a tab is already in, and badly wrong for one it is trying to enter. Somebody removed
+  from a team while their tab was open would click it in the switcher and land on the sign-in
+  screen. A switch in flight now reverts instead.
+- **A `member` link invitation silently demoted an owner who opened it.** `insertMemberIn` upserts
+  the role, so an owner clicking their own shareable link wrote `member` over `owner` — on the one
+  account that cannot be restored by anybody else, since only an owner can change a role.
+- **An invitation stored with an empty address competed for the one row the partial unique index
+  gives it**, so minting a second link revoked the first. An absent address now reaches the
+  repository as absent and the column stores `NULL`.
+- **The invite form returned early on a blank address**, which made the link-for-anybody the one
+  credential no screen in the product could produce.
+- **`POST /v1/workspaces` created a second personal workspace for anybody who asked.** The rule
+  was only ever on the button: the switcher absents the Personal option once you have one, and the
+  route accepted `kind: "personal"` from any request behind it. Every account is provisioned with
+  one, an owner cannot leave the one workspace they cannot be removed from, and several things
+  read as though there is exactly one — the landing after leaving a team picks
+  `find(kind === "personal")`, and the switcher pins *the* personal workspace to the top. Found by
+  walking §12.3 against a running server; `test:session` asserted the opposite and now asserts the
+  refusal.
+
+### Migrations
+
+**None.** Every table this release touches has existed since v0.2.5, and the one column it leans
+on — a partial unique index that permits many `NULL` addresses and one row per real address —
+arrived with `059_link_invites`. `schema/events.md` is untouched: nothing here is a run event.
+
+### Verified
+
+- Fifteen commits, each pushed to `origin/main` on its own and each left with CI green before the
+  next.
+- **`test:permission-ui` reads `server/src/auth/capabilities.ts` as text** rather than importing
+  it, and fails in both directions. The direction that matters is the one nobody watches: a
+  capability the client grants and the server does not is a button that 403s and gets reported the
+  same day, while a capability the server grants and the client does not is a feature that
+  silently is not there for the role that has it — nobody files that, they assume the product does
+  not do it. It also renders six real panels at member, admin and owner and asserts the affordance
+  is absent from the markup rather than merely disabled.
+- **`test:workspace-switch` asserts a transcript, not a result.** The socket and the network are
+  fakes that record, because "closed then opened" and "opened then closed" produce the same screen
+  and only one of them is correct. Its last assertion in every block is that nothing from workspace
+  A survived into workspace B.
+- **§12.3's golden path was walked end to end against a running server** — sign in, create a team,
+  ticket, socket, mint a link over the socket, redeem it as an account that had never been seen
+  before, redeem an addressed one as an account that already existed, revoke a third and be
+  refused by it — along with every redemption that must fail.
+
+### Still owed
+
+- **The golden path was walked over HTTP and the socket, not in a browser.** §14.3 asks for a
+  browser against the running server; the click-through half is covered structurally by the client
+  suites, which render the real components, and not by anything that drives a real DOM.
+- **No per-member spend attribution**, which §11.3 names and v0.3.3 already recorded: runs carry a
+  workspace and not an actor, so "who spent this" is not a question the data can answer yet.
+- **Seats are Team-plan only.** Free and Pro are solo by design, so §12.1's "open the Members panel
+  and create an invite link" is a step that begins with a checkout. What a Free owner gets is the
+  upgrade card rather than a button that fails.
+- **No live presence, no edit locks, no thread assignment**, all explicitly out of scope in §16 and
+  all of them things a team of two to six will ask for before a team of fifty does.
+
+---
+
 ## v0.3.6 : Three New Connectors — Google Calendar, Stripe (Read-Only), HTTP/Webhook
 
 Six connectors instead of three. Calendar pairs with Gmail and unlocks the scheduling agent;

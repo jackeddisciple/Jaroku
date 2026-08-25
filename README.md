@@ -60,6 +60,7 @@ of the repo and run yourself.
 - [Connector OAuth and the credential vault](#connector-oauth-and-the-credential-vault)
 - [Hardening, abuse, data lifecycle, observability, deploy](#hardening-abuse-data-lifecycle-observability-deploy)
 - [Authentication and membership](#authentication-and-membership)
+- [Workspaces and teams](#workspaces-and-teams)
 - [Where data lives](#where-data-lives)
 - [Security notes](#security-notes)
 - [Troubleshooting](#troubleshooting)
@@ -4464,6 +4465,133 @@ that is the fact a future cleanup will not know.
   reason is the larger one anyway: RLS is the backstop the whole tenancy model leans on and it
   exists only on Postgres, so SQLite in production is a deployment with the backstop silently
   absent. `npm run test:driver`.
+
+---
+
+## Workspaces and teams
+
+The section above is about *whose* workspace a request is in. This one is about the part somebody
+uses: being in more than one, moving between them, and deciding who else is in each.
+
+Every account has a **personal workspace** from the moment it exists — `provisionUser` creates it
+in the same transaction as the user, because every panel in this product is a view of one
+workspace's data and an account without one cannot render anything. You cannot have a second: the
+switcher does not offer the option and `POST /v1/workspaces` refuses it, because "where does my
+own work live" has one answer and several things in here read as though it does.
+
+**Team workspaces** are the ones you can have many of, be invited to, and leave.
+
+### The switcher
+
+The workspace name at the top of the sidebar is a control, not a label. It carries the kind icon,
+the plan chip, and a chevron; opening it lists the personal workspace first and the teams below it
+alphabetically — case- and accent-insensitively, so `acme co` sorts above `Zebra` and `Ångström`
+sits with the As rather than after `z`. Arrow keys move, Enter selects, Escape closes.
+
+Below the list: **+ Create workspace** and **Join a workspace**. The gear on the active row opens
+the workspace panel.
+
+### Switching is a teardown, not a navigation
+
+Clicking another workspace does this, in this order:
+
+```
+  1. lock the UI            a scrim naming where it is going
+  2. close the old socket   before anything else opens one
+  3. empty every store      client/src/store/reset.ts
+  4. POST /v1/ws-ticket     for the workspace being entered
+  5. open a new socket      with that ticket
+  6. snapshots arrive       the app refills
+  7. unlock
+```
+
+**Steps 2 and 3 are the security part, and their order is the whole of it.** Two sockets open at
+once would both write to the same stores, and the old workspace's broadcasts would land in the new
+workspace's view. Resetting *after* the new socket opened would leave a window — however short —
+in which one tenant's rows are merged into another tenant's panel. Both are cross-tenant leaks in
+the UI that the server cannot prevent, and neither is visible in a screenshot of a switch that
+worked: the stores look empty because the new snapshot replaced what was there. `npm run
+test:workspace-switch` asserts the transcript rather than the result, which is the only thing that
+can tell "closed then opened" from "opened then closed" afterwards.
+
+If anything fails — a refused ticket, a handshake that closes before it opens, a target that never
+answers — the switch **reverts to where it came from** and says why. A 403 on a ticket is not
+retryable, and not-retryable used to mean sign out; being refused entry to one workspace ended the
+session in the one you were already in, which is the failure that shape of error handling has here.
+
+What survives a switch: the session, the workspace list, and per-*user* preferences. What does
+not: every workspace-scoped store, any command in flight to the old socket, and the remembered
+test input.
+
+### Joining
+
+Two ways in, and they end at the same place:
+
+- **The link.** `jaroku://invite?token=…`, or the same token on the web origin. Opening it
+  redeems the invitation as part of creating the session, so somebody who has never signed in
+  lands in the team on their first request rather than being sent to sign in and then losing the
+  link.
+- **The code.** *Join a workspace* in the switcher takes either the whole URL or the bare token
+  pasted out of Slack. The client extracts the token from whichever it was given and refuses
+  what cannot be one before anything is sent — a truncated paste is the case that matters, and
+  it is the one that otherwise reaches the server as a valid-looking secret.
+
+Every refusal a redemption can produce — revoked, expired, already used, addressed to somebody
+else, never existed — answers with **one sentence and one status**, deliberately: a stolen link
+should not learn which of the five it is.
+
+### Roles
+
+Three: **owner**, **admin**, **member**, nested — an owner can do everything an admin can, an
+admin everything a member can. The split follows one question: *does this change what the
+workspace **is**, or what is **in** it?*
+
+| | Member | Admin | Owner |
+|---|:---:|:---:|:---:|
+| Build, run, edit, evaluate agents | ● | ● | ● |
+| Threads, inbox, activity, spend figures | ● | ● | ● |
+| Appeal an enforcement action | ● | ● | ● |
+| MCP servers, connectors, secrets, deploys, GitHub | | ● | ● |
+| Invite, remove, change a role | | | ● |
+| Rename, export, delete the workspace | | | ● |
+| Billing: plan, spend ceiling, BYOK | | | ● |
+
+The table lives in `server/src/auth/capabilities.ts` and is copied into
+`client/src/lib/capabilities.ts`. The copy is what lets the UI decide what to draw without a round
+trip; `npm run test:permission-ui` reads the server file as text and fails when the two disagree in
+either direction, which is what makes "a copy guarantees they match" true rather than hopeful.
+
+**An affordance a role cannot use is absent from the DOM** — not disabled, not hidden with CSS. A
+disabled control with "only an owner can do this" beside it has decided somebody should keep
+looking at it, and a control hidden with CSS is one devtools panel away from being clicked. None
+of this is enforcement: every command is checked again by the relay and every route at its door.
+
+### Members and invitations
+
+The workspace panel's Members section lists everybody — owner first, then admins, then members,
+each group alphabetical, your own row highlighted. An owner can change a role, remove somebody, or
+mint an invitation; everybody else sees the list and a static badge.
+
+An invitation is **a link, not an email** — this server has no mailer. It is shown once, copyable
+for thirty seconds, and one-shot. Leaving the address blank makes it redeemable by whoever holds
+it; filling it in binds it to that address. Pending invitations are listed with a revoke button
+until they are accepted, at which point the row becomes a member.
+
+An owner **cannot leave** — transfer ownership first. Everybody else can, and lands back in their
+personal workspace with their socket closed on the way out.
+
+### Seats are a plan limit
+
+Free and Pro are **solo**: one member, which is you. Inviting anybody needs Team. That is an
+entitlement rather than a permission, so what an owner on Free gets is the upgrade card and not a
+button that fails — the two gates are separate on purpose, and if both are right neither a 402 nor
+a capability toast should appear in ordinary use.
+
+### Personal versus team
+
+A personal workspace has no members panel, no author column on threads, and no role badges
+anywhere. Those are not hidden — for a workspace that is nobody else's they are answers to
+questions nobody is asking.
 
 ---
 

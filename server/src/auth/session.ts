@@ -921,6 +921,33 @@ function createWorkspaceHandler(deps: SessionDeps): Handler {
       throw tooMany("you are creating workspaces faster than this server allows", retryAfter);
     }
 
+    // §3.3 — "A user cannot create a second personal workspace."
+    //
+    // THE RULE WAS ONLY EVER ON THE BUTTON. §3.3 goes on to say the option is absent rather than
+    // disabled, the switcher does that, and this route accepted `kind: "personal"` from anybody
+    // who asked — so the rule held for the menu and not for the request behind it, which is the
+    // one place it has to hold. A `curl` made as many as it liked.
+    //
+    // AND THE REST OF THE PRODUCT COUNTS ON THERE BEING ONE. `provisionUser` creates it in the
+    // same transaction as the account, §6.5 refuses to let an owner leave the one workspace they
+    // cannot be removed from, and two of them stop several things meaning anything: `leftWorkspace`
+    // lands somebody on `find(kind === "personal")` and would pick whichever came back first, §2.2
+    // pins THE personal workspace to the top of the switcher, and §9.4 hangs "no members panel, no
+    // author column, no role badges" on a workspace being the one that is nobody else's.
+    //
+    // ASKED OF THE MEMBERSHIPS RATHER THAN ASSUMED FROM `provisioned`, because "we just made you
+    // one" and "you have one" are different claims — an account provisioned before this rule
+    // existed, or one whose personal workspace was deleted by §11's account deletion, is a state
+    // this has to answer correctly rather than a state that cannot happen.
+    if (kind === "personal") {
+      const held = await deps.identity.workspacesForUser(sys, provisioned.user.id);
+      if (held.some((w) => w.kind === "personal")) {
+        throw badRequest(
+          "you already have a personal workspace — a team workspace is the kind you can have more than one of",
+        );
+      }
+    }
+
     const workspace = await deps.identity.createWorkspace(sys, {
       name,
       kind,

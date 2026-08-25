@@ -291,8 +291,14 @@ async function suite(driver: string, db: Db): Promise<void> {
     const ticket = await post(base, "/v1/ws-ticket", token, { workspaceId: created.json.workspace.id });
     check(ticket.status === 200 && ticket.json?.role === "owner", "a socket can be opened in it as its owner");
 
+    // §3.3 — "A user cannot create a second personal workspace." This line used to assert the
+    // opposite, which is how the rule ended up living on the switcher's menu and nowhere else:
+    // every account is provisioned with one, so the only thing a second could be is a second
+    // answer to "where does my own work live" — and §2.2's "personal workspace always first"
+    // and §6.5's landing both read as though there is exactly one.
     const personal = await post(base, "/v1/workspaces", token, { name: `second-${label}`, kind: "personal" });
-    check(personal.json?.workspace?.kind === "personal", "a personal one can be created too");
+    check(personal.status === 400, `a second personal workspace is refused (${personal.status})`);
+    check(/already have a personal/.test(personal.json?.error?.message ?? ""), "...saying which one they already have");
 
     check((await post(base, "/v1/workspaces", token, { name: "  ", kind: "team" })).status === 400, "a blank name is refused");
     check(
