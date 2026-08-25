@@ -16,6 +16,7 @@
     "test:truncate-path": "tsx src/lib/truncatePath.test.ts",
     "test:composer-triggers": "tsx src/lib/composerTriggers.test.ts",
     "test:icons": "tsx src/components/icons.test.ts",
+    "test:graph-icons": "tsx src/components/graphIcons.test.ts",
     "test:composer-bar": "tsx src/lib/composerBar.test.ts",
     "test:connector-deck": "tsx src/lib/connectorDeck.test.ts",
     "test:turn-metadata": "tsx src/lib/turnMetadata.test.ts",

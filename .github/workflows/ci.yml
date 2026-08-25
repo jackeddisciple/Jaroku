@@ -835,6 +835,14 @@ jobs:
           # tokens resolves to real path data — which is what turns a silent blank square in the
           # control bar into a named failure on the upgrade that caused it.
           npm run test:icons
+          # AND WHICH MARK A TOOL FILE GETS, which is a table of regexes and is therefore an
+          # ORDERING — one that looks obviously right in any arrangement and typechecks in all of
+          # them. The mapper runs on every tool path including the bespoke ones a model names, so
+          # its inputs are `mail_to_calendar.py` and `stripe_api_client.py` rather than the six
+          # connectors somebody reviewed. A wrong order is not a crash or a blank square: it is a
+          # Gmail envelope on the calendar tool of the one workspace that has both connectors and
+          # for which telling them apart is the entire point of the icon.
+          npm run test:graph-icons
           # WHERE EACH COMPOSER CONTROL SITS, which §12 states as two acceptance criteria written
           # as things somebody checks by resizing a window — 1c, that hiding a control moves no
           # other control, and 1d, that the bar never wraps and the right three collapse into the

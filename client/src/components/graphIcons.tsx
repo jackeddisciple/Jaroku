@@ -123,6 +123,47 @@ export function GmailIcon({ size = 26 }: IconProps) {
   );
 }
 
+export function GoogleCalendarIcon({ size = 26 }: IconProps) {
+  // The white card with the four-colour edge and a date on it. Deliberately NOT the Gmail
+  // envelope tinted differently: the two connectors are separate connections under one OAuth app,
+  // and a workspace that has both needs to tell at a glance which row it is about to disconnect.
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
+      <rect x="3" y="4.5" width="18" height="15" rx="2.4" fill="#ffffff" />
+      <path d="M3 7.5 A2.4 2.4 0 0 1 5.4 4.5 H9 v3 z" fill="#4285F4" />
+      <path d="M9 4.5 h6 v3 H9 z" fill="#EA4335" />
+      <path d="M15 4.5 h3.6 A2.4 2.4 0 0 1 21 7.5 H15 z" fill="#FBBC04" />
+      <path d="M3 16.5 h6 v3 H5.4 A2.4 2.4 0 0 1 3 17.1 z" fill="#34A853" />
+      <text
+        x="12"
+        y="15.4"
+        textAnchor="middle"
+        fontSize="7.5"
+        fontWeight="600"
+        fill="#3C4043"
+        fontFamily="Helvetica, Arial, sans-serif"
+      >
+        31
+      </text>
+    </svg>
+  );
+}
+
+export function StripeIcon({ size = 26 }: IconProps) {
+  // The wordmark's S on Stripe's own #635BFF. A glyph rather than the full wordmark because at
+  // 20px in the connector deck a five-letter word is a smudge, and the tile has to be legible at
+  // the size it is actually drawn.
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
+      <rect x="1.5" y="1.5" width="21" height="21" rx="5" fill="#635BFF" />
+      <path
+        d="M11.4 9.6c0-.62.52-.86 1.34-.86 1.02 0 2.32.32 3.34.88V6.5a8.6 8.6 0 0 0-3.34-.62c-2.73 0-4.55 1.44-4.55 3.85 0 3.75 5.1 3.14 5.1 4.76 0 .73-.63.97-1.5.97-1.12 0-2.58-.47-3.72-1.09v3.16c1.22.53 2.46.76 3.72.76 2.8 0 4.72-1.39 4.72-3.84 0-4.05-5.11-3.32-5.11-4.85z"
+        fill="#ffffff"
+      />
+    </svg>
+  );
+}
+
 // A globe is not a logo, so it follows the icon rules rather than the brand ones: the shared
 // factory, one stroke weight, colour set by the wrapper rather than baked into the path.
 export function HttpIcon({ size = 26 }: IconProps) {
@@ -215,9 +256,17 @@ export function toolResource(path: string): Brand {
   // Checked first: "mcp_bridge" contains none of the patterns below, but a future server
   // named "mcp_mail" would otherwise be marked as Gmail. Provenance outranks resemblance.
   if (/^mcp_bridge$/.test(s)) return { label: "MCP", Icon: McpBridgeIcon };
+  // BEFORE THE MAIL RULE, and the case is a real one rather than a tidiness. This mapper runs on
+  // EVERY tool path, including the bespoke ones a model writes — and an agent that has both Google
+  // connectors gets tools named `gmail_calendar_sync.py` and `mail_to_calendar.py` without anyone
+  // choosing those names. Below the mail rule, both draw the Gmail envelope. It is the same
+  // principle the MCP line above states: the more specific claim wins, and provenance outranks
+  // resemblance.
+  if (/calendar|gcal/.test(s)) return { label: "Google Calendar", Icon: GoogleCalendarIcon };
   if (/postgre|(^|_)pg($|_)|psql/.test(s)) return { label: "Postgres", Icon: PostgresIcon };
   if (/gmail|email|mail/.test(s)) return { label: "Gmail", Icon: GmailIcon };
   if (/slack/.test(s)) return { label: "Slack", Icon: SlackIcon };
+  if (/stripe/.test(s)) return { label: "Stripe", Icon: StripeIcon };
   if (/http|webhook|rest|api/.test(s)) return { label: "HTTP", Icon: HttpIcon };
   return { label: pretty(stem), Icon: GenericToolIcon };
 }

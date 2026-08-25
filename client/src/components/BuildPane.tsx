@@ -92,10 +92,23 @@ const MAX_LINES = 12;
 
 // Mirrors runtime/tool_templates/catalog.json. The server validates the ids it receives
 // against the catalog, so a stale entry here can never inject an unreviewed connector.
+// SIX NOW, NOT THREE, AND THE ROW HAS TO SURVIVE THAT. The chips already reserve their tick's
+// width so choosing one cannot resize it (see the picker below), but six chips plus the name field
+// wrap on a narrow window — which `flex-wrap` handles, and which is why the hints are short. A
+// hint is a tooltip, not a description: what a connector does at length belongs in the catalog
+// entry the model reads, and the one here only has to separate it from its neighbours.
+//
+// THE WRITE ONES SAY SO. "create events" and "read-only" are the two words somebody scanning this
+// row is actually deciding between, because ticking a connector here is what puts its tools in an
+// agent's hands. Gmail's hint has said "draft replies" rather than "send mail" since it was
+// written, for the same reason.
 const CONNECTORS = [
   { id: "gmail", label: "Gmail", hint: "search mail, draft replies" },
+  { id: "google_calendar", label: "Google Calendar", hint: "read, create and update events" },
   { id: "slack", label: "Slack", hint: "read channels, post messages" },
+  { id: "stripe", label: "Stripe", hint: "read-only: customers, payments, invoices" },
   { id: "postgres", label: "Postgres", hint: "read-only SQL" },
+  { id: "http", label: "HTTP/Webhook", hint: "https requests to allowlisted domains" },
 ];
 
 function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
