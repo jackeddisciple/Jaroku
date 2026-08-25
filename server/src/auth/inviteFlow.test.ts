@@ -283,6 +283,43 @@ async function suite(driver: string, db: Db): Promise<void> {
       const anonymous = await post(base, "/v1/invites/accept", undefined, { token: `${team.id}.${"a".repeat(43)}` });
       check(anonymous.status === 401, `an unauthenticated redemption is a 401, not a 403 (${anonymous.status})`);
     }
+
+    // TWO SIGN-INS CLAIMING ONE ADDRESS, AT EVERY DOOR THAT PROVISIONS.
+    //
+    // `provisionUser` refuses to hand one verified address to a second `sub` — a person whose
+    // provider changed under them, or a server with two providers configured — and it does so as a
+    // typed error rather than a unique violation, because the violation surfacing as a 500 tells
+    // somebody their sign-in is broken when what happened is that their address is spoken for.
+    //
+    // THAT ONLY HELPS WHERE SOMEBODY CONVERTS IT. Three routes provision and only
+    // `/v1/auth/session` was catching it, so the same account on the same server got a sentence by
+    // one door and a stack trace by the other two — and `/v1/invites/accept` is the door an
+    // invitee is most likely to arrive at first, because §12.2 has them redeem before they have
+    // ever signed in. Asserted at all three, since the next route to provision will copy one.
+    console.log("  · an address that belongs to a different sign-in");
+    {
+      const shared = `if-twice-${label}@example.com`;
+      await identity.provisionUser(sys, { externalId: `some-other-provider-${label}`, email: shared, displayName: "Twice" });
+      const theirToken = issuer.mint({ email: shared }).token;
+
+      const session = await post(base, "/v1/auth/session", theirToken);
+      check(session.status === 403, `POST /v1/auth/session says so (${session.status})`);
+
+      const made = await identity.createInvite(owner, { email: shared, role: "member" });
+      if ("token" in made) {
+        const accept = await post(base, "/v1/invites/accept", theirToken, { token: made.token });
+        check(accept.status === 403, `...and so does /v1/invites/accept, rather than a 500 (${accept.status})`);
+        check(
+          /different sign-in/.test(accept.json?.error?.message ?? ""),
+          "...naming what actually happened",
+        );
+      } else {
+        check(false, "an invitation for the conflicted address could not be minted");
+      }
+
+      const workspace = await post(base, "/v1/workspaces", theirToken, { name: `twice ${label}`, kind: "team" });
+      check(workspace.status === 403, `...and so does POST /v1/workspaces (${workspace.status})`);
+    }
   } finally {
     await close();
   }

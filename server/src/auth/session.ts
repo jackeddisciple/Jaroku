@@ -172,6 +172,48 @@ export interface SessionView {
   expiresAt: number;
 }
 
+/**
+ * Turn a verified token into an account, and turn the one way that fails into a sentence.
+ *
+ * THREE ROUTES CALL `provisionUser` AND ONLY ONE OF THEM CAUGHT THIS. `/v1/auth/session` converted
+ * an `IdentityConflictError` into a 403 naming the address; `/v1/invites/accept` and
+ * `POST /v1/workspaces` let it escape, so the same account, on the same server, got a clean
+ * explanation by one door and a 500 by the other two. `test:invite-flow` found it by provisioning
+ * an owner and then signing in as them through the issuer, which is what a person does.
+ *
+ * WHAT THE CONFLICT IS: two identity providers claiming one verified address — the same person
+ * signing in with Google having previously arrived through a magic link, or a `sub` that changed
+ * under them. `IdentityConflictError`'s own doc says why it is a type rather than a unique
+ * violation: "a unique violation surfacing as a 500 tells somebody their sign-in is broken, when
+ * what happened is that their address is already spoken for by a different provider account". That
+ * is only true where somebody reads the sentence, which is why it is here rather than at each call
+ * site remembering.
+ *
+ * A 403 RATHER THAN A 409, matching what `/v1/auth/session` already answered. The distinction a
+ * client acts on is retryable-or-not, and this is not: `AuthFailure` marks 403 final and shows the
+ * message, which is exactly the handling this needs.
+ */
+async function provision(
+  deps: SessionDeps,
+  sys: ReturnType<typeof systemContext>,
+  auth: AuthContext,
+): Promise<Awaited<ReturnType<IdentityRepository["provisionUser"]>>> {
+  // Every caller has already refused a token with no verified address, with its own sentence about
+  // what that means for what it was trying to do. Refusing again here would be a second answer to
+  // a question three routes have each answered better.
+  if (!auth.email) throw forbidden("your identity provider did not supply a verified email address");
+  try {
+    return await deps.identity.provisionUser(sys, {
+      externalId: auth.subject,
+      email: auth.email,
+      displayName: auth.displayName,
+    });
+  } catch (err) {
+    if (err instanceof IdentityConflictError) throw forbidden(err.message);
+    throw err;
+  }
+}
+
 export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" | "POST" | "PATCH"; handler: Handler }[] {
   const routes: { path: string; method: "GET" | "POST" | "PATCH"; handler: Handler }[] = [
     { path: "/v1/auth/session", method: "POST", handler: sessionHandler(deps) },
@@ -265,17 +307,7 @@ function sessionHandler(deps: SessionDeps): Handler {
     }
 
     const sys = systemContext(req.requestId);
-    let provisioned;
-    try {
-      provisioned = await deps.identity.provisionUser(sys, {
-        externalId: auth.subject,
-        email: auth.email,
-        displayName: auth.displayName,
-      });
-    } catch (err) {
-      if (err instanceof IdentityConflictError) throw forbidden(err.message);
-      throw err;
-    }
+    const provisioned = await provision(deps, sys, auth);
     if (provisioned.created) {
       log(`[auth] provisioned ${auth.email} and their personal workspace "${provisioned.workspace.slug}"`);
       await adoptOrphans(deps, provisioned.user.id, req.requestId, log);
@@ -822,11 +854,7 @@ function acceptInviteHandler(deps: SessionDeps): Handler {
     // Provision first. An invitation is often somebody's first contact with the product, and
     // requiring them to have signed in once already would make the link fail for exactly the
     // people it was sent to.
-    const provisioned = await deps.identity.provisionUser(sys, {
-      externalId: auth.subject,
-      email: auth.email,
-      displayName: auth.displayName,
-    });
+    const provisioned = await provision(deps, sys, auth);
 
     const result = await deps.identity.acceptInvite(sys, token, {
       id: provisioned.user.id,
@@ -910,11 +938,7 @@ function createWorkspaceHandler(deps: SessionDeps): Handler {
     const sys = systemContext(req.requestId);
     // Provisioned first, exactly as the invite path does it, so a brand-new account creating its
     // second workspace in its first session is one round trip rather than an ordering rule.
-    const provisioned = await deps.identity.provisionUser(sys, {
-      externalId: auth.subject,
-      email: auth.email,
-      displayName: auth.displayName,
-    });
+    const provisioned = await provision(deps, sys, auth);
 
     const retryAfter = await deps.limitWorkspaceCreate?.(provisioned.user.id);
     if (retryAfter !== null && retryAfter !== undefined) {
