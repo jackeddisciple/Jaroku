@@ -143,6 +143,23 @@
           "summary": "Run ONE read-only SELECT (or WITH ... SELECT) and return rows, capped at 100. Writes, DDL and multi-statement input are rejected."
         }
       ]
+    },
+    {
+      "id": "http",
+      "label": "HTTP/Webhook",
+      "file": "http_connector.py",
+      "module": "http_connector",
+      "description": "Make HTTPS requests to domains this workspace has explicitly allowed. SSRF-safe: https only, exact hostnames with no wildcards, private ranges refused whatever a name resolves to, credential-in-URL rejected, redirects reported rather than followed.",
+      "required_env": ["HTTP_ALLOWED_DOMAINS"],
+      "auth": "user_secret",
+      "pip_requires": [],
+      "tools": [
+        {
+          "name": "http_request",
+          "signature": "http_request(method: str = 'GET', url: str = '', headers: str = '', body: str = '', timeout: int = 30) -> str",
+          "summary": "HTTPS request to an allowlisted domain. HIGH IMPACT — it reaches a third-party server, and a POST/PUT/PATCH/DELETE may change something there that this tool cannot undo. Response capped at 256 KB; Set-Cookie and Authorization are stripped on the way back."
+        }
+      ]
     }
   ]
 }
