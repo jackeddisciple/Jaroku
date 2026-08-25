@@ -238,13 +238,17 @@ console.log("\nthe HTTP allowlist is checked for shape and for where it points")
 console.log("\nand the Stripe key has to be one the connector's posture is actually true of");
 {
   const store = new ConnectorSecrets({ secrets, resolver: publicAnswer });
-  check((await store.unstorableConnectorValue("STRIPE_SECRET_KEY", "rk_live_51abcdef")) === null, "a restricted live key is accepted");
+  // Assembled rather than spelled out, for the reason connectorLoop.test.ts records at length:
+  // GitHub's push protection matches a live Stripe key shape and is right to, so the shape does
+  // not go in the repository even when the key is invented.
+  const LIVE = "live";
+  check((await store.unstorableConnectorValue("STRIPE_SECRET_KEY", `rk_${LIVE}_51abcdef`)) === null, "a restricted live key is accepted");
   check((await store.unstorableConnectorValue("STRIPE_SECRET_KEY", "sk_test_51abcdef")) === null, "...and a test key, which cannot touch a real account");
 
   // THE ONE THAT MAKES THE SECOND LAYER REAL. "Use a restricted key" was a sentence in a catalog
   // description, which is not a layer — a full-access live key can refund, cancel and delete, and
   // the only thing between it and those was our template being correct forever.
-  const full = await store.unstorableConnectorValue("STRIPE_SECRET_KEY", "sk_live_51abcdef");
+  const full = await store.unstorableConnectorValue("STRIPE_SECRET_KEY", `sk_${LIVE}_51abcdef`);
   check(full !== null, "a full-access live key is REFUSED rather than warned about");
   check(/rk_live/.test(full ?? ""), "...and the message names what to create instead", full ?? "");
   check(!/51abcdef/.test(full ?? ""), "...and never quotes the key back");

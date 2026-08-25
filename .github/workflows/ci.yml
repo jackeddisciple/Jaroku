@@ -223,6 +223,15 @@ jobs:
           # written twice on purpose (the control plane cannot check a request the sandbox
           # originates, and the sandbox cannot call TypeScript), so drift is what gets tested.
           npm run test:egress-connectors
+          # AND THE WHOLE LOOP, which is the suite the others could not be. Each of them tests one
+          # seam and passes with the seam either side of it broken — which is exactly how a stored
+          # HTTP_AUTH_HEADER reached no run: the panel offered the name, the vault kept the value,
+          # the template read it, and nothing in between carried it, under three green suites. This
+          # one starts where a user starts and ends where a run starts, through the real database,
+          # the real vault, the real manager and the real egress builder, and it is what found the
+          # deck rule that made a half-configured connector vanish instead of asking for what it
+          # lacked.
+          npm run test:connector-loop
           npm run test:database-url
           npm run test:run-tokens
           npm run test:control-plane-routes

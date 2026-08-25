@@ -155,13 +155,17 @@ export interface ConfiguredConnector {
  * and the per-conversation toggle had nothing to toggle, so §12.10's promise that disabling a
  * connector removes its tools from that conversation's dispatch could not be kept for any of them.
  *
- * AT LEAST ONE REQUIRED NAME, NOT ALL OF THEM, and that is the decision worth stating. It mirrors
- * the OAuth branch, where a connection that needs reauthorising still appears — carrying a warning
- * — rather than vanishing. A connector halfway through being set up, or one whose second field
- * somebody just cleared, is a thing this workspace HAS and cannot currently use, and a tile saying
- * so is the whole point of the deck's health row. A connector with NONE of its names set has never
- * been set up: that is an option rather than a capability, and it stays absent, or the deck becomes
- * a picture of the product instead of a picture of this workspace.
+ * PRESENT WHEN ANY DECLARED NAME HAS A VALUE; MISSING LISTS ONLY THE REQUIRED ONES. Those are two
+ * different questions and the first version of this asked one of them twice — it counted required
+ * names for both, which meant a connector declaring exactly ONE required name had no half-set-up
+ * state at all. `http` declares one, so somebody who pasted an auth header and had not yet typed
+ * the allowlist saw the tile vanish rather than a tile saying what it needed. The end-to-end suite
+ * is what caught it: the rule reads correctly and is wrong for the catalog it actually has.
+ *
+ * The direction it errs in mirrors the OAuth branch, where a connection needing reauthorising still
+ * appears — carrying a warning — rather than vanishing. Anything stored is evidence this workspace
+ * has begun; a connector with NOTHING stored has never been set up, which is an option rather than
+ * a capability, and it stays absent or the deck becomes a picture of the product.
  *
  * `isConfigured` is asked per NAME rather than handed a store, so this stays pure and so the caller
  * keeps deciding what "configured" means — which for the one caller is the secret registry's own
@@ -174,11 +178,10 @@ export function configuredUserSecretConnectors(
   const out: ConfiguredConnector[] = [];
   for (const connector of all) {
     if (authModeOf(connector) !== "user_secret") continue;
-    const missing = connector.required_env.filter((name) => !isConfigured(name));
-    // Every name missing is "never set up". A connector that declares no required env at all would
-    // land here too, and absent is the right answer for it: nothing has been decided about it.
-    if (missing.length === connector.required_env.length) continue;
-    out.push({ connector, missing });
+    const declared = [...connector.required_env, ...(connector.optional_env ?? [])];
+    // Nothing stored under any name it declares is "never set up", and absent is the right answer.
+    if (!declared.some((name) => isConfigured(name))) continue;
+    out.push({ connector, missing: connector.required_env.filter((name) => !isConfigured(name)) });
   }
   return out;
 }

@@ -179,53 +179,6 @@ export class ConnectorSecrets {
   }
 
   /**
-   * Store a workspace's `HTTP_ALLOWED_DOMAINS`, refusing a list that is not one.
-   *
-   * VALIDATED BEFORE IT IS WRITTEN, exactly as the connection string is, and for a sharper
-   * reason: this value is not a credential, it is a POLICY. A typo in a database URL fails
-   * visibly at the first query. A typo here — `*.example.com`, or `https://api.example.com` —
-   * produces an allowlist that silently matches nothing, and the symptom is every request being
-   * refused with a message about a host that looks like it is on the list.
-   *
-   * THE DOMAINS ARE NOT RESOLVED HERE, and that is the deliberate half. A domain that does not
-   * resolve today may resolve tomorrow, and refusing to save it would make configuring the
-   * connector depend on the state of somebody else's DNS at the moment they pressed Save. The
-   * resolution — and the private-range refusal that matters — happens at `httpEgress`, at
-   * policy-build time, where it is pinned. Same split as the database URL: shape at save,
-   * addresses at run.
-   */
-  async saveAllowedDomains(ctx: TenantContext, raw: string): Promise<SaveConnectorSecretResult> {
-    const { domains, rejected } = parseAllowedDomains(raw);
-    if (rejected.length > 0) {
-      return {
-        ok: false,
-        message:
-          `not a hostname: ${rejected.slice(0, 3).map((r) => JSON.stringify(r)).join(", ")}. Entries are ` +
-          `bare exact hostnames — no scheme, no path, no port, and no wildcards.`,
-        warning: null,
-        reachable: null,
-      };
-    }
-    if (domains.length === 0) {
-      return {
-        ok: false,
-        message: "no domains listed — an empty allowlist refuses every request",
-        warning: null,
-        reachable: null,
-      };
-    }
-
-    // Stored NORMALISED rather than as typed, so the run path and the panel are comparing the
-    // same strings. A list saved as `API.Example.COM ` and matched against `api.example.com`
-    // is an allowlist that works everywhere except where it is used.
-    const written = await this.opts.secrets.set(ctx, HTTP_ALLOWED_DOMAINS_NAME, domains.join(","));
-    if (!written.ok) {
-      return { ok: false, message: written.warning ?? "that value could not be stored", warning: null, reachable: null };
-    }
-    return { ok: true, message: null, warning: written.warning, reachable: null };
-  }
-
-  /**
    * Why this value cannot be stored under this name, or null when there is nothing to say.
    *
    * THE ONE ENTRY POINT EVERY WRITE GOES THROUGH — the Connections panel, the Secrets tab and the
