@@ -204,6 +204,64 @@ async function suite(driver: string, db: Db): Promise<void> {
     const again = await identity.removeMember(owner, cat.user.id);
     check(!again.ok, "removing them twice reports nothing to do");
   }
+
+  // §13.3 — leaving under your own steam, which is the same DELETE as removal and a different
+  // operation. Three claims are worth making about it and only one is about the row disappearing.
+  console.log("  · leaving");
+  {
+    // A SECOND WORKSPACE, and this is the assertion the suite exists for rather than a fixture.
+    // `leaveWorkspace` takes no user id — the row it deletes is the CONTEXT's own — which makes
+    // the WHERE the only thing standing between "leave this workspace" and "leave every workspace
+    // I am in", and a one-workspace test cannot tell those apart.
+    const other = await identity.createWorkspace(sys, { name: `other ${label}`, ownerUserId: ada.user.id });
+    await identity.addMember(owner, bob.user.id, "member");
+    await identity.addMember(
+      { ...systemContextFor(other.id, newRequestId()), role: "owner", actorUserId: ada.user.id },
+      bob.user.id,
+      "member",
+    );
+    const bobHere: TenantContext = { ...systemContextFor(team.id, newRequestId()), role: "member", actorUserId: bob.user.id };
+
+    const left = await identity.leaveWorkspace(bobHere);
+    check(left.ok, "a member can leave");
+    check(await auditFor("member.left"), "...recorded as leaving rather than as being removed");
+    const bobsWorkspaces = await identity.workspacesForUser(sys, bob.user.id);
+    check(!bobsWorkspaces.some((w) => w.id === team.id), "...and they are out of the workspace they left");
+    check(bobsWorkspaces.some((w) => w.id === other.id), "...and still in the one they did not");
+
+    const twice = await identity.leaveWorkspace(bobHere);
+    check(!twice.ok, "leaving twice reports nothing to do");
+
+    // THE OWNER'S REFUSAL IS UNCONDITIONAL, not `removeMember`'s last-owner rule. Ada is the only
+    // owner here, so both guards would refuse her — which is exactly why the interesting half is
+    // below, with a second owner present.
+    const adaLeaves = await identity.leaveWorkspace(owner);
+    check(!adaLeaves.ok, "an owner cannot leave");
+    check(/transfer ownership/i.test(adaLeaves.reason ?? ""), "...and is told to hand it over first");
+
+    await identity.addMember(owner, cat.user.id, "owner");
+    const stillRefused = await identity.leaveWorkspace(owner);
+    check(
+      !stillRefused.ok,
+      "...even with a second owner, which is where this differs from removeMember's last-owner rule",
+    );
+    check(
+      (await identity.workspacesForUser(sys, ada.user.id)).some((w) => w.id === team.id),
+      "...so the workspace still has the owner who tried to walk out of it",
+    );
+
+    // THE ROLE IS READ FROM THE ROW, NEVER FROM THE CONTEXT. A context is resolved when a socket
+    // opens and refreshed once a minute, so a stale one is the ordinary case rather than the
+    // exotic one — and believing it would let somebody demoted a moment ago leave as the owner
+    // they no longer are, or refuse an owner whose tab still says "member".
+    const catLyingAboutBeingAMember: TenantContext = {
+      ...systemContextFor(team.id, newRequestId()),
+      role: "member",
+      actorUserId: cat.user.id,
+    };
+    const lied = await identity.leaveWorkspace(catLyingAboutBeingAMember);
+    check(!lied.ok, "a stale context claiming `member` does not let an owner leave");
+  }
 }
 
 const tmp = mkdtempSync(join(tmpdir(), "jaroku-members-"));

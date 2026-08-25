@@ -192,6 +192,11 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   listMembers: NO_ENTITLEMENT,
   setMemberRole: NO_ENTITLEMENT,
   revokeInvite: NO_ENTITLEMENT,
+  // LEAVING IS NEVER GATED, for the reason `setByok` beside it is not: it REDUCES what the
+  // workspace holds. A seat check in front of a departure would be a tier refusing somebody the
+  // right to stop occupying a seat — and the workspace most likely to hit it is the one already
+  // over its limit, which is the case this would make unfixable.
+  leaveWorkspace: NO_ENTITLEMENT,
   listAudit: NO_ENTITLEMENT,
   loadUsage: NO_ENTITLEMENT,
   setSpendCeiling: NO_ENTITLEMENT,

@@ -6280,6 +6280,7 @@ async function threadView(ctx: TenantContext, threadId: string): Promise<ThreadV
 
 const MEMBER_COMMAND_NAMES = new Set([
   "listMembers", "inviteMember", "revokeInvite", "setMemberRole", "removeMember",
+  "leaveWorkspace",
 ]);
 
 async function broadcastMembers(ctx: TenantContext): Promise<void> {
@@ -6369,6 +6370,38 @@ async function handleMemberCommand(ctx: TenantContext, cmd: MemberCommand): Prom
       await ticketStore.revoke(ctx.workspaceId, userId);
       console.log(`[members] removed ${userId} from ${ctx.workspaceId}`);
       await broadcastMembers(ctx);
+      return;
+    }
+
+    if (cmd.cmd === "leaveWorkspace") {
+      const userId = ctx.actorUserId;
+      const result = await identityRepo.leaveWorkspace(ctx);
+      if (!result.ok) {
+        // TO THE ASKING SOCKET, NOT THE WORKSPACE, and it is the only refusal in this handler that
+        // is. The other four are acts performed ON the workspace's membership, so everybody
+        // watching the list has a reason to see that one failed; this one is a person's own
+        // decision about themselves, and broadcasting "Riya tried to leave and could not" to every
+        // open tab is a fact about somebody that nobody asked to be told.
+        relay.sendMembers(ctx, ctx.requestId, {
+          type: "error",
+          message: result.reason ?? "could not leave this workspace",
+        });
+        return;
+      }
+      // THE SAME THREE STEPS `removeMember` TAKES, AND FOR THE SAME REASONS — a leaver is a
+      // removed member who happens to have pressed the button themselves, so anything skipped here
+      // is a window in which somebody who has left is still acting in the workspace. The cached
+      // membership is invalidated, the outstanding tickets are revoked, and the list everybody
+      // else is looking at is rebroadcast so the row disappears without a reload.
+      contextResolver.invalidate(ctx.workspaceId, userId ?? "");
+      if (userId) await ticketStore.revoke(ctx.workspaceId, userId);
+      console.log(`[members] ${userId} left ${ctx.workspaceId}`);
+      // ORDERED: the broadcast first, the leaver's own confirmation second. The broadcast reaches
+      // their socket too — they are still connected until the next revalidation — and it carries a
+      // members list they are no longer in, which would render as an empty panel with no
+      // explanation if it arrived after nothing else. The notice is what the client switches on.
+      await broadcastMembers(ctx);
+      relay.sendMembers(ctx, ctx.requestId, { type: "left" });
       return;
     }
   } catch (err) {

@@ -508,6 +508,10 @@ const SCOPED_API: Record<string, string[]> = {
   // they feed.
   IdentityRepository: [
     "listMembers", "addMember", "removeMember", "setMemberRole",
+    // §13.3's departure. It takes no user id — the row it deletes is the context's own — so what
+    // is being asserted here is narrower than for its neighbours and matters more: the WHERE has
+    // to carry the workspace, or a member of two workspaces leaving one would leave both.
+    "leaveWorkspace",
     "createInvite", "listInvites", "revokeInvite", "acceptInvite", "listAudit",
     // Session 6 — the one writer of `workspaces.plan`, and therefore of every limit read from it.
     "setWorkspacePlan",

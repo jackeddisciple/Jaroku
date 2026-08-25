@@ -891,16 +891,29 @@ export type InviteMemberCommand = { cmd: "inviteMember"; email: string; role: st
 export type RevokeInviteCommand = { cmd: "revokeInvite"; inviteId: string };
 export type SetMemberRoleCommand = { cmd: "setMemberRole"; userId: string; role: string };
 export type RemoveMemberCommand = { cmd: "removeMember"; userId: string };
+/**
+ * Give up your own membership.
+ *
+ * IT CARRIES NO USER ID, and that is the whole of its safety rather than a convenience. The
+ * subject is whoever holds the socket, which the ticket already proved — so there is no field in
+ * which a member could spell somebody else's departure, and the capability beneath it can stay
+ * the member-level one every member already holds. A `leaveWorkspace: { userId }` would have to
+ * be gated at `member:manage`, which is the owner's, and an owner is the one role that may not
+ * use this at all.
+ */
+export type LeaveWorkspaceCommand = { cmd: "leaveWorkspace" };
 
 export type MemberCommand =
   | ListMembersCommand
   | InviteMemberCommand
   | RevokeInviteCommand
   | SetMemberRoleCommand
-  | RemoveMemberCommand;
+  | RemoveMemberCommand
+  | LeaveWorkspaceCommand;
 
 const MEMBER_COMMANDS = new Set([
   "listMembers", "inviteMember", "revokeInvite", "setMemberRole", "removeMember",
+  "leaveWorkspace",
 ]);
 
 // The members channel. Every mutation answers with a full snapshot, the same discipline the
@@ -914,6 +927,19 @@ const MEMBER_COMMANDS = new Set([
 export type MemberEvent =
   | { type: "members"; members: unknown[]; invites: unknown[] }
   | { type: "inviteLink"; email: string; role: string; token: string; expiresAt: string }
+  /**
+   * The socket that asked to leave has stopped being a member.
+   *
+   * A MESSAGE OF ITS OWN rather than a `notice`, because the client has to ACT on it: the socket
+   * it arrived on is scoped to a workspace this account no longer belongs to, so every command
+   * after it will be refused and the next revalidation tick will close it. What the client does is
+   * switch to the personal workspace, which is a navigation — and a navigation cannot be triggered
+   * by a sentence, because a sentence is something a panel prints.
+   *
+   * IT CARRIES NOTHING. Where to go next is the session's question, not this workspace's, and
+   * naming a destination here would be the workspace being left choosing where somebody lands.
+   */
+  | { type: "left" }
   | { type: "error"; message: string }
   | { type: "notice"; message: string };
 
@@ -2410,7 +2436,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   listConnections: "connections", connectConnector: "connections", disconnectConnector: "connections",
   loadUsage: "billing", setSpendCeiling: "billing", setByok: "billing",
   listMembers: "members", inviteMember: "members", revokeInvite: "members",
-  setMemberRole: "members", removeMember: "members",
+  setMemberRole: "members", removeMember: "members", leaveWorkspace: "members",
   listAudit: "audit",
   loadEnforcement: "enforcement", appealEnforcement: "enforcement",
   // All six on `threads`, the reads included. The channel HAS an error shape, so unlike

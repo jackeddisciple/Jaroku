@@ -210,6 +210,38 @@ export async function attackSuite(
   check(!evicted.ok, "...nor remove him from his own workspace");
   check((await stack.identity.listMembers(bobCtx)).length === 1, "...which still has its member");
 
+  // §13.3's departure, across the boundary. It is the one membership mutation with NO target
+  // argument — the row it acts on is the CONTEXT's own — so the workspace_id on that context is
+  // the entire filter, and a statement that dropped it would still pass every single-workspace
+  // test ever written against this method.
+  //
+  // WHAT THE FIXTURE IS FOR. Bob is a plain member of one workspace and the OWNER of another, and
+  // he leaves the first. That arrangement is what makes the third check discriminate: a DELETE
+  // filtered on `user_id` alone would report exactly the same success and empty the workspace he
+  // owns on the way past — which is not a leak anybody would see in a screenshot, because the
+  // screen he is looking at is the one he meant to leave.
+  const elsewhere = await stack.identity.createWorkspace(sys, { name: `atk elsewhere ${suffix}`, ownerUserId: ada!.id });
+  const elsewhereOwner: TenantContext = { ...systemContextFor(elsewhere.id, newRequestId()), role: "owner", actorUserId: ada!.id };
+  await stack.identity.addMember(elsewhereOwner, bob!.id, "member");
+
+  const bobLeaving: TenantContext = { ...systemContextFor(elsewhere.id, newRequestId()), role: "member", actorUserId: bob!.id };
+  const walked = await stack.identity.leaveWorkspace(bobLeaving);
+  check(walked.ok, "Bob can leave a workspace he is only a member of");
+  check(
+    !(await stack.identity.listMembers(elsewhereOwner)).some((m) => m.user_id === bob!.id),
+    "...and is out of that one",
+  );
+  check(
+    (await stack.identity.listMembers(bobCtx)).some((m) => m.user_id === bob!.id),
+    "...while the workspace he OWNS still has him in it",
+  );
+
+  const bobInAdasWorkspace: TenantContext = { ...adaCtx, role: "member", actorUserId: bob!.id };
+  check(
+    !(await stack.identity.leaveWorkspace(bobInAdasWorkspace)).ok,
+    "and a context naming a workspace he was never in leaves nothing",
+  );
+
   // Invites, all four operations, across the boundary.
   const invited = await stack.identity.createInvite(adaOwner, { email: `guest-${suffix}@example.com`, role: "member" });
   check("token" in invited, "Ada can invite somebody to her OWN workspace");

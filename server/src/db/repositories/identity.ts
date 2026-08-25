@@ -901,6 +901,65 @@ export class IdentityRepository {
   }
 
   /**
+   * Leave a workspace under your own steam.
+   *
+   * THE SAME DELETE AS `removeMember` AND A DIFFERENT OPERATION, which is why it is a method
+   * rather than a caller that passes `ctx.actorUserId` to that one. Three things differ, and each
+   * of them is the reason somebody would reach for the wrong one:
+   *
+   *   WHO IT MAY TOUCH. Exactly one row — the caller's own — and it takes no user id at all, so
+   *   there is no argument to get wrong and no shape in which a member could spell somebody
+   *   else's departure. `removeMember` takes a target because it is an act performed ON a person
+   *   by an owner; this is an act performed BY a person on themselves.
+   *
+   *   WHAT IT REFUSES. An OWNER cannot leave, and the refusal is unconditional rather than
+   *   `removeMember`'s "not if you are the last one". The two guards look interchangeable and are
+   *   not: a workspace with two owners would let one of them walk out under the last-owner rule,
+   *   and §6.5 is explicit that ownership is handed over deliberately rather than dropped — the
+   *   remaining owner would find out from the members list. Transfer first, leave second, and the
+   *   act of transferring is the one that says who is now responsible for the bill.
+   *
+   *   WHAT THE AUDIT ROW SAYS. `member.left` rather than `member.removed`, because those are
+   *   different events to whoever reads the log during an incident and collapsing them would make
+   *   "who removed Riya" unanswerable — the answer would be "Riya", which reads as a bug.
+   */
+  async leaveWorkspace(ctx: TenantContext): Promise<{ ok: boolean; reason?: string }> {
+    return this.db.transaction(async (tx) => {
+      const userId = ctx.actorUserId;
+      // A context with no actor is the server acting on its own behalf, which has no membership
+      // to give up. Refused here rather than deleting zero rows and reporting success.
+      if (!userId) return { ok: false, reason: "there is nobody here to leave" };
+
+      const self = await tx.get<{ role: string }>(
+        `SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?`,
+        [ctx.workspaceId, userId],
+      );
+      // READ RATHER THAN TRUSTING `ctx.role`. The context's role was resolved when the socket
+      // opened and is refreshed once a minute; a demotion in between would let somebody leave as
+      // the owner they no longer are, or — the direction that actually bites — refuse an admin
+      // who was promoted to owner and back while the tab stayed open.
+      if (!self) return { ok: false, reason: "you are not a member of this workspace" };
+      if (self.role === "owner") {
+        return { ok: false, reason: "transfer ownership before leaving this workspace" };
+      }
+
+      await tx.run(`DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, [
+        ctx.workspaceId,
+        userId,
+      ]);
+      await this.appendAuditIn(tx, ctx, {
+        workspaceId: ctx.workspaceId,
+        actorUserId: userId,
+        action: "member.left",
+        targetType: "user",
+        targetId: userId,
+        metadata: { role: self.role },
+      });
+      return { ok: true };
+    });
+  }
+
+  /**
    * Change a member's role. Refuses to demote the last owner.
    *
    * Same guard as `removeMember`, and for the same reason: a workspace with no owner cannot be

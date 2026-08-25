@@ -386,6 +386,22 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
 
   listMembers: "member:read",
   /**
+   * Giving up your own membership.
+   *
+   * `member:read` — A MEMBER'S — AND NOT `member:manage` BESIDE THE FOUR BELOW, which looks like
+   * the entry most likely to be wrong in this table and is the one decision here that could not go
+   * the other way. `member:manage` is the owner's, and an owner is precisely the role that may NOT
+   * leave: §6.5 says ownership is handed over deliberately, never dropped. Filing this under it
+   * would produce a command that exactly nobody can use — refused for every role that wants it and
+   * held only by the role it refuses.
+   *
+   * So it sits under the member capability for the membership surface, and the thing that makes
+   * that safe is the command's SHAPE rather than this line: `leaveWorkspace` carries no user id,
+   * so the only membership it can reach is the socket's own. Widening `member:read` to cover it is
+   * widening it to "may end your own presence here", which is not an authority over anybody else.
+   */
+  leaveWorkspace: "member:read",
+  /**
    * The workspace's audit trail.
    *
    * `workspace:manage` — THE OWNER'S — and not `member:read` beside it, because of what the rows
