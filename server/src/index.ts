@@ -6467,6 +6467,14 @@ async function handleMemberCommand(ctx: TenantContext, cmd: MemberCommand): Prom
       await broadcastMembers(ctx);
       // ...and the sockets that user already has open pick the new role up on the next
       // revalidation tick, in place, without being disconnected. See relay.revalidateAll.
+      //
+      // AND EVERY AGENT'S ACCESS PANEL RE-RESOLVES, because a role IS the ceiling: demoting an
+      // admin to member narrows their effective access on every agent in the workspace at once,
+      // including ones with grants that were perfectly valid a moment ago and are now capped. This
+      // surface knows nothing about agents, which is exactly why the recheck has to be emitted from
+      // here rather than only from the grant handlers — a panel left showing somebody as an
+      // administrator of an agent minutes after they stopped being one is the drift §7 is about.
+      accessChanged(ctx);
       return;
     }
 
@@ -6484,6 +6492,12 @@ async function handleMemberCommand(ctx: TenantContext, cmd: MemberCommand): Prom
       await ticketStore.revoke(ctx.workspaceId, userId);
       console.log(`[members] removed ${userId} from ${ctx.workspaceId}`);
       await broadcastMembers(ctx);
+      // §16 — THEIR GRANTS PERSIST AND RESOLVE TO EMPTY, so the Access tab has to re-resolve or it
+      // goes on showing a departed colleague with whatever their grant said. The rows do not
+      // disappear: they move to the "no longer in this workspace" group, which is the honest
+      // rendering — a grant nobody can use is still a row somebody has to decide about, and
+      // deleting it here would mean it silently returns the day they are re-invited.
+      accessChanged(ctx);
       return;
     }
 
@@ -6515,6 +6529,10 @@ async function handleMemberCommand(ctx: TenantContext, cmd: MemberCommand): Prom
       // members list they are no longer in, which would render as an empty panel with no
       // explanation if it arrived after nothing else. The notice is what the client switches on.
       await broadcastMembers(ctx);
+      // A LEAVER IS A REMOVED MEMBER WHO PRESSED THE BUTTON THEMSELVES, so their grants persist and
+      // resolve to empty exactly as `removeMember`'s do, and every open Access tab has to hear
+      // about it for the same reason.
+      accessChanged(ctx);
       relay.sendMembers(ctx, ctx.requestId, { type: "left" });
       return;
     }
@@ -6714,6 +6732,31 @@ function refuseAccess(ctx: TenantContext, message: string): void {
 }
 
 /**
+ * §7 — something changed what somebody's effective access resolves to. Tell the workspace.
+ *
+ * ONE FUNCTION FOR EVERY CAUSE, and the list of callers is the point rather than the body. Access
+ * to an agent is `role ∩ grant`, so it moves when EITHER side does — a grant written, modified or
+ * revoked, and equally a workspace role changed or a membership removed from the Members panel,
+ * which is a surface that knows nothing about agents. A recheck emitted only from the grant
+ * handlers would leave the Access tab showing a person as an admin of an agent minutes after
+ * somebody demoted them to member two panels away.
+ *
+ * IT DOES NOT ENFORCE ANYTHING AND MUST NOT BE MISTAKEN FOR ENFORCEMENT. The server already
+ * refuses on the next command, because `resolveCapabilities` runs per command and caches nothing —
+ * that is §5.2 and it is what makes revocation immediate. This is about what is on SCREEN:
+ * affordances that were visible disappearing, affordances that were absent appearing, without
+ * anybody reloading. A client that missed this message is a client whose buttons are wrong and
+ * whose commands are still refused correctly.
+ *
+ * AND A COMMAND ALREADY IN FLIGHT IS LEFT ALONE. §5.2: killing a half-completed publish to enforce
+ * a permission change trades a small authorisation window for a corrupted agent, which is the
+ * wrong trade. Nothing here touches a running operation; the next command is where it bites.
+ */
+function accessChanged(ctx: TenantContext): void {
+  relay.broadcastAccessRecheck(ctx);
+}
+
+/**
  * Everything that has to be true before a grant is written, checked in one place.
  *
  * FIVE REFUSALS, AND THE ORDER IS DELIBERATE: the ones that are facts about the request come
@@ -6877,6 +6920,7 @@ async function writeGrant(
   });
 
   await sendAccess(ctx, agent.id);
+  accessChanged(ctx);
 }
 
 async function revokeGrant(ctx: TenantContext, cmd: RevokeGrantCommand): Promise<void> {
@@ -6915,6 +6959,7 @@ async function revokeGrant(ctx: TenantContext, cmd: RevokeGrantCommand): Promise
   });
 
   await sendAccess(ctx, agent.id);
+  accessChanged(ctx);
 }
 
 /** A member's workspace role, or `none` for somebody who has left. Feeds the fallback above. */

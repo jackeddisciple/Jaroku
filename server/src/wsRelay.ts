@@ -1108,6 +1108,25 @@ export type AccessEvent =
       viewer: string[];
     }
   | { type: "exposure"; exposure: ExposurePayload }
+  /**
+   * §7 — "something about access in this workspace changed; re-resolve."
+   *
+   * IT CARRIES NOTHING, AND THE EMPTINESS IS THE DESIGN. Not who changed it, not which agent, not
+   * what was granted. Two reasons, and the second is the one that would be got wrong:
+   *
+   *   It is BROADCAST, so it reaches every socket in the workspace — including the member whose
+   *   access was just narrowed and the person who was not involved. A payload saying "Priya
+   *   granted Sam deploy on billing-bot" delivered to everybody is a notification nobody asked
+   *   for, about a decision that is an admin's, sent to people who cannot read the History section
+   *   it came from. The signal is "re-resolve"; the DETAIL is fetched, by clients entitled to it,
+   *   through `loadAccess`, which is gated.
+   *
+   *   And a payload naming an agent would tempt a client into a partial update — invalidate just
+   *   that agent's cache — which is wrong whenever the change was a workspace ROLE rather than a
+   *   grant, because that moves the ceiling under every agent at once. An empty signal has one
+   *   correct handling, and it is the one that is right in both cases.
+   */
+  | { type: "recheck" }
   | { type: "error"; message: string }
   | { type: "notice"; message: string };
 
@@ -4039,6 +4058,26 @@ export class WsRelay {
       if (session.context.requestId !== requestId) continue;
       this.sendTo(ws, { channel: "access", ...event });
     }
+  }
+
+  /**
+   * Tell the workspace to re-resolve. §7's recheck.
+   *
+   * `broadcastTo`, WHICH IS WORKSPACE-SCOPED, and that is not a formality on this message. v0.2.6
+   * fixed exactly this class of bug — a push that went to every connected socket regardless of
+   * which tenant it belonged to — and the temptation with a payload this small is to think it
+   * cannot leak anything. It can: an unscoped "access changed" tells every workspace in the
+   * installation that SOME workspace's access changed, at the moment it did, which is a timing
+   * channel and a stream of pointless refetches for everybody else.
+   *
+   * BROADCAST RATHER THAN SENT TO THE PEOPLE AFFECTED, deliberately, and the argument is that the
+   * server does not know who they are. A grant changes one person's access; a workspace role
+   * change moves the ceiling under everybody's; and a client with the Access tab open is watching
+   * a list that any of those can alter. Working out the recipients would be a second resolution,
+   * per socket, of the thing the clients are about to do anyway.
+   */
+  broadcastAccessRecheck(ctx: TenantContext): void {
+    this.broadcastTo(ctx, { channel: "access", type: "recheck" });
   }
 
   /**

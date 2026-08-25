@@ -516,6 +516,9 @@ console.log("\nfired live, in A, and B receives none of it");
   // suite fires the refusal, which is the only shape on this channel that is not an answer to a
   // specific read of a specific agent.
   relay.sendAccess(ctxA, ctxA.requestId, { type: "error", message: MARK });
+  // §7's recheck, which is the ONE message on this channel that is broadcast. It is fired here so
+  // the assertion below can read its payload — see the block after this one.
+  relay.broadcastAccessRecheck(ctxA);
   relay.broadcastAgentFiles(ctxA, "agent_a");
   await relay.broadcastAgentGraph(ctxA, "agent_a");
   await relay.broadcastHistory();
@@ -558,6 +561,25 @@ console.log("\nfired live, in A, and B receives none of it");
   // ...and A did receive it, so the isolation above is not just a dead socket.
   const marked = gotA.filter((m) => JSON.stringify(m).includes(MARK));
   check(marked.length >= 11, `A received its own traffic (${marked.length} marked messages)`);
+
+  // §7 — THE RECHECK CARRIES NOTHING, and it is asserted on the payload that actually crossed the
+  // wire rather than on the type declaration, because the type is not what a client receives.
+  //
+  // WHY THE EMPTINESS IS A RULE AND NOT A STYLE: this is the one broadcast on this channel, so it
+  // reaches every socket in the workspace — the member whose access was just narrowed, and the six
+  // people who were not involved. A field naming who changed what would be a notification about an
+  // administrator's decision sent to everybody, sourced from the History section those recipients
+  // are not entitled to read. The signal is "re-resolve"; the detail is FETCHED, by clients that
+  // may have it. A field added here later fails this rather than shipping.
+  const recheck = gotA.filter((m: any) => m.channel === "access" && m.type === "recheck");
+  check(recheck.length === 1, `the recheck reached the workspace it belongs to (${recheck.length})`);
+  const extra = recheck.flatMap((m) => Object.keys(m).filter((k) => k !== "channel" && k !== "type"));
+  check(
+    extra.length === 0,
+    `...carrying nothing but its own name${extra.length ? ` — found ${extra.join(", ")}` : ""}`,
+  );
+  const leakedRecheck = gotB.filter((m: any) => m.channel === "access");
+  check(leakedRecheck.length === 0, "...and B was not told that A's access changed at all");
 }
 
 a.ws.close();
