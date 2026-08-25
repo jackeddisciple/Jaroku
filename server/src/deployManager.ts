@@ -301,6 +301,11 @@ export class DeployManager {
       model: req.model,
       envKeys,
       version: deployedVersion,
+      // WHO PRESSED IT, read off the context this deploy is running under rather than passed down
+      // from the command. That context is the socket's own — the same one the capability check was
+      // made against — so it is the person the server already decided was allowed to do this, and
+      // there is no field on the request in which a client could name somebody else.
+      createdBy: this.deps.context().actorUserId,
     });
     this.active = { deploymentId: deployment.id, upload: null, cancelled: false };
     this.seenBuild.clear();

@@ -97,6 +97,15 @@ export interface Deployment {
    */
   version: number | null;
   error: string | null;
+  /**
+   * Who started this deploy, or null for one that predates the column.
+   *
+   * §13's Exposure section is what needed it — "show who deployed it and when" was unanswerable,
+   * because nothing in this schema recorded a person and there is no audit row for a deploy to
+   * read one out of either. NEVER BACKFILLED, exactly as `version` above is not: a name beside a
+   * public URL that nobody actually chose to publish is worse than an honest "unrecorded".
+   */
+  created_by: string | null;
   created_at: string;
   updated_at: string;
   ended_at: string | null;
@@ -122,6 +131,8 @@ export interface CreateDeployment {
   target?: string;
   /** The agent's current version at the moment the deploy starts. See `Deployment.version`. */
   version?: number | null;
+  /** Who pressed it. See `Deployment.created_by` — absent for a background reconciliation. */
+  createdBy?: string | null;
 }
 
 export interface DeploymentPatch {
@@ -161,7 +172,7 @@ const PATCHABLE: ReadonlySet<string> = new Set([
 // business there.
 const DEPLOY_COLUMNS = `id, agent_id, target, status, url, provider, model, env_keys, version,
                         railway_project_id, railway_service_id, railway_environment_id,
-                        railway_deployment_id, error, created_at, updated_at, ended_at`;
+                        railway_deployment_id, error, created_by, created_at, updated_at, ended_at`;
 
 /** How much of a deploy's log is kept. A build log is diagnostic, not an archive. */
 const LOG_CAP = 2000;
@@ -242,6 +253,7 @@ export class DeployStore {
       railway_deployment_id: null,
       version: opts.version ?? null,
       error: null,
+      created_by: opts.createdBy ?? null,
       created_at: now,
       updated_at: now,
       ended_at: null,
@@ -257,11 +269,11 @@ export class DeployStore {
       await tx.run(
         `INSERT INTO deployments
            (id, workspace_id, agent_id, target, status, url, provider, model, env_keys, version,
-            created_at, updated_at, created_seq)
-         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+            created_by, created_at, updated_at, created_seq)
+         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           row.id, ctx.workspaceId, row.agent_id, row.target, row.status,
-          row.provider, row.model, JSON.stringify(row.env_keys), row.version, now, now,
+          row.provider, row.model, JSON.stringify(row.env_keys), row.version, row.created_by, now, now,
           asInt(top?.n) + 1,
         ],
       );

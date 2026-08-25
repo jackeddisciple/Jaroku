@@ -198,6 +198,14 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   // over its limit, which is the case this would make unfixable.
   leaveWorkspace: NO_ENTITLEMENT,
   listAudit: NO_ENTITLEMENT,
+  // ACCESS CONTROL IS NEVER A TIER FEATURE, and the two access reads are the first rows of that
+  // decision. Selling per-agent permissions by plan would mean a workspace that could not afford
+  // Pro had to give every member every capability on every agent — which is not a smaller product,
+  // it is a less safe one, and the party it costs is the customer paying us least. The same
+  // argument the `leaveWorkspace` and `setByok` rows below make from the other direction: a gate
+  // that stops somebody REDUCING what is reachable is a gate that sells risk.
+  loadAccess: NO_ENTITLEMENT,
+  loadExposure: NO_ENTITLEMENT,
   loadUsage: NO_ENTITLEMENT,
   setSpendCeiling: NO_ENTITLEMENT,
   // CHOOSING TO PAY FOR YOUR OWN INFERENCE IS NEVER GATED. A workspace turning BYOK on is asking to

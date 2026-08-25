@@ -45,6 +45,8 @@ import {
   type GenerateCommand,
   type McpCommand,
   type PlanAgentCommand,
+  type AccessCommand,
+  type AccessPerson,
   type MemberCommand,
   type ProviderCommand,
   type AgentCardView,
@@ -100,7 +102,7 @@ import { scanAgentDirectory } from "./agents.ts";
 import { AgentRepository, nextForkSlug } from "./db/repositories/agents.ts";
 import { AgentGrantRepository } from "./db/repositories/agentGrants.ts";
 import {
-  holds, resolveCapabilities, type AgentCapability,
+  agentCeiling, holds, resolveCapabilities, type AgentCapability,
 } from "./auth/capabilities.ts";
 // The Agents grid's derivations, in their own module because every one of them is a rule that looks
 // obviously right in a screenshot and is wrong in the case nobody had that day — see agentHealth.ts.
@@ -4002,6 +4004,7 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (PROVIDER_COMMAND_NAMES.has(cmd.cmd)) void handleProviderCommand(ctx, cmd as ProviderCommand);
     else if (CONNECTION_COMMAND_NAMES.has(cmd.cmd)) void handleConnectionCommand(ctx, cmd as ConnectionCommand);
     else if (MEMBER_COMMAND_NAMES.has(cmd.cmd)) void handleMemberCommand(ctx, cmd as MemberCommand);
+    else if (ACCESS_COMMAND_NAMES.has(cmd.cmd)) void handleAccessCommand(ctx, cmd as AccessCommand);
     else if (cmd.cmd === "listAudit") void sendAuditLog(ctx, cmd.limit);
     else if (cmd.cmd === "loadEnforcement") void broadcastEnforcement(ctx);
     else if (cmd.cmd === "appealEnforcement") void appealEnforcement(ctx, cmd.note);
@@ -6485,6 +6488,196 @@ async function handleMemberCommand(ctx: TenantContext, cmd: MemberCommand): Prom
     const message = (err as Error)?.message ?? String(err);
     console.error(`[members] ${cmd.cmd} failed: ${message}`);
     relay.broadcastMembers(ctx, { type: "error", message: `${cmd.cmd} failed: ${message}` });
+  }
+}
+
+// --- the access channel ------------------------------------------------------------------------
+//
+// Who may do what to one agent, why, and what can reach that agent without going through any of it.
+//
+// EVERY ANSWER IS ASSEMBLED HERE AND DECIDED ELSEWHERE. `resolveCapabilities` says what somebody's
+// effective set is; the identity repository says who is in the workspace; the relay says who is
+// connected; the deploy store says what is live. This file joins them into a payload. Nothing in
+// this section decides whether an access is allowed — that is invariant A, and the moment a
+// judgement appears here there are two answers to one question.
+//
+// THE READS ANSWER TO THE ASKING SOCKET. See `relay.sendAccess` for why: the payload names
+// colleagues, their addresses, whether each is online, and the viewer's OWN effective set, which is
+// per-person by construction.
+
+const ACCESS_COMMAND_NAMES = new Set(["loadAccess", "loadExposure"]);
+
+/**
+ * One person's row: their effective set, and the provenance line that is the whole point of it.
+ *
+ * §10.2 — "A list of names with permission badges is a report. A list that answers WHY each person
+ * has what they have is a tool." So every row carries four things rather than one: what they can
+ * do, what their ROLE alone would give (the chips with no `+`), what the grant added, and what the
+ * ceiling took back. Without the last two an admin cannot tell whether removing somebody from this
+ * agent means revoking a grant or changing a workspace role — and will do the wrong one.
+ */
+async function accessRowFor(
+  ctx: TenantContext,
+  agentUuid: string,
+  member: { user_id: string; email: string; display_name: string | null; role: string | null },
+  live: Set<string>,
+  nameOf: (userId: string | null) => string | null,
+): Promise<AccessPerson> {
+  // RESOLVED AS THAT PERSON, not as the caller. The context handed to the resolver carries THEIR
+  // user id and THEIR role, because the question is what the server would allow them — a resolution
+  // made under the caller's role would produce a panel showing everybody the admin's own access.
+  const asThem: TenantContext = {
+    ...ctx,
+    actorUserId: member.user_id,
+    role: (member.role ?? "none") as TenantContext["role"],
+  };
+  const resolved = await resolveCapabilities(asThem, agentUuid, agentGrantRepo);
+  const grant = await agentGrantRepo.find(ctx, agentUuid, member.user_id);
+  const fromRole = member.role ? [...agentCeiling(asThem.role)] : [];
+
+  return {
+    user_id: member.user_id,
+    email: member.email,
+    display_name: member.display_name,
+    role: member.role,
+    capabilities: [...resolved.capabilities],
+    fromRole,
+    granted: grant?.capabilities ?? [],
+    capped: resolved.provenance.kind === "grant" ? resolved.provenance.capped : [],
+    provenance: resolved.provenance.kind,
+    granted_by: grant?.granted_by ?? null,
+    granted_by_name: nameOf(grant?.granted_by ?? null),
+    granted_at: grant?.granted_at ?? null,
+    expires_at: grant?.expires_at ?? null,
+    note: grant?.note ?? null,
+    live: live.has(member.user_id),
+  };
+}
+
+async function sendAccess(ctx: TenantContext, agentId: string): Promise<void> {
+  const agent = await agentForCommand(ctx, agentId);
+  // ABSENT, NOT FORBIDDEN. The relay's own gate already refuses a cross-workspace id with this
+  // sentence; reaching here means the agent went between the check and the read, and the answer
+  // has to be the same one either way.
+  if (!agent) {
+    relay.sendAccess(ctx, ctx.requestId, {
+      type: "error",
+      message: `there is no agent "${agentId}" in this workspace`,
+    });
+    return;
+  }
+
+  const [members, grants] = await Promise.all([
+    identityRepo.listMembers(ctx),
+    agentGrantRepo.listForAgent(ctx, agent.id),
+  ]);
+  const live = relay.liveUsers(ctx);
+  const byId = new Map(members.map((m) => [m.user_id, m]));
+  const nameOf = (userId: string | null): string | null => {
+    if (!userId) return null;
+    const m = byId.get(userId);
+    return m ? m.display_name || m.email : null;
+  };
+
+  const people = await Promise.all(
+    members.map((m) =>
+      accessRowFor(ctx, agent.id, { ...m, display_name: m.display_name ?? null }, live, nameOf),
+    ),
+  );
+
+  // §16 — A GRANT FOR SOMEBODY WHO HAS LEFT PERSISTS AND RESOLVES TO EMPTY, and the row is shown
+  // in a group of its own rather than dropped. Dropping it would mean the grant comes back the day
+  // that person is re-invited, silently, with the capabilities they had when they left — which is
+  // the single least expected thing an access panel could do.
+  const orphans = await Promise.all(
+    grants
+      .filter((g) => !byId.has(g.user_id))
+      .map((g) =>
+        accessRowFor(
+          ctx,
+          agent.id,
+          { user_id: g.user_id, email: "", display_name: null, role: null },
+          live,
+          nameOf,
+        ),
+      ),
+  );
+
+  const viewer = await resolveCapabilities(ctx, agent.id, agentGrantRepo);
+  relay.sendAccess(ctx, ctx.requestId, {
+    type: "access",
+    agentId: agent.id,
+    agentSlug: agent.slug,
+    people,
+    orphans,
+    viewer: [...viewer.capabilities],
+  });
+}
+
+/**
+ * §13 — what can reach this agent WITHOUT going through anything above it in the panel.
+ *
+ * THE SENTENCE IS BUILT HERE AND NOT IN THE CLIENT, and that is the section's whole design. Every
+ * grant in §10 governs access through Jaroku; a deployed agent answers HTTP directly, and the
+ * reviewed deployment template is Python's standard-library ThreadingHTTPServer with no auth layer
+ * of any kind. So the honest statement is that the deployed endpoint is not covered by anything
+ * else in this panel — and an access panel that implies protection it does not provide is worse
+ * than no access panel, because it converts an unknown risk into a false certainty.
+ *
+ * A client rendering this from a boolean would eventually render it as a pill, and a pill is the
+ * shape somebody skims past. The server sends the sentence.
+ */
+async function sendExposure(ctx: TenantContext, agentId: string): Promise<void> {
+  const agent = await agentForCommand(ctx, agentId);
+  if (!agent) {
+    relay.sendAccess(ctx, ctx.requestId, {
+      type: "error",
+      message: `there is no agent "${agentId}" in this workspace`,
+    });
+    return;
+  }
+
+  const current = (await deployStore.currentByAgent(ctx)).get(agent.slug) ?? null;
+  // LIVE MEANS A URL, NOT A ROW. A queued or failed deployment has no endpoint anybody can reach,
+  // and treating one as exposure would put a warning on an agent nothing can call.
+  const deployed = Boolean(current?.url);
+  const deployedBy = current?.created_by ? await identityRepo.userById(ctx, current.created_by) : undefined;
+
+  relay.sendAccess(ctx, ctx.requestId, {
+    type: "exposure",
+    exposure: {
+      agentId: agent.id,
+      deployed,
+      url: current?.url ?? null,
+      status: current?.status ?? null,
+      version: current?.version ?? null,
+      // NULL IS "UNRECORDED" AND NEVER A GUESS. Migration 061 is never backfilled, so a deploy
+      // made before the column existed says nobody rather than naming the workspace's owner.
+      deployedByName: deployedBy ? deployedBy.display_name || deployedBy.email : null,
+      deployedAt: current?.created_at ?? null,
+      auth: deployed
+        ? "No authentication — anyone with the URL can invoke this agent. Nothing above governs it."
+        : null,
+    },
+  });
+}
+
+async function handleAccessCommand(ctx: TenantContext, cmd: AccessCommand): Promise<void> {
+  try {
+    if (cmd.cmd === "loadAccess") {
+      await sendAccess(ctx, String(cmd.agentId ?? ""));
+      return;
+    }
+    if (cmd.cmd === "loadExposure") {
+      await sendExposure(ctx, String(cmd.agentId ?? ""));
+      return;
+    }
+  } catch (err) {
+    const message = (err as Error)?.message ?? String(err);
+    console.error(`[access] ${cmd.cmd} failed: ${message}`);
+    // TO THE ASKING SOCKET, like the answer it replaces. A failure to build one person's panel is
+    // not something to put in front of every other tab in the workspace.
+    relay.sendAccess(ctx, ctx.requestId, { type: "error", message: `${cmd.cmd} failed: ${message}` });
   }
 }
 

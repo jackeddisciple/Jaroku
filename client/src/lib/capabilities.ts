@@ -212,6 +212,13 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   appealEnforcement: "enforcement:appeal",
   listMembers: "member:read",
   leaveWorkspace: "member:read",
+  // The access channel's two reads. `agent:read` on both, which is §9.2's rule copied rather than
+  // re-derived: reading who can deploy an agent is a normal operation, so the tab renders
+  // READ-ONLY for a non-admin instead of being absent. What a non-admin cannot do is change any of
+  // it, and that is decided per agent rather than by this table — see `useCapability`'s second
+  // argument.
+  loadAccess: "agent:read",
+  loadExposure: "agent:read",
   listAudit: "workspace:manage",
   inviteMember: "member:manage",
   revokeInvite: "member:manage",

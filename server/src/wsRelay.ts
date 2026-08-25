@@ -978,6 +978,101 @@ export type AuditEvent =
 const AUDIT_COMMANDS = new Set(["listAudit"]);
 
 /**
+ * The access channel — who may do what to one agent, and what can reach it without asking us.
+ *
+ * A CHANNEL RATHER THAN HTTP ROUTES, and that is a correction to the shape this feature was first
+ * described in. The original wanted `GET /agents/:id/access` and its siblings; this product puts
+ * nearly everything down the socket, and the ONE exception is `POST /v1/workspaces` — because a
+ * socket is scoped to a workspace for its whole life and that request is what creates one. Agent
+ * access happens INSIDE a workspace scope, so it belongs where every other in-workspace operation
+ * already is: on a socket that has already proved which tenant it is acting in.
+ *
+ * A CHANNEL OF ITS OWN rather than a corner of `members`, for the reason `audit` is not a corner of
+ * `members` either. The members channel answers "who is in this workspace"; this answers "and what
+ * may each of them do to this one agent, who granted it, when does it run out, and what else can
+ * reach it" — which is a different question about a different subject, at a scope the members
+ * channel has no concept of.
+ *
+ * EVERY READ ANSWERS TO THE SOCKET THAT ASKED, not to the workspace, which is the same discipline
+ * `audit` and `activity` follow: a read changes nothing, so there is nothing for anybody else to be
+ * kept in step with, and one person opening an access panel is not a reason to put a list of who
+ * can deploy in front of every other tab. The one thing that IS broadcast is the recheck — see
+ * §7 — and it deliberately carries no detail at all.
+ */
+export type LoadAccessCommand = { cmd: "loadAccess"; agentId: string };
+export type LoadExposureCommand = { cmd: "loadExposure"; agentId: string };
+
+export type AccessCommand = LoadAccessCommand | LoadExposureCommand;
+
+const ACCESS_COMMANDS = new Set(["loadAccess", "loadExposure"]);
+
+/** One person on the Access tab's People list, with WHY they have what they have. */
+export interface AccessPerson {
+  user_id: string;
+  email: string;
+  display_name: string | null;
+  /** Their workspace role, or null for somebody who is no longer a member — see `orphans`. */
+  role: string | null;
+  /** The effective set: role ∩ grant, closed under implication. What the server will actually allow. */
+  capabilities: string[];
+  /** What the role alone would give. The chips drawn without a `+`. */
+  fromRole: string[];
+  /** The stored grant, unintersected. Empty when there is no grant row. */
+  granted: string[];
+  /** Capabilities in the grant that the role's ceiling took back off it. §10.2's "capped by role". */
+  capped: string[];
+  provenance: "role" | "grant" | "expired" | "none";
+  granted_by: string | null;
+  granted_by_name: string | null;
+  granted_at: string | null;
+  expires_at: string | null;
+  note: string | null;
+  /** Whether they have an open socket to this workspace right now. §10.2's presence dot. */
+  live: boolean;
+}
+
+/**
+ * What can reach a deployed agent without going through anything above it in this panel.
+ *
+ * `auth` IS A SENTENCE THE SERVER OWNS rather than a boolean the client renders a pill from. §13 is
+ * explicit that a green/red pill "invites skimming past the one fact that matters", and a boolean
+ * on the wire is a pill waiting to happen — the first client to render it will choose a colour and
+ * a word, and neither will say that the reviewed deployment template is a stdlib
+ * ThreadingHTTPServer with no auth layer of any kind.
+ */
+export interface ExposurePayload {
+  agentId: string;
+  deployed: boolean;
+  url: string | null;
+  status: string | null;
+  version: number | null;
+  deployedByName: string | null;
+  deployedAt: string | null;
+  /** The posture, in prose. Null when nothing is deployed and there is no posture to state. */
+  auth: string | null;
+}
+
+export type AccessEvent =
+  | {
+      type: "access";
+      agentId: string;
+      agentSlug: string;
+      people: AccessPerson[];
+      /**
+       * Grants belonging to people who are no longer members. §16: the rows persist, resolve to
+       * empty, and move to their own group with a cleanup action — because a grant nobody can use
+       * is still a row somebody has to decide about, and silently hiding it would mean it comes
+       * back the day that person is re-invited.
+       */
+      orphans: AccessPerson[];
+      /** The asking socket's own effective set on this agent. What the client's cache is keyed on. */
+      viewer: string[];
+    }
+  | { type: "exposure"; exposure: ExposurePayload }
+  | { type: "error"; message: string }
+  | { type: "notice"; message: string };
+
+/**
  * What rung this workspace is under, and its answer to it.
  *
  * TWO COMMANDS, AND THE APPEAL IS THE POINT. The abuse ladder is one-sided by construction: a
@@ -1075,6 +1170,7 @@ export type ClientCommand =
   | GithubCommand
   | MemberCommand
   | ListAuditCommand
+  | AccessCommand
   | EnforcementCommand
   | ThreadCommand
   | ListThreadsCommand
@@ -1130,6 +1226,7 @@ export type ForwardedCommand =
   | GithubCommand
   | MemberCommand
   | ListAuditCommand
+  | AccessCommand
   | EnforcementCommand
   | ThreadCommand
   | InboxCommand
@@ -2451,6 +2548,11 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   listMembers: "members", inviteMember: "members", revokeInvite: "members",
   setMemberRole: "members", removeMember: "members", leaveWorkspace: "members",
   listAudit: "audit",
+  // Both on `access`, the reads included, for the reason the thread and inbox commands are all on
+  // their own channels: the channel HAS an error shape, so a refusal about an agent somebody
+  // cannot see lands on the panel that asked rather than in the status bar with nothing saying
+  // which section is empty and why.
+  loadAccess: "access", loadExposure: "access",
   loadEnforcement: "enforcement", appealEnforcement: "enforcement",
   // All six on `threads`, the reads included. The channel HAS an error shape, so unlike
   // `loadAgentFiles` there is nowhere better for a refusal to go — and a refusal about a rename
@@ -3354,6 +3456,14 @@ export class WsRelay {
             // Forwarded rather than answered locally, for the reason BILLING_COMMANDS is: the relay
             // holds no identity repository and should not grow one. Shape-checked in the app.
             void withContext((ctx) => this.onCommand?.(msg as ListAuditCommand, ctx));
+          } else if (ACCESS_COMMANDS.has(msg.cmd)) {
+            // Forwarded, every one of them, including the reads — which is a departure from how
+            // this relay treats reads elsewhere and is the right one here. `listMcpServers` and
+            // `listProviders` are answered locally because the relay was handed a function that
+            // returns them; an access answer is assembled from the grants repository, the identity
+            // repository, the deploy store and the connection table at once, and a relay that
+            // could build it would be a relay that had grown four dependencies to avoid one hop.
+            void withContext((ctx) => this.onCommand?.(msg as AccessCommand, ctx));
           } else if (MEMBER_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the identity repository and can answer with
             // a precise error on the "members" channel rather than dropping the message here.
@@ -3869,6 +3979,47 @@ export class WsRelay {
       if (session.context.requestId !== requestId) continue;
       this.sendTo(ws, { channel: "audit", ...event });
     }
+  }
+
+  /**
+   * Send an access answer to ONE socket — the one that asked for it.
+   *
+   * NEVER BROADCAST, and this channel has the strongest case for that of any read on this relay
+   * except the audit log beside it. The payload is a list of colleagues with their email
+   * addresses, their workspace roles, whether each of them is connected right now, and — on the
+   * asking socket's own row — the exact set of things the server will let THEM do. One person
+   * opening a panel is not a reason to put that in front of every other tab, and the viewer's own
+   * effective set is per-person by construction: there is no payload here that is correct for two
+   * people, which is the same property that makes the Inbox rebuild per recipient.
+   */
+  sendAccess(ctx: TenantContext, requestId: string, event: AccessEvent): void {
+    for (const [ws, session] of this.sessions) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (session.context.workspaceId !== ctx.workspaceId) continue;
+      if (session.context.requestId !== requestId) continue;
+      this.sendTo(ws, { channel: "access", ...event });
+    }
+  }
+
+  /**
+   * Which of this workspace's people have a socket open right now.
+   *
+   * §10.2's presence dot, answered from the connection table rather than from a heartbeat column
+   * somebody has to remember to write. NOT A SENDER — it returns a set to whoever is building a
+   * payload — which is why it is scoped by an explicit comparison here rather than by
+   * `broadcastTo`: the caller is index.ts, assembling one answer for one socket.
+   *
+   * SOCKETS, NOT SESSIONS. Somebody with three tabs open appears once, because the question the
+   * dot answers is "is this person here", not "how many browsers do they have".
+   */
+  liveUsers(ctx: TenantContext): Set<string> {
+    const out = new Set<string>();
+    for (const [ws, session] of this.sessions) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (session.context.workspaceId !== ctx.workspaceId) continue;
+      if (session.context.actorUserId) out.add(session.context.actorUserId);
+    }
+    return out;
   }
 
   /**

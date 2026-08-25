@@ -132,6 +132,16 @@ const TENANT_CHANNELS = new Set([
   // scoping; it is in this list because the classification is about what the PAYLOAD is, and this
   // payload is a month of one tenant's operations in one frame.
   "activity",
+  // Who may do what to one agent, who granted it, when it runs out, and which of those people are
+  // connected right now. It is answered to the socket that ASKED rather than broadcast — a
+  // stronger guarantee than scoping, and the same one `audit` and `activity` have — and it is in
+  // this list because the classification is about what the PAYLOAD is. This payload is a list of
+  // one tenant's colleagues with their addresses, their roles and their live presence, plus the
+  // viewer's own effective set on an agent; delivered across the boundary it would be one
+  // workspace's whole access model under another workspace's name.
+  //
+  // The one message on it that IS broadcast carries nothing at all — see §7's recheck.
+  "access",
 ]);
 
 /**
@@ -350,6 +360,11 @@ console.log("\nevery command reaches the handler its channel implies");
     connections: "CONNECTION_COMMAND_NAMES",
     members: "MEMBER_COMMAND_NAMES",
     threads: "THREAD_COMMAND_NAMES",
+    // Every access command is forwarded, the reads included, so every one of them has to be in the
+    // app's set — an answer assembled from four stores is not something the relay can build, and a
+    // name in COMMAND_CHANNEL but not here falls through to `handleEvalCommand` and returns
+    // silently, which is exactly how `generateGithubMessage` shipped broken.
+    access: "ACCESS_COMMAND_NAMES",
   };
 
   /**
@@ -495,6 +510,12 @@ console.log("\nfired live, in A, and B receives none of it");
   // answer to a specific read.
   relay.sendActivity(ctxA, ctxA.requestId, { type: "error", message: MARK });
   relay.sendMembers(ctxA, ctxA.requestId, { type: "notice", message: MARK });
+  // TO THE ASKER, like `audit` and `activity` above, and for the strongest reason of the three: an
+  // access payload names colleagues, their addresses and their live presence, and carries the
+  // VIEWER's own effective set — so there is no version of it that is correct for two people. The
+  // suite fires the refusal, which is the only shape on this channel that is not an answer to a
+  // specific read of a specific agent.
+  relay.sendAccess(ctxA, ctxA.requestId, { type: "error", message: MARK });
   relay.broadcastAgentFiles(ctxA, "agent_a");
   await relay.broadcastAgentGraph(ctxA, "agent_a");
   await relay.broadcastHistory();

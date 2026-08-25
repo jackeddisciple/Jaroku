@@ -754,6 +754,24 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
    * of one surface is a gate that can disagree with the surface, and "may read what happened to this
    * workspace" is the same authority as "may change what this workspace is".
    */
+  /**
+   * The access channel, and the one place in this table where the workspace-level answer is
+   * deliberately the WEAKER of two gates rather than the whole of one.
+   *
+   * `agent:read` FOR BOTH READS, which is §9.2's decision expressed as data: reading who can
+   * deploy an agent is a normal operation, not a privileged one. "Who can deploy this?" is a
+   * question a member should be able to answer without asking an admin, and hiding the answer
+   * produces exactly the Slack thread the tab exists to eliminate. What a non-admin cannot do is
+   * CHANGE any of it, and that is decided one scope down.
+   *
+   * THE REAL GATE ON BOTH IS `view` AT THE AGENT SCOPE, from `COMMAND_AGENT_CAPABILITY`. This
+   * entry is the floor underneath it: it is what refuses somebody with no agent read capability at
+   * all, and it is what makes the pair still classified if the agent-level check is ever
+   * unreachable. Filing them higher — at `member:read`, say — would have made the Access tab
+   * absent for exactly the person §9.2 says must be able to open it.
+   */
+  loadAccess: "agent:read",
+  loadExposure: "agent:read",
   listAudit: "workspace:manage",
   inviteMember: "member:manage",
   revokeInvite: "member:manage",
@@ -895,6 +913,17 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   // Opening a build session ON an agent, which is not itself an act on the agent: every verb inside
   // the thread — generate, edit, run — is gated by its own row here or above.
   createThread: "view",
+  // §9.2 — THE ACCESS TAB IS READ-ONLY WITHOUT `admin` RATHER THAN HIDDEN, so both of its reads
+  // sit at `view` beside every other read about the agent. Nothing here is a credential: this is a
+  // list of who may do what and a statement about a URL, and the mutations are gated separately.
+  // Filing the reads at `admin` would mean a member cannot find out who to ask, which is the
+  // question the section exists to answer.
+  loadAccess: "view",
+  // AND THE EXPOSURE READ IS `view` FOR A SHARPER REASON. It is the section that says a deployed
+  // agent is reachable by anyone with the URL and that nothing in this panel governs that — the
+  // one fact on the surface most worth somebody stumbling across. Requiring `admin` to see it
+  // would restrict a warning to the people least likely to need telling.
+  loadExposure: "view",
   // The GitHub reads. Where the code went, how far the two lineages have drifted, what the scanner
   // found, what a shadow run did, and the squiggles in a buffer. None writes anything.
   listGithub: "view",

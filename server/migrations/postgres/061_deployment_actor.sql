@@ -1,0 +1,31 @@
+-- 061_deployment_actor — who put this agent on the internet.
+--
+-- THE EXPOSURE SECTION IS THE REASON THIS COLUMN EXISTS. §13 asks for three facts about a deployed
+-- agent: the URL, the auth posture, and who deployed it and when. The first two are already
+-- answerable — `deployments.url` and the honest sentence that there is no auth layer at all — and
+-- the third was not answerable by anything in this schema. `deployments` records what was deployed
+-- and when it happened and has never recorded a person, and `audit_log` has no deploy row to read
+-- one out of either: `deploy.start` is a RATE-LIMIT action name, not an audit action, and nothing
+-- in `index.ts` ever appended an audit entry for a deployment.
+--
+-- SO THE HONEST ANSWERS WERE TWO, AND ONLY ONE OF THEM IS ACCEPTABLE. The panel could have said
+-- nothing about who, which is a gap in the one section the whole feature exists to make truthful —
+-- an access panel that names everybody who can reach an agent THROUGH Jaroku and then goes quiet
+-- about the person who put it on the open internet is describing the smaller risk in detail. Or it
+-- could have guessed, from the agent's creator or the workspace's owner, which is a name beside a
+-- public URL that nobody actually chose to publish it. A column is the third answer.
+--
+-- NULLABLE, AND NEVER BACKFILLED. Every deployment that already exists predates this column, and
+-- there is no source anywhere to reconstruct an actor from — so those rows read as "unrecorded",
+-- exactly as `deployments.version` does for the same reason and by migration 041's own argument: a
+-- guess here is a confident lie about somebody's production.
+--
+-- A FOREIGN KEY WITH NO CASCADE. A deleted account must not take the record of what it deployed
+-- with it — the service is still running and somebody still has to be able to ask who started it.
+-- Users are soft-deleted here anyway (`users.deleted_at`), so the restrict this implies is not a
+-- constraint anything is going to run into; it is a statement that the row outlives the person.
+--
+-- EXPAND ONLY, so this is compatible with the version currently serving: a nullable column nothing
+-- older reads or writes.
+
+ALTER TABLE deployments ADD COLUMN created_by uuid REFERENCES users(id);
