@@ -8,7 +8,7 @@
 //
 //   npm run test:capabilities
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
@@ -19,6 +19,8 @@ import {
   ROLE_AGENT_CAPABILITIES,
   ROLE_CAPABILITIES,
   agentCeiling,
+  holds,
+  resolveCapabilities,
   can,
   capabilityFor,
   closeAgentCapabilities,
@@ -27,6 +29,8 @@ import {
   requireCapability,
   withArticle,
   type AgentCapability,
+  type GrantSource,
+  type ResolvedAccess,
   type Capability,
 } from "./capabilities.ts";
 import type { TenantContext, Role } from "../db/tenant.ts";
@@ -208,6 +212,209 @@ console.log("\nthe ceiling each workspace role puts on a grant");
     ceiling("member").every((c) => ceiling("admin").includes(c)) &&
       ceiling("admin").every((c) => ceiling("owner").includes(c)),
     "the three ceilings nest, exactly as the workspace roles do",
+  );
+}
+
+// The resolver, against a table of grants rather than against a database. Its behaviour under a
+// real socket, a real revocation and a real cross-workspace id is `test:access-resolver`'s
+// subject; what is asserted here is the arithmetic — the five steps, in order, and the two of them
+// that a reasonable person would argue are redundant.
+console.log("\nresolveCapabilities");
+{
+  const AGENT = "00000000-0000-4000-8000-0000000000a1";
+  const USER = "u1";
+  const HOUR = 3600_000;
+  const AT = Date.parse("2026-01-01T12:00:00.000Z");
+
+  /** A GrantSource over one in-memory row. Nothing here reaches a database. */
+  const source = (row?: { capabilities: AgentCapability[]; expires_at?: string | null }): GrantSource => ({
+    find: async () => (row ? { capabilities: row.capabilities, expires_at: row.expires_at ?? null } : undefined),
+  });
+  const resolve = async (
+    role: Role,
+    row?: { capabilities: AgentCapability[]; expires_at?: string | null },
+    actorUserId: string | null = USER,
+  ): Promise<ResolvedAccess> =>
+    resolveCapabilities({ ...ctx(role), actorUserId }, AGENT, source(row), () => AT);
+  const setOf = (r: ResolvedAccess): string[] => [...r.capabilities].sort();
+
+  {
+    const r = await resolve("member");
+    check(setOf(r).join(",") === "edit,eval,run,view", `with no grant, the role's default set (${setOf(r).join(", ")})`);
+    check(r.provenance.kind === "role", "...and the provenance says so, which is what the panel's line is drawn from");
+  }
+
+  {
+    // A grant that NARROWS. This is the shape the whole feature exists for and the one a
+    // role-only system cannot express at all.
+    const r = await resolve("member", { capabilities: ["view"] });
+    check(setOf(r).join(",") === "view", `a grant can narrow below the role's default (${setOf(r).join(", ")})`);
+  }
+
+  {
+    // A grant that WIDENS, within the ceiling. An admin's ceiling is all seven, so `deploy` sticks.
+    const r = await resolve("admin", { capabilities: ["view", "deploy"] });
+    check(setOf(r).join(",") === "deploy,view", `...and widen within the ceiling (${setOf(r).join(", ")})`);
+  }
+
+  {
+    // INVARIANT B, AND THE ASSERTION THE STEP EXISTS FOR. `grantAccess` refuses this set at write
+    // time, so the only way this row exists is a role that changed afterwards or somebody writing
+    // to the database — which is exactly the case write-time validation cannot cover.
+    const r = await resolve("member", { capabilities: ["view", "run", "deploy", "secrets", "admin"] });
+    check(
+      setOf(r).join(",") === "run,view",
+      `a stored set above the role's ceiling is intersected DOWN at read time (${setOf(r).join(", ")})`,
+    );
+    check(
+      r.provenance.kind === "grant" && [...r.provenance.capped].sort().join(",") === "admin,deploy,secrets",
+      "...and what the role took back off it is named, so the row can say `capped by role`",
+    );
+  }
+
+  {
+    // A DOWNGRADE BITES WITH NO CHANGE TO THE ROW, which is the same claim from the other side:
+    // one grant, two roles, two answers.
+    const grant = { capabilities: ["view", "run", "deploy"] as AgentCapability[] };
+    const asAdmin = setOf(await resolve("admin", grant));
+    const asMember = setOf(await resolve("member", grant));
+    check(asAdmin.includes("deploy"), "an admin holding a deploy grant has deploy");
+    check(!asMember.includes("deploy"), "...and the same row, read for a member, does not");
+    check(asMember.join(",") === "run,view", `...but keeps everything under the ceiling (${asMember.join(", ")})`);
+  }
+
+  {
+    // IMPLICATION CLOSES AFTER THE INTERSECTION. A grant of `edit` alone must resolve to three
+    // capabilities, or the person can edit an agent they cannot open.
+    const r = await resolve("member", { capabilities: ["edit"] });
+    check(setOf(r).join(",") === "edit,run,view", `a grant closes under implication (${setOf(r).join(", ")})`);
+  }
+
+  {
+    const expired = { capabilities: ["view", "eval"] as AgentCapability[], expires_at: new Date(AT - HOUR).toISOString() };
+    const r = await resolve("member", expired);
+    check(r.provenance.kind === "expired", "an expired grant is recognised at resolution, not by a job that may not have run");
+    // AND FALLS BACK TO THE ROLE RATHER THAN TO NOTHING — see the resolver's own note. A
+    // time-boxed widening that expired into a lockout would be a different feature.
+    check(setOf(r).join(",") === "edit,eval,run,view", `...and the role's default set is what remains (${setOf(r).join(", ")})`);
+
+    const live = { ...expired, expires_at: new Date(AT + HOUR).toISOString() };
+    check(setOf(await resolve("member", live)).join(",") === "eval,view", "...while one an hour from expiry still applies");
+  }
+
+  {
+    // NOT A MEMBER IS THE EMPTY SET, and it is what makes "absent, not forbidden" enforceable in
+    // one place. `system` is not a membership role and cannot arrive from a client, so the only
+    // role a socket can carry that is not in the ceiling table is one that does not exist.
+    const r = await resolveCapabilities(
+      { ...ctx("nobody" as Role), actorUserId: USER },
+      AGENT,
+      source({ capabilities: ["view", "admin"] }),
+      () => AT,
+    );
+    check(r.capabilities.size === 0, "a role no membership row can carry resolves to nothing");
+    check(r.provenance.kind === "none", "...and says `none`, which is what a 404 rather than a 403 is written from");
+  }
+
+  {
+    // A REQUEST NOBODY TRIGGERED holds no personal grant, because a grant is made TO somebody.
+    const r = await resolve("system", { capabilities: ["view"] }, null);
+    check(r.capabilities.size === 7, "a request with no actor resolves to its role, which for `system` is everything");
+  }
+
+  check(holds(await resolve("member"), "run"), "`holds` answers the one question a handler asks");
+  check(!holds(await resolve("member"), "deploy"), "...and answers it negatively where the ceiling does");
+}
+
+// EXACTLY ONE RESOLVER — invariant A, as a grep over the server's own source.
+//
+// THE CHECK IS THE FEATURE. Everything else in this file asserts that the resolver is right; this
+// asserts that it is the ONLY one, which is the property that decays. A second `canUserDoX` added
+// next year would pass every test above — they test this function — and the codebase would have
+// two answers to one question, of which the one that drifts open is the one nobody reports.
+console.log("\nthere is one resolver");
+{
+  const SRC = join(fileURLToPath(new URL(".", import.meta.url)), "..");
+  const files: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir)) {
+      if (entry === "node_modules" || entry.startsWith(".")) continue;
+      const p = join(dir, entry);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (entry.endsWith(".ts") && !entry.endsWith(".test.ts")) files.push(p);
+    }
+  };
+  walk(SRC);
+  check(files.length > 100, `read the server's source (${files.length} files)`);
+
+  // The shape a second one would take: a function whose name claims to answer a permission
+  // question. `canUserDoX`, `mayAccess`, `hasAgentPermission` — the family, not one spelling.
+  const SECOND_RESOLVER =
+    /\b(?:function|const|async)\s+(can[A-Z]\w*|may[A-Z]\w*|has[A-Z]\w*(?:Permission|Access|Capability)\w*)\b/g;
+
+  /**
+   * Functions this shape catches that are not permission checks, each with the question it
+   * actually answers.
+   *
+   * A NAMED LIST RATHER THAN A NARROWER REGEX, deliberately. Every tightening of the pattern that
+   * excluded these would also stop matching some spelling of the thing the rule is for — and a
+   * structural check that has quietly narrowed itself into matching nothing passes forever. Four
+   * exemptions somebody has to argue past is a smaller hole than a pattern nobody can see the
+   * edges of. Each is keyed on file AND name, so an exemption covers one function rather than a
+   * word anybody may reuse.
+   *
+   * All four answer v0.4.0's OTHER gate, or somebody else's: "who may" is this file, "what does
+   * this workspace have left" is `requireEntitlement`, "whose money pays" is the key pool, and
+   * "what does GitHub say about this token" is another system's ACL entirely.
+   */
+  const NOT_A_PERMISSION_CHECK: Record<string, string> = {
+    "gate.ts:mayStartWork":
+      "the spend ceiling and the balance — whether the WORKSPACE can afford this, which is refused by paying rather than by asking an admin",
+    "gate.ts:mayStart":
+      "the same question per run kind. It never reads a role, and a person with every capability is refused by it when the money is gone",
+    "platformKey.ts:mayUsePlatformKey":
+      "whether the PLATFORM's own key pool will pay for this call. Our money, decided by plan and kill switch, not the caller's authority",
+    "githubApi.ts:hasWriteAccess":
+      "what GitHub says about the token's access to a repository. A third party's ACL, reported, not a decision this product makes",
+  };
+
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const file of files) {
+    const text = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+    SECOND_RESOLVER.lastIndex = 0;
+    for (const m of text.matchAll(SECOND_RESOLVER)) {
+      const name = m[1]!;
+      // `can` itself is the workspace-level matrix read, in this file, and it is the resolver's
+      // own step 2. Named rather than pattern-excluded, so the exemption is one function and not
+      // a shape somebody else's name could accidentally fit.
+      if (name === "can") continue;
+      const key = `${file.split(/[\\/]/).pop()}:${name}`;
+      seen.add(key);
+      if (key in NOT_A_PERMISSION_CHECK) continue;
+      found.push(key);
+    }
+  }
+  check(
+    found.length === 0,
+    `no second permission checker exists in the server${found.length ? ` — found ${found.join(", ")}` : ""}`,
+  );
+  check(
+    Object.values(NOT_A_PERMISSION_CHECK).every((reason) => reason.length > 20),
+    "...and every exemption says which question it answers instead",
+  );
+  // An exemption for a function that no longer exists is a hole with a comment on it, exactly as
+  // the method allowlist in test:db-boundary says of its own.
+  const stale = Object.keys(NOT_A_PERMISSION_CHECK).filter((k) => !seen.has(k));
+  check(stale.length === 0, `...and still names real code (${stale.join(", ") || "all four do"})`);
+
+  // ...and the rule can still fail, for the reason every structural check in this repository
+  // carries one: a regex that has quietly stopped matching reports that there is one resolver,
+  // forever, and the sentence is true only because it can no longer see any.
+  SECOND_RESOLVER.lastIndex = 0;
+  check(
+    SECOND_RESOLVER.test("export function canUserDeployAgent(user, agent) { return true; }"),
+    "...and the rule still recognises one when it sees it",
   );
 }
 

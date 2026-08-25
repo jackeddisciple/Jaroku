@@ -339,6 +339,137 @@ export function agentCeiling(role: Role): Set<AgentCapability> {
   return closeAgentCapabilities(ROLE_AGENT_CAPABILITIES[role] ?? []);
 }
 
+// --- the resolver ------------------------------------------------------------------------------
+
+/**
+ * What the resolver needs from the database, and nothing else.
+ *
+ * AN INTERFACE RATHER THAN THE REPOSITORY ITSELF, for one structural reason: this module is
+ * imported by the client's `test:permission-ui` as TEXT and by the relay as code, and it must not
+ * drag a database driver behind it — `test:db-boundary`'s first rule is that `node:sqlite` and `pg`
+ * are reachable from exactly one directory. A one-method interface keeps the resolver where the
+ * matrix is, which is what invariant A asks for, without putting SQL in front of the matrix.
+ *
+ * It is also what makes the resolver testable against a table of grants rather than against a
+ * database, which is the difference between a suite that asserts the INTERSECTION and one that
+ * asserts that a query returned a row.
+ */
+export interface GrantSource {
+  /**
+   * The stored grant for (workspace, agent, user), or undefined.
+   *
+   * THE STORED SET, NOT THE EFFECTIVE ONE. Anything that intersected before handing it back would
+   * be a second resolver wearing a repository's clothes, and the two would eventually disagree
+   * about a ceiling. The row goes in; the effective set comes out of exactly one function.
+   */
+  find(
+    ctx: TenantContext,
+    agentId: string,
+    userId: string,
+  ): Promise<{ capabilities: AgentCapability[]; expires_at: string | null } | undefined>;
+}
+
+/** Why a resolution came out the way it did, for the audit row and for the panel's provenance line. */
+export type GrantProvenance =
+  /** No grant row. The effective set is the workspace role's default, which is also its ceiling. */
+  | { kind: "role" }
+  /** A live grant, intersected with the ceiling. `capped` is what the role took back off it. */
+  | { kind: "grant"; capped: AgentCapability[] }
+  /** A grant whose `expires_at` has passed. Treated as absent — see `resolveCapabilities`. */
+  | { kind: "expired"; at: string }
+  /** Not a member of this workspace. The empty set, and the agent reads as absent. */
+  | { kind: "none" };
+
+export interface ResolvedAccess {
+  capabilities: Set<AgentCapability>;
+  provenance: GrantProvenance;
+}
+
+/**
+ * THE resolver. Every gated command asks this function and there is no second one.
+ *
+ * Five steps, in this order, and the order is the security property rather than a style:
+ *
+ *   1. The workspace role. Absent — not a member — is the EMPTY SET, and everything downstream
+ *      intersects with it, so a non-member resolves to nothing regardless of what rows exist. That
+ *      is what makes "absent rather than forbidden" enforceable at the resolver instead of at
+ *      thirty call sites: the caller cannot distinguish "no such agent" from "not yours" because
+ *      the answer to both is an empty set.
+ *   2. The role's default set from the matrix, which is also its ceiling.
+ *   3. The grant row, if there is one and it has not expired.
+ *   4. THE INTERSECTION WITH THE CEILING, ALWAYS — invariant B, and the step that is easiest to
+ *      argue away. `grantAccess` already refuses a set exceeding the ceiling at write time, so this
+ *      looks redundant, and it is redundant for exactly as long as nobody's role changes. Demote an
+ *      admin to member and every grant they hold is a set their role no longer permits, sitting in
+ *      a table that was validated once. Write-time validation is about the moment of writing; this
+ *      is about every moment after it. It is also the only thing standing between a row written
+ *      directly to the database and an authorisation.
+ *   5. The implication closure, from the same table the dialog uses.
+ *
+ * EXPIRY IS EVALUATED HERE AND NOWHERE ELSE. Not in a sweeper, not in a scheduled job: a control
+ * that is correct only as often as a cron fires is one whose failure leaves live access in place
+ * with nothing on screen saying so. A grant that ran out five seconds ago is refused by the first
+ * command after it did.
+ *
+ * NOTHING CACHES THE RESULT ACROSS COMMANDS. §5.2 is explicit and the reason is v0.2.6's bug in a
+ * different costume: a socket resolves its workspace context live rather than holding the one it
+ * connected with, precisely so a demotion bites without a reconnect. A per-socket capability cache
+ * would reintroduce that for grants — revocation would take effect whenever the socket happened to
+ * be replaced, which is to say when somebody closed a laptop lid.
+ */
+export async function resolveCapabilities(
+  ctx: TenantContext,
+  agentId: string,
+  grants: GrantSource,
+  now: () => number = Date.now,
+): Promise<ResolvedAccess> {
+  // Step 1 and 2. `role` on the context IS the workspace membership, resolved live per command by
+  // the relay's revalidation — see wsRelay's `contextOf`. A role this table does not know holds
+  // nothing, which is the same answer `can` gives one level up and for the same reason: a server
+  // that grew a fourth role must not silently grant it everything.
+  const ceiling = agentCeiling(ctx.role);
+  if (ceiling.size === 0) return { capabilities: new Set(), provenance: { kind: "none" } };
+
+  // No actor is a request nobody triggered. It cannot hold a personal grant — a grant is made TO
+  // somebody — so it resolves to the role's set, which for `system` is everything.
+  const userId = ctx.actorUserId;
+  const grant = userId ? await grants.find(ctx, agentId, userId) : undefined;
+
+  if (!grant) return { capabilities: closeAgentCapabilities(ceiling), provenance: { kind: "role" } };
+
+  // Step 3. An expired grant is ABSENT rather than empty, which is a decision worth stating: the
+  // person falls back to their workspace role's default set rather than to nothing. The other
+  // reading — expiry revokes everything — would make a time-boxed WIDENING into a time-boxed
+  // lockout, so granting somebody `deploy` for eight hours would remove their ability to run the
+  // agent on the ninth. A grant that must take access away is a grant that narrows, and narrowing
+  // grants do not expire into more access than they started with.
+  if (grant.expires_at && Date.parse(grant.expires_at) <= now()) {
+    return {
+      capabilities: closeAgentCapabilities(ceiling),
+      provenance: { kind: "expired", at: grant.expires_at },
+    };
+  }
+
+  // Step 4 — the intersection, and step 5 — the closure. IN THAT ORDER, which matters: closing
+  // first and intersecting after would be the same answer here only by luck, and would stop being
+  // so the moment an implication pointed at something outside a role's ceiling.
+  const capped = grant.capabilities.filter((c) => !ceiling.has(c));
+  const effective = closeAgentCapabilities(grant.capabilities.filter((c) => ceiling.has(c)));
+  return { capabilities: effective, provenance: { kind: "grant", capped } };
+}
+
+/**
+ * Whether a resolved set holds a capability. The one question a command handler asks.
+ *
+ * A FUNCTION RATHER THAN `set.has`, so that every gated call site reads the same and so that the
+ * grep invariant A rests on has something to find. It is deliberately not called `can` — that name
+ * is taken, one scope up, and two functions called `can` in one file is precisely the confusion
+ * this whole feature exists to prevent.
+ */
+export function holds(resolved: ResolvedAccess, capability: AgentCapability): boolean {
+  return resolved.capabilities.has(capability);
+}
+
 /**
  * The MEMBERSHIP roles, weakest first. `system` is deliberately not among them.
  *

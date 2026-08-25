@@ -99,6 +99,12 @@ const SCOPED_MODULES = [
   // module, everybody's" is that no method on the class can be called without a scope.
   "activity/activityStore.ts",
   "db/repositories/agents.ts",
+  // Per-agent access. The rule is at its strongest here, because what an unscoped method on this
+  // class would return is not a row of somebody's data — it is somebody's PERMISSION, read by a
+  // workspace that has no business knowing the agent exists. There is exactly one resolver and it
+  // reads this repository; a `find` that could be called without a scope would be that resolver
+  // answering a question about another tenant.
+  "db/repositories/agentGrants.ts",
   "db/repositories/secretRefs.ts",
   "db/repositories/secretUsages.ts",
   "db/repositories/secretPasscodes.ts",
@@ -127,6 +133,8 @@ const EXEMPT: Record<string, string> = {
   hydrateTool: "pure row-shaping",
   hydrateServer: "pure row-shaping",
   parseJson: "pure row-shaping",
+  capabilitiesFrom: "pure row-shaping — one column into a capability set, deciding nothing",
+  stored: "pure serialisation — the same column on the way back out, per dialect",
   j: "pure serialisation",
   q: "the scoped-query helper itself; it TAKES the context",
   constructor: "takes the database, not a request",
