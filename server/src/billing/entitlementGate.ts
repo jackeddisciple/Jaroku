@@ -206,6 +206,12 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   // that stops somebody REDUCING what is reachable is a gate that sells risk.
   loadAccess: NO_ENTITLEMENT,
   loadExposure: NO_ENTITLEMENT,
+  grantAccess: NO_ENTITLEMENT,
+  modifyGrant: NO_ENTITLEMENT,
+  // And revoking least of all, by the argument `cancelDeploy` and `removeMcpServer` make: a gate
+  // in front of NARROWING somebody's access would be a tier refusing an admin the right to take a
+  // capability away, and the workspace most likely to hit it is the one that most needs to.
+  revokeGrant: NO_ENTITLEMENT,
   loadUsage: NO_ENTITLEMENT,
   setSpendCeiling: NO_ENTITLEMENT,
   // CHOOSING TO PAY FOR YOUR OWN INFERENCE IS NEVER GATED. A workspace turning BYOK on is asking to

@@ -47,6 +47,9 @@ import {
   type PlanAgentCommand,
   type AccessCommand,
   type AccessPerson,
+  type GrantAccessCommand,
+  type ModifyGrantCommand,
+  type RevokeGrantCommand,
   type MemberCommand,
   type ProviderCommand,
   type AgentCardView,
@@ -102,7 +105,8 @@ import { scanAgentDirectory } from "./agents.ts";
 import { AgentRepository, nextForkSlug } from "./db/repositories/agents.ts";
 import { AgentGrantRepository } from "./db/repositories/agentGrants.ts";
 import {
-  agentCeiling, holds, resolveCapabilities, type AgentCapability,
+  agentCeiling, closeAgentCapabilities, holds, isAgentCapability, resolveCapabilities,
+  type AgentCapability,
 } from "./auth/capabilities.ts";
 // The Agents grid's derivations, in their own module because every one of them is a rule that looks
 // obviously right in a screenshot and is wrong in the case nobody had that day — see agentHealth.ts.
@@ -1230,13 +1234,43 @@ async function agentAccessRefusalFor(
   ctx: TenantContext,
   agentId: string,
   capability: AgentCapability,
-  _cmd: string,
+  cmd: string,
 ): Promise<{ message: string; absent: boolean } | null> {
   const agent = await agentForCommand(ctx, agentId);
+  // NO AUDIT ROW FOR AN ABSENT AGENT, and that is a decision rather than an omission. `access.
+  // denied` is meant to make a MISCONFIGURED GRANT visible — somebody hitting a wall inside their
+  // own workspace, repeatedly, which is either a permission that needs fixing or something worth
+  // investigating. An id from another tenant is neither: it is a scan or a stale tab, it would
+  // arrive at whatever rate somebody chose to send it, and writing a row per attempt would let an
+  // outsider fill this workspace's audit log with rows about agents it does not have.
   if (!agent) return { message: `there is no agent "${agentId}" in this workspace`, absent: true };
 
   const resolved = await resolveCapabilities(ctx, agent.id, agentGrantRepo);
   if (holds(resolved, capability)) return null;
+
+  // §4.3 — THE HIGHEST-SIGNAL ROW IN THE WHOLE FEATURE, and the one that is invisible without it.
+  // Everything else in the History section records something somebody DID; this records something
+  // the system refused, which is the only evidence that a grant is wrong. A member who cannot
+  // deploy and needs to does not file a ticket saying "my capability is misconfigured" — they try,
+  // fail, try again tomorrow, and eventually ask a colleague to do it for them, which is the
+  // outcome per-agent access exists to prevent.
+  //
+  // AWAITED RATHER THAN FIRED AND FORGOTTEN. A refusal is not a hot path — it happens when
+  // something is already wrong — and a row written after the refusal has been sent is one that can
+  // be lost by a process that exits in between, which is precisely the moment it matters.
+  //
+  // WHAT WAS ASKED FOR, NOT WHAT THEY HAVE. The metadata names the command and the capability it
+  // needed; it deliberately does not record the person's effective set, because that is a fact
+  // about a moment which `loadAccess` answers live and which would be stale in the row by the time
+  // anybody read it.
+  await identityRepo
+    .appendAudit(ctx, {
+      action: "access.denied",
+      targetType: "agent",
+      targetId: agent.id,
+      metadata: { agent: agent.slug, cmd, capability },
+    })
+    .catch((err) => console.error(`[access] could not record a denial: ${(err as Error).message}`));
 
   // THE SENTENCE NAMES THE CAPABILITY AND NOT A ROLE, unlike every other refusal on this socket.
   // §13.5's rule is that a refusal has to carry something a person can act on, and for a workspace
@@ -6505,7 +6539,19 @@ async function handleMemberCommand(ctx: TenantContext, cmd: MemberCommand): Prom
 // colleagues, their addresses, whether each is online, and the viewer's OWN effective set, which is
 // per-person by construction.
 
-const ACCESS_COMMAND_NAMES = new Set(["loadAccess", "loadExposure"]);
+const ACCESS_COMMAND_NAMES = new Set([
+  "loadAccess", "loadExposure", "grantAccess", "modifyGrant", "revokeGrant",
+]);
+
+/**
+ * The three capabilities a grant has to be justified in writing.
+ *
+ * §11.1 — "Required for deploy, secrets, and admin. Six months later, 'why does this contractor
+ * have deploy' needs an answer that isn't archaeology." Not a CHECK on the table, deliberately:
+ * the rule is conditional on the contents of an array column, and a constraint that reached into
+ * an array to require a text column is one nobody can read. It lives here, where the sentence is.
+ */
+const NOTE_REQUIRED: readonly AgentCapability[] = ["deploy", "secrets", "admin"];
 
 /**
  * One person's row: their effective set, and the provenance line that is the whole point of it.
@@ -6662,6 +6708,221 @@ async function sendExposure(ctx: TenantContext, agentId: string): Promise<void> 
   });
 }
 
+/** Refuse and say why, to the socket that asked. A refusal here is one person's click. */
+function refuseAccess(ctx: TenantContext, message: string): void {
+  relay.sendAccess(ctx, ctx.requestId, { type: "error", message });
+}
+
+/**
+ * Everything that has to be true before a grant is written, checked in one place.
+ *
+ * FIVE REFUSALS, AND THE ORDER IS DELIBERATE: the ones that are facts about the request come
+ * before the ones that need a database read, so a malformed command costs no query. Each returns
+ * the sentence rather than a code, because every one of them is something the person filling in
+ * the dialog can fix, and a code would be a sentence somebody has to write twice.
+ *
+ * §11.5's CEILING VALIDATION IS THE THIRD OF THEM, and it NAMES THE OFFENDING CAPABILITIES. "That
+ * grant is not allowed" sends an admin back to a dialog with seven checkboxes and no idea which
+ * two were the problem; "secrets and admin exceed sam's workspace role" is the same refusal with
+ * the next action in it. And it is not the whole of invariant B — `resolveCapabilities` intersects
+ * again on every command, because this check is about the moment of writing and that one is about
+ * every moment after it.
+ */
+async function validateGrant(
+  ctx: TenantContext,
+  target: { user_id: string; role: string; email: string; display_name: string | null },
+  capabilities: string[],
+  note: string | null,
+): Promise<string | null> {
+  const unknown = capabilities.filter((c) => !isAgentCapability(c));
+  if (unknown.length > 0) {
+    return `${unknown.map((c) => `"${String(c).slice(0, 24)}"`).join(", ")} is not a capability this server knows`;
+  }
+  const asked = capabilities as AgentCapability[];
+  // AN EMPTY GRANT IS A REAL THING AND NOT AN ERROR: it is how somebody's access to one agent is
+  // taken to nothing while their workspace role is left alone, which is the narrowing case the
+  // whole feature exists for. What it must not be is a way to say nothing at all — the closure
+  // below turns any non-empty set into one containing `view`, so an empty one is exactly and only
+  // "this person may not see this agent".
+
+  const ceiling = agentCeiling(target.role as TenantContext["role"]);
+  const over = asked.filter((c) => !ceiling.has(c));
+  if (over.length > 0) {
+    const who = target.display_name || target.email;
+    return `${over.join(" and ")} exceed ${who}'s workspace role — change their role to grant these`;
+  }
+
+  const needsNote = asked.some((c) => NOTE_REQUIRED.includes(c));
+  if (needsNote && !note?.trim()) {
+    const which = asked.filter((c) => NOTE_REQUIRED.includes(c));
+    return `a note is required to grant ${which.join(", ")} — say why, so somebody can answer that in six months`;
+  }
+  return null;
+}
+
+/**
+ * §11.4's guards, as one question: would this change leave the agent with nobody who administers it?
+ *
+ * THE LAST ADMIN CANNOT BE REVOKED, and the reason is the same one `removeMember` refuses the last
+ * owner for: an agent nobody administers is a state with no way out from the UI, and the last
+ * person who could have fixed it is the one who just left. Unlike membership, though, the answer
+ * here is not simply "count the grants" — most people who administer an agent do so through their
+ * WORKSPACE ROLE and have no grant row at all. So the count is over effective access, which is the
+ * resolver's answer for every member, and a grant that narrows an admin below `admin` counts as
+ * taking one away exactly as revoking does.
+ *
+ * WHICH ALSO MEANS THE GUARD RARELY FIRES, and that is correct rather than a sign it is useless:
+ * in a workspace with an owner and an admin, neither can be reduced to nobody, because the other
+ * still resolves to `admin` from their role. It fires precisely in the case worth catching — one
+ * person, narrowing themselves, on an agent nobody else administers.
+ */
+async function wouldLeaveNoAdmin(
+  ctx: TenantContext,
+  agentUuid: string,
+  userId: string,
+  after: readonly AgentCapability[],
+): Promise<boolean> {
+  const members = await identityRepo.listMembers(ctx);
+  for (const m of members) {
+    if (m.user_id === userId) {
+      if (after.includes("admin")) return false;
+      continue;
+    }
+    const resolved = await resolveCapabilities(
+      { ...ctx, actorUserId: m.user_id, role: m.role as TenantContext["role"] },
+      agentUuid,
+      agentGrantRepo,
+    );
+    if (holds(resolved, "admin")) return false;
+  }
+  return true;
+}
+
+/** Grant or modify. One body, because the difference between them is the audit row and the words. */
+async function writeGrant(
+  ctx: TenantContext,
+  cmd: GrantAccessCommand | ModifyGrantCommand,
+): Promise<void> {
+  const agent = await agentForCommand(ctx, String(cmd.agentId ?? ""));
+  if (!agent) {
+    refuseAccess(ctx, `there is no agent "${cmd.agentId}" in this workspace`);
+    return;
+  }
+  const userId = String(cmd.userId ?? "");
+  const members = await identityRepo.listMembers(ctx);
+  const target = members.find((m) => m.user_id === userId);
+  // §16 AND §1.C TOGETHER. Somebody outside this workspace is not "you may not grant to them", it
+  // is "there is no such person here" — the same reading a cross-workspace agent id gets, for the
+  // same reason: the alternative confirms an id.
+  if (!target) {
+    refuseAccess(ctx, "there is nobody by that id in this workspace");
+    return;
+  }
+
+  const asked = Array.isArray(cmd.capabilities) ? cmd.capabilities.map(String) : [];
+  const note = typeof cmd.note === "string" ? cmd.note.trim() || null : null;
+  const refusal = await validateGrant(
+    ctx,
+    { ...target, display_name: target.display_name ?? null },
+    asked,
+    note,
+  );
+  if (refusal) {
+    refuseAccess(ctx, refusal);
+    return;
+  }
+
+  // CLOSED BEFORE IT IS STORED, so the row says what it means. The dialog closes the same set from
+  // the same table while somebody is ticking boxes, and storing the unclosed version would leave
+  // two representations of one grant — the one that was shown and the one that was saved — which
+  // is the drift the closure lives in `capabilities.ts` to prevent.
+  const capabilities = [...closeAgentCapabilities(asked as AgentCapability[])];
+
+  if (await wouldLeaveNoAdmin(ctx, agent.id, userId, capabilities)) {
+    refuseAccess(
+      ctx,
+      `that would leave ${agent.slug} with nobody who can manage its access — grant admin to somebody else first`,
+    );
+    return;
+  }
+
+  const expiresAt = typeof cmd.expiresAt === "string" && cmd.expiresAt ? cmd.expiresAt : null;
+  // AN EXPIRY IN THE PAST IS REFUSED RATHER THAN STORED. The resolver would treat it as expired on
+  // the next command, so the grant would appear in the panel, do nothing, and be indistinguishable
+  // from one that had simply run out — a control that silently does nothing is worse than one that
+  // refuses.
+  if (expiresAt && (Number.isNaN(Date.parse(expiresAt)) || Date.parse(expiresAt) <= Date.now())) {
+    refuseAccess(ctx, "that expiry is not a moment in the future");
+    return;
+  }
+
+  await agentGrantRepo.upsert(ctx, {
+    agentId: agent.id,
+    userId,
+    capabilities,
+    grantedBy: ctx.actorUserId ?? "",
+    expiresAt,
+    note,
+  });
+
+  await identityRepo.appendAudit(ctx, {
+    action: cmd.cmd === "grantAccess" ? "access.granted" : "access.modified",
+    targetType: "agent_grant",
+    // THE PAIR, because a grant is identified by both and neither alone is the subject. A row
+    // filed under the agent cannot answer "what has this person been given lately", and one filed
+    // under the person cannot answer "who has ever had deploy on this agent" — and those are the
+    // two questions the History section and an investigation respectively ask.
+    targetId: `${agent.id}:${userId}`,
+    metadata: { agent: agent.slug, user: userId, capabilities, expiresAt, note },
+  });
+
+  await sendAccess(ctx, agent.id);
+}
+
+async function revokeGrant(ctx: TenantContext, cmd: RevokeGrantCommand): Promise<void> {
+  const agent = await agentForCommand(ctx, String(cmd.agentId ?? ""));
+  if (!agent) {
+    refuseAccess(ctx, `there is no agent "${cmd.agentId}" in this workspace`);
+    return;
+  }
+  const userId = String(cmd.userId ?? "");
+
+  // REVOKING TAKES SOMEBODY BACK TO THEIR WORKSPACE ROLE, not to nothing, which is what makes the
+  // last-admin guard necessary here too: a workspace admin whose grant is revoked still resolves
+  // to `admin` from their role, and a MEMBER whose `admin` grant is revoked does not. The guard is
+  // asked with the set they would fall back to rather than with an empty one, so it answers the
+  // real question rather than a pessimistic one.
+  const fallback = [...agentCeiling(await roleOf(ctx, userId))];
+  if (await wouldLeaveNoAdmin(ctx, agent.id, userId, fallback)) {
+    refuseAccess(
+      ctx,
+      `${agent.slug} would be left with nobody who can manage its access — grant admin to somebody else first`,
+    );
+    return;
+  }
+
+  const removed = await agentGrantRepo.remove(ctx, agent.id, userId);
+  if (!removed) {
+    refuseAccess(ctx, "that grant is already gone");
+    return;
+  }
+
+  await identityRepo.appendAudit(ctx, {
+    action: "access.revoked",
+    targetType: "agent_grant",
+    targetId: `${agent.id}:${userId}`,
+    metadata: { agent: agent.slug, user: userId },
+  });
+
+  await sendAccess(ctx, agent.id);
+}
+
+/** A member's workspace role, or `none` for somebody who has left. Feeds the fallback above. */
+async function roleOf(ctx: TenantContext, userId: string): Promise<TenantContext["role"]> {
+  const members = await identityRepo.listMembers(ctx);
+  return (members.find((m) => m.user_id === userId)?.role ?? "none") as TenantContext["role"];
+}
+
 async function handleAccessCommand(ctx: TenantContext, cmd: AccessCommand): Promise<void> {
   try {
     if (cmd.cmd === "loadAccess") {
@@ -6670,6 +6931,14 @@ async function handleAccessCommand(ctx: TenantContext, cmd: AccessCommand): Prom
     }
     if (cmd.cmd === "loadExposure") {
       await sendExposure(ctx, String(cmd.agentId ?? ""));
+      return;
+    }
+    if (cmd.cmd === "grantAccess" || cmd.cmd === "modifyGrant") {
+      await writeGrant(ctx, cmd);
+      return;
+    }
+    if (cmd.cmd === "revokeGrant") {
+      await revokeGrant(ctx, cmd);
       return;
     }
   } catch (err) {

@@ -219,6 +219,14 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   // argument.
   loadAccess: "agent:read",
   loadExposure: "agent:read",
+  // The three mutations, at the same weak floor the server files them under — see its own note.
+  // A GUARD MUST NOT USE THESE ROWS ALONE: `member:read` is every member's, so `useCanRun(
+  // "grantAccess")` would render a Grant button for everybody. The real gate is `admin` at the
+  // agent scope, which is what `useCapability("admin", agent.id)` asks; these entries exist so the
+  // table stays a complete copy of the server's, which is what `test:permission-ui` holds it to.
+  grantAccess: "member:read",
+  modifyGrant: "member:read",
+  revokeGrant: "member:read",
   listAudit: "workspace:manage",
   inviteMember: "member:manage",
   revokeInvite: "member:manage",

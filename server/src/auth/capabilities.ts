@@ -772,6 +772,26 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
    */
   loadAccess: "agent:read",
   loadExposure: "agent:read",
+  /**
+   * The three mutations, at `member:read` — a MEMBER capability, which looks far too weak and is
+   * the right floor.
+   *
+   * WHAT ACTUALLY GATES THESE IS `admin` AT THE AGENT SCOPE, and the choice here is only about what
+   * happens BEFORE that check. The candidates were `member:manage`, which is the owner's, and this.
+   * `member:manage` would mean a workspace ADMIN could not grant access to an agent they
+   * administer — the exact person §11 is written for — because the coarse gate would refuse them
+   * before the fine one ran. So the floor is the weakest capability that still means "may see who
+   * is in this workspace at all", which is what these commands operate on, and the authority to
+   * change anything is decided per agent.
+   *
+   * THE COST OF THAT IS ONE THING AND IT IS NAMED: a member sending `grantAccess` by hand passes
+   * this check and is refused by the agent-level one, which is where `access.denied` is written.
+   * That is the correct place for it to be refused and the correct row to write — a member
+   * repeatedly hitting that wall is exactly the signal §4.3 says the event exists to make visible.
+   */
+  grantAccess: "member:read",
+  modifyGrant: "member:read",
+  revokeGrant: "member:read",
   listAudit: "workspace:manage",
   inviteMember: "member:manage",
   revokeInvite: "member:manage",
@@ -918,6 +938,14 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   // list of who may do what and a statement about a URL, and the mutations are gated separately.
   // Filing the reads at `admin` would mean a member cannot find out who to ask, which is the
   // question the section exists to answer.
+  // --- admin: manage who may do any of the above ----------------------------------------------
+  //
+  // The three mutations, and they are the only rows in this table at `admin`. Everything else on
+  // the Access tab is a read; these are what the capability is for.
+  grantAccess: "admin",
+  modifyGrant: "admin",
+  revokeGrant: "admin",
+
   loadAccess: "view",
   // AND THE EXPOSURE READ IS `view` FOR A SHARPER REASON. It is the section that says a deployed
   // agent is reachable by anyone with the URL and that nothing in this panel governs that — the

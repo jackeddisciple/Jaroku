@@ -1002,9 +1002,48 @@ const AUDIT_COMMANDS = new Set(["listAudit"]);
 export type LoadAccessCommand = { cmd: "loadAccess"; agentId: string };
 export type LoadExposureCommand = { cmd: "loadExposure"; agentId: string };
 
-export type AccessCommand = LoadAccessCommand | LoadExposureCommand;
+/**
+ * Create or replace one person's grant on one agent.
+ *
+ * ONE COMMAND FOR CREATE AND ONE FOR MODIFY, even though the row is an upsert and one command
+ * could serve both. They are separate because the AUDIT ROW is different — `access.granted` and
+ * `access.modified` answer different questions six months later — and deriving which one to write
+ * from whether a row happened to exist would be the server guessing at intent. The dialog knows
+ * which it opened as; the command says so.
+ *
+ * `expiresAt` IS AN ISO STRING OR NULL, never a duration. §11.1's picker offers 1 hour through 30
+ * days plus a custom date, and every one of those is turned into an instant by the client — because
+ * a duration on the wire is a duration measured from whenever the server happens to process it,
+ * which is a different moment from the one the person was looking at.
+ */
+export type GrantAccessCommand = {
+  cmd: "grantAccess";
+  agentId: string;
+  userId: string;
+  capabilities: string[];
+  expiresAt?: string | null;
+  note?: string | null;
+};
+export type ModifyGrantCommand = {
+  cmd: "modifyGrant";
+  agentId: string;
+  userId: string;
+  capabilities: string[];
+  expiresAt?: string | null;
+  note?: string | null;
+};
+export type RevokeGrantCommand = { cmd: "revokeGrant"; agentId: string; userId: string };
 
-const ACCESS_COMMANDS = new Set(["loadAccess", "loadExposure"]);
+export type AccessCommand =
+  | LoadAccessCommand
+  | LoadExposureCommand
+  | GrantAccessCommand
+  | ModifyGrantCommand
+  | RevokeGrantCommand;
+
+const ACCESS_COMMANDS = new Set([
+  "loadAccess", "loadExposure", "grantAccess", "modifyGrant", "revokeGrant",
+]);
 
 /** One person on the Access tab's People list, with WHY they have what they have. */
 export interface AccessPerson {
@@ -2553,6 +2592,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // cannot see lands on the panel that asked rather than in the status bar with nothing saying
   // which section is empty and why.
   loadAccess: "access", loadExposure: "access",
+  grantAccess: "access", modifyGrant: "access", revokeGrant: "access",
   loadEnforcement: "enforcement", appealEnforcement: "enforcement",
   // All six on `threads`, the reads included. The channel HAS an error shape, so unlike
   // `loadAgentFiles` there is nowhere better for a refusal to go — and a refusal about a rename
