@@ -194,6 +194,7 @@ export const RETENTION_KEPT_TABLES: Record<string, string> = {
   turn_notes: "somebody's words about a turn, and the whole reason the feature exists is that this knowledge otherwise lives in Slack. It leaves with the turn, which cascades. A note is also already soft-deleted by its author, so a sweep would be a second, silent delete nobody asked for",
   turn_pins: "a personal anchor in a conversation, with no age — it stops being relevant when its owner unpins it or the turn goes, and both of those already remove it",
   turn_feedback: "one opinion per person per turn, and the input to an eval case. Sweeping it would quietly reset the counts a team reads to decide what to fix",
+  agent_grants: "who may do what to one agent. A permission is a state rather than an event, so it has no age to be swept at — and a sweep here would REVOKE somebody's access on a retention clock, silently, which is the one table in this schema where deleting a row is a security decision rather than a housekeeping one. It leaves with the agent, which cascades, and with the workspace, which the deleter names explicitly. Expiry is the only thing that ends a grant on a timer, and it is evaluated at resolution rather than by any job",
 };
 
 /** How many rows a sweep actually took, across every table it touches. */

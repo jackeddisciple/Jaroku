@@ -460,6 +460,30 @@ const NO_POLICY_BY_DESIGN: Record<string, string> = {
     `every tenant table has tenant_isolation or a stated reason (${unguarded.join(", ") || "none missing"})`,
   );
 
+  // AND `agent_grants` BY NAME, from its first migration, which is the one exception this file
+  // makes to discovering everything. The rule above already covers it and would already fail if it
+  // lost its policy — but this table is the one that decides who may do what, and "covered because
+  // the discovery happened to find it" and "covered because somebody asserted it" are the same
+  // green tick until the day the reader stops recognising a CREATE TABLE. The synthetic check at
+  // the end of this block guards that for every table in general; this guards it for the table
+  // where the failure is an authorisation answer crossing a tenant boundary.
+  check3(tenant.has("agent_grants"), "the migrations give agent_grants a workspace_id");
+  check3(policied.has("agent_grants"), "...and tenant_isolation, which is what stops a grant being read or WRITTEN across the boundary");
+  {
+    const pg = readFileSync(join(MIGRATIONS_PG, "060_agent_grants.sql"), "utf8");
+    const sqlite = readFileSync(
+      join(resolve(SRC, "..", "migrations", "sqlite"), "060_agent_grants.sql"),
+      "utf8",
+    );
+    // THE PAIR, ON BOTH DRIVERS. A bare `REFERENCES agents(id)` is satisfied by any tenant's agent
+    // — `agents.id` is a globally unique uuid — which is precisely the hole migration 018 closed on
+    // `secret_refs`. Asserted as text on both files rather than behaviourally, because the
+    // behavioural half needs a database and this rule has to run on every machine.
+    const pairFk = /FOREIGN KEY \(workspace_id, agent_id\)\s*\n?\s*REFERENCES agents \(workspace_id, id\)/;
+    check3(pairFk.test(pg), "...and its foreign key is the (workspace_id, agent_id) pair on postgres");
+    check3(pairFk.test(sqlite), "...and on sqlite, where foreign keys are on by default and enforce it");
+  }
+
   // And the reasons are not a graveyard. An entry for a table that no longer exists is a rule
   // getting quietly weaker, exactly as rule 2b says of the method allowlist above.
   const stale = Object.keys(NO_POLICY_BY_DESIGN).filter((t) => !tenant.has(t));

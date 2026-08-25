@@ -122,6 +122,11 @@ const DELETION_ORDER = [
   "thread_items",
   "threads",
   "agent_versions",
+  // Before `agents`, whose cascade would take it anyway — named for the reason every other child
+  // here is named, and for one more that is particular to this table. A receipt is what a workspace
+  // is handed to prove its data is gone, and "nobody holds access to anything of yours any more" is
+  // a claim somebody may specifically want a number against.
+  "agent_grants",
   "agents",
   "usage_events",
   "billing_holds",

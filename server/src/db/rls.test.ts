@@ -187,6 +187,13 @@ try {
     // The policy is still not optional — a leaked WRAPPED DATA KEY plus a leaked master key is
     // the whole workspace, and "we also encrypted it" is not a reason to skip the scope.
     "workspace_data_keys", "workspace_secrets", "secret_refs",
+    // Session 12's per-agent access. The strongest case for a policy of any table on this list,
+    // and the one where a missing one would be hardest to notice: every other table here leaks a
+    // FACT across the boundary, and this one would leak an ANSWER — a row saying who may deploy
+    // an agent, read by a workspace that cannot see the agent. It is also the table an attacker
+    // would rather write to than read, which is why the policy's WITH CHECK half matters here
+    // more than anywhere else in the schema.
+    "agent_grants",
   ];
   // `'p'` AS WELL AS `'r'`, because a partitioned table is not an ordinary one.
   //

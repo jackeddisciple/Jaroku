@@ -210,6 +210,16 @@ export const EXPORTED_TABLES = [
   // person's dismissals and snoozes, which in a Team workspace is a record of what each individual
   // chose not to look at. Resolution is the workspace's and travels; one member's triage is theirs.
   "inbox_items",
+  // WHO COULD REACH WHICH AGENT, why they could, and when it was going to stop. Ids, seven fixed
+  // capability strings, two timestamps and a note somebody wrote — no credential, which is the
+  // only question this list asks.
+  //
+  // It belongs here for the reason `audit_log` does, and rather more sharply. "Who had deploy on
+  // the billing agent in March, and who gave it to them" is a question asked after something went
+  // wrong, long after the runs that revealed it have been swept — and unlike the audit rows beside
+  // it, this table says what was true rather than what changed, which is the half an investigator
+  // has to reconstruct by replaying every event when it is missing.
+  "agent_grants",
 ] as const;
 
 /**
