@@ -43,22 +43,56 @@ import {
   AlertTriangleIcon, CheckIcon, ChevronDownIcon, PlusIcon, SettingsIcon, UserIcon, UsersIcon, XIcon,
 } from "./panelIcons.tsx";
 
-/** The two kinds, in the terms that decide which one somebody wants. */
+/**
+ * §3.2's two options, in §3.2's own words.
+ *
+ * TEAM FIRST AND PRE-SELECTED, which is what the spec asks for and is also the only order that
+ * survives the edge case beneath it: an account that already has a personal workspace — every
+ * account, since `provisionUser` makes one in the same transaction as the user — never sees the
+ * second row at all, so a list with Personal first would be a list whose first entry is usually
+ * absent and whose selection therefore usually starts on the second.
+ */
 const KINDS: { id: "personal" | "team"; label: string; what: string }[] = [
-  { id: "team", label: "Team", what: "Members, roles and invitations. Threads show who did what." },
-  { id: "personal", label: "Personal", what: "Just you. No members list and no author column." },
+  { id: "team", label: "Team", what: "Invite your team, shared agents and billing" },
+  { id: "personal", label: "Personal", what: "Just you, no members" },
 ];
+
+/** §3.2 — 1-64 characters, non-empty after trim. The server bounds it identically. */
+const NAME_MAX = 64;
 
 function NewWorkspaceForm({ onDone }: { onDone: () => void }) {
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"personal" | "team">("team");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const workspaces = useSessionStore((s) => s.workspaces);
+
+  /**
+   * §3.3 — "A user cannot create a second personal workspace. The button is ABSENT (not disabled)
+   * if they already have one."
+   *
+   * ABSENT RATHER THAN DISABLED is §1.3's frozen rule about controls a role cannot use, applied to
+   * a control an ACCOUNT cannot use, and it is the right reading for the same reason: a disabled
+   * "Personal" is an offer the product is refusing, which invites somebody to work out what would
+   * enable it. There is no such state — every account has exactly one personal workspace from the
+   * moment it exists — so the honest rendering is that the choice was never on the table.
+   *
+   * THE SERVER DOES NOT REFUSE THIS, and that is deliberate rather than a hole left open. §16 says
+   * to stop and ask before adding server-side business logic beyond §13's list, and this is not on
+   * it. What happens if something posts `kind: "personal"` twice anyway is a second personal
+   * workspace, which `defaultWorkspace` already tolerates: it takes the oldest, stably, so the
+   * account still lands where it always did.
+   */
+  const hasPersonal = workspaces.some((w) => w.kind === "personal");
+  const offered = KINDS.filter((k) => k.id !== "personal" || !hasPersonal);
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
+    // §3.3 — trimmed before it is sent, and the same trimmed value is what was validated. Sending
+    // the untrimmed one would mean a workspace called " Acme" whose name does not match the string
+    // this form checked the length of.
     const wanted = name.trim();
-    if (busy || !wanted) return;
+    if (busy || !wanted || wanted.length > NAME_MAX) return;
     const token = storedToken();
     if (!token) {
       setError("sign in again — this tab has no credential");
@@ -72,48 +106,68 @@ function NewWorkspaceForm({ onDone }: { onDone: () => void }) {
       // before the switch, because `switchWorkspace` refuses a workspace it cannot see a
       // membership for — and this account became its owner a millisecond ago.
       useSessionStore.getState().setWorkspaces(created.workspaces);
+      // §3.4 AND §5.1 STEP 7 — "the Inbox for a first visit to this workspace", and a workspace
+      // that did not exist a moment ago is the clearest first visit there is. It lands on two
+      // seeded items (`setup_api_key`, `setup_first_agent`) which are the entire content of a new
+      // team workspace; the Threads tab somebody would otherwise land on is empty by definition.
+      // Set BEFORE the switch, because `uiStore` is deliberately not reset by one — see reset.ts.
+      useUiStore.getState().openNav("inbox");
       onDone();
       switchWorkspace(created.workspace.id);
     } catch (err) {
+      // §3.5 — INLINE, AND THE FORM STAYS OPEN. `AuthFailure` already separates "could not reach
+      // the server" from "the server refused", so an offline create says so rather than spinning:
+      // `busy` is cleared here and only here, which is what makes every failure end the spinner.
       setError((err as Error).message);
       setBusy(false);
     }
   };
 
+  const trimmed = name.trim();
   return (
+    // §3.1 — IT REPLACES THE DROPDOWN'S CONTENT. Not a modal and not a page: the thing being named
+    // is the thing the menu above it lists, and a modal would cover the list somebody is about to
+    // see their new workspace appear in.
     <form onSubmit={submit} className="border-t border-hair px-3 py-2.5">
       <input
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value)}
-        maxLength={64}
-        placeholder="workspace name"
+        maxLength={NAME_MAX}
+        placeholder="My team"
+        aria-label="Workspace name"
         className="w-full rounded-control border border-hair bg-void px-2 py-1.5 text-[12px] text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
       />
       {/* THE KIND IS ASKED, NEVER DEFAULTED SILENTLY. It decides whether the workspace has a
           members list, roles and an author column at all, and it is not changeable afterwards —
           so a control that guessed would be guessing about the one irreversible field. */}
-      <div className="mt-2 flex gap-1">
-        {KINDS.map((k) => (
-          <button
-            key={k.id}
-            type="button"
-            onClick={() => setKind(k.id)}
-            title={k.what}
-            className={`flex-1 rounded-control px-2 py-1 text-[11px] transition-colors ${
-              kind === k.id ? "bg-active text-ink" : "text-muted hover:text-ink"
-            }`}
-          >
-            {k.label}
-          </button>
-        ))}
-      </div>
+      {offered.length > 1 && (
+        <div className="mt-2 flex gap-1">
+          {offered.map((k) => (
+            <button
+              key={k.id}
+              type="button"
+              onClick={() => setKind(k.id)}
+              title={k.what}
+              className={`flex-1 rounded-control px-2 py-1 text-[11px] transition-colors ${
+                kind === k.id ? "bg-active text-ink" : "text-muted hover:text-ink"
+              }`}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {/* §3.2's one-line description, which is the row's whole job: "Team" and "Personal" are two
+          words that mean nothing to somebody who has not read the tenancy model. Rendered even
+          when there is only one option left, because that is exactly the case where the label is
+          alone and unexplained. */}
       <p className="mt-1.5 text-[11px] leading-[1.5] text-faint">{KINDS.find((k) => k.id === kind)?.what}</p>
-      {error && <p className="mt-1.5 text-[11px] text-err">{error}</p>}
+      {error && <p role="alert" className="mt-1.5 text-[11px] text-err">{error}</p>}
       <div className="mt-2 flex items-center gap-2">
         <button
           type="submit"
-          disabled={busy || name.trim().length === 0}
+          disabled={busy || trimmed.length === 0}
           className="rounded-control bg-panel px-2.5 py-1 text-[11px] text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
         >
           {busy ? "Creating…" : "Create"}
