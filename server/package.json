@@ -109,6 +109,7 @@
     "test:interactive-slot": "tsx src/interactiveSlot.test.ts",
     "test:sandbox-image": "tsx src/sandbox/image.test.ts",
     "test:egress-policy": "tsx src/sandbox/egressPolicy.test.ts",
+    "test:egress-connectors": "tsx src/sandbox/egressConnectors.test.ts",
     "test:database-url": "tsx src/sandbox/databaseUrl.test.ts",
     "test:event-bus": "tsx src/sandbox/eventBus.test.ts",
     "test:run-tokens": "tsx src/sandbox/runTokens.test.ts",

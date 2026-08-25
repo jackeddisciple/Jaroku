@@ -35,10 +35,63 @@ import type { SecretStore } from "./secrets/secretStore.ts";
 import {
   DatabaseUrlError, probeReachable, validateDatabaseUrl, type ValidatedDatabaseUrl,
 } from "./sandbox/databaseUrl.ts";
-import { EgressPolicyError, realResolver, type Resolver } from "./sandbox/egressPolicy.ts";
+import {
+  EgressPolicyError, realResolver, resolveAndPin, type EgressRule, type Resolver,
+} from "./sandbox/egressPolicy.ts";
 
-/** The env name the Postgres connector reads, and the only `user_secret` there is today. */
+/** The one port the HTTP connector will ever open, because it refuses anything that is not https. */
+const HTTPS_PORT = 443;
+
+/** The env name the Postgres connector reads. */
 export const DATABASE_URL_NAME = "DATABASE_URL";
+
+/** The env name the HTTP connector reads. The allowlist IS that connector's whole safety model. */
+export const HTTP_ALLOWED_DOMAINS_NAME = "HTTP_ALLOWED_DOMAINS";
+
+/**
+ * One allowlist entry, normalised, or null when it is not a bare hostname.
+ *
+ * THE SAME RULE `http_connector.normalise_domain` APPLIES, in the language this side is written
+ * in — and it is stated twice for the reason the address block list is: the control plane cannot
+ * run Python and the sandbox cannot call TypeScript, but both have to agree about what the
+ * workspace typed. A domain this accepts and the template refuses is a workspace that configured
+ * the connector and cannot use it; a domain this refuses and the template accepts is a request
+ * the egress policy never granted, which fails as a network error naming nothing.
+ *
+ * A SCHEME, PATH, PORT OR WILDCARD MAKES IT NOT A HOSTNAME, and each is refused rather than
+ * stripped. Stripping is how `https://evil.example/@api.example.com` becomes an entry somebody
+ * did not mean to write, and a wildcard is refused because the domain anybody would want one on
+ * is a shared platform — `*.herokuapp.com` grants every tenant of it, which is everybody.
+ */
+export function normaliseAllowedDomain(value: string): string | null {
+  const text = value.trim().toLowerCase().replace(/\.+$/, "");
+  if (!text || /[*/:@\s]/.test(text)) return null;
+  if (!text.includes(".") || text.startsWith(".") || text.includes("..")) return null;
+  let ascii: string;
+  try {
+    // IDN once, here, so a domain stored in unicode and compared against a punycode hostname is
+    // not an allowlist that silently never matches.
+    ascii = new URL(`https://${text}`).hostname;
+  } catch {
+    return null;
+  }
+  return ascii === text || ascii === text.normalize("NFC") || ascii.startsWith("xn--") || /^[a-z0-9.-]+$/.test(ascii)
+    ? ascii
+    : null;
+}
+
+/** The entries in a raw `HTTP_ALLOWED_DOMAINS` value, and the ones that are not hostnames. */
+export function parseAllowedDomains(raw: string): { domains: string[]; rejected: string[] } {
+  const domains: string[] = [];
+  const rejected: string[] = [];
+  for (const entry of raw.split(",")) {
+    if (!entry.trim()) continue;
+    const normalised = normaliseAllowedDomain(entry);
+    if (!normalised) rejected.push(entry.trim().slice(0, 60));
+    else if (!domains.includes(normalised)) domains.push(normalised);
+  }
+  return { domains, rejected };
+}
 
 export interface SaveConnectorSecretResult {
   ok: boolean;
@@ -117,6 +170,93 @@ export class ConnectorSecrets {
 
   async forget(ctx: TenantContext): Promise<void> {
     await this.opts.secrets.delete(ctx, DATABASE_URL_NAME);
+  }
+
+  /**
+   * Store a workspace's `HTTP_ALLOWED_DOMAINS`, refusing a list that is not one.
+   *
+   * VALIDATED BEFORE IT IS WRITTEN, exactly as the connection string is, and for a sharper
+   * reason: this value is not a credential, it is a POLICY. A typo in a database URL fails
+   * visibly at the first query. A typo here — `*.example.com`, or `https://api.example.com` —
+   * produces an allowlist that silently matches nothing, and the symptom is every request being
+   * refused with a message about a host that looks like it is on the list.
+   *
+   * THE DOMAINS ARE NOT RESOLVED HERE, and that is the deliberate half. A domain that does not
+   * resolve today may resolve tomorrow, and refusing to save it would make configuring the
+   * connector depend on the state of somebody else's DNS at the moment they pressed Save. The
+   * resolution — and the private-range refusal that matters — happens at `httpEgress`, at
+   * policy-build time, where it is pinned. Same split as the database URL: shape at save,
+   * addresses at run.
+   */
+  async saveAllowedDomains(ctx: TenantContext, raw: string): Promise<SaveConnectorSecretResult> {
+    const { domains, rejected } = parseAllowedDomains(raw);
+    if (rejected.length > 0) {
+      return {
+        ok: false,
+        message:
+          `not a hostname: ${rejected.slice(0, 3).map((r) => JSON.stringify(r)).join(", ")}. Entries are ` +
+          `bare exact hostnames — no scheme, no path, no port, and no wildcards.`,
+        warning: null,
+        reachable: null,
+      };
+    }
+    if (domains.length === 0) {
+      return {
+        ok: false,
+        message: "no domains listed — an empty allowlist refuses every request",
+        warning: null,
+        reachable: null,
+      };
+    }
+
+    // Stored NORMALISED rather than as typed, so the run path and the panel are comparing the
+    // same strings. A list saved as `API.Example.COM ` and matched against `api.example.com`
+    // is an allowlist that works everywhere except where it is used.
+    const written = await this.opts.secrets.set(ctx, HTTP_ALLOWED_DOMAINS_NAME, domains.join(","));
+    if (!written.ok) {
+      return { ok: false, message: written.warning ?? "that value could not be stored", warning: null, reachable: null };
+    }
+    return { ok: true, message: null, warning: written.warning, reachable: null };
+  }
+
+  /**
+   * The pinned egress a run's HTTP connector needs, and the entries that could not be granted.
+   *
+   * THE HARDEST INTEGRATION POINT IN THIS RELEASE, because every other connector's hosts are
+   * fixed strings somebody reviewed and these are whatever a workspace typed. So this is the
+   * `databaseUrl` shape rather than the `CONNECTOR_HOSTS` shape: resolved FRESH, here, at
+   * policy-build time, refused on any private answer, and handed to `buildEgressPolicy` already
+   * pinned. Reading something the save path recorded would be the DNS-rebinding hole — a name
+   * that answered publicly while somebody filled in a form and answers 169.254.169.254 when the
+   * sandbox connects.
+   *
+   * FAILURES ARE COLLECTED RATHER THAN THROWN, which is `mcpEgressRules`'s decision and not
+   * `postgresEgress`'s, and the difference is that this list has MANY entries. A workspace with
+   * four allowed domains, one of which has been repointed at a private address, should keep the
+   * other three: refusing the whole run would let one bad entry take down an agent that may
+   * never call it. The refused entry contributes no rule, so the request fails at the point of
+   * use with the template's own message — and the caller logs the reason.
+   */
+  async httpEgress(runId: string): Promise<{ rules: EgressRule[]; refused: { domain: string; reason: string }[] }> {
+    const env = await this.opts.secrets.getForRun(runId, [HTTP_ALLOWED_DOMAINS_NAME]);
+    const raw = env[HTTP_ALLOWED_DOMAINS_NAME];
+    const rules: EgressRule[] = [];
+    const refused: { domain: string; reason: string }[] = [];
+    if (!raw) return { rules, refused };
+
+    const { domains, rejected } = parseAllowedDomains(raw);
+    for (const bad of rejected) refused.push({ domain: bad, reason: "not a bare hostname" });
+
+    for (const domain of domains) {
+      try {
+        const ips = await resolveAndPin(domain, this.resolver);
+        rules.push({ host: domain, ips, ports: [HTTPS_PORT], reason: "the http connector's allowlist" });
+      } catch (err) {
+        const known = err instanceof EgressPolicyError;
+        refused.push({ domain, reason: known ? (err as Error).message : "could not be checked" });
+      }
+    }
+    return { rules, refused };
   }
 
   /**

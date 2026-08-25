@@ -213,6 +213,16 @@ jobs:
           npm run test:chaos
           npm run test:event-bridge
           npm run test:egress-policy
+          # THE THREE v0.3.6 CONNECTORS AT THE POINT THEIR HOSTS BECOME A POLICY. Two of them are
+          # fixed strings; the third is whatever a workspace typed, which makes it the third SSRF
+          # vector after DATABASE_URL and an MCP endpoint. Its load-bearing assertion is the one
+          # the spec names — an ALLOWED domain resolving to a private address is refused, because
+          # allowed is not the same as reachable and a builder that trusted its own allowlist
+          # would make a text field into a metadata-server read. It also holds the two private-
+          # range block lists to each other by reading the other language's source: the rule is
+          # written twice on purpose (the control plane cannot check a request the sandbox
+          # originates, and the sandbox cannot call TypeScript), so drift is what gets tested.
+          npm run test:egress-connectors
           npm run test:database-url
           npm run test:run-tokens
           npm run test:control-plane-routes

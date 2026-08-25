@@ -1393,12 +1393,25 @@ async function buildRunEgress(
       console.warn(`[sandbox] run ${runId} was not granted egress to the ${bad.id} MCP server: ${bad.reason}`);
     }
 
+    // AND THE HTTP CONNECTOR'S ALLOWLIST, resolved fresh here for the same reason the DATABASE_URL
+    // is: these are hosts a workspace typed, so a name that answered publicly while somebody filled
+    // in the form can answer 169.254.169.254 by the time a sandbox connects. Per-domain rather than
+    // all-or-nothing — one repointed entry contributes no rule and is logged, and the other three
+    // still work, which is the judgement the MCP rules make one line up.
+    const http = connectors.includes("http")
+      ? await connectorSecrets.httpEgress(runId)
+      : { rules: [], refused: [] as { domain: string; reason: string }[] };
+    for (const bad of http.refused) {
+      console.warn(`[sandbox] run ${runId} was not granted egress to ${bad.domain}: ${bad.reason}`);
+    }
+
     return await buildEgressPolicy({
       runId,
       provider: provider ?? "fake",
       connectors,
       databaseUrl,
       mcpRules: mcp.rules,
+      httpRules: http.rules,
       controlPlaneHost: CONTROL_PLANE_URL ? new URL(CONTROL_PLANE_URL).hostname : undefined,
       controlPlanePort: CONTROL_PLANE_URL ? Number(new URL(CONTROL_PLANE_URL).port || 443) : undefined,
     });

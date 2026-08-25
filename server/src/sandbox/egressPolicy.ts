@@ -308,6 +308,21 @@ export interface EgressPolicyInput {
    * beats refusing to start a run over one repointed server.
    */
   mcpRules?: EgressRule[];
+  /**
+   * The HTTP connector's allowlisted domains, already validated and pinned by `connectorSecrets`.
+   *
+   * THE THIRD USER-SUPPLIED HALF, and it arrives finished for exactly the reason the other two
+   * do: this module has no business re-deciding what counts as a safe workspace-supplied host,
+   * and a second copy of that judgement is how the two would eventually disagree.
+   *
+   * Its shape differs from `databaseUrl` in one way that is a decision rather than an accident.
+   * A missing DATABASE_URL makes `buildEgressPolicy` REFUSE, because postgres with no host is a
+   * run that cannot work and whose failure would name nothing. An empty allowlist does not
+   * refuse: the HTTP connector's own template raises at the first call with a sentence naming
+   * the variable, which is a better place to learn it than a run that would not start. Same
+   * judgement `mcpRules` makes about a server that no longer validates.
+   */
+  httpRules?: EgressRule[];
 }
 
 /**
@@ -361,6 +376,14 @@ export async function buildEgressPolicy(
   // Already pinned. Appended rather than re-resolved: `validateMcpUrl` did the lookup, and the
   // whole point of pinning is that nothing does it a second time.
   for (const rule of input.mcpRules ?? []) rules.push(rule);
+
+  // The same, for the HTTP connector's allowlist. Refused here when nothing selected it, which
+  // mirrors the databaseUrl guard: granting a sandbox a set of hosts no connector asked for is
+  // widening the policy by accident, and an accident is exactly what this shape catches.
+  if ((input.httpRules?.length ?? 0) > 0 && !input.connectors.includes("http")) {
+    throw new EgressPolicyError("http allowlist rules were supplied but the http connector was not selected");
+  }
+  for (const rule of input.httpRules ?? []) rules.push(rule);
 
   return { runId: input.runId, rules };
 }
