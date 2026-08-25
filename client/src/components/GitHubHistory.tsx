@@ -52,7 +52,12 @@ export function BranchSwitcher({ view }: { view: GithubView }) {
   // workspace's provider balance — "disposable to the product and not disposable to the bill".
   // The CURRENT branch stays visible for everybody, because it is half of what "where did this go"
   // means and the whole panel around it is a read.
-  const canWrite = useCanRun("switchGithubBranch");
+  //
+  // AND `deploy` AT THE AGENT SCOPE. The GitHub writes are agent-level `deploy` rather than
+  // `edit`: what they do to the source is nothing, and what they do is put it somewhere outside
+  // this product where people with no membership here can read it. A contractor granted `edit` to
+  // fix one agent has not been granted the right to publish it to the company's organisation.
+  const canWrite = useCanRun("switchGithubBranch", view.agentId);
   const [open, setOpen] = useState(false);
   // §A.7's chip opens the tab AT this control rather than merely at the panel. A nonce rather than
   // a boolean, so clicking the chip twice re-opens the switcher rather than firing once and then
@@ -405,7 +410,7 @@ function FileRow({
 export function PullRequestCard({ view }: { view: GithubView }) {
   // Opening a pull request writes to a repository outside this workspace. The CARD — that one is
   // open, its title, where it points — is a read and stays.
-  const canWrite = useCanRun("openGithubPr");
+  const canWrite = useCanRun("openGithubPr", view.agentId);
   if (!view.pr) {
     // Only offered where §3.1's model says a PR is the move: Jaroku's own branch, with something
     // on it. Reconciliation is always through a PR and never a silent auto-merge.

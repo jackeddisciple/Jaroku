@@ -27,7 +27,7 @@ import { AgentFiles } from "./AgentFiles.tsx";
 import { AgentTabs } from "./AgentTabs.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { AlertTriangleIcon, SparklesIcon } from "./panelIcons.tsx";
-import { sendLoadAgentDetail } from "../lib/socket.ts";
+import { sendLoadAccess, sendLoadAgentDetail } from "../lib/socket.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
 
 /**
@@ -47,6 +47,24 @@ export function AgentDetail() {
   const openAgentId = useAgentGridStore((s) => s.openAgentId);
   const [narrow, setNarrow] = useState(false);
   const [host, setHost] = useState<HTMLDivElement | null>(null);
+
+  // §8.2 — THE GRANT IS FETCHED WHEN THE DETAIL PANE OPENS, not when the Access tab is selected.
+  //
+  // THAT DISTINCTION IS THE WHOLE VALUE OF THE FETCH. Every agent-scoped guard in the client reads
+  // this cache — the Deploy button in the title bar, the GitHub panel's writes, the Deploy tab —
+  // and none of them is inside the Access tab. Fetching only when somebody opened Access would mean
+  // per-agent narrowing was invisible on every surface except the one that displays it, which is
+  // the worst possible place for it to be the only place it works.
+  //
+  // ON THE UUID, which is the id this pane has and the one the server answers with. `activeAgentId`
+  // elsewhere is a slug; the store's alias map is what lets both find the same entry.
+  //
+  // ONCE PER AGENT, on open. The recheck is what refreshes it after that — see socket.ts — so this
+  // is not a poll and does not need to be one.
+  const openUuid = detail?.card.uuid;
+  useEffect(() => {
+    if (openUuid) sendLoadAccess(openUuid);
+  }, [openUuid]);
 
   useEffect(() => {
     if (!host || typeof ResizeObserver === "undefined") return;

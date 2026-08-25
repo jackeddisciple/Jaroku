@@ -18,7 +18,7 @@
 // hidden, and these are what an affordance asks in order to be absent.
 
 import { useSessionStore } from "../store/sessionStore.ts";
-import { useAccessStore } from "../store/accessStore.ts";
+import { accessFor, useAccessStore } from "../store/accessStore.ts";
 import {
   agentCapabilityFor, agentCeiling, can, canRun, effectiveAgentCapabilities, isAgentCapability,
   ROUTE_CAPABILITY,
@@ -55,7 +55,7 @@ export function useCapability(capability: string, agentId?: string | null): bool
   // SUBSCRIBED, NOT READ ONCE, for the reason the role is: a teammate can write a grant while this
   // tab is open, the recheck empties this map, and the next `loadAccess` refills it — a component
   // that read the store imperatively would keep rendering the answer it got at mount.
-  const grant = useAccessStore((s) => (agentId ? s.byAgent[agentId]?.viewer ?? null : null));
+  const grant = useAccessStore((s) => accessFor(s, agentId)?.viewer ?? null);
   if (!agentId) return can(role, capability);
   // Not an agent capability at all — a workspace capability passed with an agent id, or a typo.
   // Answered as false rather than falling through to the workspace check, because a guard written
@@ -99,7 +99,7 @@ function workspaceFallbackFor(role: string | null, capability: AgentCapability):
  */
 export function useCanRun(cmd: string, agentId?: string | null): boolean {
   const role = useSessionStore((s) => s.role());
-  const grant = useAccessStore((s) => (agentId ? s.byAgent[agentId]?.viewer ?? null : null));
+  const grant = useAccessStore((s) => accessFor(s, agentId)?.viewer ?? null);
   if (!canRun(role, cmd)) return false;
   const agentCapability = agentId ? agentCapabilityFor(cmd) : undefined;
   if (!agentCapability) return true;

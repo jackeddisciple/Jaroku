@@ -111,7 +111,13 @@ export function DeployPanel() {
   const agentId = useBuildStore((s) => s.activeAgentId);
   const agents = useBuildStore((s) => s.agents);
   // `deploy:manage` — see the note on the Railway row below for why this is not `agent:write`.
-  const canDeploy = useCanRun("deploy");
+  //
+  // AND `deploy` AT THE AGENT SCOPE, which is the narrowing this release adds. The workspace
+  // capability answers "may this person deploy anything here"; the second argument asks whether
+  // they may deploy THIS one, which is a different answer for somebody holding a grant on one agent
+  // and none on another. The slug is what this panel has — `activeAgentId` has been a slug since
+  // before agents had uuids — and the access store answers to either spelling.
+  const canDeploy = useCanRun("deploy", agentId);
 
   useEffect(() => {
     // McpPanel's precedent: ask on mount rather than relying only on the connect snapshot,

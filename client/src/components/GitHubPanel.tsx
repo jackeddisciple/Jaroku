@@ -70,7 +70,9 @@ export function GitHubPanel() {
   const view = viewFor(views, agentId);
   // §8.2's GitHub rows. `linkGithub` stands for the whole `github:manage` group here — the two
   // screens below it are the ones that CREATE a link, and everything past them is a read.
-  const canWrite = useCanRun("linkGithub");
+  // ...and `deploy` at the agent scope — see BranchSwitcher for why the GitHub writes are
+  // agent-level `deploy` rather than `edit`.
+  const canWrite = useCanRun("linkGithub", agentId);
 
   // Ask on mount and whenever the agent changes. McpPanel's precedent: relying only on the connect
   // snapshot means opening the tab after a reconnect shows whatever was true before it.
@@ -543,7 +545,12 @@ function Linked({ view }: { view: GithubView }) {
    * History stay. A member opening this panel sees the whole picture and none of the verbs, which
    * is what `github:read` is for.
    */
-  const canWrite = useCanRun("pushGithub");
+  // AND `deploy` AT THE AGENT SCOPE. The GitHub writes are agent-level `deploy` rather than `edit`,
+  // which is the least obvious row in that table: what they do to the SOURCE is nothing, and what
+  // they do is put it somewhere outside this product, under an account this workspace chose, where
+  // people with no membership here can read and run it. A contractor granted `edit` to fix one agent
+  // has not been granted the right to publish it to the company's GitHub organisation.
+  const canWrite = useCanRun("pushGithub", view.agentId);
   // Read once per agent rather than on every render: this is localStorage, the panel re-renders on
   // every stage of a push, and a synchronous read per frame during a live rail is a read per frame
   // for a value that only a click changes.
@@ -699,7 +706,8 @@ function RepoHeader({ view }: { view: GithubView }) {
   // the matrix calls out by name as the `github:manage` half of the link. The repository name and
   // the branch stay readable — that is `github:read`, and it is the first thing somebody debugging
   // an agent asks.
-  const canWrite = useCanRun("unlinkGithub");
+  // ...and `deploy` on this agent, beside the region guard above and for the same reason.
+  const canWrite = useCanRun("unlinkGithub", view.agentId);
   return (
     <div>
       <div className="flex items-center gap-2">

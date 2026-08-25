@@ -316,7 +316,10 @@ export function TopBar() {
   const setRightTab = useUiStore((s) => s.setRightTab);
   const inFlight = useDeployStore((s) => s.deployments.find((d) => isDeployInFlight(d.status)));
   // `deploy:manage`, not `agent:write`. See the guard on the button itself.
-  const canDeploy = useCanRun("deploy");
+  // ...and the agent as well, because the title bar's Deploy button acts on the agent that is open
+  // rather than on the workspace. Somebody with deploy on one agent and not another has to see it
+  // appear and disappear as they move between them, which is the whole point of a per-agent grant.
+  const canDeploy = useCanRun("deploy", agent?.agent_id);
 
   return (
     <div className="flex h-11 shrink-0 items-center gap-3 border-b border-hair px-4">

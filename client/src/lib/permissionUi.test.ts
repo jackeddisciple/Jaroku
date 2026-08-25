@@ -30,6 +30,7 @@ import React from "react";
 
 import {
   AGENT_CAPABILITIES,
+  agentCapabilityFor,
   CAPABILITIES,
   COMMAND_AGENT_CAPABILITY,
   COMMAND_CAPABILITY,
@@ -494,6 +495,57 @@ console.log("\n§8.1 — the agent-level copy is the original too");
   check(
     ROLE_AGENT_CAPABILITIES.admin.length === 7 && ROLE_AGENT_CAPABILITIES.owner.length === 7,
     "...and an admin's and an owner's are all seven, as the server declares them",
+  );
+}
+
+// §8.3 — EVERY GUARD ON AN AGENT-SCOPED COMMAND PASSES THE AGENT.
+//
+// THE AUDIT THIS RELEASE IS ACTUALLY ABOUT. The v0.4.1 sweep wrapped every affordance in a
+// workspace-level guard; this one walks the same checklist and adds the agent id to the ones that
+// operate on a specific agent. A guard left at the workspace scope is not a broken button and not a
+// 403 — it renders exactly as it always did, for everybody the workspace capability allows, and the
+// per-agent narrowing is silently not applied to it. Nobody reports that, because nothing fails:
+// the person simply has an authority somebody deliberately took away from them.
+//
+// SO IT IS READ OUT OF THE SOURCE. Every `useCanRun("x")` and `<Capable cmd="x">` in the components
+// directory, checked against `COMMAND_AGENT_CAPABILITY`: if the command is agent-scoped, the call
+// has to carry a second argument. What that argument IS cannot be checked here — a suite cannot know
+// whether a variable holds the right agent — but its ABSENCE can, and absence is the failure that
+// happens.
+console.log("\n§8.3 — an agent-scoped guard names its agent");
+{
+  const dir = fileURLToPath(new URL("../components/", import.meta.url));
+  const offenders: string[] = [];
+  let scanned = 0;
+  let guarded = 0;
+  for (const file of readdirSync(dir)) {
+    if (!file.endsWith(".tsx") || file.includes(".test.")) continue;
+    // `Capable.tsx` is the guard itself: its `useCanRun(cmd ?? "")` is the mechanism, not a call
+    // site, and the id it forwards comes from whoever rendered it.
+    if (file === "Capable.tsx") continue;
+    scanned++;
+    const text = withoutComments(readFileSync(dir + file, "utf8"));
+    // `useCanRun("x")` with nothing after the string, and `<Capable cmd="x"` with no `agentId` up
+    // to the closing bracket. Two shapes because both are in use and §8.2's checklist covers both.
+    for (const m of text.matchAll(/useCanRun\(\s*"([a-zA-Z]+)"\s*\)/g)) {
+      if (!agentCapabilityFor(m[1]!)) continue;
+      offenders.push(`${file}: useCanRun("${m[1]}") — agent-scoped, no agent`);
+    }
+    for (const m of text.matchAll(/<Capable\b([^>]*)>/g)) {
+      const props = m[1]!;
+      const cmd = /cmd=\{?"([a-zA-Z]+)"/.exec(props)?.[1];
+      if (!cmd || !agentCapabilityFor(cmd)) continue;
+      if (!/\bagentId=/.test(props)) offenders.push(`${file}: <Capable cmd="${cmd}"> — agent-scoped, no agent`);
+    }
+    guarded += [...text.matchAll(/useCanRun\(\s*"[a-zA-Z]+"\s*,/g)].length;
+  }
+  check(scanned > 10, `every component was read (${scanned} files)`);
+  // THE RULE HAS TO HAVE SOMETHING TO FIND, or it passes over a client with no per-agent guards at
+  // all — which is precisely the state this release exists to leave behind.
+  check(guarded >= 5, `...and agent-scoped guards are actually passing an agent (${guarded} of them)`);
+  check(
+    offenders.length === 0,
+    `no agent-scoped guard is left at the workspace scope${offenders.length ? ` — ${offenders.join(" | ")}` : ""}`,
   );
 }
 

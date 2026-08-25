@@ -71,6 +71,22 @@ export interface AgentAccess {
 interface AccessState {
   /** Keyed by the agent uuid the server answered with, never by the slug the client asked with. */
   byAgent: Record<string, AgentAccess>;
+  /**
+   * slug → uuid, so a guard holding either spelling finds the same entry.
+   *
+   * THIS EXISTS BECAUSE THE CLIENT GENUINELY HOLDS BOTH, and pretending otherwise would push the
+   * problem into every call site. The Agents grid has the uuid; `buildStore.activeAgentId` — which
+   * the composer, the Deploy panel, the GitHub panel and the title bar all read — is the SLUG, and
+   * has been since before agents had uuids. A guard in the Deploy panel cannot produce a uuid
+   * without a lookup, and a guard that did the lookup itself would be forty call sites each
+   * deciding what to do when it fails.
+   *
+   * ONE MAP, WRITTEN FROM THE SERVER'S OWN ANSWER. `loadAccess` returns both spellings for the
+   * agent it answered about, so the alias is a fact the server stated rather than a join this
+   * client performed — which matters because slugs are unique per WORKSPACE and this map is
+   * emptied on a switch along with everything else here.
+   */
+  bySlug: Record<string, string>;
   exposure: Record<string, Exposure>;
   /** Which agent ids have a `loadAccess` in flight, so a panel can say "loading" rather than "nobody". */
   loading: Record<string, boolean>;
@@ -86,6 +102,7 @@ interface AccessState {
 
 const EMPTY = {
   byAgent: {} as Record<string, AgentAccess>,
+  bySlug: {} as Record<string, string>,
   exposure: {} as Record<string, Exposure>,
   loading: {} as Record<string, boolean>,
   error: null as string | null,
@@ -97,7 +114,11 @@ export const useAccessStore = create<AccessState>((set) => ({
   setAccess: (access) =>
     set((s) => ({
       byAgent: { ...s.byAgent, [access.agentId]: access },
-      loading: { ...s.loading, [access.agentId]: false },
+      bySlug: { ...s.bySlug, [access.agentSlug]: access.agentId },
+      // BOTH SPELLINGS ARE MARKED SETTLED, because either could have been the one asked with —
+      // `sendLoadAccess` takes whatever the caller had. Clearing only the uuid would leave a panel
+      // that asked by slug rendering a spinner over an answer that has already arrived.
+      loading: { ...s.loading, [access.agentId]: false, [access.agentSlug]: false },
       error: null,
     })),
 
@@ -121,8 +142,26 @@ export const useAccessStore = create<AccessState>((set) => ({
    * grants do not close a public URL, and clearing the warning when somebody's permissions changed
    * would be the panel implying a connection between the two that does not exist.
    */
-  invalidate: () => set({ byAgent: {}, loading: {} }),
+  // The alias map goes with it. It is derived from the answers, so keeping it would leave slugs
+  // pointing at uuids whose entries no longer exist — a lookup that resolves to nothing, which is
+  // the same as no alias and one more thing to be wrong.
+  invalidate: () => set({ byAgent: {}, bySlug: {}, loading: {} }),
 }));
+
+/**
+ * One agent's cached access, found by uuid OR slug.
+ *
+ * THE ONE PLACE THE TWO SPELLINGS ARE RECONCILED. Every guard, the panel and the hooks go through
+ * this, so a call site never has to know which kind of id it is holding — and the day a third
+ * spelling appears, there is one function to teach rather than forty.
+ */
+export function accessFor(
+  state: Pick<AccessState, "byAgent" | "bySlug">,
+  agentId: string | null | undefined,
+): AgentAccess | undefined {
+  if (!agentId) return undefined;
+  return state.byAgent[agentId] ?? state.byAgent[state.bySlug[agentId] ?? ""];
+}
 
 /**
  * The viewer's effective set on an agent, or null when nothing has been fetched for it yet.
@@ -139,6 +178,5 @@ export const useAccessStore = create<AccessState>((set) => ({
  * concludes does not exist.
  */
 export function viewerCapabilities(agentId: string | null | undefined): AgentCapability[] | null {
-  if (!agentId) return null;
-  return useAccessStore.getState().byAgent[agentId]?.viewer ?? null;
+  return accessFor(useAccessStore.getState(), agentId)?.viewer ?? null;
 }
