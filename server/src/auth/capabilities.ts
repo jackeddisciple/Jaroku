@@ -836,3 +836,128 @@ export function capabilityFor(cmd: string): Capability | undefined {
     ? COMMAND_CAPABILITY[cmd]
     : undefined;
 }
+
+/**
+ * Which AGENT-level capability each agent-scoped command needs.
+ *
+ * A SECOND TABLE IN THE SAME FILE, NOT A SECOND MATRIX. `COMMAND_CAPABILITY` above answers "may
+ * this person do this in this workspace"; this answers "and to THIS agent". Both are read by one
+ * dispatch point, both feed one resolver, and a command in this table is refused unless both say
+ * yes. The alternative — one table with a sometimes-agent-scoped column — is a column whose
+ * meaning depends on the row, which is the shape nobody can audit.
+ *
+ * ONLY THE COMMANDS WHOSE MESSAGE NAMES AN AGENT ARE IN HERE, and that boundary is a real
+ * limitation rather than a tidy one. `pauseRun` carries a run id, `applyEdit` a proposal id,
+ * `cancelDeploy` a deployment id, `addExample` a dataset id — every one of those belongs to an
+ * agent, and none of them says which. Resolving the agent for them would mean a database lookup
+ * inside the relay, which imports no database by construction (`test:db-boundary`, rule 1), or a
+ * second authorisation pass inside each handler, which is invariant A's failure exactly.
+ *
+ * SO WHAT THAT COSTS, SAID PLAINLY: a person who may not `run` an agent may still `pauseRun` a run
+ * of it that somebody else started, and may still `applyEdit` a proposal on it. Both are gated by
+ * the workspace capability, so neither is reachable by somebody with no authority at all — what
+ * they are not gated by is the per-agent narrowing. The commands that CREATE those ids — `run`,
+ * `edit`, `deploy`, `startEval` — are all in this table, so the narrowing holds at the door and
+ * leaks at the follow-up. Closing it properly means the id carrying its agent, which is a change
+ * to four message shapes and their clients; it is worth doing and it is not this release.
+ *
+ * A COMMAND THAT CARRIES AN `agentId` AND IS ABSENT FROM THIS TABLE IS REFUSED, not allowed —
+ * `test:capabilities` asserts the set is empty, so that branch is a floor rather than a behaviour,
+ * and it is the same rule `capabilityFor` follows one scope up. "Unlisted means allowed" is the
+ * hole; "unlisted means denied" is the same hole in a year, so neither is left to a default.
+ */
+export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
+  // --- view: reads about the agent ------------------------------------------------------------
+  loadAgentDetail: "view",
+  loadAgentFiles: "view",
+  loadAgentGraph: "view",
+  loadAgentVersion: "view",
+  explain: "view",
+  // The datasets belonging to an agent, and what a comparison would cost. Both are reads, and the
+  // second is the estimate the entitlement gate deliberately leaves ungated for the same reason: a
+  // workspace at its limit has to be able to find out what going over would cost, and a person who
+  // may see an agent has to be able to see what evaluating it would.
+  listDatasets: "view",
+  estimateEval: "view",
+  // What this one agent has been doing. `view`, beside the reads above, because that is what it is
+  // — the Activity feed narrowed to one agent, carrying nothing the detail pane does not.
+  getActivityFeed: "view",
+  // Planning a deployment renders what WOULD happen and changes nothing. Same argument the
+  // entitlement table makes about it, one gate over.
+  planDeploy: "view",
+  // A FORK IS A READ OF THIS AGENT, and the decision is worth stating because it looks lenient.
+  // What a fork needs OF THE AGENT IT COPIES is the right to see its source — which `view` already
+  // grants through `loadAgentFiles`, so somebody with `view` could reproduce a fork by hand. What
+  // it needs in order to CREATE the copy is `agent:write` on the workspace, which is checked one
+  // scope up and is not this table's question. Gating it at `edit` would mean a person who may
+  // read an agent's code may not press the button that copies it.
+  forkAgent: "view",
+  // Opening a build session ON an agent, which is not itself an act on the agent: every verb inside
+  // the thread — generate, edit, run — is gated by its own row here or above.
+  createThread: "view",
+  // The GitHub reads. Where the code went, how far the two lineages have drifted, what the scanner
+  // found, what a shadow run did, and the squiggles in a buffer. None writes anything.
+  listGithub: "view",
+  refreshGithub: "view",
+  listScanFindings: "view",
+  listShadowRuns: "view",
+  semanticDiffGithub: "view",
+  diagnoseFile: "view",
+
+  // --- run: execute and debug -----------------------------------------------------------------
+  run: "run",
+  // §B.2's shadow run executes the agent against a branch. It publishes nothing and moves no
+  // pointer — what it does is RUN, which is what this capability is for.
+  shadowRunGithub: "run",
+
+  // --- edit: change the agent's code ----------------------------------------------------------
+  edit: "edit",
+  undoEdit: "edit",
+  // The lifecycle. `edit`, beside generate and apply, for the reason the workspace matrix files
+  // them under `agent:write`: archiving destroys nothing and is one click back, so it is the same
+  // authority as editing rather than a workspace-shaped one.
+  archiveAgent: "edit",
+  restoreAgent: "edit",
+  renameAgent: "edit",
+  // Publishing a NEW version that points at an old manifest. It rewrites no history and moves no
+  // pointer backwards, which makes it the same act as applying an edit.
+  restoreAgentVersion: "edit",
+
+  // --- eval: start, cancel, and the datasets they run against ---------------------------------
+  startEval: "eval",
+  createDataset: "eval",
+  deleteDataset: "eval",
+  promoteTestInput: "eval",
+
+  // --- deploy: put it where somebody outside Jaroku can reach it ------------------------------
+  deploy: "deploy",
+  // THE GITHUB WRITES ARE `deploy` AND NOT `edit`, which is the least obvious row in this table.
+  // What they do to the agent's SOURCE is nothing — the code is unchanged either way. What they do
+  // is put it somewhere outside this product, under an account this workspace chose, where it can
+  // be read, run and forked by people who have no membership here. That is the same act `deploy`
+  // names, and it is emphatically not the same act as changing a file: a contractor granted `edit`
+  // to fix one agent has not been granted the right to publish that agent's source to the
+  // company's GitHub organisation. Both are still behind `github:manage` at the workspace scope,
+  // which is the admin's; this is the narrowing on top of it.
+  linkGithub: "deploy",
+  unlinkGithub: "deploy",
+  pushGithub: "deploy",
+  pullGithub: "deploy",
+  createGithubBranch: "deploy",
+  switchGithubBranch: "deploy",
+  openGithubPr: "deploy",
+  commitGithub: "deploy",
+  generateGithubMessage: "deploy",
+  resolveReviewComment: "deploy",
+  // §B.1.2's opt-in decides whether a stranger's pull request may spend this workspace's provider
+  // balance against this agent. It is the sharpest "commits us to something outside ourselves" in
+  // the table, which is why it sits with the pushes rather than with the evals it names.
+  setAgentCiConfig: "deploy",
+};
+
+/** The agent-level capability a command needs, or undefined for one that is not agent-scoped. */
+export function agentCapabilityFor(cmd: string): AgentCapability | undefined {
+  return Object.prototype.hasOwnProperty.call(COMMAND_AGENT_CAPABILITY, cmd)
+    ? COMMAND_AGENT_CAPABILITY[cmd]
+    : undefined;
+}

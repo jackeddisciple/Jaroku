@@ -98,6 +98,10 @@ import { Planner } from "./planner.ts";
 import { Editor } from "./editor.ts";
 import { scanAgentDirectory } from "./agents.ts";
 import { AgentRepository, nextForkSlug } from "./db/repositories/agents.ts";
+import { AgentGrantRepository } from "./db/repositories/agentGrants.ts";
+import {
+  holds, resolveCapabilities, type AgentCapability,
+} from "./auth/capabilities.ts";
 // The Agents grid's derivations, in their own module because every one of them is a rule that looks
 // obviously right in a screenshot and is wrong in the case nobody had that day — see agentHealth.ts.
 import {
@@ -1177,6 +1181,71 @@ await deployStore.init();
 // and again whenever a generation, an apply or an undo changes what is on disk — those are
 // the only three things that do.
 const agentRepo = new AgentRepository(store.database());
+
+// --- per-agent access ---------------------------------------------------------------------------
+//
+// One repository for the rows and one function that asks the resolver. Nothing here decides
+// anything: `agentAccessRefusalFor` resolves an agent id to a row, hands the pair to
+// `resolveCapabilities`, and turns "no" into the sentence the socket sends. Every decision is in
+// `auth/capabilities.ts`, which is invariant A — the whole feature fails if this file grows an
+// opinion about who may do what.
+const agentGrantRepo = new AgentGrantRepository(store.database());
+
+/**
+ * The agent a command names, whether it named it by uuid or by slug.
+ *
+ * BOTH SPELLINGS ARRIVE ON THE WIRE and that is not a mess to be tidied up here. `loadAgentDetail`
+ * and `explain` carry the uuid — they came from the Agents grid, which has it — and `run`,
+ * `loadAgentFiles` and every GitHub command carry the slug, which is the on-disk directory name and
+ * what the composer has. Both are scoped reads: `byId` and `bySlug` each filter by workspace, so a
+ * miss is genuinely "not in this workspace" rather than "not found globally".
+ *
+ * THE UUID IS TRIED FIRST because it is the one that cannot collide. Slugs are unique per workspace
+ * and uuids are unique everywhere, so a slug that happened to look like a uuid resolving to the
+ * wrong row is a case the ordering removes rather than a case anybody has to think about.
+ */
+async function agentForCommand(ctx: TenantContext, agentId: string) {
+  return (await agentRepo.byId(ctx, agentId).catch(() => undefined))
+    ?? (await agentRepo.bySlug(ctx, agentId).catch(() => undefined));
+}
+
+/**
+ * Whether this person may do this to this agent, as a refusal or null.
+ *
+ * §1.C — ABSENT, NOT FORBIDDEN, and this function is where that convention is enforced for every
+ * agent-scoped command at once. An id belonging to another workspace resolves to no row, and the
+ * sentence it produces is the same one a deleted agent produces and the same one an invented id
+ * produces. Distinguishing them would make this socket an enumeration oracle: "you may not touch
+ * that agent" is a confirmation that it exists, told to the one person who should not be told.
+ *
+ * WHAT IT DOES NOT DO IS CACHE. §5.2 is explicit, and the reason is v0.2.6's bug in another
+ * costume: a socket resolves its workspace role live on every command precisely so a demotion
+ * bites without a reconnect, and a resolved-capability cache would put revocation back on the
+ * clock of whenever a socket happens to be replaced. Two scoped reads per agent-scoped command is
+ * what that costs, both on the primary key.
+ */
+async function agentAccessRefusalFor(
+  ctx: TenantContext,
+  agentId: string,
+  capability: AgentCapability,
+  _cmd: string,
+): Promise<{ message: string; absent: boolean } | null> {
+  const agent = await agentForCommand(ctx, agentId);
+  if (!agent) return { message: `there is no agent "${agentId}" in this workspace`, absent: true };
+
+  const resolved = await resolveCapabilities(ctx, agent.id, agentGrantRepo);
+  if (holds(resolved, capability)) return null;
+
+  // THE SENTENCE NAMES THE CAPABILITY AND NOT A ROLE, unlike every other refusal on this socket.
+  // §13.5's rule is that a refusal has to carry something a person can act on, and for a workspace
+  // capability that is a role — "ask an admin". Here it is not: the thing that would fix this is a
+  // GRANT, made by somebody who administers THIS agent, and telling a person to ask an owner would
+  // send them to the wrong desk in a workspace where an admin holds the agent.
+  return {
+    message: `you do not have "${capability}" on ${agent.slug} — an administrator of this agent can grant it`,
+    absent: false,
+  };
+}
 
 // --- the Activity tab -------------------------------------------------------------------------
 //
@@ -3807,6 +3876,9 @@ const relay = new WsRelay({
   // same object, which is exactly why it would have gone unnoticed until it was not.
   onCommand: (cmd: ForwardedCommand, ctx: TenantContext) => void dispatchCommand(cmd, ctx),
   entitles: (ctx: TenantContext, cmd: string) => entitlementRefusalFor(ctx, cmd),
+  // The per-agent half of the same question — see the option's own doc, and
+  // `agentAccessRefusalFor`, which is the only thing in this file that touches a grant.
+  resolvesAgent: agentAccessRefusalFor,
 });
 
 /**

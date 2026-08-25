@@ -15,9 +15,11 @@ import { join } from "node:path";
 import {
   AGENT_CAPABILITIES,
   CAPABILITIES,
+  COMMAND_AGENT_CAPABILITY,
   COMMAND_CAPABILITY,
   ROLE_AGENT_CAPABILITIES,
   ROLE_CAPABILITIES,
+  agentCapabilityFor,
   agentCeiling,
   holds,
   resolveCapabilities,
@@ -502,6 +504,62 @@ console.log("\nevery command the relay accepts is classified");
   const staleChannels = Object.keys(COMMAND_CHANNEL).filter((c) => !commands.has(c));
   check(staleChannels.length === 0, `no channel entry names a dropped command (${staleChannels.join(", ") || "none"})`);
   check(channelFor("no-such-command") === "log", "an unknown command falls back to `log` — visible, not silent");
+
+  // AND EVERY COMMAND WHOSE MESSAGE NAMES AN AGENT HAS AN AGENT-LEVEL CAPABILITY.
+  //
+  // THE SAME AUDIT AS THE ONE ABOVE, ONE SCOPE DOWN, and it exists for the same failure: a command
+  // added next year carrying an `agentId` would otherwise be gated at the workspace scope alone,
+  // forever, with nothing anywhere saying so. The relay refuses one it cannot classify — loudly,
+  // which is the right behaviour and a terrible thing to discover in production — so this is what
+  // turns that into a build failure instead.
+  //
+  // WHICH COMMANDS THOSE ARE IS READ OUT OF THE RELAY'S OWN TYPES rather than listed here, by the
+  // same argument the command surface above is read rather than remembered: a list maintained by
+  // remembering is a list that is already wrong.
+  {
+    const named = new Set<string>();
+    for (const m of relay.matchAll(/cmd:\s*"(\w+)"/g)) {
+      // The enclosing object literal, found by walking back to its `{` and forward to the match.
+      let open = m.index!;
+      while (open > 0 && relay[open] !== "{") open--;
+      let depth = 0;
+      let close = relay.length;
+      for (let i = open; i < relay.length; i++) {
+        if (relay[i] === "{") depth++;
+        else if (relay[i] === "}" && --depth === 0) { close = i; break; }
+      }
+      if (/\bagentId\??\s*:/.test(relay.slice(open, close))) named.add(m[1]!);
+    }
+    check(named.size > 30, `found the commands that name an agent (${named.size})`);
+    check(named.has("run") && named.has("deploy") && named.has("pushGithub"), "...including the three worth being sure about");
+
+    const ungated = [...named].filter((c) => agentCapabilityFor(c) === undefined);
+    check(
+      ungated.length === 0,
+      `every command naming an agent has an agent-level capability (ungated: ${ungated.join(", ") || "none"})`,
+    );
+
+    // And the other direction. An entry for a command that carries no agent id can never fire —
+    // the relay reads the id off the message — so it is a rule that reads as coverage and is not.
+    const unreachable = Object.keys(COMMAND_AGENT_CAPABILITY).filter((c) => !named.has(c));
+    check(
+      unreachable.length === 0,
+      `no agent-level entry names a command with no agent id (${unreachable.join(", ") || "none does"})`,
+    );
+
+    // AND THE COMMANDS THAT REFERENCE AN AGENT INDIRECTLY ARE STILL OUTSIDE THIS, WHICH IS THE
+    // LIMITATION WRITTEN DOWN. `pauseRun` carries a run id and `applyEdit` a proposal id; both
+    // belong to an agent and neither says which, so the per-agent narrowing does not reach them.
+    // Asserted rather than left implicit, so that the day one of them starts carrying an agent id
+    // this fails and somebody classifies it instead of it silently staying at the coarse gate.
+    for (const indirect of ["pauseRun", "applyEdit", "cancelDeploy", "addExample"]) {
+      check(
+        agentCapabilityFor(indirect) === undefined,
+        `${indirect} is gated at the workspace scope alone — it names no agent`,
+      );
+    }
+    check(agentCapabilityFor("__proto__") === undefined, "and __proto__ is not an entry here either");
+  }
 
   // AND NO COMMAND ON THIS SOCKET WRITES A PROVIDER KEY. Two did, classified `provider:manage`,
   // and a capability is not the gate the Secrets surface is built on: elevation rides on a request

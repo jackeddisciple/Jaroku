@@ -18,7 +18,9 @@ import {
   KEEP_ALIVE_TIMEOUT_MS,
   REQUEST_READ_TIMEOUT_MS,
 } from "./http/security.ts";
-import { can, capabilityFor, roleFor, withArticle } from "./auth/capabilities.ts";
+import {
+  agentCapabilityFor, can, capabilityFor, roleFor, withArticle, type AgentCapability,
+} from "./auth/capabilities.ts";
 
 export type RunCommand = {
   cmd: "run";
@@ -2612,6 +2614,33 @@ export interface RelayOptions {
    * those are testing the socket, not the pricing.
    */
   entitles?: (ctx: TenantContext, cmd: string) => Promise<{ message: string; refusal: unknown } | null>;
+  /**
+   * May this person do this to THIS agent?
+   *
+   * THE SAME PLACE, ONE SCOPE DOWN. `entitles` above answers "has this workspace any left" and
+   * this answers "may this person, here" — and both are asked at the one point every command
+   * already passes through, for the reason that comment gives: a check made at four call sites is
+   * four checks, and the hole is always in the one nobody thought of.
+   *
+   * A CALLBACK RATHER THAN THE RESOLVER ITSELF, exactly as `entitles` is a callback rather than
+   * the entitlement tables: resolving a grant needs a database and this file imports none, which
+   * `test:db-boundary` makes a rule rather than a habit. index.ts supplies it, where the
+   * repositories already are, and what it supplies is a call to `resolveCapabilities` — the one
+   * resolver — and nothing else.
+   *
+   * NULL IS ALLOWED. A refusal carries the sentence to send and whether the agent was ABSENT: a
+   * cross-workspace id must read as "no such agent" and never as "you may not touch that one",
+   * because the second confirms the id exists and turns this into an enumeration oracle.
+   *
+   * Absent means unchecked, which is what a suite standing the relay up on its own wants — those
+   * are testing the socket, not the access model.
+   */
+  resolvesAgent?: (
+    ctx: TenantContext,
+    agentId: string,
+    capability: AgentCapability,
+    cmd: string,
+  ) => Promise<{ message: string; absent: boolean } | null>;
   // Every read takes the asking socket's context, the filesystem-backed ones included: the
   // directory they read is global, so the caller's right to a given agent is a question only
   // the database can answer. Session 3's object store makes the key itself workspace-scoped
@@ -2779,11 +2808,13 @@ export class WsRelay {
   private store: TraceStore;
   private onCommand?: (cmd: ForwardedCommand, ctx: TenantContext) => void;
   private entitles?: (ctx: TenantContext, cmd: string) => Promise<{ message: string; refusal: unknown } | null>;
+  private resolvesAgent?: RelayOptions["resolvesAgent"];
 
   constructor(private opts: RelayOptions) {
     this.store = opts.store;
     this.onCommand = opts.onCommand;
     this.entitles = opts.entitles;
+    this.resolvesAgent = opts.resolvesAgent;
 
     // SLOWLORIS, WHICH IS NOT THE SAME PROBLEM AS A SLOW HANDLER. The router puts a deadline on
     // OUR work; these bound how long somebody else is allowed to take dribbling a request in.
@@ -2906,7 +2937,7 @@ export class WsRelay {
           // It happens here, once, rather than in fifty handlers, and a command with no
           // capability is refused rather than allowed, so a command added without an entry in
           // the matrix fails loudly instead of arriving ungated.
-          void this.authorized(ws, msg.cmd, pending).then((allowed) => {
+          void this.authorized(ws, msg.cmd, pending, msg).then((allowed) => {
             if (allowed) this.dispatch(ws, msg, pending);
           });
         } catch {
@@ -3025,7 +3056,12 @@ export class WsRelay {
    * client that silently gets nothing back cannot tell "you may not" from "the server is
    * broken", and the UI's only honest response to the second is to keep waiting.
    */
-  private async authorized(ws: WebSocket, cmd: string, pending: Promise<TenantContext>): Promise<boolean> {
+  private async authorized(
+    ws: WebSocket,
+    cmd: string,
+    pending: Promise<TenantContext>,
+    msg?: ClientCommand,
+  ): Promise<boolean> {
     let ctx: TenantContext;
     try {
       ctx = await this.contextOf(ws, pending);
@@ -3064,6 +3100,53 @@ export class WsRelay {
         role: roleFor(capability),
       });
       return false;
+    }
+
+    // AND THEN THE AGENT, WHEN THE COMMAND NAMES ONE.
+    //
+    // NOT A THIRD GATE. It is the same question the check above just asked, resolved at the scope
+    // the command is actually about: `resolveCapabilities` begins from the very role that was
+    // consulted two lines up, takes that role's default set as its ceiling, and narrows or widens
+    // within it from the grant. One function, one dispatch point, extended.
+    //
+    // THE COARSE CHECK IS KEPT RATHER THAN REPLACED, which is worth a sentence because the spec's
+    // wording is "replaces". Today the two are equivalent in outcome — the agent-level ceilings are
+    // derived from the same role split as the workspace matrix, so nothing an agent grant can say
+    // would let somebody past a workspace capability they lack. "Equivalent today" is not a
+    // property to rest a permission on: the coarse check is also what refuses an UNCLASSIFIED
+    // command, and it is what produces §13.5's `requires_role` refusal that every panel already
+    // knows how to render. Removing it would trade a sentence a person can act on for a narrower
+    // one that says the same thing, and would make the unclassified branch reachable only for
+    // commands that happen to name an agent.
+    //
+    // AN AGENT ID WITH NO ENTRY IN THE AGENT MATRIX IS REFUSED, not waved through, for the reason
+    // `capabilityFor` refuses one: a command added next year that names an agent and nothing else
+    // would otherwise be gated at the workspace scope alone, forever, with nothing anywhere saying
+    // so. `test:capabilities` asserts the set of such commands is empty, so this is a floor.
+    const agentId = typeof (msg as { agentId?: unknown } | undefined)?.agentId === "string"
+      ? String((msg as { agentId?: unknown }).agentId)
+      : null;
+    if (agentId && this.resolvesAgent) {
+      const capability = agentCapabilityFor(cmd);
+      if (!capability) {
+        console.warn(`[relay] refused "${cmd}", which names an agent and has no agent-level capability`);
+        this.sendTo(ws, {
+          channel: channelFor(cmd),
+          type: "error",
+          message: `"${cmd}" is not a command this server authorises against an agent`,
+        });
+        return false;
+      }
+      const refusal = await this.resolvesAgent(ctx, agentId, capability, cmd);
+      if (refusal) {
+        // NO `reason` AND NO `role` ON THIS ONE, deliberately, and it is the one refusal on this
+        // socket that deliberately tells somebody less. A per-agent refusal cannot name a role to
+        // ask, because the answer is not a role — it is a grant, from an administrator of THAT
+        // agent, and "ask an owner" would send somebody to the wrong person. And where the agent
+        // is absent the sentence must not distinguish "not yours" from "does not exist" at all.
+        this.sendTo(ws, { channel: channelFor(cmd), type: "error", message: refusal.message });
+        return false;
+      }
     }
 
     // AND THEN THE TIER, WHICH IS A DIFFERENT QUESTION FROM THE ROLE. "May this person do this" and
