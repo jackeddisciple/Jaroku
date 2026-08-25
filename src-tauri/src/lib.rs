@@ -99,6 +99,7 @@ pub fn run() {
             secrets::secret_get,
             secrets::secret_set,
             secrets::secret_delete,
+            window::set_window_title,
         ]);
 
     // OFF BY DEFAULT AND BUILT ON PURPOSE. The updater needs a signing key pair to build at all —
@@ -357,6 +358,7 @@ fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         secrets::secret_get,
         secrets::secret_set,
         secrets::secret_delete,
+        window::set_window_title,
         updater::check_for_update,
         updater::install_update,
     ])

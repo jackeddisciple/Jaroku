@@ -998,6 +998,40 @@ export function WorkspacePanel() {
   const open = useUiStore((s) => s.openWorkspacePanel);
   const close = useUiStore((s) => s.closeWorkspacePanel);
   const card = useRef<HTMLDivElement>(null);
+  const workspaces = useSessionStore((s) => s.workspaces);
+  const workspaceId = useSessionStore((s) => s.workspaceId);
+  const kind = workspaces.find((w) => w.id === workspaceId)?.kind ?? null;
+
+  /**
+   * §6.1 and §9.4 — a PERSONAL workspace has no members tab at all.
+   *
+   * THIS REVERSES A DELIBERATE DECISION AND THE REASON IT REVERSES IS §3. The note that used to sit
+   * on the Members entry said it was offered for a personal workspace too, because "hiding the list
+   * would make 'invite somebody' undiscoverable in the only workspace most accounts have" — which
+   * was correct when the only workspace most accounts had was the one `provisionUser` made, and
+   * nothing in the product could make another. §3 changed that: "+ Create workspace" is two clicks
+   * from every screen now, so the answer to "how do I invite a colleague" is a team workspace
+   * rather than a members list on a workspace whose whole definition is that it is just you.
+   *
+   * ABSENT, NOT DISABLED — §6.1 says so in the same words §8 uses everywhere else.
+   *
+   * AUDIT STAYS. §9.4 names three things that must not appear in a personal workspace — the
+   * members panel, the Threads author column, role badges — and the audit log is none of them: it
+   * records exports, deletions, credential reveals and push overrides, every one of which happens
+   * in a personal workspace and every one of which somebody may need to look up afterwards.
+   */
+  const sections = SECTIONS.filter((s) => s.id !== "members" || kind !== "personal");
+
+  /**
+   * The section actually rendered, which is not always the one that was asked for.
+   *
+   * A CALLER NAMES A SECTION AND THE PANEL DECIDES WHETHER IT EXISTS. Every entry point passes a
+   * section — that is the whole reason `workspaceSection` is a store field rather than local state
+   * — and one of them, the switcher's settings row, has no way to know whether this workspace has
+   * a members list. Resolving here means a personal workspace opens on something real instead of
+   * on a tab that is not in the strip above it.
+   */
+  const shown = sections.some((s) => s.id === section) ? section : sections[0]?.id ?? null;
 
   useEffect(() => {
     if (!section) return;
@@ -1026,12 +1060,12 @@ export function WorkspacePanel() {
         <div className="flex shrink-0 items-center gap-1 border-b border-hair px-4 py-2.5">
           <span className={TYPE.panelLabel}>Workspace</span>
           <div className="ml-3 flex items-center gap-1">
-            {SECTIONS.map((s) => (
+            {sections.map((s) => (
               <button
                 key={s.id}
                 onClick={() => open(s.id)}
                 className={`rounded-control px-2.5 py-1 text-[12px] transition-colors ${
-                  section === s.id ? "bg-active text-ink" : "text-muted hover:text-ink"
+                  shown === s.id ? "bg-active text-ink" : "text-muted hover:text-ink"
                 }`}
               >
                 {s.label}
@@ -1047,10 +1081,10 @@ export function WorkspacePanel() {
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3.5">
-          {section === "data" ? <DataSection />
-            : section === "audit" ? <AuditSection />
-            : section === "billing" ? <BillingSection />
-            : section === "account" ? <AccountSection />
+          {shown === "data" ? <DataSection />
+            : shown === "audit" ? <AuditSection />
+            : shown === "billing" ? <BillingSection />
+            : shown === "account" ? <AccountSection />
             : <MembersSection />}
         </div>
       </div>

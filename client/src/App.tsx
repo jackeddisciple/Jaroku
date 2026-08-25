@@ -16,6 +16,7 @@ import { AdminModeBanner } from "./components/AdminModeBanner.tsx";
 import { EnforcementStrip } from "./components/EnforcementStrip.tsx";
 import { WorkspacePanel } from "./components/WorkspacePanel.tsx";
 import { WorkspaceSwitchLock } from "./components/WorkspaceSwitchLock.tsx";
+import { setWindowTitle } from "./lib/windowTitle.ts";
 import { RoleRefusal } from "./components/RoleRefusal.tsx";
 import { InviteNotice } from "./components/InviteNotice.tsx";
 import { redeemPendingInvite } from "./lib/invite.ts";
@@ -82,6 +83,22 @@ export function App() {
   // Whether this account still has to say what to call it. Null rather than empty: the server
   // stores a trimmed non-empty string or nothing at all, so there is no third state to consider.
   const needsName = useSessionStore((s) => s.user !== null && s.user.displayName === null);
+
+  /**
+   * §9.2 — the workspace's name on the window, updated whenever it changes.
+   *
+   * HERE RATHER THAN IN `switchWorkspace`, and that is the decision. A switch is not the only way
+   * this name moves: a rename arrives on a broadcast, the session refreshes on every reconnect,
+   * and the very first name arrives when hydration lands rather than when anybody switched. Hung
+   * off the value it renders, the title is correct in all four cases and cannot be forgotten by a
+   * fifth; hung off the switch, it would be right exactly once per switch and stale otherwise.
+   */
+  const workspaceName = useSessionStore(
+    (s) => s.workspaces.find((w) => w.id === s.workspaceId)?.name ?? null,
+  );
+  useEffect(() => {
+    setWindowTitle(workspaceName);
+  }, [workspaceName]);
 
   // §5.3s resume point, read off the session once it lands. A hook rather than an effect inside
   // `AccountOnboarding`, because the store has to hydrate whether or not the flow is on screen —

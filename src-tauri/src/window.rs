@@ -51,6 +51,32 @@ pub fn focus_existing(app: &AppHandle) {
     let _ = main.set_focus();
 }
 
+/// §9.2 — put the workspace's name in the window title.
+///
+/// WHY THE SHELL OWNS THE TITLE AT ALL, when the page could set `document.title` and be done. In a
+/// browser those are the same thing; in a WebViewgnat they are not — the native window has a title of
+/// its own, set at creation, and nothing the page writes reaches it. What Alt-Tab, the taskbar and
+/// a window list show is the native one.
+///
+/// THROUGH `invoke` RATHER THAN `@tauri-apps/api/window`, which is the invariant `docs/tauri.md`
+/// states by name: the client reaches the shell through `__TAURI__.core.invoke` and nothing else,
+/// so the number of modules that know they are inside Tauri stays at three and neither
+/// `package.json` grows a dependency on it. It also means the capability file grants one command
+/// rather than a window-permission group.
+///
+/// IT CLAMPS AND FALLS BACK RATHER THAN REFUSING. A workspace name is 1-64 characters by the time
+/// the server has stored one, so the clamp is belt-and-braces — but this string comes from the page
+/// and the failure of a bad one is a window with no title at all, which reads as a broken build.
+/// An empty name yields the product's own name, which is what the window opened with.
+#[tauri::command]
+pub fn set_window_title(app: AppHandle, name: Option<String>) {
+    let Some(main) = app.get_webview_window(MAIN) else { return };
+    let trimmed = name.unwrap_or_default().trim().chars().take(64).collect::<String>();
+    // An em dash rather than a hyphen: the two halves are a product and a place, not a compound.
+    let title = if trimmed.is_empty() { "Jaroku".to_string() } else { format!("Jaroku — {trimmed}") };
+    let _ = main.set_title(&title);
+}
+
 /// The script that runs before the bundle does.
 ///
 /// IT SETS ONE FIELD AND IT IS FROZEN. A host configuration object that the page can rewrite is
