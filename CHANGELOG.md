@@ -8,6 +8,130 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.3.6 : Three New Connectors — Google Calendar, Stripe (Read-Only), HTTP/Webhook
+
+Six connectors instead of three. Calendar pairs with Gmail and unlocks the scheduling agent;
+Stripe pairs with Postgres for the support agent the README already describes; HTTP is not really
+a connector at all but an escape hatch for the long tail of APIs nobody will write a connector for.
+
+One rule governs all three, and it is ADR-014's: **a connector's safety posture has to be a
+property of the file, not a promise about it.** Every posture in this release is therefore
+something a suite can fail on. Stripe is read-only because `test:connector-stripe` walks the
+template's syntax tree and refuses any SDK call that is not `retrieve`, `list` or `search` — the
+way that guarantee stops being true is a seventh tool, which does not exist to be called until
+somebody has written it. The HTTP connector's refusals are counted rather than read, because a
+message saying "refused" while a socket was opened passes a text check. And Calendar cannot delete
+anything because there is no delete call in the file and no scope that would permit one.
+
+### Added
+
+- **Google Calendar, as a second Google connection rather than a wider Gmail one.**
+  `gcal_list_events`, `gcal_get_event`, `gcal_create_event`, `gcal_update_event`. Merging the two
+  behind one grant would have saved a click and cost the thing people actually want: one grant is
+  one revocation, so somebody stopping an agent from reading their mail would lose their
+  scheduling assistant with it. Two connections, two `GCAL_` names, independent revocation. The
+  scope asked for is `calendar.events` and not `calendar` — the wide one grants creating, deleting
+  and sharing *calendars*, which no tool here does, and it is what the consent screen would say.
+- **No `gcal_delete_event`, and that is the posture rather than an omission.** Gmail drafts and
+  never sends; Calendar creates and updates and never deletes. Writes are already irreversible in
+  the sense that matters — an invitation cannot be unsent — so the tool docstrings say so where
+  the model reads them, and the update tool reports the guest list it is about to replace, because
+  passing `attendees` replaces the whole list and everybody omitted is uninvited.
+- **Stripe, read-only, enforced twice and proven from the file.** Six tools, all `retrieve`, `list`
+  or `search`. Returned fields are an **allowlist** rather than a denylist — a rule that only knows
+  what to remove admits whatever the API grows next — and nothing is `expand`ed, so a card number
+  is not something to be careful with here but something the template cannot ask for. Amounts are
+  reported as the integer Stripe means: dividing by a hundred is right for most of the world and
+  wrong by a factor of a hundred for Japan, in a number an agent is about to quote to a customer.
+- **"Use a restricted key" became enforcement instead of advice.** The second layer of the
+  read-only posture is Stripe's to enforce and ours to insist on, and until now it was a sentence
+  in a catalog description, which is not a layer. A full-access `sk_live_` key is now refused at
+  save — on every write path, including a pasted `.env`, because the rule hangs off the vault's
+  `store` rather than off a form — with a message naming the `rk_` key to create instead.
+- **The HTTP connector, whose allowlist *is* the connector.** HTTPS only; exact hostnames with no
+  wildcards, because the domain anybody would want one on is a shared platform and a wildcard
+  there grants every tenant of it; credential-in-URL refused before anything is sent and never
+  quoted back into a stored trace; response capped at 256 KB; `Set-Cookie` and `Authorization`
+  stripped on the way back, after filtering rather than before capping, so a server cannot push
+  them out of view behind forty of its own.
+- **Addresses are pinned, which is the rule the others depend on.** Checking a hostname and then
+  handing that hostname to urllib is a check that proves nothing: a name can answer publicly for
+  the millisecond the check looks and `169.254.169.254` for the millisecond the socket connects.
+  The name is resolved once, **every** answer is checked — not the first, because a round-robin
+  resolver could hand out the dangerous one next — and the socket is dialled at a literal address
+  while TLS still validates the certificate against the name.
+- **A redirect is reported and never followed**, even to another allowed host. It is the one thing
+  a server at an approved address controls completely, and following it hands the choice of
+  destination to whoever answered, which is how an allowlist becomes advisory. The report says
+  whether the target would pass, so an agent can ask for it directly and go through every check
+  again.
+- **`HTTP_ALLOWED_DOMAINS` became per-run egress**, the way `DATABASE_URL` already was: parsed and
+  normalised at save, resolved fresh and **pinned** at policy-build time, and refused **per domain
+  rather than per run** — one entry since repointed at a private address contributes no rule and is
+  logged while the other three still work, which is the judgement `mcpEgressRules` already makes.
+- **Postgres, Stripe and HTTP now appear in the Connections tab.** Three of six connectors were
+  missing from the one screen named for connections, and the answer was to open the Secrets tab and
+  type a variable name from memory. They are the same rows, ending in fields instead of a Connect
+  button. The value still goes over the elevation-gated `POST /v1/secrets` and never the socket,
+  because a WebSocket frame cannot carry an elevation header — and the allowlist, which is a policy
+  rather than a credential, can be read back through the existing reveal route, because a list
+  retyped from memory is how a domain silently drops off it.
+- **Marks for Calendar and Stripe, and a suite for the table that assigns them.** That mapper runs
+  on every tool path including the bespoke ones a model names, so its real inputs are
+  `mail_to_calendar.py` and `stripe_api_client.py` — and a wrong order there is not a crash or a
+  blank square but a Gmail envelope on the calendar tool of the one workspace that has both.
+
+### Fixed
+
+- **The connector catalog's own two verifications had never been run by anything.** The README,
+  ADR-014 and CONTRIBUTING all tell a contributor to run `check_catalog()`, and between them no
+  workflow, script or npm target invoked it — so a catalog entry naming a file that is not there, a
+  `required_env` disagreeing with its module, or a `pip_requires` outside the `connectors` extra
+  could each have merged on the word of whoever last typed it into a REPL. A third CI job now runs
+  both it and `check_failures_raise()`.
+- **The Python private-range refusal had a hole where the standard library used to be.** Delegating
+  to `ipaddress`'s own predicates was tried first: `100.64.0.0/10` — carrier-grade NAT, where a
+  mobile network or a cloud NAT gateway puts real infrastructure — is **not** `is_private` in
+  Python 3.12, having been in that table in earlier versions. The blocks are now named, entry for
+  entry with `egressPolicy.ts`, with the predicates kept as a supplement.
+
+### Migrations
+
+**None.** These connectors are files and a catalog entry, not tables: `oauth_connections` already
+handles Calendar, and Stripe and HTTP use the existing `SecretStore` under their own names.
+`schema/events.md` stays at `schema_version: 1` — an HTTP call is an ordinary `tool_call` step.
+
+### Verified
+
+- Fifteen commits, each pushed to `origin/main` on its own and each left with CI green before the
+  next. Five new suites, all wired into `ci.yml` rather than left in `package.json` alone:
+  `test:connector-catalog`, `test:connector-gcal`, `test:connector-stripe`, `test:connector-http`,
+  `test:egress-connectors`, `test:graph-icons`.
+- **A third CI job**, because the connector templates are Python and this workflow had only ever
+  run TypeScript. It needs no services and no `--extra connectors`: every suite fakes its SDK into
+  `sys.modules` before the template's lazy import, which is both why it is fast and why it can
+  assert what a template *sends* rather than only that it did not crash.
+- **The two private-range block lists are held to each other by reading the other language's
+  source.** The rule is written twice on purpose — the control plane cannot check a request the
+  sandbox originates and the sandbox cannot call TypeScript — so drift is the only way it fails,
+  and drift is what `test:egress-connectors` tests, in both directions.
+- Every scanner in `test:connector-stripe` is re-run against snippets that violate it, because a
+  check nobody has watched refuse anything might be stuck at true.
+
+### Still owed
+
+- **No wildcard domains** on the HTTP connector. `*.example.com` is refused and will stay refused
+  until there is a model that does not amount to granting a whole shared platform. A future version
+  could add path prefixes, which is the narrowing people actually want.
+- **No `http_webhook_listen`.** A hosted run's sandbox is outbound-only and its egress policy has
+  no concept of accepting a connection, so the tool would work on a laptop and raise everywhere the
+  product actually runs — present in the prompt, selected by a model, failing at the point of use.
+  Shipped as one tool rather than one-and-a-half.
+- **No incremental OAuth scope consent.** Gmail and Calendar are separate Google connections, which
+  is the safer arrangement and is documented as the decision rather than the shortcut.
+
+---
+
 ## v0.3.5 : The Composer & Generation Panel — Telling the Model More, and Saying What Happened
 
 The right panel inspects; the middle panel acts, and this release is the middle panel. Everything
