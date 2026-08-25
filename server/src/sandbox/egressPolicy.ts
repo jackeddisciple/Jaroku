@@ -59,6 +59,11 @@ const CONNECTOR_HOSTS: Record<string, string[]> = {
   // lose the ability to say WHICH connector needed it.
   google_calendar: ["www.googleapis.com", "oauth2.googleapis.com"],
   slack: ["slack.com"],
+  // One host, and no OAuth endpoint beside it: Stripe authenticates with a bearer token on the
+  // API host itself, so there is no second exchange to reach. `files.stripe.com` is deliberately
+  // absent — nothing in the template downloads a file, and a host granted "in case" is a host
+  // model-written code can reach for reasons nobody reviewed.
+  stripe: ["api.stripe.com"],
 };
 
 /**

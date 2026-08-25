@@ -21,6 +21,12 @@ connectors = [
     "google-auth>=2.23.0",
     "slack-sdk>=3.26.0",
     "psycopg[binary]>=3.1.0",
+    # Stripe's own SDK, for the read-only connector. Pinned at 7 as a floor rather than a ceiling
+    # because that is the release where the resource classes settled on `retrieve`/`list`/`search`
+    # as the method names the template is allowed to call — and the suite scans the template's
+    # source for any other name, so a version whose spelling differed would fail loudly here
+    # rather than quietly at a customer's account.
+    "stripe>=7.0.0",
     # The MCP client used by tool_templates/mcp_bridge.py. Same discipline as the others:
     # lazy-imported, so the base install and the dry-run path never depend on it.
     "mcp>=1.9.0",

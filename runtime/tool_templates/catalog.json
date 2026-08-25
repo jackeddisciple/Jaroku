@@ -86,6 +86,33 @@
       ]
     },
     {
+      "id": "stripe",
+      "label": "Stripe (Read-Only)",
+      "file": "stripe_connector.py",
+      "module": "stripe_connector",
+      "description": "Look up customers, payments, invoices and balances. Read-only: no charges, refunds, or mutations of any kind. Use a Stripe RESTRICTED key with read permissions only.",
+      "required_env": ["STRIPE_SECRET_KEY"],
+      "auth": "user_secret",
+      "pip_requires": ["stripe>=7.0.0"],
+      "tools": [
+        {
+          "name": "stripe_get_customer",
+          "signature": "stripe_get_customer(customer_id: str = '', email: str = '') -> str",
+          "summary": "Look up one customer by id or by email. Returns id, email, name, creation time and metadata — never payment methods or card details."
+        },
+        {
+          "name": "stripe_list_payments",
+          "signature": "stripe_list_payments(customer_id: str, limit: int = 10) -> str",
+          "summary": "List a customer's recent payment intents, newest first, capped at 100. Amounts are in the smallest currency unit."
+        },
+        {
+          "name": "stripe_get_payment",
+          "signature": "stripe_get_payment(payment_intent_id: str) -> str",
+          "summary": "Get one payment intent by id, including why it failed if it did. Never the card or bank details behind it."
+        }
+      ]
+    },
+    {
       "id": "postgres",
       "label": "Postgres",
       "file": "postgres.py",
