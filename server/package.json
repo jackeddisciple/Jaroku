@@ -144,6 +144,7 @@
     "test:oauth-revoke": "tsx src/oauth/revoke.test.ts",
     "test:connector-auth": "tsx src/connectorAuth.test.ts",
     "test:connector-secrets": "tsx src/connectorSecrets.test.ts",
+    "test:connector-catalog": "uv run --directory ../runtime python -m tool_templates.tests.catalog",
     "test:providers": "tsx src/providers.test.ts",
     "test:deploy-artifacts": "tsx src/deployArtifacts.test.ts",
     "test:deploy-secrets": "tsx src/deploySecrets.test.ts",

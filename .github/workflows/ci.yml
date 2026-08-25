@@ -851,3 +851,30 @@ jobs:
           # is also the natural thing to write, so the suite checks every combination of
           # absences rather than the three the spec happens to name.
           npm run test:turn-metadata
+
+  # THE PYTHON SIDE, WHICH THIS FILE HAS NEVER RUN. Two jobs above it check the two halves
+  # written in TypeScript; the connector templates are Python, and the two verifications built to
+  # guard them — `check_catalog()` and `check_failures_raise()` — are invoked by no workflow, no
+  # script and no npm target. The README tells a contributor to run the first "when adding a
+  # connector", ADR-014 repeats it, and CONTRIBUTING describes what it refuses. Three documents
+  # describing a check that ran when somebody remembered, which is to say on the days it was least
+  # needed — the same gap the two comments in the server job are already about.
+  #
+  # NO SERVICES AND NO EXTRAS. Every suite here fakes its SDK into `sys.modules` before the
+  # template's lazy import runs, so the base install is enough and nothing reaches a network. That
+  # is not only speed: a suite that needed `--extra connectors` would be a suite that skips on the
+  # machines least likely to be checking, and one that needed a real Stripe key could not run here
+  # at all.
+  runtime:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: runtime/uv.lock
+      - name: the connector catalog's own verifications
+        run: npm run test:connector-catalog
