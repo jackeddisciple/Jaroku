@@ -22,10 +22,12 @@
 import { useEffect, useState } from "react";
 import { CollapsibleRegion } from "./CollapsibleRegion.tsx";
 import { AccessPeople } from "./AccessPeople.tsx";
+import { GrantDialog } from "./GrantDialog.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { AlertTriangleIcon, LockIcon } from "./panelIcons.tsx";
-import { sendLoadAccess } from "../lib/socket.ts";
-import { STATUS } from "../lib/tokens.ts";
+import { quietBtn } from "./buttons.ts";
+import { sendLoadAccess, sendRevokeGrant } from "../lib/socket.ts";
+import { STATUS, TYPE } from "../lib/tokens.ts";
 import { accessFor, useAccessStore, type AccessPerson } from "../store/accessStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { useCapability } from "../lib/useCapability.ts";
@@ -67,9 +69,20 @@ export function AccessPanel({ detail }: { detail: AgentDetailView }) {
   const [open, setOpen] = useState<Record<string, boolean>>({ people: true });
   const toggle = (id: string): void => setOpen((o) => ({ ...o, [id]: !o[id] }));
 
-  const onGrant = (): void => undefined;
-  const onEdit = (_person: AccessPerson): void => undefined;
-  const onRevoke = (_person: AccessPerson): void => undefined;
+  /**
+   * The dialog, in three states rather than two booleans.
+   *
+   * `null` is closed, `{ editing: null }` is a new grant, `{ editing: person }` is §11.2's
+   * pre-populated edit. One value rather than an `open` flag plus a `subject`, because those two
+   * can disagree — an open dialog with a stale subject is how somebody edits the wrong person's
+   * grant, and it is invisible in review because both fields look correct on their own.
+   */
+  const [dialog, setDialog] = useState<{ editing: AccessPerson | null } | null>(null);
+  const [confirmRevoke, setConfirmRevoke] = useState<AccessPerson | null>(null);
+
+  const onGrant = (): void => setDialog({ editing: null });
+  const onEdit = (person: AccessPerson): void => setDialog({ editing: person });
+  const onRevoke = (person: AccessPerson): void => setConfirmRevoke(person);
 
   if (!access) {
     return loading ? (
@@ -136,6 +149,107 @@ export function AccessPanel({ detail }: { detail: AgentDetailView }) {
       >
         <AccessPeople access={access} canAdmin={canAdmin} onGrant={onGrant} onEdit={onEdit} onRevoke={onRevoke} />
       </CollapsibleRegion>
+
+      {dialog && (
+        <GrantDialog
+          agentId={access.agentId}
+          agentSlug={access.agentSlug}
+          editing={dialog.editing}
+          // §11.1 — "workspace members who don't already have a per-agent grant". Offering somebody
+          // who already has one would turn a Grant into a silent overwrite of a grant somebody else
+          // wrote, with no record on this screen that it existed. Editing is how that is changed,
+          // and it is reached from their row.
+          candidates={
+            dialog.editing
+              ? access.people.filter((p) => p.user_id === dialog.editing?.user_id)
+              : access.people.filter((p) => p.provenance === "role")
+          }
+          onClose={() => setDialog(null)}
+        />
+      )}
+
+      {confirmRevoke && (
+        <RevokeDialog
+          person={confirmRevoke}
+          agentSlug={access.agentSlug}
+          onCancel={() => setConfirmRevoke(null)}
+          onConfirm={() => {
+            sendRevokeGrant(access.agentId, confirmRevoke.user_id);
+            setConfirmRevoke(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * §11.3 — revoking, and saying what it will actually do.
+ *
+ * THE CONSEQUENCE IS IN THE BODY, NOT THE TITLE. §17 asks for that on every destructive action here
+ * and it is not a formality: "Revoke access?" is a question somebody answers from the button they
+ * pressed, and the thing they need to know is what happens to a colleague who is using the agent
+ * right now. So the body names them, says whether they are connected, and says when it takes
+ * effect — on their NEXT command, because a command already in flight is allowed to finish (§5.2:
+ * killing a half-completed publish to enforce a permission change trades a small authorisation
+ * window for a corrupted agent).
+ *
+ * AND IT SAYS WHAT REVOKING LEAVES BEHIND. A grant is not somebody's whole access — revoking it
+ * drops them back to their workspace role, which may still be quite a lot. An admin who thinks
+ * this removes a person from the agent and finds them still able to run it has been misled by a
+ * dialog, not by the feature.
+ */
+function RevokeDialog({
+  person,
+  agentSlug,
+  onCancel,
+  onConfirm,
+}: {
+  person: AccessPerson;
+  agentSlug: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const who = person.display_name || person.email;
+  const fallback = person.role
+    ? `They keep whatever their ${person.role} role gives them on this agent.`
+    : "They are no longer in this workspace, so this removes a grant that already resolves to nothing.";
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Revoke ${who}'s grant on ${agentSlug}`}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4"
+    >
+      <div className="w-full max-w-md rounded-modal border border-edge bg-elevated p-4 shadow-overlay">
+        <div className={TYPE.sectionLabel}>Revoke access</div>
+        <p className="mt-2 text-caption leading-[1.55] text-ink">
+          Revoke <span className="text-ink">{who}</span>&apos;s grant on{" "}
+          <span className="text-ink">{agentSlug}</span>?
+        </p>
+        {/* §11.3 — when somebody is connected, the confirmation states the consequence rather than
+            leaving an admin to wonder whether a live session is unaffected. It is not: the next
+            command that session sends re-resolves and is refused. */}
+        {person.live && (
+          <p className="mt-1.5 text-tiny leading-[1.55]" style={{ color: STATUS.pending }}>
+            {who} is connected right now. Revoking ends their granted access on their next command —
+            anything already running finishes.
+          </p>
+        )}
+        <p className="mt-1.5 text-tiny leading-[1.55] text-muted">{fallback}</p>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            onClick={onConfirm}
+            className="rounded-control border border-err/40 bg-err/10 px-3 py-1.5 text-caption text-err transition-colors hover:bg-err/20"
+          >
+            Revoke
+          </button>
+          <button onClick={onCancel} className={quietBtn}>
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -71,6 +71,7 @@ export function CheckboxField({
   onChange,
   disabled = false,
   title,
+  describedBy,
   align = "center",
   children,
 }: {
@@ -80,6 +81,15 @@ export function CheckboxField({
   title?: string;
   /** `start` when the sentence wraps to more than one line. */
   align?: "center" | "start";
+  /**
+   * The id of an element carrying the REASON this box is disabled.
+   *
+   * §17 asks for exactly this on the grant dialog's out-of-ceiling capabilities, and the reason it
+   * is not a `title` is that a title is unreachable by keyboard — which is precisely how somebody
+   * arrives at a control they cannot use and cannot find out why. A disabled control with no
+   * announced reason is a dead end; one pointing at a sentence is a dead end that names its exit.
+   */
+  describedBy?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -87,6 +97,7 @@ export function CheckboxField({
       type="button"
       role="checkbox"
       aria-checked={checked}
+      aria-describedby={describedBy}
       title={title}
       disabled={disabled}
       onClick={onChange}

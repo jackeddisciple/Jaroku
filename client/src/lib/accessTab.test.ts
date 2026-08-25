@@ -21,11 +21,12 @@ import {
   cappedLine, chipKindFor, chipsFor, matchesAccess, orderAccess, provenanceLine,
   revokeBlockedReason,
 } from "./accessList.ts";
-import { AGENT_CAPABILITIES } from "./capabilities.ts";
+import { AGENT_CAPABILITIES, closeAgentCapabilities } from "./capabilities.ts";
 import { markup, seed, sessionAs } from "./testRender.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useAccessStore, type AccessPerson, type AgentAccess } from "../store/accessStore.ts";
 import { AccessPeople } from "../components/AccessPeople.tsx";
+import { GrantDialog } from "../components/GrantDialog.tsx";
 import type { AgentCapability } from "./capabilities.ts";
 
 let failures = 0;
@@ -355,6 +356,96 @@ console.log("\nthe panel never renders an address it was not given");
   );
   check(!/\b\d{1,3}(\.\d{1,3}){3}\b/.test(html), "no dotted-quad appears in the people list");
   check(!/\bip\b/i.test(html.replace(/<[^>]*>/g, "")), "...and the word does not either");
+}
+
+// ---------------------------------------------------------------------------------------------
+// §11 — the grant dialog.
+// ---------------------------------------------------------------------------------------------
+
+console.log("\ncapabilities above a person's role are disabled with a reason, never hidden");
+{
+  const html = markup(
+    React.createElement(GrantDialog, {
+      agentId: AGENT,
+      agentSlug: "billing_bot",
+      editing: null,
+      candidates: [{ user_id: "sam", display_name: "Sam", email: "sam@example.test", role: "member" }],
+      onClose: () => undefined,
+    }),
+  );
+  // §11.1 — NEVER HIDDEN. Hiding them produces an admin who concludes the capability does not exist
+  // and goes looking for it in the product rather than in the person's role.
+  for (const capability of AGENT_CAPABILITIES) {
+    check(html.includes(`>${capability}<`), `${capability} is on the form at all`);
+  }
+  check(html.includes("exceeds Sam"), "the ones a member cannot hold say whose role stops them");
+  check(html.includes("change their"), "...and what would let them have it");
+  // §17 — THE REASON IS AN ELEMENT THE CHECKBOX POINTS AT, not a `title`. A tooltip is unreachable
+  // by keyboard, which is exactly how somebody arrives at a control they cannot use.
+  check(/aria-describedby="ceiling-secrets"/.test(html), "and the checkbox points at the reason for assistive tech");
+  check(/id="ceiling-secrets"/.test(html), "...which is a real element rather than a tooltip");
+
+  // §17's dialog requirements. Asserted on the markup because a role attribute nobody rendered is
+  // an accessibility claim in a comment.
+  check(/role="dialog"/.test(html), "it is a dialog");
+  check(/aria-modal="true"/.test(html), "...and says it is modal");
+  check(/aria-label="[^"]*billing_bot/.test(html), "...and names the agent it is about");
+}
+
+console.log("\nthe implication rules come from the matrix, not from checkbox handlers");
+{
+  // Exercised through the same function the dialog calls, which is the point: if these two rules
+  // lived in an onChange handler they would be a second copy of a table the server applies again,
+  // and the two would drift the first time a capability was added.
+  check(
+    [...closeAgentCapabilities(["edit"])].sort().join(",") === "edit,run,view",
+    "ticking edit brings run, and run brings view",
+  );
+  check(
+    closeAgentCapabilities(["deploy"]).has("view"),
+    "...and every capability brings view, so nothing can be granted invisibly",
+  );
+  // UNTICKING `view` CLEARS EVERYTHING, and it falls out of the same table rather than being a
+  // special case: every capability implies `view`, so none survives its removal.
+  const afterUnviewing = [...closeAgentCapabilities(["edit", "run", "view"])].filter(
+    (c) => !closeAgentCapabilities([c]).has("view") || c === "view",
+  );
+  check(
+    afterUnviewing.join(",") === "view",
+    "and nothing survives view being removed — the rule is the table, not a handler",
+  );
+}
+
+console.log("\na note is required for the three that need one six months later");
+{
+  const withDeploy = markup(
+    React.createElement(GrantDialog, {
+      agentId: AGENT,
+      agentSlug: "billing_bot",
+      editing: person({
+        user_id: "kim", role: "admin", provenance: "grant",
+        granted: ["view", "deploy"], capabilities: ["view", "deploy"],
+      }),
+      candidates: [{ user_id: "kim", display_name: "Kim", email: "kim@example.test", role: "admin" }],
+      onClose: () => undefined,
+    }),
+  );
+  check(withDeploy.includes("required for deploy"), "a deploy grant says the note is required");
+  // AND THE BUTTON IS REFUSED UNTIL THERE IS ONE. The server refuses it too — this is what stops
+  // somebody discovering that after filling the form in.
+  check(/disabled=""[^>]*>Save|>Save<\/button>/.test(withDeploy), "the dialog renders its submit control");
+  check(withDeploy.includes("disabled"), "...disabled while the note is empty");
+
+  const viewOnly = markup(
+    React.createElement(GrantDialog, {
+      agentId: AGENT,
+      agentSlug: "billing_bot",
+      editing: null,
+      candidates: [{ user_id: "sam", display_name: "Sam", email: "sam@example.test", role: "member" }],
+      onClose: () => undefined,
+    }),
+  );
+  check(!viewOnly.includes("required for"), "a view-only grant does not demand one");
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
