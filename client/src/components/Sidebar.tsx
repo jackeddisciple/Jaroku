@@ -12,7 +12,7 @@ import { agentStatus, type AgentStatus } from "../lib/agentStatus.ts";
 import { ProviderMark } from "../lib/icons.tsx";
 import { selectAgent, selectRun } from "../lib/selection.ts";
 import {
-  sendArchiveAgent, sendLoadHistory, sendLoadRun, sendRenameAgent, sendRestoreAgent,
+  sendArchiveAgent, sendLoadHistory, sendLoadRun, sendRenameAgent, sendRestoreAgent, signOut,
 } from "../lib/socket.ts";
 import { ICON, SURFACE, TYPE } from "../lib/tokens.ts";
 import { quietBtn, secondaryBtn } from "./buttons.ts";
@@ -29,7 +29,7 @@ import { StatusDot } from "./StatusBadge.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { ArchiveRestoreIcon, FilterIcon } from "./agentIcons.tsx";
 import {
-  ActivityIcon, CheckIcon, GitForkIcon, GlobeIcon, HashIcon, InboxIcon, RocketIcon,
+  ActivityIcon, CheckIcon, GitForkIcon, GlobeIcon, HashIcon, InboxIcon, LogOutIcon, RocketIcon,
   LoaderIcon, PauseIcon, PencilIcon, PlusIcon, SearchIcon, SettingsIcon, SparklesIcon, XIcon,
 } from "./panelIcons.tsx";
 
@@ -474,22 +474,43 @@ function AccountRow() {
 
   return (
     <div>
+      {/* TWO CONTROLS, NOT ONE BUTTON WITH A SECOND INSIDE IT. Nesting is invalid markup and the
+          browser's own recovery from it is to flatten — which is how a "sign out" glyph inside a
+          row ends up firing the row's own click as well. */}
+      <div className="flex items-center gap-1">
       <button
-        onClick={() => openWorkspacePanel("members")}
+        // YOUR OWN NAME OPENS YOUR OWN ACCOUNT, which it did not: it opened the Members list,
+        // because that was the only door the workspace panel had. §10.1 gave the workspace a door
+        // of its own — the switcher's settings row — so this one can be what it looks like.
+        onClick={() => openWorkspacePanel("account")}
         title={`${user.email}${workspace ? ` — ${workspace.role} of ${workspace.name}` : ""}`}
-        className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-active active:bg-chrome"
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-active active:bg-chrome"
       >
         {/* The first letter of whoever is actually here, uppercased. */}
-        <span className="flex h-5 w-5 items-center justify-center rounded-control bg-active text-[11px] text-ink">
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-active text-[11px] text-ink">
           {(name ?? "?").trim().charAt(0).toUpperCase()}
         </span>
-        <Truncate className="text-[12px] text-ink" title={name}>{name}</Truncate>
+        <Truncate className="min-w-0 flex-1 text-[12px] text-ink" title={name}>{name}</Truncate>
         {/* Only when the session carries one. A chip is a claim about what the workspace is paying,
             and inventing a default for it is how the hardcoded `Free` got there in the first place. */}
         {workspace?.plan?.label && (
-          <Chip caps size="sm" tone="faint" className="ml-auto shrink-0">{workspace.plan.label}</Chip>
+          <Chip caps size="sm" tone="faint" className="shrink-0">{workspace.plan.label}</Chip>
         )}
       </button>
+      {/* SIGN OUT LIVES WITH THE PERSON, not in the workspace switcher, and moving it here is what
+          §2.2's list of dropdown contents implies rather than a tidy-up. Ending a session is not a
+          thing you do to a workspace — it is the same act whichever one you are in, and a menu
+          whose subject is "which tenant am I acting in" ending with "leave entirely" put the one
+          irreversible-feeling row at the bottom of the one menu people open to switch. */}
+      <button
+        onClick={signOut}
+        title="Sign out"
+        aria-label="Sign out"
+        className="shrink-0 rounded-control p-1.5 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+      >
+        <LogOutIcon size={ICON.sm} />
+      </button>
+      </div>
       {/* RENDERED ONLY FOR AN ADMIN, and `AdminModeToggle` itself returns null otherwise — so for
           everybody else there is no element, no comment and nothing in view-source suggesting the
           mode exists. Absent rather than hidden, which is the specification's own instruction and

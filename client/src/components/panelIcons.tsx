@@ -395,6 +395,18 @@ export function UsersIcon(p: P) {
   );
 }
 
+/** lucide:log-out — end this session. The arrow leaves the box; the box is the app. */
+export function LogOutIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="m16 17 5-5-5-5" />
+      <path d="M21 12H9" />
+    </>,
+  );
+}
+
 // ── Status ──────────────────────────────────────────────────────────────────
 
 /** lucide:check — approved, audited, done. */

@@ -32,14 +32,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createWorkspace, storedToken } from "../lib/auth.ts";
-import { signOut, switchWorkspace } from "../lib/socket.ts";
+import { switchWorkspace } from "../lib/socket.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { ICON } from "../lib/tokens.ts";
+import { orderWorkspaces, roleLabel, shouldScroll } from "../lib/workspaceList.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import {
-  CheckIcon, ChevronDownIcon, PlusIcon, UserCircleIcon, UserIcon, UsersIcon,
+  CheckIcon, ChevronDownIcon, PlusIcon, SettingsIcon, UserIcon, UsersIcon,
 } from "./panelIcons.tsx";
 
 /** The two kinds, in the terms that decide which one somebody wants. */
@@ -125,6 +126,28 @@ function NewWorkspaceForm({ onDone }: { onDone: () => void }) {
   );
 }
 
+/** A text row at the foot of the menu. §2.2: these are rows, not buttons. */
+function MenuRow({
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  icon: (p: { size?: number }) => React.ReactElement;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      role="menuitem"
+      onClick={onClick}
+      className="flex w-full items-center gap-2 rounded-control px-2 py-2 text-left text-[12px] text-muted transition-colors hover:bg-active/40 active:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+    >
+      <span className="shrink-0" aria-hidden><Icon size={ICON.xs} /></span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </button>
+  );
+}
+
 export function WorkspaceSwitcher() {
   const user = useSessionStore((s) => s.user);
   const workspaces = useSessionStore((s) => s.workspaces);
@@ -134,21 +157,73 @@ export function WorkspaceSwitcher() {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // §2.2's order, computed here rather than in the map, so the list the rows are drawn from and
+  // the list the arrow keys walk are the same array by construction.
+  const ordered = orderWorkspaces(workspaces);
 
+  /**
+   * §2.3's three ways out and the arrow keys, on ONE listener.
+   *
+   * ROVING DOM FOCUS OVER THE ROWS, not an index in React state — which is the "extends the
+   * existing binding layer, not a second one" the spec asks for, spelled the way `composer/
+   * Popover.tsx` already spells it. The difference is not stylistic: an index has to be kept in
+   * step with a list that changes under it (a workspace created, a form replacing the rows), and
+   * every one of those is a place for the highlight to point at a row that has moved. Focus cannot
+   * drift, `Enter` is already the browser's activation for a focused button, and the focus ring is
+   * the highlight — so there is nothing to draw and nothing to reset.
+   *
+   * `Enter` IS THEREFORE ABSENT FROM THIS HANDLER, deliberately. A row is a `<button>`; the
+   * platform activates it. Adding a key handler for it would be a second activation path that can
+   * disagree with the first — and the one it would disagree with is the one screen readers use.
+   */
   useEffect(() => {
     if (!open) return;
+    const rows = (): HTMLElement[] =>
+      Array.from(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+
     const close = (e: MouseEvent): void => {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     };
-    const escape = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") setOpen(false);
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        return;
+      }
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+      // A FIELD INSIDE THE MENU KEEPS ITS OWN ARROWS. The create form replaces the rows with a
+      // text input, and stealing ArrowUp from it would stop somebody moving the caret in the name
+      // they are typing. Same guard, same reason, as the popover's.
+      const active = document.activeElement as HTMLElement | null;
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
+      const items = rows();
+      if (items.length === 0) return;
+      e.preventDefault();
+      const at = active ? items.indexOf(active) : -1;
+      const next =
+        e.key === "Home" ? 0
+        : e.key === "End" ? items.length - 1
+        // Wrapping, because a menu of four rows should not require knowing which end you are at.
+        : e.key === "ArrowDown" ? (at + 1) % items.length
+        : (at - 1 + items.length) % items.length;
+      items[next]?.focus();
     };
     document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", escape);
+    document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", escape);
+      document.removeEventListener("keydown", onKey);
     };
+  }, [open]);
+
+  // Focus back to the trigger when the menu closes, so a keyboard user is not dropped at the top
+  // of the document by a row that has just been removed from it. In its own effect rather than in
+  // every path that closes, because there are four of them — a selection, Escape, an outside
+  // click, and the create form finishing — and each would have to remember.
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (wasOpen.current && !open) triggerRef.current?.focus();
+    wasOpen.current = open;
   }, [open]);
 
   // The form is per-opening, not per-tab. A half-typed name left behind a dismissed menu would
@@ -168,6 +243,7 @@ export function WorkspaceSwitcher() {
   return (
     <div ref={ref} className="relative shrink-0 border-b border-hair">
       <button
+        ref={triggerRef}
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -207,69 +283,89 @@ export function WorkspaceSwitcher() {
       </button>
 
       {open && (
-        <div className="absolute left-2 right-2 z-30 mt-1 w-auto animate-slide-in overflow-hidden rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none">
-          <div className="border-b border-hair px-3 py-2">
-            <div className="truncate text-[12px] text-ink">{user.displayName || user.email}</div>
-            <div className="truncate text-[11px] text-faint">{user.email}</div>
-          </div>
-
-          <div className="max-h-64 overflow-y-auto py-1">
-            {workspaces.map((w) => (
-              <button
-                key={w.id}
-                onClick={() => {
-                  setOpen(false);
-                  switchWorkspace(w.id);
-                }}
-                className="flex w-full items-center justify-between px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-active active:bg-chrome"
-              >
-                <span className="min-w-0 flex-1">
-                  <span className={`block truncate ${w.id === workspaceId ? "text-ink" : "text-muted"}`}>
-                    {w.name}
+        <div
+          role="menu"
+          className="absolute left-2 right-2 z-30 mt-1 w-auto animate-slide-in overflow-hidden rounded-card border border-edge bg-panel p-1 shadow-floating motion-reduce:animate-none"
+        >
+          {/* THE LIST SCROLLS ONLY WHEN IT HAS TO — §2.3. A `max-h` applied unconditionally would
+              put a scrollbar on a menu of three and, worse, would push the two actions below the
+              fold on exactly the account that has no workspaces to switch between and therefore
+              needs "Create" and "Join" most. */}
+          <div className={`py-1 ${shouldScroll(ordered.length) ? "max-h-64 overflow-y-auto" : ""}`}>
+            {ordered.map((w) => {
+              const active = w.id === workspaceId;
+              const RowKind = w.kind === "team" ? UsersIcon : UserIcon;
+              return (
+                <button
+                  key={w.id}
+                  role="menuitem"
+                  onClick={() => {
+                    setOpen(false);
+                    switchWorkspace(w.id);
+                  }}
+                  // A CHECKMARK, NOT A CHECKMARK AND A HIGHLIGHT — §2.2 asks for one or the other
+                  // and the reason is worth keeping: a filled row plus a tick states the same fact
+                  // twice, and the second statement is the one that makes a quiet menu loud. The
+                  // row is `text-ink` against the others' `text-muted`, which is "visually distinct
+                  // but not loud" without a background.
+                  className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-active/40 active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring"
+                >
+                  <span className={`shrink-0 ${active ? "text-ink" : "text-faint"}`} aria-hidden>
+                    <RowKind size={ICON.xs} />
                   </span>
-                  {/* The KIND beside the role, because it is what decides whether the members and
-                      author surfaces exist in that workspace at all. */}
-                  <span className="block truncate text-[10px] text-faint">{w.role} · {w.kind}</span>
-                </span>
-                {w.id === workspaceId && <span className="ml-2 text-ink"><CheckIcon size={ICON.xs} /></span>}
-              </button>
-            ))}
+                  <Truncate className={`min-w-0 flex-1 ${active ? "text-ink" : "text-muted"}`} title={w.name}>
+                    {w.name}
+                  </Truncate>
+                  {/* THE ROLE, AND ONLY WHERE IT MEANS SOMETHING. A personal workspace has one
+                      member and no roles to distinguish — §5.5 and §9.4 both say those surfaces do
+                      not exist there — so an "Owner" badge on it would be a badge for a
+                      distinction the workspace does not make. */}
+                  {w.kind === "team" && (
+                    <Chip size="sm" tone="faint" variant="bare" className="shrink-0">{roleLabel(w.role)}</Chip>
+                  )}
+                  {w.plan?.label && (
+                    <Chip caps size="sm" tone="faint" className="shrink-0">{w.plan.label}</Chip>
+                  )}
+                  <span className={`shrink-0 ${active ? "text-ink" : "text-transparent"}`} aria-hidden>
+                    <CheckIcon size={ICON.xs} />
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
-          {/* MEMBERS IS HERE rather than in the sidebar's settings block, because this is where a
-              workspace is already the subject. Offered for a personal workspace too: the roles all
-              work there, and hiding the list would make "invite somebody" undiscoverable in the
-              only workspace most accounts have. */}
-          <button
-            onClick={() => {
-              setOpen(false);
-              openWorkspacePanel("members");
-            }}
-            className="flex w-full items-center gap-2 border-t border-hair px-3 py-2 text-left text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
-          >
-            <UserCircleIcon size={ICON.xs} /> Members and invitations
-          </button>
+          {/* WHAT IS DELIBERATELY NOT ON THESE ROWS: an unread count from the Inbox. §2.2 offers it
+              "only if you've implemented an unread-count-per-workspace endpoint", and there is no
+              such endpoint — `counts.badge` is computed for the ONE workspace this socket is in,
+              and a socket is scoped to a workspace by its ticket, so the number for the others is
+              not a value this tab is holding. The spec's own instruction for that case is the one
+              followed here: skip it and say so, rather than render a zero that looks like an
+              answer. */}
 
           {creating ? (
             <NewWorkspaceForm onDone={() => setOpen(false)} />
           ) : (
-            <button
-              onClick={() => setCreating(true)}
-              className="flex w-full items-center gap-2 border-t border-hair px-3 py-2 text-left text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
-            >
-              <PlusIcon size={ICON.xs} /> New workspace
-            </button>
+            // §2.2 — TEXT ROWS, NOT BUTTONS. They sit at the bottom of a menu whose other rows are
+            // all destinations, and filled buttons there would read as the menu's primary actions
+            // rather than as the things you do when none of the rows above is what you wanted.
+            <div className="border-t border-hair">
+              <MenuRow icon={PlusIcon} label="Create workspace" onClick={() => setCreating(true)} />
+              {/* SETTINGS FOR THE ACTIVE WORKSPACE — §6.1 and §10.1's entry point, on the row
+                  group rather than on the active workspace's own row. A gear inside a row whose
+                  whole job is "switch to this" would be a second target inside a click target,
+                  and the only workspace whose settings can be opened is the one this socket is
+                  in: the panel reads members, invitations, billing and the audit log over THIS
+                  socket, and there is no socket in the others. */}
+              <MenuRow
+                icon={SettingsIcon}
+                label={`${current?.name ?? "Workspace"} settings`}
+                onClick={() => {
+                  setOpen(false);
+                  openWorkspacePanel("members");
+                }}
+              />
+            </div>
           )}
-
-          <button
-            onClick={() => {
-              setOpen(false);
-              signOut();
-            }}
-            className="w-full border-t border-hair px-3 py-2 text-left text-[12px] text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
-          >
-            Sign out
-          </button>
         </div>
       )}
     </div>
