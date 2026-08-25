@@ -144,6 +144,17 @@ export interface SessionWorkspace {
    * showing nothing at all.
    */
   plan: { id: string; label: string };
+  /**
+   * When this workspace was created, as an ISO string. §10.2's General section.
+   *
+   * OPTIONAL ON THIS SIDE, and that is not laziness about a field the server always sends. A
+   * desktop build is a bundle somebody installed weeks ago talking to whichever server it is
+   * pointed at, so "the server always sends it" is true of the server in this repository and not
+   * of the one an older install is connected to — and a `string` here would be a `string` that is
+   * `undefined` at runtime, read into a date formatter, on a screen somebody opened to find out
+   * when their workspace was made.
+   */
+  createdAt?: string;
 }
 
 export interface SessionView {

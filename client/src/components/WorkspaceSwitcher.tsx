@@ -551,7 +551,7 @@ export function WorkspaceSwitcher() {
                 label={`${current?.name ?? "Workspace"} settings`}
                 onClick={() => {
                   setOpen(false);
-                  openWorkspacePanel("members");
+                  openWorkspacePanel("general");
                 }}
               />
             </div>

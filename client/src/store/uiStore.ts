@@ -40,7 +40,7 @@ export type NavDestination = "threads" | "agents" | "inbox" | "activity";
  * thing they change. A boolean would open the panel and leave the caller's actual intent to be
  * re-navigated by hand.
  */
-export type WorkspaceSection = "members" | "audit" | "billing" | "data" | "account";
+export type WorkspaceSection = "general" | "members" | "audit" | "billing" | "data" | "account";
 
 export type RightTab =
   | "secrets"

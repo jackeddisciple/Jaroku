@@ -22,13 +22,13 @@ import {
 } from "../lib/socket.ts";
 import { inviteUrl } from "../lib/invite.ts";
 import {
-  deleteWorkspace, startWorkspaceExport, workspaceExportStatus,
+  deleteWorkspace, renameWorkspace, startWorkspaceExport, workspaceExportStatus,
   type DeletionReceipt, type ExportStatus,
 } from "../lib/workspaceApi.ts";
 import { useAuditStore } from "../store/auditStore.ts";
 import { useMemberStore, type Invite, type Member } from "../store/memberStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
-import { useUiStore, type WorkspaceSection } from "../store/uiStore.ts";
+import { useUiStore, type RightTab, type WorkspaceSection } from "../store/uiStore.ts";
 import { AccountSection } from "./AccountSection.tsx";
 import { absTime, fmtUntil, isExpired, relTime } from "../lib/format.ts";
 import { avatarColor, avatarLetter, orderMembers } from "../lib/memberList.ts";
@@ -38,13 +38,17 @@ import { Chip } from "./Chip.tsx";
 import { EmptyState, LoadingLine } from "./EmptyState.tsx";
 import { Truncate } from "./Truncate.tsx";
 import {
-  ActivityIcon, AlertTriangleIcon, CheckIcon, TicketIcon, UserCircleIcon, UserPlusIcon, XIcon,
+  ActivityIcon, AlertTriangleIcon, CheckIcon, DollarSignIcon, GithubIcon, KeyIcon, PlugIcon,
+  TicketIcon, UserCircleIcon, UserPlusIcon, XIcon,
 } from "./panelIcons.tsx";
 import { Select } from "./Select.tsx";
 import { BillingSection } from "./BillingSection.tsx";
 import { UpsellCard } from "./UpsellCard.tsx";
 
 const SECTIONS: { id: WorkspaceSection; label: string }[] = [
+  // §10.2's first section, and the first one the panel opens on. What the workspace IS — its name,
+  // its kind, when it was made — before anything about who is in it or what it costs.
+  { id: "general", label: "General" },
   { id: "members", label: "Members" },
   // Beside Members because most of what it records is membership, and because the two answer
   // the same question at different tenses: who is here, and what has been done here.
@@ -73,6 +77,177 @@ const ROLES: { id: string; label: string; what: string }[] = [
   { id: "member", label: "Member", what: "Build, run, edit and evaluate agents" },
   { id: "admin", label: "Admin", what: "…and connect keys, servers, repositories and deployments" },
   { id: "owner", label: "Owner", what: "…and membership, billing, and the workspace itself" },
+];
+
+/**
+ * §10.2's General section, and §10's rule about where everything else lives.
+ *
+ * WHAT THE SECTION ITSELF HOLDS is the three facts §10.2 names: the name, which an owner or an
+ * admin may change; the kind, which nobody may change; and the date it was made.
+ *
+ * WHAT IT ALSO HOLDS IS A LIST OF DOORS, and that is §10's actual requirement rather than a
+ * convenience: "At 25-30 teams this does not need to be a unified settings page. But every setting
+ * surface must be findable within 2 clicks from the switcher." Four of §10.2's nine sections —
+ * Usage, Secrets, Connections, Integrations — are right-panel tabs, and a right-panel tab is not
+ * reachable from the switcher at all. Copying them into this modal would be the unified settings
+ * page §16 puts out of scope, and would give each of them two homes that could disagree. A row
+ * that opens the tab it names is one click from here and two from the switcher, which is what was
+ * asked for.
+ */
+function GeneralSection() {
+  const workspaces = useSessionStore((s) => s.workspaces);
+  const workspaceId = useSessionStore((s) => s.workspaceId);
+  const setWorkspaces = useSessionStore((s) => s.setWorkspaces);
+  const setRightTab = useUiStore((s) => s.setRightTab);
+  const closePanel = useUiStore((s) => s.closeWorkspacePanel);
+  const workspace = workspaces.find((w) => w.id === workspaceId);
+  const [name, setName] = useState(workspace?.name ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  /**
+   * §10.2 — "Workspace name (editable for owner/admin)".
+   *
+   * OWNER OR ADMIN, WHICH IS THE ROUTE'S OWN RULE AND NOT `workspace:manage`. `/v1/workspaces/
+   * rename` checks the role directly — `session.role !== "owner" && session.role !== "admin"` —
+   * rather than going through the capability matrix, because it is an HTTP route that runs before
+   * a socket exists during onboarding. So the guard here reads the same two roles the route reads,
+   * and `ROUTE_CAPABILITY.workspaceRename` is deliberately not what decides: it names
+   * `workspace:manage`, the owner's, and using it would hide the field from the admins the route
+   * would have accepted.
+   */
+  const role = useSessionStore((s) => s.role());
+  const canRename = role === "owner" || role === "admin";
+
+  // Re-seeded when the workspace changes. Without this, switching with the panel open would leave
+  // the previous workspace's name in the field — over a Save button that would rename this one.
+  useEffect(() => {
+    setName(workspace?.name ?? "");
+    setError(null);
+    setSaved(false);
+  }, [workspaceId, workspace?.name]);
+
+  const save = async (): Promise<void> => {
+    const wanted = name.trim();
+    if (busy || !wanted || !workspaceId || wanted === workspace?.name) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const renamed = await renameWorkspace(workspaceId, wanted);
+      // The session's copy, updated in place. The rename is broadcast to other sockets in the
+      // workspace; this tab's own session is not refetched until the next connect, so without this
+      // the switcher above would keep the old name until a reconnect.
+      setWorkspaces(workspaces.map((w) => (w.id === workspaceId ? { ...w, name: renamed.name } : w)));
+      setSaved(true);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!workspace) return null;
+  const dirty = name.trim() !== workspace.name && name.trim().length > 0;
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <div className={TYPE.sectionLabel}>Name</div>
+        {canRename ? (
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <input
+              value={name}
+              maxLength={64}
+              onChange={(e) => { setName(e.target.value); setSaved(false); }}
+              onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
+              aria-label="Workspace name"
+              className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 text-[12px] text-ink outline-none focus-visible:shadow-focusring focus:border-edge"
+            />
+            <button className={secondaryBtn} onClick={() => void save()} disabled={busy || !dirty}>
+              {busy ? "Saving…" : "Save"}
+            </button>
+            {saved && !dirty && <span className="text-[11px] text-ok">Saved</span>}
+          </div>
+        ) : (
+          // Absent rather than disabled — §8. A member reads the name they already see at the top
+          // of the sidebar; what is gone is the box that would refuse to save.
+          <p className="mt-1.5 text-[12px] text-ink">{workspace.name}</p>
+        )}
+        {error && <p className="mt-1.5 text-[11px] text-err">{error}</p>}
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <div className={TYPE.sectionLabel}>Kind</div>
+          {/* READ-ONLY AND SAID SO — §10.2 marks it that way and §1.3 froze it: `kind` decides
+              whether the workspace has a members list, roles and a Threads author column at all,
+              and it cannot change after creation. A control that looked editable would be offering
+              the one field the product genuinely cannot move. */}
+          <p className="mt-1.5 text-[12px] text-ink">{workspace.kind}</p>
+          <p className="mt-0.5 text-[11px] leading-[1.5] text-faint">
+            {workspace.kind === "team"
+              ? "Members, roles and invitations. Threads show who did what."
+              : "Just you. No members list and no author column."}
+            {" "}Chosen at creation and fixed.
+          </p>
+        </div>
+        <div>
+          <div className={TYPE.sectionLabel}>Created</div>
+          {/* A server that predates §13.1's `createdAt` sends nothing. A dash rather than an
+              invented date, which is the same rule §3.5 of the Activity spec sets for an unknown
+              figure: `--`, never a zero that looks like an answer. */}
+          <p className="mt-1.5 text-[12px] text-ink" title={workspace.createdAt ? absTime(workspace.createdAt) : undefined}>
+            {workspace.createdAt ? absTime(workspace.createdAt) : "—"}
+          </p>
+          <p className="mt-0.5 break-all font-mono text-[11px] text-faint select-all">{workspace.id}</p>
+        </div>
+      </div>
+
+      <div className="border-t border-hair pt-3">
+        <div className={TYPE.sectionLabel}>Everything else about this workspace</div>
+        <p className="mt-1 text-[11px] leading-[1.55] text-muted">
+          These live in the right panel, where the surfaces they belong to already are. Opening one
+          closes this.
+        </p>
+        <div className="mt-2 grid grid-cols-2 gap-1">
+          {WORKSPACE_TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => { setRightTab(t.id); closePanel(); }}
+              className="flex items-start gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-active active:bg-chrome"
+            >
+              <span className="mt-0.5 shrink-0 text-faint" aria-hidden><t.Icon size={ICON.xs} /></span>
+              <span className="min-w-0">
+                <span className="block text-[12px] text-ink">{t.label}</span>
+                <span className="block text-[11px] leading-[1.5] text-faint">{t.what}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * §10.2's four sections that are right-panel tabs, and what each one is for.
+ *
+ * THE DESCRIPTIONS ARE THE POINT rather than decoration. "Connections" and "Secrets" are two words
+ * that sound like the same thing to somebody who has not used the product — one is an account this
+ * workspace has been granted access to, the other is a value stored in its vault — and a settings
+ * index whose rows are single nouns is an index somebody has to click through to read.
+ */
+const WORKSPACE_TABS: {
+  id: RightTab;
+  label: string;
+  what: string;
+  Icon: (p: { size?: number }) => React.ReactElement;
+}[] = [
+  { id: "usage", label: "Usage", what: "What this workspace has spent, and against which ceiling", Icon: DollarSignIcon },
+  { id: "secrets", label: "Secrets", what: "Credentials, their health, and when each was last rotated", Icon: KeyIcon },
+  { id: "connections", label: "Connections", what: "Accounts this workspace's agents may act on behalf of", Icon: PlugIcon },
+  { id: "github", label: "Integrations", what: "Where each agent's code goes, its checks and its scan findings", Icon: GithubIcon },
 ];
 
 /**
@@ -1081,7 +1256,8 @@ export function WorkspacePanel() {
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3.5">
-          {shown === "data" ? <DataSection />
+          {shown === "general" ? <GeneralSection />
+            : shown === "data" ? <DataSection />
             : shown === "audit" ? <AuditSection />
             : shown === "billing" ? <BillingSection />
             : shown === "account" ? <AccountSection />

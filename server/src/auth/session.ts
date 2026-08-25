@@ -151,6 +151,20 @@ export interface SessionView {
      * resolves limits through, so the two cannot disagree.
      */
     plan: { id: string; label: string };
+    /**
+     * When this workspace came into existence, as an ISO string.
+     *
+     * §10.2's General section asks for it, and it is the one field on that section a client cannot
+     * derive: the name and the kind are already here, and a creation date is a row in `workspaces`
+     * nothing else in the product surfaces. It is a fact about the workspace rather than about the
+     * membership — "created", not "joined" — which is why it reads from `w.created_at` and not
+     * from the membership row beside it.
+     *
+     * ON EVERY MEMBERSHIP RATHER THAN ONLY THE CURRENT ONE, because the switcher's list and the
+     * panel's list are the same array and a field present on one entry and absent on the others is
+     * the shape that produces an undefined nobody expected.
+     */
+    createdAt: string;
   }[];
   /** Where a client with no stored preference should start. Always one it belongs to. */
   defaultWorkspaceId: string;
@@ -304,6 +318,7 @@ function sessionHandler(deps: SessionDeps): Handler {
         kind: w.kind,
         role: w.role,
         plan: { id: planFor(w.plan).id, label: planFor(w.plan).label },
+        createdAt: w.created_at,
       })),
       defaultWorkspaceId: preferred.id,
       expiresAt: auth.expiresAt,
@@ -620,6 +635,7 @@ async function exchangeTicket(
         kind: w.kind,
         role: w.role,
         plan: { id: planFor(w.plan).id, label: planFor(w.plan).label },
+        createdAt: w.created_at,
       })),
       defaultWorkspaceId: preferred.id,
     },
