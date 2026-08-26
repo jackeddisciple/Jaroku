@@ -27,6 +27,7 @@ import { AccessExposure } from "./AccessExposure.tsx";
 import { AccessSessions } from "./AccessSessions.tsx";
 import { AccessInvites } from "./AccessInvites.tsx";
 import { AccessHistory } from "./AccessHistory.tsx";
+import { InviteWithGrantDialog } from "./InviteWithGrantDialog.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { AlertTriangleIcon, LockIcon } from "./panelIcons.tsx";
 import { quietBtn } from "./buttons.ts";
@@ -37,6 +38,7 @@ import {
 import { STATUS, TYPE } from "../lib/tokens.ts";
 import { accessFor, useAccessStore, type AccessPerson } from "../store/accessStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
+import { useSessionStore } from "../store/sessionStore.ts";
 import { useCanRun, useCapability } from "../lib/useCapability.ts";
 import type { AgentDetailView } from "../types.ts";
 
@@ -123,6 +125,11 @@ export function AccessPanel({ detail }: { detail: AgentDetailView }) {
    */
   const [dialog, setDialog] = useState<{ editing: AccessPerson | null } | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState<AccessPerson | null>(null);
+  const [inviting, setInviting] = useState(false);
+  // §12.1's sentence names the workspace, so the dialog needs it. From the session rather than from
+  // the access payload: the workspace's NAME is a fact about the session's current tenant, and a
+  // panel that got it from an agent's answer would be one refresh away from naming the wrong one.
+  const workspaceName = useSessionStore((s) => s.workspaces.find((w) => w.id === s.workspaceId)?.name ?? "this workspace");
 
   const onGrant = (): void => setDialog({ editing: null });
   const onEdit = (person: AccessPerson): void => setDialog({ editing: person });
@@ -213,7 +220,11 @@ export function AccessPanel({ detail }: { detail: AgentDetailView }) {
         open={open["invites"] !== false}
         onToggle={() => toggle("invites")}
       >
-        <AccessInvites invites={access.invites} canManage={canManageInvites} />
+        <AccessInvites
+          invites={access.invites}
+          canManage={canManageInvites}
+          onInvite={() => setInviting(true)}
+        />
       </CollapsibleRegion>
 
       {/* §14.1's count is the section's own, so it is legible before anybody expands it. */}
@@ -260,6 +271,15 @@ export function AccessPanel({ detail }: { detail: AgentDetailView }) {
               : access.people.filter((p) => p.provenance === "role")
           }
           onClose={() => setDialog(null)}
+        />
+      )}
+
+      {inviting && (
+        <InviteWithGrantDialog
+          agentId={access.agentId}
+          agentSlug={access.agentSlug}
+          workspaceName={workspaceName}
+          onClose={() => setInviting(false)}
         />
       )}
 

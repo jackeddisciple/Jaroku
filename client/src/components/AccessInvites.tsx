@@ -13,24 +13,25 @@
 // ceiling over every agent in it — so this section is careful never to imply that inviting somebody
 // from an agent's panel invites them to an agent.
 //
-// AND IT DOES NOT OFFER TO INVITE. §12.1 asks for a "+ Invite" button with an optional pre-staged
-// grant; that half is §12.2's atomic acceptance and is a decision recorded in the changelog rather
-// than a control here — see the release notes. The existing Members panel is where an invitation is
-// made, and this links to it rather than growing a second door onto the same act.
+// §12.1's "+ Invite" IS HERE, and it carries the pre-staged grant §12.2 asks for — see
+// `InviteWithGrantDialog`, whose whole design is the sentence that stops an admin thinking they
+// granted narrow agent access when they widened the tenancy. Ordinary workspace invitations are
+// still made from the Members panel; what this door adds is the grant travelling with the
+// invitation, which is the step everybody otherwise forgets after somebody accepts.
 
 import { Truncate } from "./Truncate.tsx";
 import { Chip } from "./Chip.tsx";
-import { quietBtn } from "./buttons.ts";
-import { AlertTriangleIcon, TicketIcon } from "./panelIcons.tsx";
+import { quietBtn, secondaryBtn } from "./buttons.ts";
+import { AlertTriangleIcon, TicketIcon, UserPlusIcon } from "./panelIcons.tsx";
 import { absTime, relTime } from "../lib/format.ts";
 import { sendRevokeInvite } from "../lib/socket.ts";
 import { ICON, STATUS } from "../lib/tokens.ts";
-import { useUiStore } from "../store/uiStore.ts";
 import type { PendingInvite } from "../store/accessStore.ts";
 
 export function AccessInvites({
   invites,
   canManage,
+  onInvite,
 }: {
   invites: PendingInvite[];
   /**
@@ -42,20 +43,17 @@ export function AccessInvites({
    * reaching outside the agent they administer, which is the boundary the whole feature is about.
    */
   canManage: boolean;
+  /** §12.1's button, wired by the panel — which is where the agent and the workspace name are. */
+  onInvite: () => void;
 }) {
-  const openWorkspace = useUiStore((s) => s.openWorkspacePanel);
 
   if (invites.length === 0) {
     return (
       <div className="space-y-1">
         <div className="text-tiny text-faint">Nobody is waiting to join this workspace.</div>
         {canManage && (
-          <button
-            type="button"
-            onClick={() => openWorkspace("members")}
-            className="text-tiny text-muted underline decoration-dotted hover:text-ink"
-          >
-            Invite somebody to the workspace
+          <button type="button" onClick={onInvite} className={secondaryBtn}>
+            <UserPlusIcon size={ICON.xs} /> Invite
           </button>
         )}
       </div>
@@ -72,6 +70,14 @@ export function AccessInvites({
         These are invitations to the <span className="text-ink">workspace</span>. Accepting one makes
         somebody a member with a role, which is a ceiling over every agent here — not only this one.
       </p>
+
+      {canManage && (
+        <div className="flex">
+          <button type="button" onClick={onInvite} className={secondaryBtn}>
+            <UserPlusIcon size={ICON.xs} /> Invite
+          </button>
+        </div>
+      )}
 
       {invites.map((invite) => (
         <div

@@ -1,0 +1,38 @@
+-- 062_invite_agent_grant — the grant an invitation is carrying, applied when it is accepted.
+--
+-- WHAT THIS SOLVES. §12.2 asks that an invitation be able to name a per-agent grant, and that the
+-- grant be written "atomically with the membership creation — same transaction, so a partially
+-- accepted invite with a missing grant is impossible". Without it the flow is: invite somebody,
+-- wait for them to accept, remember to go and grant them access to the one agent you actually
+-- brought them in for. The step everybody forgets is the third one, and what it leaves behind is a
+-- new member holding their workspace ROLE's default access to every agent — which is wider than
+-- what anybody intended, on the day they intended to narrow it.
+--
+-- ON THE INVITE ROW RATHER THAN IN A TABLE OF ITS OWN, and that is the decision. A pre-staged grant
+-- has exactly the lifetime of the invitation: it is created with it, it is discarded when the
+-- invitation is revoked or expires, and it stops existing the moment it becomes a real
+-- `agent_grants` row. A second table would need its own cascade, its own policy and its own sweep,
+-- to model a field.
+--
+-- json, NOT A PAIR OF COLUMNS, and not a foreign key to `agents`. Three reasons, and the third is
+-- the one that decides it:
+--
+--   It is one optional value that is either wholly present or wholly absent — an `agent_id` with no
+--   capabilities is not a state anything should be able to represent.
+--
+--   Nothing queries into it. It is read exactly once, by `acceptInvite`, for one invitation.
+--
+--   AND §16 REQUIRES THAT A DELETED AGENT NOT BREAK THE INVITATION: "invite accepted after agent
+--   was deleted — pre-staged grant discarded silently". A foreign key would make that case an
+--   error at acceptance time, or would cascade the whole invitation away when an unrelated agent
+--   was deleted. The id is checked at acceptance instead, against the workspace, and a miss simply
+--   means the membership is created without a grant.
+--
+-- THE CAPABILITY SET IS VALIDATED AT WRITE TIME AND AGAIN AT ACCEPTANCE, against the role the
+-- invitation carries — because the whole of invariant B is that a grant cannot exceed a workspace
+-- role, and an invitation is the one place where the role and the grant are decided together
+-- before either exists.
+--
+-- EXPAND ONLY: a nullable column nothing older reads or writes.
+
+ALTER TABLE workspace_invites ADD COLUMN agent_grant json;

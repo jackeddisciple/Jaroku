@@ -31,6 +31,7 @@ import { AccessExposure } from "../components/AccessExposure.tsx";
 import { AccessSessions } from "../components/AccessSessions.tsx";
 import { AccessInvites } from "../components/AccessInvites.tsx";
 import { AccessHistory } from "../components/AccessHistory.tsx";
+import { InviteWithGrantDialog } from "../components/InviteWithGrantDialog.tsx";
 import type { AgentCapability } from "./capabilities.ts";
 
 let failures = 0;
@@ -559,7 +560,7 @@ console.log("\nan invitation is to the workspace, and the section says so");
     { id: "i1", email: "sam@example.test", role: "member", createdAt: "2026-01-01T00:00:00.000Z", expiresAt: "2026-02-01T00:00:00.000Z", stale: true },
     { id: "i2", email: null, role: "admin", createdAt: "2026-01-20T00:00:00.000Z", expiresAt: "2026-02-20T00:00:00.000Z", stale: false },
   ];
-  const html = markup(React.createElement(AccessInvites, { invites, canManage: true }));
+  const html = markup(React.createElement(AccessInvites, { invites, canManage: true, onInvite: () => undefined }));
   // §12.1's warning, and it is the whole reason this section is careful with its words: an admin
   // must never think they have granted narrow agent access when they have widened the tenancy.
   check(html.includes("workspace"), "the section says these are invitations to the workspace");
@@ -571,7 +572,7 @@ console.log("\nan invitation is to the workspace, and the section says so");
   check(html.includes(">stale<") || html.includes("stale"), "an invitation older than seven days is marked");
   check(html.includes("Revoke"), "an owner can revoke one");
 
-  const asMember = markup(React.createElement(AccessInvites, { invites, canManage: false }));
+  const asMember = markup(React.createElement(AccessInvites, { invites, canManage: false, onInvite: () => undefined }));
   // ABSENT rather than disabled — and gated by `member:manage` rather than by this panel's own
   // agent-level `admin`, because withdrawing a workspace invitation reaches outside the agent.
   check(!asMember.includes("Revoke"), "somebody who cannot manage membership gets no Revoke");
@@ -606,6 +607,42 @@ console.log("\nhistory tells an agent change apart from a workspace one");
     markup(React.createElement(AccessHistory, { entries: [], agentSlug: "x" })).includes("Nothing has changed"),
     "an empty history is a sentence rather than a blank",
   );
+}
+
+console.log("\n§12.1 — the invite dialog says it is adding somebody to the WORKSPACE");
+{
+  const html = markup(
+    React.createElement(InviteWithGrantDialog, {
+      agentId: AGENT,
+      agentSlug: "billing_bot",
+      workspaceName: "Acme Corp",
+      onClose: () => undefined,
+    }),
+  );
+  // THE SENTENCE §12.1 ASKS FOR, assembled from the three real values. This is the whole reason the
+  // dialog exists rather than a checkbox on the grant form: a dialog reached from an agent's Access
+  // tab, headed "Invite", with that agent's capabilities under it, READS as inviting somebody to
+  // the agent — and it is not. It adds a member to the workspace, with a role, which is a ceiling
+  // over every agent in it.
+  check(html.includes("to join the"), "the sentence says what joining means");
+  check(html.includes("Acme Corp"), "...naming the workspace by name");
+  check(html.includes("billing_bot"), "...and the agent the grant is on");
+  check(html.includes("workspace</span> workspace") || /Acme Corp[\s\S]{0,60}workspace/.test(html),
+    "...with the word `workspace` beside it rather than only the agent");
+  // AND THE CEILING WARNING, which is the half an admin skimming would otherwise miss: the role
+  // reaches every agent, and only the grant is narrow.
+  check(html.includes("ceiling over"), "and it says the role is a ceiling over every agent");
+  check(html.includes("narrows them on billing_bot only"), "...while the grant narrows this one");
+
+  // A ROLE'S CEILING BOUNDS WHAT MAY BE STAGED, with the reason stated — the same rule the grant
+  // dialog follows, at the one place a role and a grant are chosen together before either exists.
+  check(html.includes("exceeds the member role"), "capabilities above the invited role are refused with a reason");
+  check(/aria-describedby="invite-ceiling-deploy"/.test(html), "...and the checkbox points at it");
+  // §13.4's link invitation is offered rather than hidden, and the placeholder says what an empty
+  // address means — a shareable credential handed to somebody who thought they were writing to one
+  // person is the worst version of this.
+  check(html.includes("leave empty for a link"), "an empty address is offered as the choice it is");
+  check(/role="dialog"/.test(html) && /aria-modal="true"/.test(html), "and it is a modal dialog");
 }
 
 console.log("\n§9.3's dot carries its own reason");

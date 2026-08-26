@@ -8,6 +8,183 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.3.8 : The Access Tab — Per-Agent Access, and the One Section That Says What This Does Not Cover
+
+A workspace role has always been the whole answer to "what may this person do", and it is the same
+answer for every agent in the tenant. That is fine for a workspace of three and wrong for the case
+this release is about: a contractor brought in to fix one agent held the same authority over every
+other one, and there was no row anybody could write to say otherwise.
+
+So access becomes per-agent. What that could easily have been is a second permission system beside
+the first, and the whole of the design is about it not being one. There is **one resolver**, in the
+file the role matrix already lives in, and the grant is data that flows through the same check
+every command already passes. A grant may narrow somebody below their role's default or widen them
+within it, and can never exceed it — enforced when it is written *and* again on every command, which
+sounds redundant and is the only thing that makes a demotion bite without anybody rewriting rows.
+
+The section that matters most is the one that is not about Jaroku at all. Every grant here governs
+access *through* this product; a deployed agent answers HTTP directly, on a template with no auth
+layer of any kind. An access panel that implied otherwise would be worse than no panel, because it
+converts an unknown risk into a false certainty — so Exposure states the posture as a sentence and
+renders when nothing is deployed too, since a section that disappeared would have its absence read
+as safety.
+
+### Added
+
+- **Seven agent-level capabilities** — `view`, `run`, `edit`, `eval`, `deploy`, `secrets`, `admin` —
+  extending `auth/capabilities.ts` rather than sitting beside it. The implication rules are data:
+  `view` is implied by everything, `edit` implies `run`, and `secrets`, `edit` and `admin` imply
+  none of each other, because a contractor who writes an agent's code and a person who holds its
+  production credentials are genuinely different roles. The grant dialog applies the same table the
+  server applies, so the set on screen and the set that gets stored cannot disagree.
+- **`resolveCapabilities(ctx, agentId)`**, the one resolver: workspace role → the role's default set
+  → the grant → **the intersection with the ceiling, always** → the implication closure. Expiry is
+  evaluated here and nowhere else, because a control that is correct only as often as a cron fires
+  fails silently in the generous direction.
+- **`agent_grants`** (migration 060), keyed on `(workspace_id, agent_id, user_id)` with a composite
+  foreign key to `agents (workspace_id, id)`. A bare `agents(id)` reference is satisfied by *any*
+  tenant's agent — that is the hole migration 018 closed on `secret_refs`, and repeating it on an
+  access-control table would be considerably worse.
+- **The `access` channel** — `loadAccess`, `loadExposure`, `loadSessions`, `loadAccessHistory`,
+  `grantAccess`, `modifyGrant`, `revokeGrant`, `endSession`. WebSocket commands rather than the
+  HTTP routes the original design called for, because a socket is already scoped to a workspace and
+  agent access happens inside one. Every read answers the socket that asked.
+- **The Access tab**, sixth in the agent detail view, with five collapsible regions. It is
+  **read-only without the `admin` capability rather than hidden**: "who can deploy this?" is a
+  question a member should be able to answer without asking an admin, and hiding the answer produces
+  exactly the Slack thread the tab exists to eliminate.
+- **A provenance line on every person row** — "from workspace role", "granted here by Priya · 3 days
+  ago · expires in 6 hours", or "their member role caps this at view, run". This is the whole point
+  of the panel rather than a nicety: a list of names with permission badges is a report, and an
+  admin who cannot tell an inherited capability from a granted one will revoke a grant that was
+  never the reason.
+- **Time-boxed grants as a first-class control**, and a **required note** for `deploy`, `secrets`
+  and `admin`. Six months later "why does this contractor have deploy" needs an answer that is not
+  archaeology, and the only moment anybody can write it is the moment they know.
+- **Live revocation.** Any grant change emits a workspace-scoped recheck carrying **nothing at all**
+  — not who, not which agent, not what — because it reaches every socket in the workspace and the
+  detail belongs to whoever may read the History section. It is emitted from `setMemberRole`,
+  `removeMember` and `leaveWorkspace` as well, since a role *is* the ceiling.
+- **Exposure**, which names the live URL, states in a sentence that the endpoint is unauthenticated,
+  and says who deployed it — for which `deployments` gained a `created_by` column (migration 061),
+  nullable and never backfilled, because a name beside a public URL that nobody chose to publish is
+  worse than an honest gap.
+- **Live sessions**, with a name, two words about the browser and a duration. **No IP addresses**,
+  no tickets, no raw User-Agent. End session closes one socket and revokes nothing, and the
+  confirmation says so, because an administrator who believes they removed somebody's access and
+  removed their tab is the failure that button invites.
+- **Pending invites and History.** History reads `audit_log` and marks a *workspace* change apart
+  from an *agent* one, because the commonest reason somebody's access to an agent changed is a role
+  change two panels away. `[Export CSV]` carries the scope as a column, since an icon is nothing in
+  a spreadsheet.
+- **`access.denied`**, written whenever a real command is refused for insufficient per-agent
+  capability. It is the highest-signal row in the feature and the only evidence a grant is wrong:
+  nobody files a ticket saying their capability is misconfigured — they try, fail, and eventually
+  ask a colleague to do it for them.
+- **Pre-staged grants on invitations** (migration 062). The grant travels with the invitation and is
+  written **in the same transaction as the membership**, so a partially-accepted invite with a
+  missing grant is impossible. The dialog's confirming sentence names the workspace twice, because
+  an admin must never think they granted narrow agent access when they widened the tenancy.
+- **Three new suites**, all wired into `ci.yml`: `test:access-resolver` and `test:access-denied`
+  (server), `test:access-tab` (client).
+
+### Changed
+
+- **`useCapability` and `useCanRun` take an optional `agentId`** rather than gaining a sibling. A
+  `useAgentCapability` would have been the two-resolver drift this whole feature exists to prevent,
+  one layer out from the server where the same rule is written. Without the argument every existing
+  call site means exactly what it meant.
+- **Every agent-scoped guard now passes its agent** — Deploy in the title bar and the panel, and the
+  six GitHub writes. A guard left at the workspace scope is not a broken button: it renders exactly
+  as it always did and the narrowing somebody deliberately applied is silently not there.
+  `test:permission-ui` reads the components and fails on one that forgot, which is how the last two
+  were found.
+- **The GitHub writes are agent-level `deploy` rather than `edit`**, which is the least obvious
+  decision in the matrix. What they do to the source is nothing; what they do is put it outside this
+  product where people with no membership here can read it. A contractor granted `edit` to fix one
+  agent has not been granted the right to publish it to the company's organisation.
+- **`perAgentAccessGrants` is wired.** The flag has been in `TierEntitlements` and in the plan table
+  since v0.3.4 — off on Free and Pro, on for Team — declared with nothing to check because the
+  surface did not exist. It gates `grantAccess` and `modifyGrant`. The **reads are deliberately not
+  gated**: what Team buys is the ability to narrow somebody, and what every workspace gets is the
+  ability to see who can reach what. The Exposure warning behind a paywall would be indefensible.
+  Revoking is not gated either, by the rule a downgrade gates features off and never destroys data.
+- **A third close code, `4003`**, for a session an administrator ended. Distinct from `CLOSE_RECONNECT`
+  because a tab that came straight back would make the button appear not to work.
+
+### Fixed
+
+- **`describeClient` reported "Safari on macOS" for every iPhone.** An iOS User-Agent contains the
+  literal string "like Mac OS X" and an Android's contains "Linux", so a scan that asked the general
+  question first was confidently wrong on every phone — on the one row whose entire job is helping
+  somebody recognise their own session. Both lists are now most-specific-first, with an assertion
+  per case.
+- **The agent-scoped command audit was too generous.** It looked for `agentId` anywhere in a
+  command's type literal, so `inviteMember` — which gained a nested `agentGrant.agentId` — was
+  reported as needing an agent-level capability. The relay reads `msg.agentId` and nothing deeper,
+  and an invitation is an act on the *workspace*; the rule now matches only a top-level field, which
+  is exactly what the gate reads.
+- **`deployments.created_by` did not exist**, so §13's "who deployed it" was unanswerable — there is
+  no audit row for a deploy either. The column is written from the socket's own context, which is
+  the person the server already decided was allowed to do it.
+
+### Migrations
+
+Three, all expand-only and safe against the version currently serving:
+
+- **`060_agent_grants`** — the table, with RLS enabled and forced and a `WITH CHECK` half, because a
+  write here is somebody else's permission. Registered with export, retention and the deleter so the
+  three audits that read the schema cover it from its first migration.
+- **`061_deployment_actor`** — `deployments.created_by`, nullable, never backfilled.
+- **`062_invite_agent_grant`** — the pre-staged grant, as `json` on the invitation row. Deliberately
+  no foreign key to `agents`: §16 requires that an invitation accepted after its agent was deleted
+  still create the membership and discard the grant silently, which a key would turn into an error.
+
+`schema/events.md` is untouched — nothing here is a run event.
+
+### Verified
+
+- **Fifteen commits for the specification's own plan**, each pushed to `origin/main` on its own and
+  each left with CI green before the next was started.
+- **`test:access-resolver` drives every gated command with the client bypassed entirely** — a real
+  relay on a real port, raw WebSocket frames, no store and no component that could be politely
+  refusing on the server's behalf. Its two load-bearing assertions both look redundant: a grant
+  exceeding a role is refused at write time *and* a row written straight to the database is
+  intersected down at read time, and a cross-workspace agent id answers "there is no such agent"
+  rather than refusing, on every command, because a refusal confirms the id exists.
+- **The composite foreign key was proved by the database rather than by a comment** — a grant naming
+  another tenant's agent is rejected on both drivers, and `test:tenancy` aims the reads, the write
+  and the revoke at workspace B's real ids from workspace A.
+- **`test:access-denied` asserts the row is written per refusal rather than deduplicated**, because
+  the pattern is the signal — and that a cross-tenant id writes nothing at all, since that branch is
+  reachable by anybody who can open a socket at whatever rate they choose.
+- **The render assertions are about absence.** A non-admin gets the full panel with every mutation
+  control absent rather than disabled, and the suite fails on `disabled` too, because §8 rules out
+  both shapes.
+
+### Still owed
+
+- **The per-agent narrowing does not reach commands that name an agent only indirectly.** `pauseRun`
+  carries a run id, `applyEdit` a proposal id, `cancelDeploy` a deployment id, `addExample` a dataset
+  id — each belongs to an agent and none says which. So a person who may not `run` an agent may
+  still pause a run of it that somebody else started. Every command that *creates* those ids is
+  gated, so the narrowing holds at the door and leaks at the follow-up; closing it means the id
+  carrying its agent, which is a change to four message shapes and their clients.
+  `test:capabilities` asserts this rather than leaving it implied.
+- **Live sessions are the sockets this process holds.** Tickets are in Postgres so the question is
+  answerable across replicas, and the answer is not assembled across them yet: behind two gateways
+  each reports its own, and `endSession` can only close one it holds. The count is honest about what
+  it counted.
+- **The per-socket agent context is advisory.** A tab left open on an agent last Tuesday still
+  reports that agent. What it answers well is "who is in here right now".
+- **No group or team grants, no custom roles, no approval workflow for grant requests**, all
+  explicitly out of scope — per-user until there is evidence of teams large enough to need
+  otherwise.
+- **Authentication on deployed agent endpoints is still the largest real gap**, and it belongs to the
+  deploy layer rather than here. The Exposure section is what makes it visible enough to prioritise.
+
+---
+
 ## v0.3.7 : Teams & Workspaces — The Surface That Reaches a Backend That Was Already There
 
 Almost nothing in this release is a new capability. The tables landed in v0.2.5, the socket has

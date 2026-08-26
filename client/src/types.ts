@@ -1790,7 +1790,19 @@ export type ClientCommand =
   | { cmd: "appealEnforcement"; note: string }
   // §7.1 — `email` is optional. Absent means a link for whoever opens it; present means a token
   // only an account signing in as that address can redeem. Two credentials, not one with a blank.
-  | { cmd: "inviteMember"; email?: string; role: string }
+  /**
+   * §12.2 — an invitation may carry a grant on ONE agent, applied atomically on acceptance.
+   *
+   * ON THE EXISTING COMMAND rather than a new one, which is §12's own instruction: this is a view
+   * onto the existing invite system, not a reimplementation. A second invite command would be a
+   * second place the token is minted and a second place the address is validated.
+   */
+  | {
+      cmd: "inviteMember";
+      email?: string;
+      role: string;
+      agentGrant?: { agentId: string; capabilities: string[]; note?: string | null } | null;
+    }
   // §6.5 — give up your own membership. It carries no user id: the subject is whoever holds this
   // socket, which is what lets it sit at the member-level capability. See server/src/wsRelay.ts.
   | { cmd: "leaveWorkspace" }

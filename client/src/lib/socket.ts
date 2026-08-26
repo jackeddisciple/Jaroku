@@ -1478,9 +1478,21 @@ export function sendListMembers(): void {
  * "", role }` is a form somebody left blank, which is the same bytes and a different sentence in
  * every log this passes through.
  */
-export function sendInviteMember(email: string | null, role: string): void {
+export function sendInviteMember(
+  email: string | null,
+  role: string,
+  /**
+   * §12.2's pre-staged grant, applied atomically when the invitation is accepted.
+   *
+   * OPTIONAL, AND ABSENT IS WHAT EVERY EXISTING CALL SITE SENDS — the Members panel invites to the
+   * workspace and stages nothing, which is what an invitation has always done. The Access tab
+   * passes one, because the case it is for is somebody brought in FOR one agent.
+   */
+  agentGrant?: { agentId: string; capabilities: string[]; note?: string | null } | null,
+): void {
   const address = email?.trim();
-  send(address ? { cmd: "inviteMember", email: address, role } : { cmd: "inviteMember", role });
+  const base = address ? { cmd: "inviteMember" as const, email: address, role } : { cmd: "inviteMember" as const, role };
+  send(agentGrant ? { ...base, agentGrant } : base);
 }
 
 /**

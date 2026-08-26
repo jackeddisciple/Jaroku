@@ -8,6 +8,9 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Db, Queryable } from "../db.ts";
 import { asBool, asInt, jsonFromColumn } from "../db.ts";
 import {
+  agentCeiling, closeAgentCapabilities, isAgentCapability, type AgentCapability,
+} from "../../auth/capabilities.ts";
+import {
   isMemberRole,
   type AnyContext,
   type MemberRole,
@@ -172,6 +175,19 @@ export interface Invite {
    */
   email: string | null;
   role: MemberRole;
+  /**
+   * §12.2 — the per-agent grant this invitation is carrying, applied when it is accepted.
+   *
+   * NULL IS THE ORDINARY CASE. An invitation with no pre-staged grant makes somebody a member with
+   * their role's default access to every agent, which is what an invitation has always done; this
+   * is for the case somebody was brought in FOR one agent, where the step everybody forgets is
+   * going back afterwards to narrow them.
+   *
+   * IT IS VALIDATED AGAINST THE ROLE THIS INVITATION CARRIES, at creation and again at acceptance,
+   * because invariant B holds here as everywhere: a grant cannot exceed a workspace role. This is
+   * the one place where the role and the grant are decided together before either exists.
+   */
+  agent_grant: { agentId: string; capabilities: string[]; note?: string | null } | null;
   invited_by: string | null;
   expires_at: string;
   accepted_at: string | null;
@@ -1024,7 +1040,13 @@ export class IdentityRepository {
 
   async createInvite(
     ctx: TenantContext,
-    input: { email?: string | null; role: MemberRole; ttlHours?: number },
+    input: {
+      email?: string | null;
+      role: MemberRole;
+      ttlHours?: number;
+      /** §12.2's pre-staged grant. Refused here if it exceeds the role being invited. */
+      agentGrant?: { agentId: string; capabilities: string[]; note?: string | null } | null;
+    },
   ): Promise<{ invite: Invite; token: string } | { error: string }> {
     if (!isMemberRole(input.role)) throw new Error(`not a membership role: ${input.role}`);
     // §13.4 — AN OMITTED ADDRESS IS A DECISION, NOT A BLANK FIELD. An empty string and an absent
@@ -1037,6 +1059,45 @@ export class IdentityRepository {
     const email: string | null = typed === "" ? null : typed;
     if (email !== null && (!/^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(email) || email.length > 254)) {
       return { error: `"${email.slice(0, 64)}" is not an email address` };
+    }
+
+    /**
+     * §12.2's pre-staged grant, validated against the role THIS INVITATION carries.
+     *
+     * THE INVITED ROLE, NOT THE INVITER'S, which is the whole subtlety of validating a grant that
+     * does not have a member to belong to yet. An owner inviting somebody as a `member` and staging
+     * `deploy` on an agent is describing a state that can never exist — the resolver would intersect
+     * it away the first time that person sent a command — so it is refused here rather than stored
+     * as a grant that silently does nothing.
+     *
+     * REFUSED RATHER THAN TRIMMED. Quietly dropping the capabilities that do not fit would create
+     * the invitation and hand back a link, having given somebody less than the sentence on screen
+     * said they were giving. The refusal names what did not fit, which is the same shape
+     * `grantAccess` refuses in.
+     */
+    const asked = input.agentGrant;
+    let staged: Invite["agent_grant"] = null;
+    if (asked) {
+      const capabilities = (asked.capabilities ?? []).map(String);
+      const unknown = capabilities.filter((c) => !isAgentCapability(c));
+      if (unknown.length > 0) {
+        return { error: `${unknown.map((c) => `"${c.slice(0, 24)}"`).join(", ")} is not a capability` };
+      }
+      const ceiling = agentCeiling(input.role);
+      const over = capabilities.filter((c) => !ceiling.has(c as AgentCapability));
+      if (over.length > 0) {
+        return {
+          error: `${over.join(" and ")} exceed the ${input.role} role this invitation grants — invite them at a higher role, or leave those off`,
+        };
+      }
+      staged = {
+        // CLOSED BEFORE IT IS STORED, so the row says what it means and matches what the dialog
+        // showed. The same closure `grantAccess` applies, from the same table.
+        capabilities: [...closeAgentCapabilities(capabilities as AgentCapability[])],
+        agentId: String(asked.agentId ?? ""),
+        note: asked.note?.trim() || null,
+      };
+      if (!staged.agentId) return { error: "a pre-staged grant has to name an agent" };
     }
 
     // SCOPED, not a bare transaction. `workspace_invites` is the one table in this module that
@@ -1084,12 +1145,13 @@ export class IdentityRepository {
         accepted_at: null,
         accepted_by: null,
         revoked_at: null,
+        agent_grant: staged,
         created_at: nowIso(),
       };
       await tx.run(
         `INSERT INTO workspace_invites
-           (id, workspace_id, email, role, token_hash, invited_by, expires_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, workspace_id, email, role, token_hash, invited_by, expires_at, created_at, agent_grant)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           invite.id,
           invite.workspace_id,
@@ -1099,6 +1161,10 @@ export class IdentityRepository {
           invite.invited_by,
           invite.expires_at,
           invite.created_at,
+          // `JSON.stringify` ON BOTH DRIVERS, exactly as `appendAuditIn` writes `metadata`: a
+          // json column accepts a JSON string on Postgres and TEXT is a string on SQLite, so one
+          // spelling serves both and there is no dialect branch to get wrong.
+          staged === null ? null : JSON.stringify(staged),
         ],
       );
       await this.appendAuditIn(tx, ctx, {
@@ -1118,14 +1184,15 @@ export class IdentityRepository {
   async listInvites(ctx: TenantContext): Promise<Invite[]> {
     // `forWorkspace`, for the reason createInvite is scoped: an unscoped read of a policied
     // table answers nothing as the application role.
-    return this.db.forWorkspace(ctx.workspaceId).all<Invite>(
+    const rows = await this.db.forWorkspace(ctx.workspaceId).all<Record<string, unknown>>(
       `SELECT id, workspace_id, email, role, invited_by, expires_at, accepted_at, accepted_by,
-              revoked_at, created_at
+              revoked_at, created_at, agent_grant
          FROM workspace_invites
         WHERE workspace_id = ? AND accepted_at IS NULL AND revoked_at IS NULL
         ORDER BY created_at DESC`,
       [ctx.workspaceId],
     );
+    return rows.map((r) => this.hydrateInvite(r));
   }
 
   async revokeInvite(ctx: TenantContext, inviteId: string): Promise<boolean> {
@@ -1175,12 +1242,13 @@ export class IdentityRepository {
     // see migration 012. It authorises nothing on its own: it chooses which rows the digest
     // below is compared against, and the digest is the whole of the proof.
     return this.db.scoped(workspaceId, async (tx) => {
-      const invite = await tx.get<Invite>(
+      const row = await tx.get<Record<string, unknown>>(
         `SELECT id, workspace_id, email, role, invited_by, expires_at, accepted_at, accepted_by,
-                revoked_at, created_at
+                revoked_at, created_at, agent_grant
            FROM workspace_invites WHERE workspace_id = ? AND token_hash = ?`,
         [workspaceId, sha256(secret)],
       );
+      const invite = row ? this.hydrateInvite(row) : undefined;
       // One message for every way it can fail to exist. A link that is expired, withdrawn,
       // already used or invented are all "ask for a new one", and distinguishing them tells
       // somebody holding a stolen link whether it was ever real.
@@ -1230,6 +1298,69 @@ export class IdentityRepository {
       }
 
       await this.insertMemberIn(tx, workspaceId, user.id, invite.role);
+
+      /**
+       * §12.2 — THE PRE-STAGED GRANT, IN THE SAME TRANSACTION AS THE MEMBERSHIP.
+       *
+       * That is the whole requirement and it is the reason this lives here rather than in the
+       * command handler: "same transaction, so a partially-accepted invite with a missing grant is
+       * impossible". A grant written after the membership commits is a grant that is missing
+       * whenever the process dies in between — and the failure is silent and generous, because
+       * what is left is a member holding their ROLE's default access to every agent, which is
+       * wider than what anybody intended on the day they intended to narrow it.
+       *
+       * §16 — A DELETED AGENT DISCARDS IT SILENTLY. The agent is looked up inside this transaction
+       * and against this workspace; a miss simply means no grant row. Not an error, because the
+       * invitation is still valid and the person is still meant to be a member — refusing the whole
+       * acceptance because an unrelated agent was deleted last week would strand somebody outside a
+       * workspace over a detail nobody can see from the link they were sent.
+       *
+       * AND THE CEILING IS APPLIED AGAIN, by the resolver, on every command — so even a payload
+       * written before this validation existed cannot exceed the role it was accepted at.
+       */
+      const staged = invite.agent_grant;
+      if (staged) {
+        const agent = await tx.get<{ id: string }>(
+          `SELECT id FROM agents WHERE workspace_id = ? AND id = ? AND deleted_at IS NULL`,
+          [workspaceId, staged.agentId],
+        );
+        if (agent) {
+          await tx.run(
+            `INSERT INTO agent_grants
+               (workspace_id, agent_id, user_id, capabilities, granted_by, granted_at, note)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (workspace_id, agent_id, user_id) DO UPDATE SET
+               capabilities = excluded.capabilities,
+               granted_by   = excluded.granted_by,
+               granted_at   = excluded.granted_at,
+               note         = excluded.note`,
+            [
+              workspaceId,
+              staged.agentId,
+              user.id,
+              this.db.dialect === "postgres" ? staged.capabilities : JSON.stringify(staged.capabilities),
+              // GRANTED BY WHOEVER SENT THE INVITATION, not by the person accepting it. The row has
+              // to say who decided this, and the person walking through a link decided nothing —
+              // they clicked something somebody else prepared.
+              invite.invited_by ?? user.id,
+              nowIso(),
+              staged.note ?? null,
+            ],
+          );
+          await this.appendAuditIn(tx, ctx, {
+            workspaceId,
+            actorUserId: invite.invited_by ?? user.id,
+            action: "access.granted",
+            targetType: "agent_grant",
+            targetId: `${staged.agentId}:${user.id}`,
+            // `viaInvite` IS ON THE ROW because the History section otherwise shows a grant made by
+            // somebody at a moment they were not doing anything — the decision was days earlier,
+            // and this is the field that says so.
+            metadata: { user: user.id, capabilities: staged.capabilities, viaInvite: invite.id },
+          });
+        }
+      }
+
       await tx.run(
         `UPDATE workspace_invites SET accepted_at = ?, accepted_by = ? WHERE id = ? AND workspace_id = ?`,
         [nowIso(), user.id, invite.id, workspaceId],
@@ -1244,6 +1375,29 @@ export class IdentityRepository {
       });
       return { ok: true, workspace, role: invite.role };
     });
+  }
+
+  /**
+   * One invitation row, with its `agent_grant` read back as an object on either driver.
+   *
+   * A MALFORMED PAYLOAD BECOMES `null`, never a partial grant. It is the same judgement
+   * `AgentGrantRepository.capabilitiesFrom` makes and the safe direction is the same: a row nobody
+   * can parse is a row nobody should be trusted by, and the acceptance falls back to creating the
+   * membership with no grant — which is where every invitation was before this column existed.
+   */
+  private hydrateInvite(row: Record<string, unknown>): Invite {
+    const raw = jsonFromColumn(this.db.dialect, row["agent_grant"]) as
+      | { agentId?: unknown; capabilities?: unknown; note?: unknown }
+      | null;
+    const agentGrant =
+      raw && typeof raw.agentId === "string" && Array.isArray(raw.capabilities)
+        ? {
+            agentId: raw.agentId,
+            capabilities: raw.capabilities.filter(isAgentCapability),
+            note: typeof raw.note === "string" ? raw.note : null,
+          }
+        : null;
+    return { ...(row as unknown as Invite), agent_grant: agentGrant };
   }
 
   // --- audit -----------------------------------------------------------------

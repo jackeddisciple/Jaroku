@@ -898,7 +898,24 @@ export type ListMembersCommand = { cmd: "listMembers" };
  * Without one, it is redeemable by whoever holds it, which is the whole reason it can be pasted
  * into a channel where the sender does not know everybody's address.
  */
-export type InviteMemberCommand = { cmd: "inviteMember"; email?: string; role: string };
+export type InviteMemberCommand = {
+  cmd: "inviteMember";
+  email?: string;
+  role: string;
+  /**
+   * §12.2's pre-staged grant, applied atomically when the invitation is accepted.
+   *
+   * OPTIONAL, AND ABSENT IS THE ORDINARY CASE — an invitation with none makes somebody a member
+   * with their role's default access to every agent, which is what an invitation has always done.
+   * This is for the case somebody was brought in FOR one agent, where the step everybody forgets
+   * is going back afterwards to narrow them.
+   *
+   * ON THE EXISTING COMMAND rather than a new one, which is §12's own instruction: this is a view
+   * onto the existing invite system, not a reimplementation. A second invite command would be a
+   * second place the token is minted and a second place the address is validated.
+   */
+  agentGrant?: { agentId: string; capabilities: string[]; note?: string | null } | null;
+};
 export type RevokeInviteCommand = { cmd: "revokeInvite"; inviteId: string };
 export type SetMemberRoleCommand = { cmd: "setMemberRole"; userId: string; role: string };
 export type RemoveMemberCommand = { cmd: "removeMember"; userId: string };

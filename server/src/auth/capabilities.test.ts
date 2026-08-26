@@ -528,7 +528,22 @@ console.log("\nevery command the relay accepts is classified");
         if (relay[i] === "{") depth++;
         else if (relay[i] === "}" && --depth === 0) { close = i; break; }
       }
-      if (/\bagentId\??\s*:/.test(relay.slice(open, close))) named.add(m[1]!);
+      // AT THE TOP LEVEL OF THE COMMAND, AND NOWHERE ELSE, because that is exactly what the relay
+      // reads: `authorized` looks at `msg.agentId` and nothing deeper. A nested one is a payload
+      // FIELD rather than the command's subject — `inviteMember` carries `agentGrant.agentId`, and
+      // gating the whole invitation on it would mean an invitation was an act on an agent, which it
+      // is not: it adds somebody to the WORKSPACE, and §12's own warning is about exactly that
+      // confusion. A rule that could not tell the two apart would demand a classification for a
+      // command the gate can never fire on.
+      const body = relay.slice(open, close);
+      let level = 0;
+      let topLevel = false;
+      for (const t of body.matchAll(/[{}]|\bagentId\??\s*:/g)) {
+        if (t[0] === "{") level++;
+        else if (t[0] === "}") level--;
+        else if (level === 1) topLevel = true;
+      }
+      if (topLevel) named.add(m[1]!);
     }
     check(named.size > 30, `found the commands that name an agent (${named.size})`);
     check(named.has("run") && named.has("deploy") && named.has("pushGithub"), "...including the three worth being sure about");
@@ -558,6 +573,18 @@ console.log("\nevery command the relay accepts is classified");
         `${indirect} is gated at the workspace scope alone — it names no agent`,
       );
     }
+    // AND A COMMAND WHOSE AGENT ID IS NESTED IS NOT AGENT-SCOPED. `inviteMember` carries §12.2's
+    // pre-staged grant, which names an agent — and the command is still an act on the WORKSPACE:
+    // it adds a member, at a role, which is a ceiling over every agent. The relay reads
+    // `msg.agentId` and nothing deeper, so the gate could never fire on it; the agent in the
+    // payload is validated by the handler instead. Asserted by name because this is the one place
+    // the parser above could plausibly be too generous.
+    check(!named.has("inviteMember"), "a nested agent id does not make a command agent-scoped");
+    check(
+      agentCapabilityFor("inviteMember") === undefined,
+      "...and inviteMember is gated on membership rather than on an agent",
+    );
+
     check(agentCapabilityFor("__proto__") === undefined, "and __proto__ is not an entry here either");
   }
 

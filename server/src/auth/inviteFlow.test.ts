@@ -23,6 +23,7 @@
 //   npm run test:invite-flow
 //   JAROKU_PG_URL=postgres://… npm run test:invite-flow    # runs it twice
 
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -34,6 +35,8 @@ import type { Db } from "../db/db.ts";
 import { migrate } from "../db/migrate.ts";
 import { SqliteDb } from "../db/sqlite.ts";
 import { withScratchPostgres } from "../db/testDb.ts";
+import { AgentGrantRepository } from "../db/repositories/agentGrants.ts";
+import { resolveCapabilities } from "./capabilities.ts";
 import { IdentityRepository } from "../db/repositories/identity.ts";
 import { newRequestId, systemContext, systemContextFor, type TenantContext } from "../db/tenant.ts";
 import { Router } from "../http/router.ts";
@@ -125,6 +128,7 @@ async function suite(driver: string, db: Db): Promise<void> {
   console.log(`\n${driver}`);
   const label = driver.toLowerCase();
   const identity = new IdentityRepository(db);
+  const grants = new AgentGrantRepository(db);
   const sys = systemContext(newRequestId());
   const { base, close } = await serve(db);
 
@@ -249,6 +253,138 @@ async function suite(driver: string, db: Db): Promise<void> {
       const second = issuer.mint({ email: `if-hank-${label}@example.com` }).token;
       const late = await post(base, "/v1/invites/accept", second, { token: made.token });
       check(late.status === 403, `and the second person to try is refused (${late.status})`);
+    }
+
+
+    // §12.2 — THE PRE-STAGED GRANT, AND THE ONE THING THAT MAKES IT WORTH HAVING.
+    //
+    // Without it the flow is three steps: invite somebody, wait for them to accept, remember to go
+    // and grant them the one agent you actually brought them in for. The step everybody forgets is
+    // the third, and what it leaves behind is a new member holding their ROLE's default access to
+    // every agent in the workspace — wider than anybody intended, on the day they intended to
+    // narrow it. So the grant travels with the invitation and lands in the same transaction as the
+    // membership: §12.2's "a partially-accepted invite with a missing grant is impossible".
+    console.log("  · an invitation carrying a grant on one agent");
+    {
+      const agentId = randomUUID();
+      await db.run(
+        `INSERT INTO agents (id, workspace_id, slug, current_version, created_at) VALUES (?, ?, ?, 1, ?)`,
+        [agentId, team.id, `staged_${label}`, new Date().toISOString()],
+      );
+
+      const invitee = `if-staged-${label}@example.com`;
+      const made = await identity.createInvite(owner, {
+        email: invitee,
+        role: "member",
+        agentGrant: { agentId, capabilities: ["view"], note: "brought in for this one agent" },
+      });
+      check("token" in made, "an owner mints an invitation with a grant on it");
+      if (!("token" in made)) return;
+      check(made.invite.agent_grant?.agentId === agentId, "...and the row carries the agent it names");
+
+      const token = issuer.mint({ email: invitee }).token;
+      const accepted = await post(base, "/v1/invites/accept", token, { token: made.token });
+      check(accepted.status === 200, `the invitee redeems it (${accepted.status})`);
+
+      const joined = (await identity.listMembers(owner)).find((m) => m.email === invitee);
+      check(joined?.role === "member", "...becoming a member");
+
+      // THE GRANT EXISTS BY THE TIME THE MEMBERSHIP DOES. Read back through the repository rather
+      // than by counting rows, because what matters is that the RESOLVER can see it — a row written
+      // under the wrong workspace would satisfy a count and answer nothing.
+      const granted = await grants.find(owner, agentId, joined!.user_id);
+      check(granted !== undefined, "...with the grant already written, in the same transaction");
+      check(
+        granted?.capabilities.join(",") === "view",
+        `...saying exactly what the invitation staged (${granted?.capabilities.join(", ")})`,
+      );
+      // GRANTED BY WHOEVER SENT IT, not by the person who clicked the link. The row has to say who
+      // decided this, and the invitee decided nothing — they opened something somebody prepared.
+      check(granted?.granted_by === ada.user.id, "...attributed to the person who sent the invitation");
+      check(granted?.note === "brought in for this one agent", "...and carrying the note they wrote");
+
+      // AND THE NARROWING IS REAL. A member's default set is view/run/edit/eval; this one resolves
+      // to `view` alone, which is the entire point of staging it.
+      const resolved = await resolveCapabilities(
+        { ...owner, actorUserId: joined!.user_id, role: "member" },
+        agentId,
+        grants,
+      );
+      check(
+        [...resolved.capabilities].join(",") === "view",
+        `...so the new member is narrowed from the first command (${[...resolved.capabilities].join(", ")})`,
+      );
+    }
+
+    // INVARIANT B, AT THE ONE PLACE THE ROLE AND THE GRANT ARE DECIDED TOGETHER BEFORE EITHER
+    // EXISTS. An owner staging `deploy` on somebody they are inviting as a MEMBER is describing a
+    // state that can never exist — the resolver would intersect it away on that person's first
+    // command — so it is refused at creation rather than stored as a grant that silently does
+    // nothing. Refused rather than trimmed: quietly dropping what does not fit would hand back a
+    // link having given less than the sentence on screen said.
+    console.log("  · a staged grant that exceeds the role being invited");
+    {
+      const agentId = randomUUID();
+      await db.run(
+        `INSERT INTO agents (id, workspace_id, slug, current_version, created_at) VALUES (?, ?, ?, 1, ?)`,
+        [agentId, team.id, `over_${label}`, new Date().toISOString()],
+      );
+      const refused = await identity.createInvite(owner, {
+        email: `if-over-${label}@example.com`,
+        role: "member",
+        agentGrant: { agentId, capabilities: ["view", "deploy"] },
+      });
+      check("error" in refused, "an invitation staging more than the role allows is refused");
+      check(
+        "error" in refused && refused.error.includes("deploy"),
+        `...naming what did not fit (${"error" in refused ? refused.error : ""})`,
+      );
+      check(
+        "error" in refused && refused.error.includes("member"),
+        "...and the role that stopped it, which is the thing to change",
+      );
+
+      // ...and the same set at a role that permits it is accepted, so the refusal above is a
+      // ceiling doing its job rather than a form that rejects everything.
+      const allowed = await identity.createInvite(owner, {
+        email: `if-okay-${label}@example.com`,
+        role: "admin",
+        agentGrant: { agentId, capabilities: ["view", "deploy"] },
+      });
+      check("token" in allowed, "...while an admin invitation may stage the same set");
+    }
+
+    // §16 — "INVITE ACCEPTED AFTER AGENT WAS DELETED: PRE-STAGED GRANT DISCARDED SILENTLY."
+    //
+    // Not an error, because the invitation is still valid and the person is still meant to be a
+    // member: refusing the whole acceptance because an unrelated agent was deleted last week would
+    // strand somebody outside a workspace over a detail nobody can see from the link they were sent.
+    console.log("  · an invitation whose agent was deleted before anybody opened it");
+    {
+      const agentId = randomUUID();
+      await db.run(
+        `INSERT INTO agents (id, workspace_id, slug, current_version, created_at) VALUES (?, ?, ?, 1, ?)`,
+        [agentId, team.id, `doomed_${label}`, new Date().toISOString()],
+      );
+      const invitee = `if-doomed-${label}@example.com`;
+      const made = await identity.createInvite(owner, {
+        email: invitee,
+        role: "member",
+        agentGrant: { agentId, capabilities: ["view"] },
+      });
+      if (!("token" in made)) return check(false, "could not mint one");
+
+      await db.run(`DELETE FROM agents WHERE id = ?`, [agentId]);
+
+      const token = issuer.mint({ email: invitee }).token;
+      const accepted = await post(base, "/v1/invites/accept", token, { token: made.token });
+      check(accepted.status === 200, `the invitation still works (${accepted.status})`);
+      const joined = (await identity.listMembers(owner)).find((m) => m.email === invitee);
+      check(joined !== undefined, "...and the membership is created");
+      check(
+        (await grants.listForAgent(owner, agentId)).length === 0,
+        "...with the grant discarded silently rather than erroring",
+      );
     }
 
     console.log("  · a member opening a link they do not need");

@@ -6422,7 +6422,25 @@ async function handleMemberCommand(ctx: TenantContext, cmd: MemberCommand): Prom
       // an omitted field and an empty one both mean "a link for whoever opens it", and only a
       // string that was actually typed is passed on to be checked as an address.
       const typed = typeof cmd.email === "string" ? cmd.email : null;
-      const result = await identityRepo.createInvite(ctx, { email: typed, role });
+      // §12.2 — THE PRE-STAGED GRANT IS RESOLVED TO A UUID HERE, before it is stored, because the
+      // Access tab sends whichever spelling it had and an invitation may sit unaccepted for a week.
+      // A slug resolved at ACCEPTANCE would find whatever agent happens to hold that slug then —
+      // slugs are unique per workspace and renameable, so the row somebody meant and the row that
+      // gets granted are two different things the moment anybody renames an agent.
+      const staged = cmd.agentGrant ?? null;
+      let agentGrant: typeof staged = null;
+      if (staged) {
+        const agent = await agentForCommand(ctx, String(staged.agentId ?? ""));
+        if (!agent) {
+          relay.broadcastMembers(ctx, {
+            type: "error",
+            message: `there is no agent "${staged.agentId}" in this workspace`,
+          });
+          return;
+        }
+        agentGrant = { ...staged, agentId: agent.id };
+      }
+      const result = await identityRepo.createInvite(ctx, { email: typed, role, agentGrant });
       if ("error" in result) {
         relay.broadcastMembers(ctx, { type: "error", message: result.error });
         return;
