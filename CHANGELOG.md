@@ -127,6 +127,30 @@ as safety.
 - **`deployments.created_by` did not exist**, so §13's "who deployed it" was unanswerable — there is
   no audit row for a deploy either. The column is written from the socket's own context, which is
   the person the server already decided was allowed to do it.
+- **Every expiry rendered as "expires just now".** `relTime` floors its delta at zero, which is
+  correct for the fifty call sites it was written for — all of them describing something that has
+  already finished, none of which should read "in 1s" because a clock was a second fast. A grant's
+  `expires_at` is the first future instant this client has ever had to draw, and it went through
+  that function: a grant with eight hours left announced itself as one that had just run out, which
+  is not a smaller answer than the right one but a confident wrong one about the single fact a
+  time-boxed grant exists to communicate. `relUntil` is a sibling rather than a sign flip inside
+  `relTime`, so the clamp the other fifty depend on stays where it is.
+- **The History line spelled the person as a uuid.** `metadata.user` on an access audit row is an
+  id — deliberately, since a stored display name is a record of what somebody was called that day —
+  and the sentence read it as though it were already a name: "granted
+  5935135b-c901-4861-ad62-cb6b199a276a view", on the one line whose whole job is letting an
+  administrator recognise a change they did not make. It resolves through the same membership
+  lookup the actor's name already used, and capabilities now read in the panel's order rather than
+  the closure's, so a line does not list the same set differently from the chips above it. The
+  sentence moved to `auth/accessHistory.ts` in the process: inside `index.ts` it could only be
+  asserted with a regular expression over the source, which is how it passed every check for a
+  release while being wrong.
+- **A tier refusal on the access channel had no card.** `perAgentAccessGrants` gated nothing until
+  this release wired it, so Grant is the first control in this panel a Free workspace can press and
+  be refused by — and the refusal arrived as the panel's red sentence alone, while every other
+  tier-gated surface in the app answers with the inline upsell naming what would change it. The
+  card is scoped to the `access` channel, so a refused generation puts nothing here and a refused
+  grant puts nothing on the composer.
 
 ### Migrations
 
@@ -161,6 +185,13 @@ Three, all expand-only and safe against the version currently serving:
 - **The render assertions are about absence.** A non-admin gets the full panel with every mutation
   control absent rather than disabled, and the suite fails on `disabled` too, because §8 rules out
   both shapes.
+- **The panel was driven in the running desktop app, and that is where the last three defects came
+  from.** None of them was reachable from a suite: a formatter is correct against a fixture and
+  wrong against a clock, a history line reads perfectly until real ids are in it, and a paywall on
+  a control nobody had pressed yet is invisible until somebody presses it. The access channel was
+  also exercised over a raw socket against the same process the window was talking to — sign-in,
+  ticket, `loadSessions`, `loadAccessHistory`, a grant refused for exceeding a member's ceiling,
+  and a grant accepted, with its recheck arriving on the workspace channel.
 
 ### Still owed
 
