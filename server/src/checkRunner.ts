@@ -26,7 +26,7 @@
 // nothing would be giving all of that up to avoid a cost that was never going to be incurred.
 
 import { compareToBaseline, conclusionFor, summaryFor, titleFor, type CheckMetrics } from "./evalCheck.ts";
-import { modeReason, providerModeFor, targetsFor } from "./checkPolicy.ts";
+import { APPROVE_ACTION, modeReason, offersApproval, providerModeFor, targetsFor } from "./checkPolicy.ts";
 import type { ChecksRepository, CheckRunRow, ProviderMode } from "./db/repositories/checks.ts";
 import type { GithubApi } from "./githubApi.ts";
 import type { GithubRepository } from "./db/repositories/github.ts";
@@ -155,6 +155,17 @@ export class CheckRunner {
         // own pull request is entitled to know, before the numbers arrive, whether they are about
         // to be numbers from a real model.
         summary: modeReason(facts),
+        // §B.1.3, AND THE REASON offersApproval EXISTED WITH NO CALLER. The state it gates was
+        // unreachable by construction: providerModeFor answers paid when approvedForThisSha, that
+        // is true only when a paid row exists, and a paid row exists only when providerModeFor
+        // answered paid. Meanwhile every external pull request was posted a summary telling
+        // whoever read it that a collaborator could approve real providers for the commit.
+        //
+        // OFFERED ONLY WHEN APPROVING WOULD CHANGE SOMETHING — on a check that is already paid it
+        // is a button that does nothing, and under dry_run_only it contradicts a setting somebody
+        // chose. Both teach people the control is decorative, which is how the one that matters
+        // gets clicked without being read.
+        ...(offersApproval(facts) ? { actions: [APPROVE_ACTION] } : {}),
       });
       githubCheckRunId = created.id;
       await this.deps.checks.attachGithubId(ctx, row.id, created.id);
@@ -198,6 +209,134 @@ export class CheckRunner {
 
     this.log(`[checks] ${input.agentSlug}#${event.number} at ${event.headSha.slice(0, 7)} → ${mode}`);
     return { checkRunId: row.id, reason: modeReason(facts) };
+  }
+
+  /**
+   * §B.1.3's approval, honoured — the write that made `approvedForSha` reachable.
+   *
+   * THE LOOP THIS BREAKS. `providerModeFor` answers `paid` when `approvedForThisSha`; that reads a
+   * `check_runs` row with `provider_mode = 'paid'` for the sha; and such a row was only ever
+   * written by a run `providerModeFor` had already answered `paid` for. Nothing outside that
+   * circle could enter it, so no external pull request had ever been approved — while every one of
+   * them carried a summary saying a collaborator could approve it.
+   *
+   * IT WRITES THE PAID ROW DIRECTLY RATHER THAN RE-DERIVING. The approval IS the fact
+   * `approvedForSha` is looking for, so recording it is recording a paid check for this commit —
+   * and every later trigger on the same sha (a re-request, a supersede-and-retry) then resolves
+   * `paid` through the ordinary path with nothing special-cased. A second door into `providerModeFor`
+   * would be a second place the boundary lives.
+   *
+   * THE PERMISSION IS ASKED, NEVER INFERRED. GitHub says who pressed the button; only GitHub can
+   * say whether that login may spend this workspace's balance, and the answer is a round trip on
+   * the one path in this product that is about to. A refusal is reported on the check itself —
+   * where the person is already looking — rather than swallowed, because a button that silently
+   * does nothing is the exact failure `offersApproval`'s own comment names.
+   */
+  async onApproval(
+    ctx: TenantContext,
+    input: {
+      api: GithubApi;
+      agentUuid: string;
+      agentSlug: string;
+      linkId: string;
+      repoFullName: string;
+      /** The check GitHub says the button was pressed on. */
+      check: { id: string; githubCheckRunId: string; prNumber: number; headSha: string };
+      /** Who pressed it, per GitHub. Checked against the repository, never trusted as given. */
+      senderLogin: string | null;
+      configuredTargets: readonly { provider: string; model: string }[];
+      datasetName?: string | null;
+    },
+  ): Promise<CheckDecision> {
+    const { api, check } = input;
+    const config = await this.deps.checks.config(ctx, input.agentUuid);
+    if (!config?.ci_dataset_id) {
+      return { checkRunId: null, reason: "no dataset is linked for CI on this agent" };
+    }
+    // AN OPT-OUT IS AN OPT-OUT. `dry_run_only` is a setting somebody chose, and an approval that
+    // overrode it would make the setting advisory — which is the same reason `offersApproval`
+    // declines to render the button under it in the first place.
+    if (config.provider_policy === "dry_run_only") {
+      return { checkRunId: null, reason: "this agent is configured to run checks on the dry-run provider only" };
+    }
+
+    const allowed = input.senderLogin
+      ? await api.hasWriteAccess(input.repoFullName, input.senderLogin)
+      : false;
+    if (!allowed) {
+      // ON THE CHECK, because that is where the press happened and where the person is. Best-effort:
+      // failing to say so is not a reason to act as though the approval succeeded.
+      await api
+        .putCheckRun(input.repoFullName, {
+          checkRunId: check.githubCheckRunId,
+          headSha: check.headSha,
+          status: "completed",
+          conclusion: "neutral",
+          title: "Not approved",
+          summary: `${input.senderLogin ?? "that account"} does not have write access to this repository, so this commit was not approved for real providers.`,
+        })
+        .catch(() => {});
+      return { checkRunId: null, reason: `${input.senderLogin ?? "an unknown sender"} has no write access` };
+    }
+
+    // THE DRY-RUN CHECK IS CLOSED FIRST, AND THE ORDER IS LOAD-BEARING. Migration 045 allows one
+    // LIVE check per (agent, pull request, commit) — deliberately, because two checks racing on one
+    // commit is two answers to one question — so `open` answers a request made while one is live by
+    // handing back the LIVE ROW rather than creating a rival. Opening the paid row first therefore
+    // wrote nothing at all: it read back the dry-run row, `approvedForSha` stayed false, and the
+    // re-run went out on the fake provider having reported success.
+    //
+    // The approval is not a second opinion; it is the same check, asked of a real provider.
+    const live = await this.deps.checks.liveForSha(ctx, input.agentUuid, check.prNumber, check.headSha);
+    if (live) {
+      await this.deps.checks.cancel(ctx, live.id);
+      // The eval too, best-effort. Its numbers are about the dry-run provider and are about to be
+      // superseded by numbers that mean something else; letting it finish would spend the run and
+      // post a result nobody asked for over the top of the one that was.
+      if (live.eval_run_id) await this.deps.cancelEval?.(ctx, live.eval_run_id).catch(() => {});
+    }
+
+    // THE APPROVAL, AS THE ROW THAT MAKES IT TRUE. Opened and completed in one step: it is not a
+    // check somebody is waiting on, it is the record that this sha may use real providers.
+    const { row } = await this.deps.checks.open(ctx, {
+      agentId: input.agentUuid,
+      linkId: input.linkId,
+      prNumber: check.prNumber,
+      headSha: check.headSha,
+      providerMode: "paid",
+    });
+    await this.deps.checks.complete(ctx, row.id, { conclusion: "neutral" });
+
+    this.log(
+      `[checks] ${input.agentSlug}#${check.prNumber} at ${check.headSha.slice(0, 7)} approved for real providers by ${input.senderLogin}`,
+    );
+
+    // AND THE RE-RUN, through the ordinary trigger so nothing about the dispatch is special-cased.
+    // `approvedForSha` now answers true, so `providerModeFor` resolves `paid` on its own.
+    return this.onPullRequest(ctx, {
+      api,
+      agentUuid: input.agentUuid,
+      agentSlug: input.agentSlug,
+      linkId: input.linkId,
+      repoFullName: input.repoFullName,
+      event: {
+        kind: "pull_request",
+        repoFullName: input.repoFullName,
+        // `synchronize` RATHER THAN A FOURTH ACTION. What this is, to everything downstream, is
+        // "there is code here to check" — which is exactly what that action means, and inventing a
+        // fifth would make every consumer learn a case that behaves identically.
+        action: "synchronize",
+        number: check.prNumber,
+        headBranch: "",
+        headSha: check.headSha,
+        baseBranch: "",
+        baseSha: null,
+        authorLogin: null,
+        fromFork: true,
+      },
+      configuredTargets: input.configuredTargets,
+      datasetName: input.datasetName ?? null,
+    });
   }
 
   /**

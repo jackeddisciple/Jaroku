@@ -24,7 +24,7 @@
 // says so in the body; a delivery that blows up is logged and still acknowledged, because the
 // retry would blow up identically.
 
-import type { PullRequestEvent } from "../githubWebhook.ts";
+import type { CheckRunActionEvent, PullRequestEvent } from "../githubWebhook.ts";
 import { badRequest, unauthorized, type Handler, type HttpRequest, type HttpResponse } from "./router.ts";
 import {
   DELIVERY_HEADER, DeliveryLog, EVENT_HEADER, SIGNATURE_HEADER,
@@ -59,6 +59,15 @@ export interface GithubWebhookDeps {
    * difference between "the hook is misconfigured" and "nothing here is watching that repo".
    */
   onPullRequest?: (event: PullRequestEvent) => Promise<number>;
+  /**
+   * §B.1.3: somebody pressed a button we declared on a check.
+   *
+   * A SECOND CALLBACK RATHER THAN A WIDENED FIRST, for the reason the route's own branch gives.
+   * More importantly it is the only place in this feature where an EXTERNAL person's press moves a
+   * workspace's provider spend — so the permission question ("may this login approve?") is asked
+   * by the handler against GitHub, never inferred here from a payload field.
+   */
+  onCheckRunAction?: (event: CheckRunActionEvent) => Promise<number>;
   log?: (line: string) => void;
 }
 
@@ -119,6 +128,19 @@ function webhookHandler(deps: GithubWebhookDeps): Handler {
         return { status: 200, body: { ok: true, applied } };
       } catch (err) {
         log(`[github] webhook ${event.repoFullName}#${event.number} failed: ${(err as Error)?.message ?? err}`);
+        return { status: 200, body: { ok: true, applied: 0, error: "handler failed" } };
+      }
+    }
+
+    // §B.1.3's approval, pressed on the check itself. Its own branch for the same reason the pull
+    // request has one: this one spends a workspace's balance on a stranger's code, and the check
+    // it belongs to is the only thing that knows whether an approval would change anything.
+    if (event.kind === "check_run_action") {
+      try {
+        const applied = (await deps.onCheckRunAction?.(event)) ?? 0;
+        return { status: 200, body: { ok: true, applied } };
+      } catch (err) {
+        log(`[github] webhook ${event.repoFullName} action ${event.requestedAction} failed: ${(err as Error)?.message ?? err}`);
         return { status: 200, body: { ok: true, applied: 0, error: "handler failed" } };
       }
     }

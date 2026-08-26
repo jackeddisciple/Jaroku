@@ -887,6 +887,19 @@ export class GithubApi {
       title: string;
       summary: string;
       detailsUrl?: string | null;
+      /**
+       * §B.1.3's approval, as a button on the check itself.
+       *
+       * CHECK RUNS ONLY, AND DROPPED SILENTLY ON THE COMMIT-STATUS FALLBACK. A status has no
+       * actions and never could; the fallback exists because check runs are App-only, so a
+       * personal-access-token deployment gets the same number on the same commit and no button.
+       * That is the honest degradation — the summary still says which provider ran — and it is
+       * why this is optional rather than required.
+       *
+       * GitHub caps it at three, and each `identifier` is what comes back on the
+       * `check_run.requested_action` delivery.
+       */
+      actions?: { label: string; description: string; identifier: string }[];
     },
   ): Promise<{ id: string }> {
     if (!input.checkRunId && !input.name) {
@@ -907,6 +920,7 @@ export class GithubApi {
       output: { title: input.title, summary: input.summary },
       ...(input.conclusion ? { conclusion: input.conclusion } : {}),
       ...(input.detailsUrl ? { details_url: input.detailsUrl } : {}),
+      ...(input.actions?.length ? { actions: input.actions.slice(0, 3) } : {}),
     };
     // GitHub refuses a `completed` check with no conclusion, and refuses a conclusion on one that
     // is not completed. Both are 422s that arrive as `conflict` and read as a mysterious refusal,

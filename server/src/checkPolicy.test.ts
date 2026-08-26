@@ -13,7 +13,7 @@
 //
 //   npm run test:check-policy
 
-import { modeReason, offersApproval, providerModeFor, targetsFor } from "./checkPolicy.ts";
+import { APPROVE_ACTION, APPROVE_SHA_ACTION, modeReason, offersApproval, providerModeFor, targetsFor } from "./checkPolicy.ts";
 import type { ProviderPolicy } from "./db/repositories/checks.ts";
 
 let failures = 0;
@@ -75,8 +75,10 @@ console.log("\nwhen the approval control is offered");
 
 console.log("\nthe sentence on the check says which of the four reasons applied");
 {
+  const facts = (policy: ProviderPolicy, collaborator: boolean, approved: boolean) =>
+    ({ policy, authorIsCollaborator: collaborator, approvedForThisSha: approved });
   const reason = (policy: ProviderPolicy, collaborator: boolean, approved: boolean): string =>
-    modeReason({ policy, authorIsCollaborator: collaborator, approvedForThisSha: approved });
+    modeReason(facts(policy, collaborator, approved));
 
   check(reason("dry_run_only", true, true).includes("configured"), "a setting names the setting");
   check(reason("collaborators_paid", true, false).includes("write access"), "a collaborator's own PR says so");
@@ -85,8 +87,23 @@ console.log("\nthe sentence on the check says which of the four reasons applied"
   check(stranger.includes("from outside"), "and a stranger's PR explains the boundary", stranger);
   // The person reading a pass rate on a pull request is usually not the person who configured the
   // agent, and a number from the fake provider means something quite different.
-  check(stranger.includes("dry-run provider") && stranger.includes("can approve"),
-    "…and says what would change it, rather than only that it happened");
+  //
+  // AND IT NAMES THE BUTTON THAT IS ACTUALLY THERE. This used to say "a collaborator can approve
+  // real providers for this commit" about a state that was unreachable by construction:
+  // `approvedForThisSha` needed a paid row, a paid row needed a paid run, and a paid run needed
+  // `approvedForThisSha`. The maintainer it was addressed to went looking for the control and
+  // found nothing — the failure `offersApproval`'s own comment names, achieved without a button.
+  check(stranger.includes("dry-run provider") && stranger.includes(APPROVE_ACTION.label),
+    "…and names the control that would change it", stranger);
+  // THE SENTENCE AND THE CONTROL CANNOT DISAGREE. Both are false together under `dry_run_only` and
+  // both are true together for a stranger, so this can never describe a button that is not on the
+  // check — which is the same failure in the opposite direction.
+  check(
+    offersApproval(facts("collaborators_paid", false, false)) &&
+      !offersApproval(facts("dry_run_only", false, false)) &&
+      !offersApproval(facts("collaborators_paid", true, false)),
+    "…and the control is offered exactly where the sentence promises it",
+  );
 }
 
 console.log("\nwhich legs actually run");

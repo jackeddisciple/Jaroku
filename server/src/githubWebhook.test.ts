@@ -10,6 +10,8 @@
 
 import { createHmac } from "node:crypto";
 
+import { APPROVE_SHA_ACTION } from "./checkPolicy.ts";
+
 import {
   DeliveryLog, parseWebhookEvent, verifyGithubSignature,
   type PushEvent, type SignatureVerdict,
@@ -200,6 +202,45 @@ console.log("\nordering two deliveries");
     "a branch deletion carries neither, and says so rather than inventing one",
     deleted.kind === "push" ? String(deleted.pushedAt) : deleted.kind,
   );
+}
+
+console.log("\n§B.1.3's approval, which had no delivery to arrive on");
+{
+  // THE HALF THAT MADE THE STATE UNREACHABLE. `providerModeFor` answers `paid` when
+  // `approvedForThisSha`; that reads a `check_runs` row with `provider_mode = 'paid'`; and such a
+  // row was only ever written by a run `providerModeFor` had already answered `paid` for. Nothing
+  // outside that circle could enter it — so no external pull request had ever been approved, while
+  // every one of them was posted a summary saying a collaborator could approve it.
+  const delivery = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    action: "requested_action",
+    repository: { full_name: "acme/agents" },
+    check_run: { id: 4242, head_sha: "a".repeat(40) },
+    requested_action: { identifier: APPROVE_SHA_ACTION },
+    sender: { login: "maintainer" },
+    ...over,
+  });
+
+  const event = parseWebhookEvent("check_run", delivery());
+  check(event.kind === "check_run_action", "a requested action is parsed", event.kind);
+  if (event.kind === "check_run_action") {
+    check(event.requestedAction === APPROVE_SHA_ACTION, "...carrying the identifier we declared");
+    check(event.headSha === "a".repeat(40), "...the commit it is an approval FOR — per sha, never per pull request");
+    check(event.checkRunId === "4242", "...GitHub's own id for the check, as a string like every other id here");
+    check(event.senderLogin === "maintainer", "...and who pressed it, to be checked against the repository rather than trusted");
+  }
+
+  // THE OTHER THREE ACTIONS ON THIS EVENT ARE OURS COMING BACK. `created` and `completed` are the
+  // writes this server just made; acting on them would be a loop.
+  for (const action of ["created", "completed", "rerequested"]) {
+    const other = parseWebhookEvent("check_run", delivery({ action }));
+    check(other.kind === "ignored", `check_run.${action} is ignored rather than acted on`, other.kind);
+  }
+
+  // AND A MALFORMED ONE IS IGNORED RATHER THAN GUESSED AT, for the reason the route's header gives:
+  // this path is about to spend a workspace's provider balance on somebody else's code.
+  check(parseWebhookEvent("check_run", delivery({ requested_action: {} })).kind === "ignored", "an action with no identifier is ignored");
+  check(parseWebhookEvent("check_run", delivery({ check_run: { id: 1 } })).kind === "ignored", "...and one with no head sha");
+  check(parseWebhookEvent("check_run", delivery({ repository: {} })).kind === "ignored", "...and one with no repository");
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

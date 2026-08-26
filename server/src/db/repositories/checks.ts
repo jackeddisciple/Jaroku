@@ -249,6 +249,27 @@ export class ChecksRepository {
     return row ? this.hydrate(row) : undefined;
   }
 
+  /**
+   * The check GitHub is asking about, by GitHub's own id for it.
+   *
+   * WHAT A `requested_action` DELIVERY CARRIES. It names the check run and the commit and nothing
+   * else — no agent, no pull request number, no workspace — so this is the only way back from
+   * "somebody pressed the button on that check" to the row that knows which agent it was about.
+   *
+   * NEWEST FIRST AND SCOPED, like every other read here. A supersede leaves older rows carrying
+   * the same GitHub id in the ordinary case where an update reused it, and the answer to "which
+   * check is this" is the live one.
+   */
+  async byGithubId(ctx: TenantContext, githubCheckRunId: string): Promise<CheckRunRow | undefined> {
+    const row = await this.q(ctx).get<Record<string, unknown>>(
+      `SELECT ${CHECK_COLUMNS} FROM check_runs
+        WHERE workspace_id = ? AND github_check_run_id = ?
+        ORDER BY created_at DESC, id DESC LIMIT 1`,
+      [ctx.workspaceId, githubCheckRunId],
+    );
+    return row ? this.hydrate(row) : undefined;
+  }
+
   async byId(ctx: TenantContext, id: string): Promise<CheckRunRow | undefined> {
     const row = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT ${CHECK_COLUMNS} FROM check_runs WHERE workspace_id = ? AND id = ?`,

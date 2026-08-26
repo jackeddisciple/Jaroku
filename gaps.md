@@ -2259,6 +2259,87 @@ person already is and keeps `approvedForSha`'s derived-from-the-rows discipline 
 | Implementation Effort | 4/10 |
 | Confidence | 9/10 |
 
+### Resolution
+
+**Status: RESOLVED — the round trip was built, not the promise withdrawn**
+
+The finding offered two options: drop the sentence, or build the Check Run requested-action round
+trip. The second was taken. Dropping it would have deleted a capability the codebase had already
+paid for — `offersApproval` written and tested, the policy ladder correct, `approvedForSha`'s
+derived-from-the-rows discipline intact — leaving only the eval-as-CI feature permanently unable to
+run a fork's pull request on real providers.
+
+**Implemented, as the round trip §B.1.3 describes:**
+
+1. **The button.** `putCheckRun` takes `actions`, and the runner attaches `APPROVE_ACTION` gated on
+   `offersApproval(facts)` — the caller that function was written for and never had. Dropped
+   silently on the commit-status fallback, which is the honest degradation: check runs are App-only,
+   so a personal-access-token deployment gets the same number and no button.
+2. **The delivery.** `check_run.requested_action` parses into `CheckRunActionEvent`. The other three
+   actions GitHub sends on that event (`created`, `completed`, `rerequested`) are **our own writes
+   coming back** and are ignored by name — acting on them would be a loop.
+3. **The permission.** `onApproval` asks GitHub whether the sender has write access. GitHub says who
+   pressed the button; only GitHub can say whether that login may spend this workspace's balance,
+   and a refusal is reported **on the check** rather than swallowed.
+4. **The write that closes the loop.** The approval *is* the fact `approvedForSha` looks for, so it
+   writes a completed `paid` row for the commit and then re-runs through the ordinary
+   `onPullRequest` path — `providerModeFor` resolves `paid` on its own, with nothing special-cased.
+
+`modeReason`'s last branch now names the button by its label rather than describing an approval in
+the abstract, and `test:check-policy` asserts the sentence and `offersApproval` agree in both
+directions — so it can never describe a button that is not on the check, or omit one that is.
+
+**A real bug the implementation found, and the ordering that fixes it.** Migration 045 allows one
+**live** check per (agent, pull request, commit), so `open` answers a request made while one is live
+by handing back the **live row** rather than creating a rival. Opening the paid row first therefore
+wrote nothing at all: it read back the dry-run row, `approvedForSha` stayed false, and the re-run
+went out on the fake provider **having reported success**. The live check is cancelled first now —
+which is also the honest semantics, since the approval is not a second opinion but the same check
+asked of a real provider. Its eval is cancelled with it, best-effort.
+
+**An opt-out stays an opt-out.** `dry_run_only` refuses the approval, matching `offersApproval`
+declining to render the button there. A press that overrode a setting somebody chose would make the
+setting advisory.
+
+**Files Changed:**
+
+- `server/src/checkPolicy.ts` — `APPROVE_SHA_ACTION`, `APPROVE_ACTION`, the corrected sentence
+- `server/src/checkRunner.ts` — the button, `onApproval`
+- `server/src/githubApi.ts` — `actions` on `putCheckRun`
+- `server/src/githubWebhook.ts`, `server/src/http/githubWebhook.ts` — the event and its branch
+- `server/src/db/repositories/checks.ts` — `byGithubId`
+- `server/src/db/repositories/github.ts` — `linksForRepo` with an optional branch
+- `server/src/index.ts` — the handler
+- `server/fixtures/github/mockGithubApi.ts` — the collaborator-permission route
+- `server/src/checkPolicy.test.ts`, `checkRunner.test.ts`, `githubWebhook.test.ts`
+
+**Verification:**
+
+`test:check-runner` drives the whole round trip against the fixture: a stranger's pull request opens
+a dry-run check whose summary names the button; an approval from a login with **no** write access is
+refused and writes no paid row and dispatches nothing; an approval from a collaborator is honoured,
+**`approvedForSha` then answers true — which nothing could make it do before** — and the re-run goes
+out on the configured real provider with the summary saying which of the four reasons applied; and
+`dry_run_only` refuses. `test:github-webhook` holds the parser: the identifier, the sha (per commit,
+never per pull request), the check id and the sender, plus the three sibling actions ignored and
+three malformed shapes ignored rather than guessed at.
+
+The fixture gained a collaborator-permission route, and the reason is worth recording: without it
+`hasWriteAccess` swallowed a 404 and answered false for **every** login, so the approval's success
+path was unreachable in the suite exactly as the circular `approvedForSha` made it unreachable in
+production. Two fake methods (`cancel`, `complete`) were no-ops that nothing had read back; both now
+close their row as the real repository does.
+
+**Regression Coverage:**
+
+`test:check-runner`, `test:check-policy`, `test:github-webhook`, `test:github-app-flow`,
+`test:github-sync`, `test:github-push`, `test:github-workflow`, `test:github-staging` and
+`test:eval-check` all pass; the server typechecks. `linksForRepo`'s branch parameter became optional
+rather than being replaced — a `check_run` delivery carries no branch to narrow by, and guessing one
+would be inventing a fact — so both existing callers are byte-identical.
+
+**Resolved On:** 2026-08-26
+
 ---
 
 ## GAP-014 — The pricing page sells three capabilities the product does not have
@@ -3104,6 +3185,7 @@ brief spends a page on.
 | GAP-008 | RESOLVED | `InboxActions.tsx`, `InboxCardActions.tsx`, `inboxStore.ts`, `InboxView.tsx`, `inboxBoard.test.ts`, `registry.ts`, `types.ts`, `inboxActionIcons.tsx` | `test:inbox-board` reads the server's vocabulary and requires a case for all 29; the exhaustive switch failed the build naming four omissions while being written |
 | GAP-009 | RESOLVED | `entitlements.ts`, `entitlementGate.ts`, `plans.ts`, `index.ts`, `entitlements.test.ts`, `entitlementStore.ts`, `UpsellCard.tsx`, `UsagePanel.tsx`, `types.ts` | `test:entitlements` holds all seven kinds from both Free and Pro, plus the top of the ladder answering null; `test:entitlement-store` holds the client guard |
 | GAP-012 | RESOLVED | `wsRelay.ts`, `index.ts`, `generators.ts`, `entitlementGate.ts`, `capabilities.ts`, `generators.test.ts`, `socket.ts`, `types.ts`, `capabilities.ts`, `InboxActions.tsx` | `test:inbox-generators` holds both answers as distinct and the whole reachability chain; the comment claiming a prompt injection that does not exist is corrected and checked |
+| GAP-013 | RESOLVED | `checkPolicy.ts`, `checkRunner.ts`, `githubApi.ts`, `githubWebhook.ts` (both), `checks.ts`, `github.ts`, `index.ts`, `mockGithubApi.ts`, three suites | `test:check-runner` drives the whole round trip and proves `approvedForSha` answers true, which nothing could make it do before |
 | GAP-014 | RESOLVED | `web/pricing.html`, `checkoutSurfaces.test.ts` | `test:checkout-surfaces` maps every sold feature row to an `EntitlementKind` and asserts the three removed names stay gone |
 | GAP-015 | RESOLVED | `graphIntrospect.ts`, `index.ts`, `graphIntrospect.test.ts`, `types.ts`, `GraphView.tsx`, `truncatePath.test.ts`, `ci.yml` | `test:truncate-path` asserts what the truncator does to prose; `test:graph-introspect` holds the two-field shape on both sides |
 | GAP-016 | RESOLVED | `TopBar.tsx`, `deadControls.test.ts` (new), `client/package.json`, `ci.yml` | `test:dead-controls` clears 365 buttons and was watched refusing a reinstated Share at `TopBar.tsx:372` |

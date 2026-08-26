@@ -134,6 +134,7 @@ import { resolveSecretValues } from "./deploySecrets.ts";
 import { ShadowRunRepository, hasReadableTrace, shouldSweep } from "./shadowRuns.ts";
 import { ShadowRunner } from "./shadowRunner.ts";
 import { ChecksRepository } from "./db/repositories/checks.ts";
+import { APPROVE_SHA_ACTION } from "./checkPolicy.ts";
 import { CheckRunner } from "./checkRunner.ts";
 import { PrCommentsRepository } from "./db/repositories/prComments.ts";
 import { diffShapes, readShape } from "./semanticDiff.ts";
@@ -8189,6 +8190,60 @@ for (const route of githubWebhookRoutes({
       });
       if (decision.checkRunId) acted++;
       else console.log(`[checks] ${agent.slug}#${event.number}: ${decision.reason}`);
+      void broadcastGithub(ctx, agent.slug);
+    }
+    return acted;
+  },
+
+  /**
+   * §B.1.3's approval, arriving from the check itself.
+   *
+   * THE LOOKUP IS BY GITHUB'S OWN CHECK ID, because that is the whole of what a `requested_action`
+   * delivery carries: the check run and the commit, with no agent, no pull request number and no
+   * workspace on it. `linksForRepo` narrows to the workspaces watching this repository and the
+   * check row is what says which agent within one — so the walk is per workspace, exactly as the
+   * pull request handler's is, and every write below is an ordinary tenant-scoped statement.
+   */
+  onCheckRunAction: async (event) => {
+    if (event.requestedAction !== APPROVE_SHA_ACTION) return 0;
+    // EVERY BRANCH, not a branch name, because a `check_run` delivery does not carry one. The
+    // lookup is by repository and the check row is what disambiguates.
+    const owners = await githubRepo.linksForRepo(event.repoFullName);
+    let acted = 0;
+    for (const { workspaceId, link } of owners) {
+      const ctx = systemContextFor(workspaceId, newRequestId());
+      const check = await checksRepo.byGithubId(ctx, event.checkRunId);
+      // NOT THIS WORKSPACE'S CHECK. Several workspaces can link one repository, and only the one
+      // that opened this check has a row for it — so this is the ordinary answer rather than an
+      // error, and it is what keeps the walk from acting for a tenant that was not asked.
+      if (!check) continue;
+      const agent = await agentRepo.byId(ctx, check.agent_id);
+      const connection = await githubIdentity.apiFor(ctx);
+      if (!agent || !connection) continue;
+
+      const config = await checksRepo.config(ctx, agent.id);
+      const dataset = config?.ci_dataset_id
+        ? await evalStore.getDataset(ctx, config.ci_dataset_id)
+        : undefined;
+
+      const decision = await checkRunner.onApproval(ctx, {
+        api: connection.api,
+        agentUuid: agent.id,
+        agentSlug: agent.slug,
+        linkId: link.id,
+        repoFullName: link.repo_full_name,
+        check: {
+          id: check.id,
+          githubCheckRunId: event.checkRunId,
+          prNumber: check.pr_number,
+          headSha: event.headSha,
+        },
+        senderLogin: event.senderLogin,
+        configuredTargets: [{ provider: agent.default_provider, model: "" }],
+        datasetName: dataset?.name ?? null,
+      });
+      if (decision.checkRunId) acted++;
+      else console.log(`[checks] ${agent.slug}#${check.pr_number}: approval refused — ${decision.reason}`);
       void broadcastGithub(ctx, agent.slug);
     }
     return acted;

@@ -412,12 +412,19 @@ export class GithubRepository {
    * of them independently told Jaroku to watch that repo, and telling one of them their branch
    * moved reveals nothing they did not already have a link to.
    */
-  async linksForRepo(repoFullName: string, branch: string): Promise<LinkOwner[]> {
+  /**
+   * `branch` IS OPTIONAL, AND THE OMISSION IS A REAL CASE RATHER THAN A CONVENIENCE. A push and a
+   * pull request both name a branch, so both narrow by one. A `check_run.requested_action`
+   * delivery names a check run and a commit and nothing else — there is no branch on the payload
+   * to narrow by — so it asks for every link on the repository and lets the check row it finds
+   * decide which workspace was actually asked. Guessing a branch there would be inventing a fact.
+   */
+  async linksForRepo(repoFullName: string, branch?: string): Promise<LinkOwner[]> {
     const rows = await this.db.asPlatform((tx) =>
       tx.all<Record<string, unknown>>(
         `SELECT ${LINK_COLUMNS}, workspace_id FROM github_links
-          WHERE repo_full_name = ? AND branch = ? AND deleted_at IS NULL`,
-        [repoFullName, branch],
+          WHERE repo_full_name = ? AND deleted_at IS NULL${branch === undefined ? "" : " AND branch = ?"}`,
+        branch === undefined ? [repoFullName] : [repoFullName, branch],
       ),
     );
     // The workspace rides ALONGSIDE the link rather than on it. `GithubLink` is read by the

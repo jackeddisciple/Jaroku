@@ -100,6 +100,29 @@ export function offersApproval(facts: TriggerFacts): boolean {
 }
 
 /**
+ * The identifier GitHub sends back when the approval is pressed.
+ *
+ * A CONSTANT BECAUSE THREE FILES AGREE ON IT and none of them imports the others' shapes: the
+ * runner declares it on the check, the webhook parser reads it off a delivery, and the handler
+ * decides what it means. A literal in each would be a string that has to match across a network
+ * round trip and a process boundary, which is the failure `GITHUB_ENV_KEY` is a constant for.
+ */
+export const APPROVE_SHA_ACTION = "approve_sha";
+
+/**
+ * §B.1.3's button, exactly as GitHub renders it.
+ *
+ * THE LABEL SAYS WHAT IT SPENDS. GitHub gives 20 characters for a label and 40 for a description,
+ * and the person pressing this is authorising somebody else's code to spend their workspace's
+ * provider balance — so the description names the money rather than the mechanism.
+ */
+export const APPROVE_ACTION = {
+  label: "Run for real",
+  description: "Re-run on real providers, at this workspace's cost",
+  identifier: APPROVE_SHA_ACTION,
+} as const;
+
+/**
  * Why this check ran where it ran, in one sentence for the check's own summary.
  *
  * SAID ON THE CHECK RATHER THAN ONLY IN THE SETTINGS, because the person reading a pass rate on a
@@ -112,7 +135,13 @@ export function modeReason(facts: TriggerFacts): string {
   }
   if (facts.authorIsCollaborator) return "the author has write access to this repository";
   if (facts.approvedForThisSha) return "a collaborator approved this commit for real providers";
-  return "this pull request is from outside the repository, so it runs on the free dry-run provider — a collaborator can approve real providers for this commit";
+  // NAMES THE BUTTON, because there now is one. This sentence promised an approval for two
+  // releases while the state it described was unreachable by construction — `approvedForThisSha`
+  // required a paid row, a paid row required a paid run, and a paid run required
+  // `approvedForThisSha` — so the maintainer it was addressed to went looking and found nothing.
+  // `offersApproval` gates the control it points at, and both are false together under
+  // `dry_run_only`, so this can never describe a button that is not on the check.
+  return `this pull request is from outside the repository, so it runs on the free dry-run provider — a collaborator with write access can press "${APPROVE_ACTION.label}" above to re-run it on real providers`;
 }
 
 /**

@@ -161,9 +161,40 @@ export interface PullRequestEvent {
   fromFork: boolean;
 }
 
+/**
+ * §B.1.3's approval, pressed on the check itself.
+ *
+ * THE STATE IT SETS WAS UNREACHABLE BY CONSTRUCTION, which is what makes this event the missing
+ * half rather than a nicety. `providerModeFor` returns `paid` when `approvedForThisSha`; that is
+ * true only when a `check_runs` row with `provider_mode = 'paid'` already exists for the sha; and
+ * such a row exists only when `providerModeFor` returned `paid`. The loop closes on itself, so no
+ * external pull request could ever have been approved — while every one of them was posted a
+ * summary saying a collaborator could approve it.
+ *
+ * A REQUESTED ACTION RATHER THAN A CONTROL IN THE PRODUCT, and §B.1.3 gives the reason: "surfaced
+ * once, on the check itself, exactly where a person is already looking". The maintainer reading the
+ * pass rate is on GitHub; a button in Jaroku would be a button they would have to be told about.
+ *
+ * `senderLogin` IS CARRIED AND NEVER TRUSTED. GitHub says who pressed it; only GitHub can say
+ * whether that person has write access, and the receiver asks — the same rule `PullRequestEvent`
+ * states about `fromFork` being the shape of the boundary rather than the boundary.
+ */
+export interface CheckRunActionEvent {
+  kind: "check_run_action";
+  repoFullName: string;
+  /** The action's own identifier, as declared on the check. */
+  requestedAction: string;
+  /** The commit the check was posted on, and the one an approval is FOR. */
+  headSha: string;
+  /** The check run GitHub is asking about, so the answer lands on the one that was pressed. */
+  checkRunId: string;
+  senderLogin: string | null;
+}
+
 export type WebhookEvent =
   | PushEvent
   | PullRequestEvent
+  | CheckRunActionEvent
   /** GitHub's setup handshake. Answered 200 or the delivery goes red in their UI forever. */
   | { kind: "ping"; zen: string | null }
   /** A real event this build does not act on yet. Named rather than dropped — see the route. */
@@ -182,6 +213,7 @@ export function parseWebhookEvent(event: string, payload: Record<string, unknown
     return { kind: "ping", zen: typeof payload["zen"] === "string" ? payload["zen"] : null };
   }
   if (event === "pull_request") return parsePullRequest(event, payload);
+  if (event === "check_run") return parseCheckRunAction(event, payload);
   if (event !== "push") return { kind: "ignored", event, reason: "not a push" };
 
   const ref = typeof payload["ref"] === "string" ? payload["ref"] : "";
@@ -249,6 +281,47 @@ function pushedAtOf(
  * pushed to a repository: the route logs the reason, so "why did my check not run" is answerable
  * from a log line rather than from a debugger.
  */
+/**
+ * The one `check_run` action this build acts on, and every other one named rather than dropped.
+ *
+ * ONE ACTION OF THE FOUR GitHub SENDS. `created`, `completed` and `rerequested` all arrive on this
+ * event, and two of them are our OWN writes coming back — acting on those would be a loop. Only
+ * `requested_action` is somebody pressing a button we declared.
+ *
+ * THE IDENTIFIER IS CHECKED HERE AND THE PERMISSION IS NOT. Whether this delivery is about the
+ * button we posted is a fact about the payload; whether the person pressing it may spend the
+ * workspace's money is a question only GitHub can answer, and the receiver asks it. Deciding it
+ * from `sender` would make the boundary a field in a request body.
+ */
+function parseCheckRunAction(event: string, payload: Record<string, unknown>): WebhookEvent {
+  const action = typeof payload["action"] === "string" ? payload["action"] : "";
+  if (action !== "requested_action") {
+    return { kind: "ignored", event, reason: `check_run.${action || "(no action)"} is not a requested action` };
+  }
+  const repo = (payload["repository"] ?? {}) as Record<string, unknown>;
+  const repoFullName = typeof repo["full_name"] === "string" ? repo["full_name"] : "";
+  if (!repoFullName) return { kind: "ignored", event, reason: "no repository on the payload" };
+
+  const run = (payload["check_run"] ?? {}) as Record<string, unknown>;
+  const requested = (payload["requested_action"] ?? {}) as Record<string, unknown>;
+  const identifier = typeof requested["identifier"] === "string" ? requested["identifier"] : "";
+  const headSha = typeof run["head_sha"] === "string" ? run["head_sha"] : "";
+  const checkRunId = run["id"] === undefined || run["id"] === null ? "" : String(run["id"]);
+  if (!identifier || !headSha || !checkRunId) {
+    return { kind: "ignored", event, reason: "a requested action with no identifier, sha or check run" };
+  }
+
+  const sender = (payload["sender"] ?? {}) as Record<string, unknown>;
+  return {
+    kind: "check_run_action",
+    repoFullName,
+    requestedAction: identifier,
+    headSha,
+    checkRunId,
+    senderLogin: typeof sender["login"] === "string" ? sender["login"] : null,
+  };
+}
+
 function parsePullRequest(event: string, payload: Record<string, unknown>): WebhookEvent {
   const action = typeof payload["action"] === "string" ? payload["action"] : "";
   if (action !== "opened" && action !== "synchronize" && action !== "reopened") {
