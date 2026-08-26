@@ -23,6 +23,7 @@ import { loadConnectors, resolveSelected, type Connector } from "./connectors.ts
 import { parsePlan, planProblem, reconcileWithSelection, type AgentPlan } from "./planProtocol.ts";
 import { buildPlanSystemPrompt, buildPlanUserPrompt } from "./prompt.ts";
 import type { McpToolView } from "./mcpRegistry.ts";
+import type { EffortPlan } from "./effort.ts";
 
 // Falls through JAROKU_GEN_MODEL so that pointing generation at a different model moves the
 // plan with it — the two phases describing the same build should not disagree about who is
@@ -32,7 +33,8 @@ export const PLAN_MODEL =
 
 // A plan is ~200 words. This is a ceiling against a runaway response, not a target; the
 // prompt does the actual work of keeping it short.
-const MAX_TOKENS = 600;
+/** Exported so the effort adapter clamps a thinking budget against the number THIS call sends. */
+export const MAX_TOKENS = 600;
 
 export interface PlanOptions {
   runtimeDir: string;
@@ -59,6 +61,15 @@ export interface PlanOptions {
   /** Present when the user asked for a change to the plan they were shown. */
   revisePlanId?: string;
   feedback?: string;
+  /**
+   * §3.2 REACHING THE REQUEST, which is the link the whole abstraction was missing.
+   *
+   * Resolved by the caller through the conversation → workspace → default chain and translated by
+   * the one adapter, so this module never learns what a level means for a provider. Null when the
+   * model has no reasoning control or nothing asked for one, and the request is then exactly the
+   * one that shipped.
+   */
+  effort?: EffortPlan | null;
 }
 
 /** A plan awaiting the user's confirmation. Holds the request it was planned FOR, because
@@ -279,6 +290,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
           (chunk) => this.emit("delta", { text: chunk }),
           (u) => (usage = u),
           opts.apiKey,
+          opts.effort,
         );
         if (fixture) writeFileSync(fixture, raw, "utf8"); // record for future free runs
       }
@@ -315,11 +327,16 @@ export class Planner extends EventEmitter<PlannerEvents> {
     onChunk: (text: string) => void,
     onUsage: (u: UsageSummary) => void,
     apiKey?: string,
+    effort?: EffortPlan | null,
   ): Promise<string> {
     let raw = "";
     const stream = anthropicClient(apiKey).messages.stream({
       model: PLAN_MODEL,
       max_tokens: MAX_TOKENS,
+      // SPREAD RATHER THAN SET, so a call with no plan is byte-identical to the one that shipped —
+      // and the budget inside it was already validated against THIS call's `max_tokens` by the
+      // adapter, not against whatever the model could theoretically produce.
+      ...(effort?.thinking?.type === "enabled" ? { thinking: effort.thinking } : {}),
       system: [
         {
           type: "text",

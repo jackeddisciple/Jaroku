@@ -8,8 +8,13 @@
 // "explain" always produces something useful (and is testable on the free path).
 
 import { anthropicClient } from "./claude.ts";
+import type { EffortPlan } from "./effort.ts";
 
-const EXPLAIN_MODEL = process.env.JAROKU_EXPLAIN_MODEL ?? "claude-haiku-4-5";
+export const EXPLAIN_MODEL = process.env.JAROKU_EXPLAIN_MODEL ?? "claude-haiku-4-5";
+
+/** The ceiling THIS call sends. Exported so the effort adapter clamps against the real number
+ *  rather than against the model's theoretical maximum — see planEffort's maxOutputTokens. */
+export const EXPLAIN_MAX_TOKENS = 700;
 
 const SYSTEM =
   "You explain an AI agent's execution to the developer who built it. Answer the developer's " +
@@ -54,6 +59,12 @@ export async function streamExplain(
   cb: ExplainCallbacks,
   /** The workspace's own key, when it has opted its key in. See billing/providerKeys.ts. */
   apiKey?: string,
+  /**
+   * §3.2 REACHING THE REQUEST, translated by the one adapter and resolved by the caller through
+   * the conversation → workspace → default chain. Null when the model has no reasoning control or
+   * nothing asked for one, and the request is then exactly the one that shipped.
+   */
+  effort?: EffortPlan | null,
 ): Promise<void> {
   // `apiKey` counts as a key. Without this, a workspace running entirely on its own credential
   // — no platform key configured at all — would get the raw-context fallback for every
@@ -67,7 +78,11 @@ export async function streamExplain(
   try {
     const stream = anthropicClient(apiKey).messages.stream({
       model: EXPLAIN_MODEL,
-      max_tokens: 700,
+      max_tokens: EXPLAIN_MAX_TOKENS,
+      // SPREAD RATHER THAN SET, so a call with no plan is byte-identical to the one that shipped —
+      // and the budget inside it was already validated against THIS call's max_tokens by the adapter,
+      // not against whatever the model could theoretically produce.
+      ...(effort?.thinking?.type === "enabled" ? { thinking: effort.thinking } : {}),
       system: SYSTEM,
       messages: [{ role: "user", content: `Context:\n${context}\n\nDeveloper's question: ${question}` }],
     });

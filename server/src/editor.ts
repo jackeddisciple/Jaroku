@@ -33,6 +33,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { structuredPatch } from "diff";
+import type { EffortPlan } from "./effort.ts";
 import { anthropicClient, emptyUsage, summarizeUsage, type UsageSummary } from "./claude.ts";
 import { loadConnectors, type Connector } from "./connectors.ts";
 import { FileProtocolParser, type ProtocolEvent } from "./fileProtocol.ts";
@@ -48,7 +49,8 @@ import { newStagingId, safeObjectPath } from "./storage/keys.ts";
 import type { ProjectStore, StoredFile } from "./storage/projectStore.ts";
 
 export const EDIT_MODEL = process.env.JAROKU_EDIT_MODEL ?? "claude-haiku-4-5";
-const MAX_TOKENS = 16000;
+/** Exported so the effort adapter clamps a thinking budget against the number THIS call sends. */
+export const MAX_TOKENS = 16000;
 
 export interface FileDiffHunk {
   oldStart: number;
@@ -265,6 +267,12 @@ export class Editor extends EventEmitter<EditorEvents> {
     /** The workspace's own Anthropic key, when it has opted its key in for platform calls.
      *  Absent — the default, and the local path — means the platform's own. */
     apiKey?: string,
+    /**
+     * §3.2 REACHING THE REQUEST, translated by the one adapter and resolved by the caller through
+     * the conversation → workspace → default chain. Null when the model has no reasoning control
+     * or nothing asked for one, and the request is then exactly the one that shipped.
+     */
+    effort?: EffortPlan | null,
   ): Promise<void> {
     if (this.busy) {
       this.fail({ message: "an edit is already in progress", agentId });
@@ -683,11 +691,16 @@ export class Editor extends EventEmitter<EditorEvents> {
     onChunk: (text: string) => void,
     onUsage: (u: UsageSummary) => void,
     apiKey?: string,
+    effort?: EffortPlan | null,
   ): Promise<string> {
     let raw = "";
     const stream = anthropicClient(apiKey).messages.stream({
       model: EDIT_MODEL,
       max_tokens: MAX_TOKENS,
+      // SPREAD RATHER THAN SET, so a call with no plan is byte-identical to the one that shipped —
+      // and the budget inside it was already validated against THIS call's max_tokens by the
+      // adapter, not against whatever the model could theoretically produce.
+      ...(effort?.thinking?.type === "enabled" ? { thinking: effort.thinking } : {}),
       system: [
         {
           type: "text",

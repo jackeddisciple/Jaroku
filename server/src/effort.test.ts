@@ -15,6 +15,10 @@
 import {
   DEFAULT_EFFORT, EFFORT_LEVELS, effortLabel, isEffort, planEffort, planForCapability, relativeCost,
 } from "./effort.ts";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
 import { capabilityFor, contextWindowFor, reasoningBudgets, type Capability } from "./pricing.ts";
 
 /**
@@ -184,6 +188,88 @@ console.log("\nthe labels are the ones the spec writes");
   check("Low", effortLabel("low") === "Low");
   check("Medium", effortLabel("medium") === "Medium");
   check("High", effortLabel("high") === "High");
+}
+
+console.log("\nthe budget is clamped against THIS call's ceiling, not the model's");
+{
+  // EVERY BUILDER SENDS ITS OWN `max_tokens` — 600 for a plan, 700 for an explain, 16,000 for a
+  // generation — and a thinking block is spent out of that allowance. A budget validated only
+  // against the model's theoretical maximum is a 400 from the provider on the plan call and a
+  // truncated answer on the explain one, neither of which has an error attached to it that names
+  // the cause. So the ceiling is per REQUEST, and the plan reports the level it stepped down to.
+  // The same model the block above uses, for the same reason: it is a real entry in the shipped
+  // catalogue and is thinking-shaped, so this exercises the branch the product actually takes.
+  const model = "claude-opus-5";
+  check("the model under test is thinking-shaped", capabilityFor(model)?.reasoning === "thinking");
+  {
+    const roomy = planEffort(model, "high");
+    check("with the model's own ceiling, High is High", roomy.applied === "high" && !roomy.clamped);
+
+    // A planner-sized request. Whatever the budget table says High costs, 600 tokens cannot hold
+    // it and leave room for an answer.
+    const tight = planEffort(model, "high", undefined, 600);
+    check("...and on a 600-token request it steps down", tight.applied !== "high" || tight.thinking?.type === "disabled");
+    check("...reporting the level that was actually spent", tight.requested === "high");
+    check(
+      "...with the clamp visible rather than silent",
+      tight.clamped || tight.thinking?.type === "disabled",
+      JSON.stringify(tight),
+    );
+    if (tight.thinking?.type === "enabled") {
+      check("...and a budget that leaves room to answer inside 600", tight.thinking.budget_tokens <= 300);
+    }
+
+    // A ceiling ABOVE the model's own changes nothing — it is a floor of two, not a replacement.
+    const generous = planEffort(model, "high", undefined, 10_000_000);
+    check("a ceiling above the model's own is ignored", JSON.stringify(generous) === JSON.stringify(roomy));
+  }
+}
+
+console.log("\nand the adapter is actually called, at every dispatch that shipped without it");
+{
+  // THE ASSERTION THIS MODULE WAITED FOR. Everything above was true of code with no production
+  // caller: `planEffort` was written, tested here, and reached from nothing — so a user set High,
+  // the setting persisted, the chip rendered it, and every request went out at the provider's
+  // default. §3.2's own rule was broken by the same absence twice: "never report an effort that
+  // wasn't used", and a clamp marker that could not fire because both fields were always equal.
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const index = readFileSync(join(HERE, "index.ts"), "utf8");
+  const read = (f: string): string => readFileSync(join(HERE, f), "utf8");
+
+  check("index.ts resolves the level through the settings chain", /async function effortForThread\(/.test(index));
+  check("...calling the one adapter rather than translating inline", /planEffort\(modelId, level, undefined, maxOutputTokens\)/.test(index));
+  check(
+    "...at all four model calls the composer can start",
+    (index.match(/await effortForThread\(/g) ?? []).length === 4,
+    String((index.match(/await effortForThread\(/g) ?? []).length),
+  );
+
+  // AND EACH BUILDER PUTS IT ON THE REQUEST. Resolving a plan nobody sends is the same silence
+  // wearing an extra function call.
+  for (const file of ["planner.ts", "generator.ts", "editor.ts", "explainer.ts"]) {
+    check(
+      `${file} puts the thinking block on its request`,
+      /\.\.\.\(effort\?\.thinking\?\.type === "enabled" \? \{ thinking: effort\.thinking \} : \{\}\)/.test(read(file)),
+    );
+  }
+
+  // §6.2's TWO FIELDS, so the chip reports what was spent and the clamp marker can fire at all.
+  check("the usage payload carries both levels", /function effortFields\(/.test(index));
+  check("...requested AND applied, never one of them", /effort: plan\.applied, effort_requested: plan\.requested/.test(index));
+  check(
+    "...on the plan, the generation and the edit",
+    (index.match(/\.\.\.effortFields\(/g) ?? []).length === 3,
+    String((index.match(/\.\.\.effortFields\(/g) ?? []).length),
+  );
+
+  // THE RUN PATH, on the seam JAROKU_PROVIDER and JAROKU_MODEL already use. Without it a
+  // conversation set to High planned and edited at High and RAN at the default, which is worse
+  // than the setting doing nothing: the two that work make the third look like it works too.
+  check("the run env carries the level", /env\.JAROKU_REASONING_EFFORT =/.test(index));
+  const models = readFileSync(join(HERE, "..", "..", "runtime", "jaroku_runner", "models.py"), "utf8");
+  check("...and models.py reads it", /JAROKU_REASONING_EFFORT/.test(models));
+  check("...translating it beside the constructor that uses it", /thinking=\{"type": "enabled", "budget_tokens": budget\}/.test(models));
+  check("...and clamping XHigh for the three-level provider", /"xhigh": "high"/.test(models));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

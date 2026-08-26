@@ -960,6 +960,69 @@ the providers snapshot's `reasoning` capability, per-turn override, the workspac
 | Implementation Effort | 4/10 |
 | Confidence | 9/10 |
 
+### Resolution
+
+**Status: RESOLVED**
+
+**Implemented:** `effortForThread(ctx, threadId, modelId, maxOutputTokens)` in `index.ts` resolves
+the level through the conversation → workspace → default chain and hands it to `planEffort` — the
+adapter §3.2 required and which had no production caller. It is called at **all four** model calls
+the composer can start (plan, generate, edit, explain), and each builder spreads the resulting
+thinking block onto its request. A call with no plan is byte-identical to the one that shipped.
+
+**`planEffort` gained a per-request ceiling, and it is a real fix rather than plumbing.** Every
+builder sends its own `max_tokens` — 600 for a plan, 700 for an explain, 16,000 for a generation —
+and a thinking block is spent out of *that* allowance. A budget validated only against the model's
+theoretical maximum is a 400 on the plan call and a truncated answer on the explain one, neither
+with an error naming the cause. The adapter now clamps per request and reports the level it
+stepped down to, which is what makes the clamp marker able to fire at all.
+
+**§6.2's two fields are on the payload.** `effortFields` puts `effort` (spent) and
+`effort_requested` (asked) on the plan, generation and edit usage payloads — **both or neither**,
+because the clamp marker is exactly their inequality, so one without the other makes a clamp either
+invisible or imaginary. `isClamped` can fire for the first time.
+
+**And the run path, on the seam `JAROKU_PROVIDER` already uses.** `env.JAROKU_REASONING_EFFORT`
+carries the level, and `models.py` translates it beside the constructor: a thinking budget with
+`max_tokens` raised to match for Anthropic, `reasoning_effort` for OpenAI with XHigh clamped to
+High. The **word** travels rather than a number, deliberately — a budget computed in TypeScript
+would be a second implementation of the adapter, in a second language, wrong the first time either
+table moved.
+
+Without the run half, a conversation set to High would have planned and edited at High and *run*
+at the default — which is worse than the setting doing nothing at all, because the parts that work
+make the third look like it works too. That is the same inference that made this gap invisible:
+`permission_mode`, the column beside it on the same row, is enforced.
+
+**Files Changed:**
+
+- `server/src/effort.ts` — the per-request ceiling
+- `server/src/index.ts` — `effortForThread`, `effortFields`, four dispatch sites, the run env
+- `server/src/planner.ts`, `generator.ts`, `editor.ts`, `explainer.ts` — the option and the spread; `MAX_TOKENS` exported
+- `runtime/jaroku_runner/models.py` — the level applied per provider
+- `server/src/effort.test.ts` — the ceiling assertions and the reachability audit
+
+**Verification:**
+
+`test:effort` gained two sections. The first drives the new ceiling against a real
+catalogue model: High is High at the model's own ceiling, steps down on a 600-token request while
+still reporting `requested: "high"` and marking the clamp, and a ceiling *above* the model's own
+changes nothing. The second is a source audit, and it is the assertion this module waited for —
+**every arithmetic assertion above it was already true of code with no production caller.** It
+holds that `effortForThread` exists and calls the one adapter, that it is called at all four
+dispatch sites, that all four builders put the block on the request, that both usage fields travel
+together at three payload sites, and that the run env and `models.py` agree on the variable name
+and on the XHigh clamp.
+
+**Regression Coverage:**
+
+`test:effort`, `test:conversation-settings`, `test:conversation-routes`, `test:generation`,
+`test:edit-versions`, `test:plan` and `test:desktop-contract` all pass; both sides typecheck. The
+`desktop-contract` pass matters: it greps every environment variable the shell sets against the
+server's own source, and a new run variable that only one side knew about would fail there.
+
+**Resolved On:** 2026-08-26
+
 ---
 
 ## GAP-006 — Per-conversation connector scoping is enforced for MCP servers only
@@ -2826,6 +2889,7 @@ brief spends a page on.
 | GAP-001 | RESOLVED | `index.ts`, `projectStore.test.ts`, `agentAdversarial.test.ts` | `test:project-store` proves the bare-row fork still throws and the published one reads back byte for byte; `test:agent-adversarial` holds the call site |
 | GAP-002 | RESOLVED | `index.ts`, `projectStore.test.ts`, `agentAdversarial.test.ts`, `editVersions.test.ts` | `test:project-store` proves the bare row is unreadable and the disk stale, then that publish + materialise fixes both; finding was understated — see its Resolution |
 | GAP-004 | RESOLVED | `http/turns.ts`, `index.ts`, `wsRelay.ts`, `threadStore.ts`, `attachments.test.ts`, `socket.ts`, `BuildPane.tsx`, `AttachmentRail.tsx` | `test:attachments` gained a 15-claim reachability audit — every arithmetic assertion in it was already true of code that never ran on a turn |
+| GAP-005 | RESOLVED | `effort.ts`, `index.ts`, `planner.ts`, `generator.ts`, `editor.ts`, `explainer.ts`, `models.py`, `effort.test.ts` | `test:effort` gained a per-request ceiling section and a reachability audit over all four dispatch sites, three payload sites and the run env |
 | GAP-008 | RESOLVED | `InboxActions.tsx`, `InboxCardActions.tsx`, `inboxStore.ts`, `InboxView.tsx`, `inboxBoard.test.ts`, `registry.ts`, `types.ts`, `inboxActionIcons.tsx` | `test:inbox-board` reads the server's vocabulary and requires a case for all 29; the exhaustive switch failed the build naming four omissions while being written |
 | GAP-009 | RESOLVED | `entitlements.ts`, `entitlementGate.ts`, `plans.ts`, `index.ts`, `entitlements.test.ts`, `entitlementStore.ts`, `UpsellCard.tsx`, `UsagePanel.tsx`, `types.ts` | `test:entitlements` holds all seven kinds from both Free and Pro, plus the top of the ladder answering null; `test:entitlement-store` holds the client guard |
 | GAP-014 | RESOLVED | `web/pricing.html`, `checkoutSurfaces.test.ts` | `test:checkout-surfaces` maps every sold feature row to an `EntitlementKind` and asserts the three removed names stay gone |

@@ -84,8 +84,25 @@ export function planEffort(
   modelId: string,
   requested: Effort,
   displayName?: string,
+  /**
+   * The `max_tokens` THIS CALL will send, when it is smaller than the model's ceiling.
+   *
+   * Every caller sets its own: the planner asks for 600, an explain for 700, a generation for
+   * 16,000. A thinking budget has to leave room for an answer INSIDE THAT, not inside whatever the
+   * model could theoretically produce — a 4,000-token thinking block on a 600-token request is a
+   * 400 from the provider, and a failed dispatch is a worse answer than a visible clamp. So the
+   * ceiling is per request rather than per model, and the plan reports the level it stepped down
+   * to, which is what makes §3.2's "never report an effort that wasn't used" true here as well.
+   *
+   * Omitted, this is exactly what it always was: the model's own maximum.
+   */
+  maxOutputTokens?: number,
 ): EffortPlan {
-  return planForCapability(capabilityFor(modelId), requested, displayName ?? modelId);
+  const cap = capabilityFor(modelId);
+  const scoped = cap && maxOutputTokens !== undefined && maxOutputTokens < cap.maxOutputTokens
+    ? { ...cap, maxOutputTokens }
+    : cap;
+  return planForCapability(scoped, requested, displayName ?? modelId);
 }
 
 /**

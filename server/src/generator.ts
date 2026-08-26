@@ -21,6 +21,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative } from "node:path";
+import type { EffortPlan } from "./effort.ts";
 import { anthropicClient, emptyUsage, summarizeUsage, type UsageSummary } from "./claude.ts";
 import {
   connectionSuppliedEnv, loadConnectors, optionalEnv, requiredEnv, resolveSelected, templatesDir,
@@ -43,7 +44,8 @@ import { validateProject } from "./validator.ts";
 export type { UsageSummary } from "./claude.ts";
 
 export const GENERATION_MODEL = process.env.JAROKU_GEN_MODEL ?? "claude-haiku-4-5";
-const MAX_TOKENS = 16000;
+/** Exported so the effort adapter clamps a thinking budget against the number THIS call sends. */
+export const MAX_TOKENS = 16000;
 const STAGING_DIRNAME = ".staging";
 
 export interface GeneratorDeps {
@@ -84,6 +86,12 @@ export interface GenerateOptions {
   /** What the plan itself cost. Part of what creating this agent cost, so it is reported and
    *  recorded alongside the generation rather than quietly absorbed. */
   planUsage?: UsageSummary;
+  /**
+   * §3.2 REACHING THE REQUEST, translated by the one adapter and resolved by the caller through
+   * the conversation → workspace → default chain. Null when the model has no reasoning control or
+   * nothing asked for one, and the request is then exactly the one that shipped.
+   */
+  effort?: EffortPlan | null;
 }
 
 export interface GeneratorEvents {
@@ -384,11 +392,16 @@ export class Generator extends EventEmitter<GeneratorEvents> {
     onChunk: (text: string) => void,
     onUsage: (u: UsageSummary) => void,
     apiKey?: string,
+    effort?: EffortPlan | null,
   ): Promise<string> {
     let raw = "";
     const stream = anthropicClient(apiKey).messages.stream({
       model: GENERATION_MODEL,
       max_tokens: MAX_TOKENS,
+      // SPREAD RATHER THAN SET, so a call with no plan is byte-identical to the one that shipped —
+      // and the budget inside it was already validated against THIS call's max_tokens by the
+      // adapter, not against whatever the model could theoretically produce.
+      ...(effort?.thinking?.type === "enabled" ? { thinking: effort.thinking } : {}),
       system: [
         {
           type: "text",

@@ -83,6 +83,7 @@ import { TokenVerifier } from "./auth/verifier.ts";
 import { authenticate, sessionRoutes } from "./auth/session.ts";
 import { conversationRoutes } from "./http/conversations.ts";
 import { ConversationSettingsStore, DEFAULT_PERMISSION_MODE, type PermissionMode } from "./conversationSettings.ts";
+import { planEffort, type EffortPlan } from "./effort.ts";
 import { ConversationConnectorStore } from "./conversationConnectors.ts";
 import { TurnInteractionStore } from "./turnInteraction.ts";
 import { classOf, mustConfirm } from "./permissionShield.ts";
@@ -99,9 +100,9 @@ import { EMAIL_ENV, emailConfigFrom, emailTransport } from "./email/transport.ts
 import { magicLinkRoutes } from "./http/magicLink.ts";
 import { signInRoutes } from "./http/signIn.ts";
 import { MAGIC_LINK_LIMITS, rateKeyForIp } from "./auth/signIn.ts";
-import { Generator, agentsDir, type UsageSummary } from "./generator.ts";
-import { Planner } from "./planner.ts";
-import { Editor } from "./editor.ts";
+import { Generator, agentsDir, MAX_TOKENS as GEN_MAX_TOKENS, type UsageSummary } from "./generator.ts";
+import { Planner, PLAN_MODEL, MAX_TOKENS as PLAN_MAX_TOKENS } from "./planner.ts";
+import { Editor, EDIT_MODEL, MAX_TOKENS as EDIT_MAX_TOKENS } from "./editor.ts";
 import { scanAgentDirectory } from "./agents.ts";
 import { AgentRepository, nextForkSlug } from "./db/repositories/agents.ts";
 import { AgentGrantRepository } from "./db/repositories/agentGrants.ts";
@@ -155,7 +156,7 @@ import {
 } from "./checkpoints/threads.ts";
 import { openCheckpointStore } from "./checkpoints/store.ts";
 import { introspectGraph, introspectGraphCached, type GraphResult } from "./graphIntrospect.ts";
-import { streamExplain } from "./explainer.ts";
+import { streamExplain, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS } from "./explainer.ts";
 import type { ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, ProviderSnapshot } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
@@ -529,6 +530,20 @@ const runPayers = new Map<string, Payer>();
  */
 let planPayer: Payer = "platform";
 let genPayer: Payer = "platform";
+
+/**
+ * WHAT EACH IN-FLIGHT DISPATCH ASKED FOR AND WHAT IT GOT, so the turn can report the second.
+ *
+ * §3.2: "Never report an effort that wasn't used." The metadata row reads `effort` off the usage
+ * payload and nothing set it, so the chip was either absent or describing a setting that changed
+ * nothing — and §6.2's clamp marker could never fire, because `effort_requested` and
+ * `effort_applied` were only ever equal or both null. These carry the plan from the dispatch to
+ * the `done` handler that builds the payload, alongside the payer and the thread which travel the
+ * same way and for the same reason.
+ */
+let genEffort: EffortPlan | null = null;
+let planEffortPlan: EffortPlan | null = null;
+let editEffort: EffortPlan | null = null;
 let editPayer: Payer = "platform";
 
 /**
@@ -581,7 +596,22 @@ async function settleRun(ctx: TenantContext, runId: string): Promise<void> {
   }
 }
 
+/**
+ * The two effort fields §6.2 renders, from a plan or from nothing.
+ *
+ * BOTH OR NEITHER. `effort` is what was SPENT and `effort_requested` is what was ASKED FOR, and
+ * the clamp marker is exactly their inequality — so a payload carrying one without the other would
+ * make a clamp either invisible or imaginary. A model with no reasoning control contributes
+ * nothing at all, which is what makes the composer omit the chip rather than render a meaningless
+ * "Low".
+ */
+function effortFields(plan: EffortPlan | null): { effort?: string; effort_requested?: string } {
+  if (!plan || !plan.supported) return {};
+  return { effort: plan.applied, effort_requested: plan.requested };
+}
+
 /** The shape claude.ts's `UsageSummary` has, narrowed to what the ledger needs from it. */
+
 function tokensOf(usage: unknown): {
   inputTokens: number;
   outputTokens: number;
@@ -3397,6 +3427,48 @@ async function permissionModeForRun(ctx: TenantContext, runId: string): Promise<
   }
   runPermissionModes.set(runId, mode);
   return mode;
+}
+
+/**
+ * The reasoning effort this conversation is set to, translated for the model about to be called.
+ *
+ * THE LINK THAT DID NOT EXIST. `conversation_settings.reasoning_effort` was persisted (054),
+ * resolved through the conversation → workspace → default chain, rendered on the composer's chip,
+ * and read by nothing outside the route that wrote it. `planEffort` — the adapter §3.2 required,
+ * "translated per provider at request time, in one adapter module, never inline at the call site" —
+ * was written, tested by `test:effort`, and had no production caller. So a user set High on a hard
+ * generation, believed they had bought more reasoning, and got the provider's default.
+ *
+ * The inference was entirely reasonable, which is what makes it a bad failure rather than a small
+ * one: `permission_mode` is the control immediately beside it on the same row of the same table,
+ * and that one IS enforced.
+ *
+ * `maxOutputTokens` IS THE CALL'S, NOT THE MODEL'S. Every builder sets its own — 600 for a plan,
+ * 700 for an explain, 16,000 for a generation — and a thinking budget has to leave room for an
+ * answer inside THAT. The adapter clamps and reports the level it stepped down to, which is what
+ * makes the metadata row's clamp marker able to fire at all.
+ *
+ * NEVER FATAL. A settings read that failed used to be impossible to notice because nothing read
+ * them; now it would cost a request, so it degrades to no reasoning control rather than to a
+ * refused dispatch — the same direction `permissionModeForRun` fails in, and the honest one: a
+ * generation at the default beats no generation.
+ */
+async function effortForThread(
+  ctx: TenantContext,
+  threadId: string | null,
+  modelId: string,
+  maxOutputTokens: number,
+): Promise<EffortPlan | null> {
+  try {
+    const level = threadId
+      ? (await conversationSettings.effective(ctx, threadId)).effort
+      : (await conversationSettings.workspaceDefaults(ctx)).effort;
+    const plan = planEffort(modelId, level, undefined, maxOutputTokens);
+    return plan.supported ? plan : null;
+  } catch (err) {
+    console.warn(`[effort] could not resolve the reasoning effort, using the model's default:`, (err as Error)?.message ?? err);
+    return null;
+  }
 }
 
 /**
@@ -9872,7 +9944,7 @@ planner.on("plan", (e) => {
   meterPlatformCall(contextForPlan(), "llm.plan", {
     model: GENERATION_MODEL, ...tokensOf(e.usage), payer: planPayer, threadId: planThread,
   });
-  planOut({ type: "plan", ...e });
+  planOut({ type: "plan", ...e, usage: { ...e.usage, ...effortFields(planEffortPlan) } });
   // The plan is now awaiting a decision, which is §3.3's `needs_you`. The item is what lets the
   // derivation find it: liveness comes from the planner's own slot, ownership from here.
   if (planThread) noteThreadItem(contextForPlan(), planThread, { kind: "plan", refId: e.planId });
@@ -9952,6 +10024,9 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
       mcpTools,
       name: cmd.name,
       revisePlanId: cmd.revisePlanId,
+      // §3.2, REACHING THE REQUEST. Resolved against the thread the brief was written in, so a
+      // conversation set to High plans at High rather than at the provider default.
+      effort: (planEffortPlan = await effortForThread(ctx, planThread, PLAN_MODEL, PLAN_MAX_TOKENS)),
     });
   } catch (err) {
     planner.releaseClaim();
@@ -10120,7 +10195,9 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     meterPlatformCall(contextForGen(), "llm.generation", {
       model: GENERATION_MODEL, ...tokensOf(e.usage), payer: genPayer, threadId: genThread,
     });
-    genOut({ type: "done", ...e });
+    // §6.2's TWO FIELDS, ON THE PAYLOAD THAT RENDERS THEM. The metadata row reads `effort` off
+    // `usage` and nothing had ever set it, so the chip reported a setting that changed nothing.
+    genOut({ type: "done", ...e, usage: { ...(e.usage as UsageSummary), ...effortFields(genEffort) } });
     // THE SESSION LEARNS WHICH AGENT IT BUILT, and the name is snapshotted in the same statement
     // (§3.2) — after this, deleting that agent nulls the link and leaves the row saying
     // `name (deleted)` rather than losing what it was. `syncAgents` first, because the uuid this
@@ -10175,6 +10252,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     const mcpServers = await mcpRegistry.list(genCtx);
     void generator.generate({
       runtimeDir: RUNTIME_DIR, ctx: genCtx, prompt, connectors, mcpTools, mcpServers, name, plan, planUsage,
+      effort: (genEffort = await effortForThread(ctx, genThread, GENERATION_MODEL, GEN_MAX_TOKENS)),
       // See planAgent: undefined unless this workspace asked that its own key pay for the
       // platform's calls, and undefined is the platform's key.
       apiKey: genKey,
@@ -10203,7 +10281,7 @@ editor.on("proposal", (e) => {
   meterPlatformCall(contextForEdit(), "llm.edit", {
     model: GENERATION_MODEL, ...tokensOf(e.usage), payer: editPayer, threadId: editThread,
   });
-  editOut({ type: "proposal", ...e });
+  editOut({ type: "proposal", ...e, usage: { ...e.usage, ...effortFields(editEffort) } });
   // An unapplied diff is the most common thing a thread is blocked on, and this row is how the
   // derivation finds which thread. Whether it is still pending stays the editor's answer —
   // `openProposals` — so applying or discarding needs no row of its own here.
@@ -10288,9 +10366,13 @@ async function editAgent(
   editOut({ type: "started", agentId, instruction });
   void providerKeys
     .platformKey(ctx)
-    .then((apiKey) => {
+    .then(async (apiKey) => {
       editPayer = apiKey ? "workspace" : "platform";
-      return editor.propose(ctx, agentId, instruction, apiKey);
+      // Resolved against the thread the instruction was written in — see effortForThread.
+      return editor.propose(
+        ctx, agentId, instruction, apiKey,
+        (editEffort = await effortForThread(ctx, editThread, EDIT_MODEL, EDIT_MAX_TOKENS)),
+      );
     })
     .catch((err) => {
       // The claim never became an edit, so it has to go back — otherwise one failed key lookup
@@ -10404,6 +10486,28 @@ async function runAgent(
   // auto-approves or puts a person in front of it. A run whose environment claimed "fast" would
   // ask less often and be refused just as often, because the deciding is not done here.
   env.JAROKU_PERMISSION_MODE = await permissionModeForRun(ctx, runId);
+
+  // AND THE REASONING EFFORT, ON THE SAME SEAM AND FOR THE SAME REASON. `JAROKU_PROVIDER` and
+  // `JAROKU_MODEL` already decide at spawn time what a generated project runs on; this decides how
+  // hard it thinks, and it is the run half of the link §3.2 asked for. Without it a conversation
+  // set to High planned and edited at High and RAN at the provider's default — the setting applying
+  // to three of four things somebody does in the same composer, which is worse than it applying to
+  // none, because the two that worked make the third look like it did too.
+  //
+  // THE LEVEL, NOT A BUDGET. The runtime knows which model it is about to construct and the token
+  // arithmetic differs per provider; sending a number computed here would be the second
+  // implementation of the adapter, in a second language, out of sync the first time a budget
+  // changes. `models.py` reads the word and translates it once, beside the constructor.
+  try {
+    const threadForRun = await threadStore.threadForRef(ctx, "run", runId);
+    env.JAROKU_REASONING_EFFORT = threadForRun
+      ? (await conversationSettings.effective(ctx, threadForRun)).effort
+      : (await conversationSettings.workspaceDefaults(ctx)).effort;
+  } catch (err) {
+    // Never fatal. A run at the provider's default is a run; a run refused because a settings read
+    // failed is not — the same direction `permissionModeForRun` fails in.
+    console.warn(`[effort] could not resolve the effort for run ${runId}:`, (err as Error)?.message ?? err);
+  }
 
   // §12.10 — "Disabling a connector for a conversation removes its tools from that conversation's
   // dispatch and leaves the workspace connection intact."
@@ -10982,7 +11086,7 @@ ${attached}`;
       }),
     onDone: () => { explaining = false; replyOut({ type: "done", agentId: cmd.agentId }); },
     onError: (message) => { explaining = false; replyOut({ type: "error", agentId: cmd.agentId, message }); },
-  }, explainKey);
+  }, explainKey, await effortForThread(ctx, replyThread, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS));
 }
 
 // Kick off one run on startup unless suppressed (set JAROKU_NO_AUTORUN=1 to just serve).
