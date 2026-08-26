@@ -172,13 +172,28 @@
       <tr><th scope="row">Included credit</th><td class="no">—</td><td>$15/month</td><td>$30/user/month</td></tr>
       <tr><th scope="row">Overage</th><td class="no">—</td><td>At cost + 15%</td><td>At cost + 15%, pooled</td></tr>
 
+      <!--
+        EVERY ROW HERE IS A ROW SOMEBODY CAN GO AND USE. Three used to sit below these — Batch
+        approvals, Policy engine, Evals as a CI gate — and each named a `TierEntitlements` flag
+        that gates nothing, because the surfaces they describe are other specifications and are
+        not built. `entitlementGate.ts` records that openly and gives the right reason for the
+        order of work: declare the flag, wire it when the surface lands. What went wrong was that
+        the MARKETING shipped ahead of the flag rather than behind it, which is the one commercial
+        claim in this repository the code contradicted.
+
+        A customer read the comparison, paid, and never heard of the three again — there is no
+        second surface where the absence would have been noticed either, because the in-app plan
+        list carries only what a plan actually turns on.
+
+        THE FLAGS STAY. The declaration order is right and `perAgentAccessGrants` is the proof it
+        works: declared in v0.3.4, sold, and wired in v0.3.8 when the Access tab landed — at which
+        point its row here became true. A row returns to this table when its feature does, and
+        `test:checkout-surfaces` is what refuses one that arrives early.
+      -->
       <tr class="group"><th scope="row" colspan="4">Features</th></tr>
       <tr><th scope="row">GitHub push</th><td class="no">—</td><td>Yes</td><td>Yes</td></tr>
       <tr><th scope="row">GitHub sync (bidirectional)</th><td class="no">—</td><td class="no">—</td><td>Yes</td></tr>
       <tr><th scope="row">Per-agent Access grants</th><td class="no">—</td><td class="no">—</td><td>Yes</td></tr>
-      <tr><th scope="row">Batch approvals</th><td class="no">—</td><td>Yes</td><td>Yes</td></tr>
-      <tr><th scope="row">Policy engine</th><td class="no">—</td><td class="no">—</td><td>Yes</td></tr>
-      <tr><th scope="row">Evals as a CI gate</th><td class="no">—</td><td class="no">—</td><td>Yes</td></tr>
 
       <tr class="group"><th scope="row" colspan="4">Support</th></tr>
       <tr><th scope="row">Channel</th><td>GitHub Issues</td><td>Email, 48h</td><td>Priority email, 24h</td></tr>

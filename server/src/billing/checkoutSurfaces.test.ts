@@ -82,6 +82,66 @@ console.log("\nthe pricing page is discovery, not a checkout");
     "Free and Pro both lead to a download",
   );
   check(/mailto:contact@jaroku\.dev/.test(html), "and Team leads to a conversation");
+
+  // -------------------------------------------------------------------------------------------
+  // AND EVERY FEATURE IT SELLS IS ONE THE PRODUCT GATES.
+  //
+  // Three rows here named `TierEntitlements` flags that gate nothing — Batch approvals, the
+  // Policy engine, Evals as a CI gate — because the surfaces they describe are other
+  // specifications and are not built. That is the only commercial claim in this repository the
+  // code contradicted, and the codebase already knew: `entitlementGate.ts` says so in as many
+  // words, right above the enum this checks against.
+  //
+  // THE DECLARATION ORDER IS NOT THE BUG. Declaring a flag and wiring it when its surface lands
+  // is right, and `perAgentAccessGrants` is the proof — declared in v0.3.4, wired in v0.3.8, at
+  // which point its row here became true. What went wrong is that the marketing shipped ahead of
+  // the flag rather than behind it, and a prospective customer has no way to tell which side of
+  // that a row is on.
+  //
+  // SO THE GATE IS AGAINST `EntitlementKind` RATHER THAN AGAINST `PlanFeatures`. A flag on
+  // `PlanFeatures` is a declaration; a member of `EntitlementKind` is a check somebody can be
+  // refused by, which is what makes a row here a thing the customer actually receives. The
+  // rows are matched by NAME because the two tables are written in different vocabularies — one
+  // sells and one enforces — and that mapping is the only place the two meet.
+  // -------------------------------------------------------------------------------------------
+  {
+    const gateSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "entitlementGate.ts"), "utf8");
+    const kinds = new Set(
+      // `[A-Za-z0-9]` and not `[A-Za-z]`: two of the ten kinds end in a digit, and a character
+      // class that dropped them made this audit pass over the exact rows it exists to check.
+      [...(/export type EntitlementKind =([\s\S]*?);/.exec(gateSource)?.[1] ?? "").matchAll(/"([A-Za-z0-9]+)"/g)]
+        .map((m) => m[1]!),
+    );
+    check(kinds.size >= 10, `read the entitlement kinds (${kinds.size})`);
+
+    /** Which check each sold row is delivered by. A row with no entry has nothing behind it. */
+    const SOLD: Record<string, string> = {
+      "GitHub push": "githubPhase1",
+      "GitHub sync (bidirectional)": "githubPhase2",
+      "Per-agent Access grants": "perAgentAccessGrants",
+    };
+
+    // The Features group's rows, read out of the page rather than remembered — a row added below
+    // without an entry above is exactly the failure this exists for.
+    const featuresBlock = /Features<\/th><\/tr>([\s\S]*?)<tr class="group"/.exec(html)?.[1] ?? "";
+    const sold = [...featuresBlock.matchAll(/<th scope="row">([^<]+)<\/th>/g)].map((m) => m[1]!.trim());
+    check(sold.length >= 3, `found the features the page sells (${sold.length}): ${sold.join(", ")}`);
+
+    const ungated = sold.filter((row) => {
+      const kind = SOLD[row];
+      return kind === undefined || !kinds.has(kind);
+    });
+    check(
+      ungated.length === 0,
+      `every feature sold is one a workspace can be refused for${ungated.length ? ` — UNGATED: ${ungated.join(", ")}` : ""}`,
+    );
+
+    // And the three that were removed stay removed until they are real. Named individually
+    // because their absence is the fix and a regression would restore them one at a time.
+    for (const gone of ["Batch approvals", "Policy engine", "Evals as a CI gate"]) {
+      check(!html.includes(gone), `"${gone}" is not sold — it gates nothing and is not built`);
+    }
+  }
 }
 
 console.log("\nthe return pages land the browser back in the app");

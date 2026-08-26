@@ -1902,6 +1902,50 @@ kind of structural audit this codebase already applies to channels and stores.
 | Implementation Effort | 1/10 |
 | Confidence | 10/10 |
 
+### Resolution
+
+**Status: RESOLVED**
+
+**Implemented:**
+
+The three rows are gone from `web/pricing.html`. The flags stay on `TierEntitlements` and in the
+plan table — the declaration order is right, and `perAgentAccessGrants` is the proof it works:
+declared in v0.3.4, sold, wired in v0.3.8 when the Access tab landed, at which point its row here
+became true. What was wrong was that the marketing shipped *ahead* of the flag rather than behind
+it, and a prospective customer has no way to tell which side of that a row is on.
+
+The deleted rows are replaced by a comment saying why, so the next reader does not restore them.
+
+**And a gate, so it cannot happen again.** `test:checkout-surfaces` now reads the Features group
+out of `pricing.html` and requires every row to map to a member of `EntitlementKind`. The gate is
+against `EntitlementKind` and deliberately **not** against `PlanFeatures`: a flag on `PlanFeatures`
+is a *declaration*, while a member of `EntitlementKind` is a check somebody can actually be refused
+by — which is what makes a row on that page a thing the customer receives. The three removed names
+are also asserted absent individually, because their absence is the fix and a regression would
+restore them one at a time.
+
+**Files Changed:**
+
+- `web/pricing.html` — three rows removed, with the reason left in place
+- `server/src/billing/checkoutSurfaces.test.ts` — the structural gate
+
+**Verification:**
+
+`test:checkout-surfaces` passes: it reads ten entitlement kinds out of `entitlementGate.ts`, finds
+the three features the page still sells, and confirms each maps to a check. It caught its own bug
+while being written — a `[A-Za-z]` character class dropped `githubPhase1` and `githubPhase2`,
+which are the two rows the audit is most about, so the check would have passed over exactly what it
+exists to verify. Fixed to `[A-Za-z0-9]` with the reason recorded beside it.
+
+**Regression Coverage:**
+
+The suite's existing rules are untouched and still pass: no script, no form, no Stripe, every CTA a
+download or a mailto, all three tier cards present. This also removes GAP-009's compounding risk —
+`unlockingTier` resolves from the flag table, so had `policyEngine` stayed on the page it would now
+confidently recommend Team for a capability that does not exist.
+
+**Resolved On:** 2026-08-26
+
 ---
 
 ## GAP-015 — The Graph tab's error detail is truncated down to a bare filename
@@ -2496,4 +2540,5 @@ brief spends a page on.
 | GAP-001 | RESOLVED | `index.ts`, `projectStore.test.ts`, `agentAdversarial.test.ts` | `test:project-store` proves the bare-row fork still throws and the published one reads back byte for byte; `test:agent-adversarial` holds the call site |
 | GAP-002 | RESOLVED | `index.ts`, `editVersions.test.ts` | `test:edit-versions` proves the bare row is unreadable AND leaves the disk stale, then that publish + materialise fixes both; finding was understated — see its Resolution |
 | GAP-009 | RESOLVED | `entitlements.ts`, `entitlementGate.ts`, `plans.ts`, `index.ts`, `entitlements.test.ts`, `entitlementStore.ts`, `UpsellCard.tsx`, `UsagePanel.tsx`, `types.ts` | `test:entitlements` holds all seven kinds from both Free and Pro, plus the top of the ladder answering null; `test:entitlement-store` holds the client guard |
+| GAP-014 | RESOLVED | `web/pricing.html`, `checkoutSurfaces.test.ts` | `test:checkout-surfaces` maps every sold feature row to an `EntitlementKind` and asserts the three removed names stay gone |
 | GAP-003 | RESOLVED | `wsRelay.ts`, `channels.test.ts`, `wsRelay.test.ts`, `types.ts`, `buildStore.ts`, `socket.ts`, `AddMenu.tsx`, `BuildPane.tsx` | `test:channels` audits all 13 call sites from source; `test:relay` drives a throwing read and asserts the frame |
