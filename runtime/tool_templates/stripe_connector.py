@@ -65,6 +65,8 @@ import os
 
 from langchain_core.tools import tool
 
+from . import require_enabled
+
 REQUIRED_ENV = ["STRIPE_SECRET_KEY"]
 
 # Stripe's own default is 10 and its own ceiling is 100. Both are repeated here rather than left
@@ -91,6 +93,10 @@ def _sdk():
     would read the environment once, in whatever order Python happened to import things, and a
     hosted run assembles its environment after the process is already alive.
     """
+    # BEFORE THE CREDENTIAL CHECK — see require_enabled. The host already declines to inject a
+    # disabled connector's credential, so without this the failure would name a credential that is
+    # perfectly fine and send somebody to repair it.
+    require_enabled("stripe", "Stripe")
     key = os.environ.get("STRIPE_SECRET_KEY")
     if not key:
         raise RuntimeError(

@@ -95,6 +95,8 @@ from http.client import HTTPSConnection
 
 from langchain_core.tools import tool
 
+from . import require_enabled
+
 REQUIRED_ENV = ["HTTP_ALLOWED_DOMAINS"]
 AUTH_HEADER_ENV = "HTTP_AUTH_HEADER"
 
@@ -186,6 +188,10 @@ def _allowlist() -> set[str]:
     AN EMPTY LIST REFUSES EVERYTHING, and it says so rather than defaulting to anything. There is
     no "unset means unrestricted" reading of this variable: unrestricted is the vulnerability.
     """
+    # BEFORE THE CREDENTIAL CHECK — see require_enabled. The host already declines to inject a
+    # disabled connector's credential, so without this the failure would name a credential that is
+    # perfectly fine and send somebody to repair it.
+    require_enabled("http", "The HTTP connector")
     raw = os.environ.get("HTTP_ALLOWED_DOMAINS", "")
     domains = {d.strip().lower().rstrip(".") for d in raw.split(",") if d.strip()}
     if not domains:

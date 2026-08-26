@@ -38,6 +38,8 @@ import os
 
 from langchain_core.tools import tool
 
+from . import require_enabled
+
 REQUIRED_ENV = ["SLACK_BOT_TOKEN"]
 
 MAX_MESSAGE_CHARS = 4000
@@ -51,6 +53,11 @@ _MISSING_DEPS = (
 
 def _client():
     """Build an authorized Slack client, or raise RuntimeError with an actionable message."""
+    # BEFORE THE CREDENTIAL CHECK, because the two are different problems with different fixes.
+    # The host already declines to inject a disabled connector's token, so without this the
+    # failure would read "SLACK_BOT_TOKEN is not set" and send somebody to the Connections panel
+    # to repair a credential that is perfectly fine. See `require_enabled`.
+    require_enabled("slack", "Slack")
     token = os.environ.get("SLACK_BOT_TOKEN")
     if not token:
         raise RuntimeError(

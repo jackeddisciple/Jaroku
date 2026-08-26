@@ -324,6 +324,67 @@ console.log("\n8. and a domain that has since been repointed is refused per doma
   check(egress.rules.length > 0, "an agent with four domains and one bad one keeps the other three");
 }
 
+// --- 9. and a connector switched off for a conversation is off everywhere ------------------------
+
+console.log("\n9. a connector disabled for the conversation is off in all three places it could reach");
+{
+  // §12.10, WHICH WAS TRUE FOR ONE OF THE THREE KINDS OF ROW THE DECK OFFERS. The deck lists
+  // reviewed connectors, user-secret connectors and MCP servers in one list and lets you disable
+  // any of them; the run dispatch applied those decisions to MCP servers alone. Switching Gmail
+  // off dimmed a tile, persisted a row, and left its tools bound, its token minted and its host on
+  // the egress allowlist.
+  //
+  // That is a SAFETY control that reads as enforced and is not, and the deck's own care is what
+  // makes the inference reasonable: a disabled connector deliberately STAYS in the deck so its
+  // absence cannot be misread as a workspace disconnection.
+  //
+  // The narrowing itself is a one-line intersection; what this suite is for is that the narrowed
+  // list reaches all three consumers. Each of them passes with the other two broken, which is
+  // exactly how `HTTP_AUTH_HEADER` survived three green suites.
+  const enabled = THREE.filter((id) => id !== "stripe");
+
+  const narrowed = await buildEgressPolicy(
+    { runId: "loop", provider: "anthropic", connectors: enabled, httpRules: [] },
+    async (host) => (host === "api.anthropic.com" ? { v4: ["160.79.104.10"], v6: [] } : PUBLIC(host)),
+  );
+  const narrowedHosts = narrowed.rules.map((r) => r.host);
+  check(!narrowedHosts.includes("api.stripe.com"), "the disabled connector's host is off the egress allowlist", narrowedHosts.join(","));
+  check(narrowedHosts.includes("www.googleapis.com"), "...while the ones still on keep theirs");
+
+  // AND ITS CREDENTIAL IS NOT RESOLVED. The security half: an unminted token is not injected, not
+  // registered as a protected secret, and not in the environment for model-written Python to read.
+  const stripeNames = requiredEnv(resolveSelected(CATALOG, ["stripe"]));
+  const narrowedNames = requiredEnv(resolveSelected(CATALOG, enabled));
+  check(stripeNames.length > 0, `stripe declares a credential (${stripeNames.join(",")})`);
+  check(
+    stripeNames.every((n) => !narrowedNames.includes(n)),
+    "the disabled connector's credential names are not among those the run resolves",
+    narrowedNames.join(","),
+  );
+
+  // AND THE SENTENCE THE TOOL GIVES IS THE RIGHT ONE. Without `require_enabled` the failure reads
+  // "Stripe is not configured", which sends somebody to the Connections panel to repair a
+  // credential that is perfectly fine. It is a different problem with a different fix, one tile
+  // away — and it RAISES rather than returning, or the trace records a refusal as a green step.
+  const templates = readFileSync(join(ROOT, "runtime", "tool_templates", "__init__.py"), "utf8");
+  check(/def require_enabled\(/.test(templates), "the templates package has a shared enablement guard");
+  check(/raise RuntimeError\(/.test(templates), "...which raises rather than returning its reason as an answer");
+  check(/if allowed is None:/.test(templates), "...and an absent variable means no restriction, as the MCP sentinel does");
+  check(/allowed\.strip\(\) == "-"/.test(templates), "...while the sentinel means nothing is allowed, which an empty string could not carry");
+  for (const file of ["gmail", "google_calendar", "slack", "postgres", "http_connector", "stripe_connector"]) {
+    const source = readFileSync(join(ROOT, "runtime", "tool_templates", file + ".py"), "utf8");
+    check(/^from \. import require_enabled$/m.test(source) && /require_enabled\(/.test(source), `${file} consults it`);
+  }
+
+  // THE DISPATCH ITSELF, read as text: one narrowed list feeding all three consumers. Three call
+  // sites reading `agent.connectors` again would be three chances to forget one.
+  const index = readFileSync(join(ROOT, "server", "src", "index.ts"), "utf8");
+  check(/const activeConnectors = conversationConnectorIds \?\? agent\?\.connectors \?\? \[\];/.test(index), "the run narrows the agent's list by the conversation's decisions");
+  check(/connectors: activeConnectors,/.test(index), "...and resolves credentials from the narrowed list");
+  check(/buildRunEgress\(ctx, runId, provider, activeConnectors,/.test(index), "...builds the egress allowlist from it");
+  check(/env\.JAROKU_CONNECTORS =/.test(index), "...and sends it to the runtime beside JAROKU_MCP_SERVERS");
+}
+
 await db.close();
 rmSync(dir, { recursive: true, force: true });
 

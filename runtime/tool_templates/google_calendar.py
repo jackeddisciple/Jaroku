@@ -70,6 +70,8 @@ import os
 
 from langchain_core.tools import tool
 
+from . import require_enabled
+
 REQUIRED_ENV = ["GCAL_CLIENT_ID", "GCAL_CLIENT_SECRET", "GCAL_REFRESH_TOKEN"]
 ACCESS_TOKEN_ENV = "GCAL_ACCESS_TOKEN"
 
@@ -140,6 +142,10 @@ def _credentials():
     """
     from google.oauth2.credentials import Credentials
 
+    # BEFORE THE CREDENTIAL CHECK — see require_enabled. The host already declines to inject a
+    # disabled connector's credential, so without this the failure would name a credential that is
+    # perfectly fine and send somebody to repair it.
+    require_enabled("gcal", "Google Calendar")
     access_token = os.environ.get(ACCESS_TOKEN_ENV)
     if access_token:
         return Credentials(token=access_token, scopes=SCOPES)

@@ -1135,6 +1135,75 @@ egress policy, the MCP allowlist (the working half), and the permission shield.
 | Implementation Effort | 5/10 |
 | Confidence | 9/10 |
 
+### Resolution
+
+**Status: RESOLVED — all three steps**
+
+**Implemented:** the run dispatch resolves `conversationConnectorIds` — `agent.connectors ∩
+enabled`, honouring the store's absent-row-means-yes rule — and that **one narrowed list** is the
+input to every place a connector reaches a run:
+
+| Consumer | Was | Is |
+|---|---|---|
+| Credentials (`connectorRunEnv`) | `agent.connectors` | `activeConnectors` |
+| Optional env names (`optionalEnv`) | `agent.connectors` | `activeConnectors` |
+| Egress allowlist (`buildRunEgress`) | `agent.connectors` | `activeConnectors` |
+| The runtime's tools | — | `JAROKU_CONNECTORS`, the same sentinel scheme as `JAROKU_MCP_SERVERS` |
+
+One list feeding all four, and not four reads of `agent.connectors`, because four reads are four
+chances to forget one — which is exactly how this shipped: the decisions *were* read, and applied
+to one of the three kinds of row the deck offers.
+
+**Step 3 landed in the templates rather than in `tools/__init__.py`,** and that is a better answer
+than the finding's. `tools/__init__.py` is written by the model per agent, so filtering there would
+reach only agents generated after this release and would leave every existing one enforcing
+nothing. The connector templates are **host-owned, reviewed, and copied byte-for-byte into every
+project** — including projects already generated — so `require_enabled(id, label)` in
+`tool_templates/__init__.py`, consulted by all six templates, enforces on agents that exist today.
+
+Its value is the *sentence*. The host already declines to mint the credential, so a disabled
+connector's tool would fail regardless — with *"Gmail is not configured"*, which sends somebody to
+the Connections panel to repair a credential that is perfectly fine. *"Switched off for this
+conversation"* is a different problem with a different fix, one tile away. It **raises** rather
+than returning, which is the rule `check_failures_raise` exists to hold: LangChain records a
+returned string as a *successful* tool call, so returning would draw a green step whose content
+happened to be a refusal.
+
+**Files Changed:**
+
+- `server/src/index.ts` — `conversationConnectorIds`, `activeConnectors`, `JAROKU_CONNECTORS`
+- `runtime/tool_templates/__init__.py` — `require_enabled`
+- `runtime/tool_templates/{gmail,google_calendar,slack,postgres,http_connector,stripe_connector}.py`
+- `server/src/connectorLoop.test.ts` — section 9
+
+**Verification:**
+
+`test:connector-loop` is the right home and its header says why: every other connector suite tests
+one seam and passes with the seam either side of it broken, which is exactly how `HTTP_AUTH_HEADER`
+survived three green suites over a value that did nothing. Section 9 holds all three consumers at
+once — the disabled connector's host is off the egress allowlist while the others keep theirs, its
+credential names are not among those the run resolves, and the guard exists, raises, treats an
+absent variable as no restriction and `-` as nothing-allowed. All six templates are asserted to
+import and consult it, and the dispatch is read as text: one narrowed list, used by the credentials,
+the egress and the runtime variable.
+
+`test:connector-catalog`'s `check_failures_raise()` passes with the guard in place, which is the
+assertion that matters most on the Python side.
+
+**Regression Coverage:**
+
+`test:connector-loop`, `test:connector-catalog`, `test:connector-gcal`, `test:connector-stripe`,
+`test:connector-http`, `test:connector-secrets`, `test:connector-auth`, `test:egress-connectors`
+and `test:egress-policy` all pass; the server typechecks. The MCP half is untouched and still
+works: `JAROKU_MCP_SERVERS` is built exactly as it was, and the new variable sits beside it under
+the same `decisions.size > 0` guard, so a conversation nobody has scoped runs precisely as it did.
+
+**Known, and unchanged:** the second-order effect the finding notes — disabling *any* connector
+makes `decisions.size > 0` and switches the MCP allowlist on — still holds, and is still harmless.
+It is now symmetric rather than surprising: both allowlists arm together.
+
+**Resolved On:** 2026-08-26
+
 ---
 
 ## GAP-007 — `runnable` is derived from the local filesystem, never from the version manifest
@@ -2962,6 +3031,7 @@ brief spends a page on.
 | GAP-002 | RESOLVED | `index.ts`, `projectStore.test.ts`, `agentAdversarial.test.ts`, `editVersions.test.ts` | `test:project-store` proves the bare row is unreadable and the disk stale, then that publish + materialise fixes both; finding was understated — see its Resolution |
 | GAP-004 | RESOLVED | `http/turns.ts`, `index.ts`, `wsRelay.ts`, `threadStore.ts`, `attachments.test.ts`, `socket.ts`, `BuildPane.tsx`, `AttachmentRail.tsx` | `test:attachments` gained a 15-claim reachability audit — every arithmetic assertion in it was already true of code that never ran on a turn |
 | GAP-005 | RESOLVED | `effort.ts`, `index.ts`, `planner.ts`, `generator.ts`, `editor.ts`, `explainer.ts`, `models.py`, `effort.test.ts` | `test:effort` gained a per-request ceiling section and a reachability audit over all four dispatch sites, three payload sites and the run env |
+| GAP-006 | RESOLVED | `index.ts`, `tool_templates/__init__.py` + all six templates, `connectorLoop.test.ts` | `test:connector-loop` §9 holds all three consumers at once — egress, credentials and the runtime guard — plus the dispatch read as text |
 | GAP-007 | RESOLVED | `agents.ts`, `index.ts`, `agentFiles.test.ts`, `ci.yml` | `test:agent-files` proves a published agent is runnable with no directory, that the whole workspace costs one statement, and that all three call sites materialise on demand |
 | GAP-008 | RESOLVED | `InboxActions.tsx`, `InboxCardActions.tsx`, `inboxStore.ts`, `InboxView.tsx`, `inboxBoard.test.ts`, `registry.ts`, `types.ts`, `inboxActionIcons.tsx` | `test:inbox-board` reads the server's vocabulary and requires a case for all 29; the exhaustive switch failed the build naming four omissions while being written |
 | GAP-009 | RESOLVED | `entitlements.ts`, `entitlementGate.ts`, `plans.ts`, `index.ts`, `entitlements.test.ts`, `entitlementStore.ts`, `UpsellCard.tsx`, `UsagePanel.tsx`, `types.ts` | `test:entitlements` holds all seven kinds from both Free and Pro, plus the top of the ladder answering null; `test:entitlement-store` holds the client guard |

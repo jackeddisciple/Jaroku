@@ -42,6 +42,8 @@ import re
 
 from langchain_core.tools import tool
 
+from . import require_enabled
+
 REQUIRED_ENV = ["DATABASE_URL"]
 
 MAX_ROWS = 100
@@ -93,6 +95,9 @@ def pg_query(sql: str) -> str:
     Only a single SELECT (or WITH ... SELECT) statement is permitted; writes and DDL are
     rejected. Results are capped at 100 rows, so add LIMIT/WHERE to narrow large tables.
     """
+    # BEFORE THE CREDENTIAL CHECK — see `require_enabled`. "Postgres is not configured" would send
+    # somebody to fix a DATABASE_URL that is perfectly fine.
+    require_enabled("postgres", "Postgres")
     url = os.environ.get("DATABASE_URL")
     if not url:
         raise RuntimeError("Postgres is not configured: DATABASE_URL is not set in the environment.")

@@ -10594,6 +10594,41 @@ async function runAgent(
   // outside any conversation gets; `-` means "nothing is allowed", which is a real state somebody
   // can reach by switching everything off. An empty string cannot carry that distinction —
   // Windows deletes an environment variable set to "", so the two would be the same value.
+  //
+  // AND IT APPLIED TO ONE OF THE THREE KINDS OF ROW THE DECK OFFERS. `workspaceConnectors()`
+  // returns OAuth connectors, user-secret connectors and MCP servers in ONE list; the `PUT`
+  // accepts any id from it; the deck renders them identically and lets you disable any of them.
+  // The dispatch read those decisions and filtered MCP servers alone. Switching Gmail off dimmed a
+  // tile, persisted a row, and changed nothing: its tools stayed bound, `GMAIL_ACCESS_TOKEN` was
+  // still minted and injected, and `googleapis.com` was still on the egress allowlist.
+  //
+  // That is a SAFETY control that reads as enforced and is not, and the deck's own care is what
+  // makes the inference reasonable — a disabled connector deliberately STAYS in the deck so its
+  // absence cannot be misread. "Switch Gmail off for this conversation" is the exact gesture
+  // somebody makes before pasting something they do not want an agent's mail tools near.
+  //
+  // So the decisions now narrow `agent.connectors` as well, and that one narrowed list is the
+  // input to all three places a connector reaches a run: its credentials, its egress hosts, and
+  // the tool list the generated project binds. Filtering credentials alone would leave the tool in
+  // the model's list, failing at the point of use — which the templates report cleanly, and which
+  // is still a tool the model was offered after somebody switched it off.
+  //
+  // Read ONCE and above both blocks, because the credential resolution below reads it too and a
+  // second lookup would be a second answer to "which connectors does this agent declare" — the
+  // question this whole narrowing is about.
+  const agentForRun = agentId ? await agentRepo.bySlug(ctx, agentId).catch(() => undefined) : undefined;
+  const conversationConnectorIds = await (async (): Promise<string[] | null> => {
+    const declared = agentForRun?.connectors ?? [];
+    if (declared.length === 0) return null;
+    const threadId = await threadStore.threadForRef(ctx, "run", runId).catch(() => undefined);
+    if (!threadId) return null;
+    const decisions = await conversationConnectors.decisionsFor(ctx, threadId).catch(() => new Map<string, boolean>());
+    // ABSENT MEANS YES — the store's own rule, and the reason a conversation nobody has scoped
+    // runs exactly as it did before this existed.
+    if (decisions.size === 0) return null;
+    return declared.filter((id) => decisions.get(id) ?? true);
+  })();
+
   {
     const threadId = await threadStore.threadForRef(ctx, "run", runId).catch(() => undefined);
     if (threadId) {
@@ -10605,6 +10640,14 @@ async function runAgent(
         const servers = await mcpStore.listServers(ctx).catch(() => []);
         const allowed = servers.map((sv) => sv.id).filter((id) => decisions.get(id) ?? true);
         env.JAROKU_MCP_SERVERS = allowed.length > 0 ? allowed.join(",") : "-";
+        // THE SAME SENTINEL, FOR THE OTHER SIX ROWS. `tools/__init__.py` reads it and omits the
+        // unlisted templates from `TOOLS`, so a disabled connector is absent from the model's tool
+        // list rather than merely credential-less. Absent means no restriction — a run outside any
+        // conversation — and `-` means nothing is allowed, which is reachable by switching
+        // everything off. An empty string cannot carry that distinction on Windows.
+        if (conversationConnectorIds !== null) {
+          env.JAROKU_CONNECTORS = conversationConnectorIds.length > 0 ? conversationConnectorIds.join(",") : "-";
+        }
       }
     }
   }
@@ -10622,7 +10665,11 @@ async function runAgent(
   // the point of use, with the name in the message, which is a far better error than a run that
   // refuses to start for a variable it might not have needed.
   try {
-    const agent = agentId ? await agentRepo.bySlug(ctx, agentId) : undefined;
+    const agent = agentForRun;
+    // THE CONVERSATION-NARROWED LIST, or the agent's own when nothing has been scoped. Every use
+    // of a connector below reads THIS rather than `agent.connectors`, which is what turns the
+    // deck's toggle from a dimmed logo into a capability. See `conversationConnectorIds`.
+    const activeConnectors = conversationConnectorIds ?? agent?.connectors ?? [];
     const names = (agent?.required_env ?? []).filter(isSecretName);
     if (names.length) Object.assign(env, await secrets.getForRun(runId, names));
 
@@ -10638,7 +10685,7 @@ async function runAgent(
     //
     // From the AGENT'S OWN connector list, never from anything a client sent — the same rule the
     // required half above and the OAuth half below both follow.
-    const optional = optionalEnv(resolveSelected(loadConnectors(RUNTIME_DIR), agent?.connectors ?? []))
+    const optional = optionalEnv(resolveSelected(loadConnectors(RUNTIME_DIR), activeConnectors))
       .filter(isSecretName)
       .filter((name) => !names.includes(name));
     if (optional.length) Object.assign(env, await secrets.getForRun(runId, optional));
@@ -10662,7 +10709,10 @@ async function runAgent(
     // connected Gmail and pasted a `GMAIL_ACCESS_TOKEN` by hand should get the connection — the
     // hand-set one is the local development path, and hosted it is the one nobody is maintaining.
     const connectors = await connectorRunEnv(ctx, tokenRefresher, oauth, {
-      connectors: agent?.connectors ?? [],
+      // A DISABLED CONNECTOR IS NOT MINTED A TOKEN. This is the security half: an hour-long Gmail
+      // access token is not created, not injected, and not registered as a secret for a run whose
+      // conversation switched Gmail off.
+      connectors: activeConnectors,
     });
     Object.assign(env, connectors.env);
 
@@ -10701,7 +10751,9 @@ async function runAgent(
     // completely different places and neither should be deciding what the rules are. Locally
     // nothing enforces it at all — a child process shares this machine's network — which is why
     // LocalSubprocessSandbox refuses to start under NODE_ENV=production.
-    runEgress = await buildRunEgress(ctx, runId, provider, agent?.connectors ?? [], agent?.mcp_tools ?? []);
+    // AND ITS HOST IS OFF THE ALLOWLIST. Credentials alone would leave  reachable
+    // by whatever else the model decided to do with an  tool it still had.
+    runEgress = await buildRunEgress(ctx, runId, provider, activeConnectors, agent?.mcp_tools ?? []);
   } catch (err) {
     console.warn(`[manager] could not resolve credentials for ${runId}: ${(err as Error).message}`);
   }
