@@ -20,6 +20,13 @@ of the repo and run yourself.
         writing    landing              & forked applying providers account
 ```
 
+Once there is more than one agent and more than one session, four full-screen destinations answer
+four different questions — [Threads](#threads) is the conversation, [Agents](#agents) is the
+artifact, [the Inbox](#the-inbox) is what is waiting on you, and [Activity](#activity) is what the
+workspace is doing. It runs the same way for one person on a laptop and for a
+[team](#workspaces-and-teams) sharing a workspace, with [per-agent access](#per-agent-access) for
+the case where somebody should be able to fix one agent and not every other one.
+
 ---
 
 ## Table of contents
@@ -39,6 +46,9 @@ of the repo and run yourself.
 - [The fix loop: propose → apply → undo](#the-fix-loop-propose--apply--undo)
 - [Threads](#threads)
 - [Agents](#agents)
+- [The Inbox](#the-inbox)
+- [Activity](#activity)
+- [The composer](#the-composer)
 - [Debug depth: pause, resume, branch](#debug-depth-pause-resume-branch)
 - [The eval engine](#the-eval-engine)
 - [Cost accounting](#cost-accounting)
@@ -57,10 +67,12 @@ of the repo and run yourself.
 - [Sandboxed execution and the distributed control plane](#sandboxed-execution-and-the-distributed-control-plane)
 - [Queueing, fairness, and per-workspace limits](#queueing-fairness-and-per-workspace-limits)
 - [Cost metering, budgets, and billing](#cost-metering-budgets-and-billing)
+- [Plans, tiers and entitlements](#plans-tiers-and-entitlements)
 - [Connector OAuth and the credential vault](#connector-oauth-and-the-credential-vault)
 - [Hardening, abuse, data lifecycle, observability, deploy](#hardening-abuse-data-lifecycle-observability-deploy)
 - [Authentication and membership](#authentication-and-membership)
 - [Workspaces and teams](#workspaces-and-teams)
+- [Per-agent access](#per-agent-access)
 - [Where data lives](#where-data-lives)
 - [Security notes](#security-notes)
 - [Troubleshooting](#troubleshooting)
@@ -95,6 +107,7 @@ a tool you trust and one you don't:
 | **stdout is sacred** | stdout carries trace events and nothing else. The runner `dup2`s fd 1 to stderr before importing any generated code, so a stray `print()` physically cannot corrupt the stream. |
 | **Money asks first** | The free dry-run path is one click. Spending real money requires picking providers, seeing an estimate, and setting a hard budget ceiling the server enforces. |
 | **Unreviewed code is labelled as such** | Connectors are audited and copied in verbatim. An [MCP server](#mcp-servers) is third-party code nobody here has read, so its tools carry a badge everywhere they appear, an agent only gets the specific ones it was granted, and a high-impact one stops for your confirmation before it runs. |
+| **A control that does nothing is worse than no control** | A stored setting has to change what the machine does, or it is a lie the UI keeps telling. A read that fails answers on its own channel rather than leaving an empty state that means "there is nothing here". A button with no handler fails `test:dead-controls`, and an action name with no case fails the typecheck. |
 
 ---
 
@@ -345,7 +358,8 @@ jaroku/
 │   │
 │   ├── tool_templates/        # reviewed connectors, copied verbatim into projects
 │   │   ├── catalog.json       # the registry: ids, env, tool signatures
-│   │   ├── gmail.py  slack.py  postgres.py
+│   │   ├── gmail.py  google_calendar.py  slack.py
+│   │   ├── postgres.py  stripe_connector.py  http_connector.py
 │   │   └── mcp_bridge.py      # calls third-party MCP servers; the manifest is the grant
 │   │
 │   ├── test_agent/            # hand-written 2-tool fixture; traces itself
@@ -358,7 +372,9 @@ jaroku/
 │   │   ├── auth/              # who is asking, and what they may do
 │   │   └── http/              # the small HTTP surface beside the socket
 │   ├── fixtures/              # recorded model responses for free development
-│   │   └── mcp/mockServer.ts  # a fixture MCP server, so all of it is testable for free
+│   │   ├── mcp/mockServer.ts  # a fixture MCP server, so all of it is testable for free
+│   │   ├── github/mockGithubApi.ts  # a fixture GitHub, App flow and check runs included
+│   │   ├── fly/mockFlyApi.ts  s3/mockS3.ts
 │   ├── debug-client.html      # dependency-free fallback UI on :4317
 │   └── jaroku.db              # SQLite: traces + eval control plane (gitignored)
 │
@@ -378,10 +394,10 @@ Three processes, one direction of data flow.
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
 │  BROWSER — React 19 / Vite / Zustand                    localhost:5173    │
-│  three columns: agents+runs · build & conversation · graph/trace/evals    │
+│  four destinations · one composer · eleven right-panel tabs               │
 └───────────────────────────────┬───────────────────────────────────────────┘
                                 │  one WebSocket, many logical channels
-                                │  trace · gen · edit · debug · eval · reply …
+                                │  trace · gen · edit · debug · eval · reply · inbox · activity · access …
 ┌───────────────────────────────┴───────────────────────────────────────────┐
 │  NODE SERVER — process manager + relay + store          localhost:4317    │
 │                                                                           │
@@ -937,25 +953,219 @@ rather than by discipline. `test:agent-context` asserts it by the same pattern t
 secret out of a log sink.
 
 **The detail is a tab of the right panel, not a fourth column.** The composer keeps the centre
-unchanged; the surface splits into the artifact (overview, version history, file browser) and five
-tabs (Capabilities · Health · Deploy · Evals · Threads & runs). Reading it as a fourth column would
-have put the trace out of reach for anybody who arrived from the Agents tab, when the trace is only
-out of scope *for* that tab.
+unchanged; the surface splits into the artifact (overview, version history, file browser) and six
+tabs (Capabilities · Health · Deploy · Evals · Threads & runs · Access). Reading it as a fourth
+column would have put the trace out of reach for anybody who arrived from the Agents tab, when the
+trace is only out of scope *for* that tab. Access is absent in a personal workspace, where every
+section of it would be about a set of one — see [Per-agent access](#per-agent-access).
+
+**Capabilities is where an agent's MCP grants are changed**, and it is the only place they can be.
+`setAgentTools` carries the **whole set** rather than an add or a remove: a grant is a
+least-privilege decision and its honest unit is "these tools and no others", where two tabs each
+sending an add would produce a set neither of them chose. Every ref is resolved against the registry
+before it is written, so a client cannot grant a tool this workspace has not connected — and sending
+the refs that still resolve is how a grant whose server has left the workspace gets removed.
 
 **Version history is a render, not a query.** Migration 014 already put the instruction, the summary,
 the per-file diff stat and the undone flag onto the version row. Restoring an old version **publishes
-a new one pointing at its manifest** — it never moves `current_version` backwards, which would rewrite
-the history the request was made from and leave the pointer on objects a retention sweep is entitled
-to consider superseded.
+a new one carrying its files** — it never moves `current_version` backwards, which would rewrite the
+history the request was made from and leave the pointer on objects a retention sweep is entitled to
+consider superseded. Publishing the *files* rather than pointing at the old manifest is what makes
+the new version readable at all: a key carries the version it was written under, so a manifest
+copied onto a new number names paths that only exist under the old one. The restored version is then
+materialised to `runtime/agents/<slug>`, because that directory is what a local run spawns from and
+what a deploy uploads.
 
-**Fork copies the connectors and the current manifest, and resets MCP grants to zero.** Copying them
-would silently re-grant high-impact third-party tools to a brand-new agent without anybody ticking a
-box, and the whole MCP design rests on access being granted per tool, deliberately. No file is
-copied: objects are content-addressed and immutable, so the fork's first version names the same ones.
+**Fork copies the connectors and the current version's files, and resets MCP grants to zero.**
+Copying the grants would silently re-grant high-impact third-party tools to a brand-new agent
+without anybody ticking a box, and the whole MCP design rests on access being granted per tool,
+deliberately. The Capabilities tab is where the fork's own grants get filled, which is what makes
+that notice sensible advice.
+
+The **files** are published under the fork's own id rather than having the manifest copied onto it.
+An object's key is per agent — `ws/<workspace>/agents/<agentId>/v<n>/<path>` — so a manifest handed
+across an agent boundary names a prefix nobody wrote: the row, the version list and the byte total
+are all correct and every read of the content throws. `addVersion` is right for a *restore*, where
+the objects live under the same id; `publish` writes the row and the objects together, which is the
+invariant it exists to hold.
 
 One migration, and it adds no column: `048_agents_grid` is an index on
 `threads (workspace_id, agent_id, last_activity_at DESC)`, because the card's current-work line and
 the grid's default sort are the same question and neither of 043's two indexes answers it.
+
+---
+
+## The Inbox
+
+Threads is the conversation, Agents is the artifact, Activity is what happened, and **the Inbox is
+what is waiting on you.** It is the third destination, and the one that shrinks as you work.
+
+Three laws hold it up, and each is enforced by something other than a comment.
+
+**Every item has exactly one owner-action.** "A run failed" is Activity. "A run failed and nobody
+has opened the trace" is the Inbox. If there is nothing a person could do about it, it does not
+belong here.
+
+**Every item dies on its own.** Each type declares a *resolve predicate* the server evaluates
+independently of any user action — so setting a missing credential from the Agents tab, from a
+thread, or from a script nobody has written yet clears the card with nobody dismissing anything. An
+item that left because a button was pressed is an item that stays when the same fix arrives by
+another door, and an Inbox that shows stale items is dead in a week.
+
+**Items collapse.** Forty failed runs is one item with a count of forty, deduplicated at write time
+on a key in the database rather than by a query that groups afterwards.
+
+**Sixteen item types, as one typed registry.** Each entry declares its severity, its subject, how it
+is produced, its icon, its action set, the sentence its card reads — and, load-bearing, the
+predicate. The trigger that creates an item and the condition that removes it sit three lines apart
+on purpose: a file apart they drift, and the type quietly becomes one that can be raised and never
+cleared. Adding a seventeenth is one entry and no line in the sweep, the store, the channel or the
+board.
+
+**Two generators, because two kinds of item exist.** *Event-driven* ones hang off moments the
+control plane already emits — a run failing, a deploy failing, an eval finishing, an MCP server
+changing status. *Derived* ones have no event to hang off, because each is a **comparison between
+two states that are both simply true**: a name in `required_env` with no configured secret, a
+deployed version behind the current one, a server that last answered a day ago, spend three times
+its own average, a high-impact grant with the confirmation gate off. Nothing was added to the frozen
+event schema for any of it.
+
+**Three verbs, and they stay three.** Resolve is shared, because the problem is. Snooze is personal
+and *returns* — evaluated at read time, so there is no job that can fail to run and leave work away
+forever. Dismiss is personal and does not return. Collapsing any two would break something the
+specification spends a section on: a dismissal that resolved would clear a teammate's board, and a
+snooze that vanished would be a slower dismissal.
+
+**The reconciler is what makes Law 2 real.** Idempotent by its own `WHERE`, workspace-scoped one at
+a time through the repository layer, safe against concurrent replicas on an advisory lock that
+*tries and gives up* rather than queueing, and constant in the number of agents — one aggregate pass
+plus two statements, asserted by counting them for two items and for forty.
+
+Cards carry their fixes inline. Twenty-nine action names route through one dispatcher, and it is
+**exhaustive**: a new `InboxActionName` fails the client typecheck rather than shipping as a glyph
+that does nothing. An action the client cannot yet run is declared in `UNIMPLEMENTED_ACTIONS` and
+therefore **not rendered**, so the card falls through to its next-best fix rather than offering a
+control that closes a menu and changes nothing.
+
+---
+
+## Activity
+
+The fourth destination, and **the only one that writes nothing.** Cross-agent, aggregate,
+historical, read-only: what this workspace is doing.
+
+It inherits the leftover axis, and that inheritance is the whole design. Everything per-agent
+already lives in the Agents detail pane; everything actionable already lives in the Inbox. So
+Activity gets exactly what is left — and the consequence is enforced by an **absence** rather than
+by a rule anybody has to remember: *the `activity` channel has no mutating command.* Every other
+tab's relay code carries a set of them; this one carries none, so the next person who wants a button
+that changes state has to add a command first and will find nothing to put it beside.
+
+**One window, resolved once, handed to every module.** 24h / 7d / 30d, chosen in the header and
+remembered per workspace, with every card stating its own window in its context line so a screenshot
+is never ambiguous. That is not tidiness: cross-highlighting is only coherent because all four
+participating modules are looking at the same seconds, and six aggregates that each resolved their
+own window would be four lenses onto four moments.
+
+**Ten aggregates, one grouped query per module, none of them moving with the number of agents.** The
+leaderboard's statement count is asserted equal for one agent and for forty, the way the Agents
+grid's is — a leaderboard is the most natural place in the product to write an N+1, because every
+row wants a per-agent figure.
+
+Four honesty rules, each of which is a bug this product has shipped once and each of which fails
+*silently* on a card built to be screenshotted: a crashed run still spent money on its completed
+steps; cache reads bill at the cached rate; **an unpriced model is unknown and never `$0`**; and
+cost is summed from what was spent, never from `runs.cost`. There is no global "up is bad" rule
+either — spend up is bad, tokens up is neutral, latency down is good — so each metric declares its
+own polarity and every badge reads it.
+
+The feed is keyset-paginated rather than offset-paginated, and the suite proves why by scrolling a
+page, **inserting rows above the cursor**, and scrolling again: an offset repeats rows it already
+showed and skips ones it never will, silently, on a table written to by every run, deploy and step.
+
+---
+
+## The composer
+
+The right panel inspects; the middle panel acts. One rule governs every decision in the composer,
+and it is the reason several obvious shortcuts were not taken: **it gathers intent and never
+performs privileged actions.** Attaching a GitHub commit is context. *Pushing* to GitHub is a
+confirmed, audit-logged action that lives in the GitHub panel. Blurring that line is how a
+trust-first product quietly stops being one.
+
+**One bottom control bar, seven controls, in a fixed order.** ⊕, fullscreen, effort, the permission
+shield and the connector deck pack left; the model selector, the Chat/Test toggle, mic and send pack
+right; one spacer absorbs the difference. Deliberately *not* `space-between` — the deck is absent
+with zero connectors and the effort control is hidden on a non-reasoning model, and spreading the
+row would move every button each time one of them disappeared.
+
+### ⊕ Attachments
+
+Five sources behind one picker — files, runs, dataset cases, tool schemas, GitHub references —
+server-searched and **server-priced**, because a client-supplied token estimate would let any
+request through by claiming to be small. A source with nothing behind it is *hidden rather than
+disabled*: an empty menu item that always fails is worse than no item.
+
+The refs ride the command that creates the turn rather than a second round trip, because at Send the
+turn does not exist yet — the server writes the `thread_items` row. `attachTurn` is one
+implementation of the cap (existing *plus* arriving), the server-side re-measurement, the budget
+check *before* the write, and the all-or-none transaction; the HTTP route and the dispatch both call
+it. Resolved content then goes into the prompt: a persisted ref nothing reads is a record, not a
+feature.
+
+A file's ref pins a `version_id`, so an attachment of v3 stays an attachment of v3 after v4
+publishes. Everything else resolves at send time, because a chip made five minutes ago should ground
+the answer in the repository as it is now.
+
+### Reasoning effort
+
+Four Jaroku levels, translated per provider in **one adapter** — extended-thinking providers get a
+token budget, `reasoning_effort` providers get a named level with XHigh clamped to High, and a model
+with no reasoning control renders the chip disabled *with the model named* rather than showing a
+meaningless "Low".
+
+The budget is validated against **this call's** `max_tokens`, not the model's ceiling: every builder
+sends its own — 600 for a plan, 700 for an explain, 16,000 for a generation — and a thinking block is
+spent out of that allowance. A clamp is **reported**: the turn stores what was requested *and* what
+was applied, so the marker is derivable after the fact rather than only knowable to the provider.
+Budgets live in `runtime/pricing.json` beside the prices, and the resolved level reaches an agent run
+as `JAROKU_REASONING_EFFORT` on the same seam `JAROKU_PROVIDER` already uses.
+
+### The permission shield
+
+Strict, Smart, Fast — a *policy* control, enforced server-side with the client bypassed. Two
+invariants hold it up: an environment that claimed a mode cannot authorise anything (every ask still
+arrives at the gate, which resolves the mode from the conversation's own row), and **Fast still
+confirms a write**. A workspace admin can pin the mode, and a pinned conversation refuses a `PATCH`
+with 409 rather than accepting a write the resolver would then ignore.
+
+### The connector deck
+
+Three tiles then a `+N`, with a disabled connector kept **in place and greyed** rather than removed —
+an absent connector reads as a workspace disconnection, which is the one thing this toggle
+deliberately is not.
+
+Switching one off is a real capability rather than a dimmed logo. The conversation's decisions narrow
+`agent.connectors`, and that one narrowed list feeds every place a connector reaches a run: its
+credentials are not resolved, its host is off the sandbox egress allowlist, its MCP servers are
+filtered out of `JAROKU_MCP_SERVERS`, and the reviewed templates read `JAROKU_CONNECTORS` and refuse
+by name — *"Slack is switched off for this conversation"* rather than a credential error about a
+credential that is perfectly fine.
+
+### The response metadata row
+
+Model, effort, build, duration, diff stat, and — when a turn has more than one answer — a `‹ n/m ›`
+variant switcher. The order is **stable and absent items collapse without reordering the rest**,
+because people learn the position of the thing they check most.
+
+Regenerate re-runs rather than prefilling the composer, attaching a second answer to the turn it is
+re-running rather than appending a second question. Each answer's row in `turn_variants` records the
+model, both effort levels and what it cost, so *"which model wrote this?"* stays answerable for
+every one of them. The bodies live in memory for the session — the same decision migration 044 made
+about Jaroku's prose, which is not stored and is rebuilt from stubs on reload.
+
+Notes are **shared**, pins are **personal**, and feedback is workspace-visible in aggregate. Notes
+hang off the turn rather than off a variant, deliberately, so a regeneration cannot take them.
 
 ---
 
@@ -1829,16 +2039,23 @@ Three resizable columns:
 ┌─────────────┬───────────────────────────┬────────────────────────────┐
 │  Sidebar    │  Build pane               │  Right panel               │
 │             │                           │                            │
-│  agents     │  ONE composer             │  [Graph][Trace][Evals][MCP]│
-│  runs       │  · Chat  → Jaroku         │                            │
-│  history    │  · Test  → the agent      │  Trace is the hero.        │
-│             │                           │  Click a step → detail     │
-│             │  plan cards               │  panel slides over.        │
-│             │  diff cards               │                            │
-│             │  streaming files          │  Code opens as an overlay  │
-│             │  explain answers          │  (Cmd+P / a diff row).     │
+│  workspace  │  ONE composer             │  [Graph][Trace][Evals][MCP]│
+│  ─────────  │  · Chat  → Jaroku         │  [Agent][Deploy][GitHub]   │
+│  Threads    │  · Test  → the agent      │  [Secrets][Usage][Conns]   │
+│  Agents     │                           │                            │
+│  Inbox      │  plan cards               │  Trace is the hero.        │
+│  Activity   │  diff cards               │  Click a step → detail     │
+│  ─────────  │  streaming files          │  panel slides over.        │
+│  agents     │  explain answers          │                            │
+│  runs       │  ────────────────────     │  Code opens as an overlay  │
+│  history    │  the control bar          │  (Cmd+P / a diff row).     │
 └─────────────┴───────────────────────────┴────────────────────────────┘
 ```
+
+The four destinations at the top of the sidebar are full-screen surfaces rather than a fifth list:
+[Threads](#threads) is the conversation, [Agents](#agents) is the artifact, [the Inbox](#the-inbox)
+is what is waiting on you, and [Activity](#activity) is what the workspace is doing. Below them the
+sidebar keeps the agent list, the live runs and the history window it always had.
 
 **One composer, routed by intent.** Rather than a dozen buttons, a single input routes each
 message by *(selection context + phrasing)* into the mechanism that already exists:
@@ -1919,6 +2136,9 @@ frozen event schema, and everything added since rides beside it.
 | `threads` | The workspace's build sessions with §3.3's derived status and the filter counts, one thread's conversation when it is opened, and refusals answered to the socket that earned them — see [Threads](#threads) |
 | `agents` | The sidebar's agent list, and — since the Agents tab — the grid with every card's tags already derived, one agent in full, one version's files, and refusals answered to the socket that earned them. One channel rather than two: every message is the same subject, and a second would be a second place a broadcast could forget to be scoped — see [Agents](#agents) |
 | `github` | Link state, sync verdicts, push and pull outcomes, staged hunks, secret-scan refusals, and pull-request check results — see [GitHub](#github) |
+| `inbox` | What is waiting on somebody, rebuilt **per recipient** rather than fanned out — a board is per person as well as per workspace, and a snapshot carries the names of a tenant's missing credentials, failed deploys and unreachable servers. A resolution travels as a delta because it is true for everybody; a dismissal never does — see [the Inbox](#the-inbox) |
+| `activity` | Six answers to one command, each sent as its aggregate resolves, so a slow leaderboard does not hold up the hero row. Answered to the socket that **asked** — a range is one person's choice of window — and the only channel in the relay with no mutating command at all — see [Activity](#activity) |
+| `access` | Who may do what to one agent, who granted it, when it runs out, and which of those people are connected. Answered to the socket that asked; the one message that is broadcast carries nothing but the fact that something changed — see [per-agent access](#per-agent-access) |
 | `log` | stderr lines and parse errors, for visibility |
 
 **Client → server**
@@ -1945,10 +2165,22 @@ thread set: `listThreads` · `loadThread` ·
 `refreshGithub` · `pushGithub` · `pullGithub` · `switchGithubBranch` · `createGithubBranch` ·
 `openGithubPr` · `commitGithub` · `generateGithubMessage` · `diagnoseFile` ·
 `shadowRunGithub` · `listShadowRuns` · `semanticDiffGithub` · `resolveReviewComment` ·
-`setAgentCiConfig` · `listScanFindings`
+`setAgentCiConfig` · `listScanFindings` · and the inbox set: `listInbox` · `resolveInboxItem` ·
+`dismissInboxItem` · `snoozeInboxItem` · `undoInboxAction` · `bulkInboxAction` ·
+`answerMemoryProposal` · and `getActivity` · `getActivityFeed` · and the access set:
+`loadAccess` · `loadExposure` · `loadSessions` · `loadAccessHistory` · `grantAccess` ·
+`modifyGrant` · `revokeGrant` · `endSession` · and `setAgentTools` · `setByok` ·
+`listConnections` · `connectConnector` · `disconnectConnector` · `leaveWorkspace`
 
 Accepting an invitation is deliberately **not** a command: the accepter is not a member yet, so
 there is no socket scoped to the workspace they are joining. It is `POST /v1/invites/accept`.
+
+**A read has three outcomes and answers all three.** `WsRelay.answer()` takes the error shape as a
+**required** parameter, so every point-to-point read supplies the member its own channel already
+renders — a failure is a message rather than a line on a server console the person who asked cannot
+see. That matters more than it sounds: every empty state in this product is designed to mean "there
+is nothing here", so a swallowed read failure spends that meaning on a lie. `test:channels` reads
+every call site out of the source, which is what stops the next read command shipping silent.
 
 **Every command is capability-checked at the door**, before it reaches the app — see
 [roles](#roles-as-data). A refusal is answered on the channel the command belongs to, and a
@@ -2366,10 +2598,52 @@ npm run test:agent-lifecycle  # archive leaves the pickers and nothing else; a r
 npm run test:thread-title     # the cut: one line, at a word boundary, saying it was cut
 npm run test:thread-archive   # the ABSENCE: 208 source files audited for a path that deletes one
 
+# what is waiting on you — see "The Inbox"
+npm run test:inbox-registry   # every type's resolve predicate, tested by resolving it EXTERNALLY
+npm run test:inbox-store      # Law 3: forty `record` calls are one row with count = 40
+npm run test:inbox-generators # mostly what must NOT happen: reading a failure is not a tenth one
+npm run test:inbox-reconciler # idempotent, constant in agents, and isolated in BOTH directions
+npm run test:inbox-derive     # a trigger and its predicate live in two files; this is the round trip
+npm run test:inbox-snapshot   # §3's three verbs, and why collapsing any two breaks something
+npm run test:inbox-actions    # undo restores the PRIOR value rather than clearing the column
+npm run test:inbox-payload    # one known secret, every route into a payload tried against it
+
+# what the workspace is doing — see "Activity"
+npm run test:activity-range   # one window, or four modules describing four different moments
+npm run test:activity-spend   # four honesty rules, every one a bug this product has shipped once
+npm run test:activity-health  # a paused-and-resumed run is ONE run; a cancellation is not a failure
+npm run test:activity-pulse   # the columns SUM to the hero row above them
+npm run test:activity-leaderboard # one agent and forty cost the same number of statements
+npm run test:activity-feed    # the keyset, proved by inserting rows ABOVE the cursor mid-scroll
+
+# the composer — see "The composer"
+npm run test:effort           # the clamp, the per-request ceiling, and that the adapter is CALLED
+npm run test:attachments      # the budget, and that a picked ref reaches the turn and the prompt
+npm run test:conversation-settings # §7's refusal to backfill; the pin is a security rule
+npm run test:permission-shield     # §12.7 and §12.8, verified by bypassing the UI
+npm run test:turn-variants    # never overwrite variant 1's metadata; and the store has no publish path
+npm run test:turn-interaction # a note is SHARED and a pin is PERSONAL — the same question, opposite
+
+# tiers — see "Plans, tiers and entitlements"
+npm run test:plans            # the table says what the pricing says
+npm run test:entitlements     # a command with neither a check nor the word "none" fails here
+npm run test:checkout-surfaces # the pricing page sells nothing, and sells nothing ungated
+
+# per-agent access — see "Per-agent access"
+npm run test:access-resolver  # every gated command driven with the client bypassed entirely
+npm run test:access-denied    # the row that is the only evidence a grant is wrong
+
 # the desktop wrapper — see docs/tauri.md
 npm run test:desktop-contract # the seams between Rust, JSON and TypeScript, read as text
 npm run test:desktop-smoke    # index.ts spawned the way the shell spawns it, driven over a real socket
+npm run test:desktop-supervisor # the port a previous backend was still holding, read as free
 ```
+
+Some suites are **source audits** rather than arithmetic ones, and that is deliberate: the failure
+they exist for is a feature whose every calculation is correct and which nothing ever calls.
+`test:effort`, `test:attachments` and `test:turn-variants` each read the dispatch, the wire and the
+client for the links themselves — every other assertion in all three was once true of code that
+never ran on a real turn.
 
 ```bash
 cd client
@@ -2396,6 +2670,17 @@ npm run test:thread-archive  # what §3.4's notice names, and the archive that g
 npm run test:host-config     # what a HOST may tell this bundle, and the four shapes it may not
 npm run test:deep-link       # jaroku:// as untrusted input; the refusals are the interesting half
 npm run test:session-vault   # localStorage in a browser, the keychain under a host, never both
+npm run test:inbox-board     # the board's rules, and that no card offers an action nothing does
+npm run test:activity-metrics # each metric declares its own polarity; unknown renders `--`, never 0
+npm run test:composer-bar    # hiding a control moves nothing else, and the bar never wraps
+npm run test:connector-deck  # a disabled connector renders grayscale and STAYS in the deck
+npm run test:turn-metadata   # the row's order is stable and absent items collapse in place
+npm run test:entitlement-store # a half-understood refusal must not become an upsell card
+npm run test:dead-controls   # no <button> renders enabled with nothing behind it
+npm run test:access-tab      # every assertion is about a sentence or an ABSENCE
+npm run test:permission-ui   # the client's copy of the matrix, held to the server's own file
+npm run test:type-scale      # the ladder, and which face carries what — a property of ALL of it
+npm run test:colour-system   # the palette, and the hex literal that stays the colour it was
 ```
 
 The client's test scripts invoke `../server/node_modules/.bin/tsx`, so install the server's
@@ -3440,6 +3725,72 @@ it and the number beside it is a floor.
   Composing them is a change to the admit path rather than to this file, and it is the next step.
 - **There is no invoice.** Everything here is metering and enforcement; producing a document
   somebody could file is a payment-provider feature this session leans on rather than rebuilds.
+
+---
+
+## Plans, tiers and entitlements
+
+The section above is about *money* — what a run cost and whether the workspace can afford it. This
+one is about **quantity and capability**: how many agents, how many runs, how many people, and which
+features are on at all.
+
+Three plans, in `billing/plans.ts`, as data with the argument for each number written beside it.
+These are the numbers the **server enforces** — `web/pricing.html` is a marketing surface and states
+its own:
+
+| | Free | Pro | Team |
+|---|---|---|---|
+| Agents | 3 | unlimited | unlimited |
+| Runs / month | 500 | 10,000 | 50,000 |
+| Seats | 1 | **1** | 20 |
+| Trace retention | 7 days | 90 days | 365 days |
+| `monthlyCreditsUsd` | $5 | $50 | $250 |
+| Budget ceiling | $5 | $200 | no plan ceiling |
+| GitHub push | — | ✓ | ✓ |
+| GitHub sync | — | — | ✓ |
+| Per-agent access | — | — | ✓ |
+
+Free's figures are small deliberately rather than stingily: they are the whole of the free tier's
+exposure, and the abuse economics of a tier that runs arbitrary Python are the reason. A monthly
+credit **resets rather than accumulating** — an unused allowance that compounds is a liability
+nobody priced — while *purchased* credit is a different column and does carry.
+
+**Pro is single-seat, and that is the pricing's shape rather than an oversight** — Pro is the
+single-operator tier and Team is what collaboration costs. It is also the only place in the table
+where a paid plan does not beat the one below it on an axis, which is exactly why the upsell has to
+be a lookup rather than a "next tier up" heuristic: a Free workspace refused for a second member
+needs to be told **Team**, and being told Pro means paying and being refused identically.
+
+**`plans.ts` holds the numbers; `entitlements.ts` holds the resolution.** They are a table and a
+reader rather than two answers to one question — move the numbers into the resolver and they stop
+being reviewable as a set; move the resolution into the table and it has to know about sessions.
+`resolveEntitlements` is the only function that produces a tier's values, and `requireEntitlement`
+is the only thing that refuses on them.
+
+**Unclassified is a build failure, not a default.** `COMMAND_ENTITLEMENT` maps every WebSocket
+command to a check or to the literal word `"none"`, and `test:entitlements` reads `wsRelay.ts` for
+every command the relay accepts and fails on one that has neither. The failure it prevents is the
+one that actually happens: somebody adds a command next year, it is absent from the table, and it is
+unlimited on every tier forever with nothing anywhere saying so.
+
+**Two refusal shapes, because a quota and a feature gate are different facts.** A quota carries
+`current` and `limit` and renders a meter; a feature gate carries neither, because *"GitHub is not
+on Free"* is not zero of zero and a bar sitting at 0/0 reads as something that fills up again next
+month. Both carry **which plan would actually lift them**, resolved server-side from the plan table
+over the same projection the refusal was made with — and `null` is a real answer, rendered as "No
+plan currently includes this" with no upgrade button at all.
+
+A downgrade **gates features off and never destroys data**. Nothing is deleted, every read stays
+open, and the controls that get somebody back *under* a limit — cancel a deploy, remove an MCP
+server, revoke a grant — are deliberately ungated, because a gate there is a trap only an upgrade
+opens.
+
+`approvalBatchApprove`, `policyEngine` and `evalCiGate` are declared on `TierEntitlements` and gate
+nothing: the surfaces they describe are other specifications and are not built. Declaring the flag
+and wiring it when the surface lands is the right order — `perAgentAccessGrants` followed exactly
+that path from v0.3.4 to v0.3.8 — and `test:checkout-surfaces` now refuses a row on the public
+pricing page that does not map to a check somebody can actually be refused by, so the marketing
+cannot get ahead of the flag again.
 
 ---
 
@@ -4592,6 +4943,64 @@ a capability toast should appear in ordinary use.
 A personal workspace has no members panel, no author column on threads, and no role badges
 anywhere. Those are not hidden — for a workspace that is nobody else's they are answers to
 questions nobody is asking.
+
+---
+
+## Per-agent access
+
+A workspace role is one answer to *"what may this person do"*, and it is the same answer for every
+agent in the tenant. That is fine for a workspace of three and wrong for the case this is about: a
+contractor brought in to fix one agent held the same authority over every other one.
+
+**There is one resolver, not a second permission system.** Grants are data flowing through the same
+check every command already passes, in the file the role matrix already lives in:
+
+```
+  workspace role  →  the role's default set  →  the grant
+                  →  intersect with the role's ceiling, ALWAYS
+                  →  the implication closure
+```
+
+**Seven agent-level capabilities** — `view`, `run`, `edit`, `eval`, `deploy`, `secrets`, `admin` —
+with the implication rules as data: `view` is implied by everything, `edit` implies `run`, and
+`secrets`, `edit` and `admin` imply none of each other, because somebody who writes an agent's code
+and somebody who holds its production credentials are genuinely different roles.
+
+A grant may **narrow** somebody below their role's default or **widen** them within it, and can
+never exceed it. That is enforced when it is written *and again on every command* — which sounds
+redundant and is the only thing that makes a demotion bite without anybody rewriting grant rows.
+Expiry is evaluated in the resolver and nowhere else, because a control that is correct only as
+often as a cron fires fails silently in the generous direction.
+
+Grants are **time-boxable**, and `deploy`, `secrets` and `admin` require a written note. Six months
+later *"why does this contractor have deploy"* needs an answer that is not archaeology, and the only
+moment anybody can write it is the moment they know.
+
+**The tab is read-only without `admin` rather than hidden.** "Who can deploy this?" is a question a
+member should be able to answer without asking an admin, and hiding the answer produces exactly the
+Slack thread the tab exists to eliminate. Every mutation control is **absent** rather than disabled
+for a role that cannot use it.
+
+**A cross-workspace agent id answers "there is no such agent" rather than refusing**, on every
+command — a refusal confirms the id exists, which turns the socket into an enumeration oracle.
+
+`access.denied` is written per refusal rather than deduplicated, because the *pattern* is the
+signal: nobody files a ticket saying their capability is misconfigured — they try, fail, and
+eventually ask a colleague to do it for them, which is the outcome the whole feature exists to
+prevent.
+
+### What this does not cover, stated on the panel itself
+
+Every grant here governs access **through Jaroku**. A deployed agent answers HTTP directly, on a
+template with no auth layer of any kind — so the Exposure section names the live URL, says in a
+sentence that the endpoint is unauthenticated, and renders **even when nothing is deployed**, because
+a section that disappeared would have its absence read as safety.
+
+Live sessions show a name, two words about the browser and a duration — no IP addresses, no tickets,
+no raw User-Agent. **End session closes one socket and revokes nothing**, and the confirmation says
+so, because an administrator who believes they removed somebody's access and removed their tab is
+the failure that button invites. The sessions listed are the ones *this process* holds: behind two
+gateways each reports its own, and the count is honest about what it counted.
 
 ---
 
