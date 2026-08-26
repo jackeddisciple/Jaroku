@@ -139,6 +139,7 @@ import { diffShapes, readShape } from "./semanticDiff.ts";
 import { inSubdirectory, repoPrefix } from "./githubPush.ts";
 import { MANIFEST_FILE } from "./mcpManifest.ts";
 import type { McpImpact } from "./mcpStore.ts";
+import { ObjectNotFound } from "./storage/objectStore.ts";
 import { openObjectStore } from "./storage/open.ts";
 import { resolveSigningKey } from "./storage/presign.ts";
 import { filesFromDirectory, ProjectStore } from "./storage/projectStore.ts";
@@ -2199,6 +2200,15 @@ async function agentGraph(ctx: TenantContext, agentId: string): Promise<GraphRes
           return await introspectGraphCached(RUNTIME_DIR, agentId, agent.current_version, store, dir);
         }
       } catch (err) {
+        // THE KEY TRAVELS AS ITS OWN FIELD, and the sentence stays a sentence. `ObjectNotFound`
+        // carries the key it could not find, so this is a read rather than a parse — the client
+        // renders prose as prose and the key in mono, middle-truncated, and nothing anywhere has
+        // to hunt for a colon in a message to work out where one ends and the other begins.
+        // The old single string was fed whole to a path truncator, which keeps the last segment
+        // and collapses everything before it: a 120-character diagnosis rendered as `.env.example`.
+        if (err instanceof ObjectNotFound) {
+          return { agent_id: agentId, error: "could not read this agent's files", errorKey: err.key };
+        }
         return { agent_id: agentId, error: `could not read this agent's files: ${(err as Error).message}` };
       } finally {
         rmSync(dir, { recursive: true, force: true });

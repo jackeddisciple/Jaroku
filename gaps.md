@@ -2052,6 +2052,61 @@ is closed — this rendering is the template they would follow.
 | Implementation Effort | 1/10 |
 | Confidence | 10/10 |
 
+### Resolution
+
+**Status: RESOLVED**
+
+**Implemented:**
+
+Fixed at the server, which is the option the finding called "better still": `GraphResult` gains
+`errorKey`, and `agentGraph` catches `ObjectNotFound` — which already carries its own key — and
+answers `{ error: "could not read this agent's files", errorKey: err.key }`. The sentence is a
+sentence and the key is a field.
+
+That is deliberately not a client-side split on the last `": "`. Parsing prose for a colon breaks
+the first time a sentence contains one, and it puts the knowledge of *which part of this string is
+a path* in the layer furthest from the code that knows. The server threw the error; the server
+knows.
+
+`Empty` in `GraphView` now takes both and renders each as what it is — the sentence as prose, the
+key in mono through `Truncate variant="path"`. Both are optional and either may stand alone, so the
+two "nothing selected" states are unaffected. Non-`ObjectNotFound` failures keep the single-string
+form, which is correct: they have no key to separate.
+
+**Files Changed:**
+
+- `server/src/graphIntrospect.ts` — `errorKey` on `GraphResult`
+- `server/src/index.ts` — the `ObjectNotFound` branch, and the import
+- `server/src/graphIntrospect.test.ts` — the shape assertions
+- `client/src/types.ts` — `errorKey` on `AgentGraph`
+- `client/src/components/GraphView.tsx` — `Empty` renders two elements
+- `client/src/lib/truncatePath.test.ts` — what the truncator does to prose
+- `.github/workflows/ci.yml` — `test:edit-versions` and `test:graph-introspect` added
+
+**Verification:**
+
+`test:truncate-path` asserts the *cause* rather than the fix: a diagnosis fed to the path truncator
+loses its verb and keeps only `.env.example`. That documents why the two fields exist, and it fails
+if somebody ever "improves" the truncator to guess at prose — which would break the
+distinguishability property that suite exists for. `test:graph-introspect` reads the branch out of
+`index.ts` and requires the key as its own field, a sentence that does not interpolate it, and the
+client's `AgentGraph` declaring the field — a field the server sends that the client's type does not
+know about is a field no component can read, which is the same silence this finding is about.
+
+**Both suites were absent from CI**, which by this repository's own rule means they did not run.
+They are in it now, in the agents step. The remaining forty-five server suites that are registered
+in `package.json` and absent from the workflow are recorded as **GAP-017**.
+
+**Regression Coverage:**
+
+Both typecheck; `test:truncate-path` and `test:graph-introspect` pass whole. `test:relay`'s graph
+assertions are unchanged — a cross-workspace graph request still answers `{ error }` with no key,
+because "no such agent in this workspace" is a refusal rather than a read failure and has no
+identifier to name. Naming one there would be the enumeration oracle `test:access-resolver` exists
+to prevent.
+
+**Resolved On:** 2026-08-26
+
 ---
 
 ## GAP-016 — Share is a permanently enabled no-op in the top bar of every screen
@@ -2541,4 +2596,5 @@ brief spends a page on.
 | GAP-002 | RESOLVED | `index.ts`, `editVersions.test.ts` | `test:edit-versions` proves the bare row is unreadable AND leaves the disk stale, then that publish + materialise fixes both; finding was understated — see its Resolution |
 | GAP-009 | RESOLVED | `entitlements.ts`, `entitlementGate.ts`, `plans.ts`, `index.ts`, `entitlements.test.ts`, `entitlementStore.ts`, `UpsellCard.tsx`, `UsagePanel.tsx`, `types.ts` | `test:entitlements` holds all seven kinds from both Free and Pro, plus the top of the ladder answering null; `test:entitlement-store` holds the client guard |
 | GAP-014 | RESOLVED | `web/pricing.html`, `checkoutSurfaces.test.ts` | `test:checkout-surfaces` maps every sold feature row to an `EntitlementKind` and asserts the three removed names stay gone |
+| GAP-015 | RESOLVED | `graphIntrospect.ts`, `index.ts`, `graphIntrospect.test.ts`, `types.ts`, `GraphView.tsx`, `truncatePath.test.ts`, `ci.yml` | `test:truncate-path` asserts what the truncator does to prose; `test:graph-introspect` holds the two-field shape on both sides |
 | GAP-003 | RESOLVED | `wsRelay.ts`, `channels.test.ts`, `wsRelay.test.ts`, `types.ts`, `buildStore.ts`, `socket.ts`, `AddMenu.tsx`, `BuildPane.tsx` | `test:channels` audits all 13 call sites from source; `test:relay` drives a throwing read and asserts the frame |

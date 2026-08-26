@@ -5,6 +5,10 @@
 //
 //   npm run test:graph-introspect
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
 import { introspectGraphCached, type GraphCacheStore, type GraphResult } from "./graphIntrospect.ts";
 import type { CodeCheckSandbox, CodeCheckSpec, CodeCheckResult } from "./sandbox/codeCheck.ts";
 
@@ -72,6 +76,41 @@ await (async () => {
   check("a FAILED result is never cached — the next call tries again", sandbox.calls === 2);
   check("...and can succeed once the transient problem is gone", !second.error);
 })();
+
+// ---------------------------------------------------------------------------------------------
+// THE ONE ERROR PATH IN THIS PRODUCT THAT IS WIRED END TO END, and it delivered less information
+// than a raw string dump. This is the read that CATCHES a missing object and explains it, which
+// makes it the diagnosis a user meets first when a version's objects are unreachable — and the
+// client fed the whole explanation through a path truncator, which is built to keep the last
+// segment and collapse everything before it. "could not read this agent's files: no such object:
+// ws/…/v2/.env.example" rendered as `.env.example`, under a heading it had no relationship to.
+//
+// The fix is that the sentence and the key are two fields, so nothing has to find the boundary by
+// parsing prose. Asserted here on the SERVER because that boundary is decided here: what makes it
+// a read rather than a guess is that `ObjectNotFound` already carries its own key.
+// ---------------------------------------------------------------------------------------------
+console.log("\nan unreadable object explains itself without putting a key in the sentence");
+{
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "index.ts"), "utf8");
+  const branch = /if \(err instanceof ObjectNotFound\) \{[\s\S]*?\n        \}/.exec(source)?.[0] ?? "";
+  check("the graph read has a branch for a missing object", branch.length > 0);
+  check(
+    "...answering with the key as its own field",
+    /errorKey: err\.key/.test(branch),
+  );
+  check(
+    "...and a sentence that does not interpolate it",
+    /error: "could not read this agent's files"/.test(branch) && !/\$\{.*key.*\}/.test(branch),
+  );
+
+  // AND THE SHAPE IS ON THE TYPE, both sides. A field the server sends and the client's copy of
+  // the type does not declare is a field no component can read, which is the same silence the
+  // whole finding is about.
+  const CLIENT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "client", "src", "types.ts");
+  const clientTypes = readFileSync(CLIENT, "utf8");
+  const agentGraph = /export interface AgentGraph \{[\s\S]*?\n\}/.exec(clientTypes)?.[0] ?? "";
+  check("the client's AgentGraph declares errorKey too", /errorKey\?: string/.test(agentGraph));
+}
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);

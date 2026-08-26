@@ -260,6 +260,16 @@ export interface AgentGraph {
   nodes?: GraphNode[];
   edges?: GraphEdge[];
   error?: string;
+  /**
+   * The identifier the failure was about, kept out of the sentence.
+   *
+   * A SENTENCE AND A PATH ARE TWO THINGS AND RENDER DIFFERENTLY. The commonest failure here is an
+   * unreadable object, whose key is 120 characters with two UUIDs in it; the sentence is prose and
+   * the key is not. Sent as two fields so no component has to hunt for a colon in a message to
+   * find out where one ends — which is what made the whole diagnosis render as `.env.example`,
+   * fed whole to a truncator built to keep the last path segment and collapse everything before it.
+   */
+  errorKey?: string;
 }
 
 export type EditMessage = InThread &

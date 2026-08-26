@@ -87,6 +87,29 @@ console.log("\nthe property the variant exists for");
   check(deepA.includes("weather") && deepB.includes("slack"), "...by keeping the segment that distinguishes them");
 }
 
+console.log("\nand a sentence is not a path");
+{
+  // WHAT THIS COMPONENT DOES TO PROSE, asserted so nobody has to discover it on a screen. It keeps
+  // the last segment and collapses everything before it — correct and load-bearing for a path, and
+  // catastrophic for a diagnosis, because the last segment of "could not read this agent's files:
+  // no such object: ws/…/v2/.env.example" is `.env.example`. The Graph tab rendered exactly that:
+  // a filename under a heading it had no visible relationship to, reading as though `.env.example`
+  // were somehow responsible for there being no graph, with the real sentence one hover away.
+  //
+  // THE FIX IS NOT IN THIS FUNCTION. It is that the two are two fields now — `error` and
+  // `errorKey` — so prose is rendered as prose and only the key comes here. This assertion
+  // documents WHY that split exists, and fails if somebody ever "improves" the truncator to guess
+  // at prose, which would break the distinguishability property above.
+  const diagnosis = "could not read this agent's files: no such object: ws/abc/agents/def/v2/.env.example";
+  const mangled = truncatePath(diagnosis, 24);
+  check(
+    !mangled.includes("could not read"),
+    "a sentence fed to the path truncator loses its verb, which is why the key travels separately",
+    mangled,
+  );
+  check(mangled.endsWith(".env.example"), "...and keeps only its last segment", mangled);
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 // Reached through globalThis, like every other suite here: the client has no @types/node on
 // purpose, so that a component touching `process` fails to compile rather than fails to run.

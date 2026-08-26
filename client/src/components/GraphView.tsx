@@ -892,7 +892,7 @@ export function GraphView() {
   // wrapping across four lines in the middle of the pane. One muted sentence, and the key itself
   // set in mono and middle-truncated by the same component every other path in the app goes
   // through, with the whole string on hover.
-  if (graph?.error) return <Empty title="No graph for this version yet" detail={graph.error} />;
+  if (graph?.error) return <Empty title="No graph for this version yet" hint={graph.error} detail={graph.errorKey} />;
   if (!graph?.nodes?.length) return <Empty title="No graph to show" hint="This agent’s build_graph() produced no nodes." />;
 
   return (
@@ -962,6 +962,20 @@ export function GraphView() {
   );
 }
 
+/**
+ * TWO ELEMENTS, A SENTENCE AND A KEY, and it used to be one of each fighting over one slot.
+ *
+ * `detail` was the whole server message and it went straight through `Truncate variant="path"` —
+ * which is a good component doing exactly what it was built for: keep the last path segment whole
+ * and collapse everything before it. Handed a sentence ending in an object-store key, it kept
+ * `.env.example` and threw away the diagnosis, so the one error path in this product that is wired
+ * end to end delivered LESS than a raw string dump would, under a heading it had no visible
+ * relationship to. The real sentence was one hover away, which is unreachable on touch.
+ *
+ * So `hint` carries prose and `detail` carries the identifier, and each is rendered as what it is.
+ * Both are optional and either may stand alone: a failure with no key is a sentence, and the two
+ * "nothing selected" states below still pass a hint and no key at all.
+ */
 function Empty({ title, hint, detail }: { title: string; hint?: string; detail?: string }) {
   return (
     <div className="graph-canvas h-full">
@@ -970,9 +984,16 @@ function Empty({ title, hint, detail }: { title: string; hint?: string; detail?:
         title={title}
         hint={
           detail ? (
-            <Truncate variant="path" className="mx-auto max-w-full font-mono text-tiny text-faint" title={detail}>
-              {detail}
-            </Truncate>
+            <span className="block">
+              {hint && <span className="block">{hint}</span>}
+              <Truncate
+                variant="path"
+                className={`mx-auto block max-w-full font-mono text-tiny text-faint${hint ? " mt-1" : ""}`}
+                title={detail}
+              >
+                {detail}
+              </Truncate>
+            </span>
           ) : (
             hint
           )

@@ -36,6 +36,19 @@ export interface GraphResult {
   nodes?: GraphNode[];
   edges?: GraphEdge[];
   error?: string;
+  /**
+   * The identifier the failure was about, kept OUT of the sentence.
+   *
+   * The commonest failure here is an unreadable object, whose key is 120 characters with two
+   * UUIDs in it — and a sentence with that glued on the end is not one thing, it is a sentence and
+   * a path pretending to be prose. The client renders the two differently on purpose: the sentence
+   * as text, the key in mono and middle-truncated, which is what `Truncate variant="path"` is for.
+   *
+   * IT IS A FIELD RATHER THAN A SPLIT ON THE CLIENT because the alternative is a component parsing
+   * prose for a colon — which breaks the first time the sentence contains one, and which puts the
+   * knowledge of what part of this string is a path in the layer furthest from the code that knows.
+   */
+  errorKey?: string;
 }
 
 const TIMEOUT_MS = 20_000;

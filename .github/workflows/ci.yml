@@ -335,6 +335,20 @@ jobs:
           # an archived-only session reading as "not started" — so this is the suite that stops them
           # coming back rather than the one that found them.
           npm run test:agent-adversarial
+          # THE VERSION LOOP, which has never run here and which holds the two defects v0.3.9 found:
+          # a restore published a manifest onto a NEW version number, so the objects it named lived
+          # under the old one and every read of the restored version threw, and nothing wrote the
+          # directory a run actually spawns from. Both were invisible — the read's failure was
+          # swallowed, so the panel simply did not change, which on the screen where somebody has
+          # just pressed Restore is indistinguishable from a refresh that worked. It replays
+          # recorded generation and edit fixtures, so the whole loop is exercised without a model.
+          npm run test:edit-versions
+          # And the graph read, which is the one error path in this product that is wired end to
+          # end and therefore the template the others follow. Its assertions here are about the
+          # SHAPE of the failure: the key travels as its own field so the sentence stays a
+          # sentence, because the client's path truncator keeps the last segment and collapses
+          # everything before it — a 120-character diagnosis rendered as `.env.example`.
+          npm run test:graph-introspect
 
       - name: the threads destination
         working-directory: server
