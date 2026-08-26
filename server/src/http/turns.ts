@@ -91,6 +91,94 @@ export interface TurnRouteDeps {
   displayNames(ctx: TenantContext, userIds: readonly string[]): Promise<Map<string, string>>;
 }
 
+/** What a client asks to attach: a kind, a ref, and which agent the ref is relative to. */
+export interface RequestedAttachment {
+  kind: AttachmentKind;
+  ref: Record<string, unknown>;
+  agentId: string;
+}
+
+/** What `attachTurn` needs. A subset of the route deps, so the dispatch can call it too. */
+export interface AttachDeps {
+  attachments: AttachmentStore;
+  attachables: TurnRouteDeps["attachables"];
+  modelForTurn: TurnRouteDeps["modelForTurn"];
+}
+
+/**
+ * Attach refs to a turn: validate, re-measure, budget-check, write all-or-none.
+ *
+ * A FUNCTION RATHER THAN THE ROUTE'S BODY, and that is the whole reason this file grew one. The
+ * composer's attachments could not use the route: at the moment somebody presses Send the turn does
+ * not exist yet — the server writes the `thread_items` row — so there is no id to POST to. The
+ * refs therefore ride the command and the dispatch attaches them once the row is written.
+ *
+ * WHAT MUST NOT HAPPEN IS TWO IMPLEMENTATIONS OF THIS. Every rule below is one somebody could
+ * reasonably re-derive slightly differently, and the second version is the one that forgets: the
+ * cap counted against existing PLUS arriving rather than either alone, the estimate re-measured
+ * here rather than taken from the request, the budget checked BEFORE the write, and the write
+ * all-or-none. A dispatch path that skipped the re-measurement would let any request through by
+ * claiming to be small, which is the exact sentence the route's own comment gives as the reason it
+ * measures. So the route calls this and so does the dispatch, and there is one of it.
+ *
+ * IT THROWS `HttpError`, WHICH THE DISPATCH TRANSLATES. A 409 and a 413 are the two answers a
+ * client acts on differently — too many, versus too large — and the socket path needs the same
+ * distinction to say which chips to remove.
+ */
+export async function attachTurn(
+  deps: AttachDeps,
+  ctx: TenantContext,
+  turnId: string,
+  requested: readonly RequestedAttachment[],
+): Promise<{ rows: StoredAttachment[]; budget: ReturnType<typeof budgetView> }> {
+  if (requested.length === 0) throw new HttpError(400, "invalid_body", "attachments must be a non-empty array");
+
+  // THE CAP IS CHECKED AGAINST WHAT IS ALREADY THERE PLUS WHAT IS ARRIVING, not against
+  // either alone. Two requests of six would otherwise land twelve.
+  const existing = await deps.attachments.countFor(ctx, turnId);
+  if (existing + requested.length > MAX_ATTACHMENTS) {
+    throw new HttpError(
+      409, "too_many_attachments",
+      checkCount(existing).message
+        ?? `A turn can carry ${MAX_ATTACHMENTS} attachments; this would make ${existing + requested.length}.`,
+    );
+  }
+
+  const resolved: ResolvedAttachment[] = [];
+  for (const item of requested) {
+    if (!isAttachmentKind(item.kind)) {
+      throw new HttpError(400, "invalid_kind", `kind must be one of ${["file", "run", "dataset_case", "tool_schema", "github"].join(", ")}`);
+    }
+    const problem = validateRef(item.kind, item.ref);
+    if (problem) throw new HttpError(400, "invalid_ref", problem);
+
+    // THE ESTIMATE IS NOT TAKEN FROM THE REQUEST. §4.4's budget check is only a check if the
+    // number it compares was measured here — a client-supplied estimate would let any request
+    // through by claiming to be small, and the overflow would be truncated silently.
+    const measured = await deps.attachables(ctx, item.agentId, item.kind, "", 0).catch(() => [] as Attachable[]);
+    const match = measured.find((m) => sameRef(m.ref, item.ref));
+
+    resolved.push({
+      kind: item.kind,
+      ref: item.ref,
+      tokenEstimate: match?.tokenEstimate ?? 0,
+      label: labelFor(item.kind, item.ref),
+      protected: match?.protected,
+    });
+  }
+
+  // BUDGET BEFORE WRITE. Writing the rows and then reporting they do not fit would leave a
+  // turn carrying context it will never be sent with.
+  const model = await deps.modelForTurn(ctx, turnId);
+  const priorRows = await deps.attachments.forTurn(ctx, turnId);
+  const budget = checkBudget([...priorRows.map(toResolved), ...resolved], model);
+  if (budget.level === "over") {
+    throw new HttpError(413, "over_context_budget", budget.message ?? "this turn's context does not fit");
+  }
+
+  return { rows: await deps.attachments.attach(ctx, turnId, resolved), budget: budgetView(budget) };
+}
+
 /**
  * `/v1/turns/{id}/{resource}[/{sub}]` → its parts.
  *
@@ -257,56 +345,25 @@ export function turnRoutes(deps: TurnRouteDeps): TurnRoute[] {
           throw new HttpError(400, "invalid_body", "attachments must be a non-empty array");
         }
 
-        // THE CAP IS CHECKED AGAINST WHAT IS ALREADY THERE PLUS WHAT IS ARRIVING, not against
-        // either alone. Two requests of six would otherwise land twelve.
-        const existing = await deps.attachments.countFor(caller.ctx, turnId);
-        if (existing + raw.length > MAX_ATTACHMENTS) {
-          throw new HttpError(
-            409, "too_many_attachments",
-            checkCount(existing).message
-              ?? `A turn can carry ${MAX_ATTACHMENTS} attachments; this would make ${existing + raw.length}.`,
-          );
-        }
-
-        const resolved: ResolvedAttachment[] = [];
-        for (const item of raw) {
-          const rec = (item ?? {}) as Record<string, unknown>;
-          const kind = rec.kind;
-          if (!isAttachmentKind(kind)) {
-            throw new HttpError(400, "invalid_kind", `kind must be one of ${["file", "run", "dataset_case", "tool_schema", "github"].join(", ")}`);
-          }
-          const problem = validateRef(kind, rec.ref);
-          if (problem) throw new HttpError(400, "invalid_ref", problem);
-          const ref = rec.ref as Record<string, unknown>;
-
-          // THE ESTIMATE IS NOT TAKEN FROM THE REQUEST. §4.4's budget check is only a check if the
-          // number it compares was measured here — a client-supplied estimate would let any request
-          // through by claiming to be small, and the overflow would be truncated silently.
-          const measured = await deps.attachables(
-            caller.ctx, String(rec.agent_id ?? ""), kind, "", 0,
-          ).catch(() => [] as Attachable[]);
-          const match = measured.find((m) => sameRef(m.ref, ref));
-
-          resolved.push({
-            kind,
-            ref,
-            tokenEstimate: match?.tokenEstimate ?? 0,
-            label: labelFor(kind, ref),
-            protected: match?.protected,
-          });
-        }
-
-        // BUDGET BEFORE WRITE. Writing the rows and then reporting they do not fit would leave a
-        // turn carrying context it will never be sent with.
-        const model = await deps.modelForTurn(caller.ctx, turnId);
-        const priorRows = await deps.attachments.forTurn(caller.ctx, turnId);
-        const budget = checkBudget([...priorRows.map(toResolved), ...resolved], model);
-        if (budget.level === "over") {
-          throw new HttpError(413, "over_context_budget", budget.message ?? "this turn's context does not fit");
-        }
-
-        const rows = await deps.attachments.attach(caller.ctx, turnId, resolved);
-        return { body: { attachments: rows.map(view), budget: budgetView(budget) } };
+        // THE RULES ARE IN `attachTurn`, WHICH THE DISPATCH ALSO CALLS. This route parses a body
+        // and that function decides what may be attached — the split exists because the composer
+        // cannot use this route at all: at Send the turn has not been written yet, so there is no
+        // id in the URL to address. Two implementations of the cap, the re-measurement and the
+        // budget check would be two answers to one question, and the second one forgets.
+        const { rows, budget } = await attachTurn(
+          deps,
+          caller.ctx,
+          turnId,
+          raw.map((item) => {
+            const rec = (item ?? {}) as Record<string, unknown>;
+            return {
+              kind: rec.kind as AttachmentKind,
+              ref: (rec.ref ?? {}) as Record<string, unknown>,
+              agentId: String(rec.agent_id ?? ""),
+            };
+          }),
+        );
+        return { body: { attachments: rows.map(view), budget } };
       },
     },
     {

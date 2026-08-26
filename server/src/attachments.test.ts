@@ -12,6 +12,10 @@
 //
 //   npm run test:attachments
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
 import {
   ATTACHMENT_KINDS, MAX_ATTACHMENTS, WARN_AT, checkBudget, checkCount, estimateTokens,
   isAttachmentKind, labelFor, validateRef, type ResolvedAttachment,
@@ -164,6 +168,77 @@ console.log("\nthe label a chip shows is the label the refusal names");
   for (const kind of ATTACHMENT_KINDS) {
     check(`${kind} always has SOME label`, labelFor(kind, {}).length > 0, labelFor(kind, {}));
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// AND THAT ANY OF IT IS EVER REACHED, which is what this whole feature was missing.
+//
+// Every assertion above was true of the shipped code and none of it ran on a real turn: the
+// picker priced rows, the rail rendered them, the meter warned, the cap and the budget check both
+// worked — and the line that sends them did not exist. `turn_attachments` held zero rows and
+// `grep` for the route across the client found no match. The budget check was a check on a
+// payload that was never going to leave the browser, and it BLOCKED THE SEND of the message.
+//
+// So this is a source audit rather than an arithmetic one, and it is here because this is the
+// suite about attachments. It reads the dispatch: the refs arrive on the command, they are
+// attached through the SAME function the HTTP route calls, and the stored rows are resolved into
+// the prompt. Two of those three could be true with the feature still inert.
+// ---------------------------------------------------------------------------------------------
+console.log("\nthe attachments actually reach a turn, and the turn's prompt");
+{
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const index = readFileSync(join(HERE, "index.ts"), "utf8");
+  const turns = readFileSync(join(HERE, "http", "turns.ts"), "utf8");
+  const relay = readFileSync(join(HERE, "wsRelay.ts"), "utf8");
+  const client = readFileSync(join(HERE, "..", "..", "client", "src", "components", "BuildPane.tsx"), "utf8");
+
+  // ONE IMPLEMENTATION OF THE RULES. The composer cannot use the route — at Send the turn does not
+  // exist yet, so there is no id to address — so the dispatch attaches instead. What must not
+  // happen is two versions of the cap, the re-measurement and the budget check, because the second
+  // one is the one that forgets to re-measure and lets any request through by claiming to be small.
+  check("attachTurn is exported for both callers", /export async function attachTurn\(/.test(turns));
+  check(
+    "...and the route calls it rather than keeping its own copy of the rules",
+    /const \{ rows, budget \} = await attachTurn\(/.test(turns),
+  );
+  check(
+    "...still re-measuring server-side rather than trusting the request",
+    /deps\.attachables\(ctx, item\.agentId, item\.kind, "", 0\)/.test(turns),
+  );
+  check(
+    "...and still checking the budget BEFORE the write",
+    turns.indexOf("if (budget.level === \"over\")") < turns.indexOf("await deps.attachments.attach(ctx, turnId, resolved)"),
+  );
+
+  // THE REFS TRAVEL ON THE COMMAND, which is the shape §7's GitHub attachments already use.
+  check("the four composer commands can carry attachments", (relay.match(/attachments\?: CommandAttachment\[\]/g) ?? []).length === 4);
+  check("the composer sends them", /const attachRefs = attachments\.map\(/.test(client));
+  // BOTH `sendPlanAgent` CALLS — a fresh brief and a revision of one. Counted rather than matched
+  // once, because a revision is the same gesture to a user and the two calls are eleven lines
+  // apart, which is exactly the distance at which one of them gets missed.
+  check(
+    `...on both plan commands (${(client.match(/sendPlanAgent\(.*attachRefs\)/g) ?? []).length} of 2)`,
+    (client.match(/sendPlanAgent\(.*attachRefs\)/g) ?? []).length === 2,
+  );
+  check("...on the edit command", /sendEdit\(activeAgentId, trimmed, attachRefs\)/.test(client));
+  check("...and on the explain command", /attachRefs,\s*\);/.test(client));
+  check("...and clears them with the draft they belonged to", /setAttachments\(\[\]\);\s*\};/.test(client));
+
+  // AND THE OTHER HALF: a persisted row nothing reads is a record, not a feature.
+  check("the dispatch resolves the stored rows into a block", /async function resolveAttachmentBlock\(/.test(index));
+  check("...reading them back from the store rather than from the request", /attachmentStore\.forTurn\(ctx, turnId\)/.test(index));
+  const attachFn = /async function attachToTurn\([\s\S]*?\n\}/.exec(index)?.[0] ?? "";
+  check("attachToTurn returns the block it just wrote", /return resolveAttachmentBlock\(ctx, agentId, turnId\)/.test(attachFn));
+  // ALL FOUR DISPATCH SITES, because three of four is a feature that works depending on how the
+  // message was phrased — a brief, a revision, an edit and a question are one gesture to a user.
+  check(
+    `every composer dispatch appends it (${(index.match(/await attachToTurn\(/g) ?? []).length} of 4)`,
+    (index.match(/await attachToTurn\(/g) ?? []).length === 4,
+  );
+
+  // A REFUSAL IS NOT A FAILED DISPATCH. The message has been sent; failing the run because a chip
+  // did not fit would be a worse answer than answering without it.
+  check("a refusal is caught and reported rather than thrown", /console\.error\(`\[attachments\] could not attach/.test(index));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

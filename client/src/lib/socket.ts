@@ -1024,13 +1024,33 @@ export function sendLoadRun(runId: string): void {
 
 /** Confirm a plan. `planId` is what makes the server build the plan the user approved rather
  *  than whatever the composer says now — see planner.take(). */
+/**
+ * §4's attachments, as they go on the wire.
+ *
+ * REFERENCES AND NEVER CONTENT, which is the same rule §7's GitHub attachments follow: the server
+ * resolves each ref at send time from the store that owns that kind of thing. What is deliberately
+ * absent is the token estimate — the client has one, for the rail's meter, and sending it would
+ * make the budget check a check of a number the client chose. The server re-measures.
+ */
+export interface CommandAttachment {
+  kind: "file" | "run" | "dataset_case" | "tool_schema" | "github";
+  ref: Record<string, unknown>;
+  /** Which agent the ref is relative to. A file path means nothing without one. */
+  agent_id: string;
+}
+
+/** Only sent when there is something to send, so an unattached message is the frame it always was. */
+const withAttachments = (a?: readonly CommandAttachment[]): { attachments?: CommandAttachment[] } =>
+  a && a.length > 0 ? { attachments: [...a] } : {};
+
 export function sendGenerate(
   prompt: string,
   connectors: string[],
   name?: string,
   planId?: string,
+  attachments?: readonly CommandAttachment[],
 ): void {
-  send({ cmd: "generate", prompt, connectors, name, planId, threadId: activeThread() });
+  send({ cmd: "generate", prompt, connectors, name, planId, threadId: activeThread(), ...withAttachments(attachments) });
 }
 
 /** Ask for a plan. With `revisePlanId`, `prompt` is feedback on that plan, not a fresh brief. */
@@ -1041,6 +1061,7 @@ export function sendPlanAgent(
   revisePlanId?: string,
   /** Scoped MCP tools, as `"server/tool"` refs — per tool, never per server. */
   mcpTools?: string[],
+  attachments?: readonly CommandAttachment[],
 ): boolean {
   // THE ONE SENDER IN THIS FILE THAT RETURNS WHETHER IT SENT, and it does because it has a caller
   // that cannot recover on its own. Every other `send` here is fired from a composer sitting inside
@@ -1048,7 +1069,10 @@ export function sendPlanAgent(
   // legitimately dropped. §5.1s step 4 is not that: it is a button on an onboarding screen that
   // advances to "You are all set" the moment it returns, so a dropped frame there is a flow that
   // reports success and generated nothing — with an empty app behind it and no way to tell why.
-  return send({ cmd: "planAgent", prompt, connectors, mcpTools, name, revisePlanId, threadId: activeThread() });
+  return send({
+    cmd: "planAgent", prompt, connectors, mcpTools, name, revisePlanId,
+    threadId: activeThread(), ...withAttachments(attachments),
+  });
 }
 
 export function sendDiscardPlan(planId: string): void {
@@ -1178,8 +1202,12 @@ export function sendLoadAgentVersion(agentId: string, version?: number): void {
 
 // --- fix loop -------------------------------------------------------------
 
-export function sendEdit(agentId: string, instruction: string): void {
-  send({ cmd: "edit", agentId, instruction, threadId: activeThread() });
+export function sendEdit(
+  agentId: string,
+  instruction: string,
+  attachments?: readonly CommandAttachment[],
+): void {
+  send({ cmd: "edit", agentId, instruction, threadId: activeThread(), ...withAttachments(attachments) });
 }
 
 export function sendApplyEdit(proposalId: string): void {
@@ -1239,8 +1267,13 @@ export function sendExplain(
   subject: ExplainSubject,
   /** §7's attachments. References, resolved server-side at send time — never content. */
   github?: GithubAttachment[],
+  /** §4's, from the ⊕ picker. Same rule, same resolution point — see `CommandAttachment`. */
+  attachments?: readonly CommandAttachment[],
 ): void {
-  send({ cmd: "explain", agentId, question, subject, threadId: activeThread(), ...(github?.length ? { github } : {}) });
+  send({
+    cmd: "explain", agentId, question, subject, threadId: activeThread(),
+    ...(github?.length ? { github } : {}), ...withAttachments(attachments),
+  });
 }
 
 // --- MCP: server registry --------------------------------------------------

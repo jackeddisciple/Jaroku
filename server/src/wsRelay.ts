@@ -66,6 +66,25 @@ export type LoadHistoryCommand = { cmd: "loadHistory"; limit?: number };
 
 /** The most rows one client may pull into a sidebar. See LoadHistoryCommand. */
 export const HISTORY_WINDOW_MAX = 500;
+/**
+ * §4 ATTACHMENTS, RIDING THE COMMAND THAT CREATES THE TURN.
+ *
+ * Not a separate round trip, because at the moment somebody presses Send the turn does not exist —
+ * the dispatch writes the `thread_items` row — so there is no id to POST to. `github` on
+ * `ExplainCommand` already works exactly this way and is the pattern this follows.
+ *
+ * THE ESTIMATE IS DELIBERATELY NOT ON THE WIRE. Every field here is a REFERENCE; what each one
+ * costs is re-measured server-side at attach time, because a client-supplied estimate would let any
+ * request through by claiming to be small. The client keeps its own copy for the rail meter, which
+ * is a warning rather than the refusal.
+ */
+export type CommandAttachment = {
+  kind: "file" | "run" | "dataset_case" | "tool_schema" | "github";
+  ref: Record<string, unknown>;
+  /** Which agent the ref is relative to. A file path means nothing without one. */
+  agent_id: string;
+};
+
 export type GenerateCommand = {
   cmd: "generate";
   prompt: string;
@@ -84,6 +103,7 @@ export type GenerateCommand = {
   /** A plan the user confirmed. The server builds what that plan describes, not what this
    *  command's other fields say — see planner.take(). */
   planId?: string;
+  attachments?: CommandAttachment[];
 };
 // The pre-generation gate: describe the agent, see a plan, confirm. `revisePlanId` turns
 // `prompt` into feedback on the plan with that id rather than a fresh brief.
@@ -97,6 +117,7 @@ export type PlanAgentCommand = {
   mcpTools?: string[];
   name?: string;
   revisePlanId?: string;
+  attachments?: CommandAttachment[];
 };
 export type DiscardPlanCommand = { cmd: "discardPlan"; planId: string };
 export type ListAgentsCommand = { cmd: "listAgents" };
@@ -196,6 +217,7 @@ export type EditCommand = {
   instruction: string;
   /** The session this edit happens in. See RunCommand.threadId. */
   threadId?: string;
+  attachments?: CommandAttachment[];
 };
 export type ApplyEditCommand = { cmd: "applyEdit"; proposalId: string };
 export type UndoEditCommand = { cmd: "undoEdit"; agentId: string };
@@ -1316,6 +1338,7 @@ export type ExplainCommand = {
   github?: GithubAttachment[];
   /** The session this question was asked in. See RunCommand.threadId. */
   threadId?: string;
+  attachments?: CommandAttachment[];
 };
 export type ClientCommand =
   | RunCommand

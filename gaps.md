@@ -772,6 +772,80 @@ picker is built on, the model catalogue's `context_window`, GitHub attachments (
 | Implementation Effort | 3/10 |
 | Confidence | 10/10 |
 
+### Resolution
+
+**Status: RESOLVED — both links, not only the first**
+
+**The refs ride the command, not a second round trip.** The finding proposed
+`POST /v1/turns/<id>/attachments` after the send resolves the turn's id. That id does not exist at
+send time: the server writes the `thread_items` row, so there is nothing to address. `github`
+attachments on `sendExplain` already work exactly this way and are the pattern named in the
+finding as the working proof — so `attachments` joins `generate`, `planAgent`, `edit` and `explain`
+as references, never content.
+
+**One implementation of the rules, not two.** `attachTurn` was extracted from the route's body and
+is now called by both the route and the dispatch. The cap counted against existing *plus* arriving,
+the estimate **re-measured server-side**, the budget checked *before* the write, and the write
+all-or-none are each a rule somebody could re-derive slightly differently — and the second version
+is the one that forgets to re-measure, at which point any request gets through by claiming to be
+small. That is the route's own stated reason for measuring, and it is why the dispatch does not
+have its own copy.
+
+**And they reach the model, which is the half that makes it a feature.** `resolveAttachmentBlock`
+reads the stored rows back and resolves each from the store that already owns that kind of thing —
+the agent's pinned version for a file, the trace store for a run, the eval store for a case, the
+MCP registry for a schema, and `githubService.resolveAttachments` for a commit or PR, which is the
+same resolver §7's own attachments use so one thing does not read two ways in a prompt. The block
+is appended to the brief, the instruction or the explain context, which is the shape §7 already
+established: the subject first, the attached material as evidence about it.
+
+Resolution is at **send** time, except a file, whose ref pins a `version_id` — §4.4's snapshot. The
+two are not in tension: the ref decides what "now" means, and a file's ref names a version.
+
+**`noteUserMessage` returns the turn id.** It was fire-and-forget; `turn_attachments`,
+`turn_notes`, `turn_pins` and `turn_feedback` all hang off that row, and nothing could reach it
+without reading the thread back. `threadStore.addItem` returns its id too — a widening, since every
+existing caller ignores it.
+
+**The dead send-block is gone.** `DraftAttachment.error` and the `unresolved` check that read it are
+removed. No code path could set that field — there was no round trip to fail — so it blocked Send
+on a state that could never exist, over a payload that was never going to leave the browser. A
+refusal now arrives as an error in the *conversation*, beside the message it is about, which is
+where every other failure of that send already lands. The budget check stays and is now a genuine
+early warning: the server re-measures and answers 413.
+
+**Files Changed:**
+
+- `server/src/http/turns.ts` — `attachTurn`, `RequestedAttachment`, `AttachDeps`; the route now calls it
+- `server/src/index.ts` — `turnDeps` extracted, `requestedAttachments`, `attachToTurn`, `resolveAttachmentBlock`, `attachmentBody`, four dispatch sites
+- `server/src/wsRelay.ts` — `CommandAttachment` on the four commands
+- `server/src/threadStore.ts` — `addItem` returns the id
+- `server/src/attachments.test.ts` — the reachability audit
+- `client/src/lib/socket.ts` — `CommandAttachment`, four senders
+- `client/src/components/BuildPane.tsx` — `attachRefs`, cleared with the draft, `unresolved` removed
+- `client/src/components/composer/AttachmentRail.tsx` — the unreachable error state removed
+
+**Verification:**
+
+`test:attachments` gained a reachability audit, and it is a source audit deliberately: **every
+arithmetic assertion in that suite was already true of the shipped code and none of it ran on a real
+turn.** It holds fifteen claims — `attachTurn` exported and called by the route, the re-measurement
+still there, the budget still checked before the write, four commands carrying the field, both
+`sendPlanAgent` calls plus `sendEdit` and `sendExplain` passing the refs, the draft cleared with
+them, the block resolved from the store rather than from the request, **all four** dispatch sites
+appending it, and a refusal caught rather than thrown. Two of those could be true with the feature
+still inert, which is why all of them are checked.
+
+**Regression Coverage:**
+
+`test:attachments`, `test:threads`, `test:thread-channel`, `test:thread-binding`,
+`test:thread-status`, `test:turn-interaction`, `test:http`, `test:acceptance`, `test:channels`,
+`test:relay` and `test:conversation-routes` all pass; both sides typecheck. `addItem`'s change is
+additive — the auto-title race it guards is untouched, and the title work stays floated inside
+`noteUserMessage` so a message that failed to title is still a message that arrived.
+
+**Resolved On:** 2026-08-26
+
 ---
 
 ## GAP-005 — Reasoning effort is persisted, resolved, rendered — and never applied
@@ -2751,6 +2825,7 @@ brief spends a page on.
 |---|---|---|---|
 | GAP-001 | RESOLVED | `index.ts`, `projectStore.test.ts`, `agentAdversarial.test.ts` | `test:project-store` proves the bare-row fork still throws and the published one reads back byte for byte; `test:agent-adversarial` holds the call site |
 | GAP-002 | RESOLVED | `index.ts`, `projectStore.test.ts`, `agentAdversarial.test.ts`, `editVersions.test.ts` | `test:project-store` proves the bare row is unreadable and the disk stale, then that publish + materialise fixes both; finding was understated — see its Resolution |
+| GAP-004 | RESOLVED | `http/turns.ts`, `index.ts`, `wsRelay.ts`, `threadStore.ts`, `attachments.test.ts`, `socket.ts`, `BuildPane.tsx`, `AttachmentRail.tsx` | `test:attachments` gained a 15-claim reachability audit — every arithmetic assertion in it was already true of code that never ran on a turn |
 | GAP-008 | RESOLVED | `InboxActions.tsx`, `InboxCardActions.tsx`, `inboxStore.ts`, `InboxView.tsx`, `inboxBoard.test.ts`, `registry.ts`, `types.ts`, `inboxActionIcons.tsx` | `test:inbox-board` reads the server's vocabulary and requires a case for all 29; the exhaustive switch failed the build naming four omissions while being written |
 | GAP-009 | RESOLVED | `entitlements.ts`, `entitlementGate.ts`, `plans.ts`, `index.ts`, `entitlements.test.ts`, `entitlementStore.ts`, `UpsellCard.tsx`, `UsagePanel.tsx`, `types.ts` | `test:entitlements` holds all seven kinds from both Free and Pro, plus the top of the ladder answering null; `test:entitlement-store` holds the client guard |
 | GAP-014 | RESOLVED | `web/pricing.html`, `checkoutSurfaces.test.ts` | `test:checkout-surfaces` maps every sold feature row to an `EntitlementKind` and asserts the three removed names stay gone |

@@ -22,7 +22,7 @@ import { Truncate } from "../Truncate.tsx";
 import { Glyph, Icon, GLYPH } from "../icons.ts";
 import { truncatePath } from "../../lib/truncatePath.ts";
 import { XIcon } from "../panelIcons.tsx";
-import { ICON, STATUS } from "../../lib/tokens.ts";
+import { ICON } from "../../lib/tokens.ts";
 import type { AttachKind } from "./AttachPicker.tsx";
 
 export interface DraftAttachment {
@@ -33,8 +33,17 @@ export interface DraftAttachment {
   label: string;
   tokenEstimate: number;
   protected: boolean;
-  /** §9: a resolution failure puts the chip in an error tone with a retry, and blocks send. */
-  error?: string | null;
+  // `error` USED TO BE HERE AND WAS UNREACHABLE. §9 asks that a resolution failure put the chip in
+  // an error tone and block send, and the field rendered both — but no code path could ever set
+  // it, because nothing sent the attachments at all. There was no round trip to fail.
+  //
+  // NOW THERE IS ONE, AND ITS REFUSAL DOES NOT BELONG HERE. The refs ride the command that creates
+  // the turn — see `CommandAttachment` — so the server answers on the channel the message went out
+  // on, after the chips have gone with the draft they belonged to. A 409 or a 413 therefore arrives
+  // as an error in the CONVERSATION, beside the message it is about, which is where every other
+  // failure of that send already lands. Reviving a per-chip state would mean holding a draft's
+  // attachments after it was sent so they could be marked, which is a rail describing a message
+  // that is no longer being written.
 }
 
 const ICON_FOR: Record<AttachKind, (typeof Icon)[keyof typeof Icon]> = {
@@ -68,16 +77,10 @@ export function AttachmentRail({
           key={a.key}
           size="md"
           mono={a.kind === "file"}
-          // §9: an attachment that could not be resolved goes to an error tone and send is blocked
-          // until it is fixed or removed. A chip that looked fine over a ref the server could not
-          // read would be a turn sent with a hole in its context.
-          color={a.error ? STATUS.error : undefined}
           title={
-            a.error
-              ? `${a.label} — ${a.error}`
-              : a.protected
-                ? `${a.label} — read-only. Attaching it never implies write access.`
-                : `${a.label} · about ${a.tokenEstimate.toLocaleString()} tokens`
+            a.protected
+              ? `${a.label} — read-only. Attaching it never implies write access.`
+              : `${a.label} · about ${a.tokenEstimate.toLocaleString()} tokens`
           }
           icon={
             <span className="text-faint">

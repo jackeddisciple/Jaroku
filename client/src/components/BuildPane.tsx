@@ -1149,7 +1149,10 @@ export function BuildPane({
   const offending = overBudget
     ? [...attachments].sort((a, b) => b.tokenEstimate - a.tokenEstimate).slice(0, 2).map((a) => a.label)
     : [];
-  const unresolved = attachments.filter((a) => a.error);
+  // `unresolved` IS GONE WITH THE FIELD IT READ. It blocked Send on a per-chip error state nothing
+  // could set — see `DraftAttachment` — and a send-block that can never fire is a promise in the
+  // type system the product does not keep. What CAN block a send is the budget, which is measured
+  // from figures the server priced and is now a warning about a payload that genuinely leaves.
 
   const clearPromoted = useEvalStore((s) => s.clearPromoted);
   const promotable = (testDraft.trim() || (localStorage.getItem(inputKey(activeAgentId)) ?? "").trim());
@@ -1235,20 +1238,40 @@ export function BuildPane({
 
     // Chat mode: talk to Jaroku — route by intent + context.
     if (busy) return;
+
+    /**
+     * §4's attachments, on the command that creates the turn.
+     *
+     * THE LINE THAT DID NOT EXIST. The picker, the rail, the budget meter, the cap, the route and
+     * the table were all finished; nothing sent the refs, so a message went out and the chips
+     * vanished with the draft having never left the browser. It rides the command rather than a
+     * second round trip because at this moment the turn has no id — the server writes the
+     * `thread_items` row — which is exactly why `github.attachments` already work this way.
+     *
+     * REFS ONLY. `tokenEstimate` stays here for the meter and is not sent: the server re-measures
+     * every one at attach time, because a client-supplied estimate would let any request through by
+     * claiming to be small.
+     */
+    const attachRefs = attachments.map((a) => ({
+      kind: a.kind,
+      ref: a.ref,
+      agent_id: activeAgentId ?? "",
+    }));
+
     switch (intent.kind) {
       case "generate":
         // Never straight to generation: the plan gate is the only way in, so nothing gets
         // built that the user hasn't seen described first.
         plannedConnectors.current = connectorKey;
-        sendPlanAgent(trimmed, selected, name.trim() || undefined, undefined, selectedMcp);
+        sendPlanAgent(trimmed, selected, name.trim() || undefined, undefined, selectedMcp, attachRefs);
         break;
       case "replan":
         // A revision is planned against the CURRENT selection, so that becomes the new baseline.
         plannedConnectors.current = connectorKey;
-        sendPlanAgent(trimmed, selected, name.trim() || undefined, intent.planId, selectedMcp);
+        sendPlanAgent(trimmed, selected, name.trim() || undefined, intent.planId, selectedMcp, attachRefs);
         break;
       case "edit":
-        if (activeAgentId) sendEdit(activeAgentId, trimmed);
+        if (activeAgentId) sendEdit(activeAgentId, trimmed, attachRefs);
         break;
       case "fix":
         // The old One-Click Fix, now reached by typing "fix this" with a failed step selected.
@@ -1270,6 +1293,9 @@ export function BuildPane({
           // draft below — an attachment outliving the message it was made for would silently
           // ground the NEXT question in a diff nobody meant to send.
           github.attachments,
+          // AND §4's, on the same rule. Two sources, one turn: the GitHub rail and the ⊕ picker
+          // both put references on the question, and the server resolves both at send time.
+          attachRefs,
         );
         github.clear();
         setGithubTrigger(null);
@@ -1277,6 +1303,11 @@ export function BuildPane({
       }
     }
     setChatDraft("");
+    // WITH THE DRAFT, because they belong to the message that has just gone. The chips used to
+    // vanish here having never been sent at all, which is what made the rail a display of
+    // something the model never saw; they leave for the same reason now, and they leave having
+    // been sent. An attachment outliving its message would silently ground the NEXT one.
+    setAttachments([]);
   };
 
   const lastGenId = [...turns].reverse().find((t) => t.role === "jaroku" && t.kind === "gen")?.id;
@@ -2191,7 +2222,7 @@ export function BuildPane({
                     // resolve, send is BLOCKED rather than allowed to truncate. The notice above
                     // the input says which, so a disabled button is never unexplained.
                     disabled={
-                      !connected || !text.trim() || overBudget || unresolved.length > 0
+                      !connected || !text.trim() || overBudget
                       || (composerMode === "test" ? !canRun : busy)
                     }
                     aria-label={composerMode === "test" ? "Run the agent on this input" : "Send"}

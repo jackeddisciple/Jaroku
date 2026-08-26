@@ -86,9 +86,9 @@ import { ConversationSettingsStore, DEFAULT_PERMISSION_MODE, type PermissionMode
 import { ConversationConnectorStore } from "./conversationConnectors.ts";
 import { TurnInteractionStore } from "./turnInteraction.ts";
 import { classOf, mustConfirm } from "./permissionShield.ts";
-import { turnRoutes, type Attachable } from "./http/turns.ts";
+import { attachTurn, turnRoutes, type Attachable, type RequestedAttachment, type TurnRouteDeps } from "./http/turns.ts";
 import { AttachmentStore } from "./attachmentStore.ts";
-import { estimateTokens } from "./attachments.ts";
+import { estimateTokens, MAX_ATTACHMENTS } from "./attachments.ts";
 import { ContextResolver } from "./auth/resolve.ts";
 import { resolveOriginPolicy } from "./auth/origin.ts";
 import { resolveSocketAuth } from "./auth/socketAuth.ts";
@@ -3415,7 +3415,7 @@ async function permissionModeForRun(ctx: TenantContext, runId: string): Promise<
  */
 const attachmentStore = new AttachmentStore(store.database());
 
-for (const route of turnRoutes({
+const turnDeps: TurnRouteDeps = {
   callerFor: async (req) => {
     const auth = await authenticate(req, tokenVerifier);
     const session = await contextResolver.resolve(
@@ -3561,11 +3561,180 @@ for (const route of turnRoutes({
       }
     }
   },
-})) {
+};
+
+for (const route of turnRoutes(turnDeps)) {
   if (route.prefix) router.prefixRoute(route.method, route.path, route.handler);
   else if (route.method === "GET") router.get(route.path, route.handler);
   else if (route.method === "DELETE") router.del(route.path, route.handler);
   else router.post(route.path, route.handler);
+}
+
+/**
+ * Attach what the composer picked to the turn the dispatch just wrote.
+ *
+ * THE ONE LINE THAT DID NOT EXIST. Everything either side of it did: a five-source picker, a rail,
+ * a live budget meter, a server route that re-measures every estimate and writes all-or-none, and
+ * `turn_attachments` registered with retention, export and the workspace deleter. What was missing
+ * was the send — so rows were picked, priced by the server, rendered with their token cost, and
+ * dropped on the floor when the message went out. It was worse than inert: an over-budget rail
+ * BLOCKED the send of a message whose attachments were never going to be sent.
+ *
+ * IT RIDES THE COMMAND RATHER THAN A SECOND ROUND TRIP, because at the moment somebody presses Send
+ * the turn does not exist — the server writes the `thread_items` row — so there is no id to POST
+ * to. `github.attachments` on `sendExplain` already work exactly this way and are the pattern.
+ *
+ * FLOATING AND CAUGHT. An attachment that could not be written must not take the dispatch with it:
+ * the message has been sent and the work has started, and failing the run because a chip did not
+ * fit would be a worse answer than answering without it. The refusal reaches the composer on the
+ * channel it is already listening to, which is where the rail's error state was always going to
+ * come from — `DraftAttachment.error` was written for a round trip that did not exist.
+ */
+/**
+ * What arrived on the command, as something `attachTurn` will accept.
+ *
+ * SHAPE-CHECKED HERE AND NOWHERE ELSE ON THIS PATH. The relay forwards a command's fields without
+ * inspecting them, so this is where a `ref` that is a string or an `attachments` that is a number
+ * stops being a possibility. Anything malformed is DROPPED rather than refused: the message itself
+ * is valid and has been sent, and failing a dispatch over a chip is a worse answer than sending
+ * the message without it. What must not happen is a half-typed object reaching a store.
+ */
+function requestedAttachments(raw: unknown): RequestedAttachment[] {
+  if (!Array.isArray(raw)) return [];
+  const out: RequestedAttachment[] = [];
+  for (const item of raw.slice(0, MAX_ATTACHMENTS)) {
+    const rec = (item ?? {}) as Record<string, unknown>;
+    const kind = rec["kind"];
+    const ref = rec["ref"];
+    if (typeof kind !== "string" || !ref || typeof ref !== "object" || Array.isArray(ref)) continue;
+    out.push({
+      kind: kind as RequestedAttachment["kind"],
+      ref: ref as Record<string, unknown>,
+      agentId: String(rec["agent_id"] ?? ""),
+    });
+  }
+  return out;
+}
+
+async function attachToTurn(
+  ctx: TenantContext,
+  agentId: string,
+  turnId: string,
+  requested: readonly RequestedAttachment[],
+  onRefusal: (message: string) => void,
+): Promise<string> {
+  if (requested.length === 0) return "";
+  try {
+    await attachTurn(turnDeps, ctx, turnId, requested);
+  } catch (err) {
+    // A REFUSAL IS NOT A FAILED DISPATCH. The message has been sent and the work is about to start;
+    // failing the run because a chip did not fit would be a worse answer than answering without it.
+    // 409 (too many) and 413 (too large) are the two the composer acts on differently, and both
+    // arrive as prose on the channel the composer is already listening to — which is where
+    // `DraftAttachment.error` was always going to come from. It was written for a round trip that
+    // did not exist.
+    const message = String((err as Error)?.message ?? err);
+    console.error(`[attachments] could not attach to ${turnId}:`, message);
+    onRefusal(message);
+  }
+  // READ BACK RATHER THAN BUILT FROM THE REQUEST, so a partial refusal still grounds the prompt in
+  // whatever was actually stored — and so the block describes the durable record rather than the
+  // client's belief about it.
+  return resolveAttachmentBlock(ctx, agentId, turnId);
+}
+
+/**
+ * The attached refs, as a block of context.
+ *
+ * THE OTHER HALF, AND THE ONE THAT MAKES THE FEATURE REAL. Persisting the refs makes the record
+ * honest; this is what puts them in front of the model, which is what somebody attaching a file
+ * was asking for. Without it the picker would still be a way to write a row nobody reads.
+ *
+ * RESOLVED AT SEND TIME RATHER THAN AT ATTACH TIME, which is the same rule §7's GitHub attachments
+ * already follow and for the same reason: a chip made five minutes ago should ground the answer in
+ * the file as it is now. The exception is a FILE, whose ref pins a `version_id` — §4.4's snapshot —
+ * so an attachment of v3 stays an attachment of v3 even after v4 publishes. Those two are not in
+ * tension: the ref decides what "now" means, and a file's ref says a version.
+ *
+ * BEST-EFFORT PER ROW. One unreadable attachment is a paragraph missing from the prompt, not a
+ * failed dispatch — and saying which one is missing beats a run that never started.
+ */
+async function resolveAttachmentBlock(ctx: TenantContext, agentId: string, turnId: string): Promise<string> {
+  const rows = await attachmentStore.forTurn(ctx, turnId).catch(() => []);
+  if (rows.length === 0) return "";
+  const parts: string[] = [];
+  for (const row of rows) {
+    const body = await attachmentBody(ctx, agentId, row).catch(
+      (err: unknown) => `(could not be read: ${String((err as Error)?.message ?? err)})`,
+    );
+    parts.push(`### ${row.label}\n${body}`);
+  }
+  return `\n\nAttached by the developer:\n${parts.join("\n\n")}`;
+}
+
+/** One attachment's content, from the store that already owns that kind of thing. */
+async function attachmentBody(
+  ctx: TenantContext,
+  agentId: string,
+  row: { kind: string; ref: Record<string, unknown> },
+): Promise<string> {
+  const ref = row.ref;
+  switch (row.kind) {
+    case "file": {
+      // FROM THE PINNED VERSION, which is what `version_id` on the ref is for. Falling back to the
+      // current one when the pin cannot be read is the honest degradation: a file the picker
+      // offered is a file the agent has, and a version that has since been swept is a reason to
+      // show the live one rather than nothing.
+      const agent = await agentRepo.bySlug(ctx, agentId).catch(() => null);
+      const path = String(ref["path"] ?? "");
+      const pinned = Number(ref["version_id"] ?? NaN);
+      if (agent && Number.isFinite(pinned)) {
+        const files = await projects.readVersion(ctx, agent.id, pinned).catch(() => []);
+        const hit = files.find((f) => f.path === path);
+        if (hit) return hit.content;
+      }
+      const { files } = await readAgentFiles(agentFilesDeps, ctx, agent?.slug ?? agentId);
+      return files.find((f) => f.path === path)?.content ?? "(this file is no longer in the project)";
+    }
+    case "run": {
+      // THE SUMMARY THAT `attachables` PRICED, not the whole trace. Its estimate is a flat 400
+      // tokens precisely so a thousand-step run stays attachable, and a body that pasted every
+      // step would make the measured number a fiction.
+      const steps = await store.stepsForRun(ctx, String(ref["run_id"] ?? ""));
+      if (steps.length === 0) return "(this run is no longer in the workspace)";
+      const lines = steps.slice(0, 40).map((s) =>
+        `${s.seq}. ${s.name} [${s.type}]${s.error ? ` — ERROR: ${s.error}` : ""}`);
+      const tail = steps.length > 40 ? `\n… ${steps.length - 40} more steps` : "";
+      return `${lines.join("\n")}${tail}`;
+    }
+    case "dataset_case": {
+      const examples = await evalStore.listExamples(ctx, String(ref["dataset_id"] ?? ""));
+      const hit = examples.find((e) => String(e.id) === String(ref["case_id"] ?? ""));
+      if (!hit) return "(this case is no longer in the dataset)";
+      return `input: ${JSON.stringify(hit.input ?? {})}\nexpected: ${JSON.stringify(hit.expected ?? null)}`;
+    }
+    case "tool_schema": {
+      const tools = await mcpStore.listTools(ctx);
+      const hit = tools.find((t) => String(t.id) === String(ref["tool_id"] ?? ""));
+      if (!hit) return "(this tool is no longer in the registry)";
+      return JSON.stringify(hit.input_schema ?? {}, null, 2);
+    }
+    case "github": {
+      // THE SAME RESOLVER §7's OWN ATTACHMENTS USE, which is the point of routing through it: a
+      // commit attached from the ⊕ picker and one attached from the GitHub rail must read the same
+      // in a prompt, or the model is being shown two vocabularies for one thing.
+      const sha = ref["commit_sha"];
+      // A PR ref carries its number for the CHIP; the resolver reads the agent's one open PR, so
+      // the number is not passed on — there is only ever one to resolve.
+      const attached = await githubService.resolveAttachments(
+        ctx, agentId,
+        typeof sha === "string" ? [{ kind: "commit" as const, sha }] : [{ kind: "pr" as const }],
+      );
+      return attached || "(this reference is no longer on the linked repository)";
+    }
+    default:
+      return "(unknown attachment)";
+  }
 }
 
 const relay = new WsRelay({
@@ -4036,7 +4205,9 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (cmd.cmd === "generate") generateAgent(ctx, cmd);
     else if (cmd.cmd === "planAgent") planAgent(ctx, cmd);
     else if (cmd.cmd === "discardPlan") planner.discard(ctx.workspaceId, cmd.planId);
-    else if (cmd.cmd === "edit") void editAgent(ctx, cmd.agentId, cmd.instruction, cmd.threadId);
+    else if (cmd.cmd === "edit") {
+      void editAgent(ctx, cmd.agentId, cmd.instruction, cmd.threadId, requestedAttachments(cmd.attachments));
+    }
     else if (cmd.cmd === "applyEdit") void editor.apply(ctx, cmd.proposalId);
     else if (cmd.cmd === "undoEdit") void editor.undo(ctx, cmd.agentId);
     else if (cmd.cmd === "discardEdit") void editor.discard(ctx, cmd.proposalId);
@@ -6004,11 +6175,20 @@ function noteThreadItem(
  * Jaroku's half of the conversation is streamed on the gen / edit / reply channels and rebuilt from
  * them, so a second copy here would be a transcript nothing reads.
  */
-function noteUserMessage(ctx: TenantContext, threadId: string, body: string): void {
+/**
+ * ...AND THE TURN ID IT WROTE, which is what makes the composer's attachments reachable.
+ *
+ * A promise rather than the fire-and-forget this used to be, because a caller now has something to
+ * do with the answer: `turn_attachments` hangs off this row, and until the id came back there was
+ * no turn for the refs the ⊕ picker had gathered to belong to. The title work below is still
+ * floated inside — a message that failed to title is not a message that failed to arrive — and
+ * every existing caller ignores the returned promise exactly as it ignored the old `void`.
+ */
+function noteUserMessage(ctx: TenantContext, threadId: string, body: string): Promise<string | null> {
   const text = body.trim();
-  if (!text) return;
-  void (async () => {
-    await threadStore.addItem(ctx, threadId, { kind: "message", role: "user", body: text });
+  if (!text) return Promise.resolve(null);
+  return (async () => {
+    const itemId = await threadStore.addItem(ctx, threadId, { kind: "message", role: "user", body: text });
     // §5'S TITLE, FROM THE FIRST MESSAGE — THE ROW, NOT THE COUNT. This used to read the message
     // count back and title only when it was exactly one, which turned a race into no title at all:
     // two first messages whose inserts both landed before either read both saw two, so neither
@@ -6024,8 +6204,10 @@ function noteUserMessage(ctx: TenantContext, threadId: string, body: string): vo
     const first = await threadStore.firstMessage(ctx, threadId);
     if (first) await threadStore.autoTitle(ctx, threadId, threadTitle(first));
     scheduleListRefresh(ctx);
+    return itemId;
   })().catch((err) => {
     console.error(`[threads] could not record a message:`, (err as Error)?.message ?? err);
+    return null;
   });
 }
 
@@ -9734,7 +9916,17 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
       (await threadForWork(ctx, cmd.threadId));
     // The brief, or the feedback on a revision — which is what the user actually typed this turn and
     // therefore what §4.3's preview should show.
-    noteUserMessage(ctx, planThread, cmd.prompt);
+    // ATTACHED TO THE TURN THE MESSAGE JUST BECAME, which is why this awaits an id it used to
+    // throw away. The refs came in on the command because at Send there was no turn to POST to.
+    const planTurn = await noteUserMessage(ctx, planThread, cmd.prompt);
+    // A PLAN HAS NO AGENT YET, which is why the agent id here is empty: `attachables` resolves a
+    // file ref against an agent, and a brief is written before one exists. In practice the picker
+    // offers no file rows on that path for the same reason — what a brief attaches is a run, a
+    // dataset case or a tool schema, none of which is agent-relative.
+    const planBlock = planTurn
+      ? await attachToTurn(ctx, "", planTurn, requestedAttachments(cmd.attachments), (m) =>
+          planOut({ type: "error", message: `attachments were not sent: ${m}` }))
+      : "";
     console.log(
       `[plan] planning${cmd.revisePlanId ? " (revision)" : ""} — "${cmd.prompt.slice(0, 80)}"`,
     );
@@ -9751,7 +9943,11 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
       // them by default and is the whole local path — and undefined means the platform's own key,
       // exactly as before. See billing/providerKeys.ts.
       apiKey: planKey,
-      prompt: cmd.prompt,
+      // APPENDED TO THE BRIEF, which is the same shape §7's GitHub attachments take on the explain
+      // path: the thing being asked about comes first and the attached material is evidence about
+      // it. Empty when nothing was attached, so a brief with no chips is byte-for-byte the brief
+      // that was typed.
+      prompt: `${cmd.prompt}${planBlock}`,
       connectors: cmd.connectors,
       mcpTools,
       name: cmd.name,
@@ -9878,7 +10074,11 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   // An unplanned generation is somebody typing a brief straight into the composer, and that brief is
   // the thread's first message. A planned one already recorded it when the plan was asked for, and
   // recording it twice would make the preview echo a brief the user has since revised.
-  if (!cmd.planId) noteUserMessage(ctx, genThread, prompt);
+  const genTurn = cmd.planId ? null : await noteUserMessage(ctx, genThread, prompt);
+  if (genTurn) {
+    prompt += await attachToTurn(ctx, "", genTurn, requestedAttachments(cmd.attachments), (m) =>
+      genOut({ type: "error", message: `attachments were not sent: ${m}` }));
+  }
   // A generation whose validator refuses it is §3.3's "rejected generation" — work waiting on a
   // person. Clearing the THREAD is what makes "rejected" describe the latest attempt rather than
   // every attempt this process has seen: this generation is the retry, so whatever the last one
@@ -10045,7 +10245,13 @@ editor.on("error", (e) => {
   editOut({ type: "error", ...e });
 });
 
-async function editAgent(ctx: TenantContext, agentId: string, instruction: string, threadId?: string): Promise<void> {
+async function editAgent(
+  ctx: TenantContext,
+  agentId: string,
+  instruction: string,
+  threadId?: string,
+  attached: readonly RequestedAttachment[] = [],
+): Promise<void> {
   // Refused here rather than inside `propose`, so the refusal is answered to the asker and the
   // edit scope is left pointing at the workspace whose edit is actually running. The editor
   // refuses a second edit either way; what this adds is that a refused one cannot redirect the
@@ -10070,7 +10276,11 @@ async function editAgent(ctx: TenantContext, agentId: string, instruction: strin
   // whoever asked second. The instruction is what the user said, so it is the thread's message.
   try {
     editThread = await threadForWork(ctx, threadId, agentId);
-    noteUserMessage(ctx, editThread, instruction);
+    const editTurn = await noteUserMessage(ctx, editThread, instruction);
+    if (editTurn) {
+      instruction += await attachToTurn(ctx, agentId, editTurn, attached, (m) =>
+        editOut({ type: "error", message: `attachments were not sent: ${m}`, agentId }));
+    }
   } catch (err) {
     console.error(`[threads] could not bind the edit:`, (err as Error)?.message ?? err);
     editThread = null;
@@ -10731,7 +10941,7 @@ async function explainAgent(ctx: TenantContext, cmd: ExplainCommand): Promise<vo
   // thread's message and therefore §4.3's preview — asking "why is it 401ing on refresh?" is exactly
   // the line that makes a session recognisable a week later.
   replyThread = await threadForWork(ctx, cmd.threadId, cmd.agentId);
-  noteUserMessage(ctx, replyThread, cmd.question);
+  const replyTurn = await noteUserMessage(ctx, replyThread, cmd.question);
   replyOut({ type: "started", agentId: cmd.agentId, question: cmd.question });
   let context = await buildExplainContext(ctx, cmd);
   // §7's attachments, resolved at SEND TIME rather than at attach time — a chip made five minutes
@@ -10744,6 +10954,16 @@ async function explainAgent(ctx: TenantContext, cmd: ExplainCommand): Promise<vo
 
 Attached from GitHub:
 ${attached}`;
+  }
+  // AND §4's, which had a picker, a rail, a budget meter and nowhere to go. Awaited rather than
+  // floated HERE alone, unlike the other three dispatch sites: this is the one path that consumes
+  // the attachments in the same turn it writes them, so the block below has to be able to read
+  // rows the write has finished putting there.
+  if (replyTurn) {
+    context += await attachToTurn(
+      ctx, cmd.agentId, replyTurn, requestedAttachments(cmd.attachments),
+      (m) => replyOut({ type: "error", agentId: cmd.agentId, message: `attachments were not sent: ${m}` }),
+    );
   }
   const explainKey = await providerKeys.platformKey(ctx);
   void streamExplain(context, cmd.question, {

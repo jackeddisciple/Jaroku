@@ -463,23 +463,34 @@ export class ThreadStore {
    * reason `last_activity_at` exists is that §4.2 sorts two of its three sections by it, and an
    * item written without it would be work that happened to a thread that does not know it did.
    */
+  /**
+   * Write one row, and answer with its id.
+   *
+   * THE ID IS RETURNED BECAUSE A TURN IS A THING OTHER TABLES POINT AT. `turn_notes`, `turn_pins`,
+   * `turn_feedback` and `turn_attachments` all hang off this row, and until this returned anything
+   * the only way a caller learned the id was to read the thread back — which is why composer
+   * attachments had no turn to attach to at the moment they were sent, and were dropped. Every
+   * existing caller ignores it, which is what makes this a widening rather than a change.
+   */
   async addItem(
     ctx: TenantContext,
     threadId: string,
     item: { kind: ThreadItemKind; refId?: string | null; role?: "user" | null; body?: string | null },
-  ): Promise<void> {
+  ): Promise<string> {
     // The monotonic clock, not the wall one — see `nextItemIso`. These rows are ordered by nothing
     // else, so two written in the same millisecond would have no defined order on either driver.
     const now = nextItemIso();
+    const id = randomUUID();
     await this.q(ctx).run(
       `INSERT INTO thread_items (id, workspace_id, thread_id, kind, ref_id, role, body, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        randomUUID(), ctx.workspaceId, threadId, item.kind,
+        id, ctx.workspaceId, threadId, item.kind,
         item.refId ?? null, item.role ?? null, item.body ?? null, now,
       ],
     );
     await this.touch(ctx, threadId, now);
+    return id;
   }
 
   /** What somebody said, in order. §4.3's preview is the last of these; §5's title is the first. */
