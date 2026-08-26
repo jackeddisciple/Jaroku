@@ -1884,6 +1884,81 @@ specifically so a regeneration cannot take them), the model catalogue, `effort_r
 | Implementation Effort | 5/10 |
 | Confidence | 10/10 |
 
+### Resolution
+
+**Status: RESOLVED — all three links, not the interim relabel**
+
+The finding offered an honest interim: relabel the control *"Send this again"* and delete the
+switcher. All three links were built instead, because the expensive parts — the table, the store,
+the suite, the slot order, the switcher — were finished and what was missing was between them.
+
+**1. Regenerate re-runs.** `rerunTurn` dispatches instead of prefilling, which is what §5.4 asks
+for. It carries `regenerateOf: turn.itemId`, so the server attaches a second answer to the turn
+being re-run rather than writing a second user message — the difference between two answers to one
+question and two questions. The id is **verified server-side** (`turnForRegenerate`): an id this
+workspace does not own falls back to an ordinary message rather than hanging a variant on a row it
+does not own.
+
+Only a **reply** re-runs as a variant. A generation or an edit publishes a version and changes an
+agent's files; running one again is a second build, and giving it a switcher would offer to "switch
+back" to code already superseded on disk. Those keep the prefill, which is honest about what
+pressing them does.
+
+**2. The dispatch opens and closes a variant.** `TurnVariantStore` is instantiated in `index.ts` for
+the first time outside a test. `openVariant` writes the row with the model and **both** effort
+levels — which is exactly the pair the clamp marker is derived from, and the reason GAP-005 had to
+land first — and returns a settler keyed by **variant id**, never by turn, which is `settle`'s own
+rule: a slow variant 1 finishing after a fast variant 2 must not land its duration on variant 2's row.
+
+**3. The wire carries the counts.** `variantCounts` reads them back from the rows, so the
+switcher's numbers are the table's numbers. Absent below two, so the metadata row's slot collapses
+rather than rendering `‹ 1/1 ›` on every turn in the product — `turnMetadata.ts` adds the slot only
+when `total > 1`, and a payload that always carried the fields would be asking that rule to do the
+hiding.
+
+**4. `onSwitchVariant` has a caller.** It was an optional prop nothing passed, so both arrows
+carried `disabled={… || !onSwitchVariant}` over a slot that could never be present anyway.
+
+**The bodies live in memory, and that is the same decision the product already made.** Migration
+044 does not store Jaroku's replies — `hydrate` rebuilds a reloaded thread from stubs rather than
+from a transcript — so `ReplyTurn.priorVariants` holds the replaced answers for as long as the tab
+does, and `turn_variants` records what each one **cost** forever. The switcher is therefore honest
+about its own lifetime: it appears when a regeneration produces a second answer in this session, and
+a reload leaves the durable record intact and the prose gone. Storing the bodies would be a
+transcript table §7 deliberately does not have.
+
+**And `BuildPane.tsx:349-351` is corrected** — it asserted that the server writes a
+`turn_variants` row beside the old one, on a code path that prefilled a textarea.
+
+**Files Changed:**
+
+- `server/src/index.ts` — `turnVariants`, `openVariant`, `variantCounts`, `turnForRegenerate`, the reply dispatch
+- `server/src/wsRelay.ts` — `regenerateOf` on four commands, `usage` and `regenerateOf` on the reply events
+- `server/src/turnVariants.test.ts` — the reachability audit
+- `client/src/store/chatStore.ts` — `usage` and `priorVariants` on `ReplyTurn`, `switchVariant`, the regenerate branch of `replyStarted`
+- `client/src/components/BuildPane.tsx` — `rerunTurn` dispatches; `onSwitchVariant` passed
+- `client/src/lib/socket.ts`, `client/src/types.ts`
+
+**Verification:**
+
+`test:turn-variants` gained a source audit, and it is a source audit deliberately: **every
+arithmetic assertion already in that suite was true of a store nothing instantiated.** Fourteen
+claims — the store constructed in production, a variant opened around a response, settled by
+variant id, carrying both effort levels; the counts on the wire and omitted below two; the four
+commands carrying `regenerateOf`, verified server-side and used instead of a second message;
+Regenerate dispatching; the switcher having a caller and being offered only where there are bodies;
+and the corrected comment.
+
+**Regression Coverage:**
+
+`test:turn-variants`, `test:turn-interaction`, `test:turn-metadata`, `test:channels`,
+`test:plan-flow`, `test:thread-store`, `test:reset` and `test:dead-controls` all pass; both sides
+typecheck. `test:turn-metadata` matters most: §12.24's rule is that the row's order is stable and
+absent items collapse without reordering the rest, and `variants` becoming a slot that can now
+actually be present is the first time that rule has been exercised on it.
+
+**Resolved On:** 2026-08-26
+
 ---
 
 ## GAP-011 — An agent's MCP grants are fixed at generation and can never be changed
@@ -3256,6 +3331,7 @@ brief spends a page on.
 | GAP-007 | RESOLVED | `agents.ts`, `index.ts`, `agentFiles.test.ts`, `ci.yml` | `test:agent-files` proves a published agent is runnable with no directory, that the whole workspace costs one statement, and that all three call sites materialise on demand |
 | GAP-008 | RESOLVED | `InboxActions.tsx`, `InboxCardActions.tsx`, `inboxStore.ts`, `InboxView.tsx`, `inboxBoard.test.ts`, `registry.ts`, `types.ts`, `inboxActionIcons.tsx` | `test:inbox-board` reads the server's vocabulary and requires a case for all 29; the exhaustive switch failed the build naming four omissions while being written |
 | GAP-009 | RESOLVED | `entitlements.ts`, `entitlementGate.ts`, `plans.ts`, `index.ts`, `entitlements.test.ts`, `entitlementStore.ts`, `UpsellCard.tsx`, `UsagePanel.tsx`, `types.ts` | `test:entitlements` holds all seven kinds from both Free and Pro, plus the top of the ladder answering null; `test:entitlement-store` holds the client guard |
+| GAP-010 | RESOLVED | `index.ts`, `wsRelay.ts`, `turnVariants.test.ts`, `chatStore.ts`, `BuildPane.tsx`, `socket.ts`, `types.ts` | `test:turn-variants` gained a 14-claim reachability audit — every arithmetic assertion in it was true of a store nothing instantiated |
 | GAP-011 | RESOLVED | `agents.ts`, `wsRelay.ts`, `index.ts`, `capabilities.ts` (x2), `entitlementGate.ts`, `agentAdversarial.test.ts`, `AgentTabs.tsx`, `socket.ts`, `types.ts`, `capabilities.ts` (x2) | `test:agent-adversarial` holds the column through add, narrow, clear and replace, plus the handler resolving against the registry before writing |
 | GAP-012 | RESOLVED | `wsRelay.ts`, `index.ts`, `generators.ts`, `entitlementGate.ts`, `capabilities.ts`, `generators.test.ts`, `socket.ts`, `types.ts`, `capabilities.ts`, `InboxActions.tsx` | `test:inbox-generators` holds both answers as distinct and the whole reachability chain; the comment claiming a prompt injection that does not exist is corrected and checked |
 | GAP-013 | RESOLVED | `checkPolicy.ts`, `checkRunner.ts`, `githubApi.ts`, `githubWebhook.ts` (both), `checks.ts`, `github.ts`, `index.ts`, `mockGithubApi.ts`, three suites | `test:check-runner` drives the whole round trip and proves `approvedForSha` answers true, which nothing could make it do before |

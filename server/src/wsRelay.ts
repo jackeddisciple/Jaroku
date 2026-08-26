@@ -104,6 +104,16 @@ export type GenerateCommand = {
    *  command's other fields say — see planner.take(). */
   planId?: string;
   attachments?: CommandAttachment[];
+  /**
+   * §5.4: this is a RE-RUN of the turn with this id, not a new message.
+   *
+   * WHAT MAKES A VARIANT A VARIANT. Regenerate used to prefill the composer, so what arrived was an
+   * ordinary second turn appended to the thread — the promised comparison affordance did not exist
+   * and the switcher had no data. Carrying the original turn means the dispatch attaches a second
+   * variant to it rather than writing a second user message, which is the difference between two
+   * answers to one question and two questions.
+   */
+  regenerateOf?: string;
 };
 // The pre-generation gate: describe the agent, see a plan, confirm. `revisePlanId` turns
 // `prompt` into feedback on the plan with that id rather than a fresh brief.
@@ -118,6 +128,16 @@ export type PlanAgentCommand = {
   name?: string;
   revisePlanId?: string;
   attachments?: CommandAttachment[];
+  /**
+   * §5.4: this is a RE-RUN of the turn with this id, not a new message.
+   *
+   * WHAT MAKES A VARIANT A VARIANT. Regenerate used to prefill the composer, so what arrived was an
+   * ordinary second turn appended to the thread — the promised comparison affordance did not exist
+   * and the switcher had no data. Carrying the original turn means the dispatch attaches a second
+   * variant to it rather than writing a second user message, which is the difference between two
+   * answers to one question and two questions.
+   */
+  regenerateOf?: string;
 };
 export type DiscardPlanCommand = { cmd: "discardPlan"; planId: string };
 export type ListAgentsCommand = { cmd: "listAgents" };
@@ -241,6 +261,16 @@ export type EditCommand = {
   /** The session this edit happens in. See RunCommand.threadId. */
   threadId?: string;
   attachments?: CommandAttachment[];
+  /**
+   * §5.4: this is a RE-RUN of the turn with this id, not a new message.
+   *
+   * WHAT MAKES A VARIANT A VARIANT. Regenerate used to prefill the composer, so what arrived was an
+   * ordinary second turn appended to the thread — the promised comparison affordance did not exist
+   * and the switcher had no data. Carrying the original turn means the dispatch attaches a second
+   * variant to it rather than writing a second user message, which is the difference between two
+   * answers to one question and two questions.
+   */
+  regenerateOf?: string;
 };
 export type ApplyEditCommand = { cmd: "applyEdit"; proposalId: string };
 export type UndoEditCommand = { cmd: "undoEdit"; agentId: string };
@@ -1362,6 +1392,16 @@ export type ExplainCommand = {
   /** The session this question was asked in. See RunCommand.threadId. */
   threadId?: string;
   attachments?: CommandAttachment[];
+  /**
+   * §5.4: this is a RE-RUN of the turn with this id, not a new message.
+   *
+   * WHAT MAKES A VARIANT A VARIANT. Regenerate used to prefill the composer, so what arrived was an
+   * ordinary second turn appended to the thread — the promised comparison affordance did not exist
+   * and the switcher had no data. Carrying the original turn means the dispatch attaches a second
+   * variant to it rather than writing a second user message, which is the difference between two
+   * answers to one question and two questions.
+   */
+  regenerateOf?: string;
 };
 export type ClientCommand =
   | RunCommand
@@ -1514,9 +1554,14 @@ export type EditEvent =
 // The "explain" reply rides its own channel too, parallel to trace/gen/edit/debug — a streaming
 // prose answer that never touches the trace store or the frozen event schema.
 export type ReplyEvent =
-  | { type: "started"; agentId: string; question: string }
+  | { type: "started"; agentId: string; question: string; regenerateOf?: string }
   | { type: "delta"; agentId: string; text: string }
-  | { type: "done"; agentId: string }
+  /**
+   * §6.5 METADATA, WHEN THERE IS ANY. Absent on an answer that had nothing to report, which is
+   * every one before §5.4 had a writer — so a reader that treats it as optional stays correct for
+   * every turn already in a thread.
+   */
+  | { type: "done"; agentId: string; usage?: unknown }
   | { type: "error"; agentId: string; message: string };
 
 // Eval rides its own channel too, parallel to trace/gen/edit/debug/reply.

@@ -1280,10 +1280,13 @@ export function sendExplain(
   github?: GithubAttachment[],
   /** §4's, from the ⊕ picker. Same rule, same resolution point — see `CommandAttachment`. */
   attachments?: readonly CommandAttachment[],
+  /** §5.4: this is a re-run of the turn with this id, not a new question. See rerunTurn. */
+  regenerateOf?: string,
 ): void {
   send({
     cmd: "explain", agentId, question, subject, threadId: activeThread(),
     ...(github?.length ? { github } : {}), ...withAttachments(attachments),
+    ...(regenerateOf ? { regenerateOf } : {}),
   });
 }
 

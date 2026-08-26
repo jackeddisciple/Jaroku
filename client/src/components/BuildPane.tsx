@@ -336,7 +336,25 @@ function AssistantTurn({
             producedVersion={Boolean(meta?.versionLabel)}
             onPromoteToDataset={() => useUiStore.getState().setRightTab("evals")}
           />
-          {meta && <TurnMetadata meta={meta} streaming={isLast && streaming} />}
+          {meta && (
+            <TurnMetadata
+              meta={meta}
+              streaming={isLast && streaming}
+              // §5.4's SWITCHER, WITH A CALLER AT LAST. It was an optional prop no component ever
+              // passed, so both arrows carried `disabled={… || !onSwitchVariant}` and the slot it
+              // sits in could never be present anyway — `total` was 1 on every turn in the product
+              // because nothing wrote a second variant.
+              //
+              // Offered only where there are bodies to switch BETWEEN, which is a reply this
+              // session has regenerated: `turn_variants` records what each answer cost forever, and
+              // the prose lives as long as the tab does. See `ReplyTurn.priorVariants`.
+              onSwitchVariant={
+                itemId && turn.role === "jaroku" && turn.kind === "reply" && (turn.priorVariants?.length ?? 0) > 0
+                  ? (ordinal) => useChatStore.getState().switchVariant({ threadId: threadId ?? undefined, turnId: itemId, ordinal })
+                  : undefined
+              }
+            />
+          )}
         </div>
       )}
     </div>
@@ -346,10 +364,22 @@ function AssistantTurn({
 /**
  * Re-run the message that produced this turn — §5.4.
  *
- * THE PREVIOUS RESPONSE IS NEVER DESTROYED. The server writes a new `turn_variants` row beside the
- * old one, so "which model wrote this?" stays answerable for both. What the client does here is
- * put the original message back in the composer's send path; the variant bookkeeping is the
- * server's, because it is the only side that knows what the request actually cost.
+ * IT DISPATCHES NOW RATHER THAN PREFILLING, which is what §5.4 asks for: "re-runs the same user
+ * input with the current toolbar settings". It used to put the sentence back in the composer and
+ * stop, so the user had to find and press Send themselves, and what arrived was an ordinary new
+ * turn appended to the thread rather than a variant of the old one — two questions instead of two
+ * answers to one. The `‹ n/m ›` switcher therefore never appeared and `onSwitchVariant` had nobody
+ * to pass it.
+ *
+ * THE PREVIOUS RESPONSE IS NEVER DESTROYED, and this is now true rather than asserted. The server
+ * opens a second `turn_variants` row beside the first, each carrying the model and the effort that
+ * produced THAT one, so "which model wrote this?" stays answerable for both — the invariant
+ * `turnVariants.ts`'s own header was written for and which nothing was upholding.
+ *
+ * ONLY A REPLY IS RE-RUNNABLE AS A VARIANT. A generation and an edit publish a version and change
+ * an agent's files; running one again is a second build rather than a second answer, and giving it
+ * a switcher would offer to "switch back" to code that has already been superseded on disk. Those
+ * keep the prefill, which is honest about what pressing it does.
  */
 function rerunTurn(
   turns: readonly ChatTurn[],
@@ -362,6 +392,15 @@ function rerunTurn(
   if (!prompt) return;
   const ui = useUiStore.getState();
   if (opts?.modelId) ui.setModel(opts.modelId);
+
+  if (turn.role === "jaroku" && turn.kind === "reply" && turn.itemId) {
+    // THE SAME COMMAND THE ORIGINAL DISPATCHED, with the turn it is a second answer to. The subject
+    // is the agent generally: the step or node the first answer was grounded in may not be selected
+    // any more, and re-running against whatever happens to be selected NOW would answer a different
+    // question under the first one's heading.
+    sendExplain(turn.agentId, prompt, { kind: "agent" }, undefined, undefined, turn.itemId);
+    return;
+  }
   ui.prefillChat(prompt);
 }
 

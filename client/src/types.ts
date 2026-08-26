@@ -1752,9 +1752,9 @@ export type ServerMessage =
   | { channel: "enforcement"; type: "enforcement"; state: EnforcementStateView; history: EnforcementRowView[] }
   | { channel: "enforcement"; type: "notice"; message: string }
   | { channel: "enforcement"; type: "error"; message: string }
-  | (InThread & { channel: "reply"; type: "started"; agentId: string; question: string })
+  | (InThread & { channel: "reply"; type: "started"; agentId: string; question: string; regenerateOf?: string })
   | (InThread & { channel: "reply"; type: "delta"; agentId: string; text: string })
-  | (InThread & { channel: "reply"; type: "done"; agentId: string })
+  | (InThread & { channel: "reply"; type: "done"; agentId: string; usage?: GenUsage })
   | (InThread & { channel: "reply"; type: "error"; agentId: string; message: string })
   | GenMessage
   | BillingMessage

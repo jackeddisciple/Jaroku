@@ -86,6 +86,7 @@ import { ConversationSettingsStore, DEFAULT_PERMISSION_MODE, type PermissionMode
 import { planEffort, type EffortPlan } from "./effort.ts";
 import { ConversationConnectorStore } from "./conversationConnectors.ts";
 import { TurnInteractionStore } from "./turnInteraction.ts";
+import { TurnVariantStore } from "./turnVariants.ts";
 import { classOf, mustConfirm } from "./permissionShield.ts";
 import { attachTurn, turnRoutes, type Attachable, type RequestedAttachment, type TurnRouteDeps } from "./http/turns.ts";
 import { AttachmentStore } from "./attachmentStore.ts";
@@ -3300,6 +3301,111 @@ mountSecretsRoutes(router, {
 const conversationSettings = new ConversationSettingsStore(store.database());
 const conversationConnectors = new ConversationConnectorStore(store.database());
 const turnInteraction = new TurnInteractionStore(store.database());
+
+/**
+ * §5.4's variants, instantiated for the first time outside a test.
+ *
+ * MIGRATION 057, `TurnVariantStore`, a passing suite, registration in export and retention, a
+ * `‹ n/m ›` switcher and an `onSwitchVariant` prop — and no writer. `turn_variants` held only the
+ * backfill's rows, every one at ordinal 1 with every metadata column null, so `total` was always 1,
+ * the metadata row's variants slot could never be present, and the switcher was unreachable code.
+ *
+ * The store's own header states the invariant it exists for: "Never overwrite variant 1's metadata
+ * with variant 2's… A store that updated a turn in place would answer 'which model wrote this?'
+ * with whichever model ran LAST." That is a claim about a feature, and until now the feature was a
+ * table.
+ */
+const turnVariants = new TurnVariantStore(store.database());
+
+/**
+ * Open a variant around a response, and answer with a settler for when it finishes.
+ *
+ * ONE HELPER FOR FOUR DISPATCH SITES, because the interesting part is identical at all of them and
+ * getting it slightly different in one is how "which model wrote this?" starts disagreeing with
+ * itself. What each site supplies is what it knows: the turn, the model, and the effort plan the
+ * adapter produced (GAP-005) — which is exactly the pair `effort_requested` / `effort_applied` the
+ * clamp marker is derived from.
+ *
+ * SETTLED BY VARIANT ID RATHER THAN BY TURN, which is `settle`'s own rule: a method that took a
+ * turn and wrote "the latest" would land a slow variant 1's duration on variant 2's row.
+ *
+ * NEVER FATAL, and never in the way. A response whose bookkeeping failed is still a response; a
+ * dispatch refused because a metadata row could not be opened would be the tail wagging the dog.
+ * The settler is a no-op when the open failed, so no call site needs a branch for it.
+ */
+async function openVariant(
+  ctx: TenantContext,
+  turnId: string | null,
+  modelId: string,
+  provider: string,
+  effort: EffortPlan | null,
+): Promise<(outcome: { durationMs?: number; tokensIn?: number; tokensOut?: number; costUsd?: number }) => void> {
+  if (!turnId) return () => {};
+  const startedAt = Date.now();
+  try {
+    const variant = await turnVariants.begin(ctx, turnId, {
+      modelId,
+      provider,
+      effortRequested: effort?.supported ? effort.requested : null,
+      effortApplied: effort?.supported ? effort.applied : null,
+    });
+    return (outcome) => {
+      void turnVariants
+        // THE DURATION IS MEASURED HERE rather than taken from the caller, because "dispatch to end
+        // of stream" is §6.4's definition and this is the only place that saw both ends.
+        .settle(ctx, variant.id, { durationMs: outcome.durationMs ?? Date.now() - startedAt, ...outcome })
+        .catch((err) => console.warn(`[variants] could not settle ${variant.id}:`, (err as Error)?.message ?? err));
+    };
+  } catch (err) {
+    console.warn(`[variants] could not open a variant on ${turnId}:`, (err as Error)?.message ?? err);
+    return () => {};
+  }
+}
+
+/**
+ * §5.4's two numbers — the "2" and the "2" in `‹ 2/2 ›`.
+ *
+ * READ BACK RATHER THAN COUNTED IN MEMORY, so the switcher's numbers are the rows' numbers. A
+ * dispatch that opened ordinal 2 knows its own ordinal and would have to be told the total by
+ * something else anyway; one read answers both and cannot disagree with the table.
+ *
+ * ABSENT WHEN THERE IS ONE, which is what makes the slot collapse rather than render `‹ 1/1 ›` on
+ * every turn in the product. `turnMetadata.ts` adds the slot only when `total > 1`, and a payload
+ * that always carried the fields would be asking that rule to do the hiding.
+ */
+/**
+ * The turn a regeneration is a second answer to — verified, never taken on the client's word.
+ *
+ * A CLIENT-SUPPLIED ID THAT REACHED A WRITE WOULD BE A WAY TO HANG A VARIANT ON ANY ROW, including
+ * one in another workspace. The read is scoped, so an id this workspace does not own answers null
+ * and the dispatch falls back to writing an ordinary message — which is the honest degradation:
+ * the answer still arrives, it is simply not recorded as a variant of something.
+ */
+async function turnForRegenerate(ctx: TenantContext, turnId: string): Promise<string | null> {
+  try {
+    const row = await store
+      .database()
+      .forWorkspace(ctx.workspaceId)
+      .get(`SELECT id FROM thread_items WHERE workspace_id = ? AND id = ?`, [ctx.workspaceId, turnId]);
+    return row ? turnId : null;
+  } catch {
+    return null;
+  }
+}
+
+async function variantCounts(
+  ctx: TenantContext,
+  turnId: string | null,
+): Promise<{ variant_ordinal?: number; variant_total?: number }> {
+  if (!turnId) return {};
+  try {
+    const rows = await turnVariants.forTurn(ctx, turnId);
+    if (rows.length < 2) return {};
+    return { variant_ordinal: rows.length, variant_total: rows.length };
+  } catch {
+    return {};
+  }
+}
 
 /**
  * Display names for the people who wrote notes.
@@ -11342,8 +11448,21 @@ async function explainAgent(ctx: TenantContext, cmd: ExplainCommand): Promise<vo
   // thread's message and therefore §4.3's preview — asking "why is it 401ing on refresh?" is exactly
   // the line that makes a session recognisable a week later.
   replyThread = await threadForWork(ctx, cmd.threadId, cmd.agentId);
-  const replyTurn = await noteUserMessage(ctx, replyThread, cmd.question);
-  replyOut({ type: "started", agentId: cmd.agentId, question: cmd.question });
+  // §5.4: A RE-RUN ATTACHES TO THE TURN IT IS RE-RUNNING RATHER THAN WRITING A SECOND MESSAGE.
+  // Regenerate used to prefill the composer, so what arrived was an ordinary second turn appended
+  // to the thread — two questions rather than two answers to one, with §4.3's preview echoing the
+  // same sentence twice and the switcher's slot unreachable.
+  const replyTurn = cmd.regenerateOf
+    ? await turnForRegenerate(ctx, cmd.regenerateOf)
+    : await noteUserMessage(ctx, replyThread, cmd.question);
+  // THE TURN THIS IS A SECOND ANSWER TO, echoed back so every tab replaces the same reply rather
+  // than appending one. It is the server's verified id, not the client's claim: a regeneration
+  // whose id this workspace does not own falls back to an ordinary message and says so by carrying
+  // nothing here.
+  replyOut({
+    type: "started", agentId: cmd.agentId, question: cmd.question,
+    ...(cmd.regenerateOf && replyTurn ? { regenerateOf: replyTurn } : {}),
+  });
   let context = await buildExplainContext(ctx, cmd);
   // §7's attachments, resolved at SEND TIME rather than at attach time — a chip made five minutes
   // ago should ground the answer in the repository as it is now. Appended rather than prepended so
@@ -11367,11 +11486,16 @@ ${attached}`;
     );
   }
   const explainKey = await providerKeys.platformKey(ctx);
+  // §5.4's ROW, OPENED AROUND THE RESPONSE. Ordinal 1 for the first answer and 2 for a
+  // regeneration of it, each carrying the model and the effort levels that produced THIS one —
+  // which is the whole of what the store's header promises and what nothing was writing.
+  const replyEffort = await effortForThread(ctx, replyThread, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS);
+  const settleReply = await openVariant(ctx, replyTurn, EXPLAIN_MODEL, "anthropic", replyEffort);
   void streamExplain(context, cmd.question, {
     onDelta: (text) => replyOut({ type: "delta", agentId: cmd.agentId, text }),
     // Only fires when a model was actually asked. The no-key path streams the raw context and
     // completes without a call, and a workspace must not be billed for the fallback.
-    onUsage: (u) =>
+    onUsage: (u) => {
       meterPlatformCall(ctx, "llm.explain", {
         model: u.model,
         inputTokens: u.input,
@@ -11380,10 +11504,25 @@ ${attached}`;
         cacheWriteTokens: u.cacheWrite,
         payer: explainKey ? "workspace" : "platform",
         threadId: replyThread,
-      }),
-    onDone: () => { explaining = false; replyOut({ type: "done", agentId: cmd.agentId }); },
+      });
+      // The variant's own figures, from the same event the meter reads. Only fires when a model was
+      // actually asked, which is right for both: the no-key path produced no call to describe.
+      settleReply({ tokensIn: u.input, tokensOut: u.output });
+    },
+    onDone: () => {
+      explaining = false;
+      // THE COUNTS, ON THE PAYLOAD THAT RENDERS THEM. Absent when there is one variant, so the
+      // metadata row's slot collapses rather than showing `‹ 1/1 ›` on every turn in the product.
+      void variantCounts(ctx, replyTurn).then((counts) =>
+        replyOut({
+          type: "done",
+          agentId: cmd.agentId,
+          ...(Object.keys(counts).length > 0 ? { usage: { ...effortFields(replyEffort), ...counts } } : {}),
+        }),
+      );
+    },
     onError: (message) => { explaining = false; replyOut({ type: "error", agentId: cmd.agentId, message }); },
-  }, explainKey, await effortForThread(ctx, replyThread, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS));
+  }, explainKey, replyEffort);
 }
 
 // Kick off one run on startup unless suppressed (set JAROKU_NO_AUTORUN=1 to just serve).

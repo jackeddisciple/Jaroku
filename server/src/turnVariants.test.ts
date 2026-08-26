@@ -14,6 +14,10 @@
 //
 //   npm run test:turn-variants
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
 import { randomUUID } from "node:crypto";
 
 import { TurnVariantStore } from "./turnVariants.ts";
@@ -236,6 +240,65 @@ console.log("\ntenancy: another workspace's turn has no variants of ours");
   check("a cross-workspace write is refused by the composite key", refused);
   check("...and their turn is untouched", (await h.store.forTurn(otherCtx, theirs)).length === 1);
   await h.close();
+}
+
+// ---------------------------------------------------------------------------------------------
+// AND THAT ANY OF IT IS EVER REACHED, which is what this whole feature was missing.
+//
+// Every assertion above was true of the shipped code and none of it ran on a real turn. Migration
+// 057, this store, this suite, registration in export and retention, `TurnMeta.ordinal`/`.total`,
+// `presentSlots` giving `variants` a fixed position, a rendered `‹ n/m ›` switcher and an
+// `onSwitchVariant` prop — and no writer anywhere. `turn_variants` held only the backfill's rows,
+// every one at ordinal 1 with every metadata column null, so `total` was always 1, the metadata
+// row's slot could never be present, and both arrows carried `disabled={… || !onSwitchVariant}`
+// over a prop nothing passed. Regenerate PREFILLED the composer, so what arrived was an ordinary
+// second turn rather than a variant of the first.
+//
+// A source audit rather than an arithmetic one, and it is here because this is the suite about
+// variants: it reads the dispatch, the wire and the client for the four links the audit named.
+// ---------------------------------------------------------------------------------------------
+console.log("\nthe store is instantiated, written and read — outside a test");
+{
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const index = readFileSync(join(HERE, "index.ts"), "utf8");
+  const relay = readFileSync(join(HERE, "wsRelay.ts"), "utf8");
+  const client = (f: string): string => readFileSync(join(HERE, "..", "..", "client", "src", f), "utf8");
+
+  check("the store is constructed in production", /new TurnVariantStore\(store\.database\(\)\)/.test(index));
+  check("...and a variant is opened around a response", /await turnVariants\.begin\(ctx, turnId, \{/.test(index));
+  check("...settled by VARIANT id rather than by turn", /turnVariants\n?\s*.*\.settle\(ctx, variant\.id/.test(index.replace(/\s+/g, " ")));
+  check(
+    "...carrying the model and BOTH effort levels, which is what the clamp marker is derived from",
+    /effortRequested: effort\?\.supported \? effort\.requested : null/.test(index)
+      && /effortApplied: effort\?\.supported \? effort\.applied : null/.test(index),
+  );
+
+  // THE COUNTS, WHICH THE SWITCHER CANNOT RENDER WITHOUT. Absent below two, so the metadata row's
+  // slot collapses rather than showing `‹ 1/1 ›` on every turn in the product.
+  const counts = /async function variantCounts\([\s\S]*?\n\}/.exec(index)?.[0] ?? "";
+  check("the wire carries the two counts", /variant_ordinal: rows\.length, variant_total: rows\.length/.test(counts));
+  check("...and omits them when there is one variant", /if \(rows\.length < 2\) return \{\};/.test(counts));
+
+  // REGENERATE RE-RUNS, and attaches to the turn it is re-running rather than writing a second
+  // message. Without this the switcher has nothing to switch between however well it is wired.
+  check("the four composer commands carry the turn a re-run is OF", (relay.match(/regenerateOf\?: string;/g) ?? []).length === 4);
+  check("...verified server-side rather than taken on the client's word", /async function turnForRegenerate\(/.test(index));
+  check("...and used instead of writing a second user message", /cmd\.regenerateOf\s*\n?\s*\? await turnForRegenerate/.test(index));
+
+  const pane = client("components/BuildPane.tsx");
+  check("Regenerate DISPATCHES rather than prefilling", /sendExplain\(turn\.agentId, prompt, \{ kind: "agent" \}, undefined, undefined, turn\.itemId\)/.test(pane));
+  check("...and the switcher finally has a caller", /onSwitchVariant=\{/.test(pane));
+  check(
+    "...offered only where there are bodies to switch between",
+    /turn\.priorVariants\?\.length \?\? 0\) > 0/.test(pane),
+  );
+
+  // AND THE COMMENT THAT ASSERTED BEHAVIOUR THAT DID NOT EXIST. It said the server writes a new
+  // `turn_variants` row beside the old one, on a code path that prefilled a textarea.
+  check(
+    "the comment above it no longer describes a write nothing performed",
+    /IT DISPATCHES NOW RATHER THAN PREFILLING/.test(pane),
+  );
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

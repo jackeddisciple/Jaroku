@@ -143,6 +143,28 @@ export interface ReplyTurn extends TurnAnchor {
   status: "streaming" | "done" | "error";
   agentId: string;
   text: string;
+  /**
+   * §6.5's metadata, arriving with the answer rather than derived from it.
+   *
+   * The model that produced THIS reply, the effort actually spent on it, and §5.4's two counts once
+   * there is more than one variant. Optional because every reply that predates §5.4 having a writer
+   * has none, and because the no-key path streams the raw context with no model call to describe.
+   */
+  usage?: GenUsage;
+  /**
+   * §5.4: the answers this turn REPLACED, oldest first.
+   *
+   * IN MEMORY, WHICH IS NOT A SHORTCUT — it is the same decision migration 044 already made for the
+   * whole conversation: Jaroku's replies are not stored, and `hydrate` rebuilds a reloaded thread
+   * from stubs rather than from a transcript. `turn_variants` records what each answer COST so
+   * "which model wrote this?" stays answerable forever; the prose itself lives as long as the tab
+   * does, which is exactly as long as a comparison is being made.
+   *
+   * So the switcher is honest about its own lifetime: it appears when a regeneration produces a
+   * second answer in this session, and a reload leaves the durable record intact and the bodies
+   * gone. Storing them would be a transcript table §7 deliberately does not have.
+   */
+  priorVariants?: string[];
 }
 
 export type ChatTurn = UserTurn | PlanTurn | GenTurn | ProposalTurn | InfoTurn | ReplyTurn;
@@ -198,9 +220,11 @@ interface ChatState {
   editError: (e: In & { message: string; problems?: string[]; agentId?: string; proposalId?: string }) => void;
 
   // --- explain (unified composer): a streaming prose reply, no code change ---
-  replyStarted: (e: In & { agentId: string; question: string }) => void;
+  replyStarted: (e: In & { agentId: string; question: string; regenerateOf?: string }) => void;
+  /** §5.4: show a different one of this turn's answers. See the implementation. */
+  switchVariant: (e: In & { turnId: string; ordinal: number }) => void;
   replyDelta: (e: In & { agentId: string; text: string }) => void;
-  replyDone: (e: In & { agentId: string }) => void;
+  replyDone: (e: In & { agentId: string; usage?: GenUsage }) => void;
   replyError: (e: In & { agentId: string; message: string }) => void;
 }
 
@@ -515,16 +539,69 @@ export const useChatStore = create<ChatState>((set) => ({
 
   // --- explain (streaming prose reply, no code change) -------------------
 
-  replyStarted: ({ threadId, agentId, question }) =>
-    set((s) => ({
-      streamingAgentId: agentId,
-      streamingThreadId: threadId ?? null,
-      ...putTurns(s, threadId, [
-        ...turnsIn(s, threadId),
-        { id: turnId(), role: "user", text: question },
-        { id: turnId(), role: "jaroku", kind: "reply", status: "streaming", agentId, text: "" },
-      ]),
-    })),
+  replyStarted: ({ threadId, agentId, question, regenerateOf }) =>
+    set((s) => {
+      const turns = turnsIn(s, threadId);
+      // §5.4: A REGENERATION REPLACES THE ANSWER RATHER THAN APPENDING A SECOND CONVERSATION.
+      //
+      // Regenerate used to prefill the composer, so pressing it produced a second user turn with
+      // the same sentence in it and a second reply beneath — two questions rather than two answers
+      // to one. What somebody pressing it wants is the OTHER answer to the question they already
+      // asked, which is what the `‹ n/m ›` switcher was built to move between and why the metadata
+      // row reserves a slot for it.
+      //
+      // The replaced body moves into `priorVariants` so the switcher has something to show. See
+      // `ReplyTurn.priorVariants` for why that is memory rather than a table.
+      if (regenerateOf) {
+        const prior = turns.find((t) => t.role === "jaroku" && t.kind === "reply" && t.itemId === regenerateOf);
+        if (prior && prior.role === "jaroku" && prior.kind === "reply") {
+          return {
+            streamingAgentId: agentId,
+            streamingThreadId: threadId ?? null,
+            ...putTurns(s, threadId, replaceTurn(turns, prior.id, {
+              ...prior,
+              status: "streaming" as const,
+              text: "",
+              priorVariants: [...(prior.priorVariants ?? []), prior.text],
+            })),
+          };
+        }
+      }
+      return {
+        streamingAgentId: agentId,
+        streamingThreadId: threadId ?? null,
+        ...putTurns(s, threadId, [
+          ...turns,
+          { id: turnId(), role: "user", text: question },
+          { id: turnId(), role: "jaroku", kind: "reply", status: "streaming", agentId, text: "" },
+        ]),
+      };
+    }),
+
+  /**
+   * §5.4's switcher, moving between the answers this session has produced.
+   *
+   * A SWAP RATHER THAN A POINTER, because there is no list to index into: `text` is what is on
+   * screen and `priorVariants` is what is not, so showing an older one means exchanging them. That
+   * keeps every other reader of a `ReplyTurn` — the copy button, the notes rail, `turnSource` —
+   * reading the same field it always did, rather than each learning which variant is current.
+   */
+  switchVariant: ({ threadId, turnId: itemId, ordinal }) =>
+    set((s) => {
+      const turns = turnsIn(s, threadId);
+      const turn = turns.find((t) => t.role === "jaroku" && t.kind === "reply" && t.itemId === itemId);
+      if (!turn || turn.role !== "jaroku" || turn.kind !== "reply") return {};
+      const prior = turn.priorVariants ?? [];
+      // Ordinals are 1-based and the last one is what is on screen, so anything outside the
+      // priors' range is either the current answer or a number nothing produced.
+      const at = ordinal - 1;
+      if (at < 0 || at >= prior.length) return {};
+      const swapped = [...prior];
+      swapped[at] = turn.text;
+      return putTurns(s, threadId, replaceTurn(turns, turn.id, {
+        ...turn, text: prior[at]!, priorVariants: swapped,
+      }));
+    }),
 
   replyDelta: ({ threadId, agentId, text }) =>
     set((s) => {
@@ -534,7 +611,7 @@ export const useChatStore = create<ChatState>((set) => ({
       return putTurns(s, threadId, replaceTurn(turns, open.id, { ...open, text: open.text + text }));
     }),
 
-  replyDone: ({ threadId, agentId }) =>
+  replyDone: ({ threadId, agentId, usage }) =>
     set((s) => {
       const turns = turnsIn(s, threadId);
       const open = findReply(turns, agentId);
@@ -542,7 +619,12 @@ export const useChatStore = create<ChatState>((set) => ({
       return {
         streamingAgentId: null,
         streamingThreadId: null,
-        ...putTurns(s, threadId, replaceTurn(turns, open.id, { ...open, status: "done" })),
+        // KEPT WHEN THE EVENT CARRIES NONE, rather than nulled. A `done` with no usage is an answer
+        // that had nothing to report about itself — the no-key path streams the raw context and
+        // never calls a model — not one whose metadata was withdrawn.
+        ...putTurns(s, threadId, replaceTurn(turns, open.id, {
+          ...open, status: "done" as const, ...(usage ? { usage } : {}),
+        })),
       };
     }),
 
