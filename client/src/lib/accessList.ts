@@ -136,23 +136,30 @@ export function chipsFor(
  *
  * RELATIVE TIME IS TAKEN AS A PARAMETER rather than imported, so this module stays free of the
  * client's formatting layer and can be exercised by a suite with no clock of its own.
+ *
+ * TWO FORMATTERS, POINTING IN OPPOSITE DIRECTIONS, and that is not tidiness: `granted_at` is in the
+ * past and `expires_at` is in the future, and this panel is the first surface in the client to
+ * render a future instant at all. Passing one formatter for both is exactly how "expires in 8
+ * hours" became "expires just now" — `relTime` floors its delta at zero on purpose, for the fifty
+ * call sites that only ever describe something already finished.
  */
 export function provenanceLine(
   person: AccessPerson,
-  relTime: (iso: string) => string,
+  when: { ago: (iso: string) => string; until: (iso: string) => string },
 ): string {
   if (person.role === null) return "no longer in this workspace";
   if (person.provenance === "expired") {
+    // `ago`, because this one HAS passed — that is what makes it the expired case.
     return person.expires_at
-      ? `their grant expired ${relTime(person.expires_at)} — back to their workspace role`
+      ? `their grant expired ${when.ago(person.expires_at)} — back to their workspace role`
       : "their grant has expired — back to their workspace role";
   }
   if (person.provenance !== "grant") return "from workspace role";
 
   const by = person.granted_by_name ? ` by ${person.granted_by_name}` : "";
-  const when = person.granted_at ? ` · ${relTime(person.granted_at)}` : "";
-  const until = person.expires_at ? ` · expires ${relTime(person.expires_at)}` : "";
-  return `granted here${by}${when}${until}`;
+  const at = person.granted_at ? ` · ${when.ago(person.granted_at)}` : "";
+  const until = person.expires_at ? ` · expires ${when.until(person.expires_at)}` : "";
+  return `granted here${by}${at}${until}`;
 }
 
 /**

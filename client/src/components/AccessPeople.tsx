@@ -27,7 +27,7 @@ import { EmptyState } from "./EmptyState.tsx";
 import { quietBtn, secondaryBtn } from "./buttons.ts";
 import { AlertTriangleIcon, UserPlusIcon } from "./panelIcons.tsx";
 import { avatarColor, avatarLetter } from "../lib/memberList.ts";
-import { absTime, relTime } from "../lib/format.ts";
+import { absTime, relTime, relUntil } from "../lib/format.ts";
 import { AGENT_CAPABILITIES } from "../lib/capabilities.ts";
 import {
   cappedLine, chipsFor, matchesAccess, orderAccess, provenanceLine, revokeBlockedReason,
@@ -161,7 +161,7 @@ function PersonRow({
         </div>
 
         <div className="text-tiny text-faint" title={person.granted_at ? absTime(person.granted_at) : undefined}>
-          {provenanceLine(person, relTime)}
+          {provenanceLine(person, { ago: relTime, until: relUntil })}
         </div>
         {capped && (
           <div className="flex items-start gap-1 text-tiny" style={{ color: STATUS.error }}>

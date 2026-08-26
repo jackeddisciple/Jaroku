@@ -23,7 +23,7 @@ import { Truncate } from "./Truncate.tsx";
 import { Chip } from "./Chip.tsx";
 import { quietBtn, secondaryBtn } from "./buttons.ts";
 import { AlertTriangleIcon, TicketIcon, UserPlusIcon } from "./panelIcons.tsx";
-import { absTime, relTime } from "../lib/format.ts";
+import { absTime, relTime, relUntil } from "../lib/format.ts";
 import { sendRevokeInvite } from "../lib/socket.ts";
 import { ICON, STATUS } from "../lib/tokens.ts";
 import type { PendingInvite } from "../store/accessStore.ts";
@@ -110,7 +110,10 @@ export function AccessInvites({
               )}
             </div>
             <div className="text-tiny text-faint" title={absTime(invite.createdAt)}>
-              sent {relTime(invite.createdAt)} · expires {relTime(invite.expiresAt)}
+              {/* SENT is behind us and EXPIRES is ahead of it, so the two take different
+                  formatters — one `relTime` for both is what made a live invitation read
+                  "expires just now". */}
+              sent {relTime(invite.createdAt)} · expires {relUntil(invite.expiresAt)}
             </div>
           </div>
 

@@ -67,8 +67,12 @@ function person(over: Partial<AccessPerson> & { user_id: string }): AccessPerson
   };
 }
 
-/** A fixed relative-time function, so no assertion here depends on the clock. */
-const rel = (): string => "3 days ago";
+/**
+ * Fixed formatters, so no assertion here depends on the clock — and TWO of them, pointing in
+ * opposite directions, because the panel renders both a past instant and a future one. Passing one
+ * for both is exactly the mistake that made a grant with eight hours left say "expires just now".
+ */
+const when = { ago: (): string => "3 days ago", until: (): string => "in 8 hours" };
 
 // ---------------------------------------------------------------------------------------------
 // §10.2 — every row states its provenance.
@@ -78,8 +82,8 @@ console.log("\nevery person row says WHY they have what they have");
 {
   const fromRole = person({ user_id: "a" });
   check(
-    provenanceLine(fromRole, rel) === "from workspace role",
-    `access with no grant says where it came from ("${provenanceLine(fromRole, rel)}")`,
+    provenanceLine(fromRole, when) === "from workspace role",
+    `access with no grant says where it came from ("${provenanceLine(fromRole, when)}")`,
   );
 
   const granted = person({
@@ -92,7 +96,7 @@ console.log("\nevery person row says WHY they have what they have");
     granted_at: "2026-01-01T00:00:00.000Z",
     role: "admin",
   });
-  const line = provenanceLine(granted, rel);
+  const line = provenanceLine(granted, when);
   check(line.includes("granted here"), `a grant says it was granted here ("${line}")`);
   // WHO, NOT JUST THAT. §10.2 asks for "granted here by [name]", and the name is the half that
   // makes the line actionable: an admin who does not recognise a grant needs somebody to ask.
@@ -100,13 +104,19 @@ console.log("\nevery person row says WHY they have what they have");
   check(line.includes("3 days ago"), "...and when");
 
   const timed = person({ ...granted, user_id: "c", expires_at: "2026-06-01T00:00:00.000Z" });
-  check(provenanceLine(timed, rel).includes("expires"), "a time-boxed grant says when it stops by itself");
+  const timedLine = provenanceLine(timed, when);
+  check(timedLine.includes("expires"), "a time-boxed grant says when it stops by itself");
+  // AND SAYS IT POINTING FORWARDS. `relTime` floors its delta at zero for the fifty call sites that
+  // describe something already finished, so a future instant through it reads "just now" — which is
+  // not a smaller answer about a grant with eight hours left, it is a confident wrong one.
+  check(timedLine.includes("in 8 hours"), `...in the future tense (${timedLine})`);
+  check(!timedLine.includes("expires 3 days ago"), "...rather than in the past tense");
 
   // AN EXPIRED GRANT READS AS THE ROLE CASE PLUS A REASON, because that is what it now is: the
   // person fell back to their workspace role. A line still saying "granted here" would describe a
   // row whose capabilities no longer come from the grant.
   const expired = person({ ...granted, user_id: "d", provenance: "expired", expires_at: "2026-01-02T00:00:00.000Z" });
-  const expiredLine = provenanceLine(expired, rel);
+  const expiredLine = provenanceLine(expired, when);
   check(expiredLine.includes("expired"), `an expired grant says so ("${expiredLine}")`);
   check(expiredLine.includes("workspace role"), "...and that the workspace role is what is left");
 
@@ -114,7 +124,7 @@ console.log("\nevery person row says WHY they have what they have");
   // thing an admin needs to decide about rather than simply vanishing.
   const gone = person({ user_id: "e", role: null, capabilities: [], fromRole: [] });
   check(
-    provenanceLine(gone, rel) === "no longer in this workspace",
+    provenanceLine(gone, when) === "no longer in this workspace",
     "a grant belonging to somebody who has left says so",
   );
 }

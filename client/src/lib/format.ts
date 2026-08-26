@@ -34,6 +34,40 @@ export function relTime(iso: string): string {
   });
 }
 
+/**
+ * The same idea pointing forwards: "in 8 hours", "in 3 days".
+ *
+ * A SIBLING RATHER THAN A SIGN INSIDE `relTime`, and the clamp above is why. `relTime` floors its
+ * delta at zero deliberately — every one of its ~fifty call sites describes something that has
+ * ALREADY happened, and a clock a second ahead of the server would otherwise render a run that just
+ * finished as "in 1s". Teaching it to look forwards would remove that protection from all of them
+ * to serve the two places that need it.
+ *
+ * THE TWO PLACES ARE BOTH THIS RELEASE'S. A grant's `expires_at` and an invitation's `expires_at`
+ * are the first future instants this client has ever rendered, and they went through `relTime` — so
+ * a grant with eight hours left said "expires just now", which is not a smaller answer than the
+ * right one, it is a confident lie about the one thing a time-boxed grant exists to communicate.
+ *
+ * A PAST INSTANT FALLS BACK TO `relTime`, so a caller holding a timestamp that may be either does
+ * not have to branch: an expiry that has already passed reads "2h ago" rather than "in 0s".
+ */
+export function relUntil(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "";
+  const s = Math.floor((t - Date.now()) / 1000);
+  if (s <= 0) return relTime(iso);
+  if (s < 60) return "in under a minute";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `in ${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `in ${h} hour${h === 1 ? "" : "s"}`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `in ${d} day${d === 1 ? "" : "s"}`;
+  // Beyond a month the number stops being useful and the DATE starts being: "in 47 days" is
+  // something somebody has to convert, and a date is something they can put in a calendar.
+  return `on ${new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short" })}`;
+}
+
 /** The exact moment, for the `title` on any element rendering `relTime`. */
 export function absTime(iso: string): string {
   const t = Date.parse(iso);
