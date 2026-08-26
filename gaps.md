@@ -2181,6 +2181,66 @@ version" is a real share, works today, and has two working call sites to copy.
 | Implementation Effort | 1/10 |
 | Confidence | 10/10 |
 
+### Resolution
+
+**Status: RESOLVED**
+
+**Implemented:**
+
+Removed, which is what the finding recommended and what this repository's own precedent requires —
+`5d0b034` removed a greyed control with an explanatory tooltip, and `EnforcementStrip` states the
+principle: *"A control that looked like it lifted a suspension and did not would be worse than no
+control."* A comment where it stood records why, so it does not come back as an obvious improvement.
+
+**Deliberately not repointed at `downloadVersion`,** though that was the adjacent capability the
+finding offered. Both of the export's existing entry points are **contextual** — a card's overflow
+and the file browser showing a version — because what is exported is *one version of one agent*.
+This bar renders on Threads, the Inbox and Activity, where no version is in view, so a third entry
+point would have to guess which one it meant. That is how "Export current version" becomes "export
+whichever version happened to be in the store."
+
+**And a suite, because nothing could observe this.** A button with no `onClick` typechecks,
+renders, and passed every check that existed. `test:dead-controls` reads every `.tsx` under
+`client/src` and fails on a `<button>` that is enabled, unspread, not a form submit, and has no
+handler. It found 365 buttons and cleared all of them.
+
+Two details that make it a real check rather than a green one:
+
+- **Comments are stripped first, with line numbers preserved.** Four files argue in prose about
+  what a `<button>` should be — *"a real `<button>` with aria-haspopup"*, *"it cannot be a real
+  `<button>`"* — and the first run reported all four as dead controls. A structural audit that
+  cries wolf is one nobody keeps.
+- **It was watched refusing something.** Share was temporarily reinstated and the suite failed
+  with `DEAD: components/TopBar.tsx:372`, then passed again once removed. A check nobody has seen
+  refuse anything might be stuck at true — the same discipline `test:connector-stripe` applies to
+  its scanner.
+
+Its limits are written into its own header: it catches a control with *no* handler, which is the
+shape that shipped. A handler that is present and does nothing is a different failure, and GAP-008's
+exhaustive switch answers that one through the typechecker instead.
+
+**Files Changed:**
+
+- `client/src/components/TopBar.tsx` — the button, its import, and the header line
+- `client/src/components/deadControls.test.ts` — new
+- `client/package.json`, `.github/workflows/ci.yml` — registered in both, per the house rule
+
+**Verification:**
+
+`test:dead-controls` passes over 156 components and 365 buttons; the negative case was verified by
+reintroducing the control. It also asserts by name that `ShareOutIcon` is absent from the top bar,
+that no control there explains itself with a *"not available yet"* tooltip, and that
+`downloadVersion` still has exactly its two contextual call sites — so a future "tidy-up" that
+removed the real share while leaving the stub fails here.
+
+**Regression Coverage:**
+
+`test:type-scale` and `test:colour-system` — the client's other whole-source audits — both pass, and
+the client typechecks. `ShareOutIcon` stays in `panelIcons.tsx`: it is a glyph library entry rather
+than a feature, and removing an icon nobody renders is a different change.
+
+**Resolved On:** 2026-08-26
+
 ---
 
 # Backend Capabilities With No UI
@@ -2597,4 +2657,5 @@ brief spends a page on.
 | GAP-009 | RESOLVED | `entitlements.ts`, `entitlementGate.ts`, `plans.ts`, `index.ts`, `entitlements.test.ts`, `entitlementStore.ts`, `UpsellCard.tsx`, `UsagePanel.tsx`, `types.ts` | `test:entitlements` holds all seven kinds from both Free and Pro, plus the top of the ladder answering null; `test:entitlement-store` holds the client guard |
 | GAP-014 | RESOLVED | `web/pricing.html`, `checkoutSurfaces.test.ts` | `test:checkout-surfaces` maps every sold feature row to an `EntitlementKind` and asserts the three removed names stay gone |
 | GAP-015 | RESOLVED | `graphIntrospect.ts`, `index.ts`, `graphIntrospect.test.ts`, `types.ts`, `GraphView.tsx`, `truncatePath.test.ts`, `ci.yml` | `test:truncate-path` asserts what the truncator does to prose; `test:graph-introspect` holds the two-field shape on both sides |
+| GAP-016 | RESOLVED | `TopBar.tsx`, `deadControls.test.ts` (new), `client/package.json`, `ci.yml` | `test:dead-controls` clears 365 buttons and was watched refusing a reinstated Share at `TopBar.tsx:372` |
 | GAP-003 | RESOLVED | `wsRelay.ts`, `channels.test.ts`, `wsRelay.test.ts`, `types.ts`, `buildStore.ts`, `socket.ts`, `AddMenu.tsx`, `BuildPane.tsx` | `test:channels` audits all 13 call sites from source; `test:relay` drives a throwing read and asserts the frame |

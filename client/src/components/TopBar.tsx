@@ -1,5 +1,4 @@
-// Top bar (doc §4.1): brand, the active agent + its live status, the provider chip, and the
-// Share / Deploy actions.
+// Top bar (doc §4.1): brand, the active agent + its live status, the provider chip, and Deploy.
 //
 // Deploy is real now, and it does the smallest thing that is honest: it opens the Deploy
 // panel, where the decisions live. A one-click button that started a deploy from here would
@@ -7,7 +6,9 @@
 // and that is exactly the review the panel exists to give them. While a deploy is running the
 // button becomes the way to stop it, the Run/Cancel swap EvalRunBar already uses.
 //
-// Share still has no backend, and is still an honest stub.
+// Share is gone — see the note where it stood. It had no backend, no handler and no `disabled`,
+// on every screen in the application, which is the one shape this codebase argues against
+// everywhere else.
 
 import { useEffect, useRef } from "react";
 import { useBuildStore } from "../store/buildStore.ts";
@@ -25,7 +26,7 @@ import { BRAND, ICON, TYPE } from "../lib/tokens.ts";
 
 import { Truncate } from "./Truncate.tsx";
 import { Chip } from "./Chip.tsx";
-import { GitBranchIcon, GithubIcon, KeyIcon, ShareOutIcon, StopIcon } from "./panelIcons.tsx";
+import { GitBranchIcon, GithubIcon, KeyIcon, StopIcon } from "./panelIcons.tsx";
 import { useGithubStore } from "../store/githubStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useEvalStore } from "../store/evalStore.ts";
@@ -369,16 +370,26 @@ export function TopBar() {
         {/* The provider chip, now also the way in to the keys behind it. */}
         <ProviderMenu provider={provider} model={model} />
 
-        {/* A GLYPH. The title bar carries no other word, and "Share" was the only text button in
-            it — a five-letter label on a control whose mark is unambiguous, sitting in the one
-            strip that is on screen on every surface of the app. */}
-        <button
-          title="Share — not available yet"
-          aria-label="Share"
-          className={iconBtn}
-        >
-          <ShareOutIcon size={ICON.sm} />
-        </button>
+        {/* SHARE IS GONE, and its absence is the honest version of what it was.
+
+            It had no handler and no `disabled` — enabled, focusable, in tab order, on every
+            surface of the application, and the only signal that it did nothing was a tooltip you
+            had to hover the control to find. That is the one element in an otherwise rigorous UI
+            that behaved as decoration, and it sat in the one strip present on every screen.
+
+            The precedent is this repository's own: `5d0b034` removed a greyed control with an
+            explanatory tooltip on the grounds that "a greyed control with 'only an owner can do
+            this' beside it has decided somebody should keep looking at it", and EnforcementStrip
+            states the principle directly — "a control that looked like it lifted a suspension and
+            did not would be worse than no control."
+
+            NOT REPOINTED AT THE EXPORT, though that was the obvious adjacent capability.
+            `downloadVersion` is a real share and works today, and both of its entry points are
+            CONTEXTUAL — the overflow on a card, and the file browser showing a version — because
+            the thing being exported is one version of one agent. This bar renders on Threads, the
+            Inbox and Activity, where no version is in view and the control would have to guess
+            which one it meant. A third entry point with the weakest context is how "Export current
+            version" becomes "export whichever version happened to be in the store." */}
         {/* §8.2's Deploy row, at its other entry point. `deploy` and `cancelDeploy` are both
             `deploy:manage`, the admin's — the checklist files this under `agent:write`, which is a
             member capability, and following it here would have put a Deploy button in the title

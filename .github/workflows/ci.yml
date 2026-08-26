@@ -907,6 +907,14 @@ jobs:
           # tokens resolves to real path data — which is what turns a silent blank square in the
           # control bar into a named failure on the upgrade that caused it.
           npm run test:icons
+          # AND THAT EVERY BUTTON DOES SOMETHING, which is the sibling failure to the one above:
+          # `test:icons` catches a control that lost its GLYPH, this catches one that never had a
+          # HANDLER. Share sat in the top bar — the strip on every surface of the app — enabled,
+          # focusable, in tab order, with a tooltip reading "not available yet" as the only signal.
+          # A button with no onClick typechecks, renders, and passed every suite there was. The
+          # principle was already written down twice in the client's own comments and neither
+          # statement had a check behind it.
+          npm run test:dead-controls
           # AND WHICH MARK A TOOL FILE GETS, which is a table of regexes and is therefore an
           # ORDERING — one that looks obviously right in any arrangement and typechecks in all of
           # them. The mapper runs on every tool path including the bespoke ones a model names, so
