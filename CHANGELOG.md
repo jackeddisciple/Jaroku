@@ -8,6 +8,220 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.3.9 : Bug Fixes and Product Audit — The Last Link, Sixteen Times
+
+Every release since v0.3.0 connected an entry point and a persistence layer, and this one is about
+what a forensic audit of the whole product found sitting between them. The finding is a single
+shape, repeated: **the value is stored, the value is displayed, and the value is not read by the
+thing it was supposed to change.** Reasoning effort, composer attachments, connector scoping,
+response variants, memory decisions, forked objects and restored versions are seven instances of
+it, and in every one the expensive part — schema, store, route, component, empty state, suite —
+was finished and the missing piece was between five and fifty lines.
+
+The audit is `gaps.md`: sixteen confirmed findings, each traced along one chain from backend
+capability to user action and back, with the break recorded. All sixteen are closed here, one
+commit each, each left with CI green before the next was started. Two more were discovered while
+closing them and are recorded in the same file rather than absorbed quietly.
+
+**The one to fix first was the one that made the rest visible.** `WsRelay.answer()` — the shared
+path for every point-to-point read on the socket — had three outcomes and expressed two: a success
+was a message, a refusal was a message, and a **failure was a line on a server console the person
+who asked cannot see.** That is not a quieter error. Every empty state in this product is designed
+to mean "there is nothing here", so a swallowed failure spends that meaning on a lie: one
+unreadable object made the Code view, the ⊕ attachment picker and the version browser all agree
+that an agent with two published versions had never been generated. Closing it first is what turned
+the next two findings from theory into a reproduction.
+
+### Fixed
+
+- **A read that failed answered nothing at all.** `answer()` takes a required `onError` returning
+  the channel's own error member, and all thirteen call sites supply one. Required rather than
+  optional is the structural half: a read command added next year cannot be written without
+  deciding what its failure looks like, and `test:channels` reads every call site out of the source
+  to say so. `loadHistory` and `loadRun` answer on the diagnostics rail instead of their own
+  channels, deliberately — a full-snapshot channel with no error member would mean every consumer
+  learning a second shape for a read that has never failed in production.
+- **`forkAgent` published a version whose objects were never written.** An object's key is per
+  agent — `ws/<workspace>/agents/<agentId>/v<n>/<path>` — so a manifest copied across an agent
+  boundary names a prefix nobody wrote. The row was correct, the version list was correct, the byte
+  total was correct, and every read of the content threw. `addVersion` is right for a *restore*,
+  where the objects live under the same id; copying that call into fork was the whole defect. It
+  publishes the source's **files** now, reading them before any row is written so an unreadable
+  source refuses with a sentence instead of producing a second broken agent.
+- **A restore was broken in the object store as well as on disk, and the audit had it as working.**
+  The same defect one axis over: a key carries the version it was written under, so a manifest
+  handed to `addVersion` reserves v5 and names paths that exist only under v3. It read as correct
+  because the read threw, the throw was swallowed, and the panel not changing looked exactly like a
+  refresh that had. It publishes the old version's files now — which also strengthens the property
+  the forward publish exists for, since a version that owns its objects cannot be broken by a
+  retention sweep collecting the one it pointed at — and materialises them where a run spawns from.
+- **Composer attachments were picked, priced by the server, rendered with their token cost, and
+  dropped on the floor.** A complete backend and a complete front end with no line between them:
+  `turn_attachments` held zero rows, and an over-budget rail **blocked the send of a message** whose
+  attachments were never going to leave the browser. The refs ride the command now — at Send the
+  turn has no id yet, which is why `github.attachments` already worked that way — and
+  `attachTurn` is one implementation of the cap, the server-side re-measurement, the budget check
+  and the all-or-none write, called by both the route and the dispatch. They reach the prompt too:
+  a persisted ref nothing reads is a record, not a feature.
+- **Reasoning effort was persisted, resolved, rendered — and never applied.** `planEffort`, the one
+  adapter §3.2 required, was written, tested, and reached from nothing, so somebody setting High on
+  a hard generation got the provider's default. It is called at all four model calls the composer
+  can start, and the run path carries the level to `models.py` on the same seam `JAROKU_PROVIDER`
+  already uses. The adapter gained a **per-request** ceiling: every builder sends its own
+  `max_tokens` — 600 for a plan, 700 for an explain — and a thinking block is spent out of *that*.
+  The inference that this was enforced was entirely reasonable, which is what made it a bad failure
+  rather than a small one: `permission_mode`, the column beside it on the same row, is enforced.
+- **Connector scoping was enforced for MCP servers only.** The composer's deck lists reviewed
+  connectors, user-secret connectors and MCP servers in one list and lets you disable any of them;
+  the dispatch applied those decisions to one of the three kinds. Switching Gmail off dimmed a tile,
+  persisted a row, and left its tools bound, its token minted and `googleapis.com` on the egress
+  allowlist. One narrowed list now feeds the credentials, the egress and the runtime, and the
+  connector templates — host-owned and copied byte-for-byte into every project, **including ones
+  already generated** — refuse by name rather than reporting a credential problem that does not
+  exist.
+- **`runnable` was derived from the local filesystem, never from the version manifest.** The comment
+  above it already said the manifest answers for a published agent; the code asked the disk twice.
+  So a fork, a restore on another replica, a restored backup or any hosted deployment with an
+  ephemeral disk reported an agent as unrunnable and blamed a missing `agent.py` on a filesystem the
+  user cannot see. One query for the whole workspace answers it now, and `ensureProjectDir` is the
+  only way the run, the plan and the deploy obtain a project directory — which makes the local run
+  path correct on a second gateway replica for the first time.
+- **Eight of twenty-nine Inbox actions rendered controls that did nothing**, two of them a card's
+  **primary** control, on a surface whose stated goal is that a board can be cleared without leaving
+  it. Six had a working command one import away. `runAction`'s switch is exhaustive now — a new
+  action name fails the client typecheck rather than shipping as a dead glyph — and its return value
+  is read at both call sites, where it used to be discarded so a closing menu was the only feedback
+  either way.
+- **The upsell card named a plan that does not unlock what was refused.** `nextTier` was a
+  two-branch heuristic — Free's next step is Pro, a paid tier's is Team — standing in for a lookup,
+  and it is false for the three kinds a Free workspace is most likely to hit: GitHub sync and
+  per-agent access are Team-only, and **Pro's seat count is 1, the same as Free**. Somebody
+  inviting a colleague was told "Pro raises this limit", paid $20 a month, and found out when the
+  invite refused again. It is a lookup now, over the same projection the refusal was made with, and
+  a kind no plan grants renders as "No plan currently includes this" with no button at all.
+- **Response variants had a table, a store, a suite, a slot in the metadata row and a switcher with
+  both arrows disabled over a prop nothing passed.** Regenerate put the sentence back in the
+  composer and stopped. It dispatches now, attaching a second answer to the turn it is re-running
+  rather than appending a second question.
+- **An agent's MCP grants were fixed at generation.** The Capabilities tab detected and explained a
+  grant whose server had left the workspace and offered no way to remove it, and `forkAgent`'s own
+  notice told people their fork's grants start empty — advice that is only sensible if grants can
+  be filled. `setAgentTools` is the first writer of that column that is not a creation.
+- **`memory_proposal` could not be answered.** Its primary control did nothing *and* prevented the
+  card expansion that would have shown the evidence, its two verbs closed a menu and changed
+  nothing, and its resolve predicate read a `decision` field nothing wrote. `noteMemoryDecision` had
+  existed since the type shipped, reachable only from a test.
+- **The pricing page sold three capabilities the product does not have.** Batch approvals, the
+  policy engine and evals as a CI gate name flags that gate nothing — which
+  `entitlementGate.ts` records openly, in the right order: declare the flag, wire it when the
+  surface lands. What went wrong is that the marketing shipped *ahead* of the flag rather than
+  behind it, and it was the only commercial claim in this repository the code contradicted.
+- **Every external pull request was told a collaborator could approve real providers, and the state
+  that sentence described was unreachable by construction.** `approvedForSha` needed a paid check
+  row, a paid row needed a paid run, and a paid run needed `approvedForSha`. The maintainer it was
+  addressed to went looking and found nothing.
+- **The Graph tab's error was truncated to a bare filename.** The one error path in this product
+  wired end to end delivered *less* than a raw string dump: a 120-character diagnosis went through
+  a truncator built to keep the last path segment, so `could not read this agent's files: no such
+  object: ws/…/v2/.env.example` rendered as `.env.example`, under a heading it had no visible
+  relationship to, with the real sentence one hover away.
+- **Share was a permanently enabled no-op** in the one strip present on every surface of the
+  application — focusable, in tab order, with a tooltip you had to hover a dead control to read.
+
+### Added
+
+- **`answerMemoryProposal`**, `setAgentTools` and a GitHub Check Run **requested action** — three
+  commands for three states that had a UI and no way in. The last is a real round trip: the button
+  is declared on the check gated on `offersApproval` (the caller that function was written for and
+  never had), `check_run.requested_action` parses into its own event, and the handler asks GitHub
+  whether the sender has write access before writing anything.
+- **`test:dead-controls`**, a new client suite: no `<button>` renders enabled with nothing behind
+  it. It reads every `.tsx` under `client/src`, strips prose first — four files argue at length
+  about what a `<button>` should be, and the first run reported all four as dead controls — and was
+  **watched refusing a reinstated Share** before being kept. A check nobody has seen refuse anything
+  might be stuck at true.
+- **A structural gate on the pricing page.** `test:checkout-surfaces` reads the Features table and
+  requires every row to map to an `EntitlementKind` — a *check somebody can be refused by* rather
+  than a flag somebody declared, which is the difference between a claim and a delivery.
+- **`features` on the in-app plan list.** The upsell card's whole job is "Team turns this on", and
+  until now the only surface that could corroborate it was the public pricing page, which a paying
+  customer does not open.
+- **A collaborator-permission route on the GitHub fixture.** Without it `hasWriteAccess` swallowed a
+  404 and answered false for every login, so the approval's success path was unreachable in the
+  suite exactly as the circular `approvedForSha` made it unreachable in production.
+
+### Changed
+
+- **`noteUserMessage` and `threadStore.addItem` return the turn id.** Four tables hang off that row
+  and nothing could reach it without reading the thread back — which is why composer attachments had
+  no turn to attach to at the moment they were sent.
+- **`linksForRepo`'s branch is optional.** A `check_run` delivery carries no branch to narrow by, and
+  guessing one would be inventing a fact. Both existing callers are byte-identical.
+- **`view_all_failures` is removed from the Inbox registry.** There is no filtered run list in the
+  product to send anybody to, so it rendered in an overflow, closed the menu, and did nothing. A
+  menu that closes reads as confirmation, which makes a silent no-op worse here than an absent
+  entry. It comes back when a destination does.
+- **`enable_gate` is relabelled and repointed.** It promised something no command could do: the
+  confirmation gate is off because a line in the agent's *own generated source* turned it off, so
+  only an edit can put it back. It navigates to the code now, labelled "Open the code that turns it
+  off" — the old label is why it read as a broken button instead of as a link.
+- **`DraftAttachment.error` and the send-block that read it are gone.** No code path could set that
+  field, so it blocked Send on a state that could never exist, over a payload that was never going
+  to leave the browser. A refusal now arrives in the conversation, beside the message it is about.
+
+### Migrations
+
+None. Every table this release writes to already existed — `turn_attachments`, `turn_variants`,
+`agent_grants`, `check_runs`, `conversation_settings` and `agents.mcp_tools` were all in the schema
+and all of them had fewer writers than readers. `schema/events.md` is untouched.
+
+### Verified
+
+- **Sixteen commits for sixteen findings**, each pushed to `origin/main` on its own and each left
+  with CI green before the next was started, plus one repair when a suite added to CI turned out
+  unable to run there.
+- **Nine suites gained a reachability audit, and each is a source audit deliberately.** The pattern
+  this release is about defeats arithmetic assertions: every check already in `test:attachments`,
+  `test:effort` and `test:turn-variants` was *true* of code that never ran on a real turn. So those
+  suites now read the dispatch, the wire and the client for the links themselves — four dispatch
+  sites, three payload sites, four commands carrying a field, both `sendPlanAgent` call sites.
+- **Two assertions were written from the broken end first**, because one that only exercised the
+  fixed path would have passed on the shipped code too: a manifest copied across an agent boundary
+  still throws `ObjectNotFound`, and one copied onto a new version number still resolves to nothing.
+- **`test:entitlements` holds the four kinds the old heuristic got right as well as the three it got
+  wrong**, since a lookup that special-cased the failures would pass the wrong three alone.
+- **The exhaustiveness check proved itself while being written**, failing the build naming
+  `set_secret | set_mcp_credential | raise_ceiling | view_all_failures` — exactly the class of
+  omission that shipped.
+- **One defect was found by the implementation rather than by the audit**, and it would have shipped
+  as a silent success: migration 045 allows one live check per commit, so opening the approval's
+  paid row while the dry-run check was still running **read that row back and wrote nothing** —
+  `approvedForSha` stayed false and the re-run went out on the fake provider having reported
+  success. Recorded as GAP-018.
+
+### Still owed
+
+- **Forty-five server suites are registered in `package.json` and absent from `ci.yml`** — recorded
+  as GAP-017, and found by this pass rather than reported by it: two of the four suites this work
+  needed for verification turned out not to run. Three were added. The rest need triage per suite
+  rather than a bulk addition, and `test:edit-versions` is the proof: it validates a generated
+  project by importing it with Python, and the server job has node and nothing else, so it fails
+  there for a reason that says nothing about the code under test. It is recorded in the workflow as
+  deliberately absent, with the reason, rather than left looking forgotten.
+- **Forks created before this release still have no objects.** They report an honest read failure
+  now instead of an empty file list, which is the recoverable state; re-forking from the source
+  produces a working copy.
+- **The variant switcher's bodies live in memory.** That is migration 044's own decision about
+  Jaroku's prose applied consistently — replies are not stored and a reloaded thread is rebuilt from
+  stubs — so `turn_variants` records what each answer *cost* forever and the text lives as long as
+  the tab does. Storing the bodies would be a transcript table §7 deliberately does not have.
+- **Everything v0.3.8 left owed is still owed**, unchanged by this pass: the personal-workspace
+  Exposure sentence, per-agent narrowing on indirect ids, and cross-replica live sessions.
+- **`approvalBatchApprove`, `policyEngine` and `evalCiGate` still gate nothing**, which remains the
+  correct order. They are simply no longer sold ahead of the surfaces they will gate.
+
+---
+
 ## v0.3.8 : The Access Tab — Per-Agent Access, and the One Section That Says What This Does Not Cover
 
 A workspace role has always been the whole answer to "what may this person do", and it is the same

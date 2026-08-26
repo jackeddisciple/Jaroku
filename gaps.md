@@ -3325,17 +3325,162 @@ brief spends a page on.
 |---|---|---|---|
 | GAP-001 | RESOLVED | `index.ts`, `projectStore.test.ts`, `agentAdversarial.test.ts` | `test:project-store` proves the bare-row fork still throws and the published one reads back byte for byte; `test:agent-adversarial` holds the call site |
 | GAP-002 | RESOLVED | `index.ts`, `projectStore.test.ts`, `agentAdversarial.test.ts`, `editVersions.test.ts` | `test:project-store` proves the bare row is unreadable and the disk stale, then that publish + materialise fixes both; finding was understated — see its Resolution |
+| GAP-003 | RESOLVED | `wsRelay.ts`, `channels.test.ts`, `wsRelay.test.ts`, `types.ts`, `buildStore.ts`, `socket.ts`, `AddMenu.tsx`, `BuildPane.tsx` | `test:channels` audits all 13 call sites from source; `test:relay` drives a throwing read and asserts the frame |
 | GAP-004 | RESOLVED | `http/turns.ts`, `index.ts`, `wsRelay.ts`, `threadStore.ts`, `attachments.test.ts`, `socket.ts`, `BuildPane.tsx`, `AttachmentRail.tsx` | `test:attachments` gained a 15-claim reachability audit — every arithmetic assertion in it was already true of code that never ran on a turn |
 | GAP-005 | RESOLVED | `effort.ts`, `index.ts`, `planner.ts`, `generator.ts`, `editor.ts`, `explainer.ts`, `models.py`, `effort.test.ts` | `test:effort` gained a per-request ceiling section and a reachability audit over all four dispatch sites, three payload sites and the run env |
 | GAP-006 | RESOLVED | `index.ts`, `tool_templates/__init__.py` + all six templates, `connectorLoop.test.ts` | `test:connector-loop` §9 holds all three consumers at once — egress, credentials and the runtime guard — plus the dispatch read as text |
 | GAP-007 | RESOLVED | `agents.ts`, `index.ts`, `agentFiles.test.ts`, `ci.yml` | `test:agent-files` proves a published agent is runnable with no directory, that the whole workspace costs one statement, and that all three call sites materialise on demand |
 | GAP-008 | RESOLVED | `InboxActions.tsx`, `InboxCardActions.tsx`, `inboxStore.ts`, `InboxView.tsx`, `inboxBoard.test.ts`, `registry.ts`, `types.ts`, `inboxActionIcons.tsx` | `test:inbox-board` reads the server's vocabulary and requires a case for all 29; the exhaustive switch failed the build naming four omissions while being written |
 | GAP-009 | RESOLVED | `entitlements.ts`, `entitlementGate.ts`, `plans.ts`, `index.ts`, `entitlements.test.ts`, `entitlementStore.ts`, `UpsellCard.tsx`, `UsagePanel.tsx`, `types.ts` | `test:entitlements` holds all seven kinds from both Free and Pro, plus the top of the ladder answering null; `test:entitlement-store` holds the client guard |
-| GAP-010 | RESOLVED | `index.ts`, `wsRelay.ts`, `turnVariants.test.ts`, `chatStore.ts`, `BuildPane.tsx`, `socket.ts`, `types.ts` | `test:turn-variants` gained a 14-claim reachability audit — every arithmetic assertion in it was true of a store nothing instantiated |
+| GAP-010 | RESOLVED | `index.ts`, `wsRelay.ts`, `turnVariants.test.ts`, `effort.test.ts`, `chatStore.ts`, `BuildPane.tsx`, `socket.ts`, `types.ts` | `test:turn-variants` gained a 14-claim reachability audit — every arithmetic assertion in it was true of a store nothing instantiated |
 | GAP-011 | RESOLVED | `agents.ts`, `wsRelay.ts`, `index.ts`, `capabilities.ts` (x2), `entitlementGate.ts`, `agentAdversarial.test.ts`, `AgentTabs.tsx`, `socket.ts`, `types.ts`, `capabilities.ts` (x2) | `test:agent-adversarial` holds the column through add, narrow, clear and replace, plus the handler resolving against the registry before writing |
 | GAP-012 | RESOLVED | `wsRelay.ts`, `index.ts`, `generators.ts`, `entitlementGate.ts`, `capabilities.ts`, `generators.test.ts`, `socket.ts`, `types.ts`, `capabilities.ts`, `InboxActions.tsx` | `test:inbox-generators` holds both answers as distinct and the whole reachability chain; the comment claiming a prompt injection that does not exist is corrected and checked |
 | GAP-013 | RESOLVED | `checkPolicy.ts`, `checkRunner.ts`, `githubApi.ts`, `githubWebhook.ts` (both), `checks.ts`, `github.ts`, `index.ts`, `mockGithubApi.ts`, three suites | `test:check-runner` drives the whole round trip and proves `approvedForSha` answers true, which nothing could make it do before |
 | GAP-014 | RESOLVED | `web/pricing.html`, `checkoutSurfaces.test.ts` | `test:checkout-surfaces` maps every sold feature row to an `EntitlementKind` and asserts the three removed names stay gone |
 | GAP-015 | RESOLVED | `graphIntrospect.ts`, `index.ts`, `graphIntrospect.test.ts`, `types.ts`, `GraphView.tsx`, `truncatePath.test.ts`, `ci.yml` | `test:truncate-path` asserts what the truncator does to prose; `test:graph-introspect` holds the two-field shape on both sides |
 | GAP-016 | RESOLVED | `TopBar.tsx`, `deadControls.test.ts` (new), `client/package.json`, `ci.yml` | `test:dead-controls` clears 365 buttons and was watched refusing a reinstated Share at `TopBar.tsx:372` |
-| GAP-003 | RESOLVED | `wsRelay.ts`, `channels.test.ts`, `wsRelay.test.ts`, `types.ts`, `buildStore.ts`, `socket.ts`, `AddMenu.tsx`, `BuildPane.tsx` | `test:channels` audits all 13 call sites from source; `test:relay` drives a throwing read and asserts the frame |
+| GAP-017 | PARTIALLY RESOLVED | `ci.yml` | Three suites added and one recorded as deliberately absent; forty-five remain, each needing per-suite triage rather than a bulk addition |
+| GAP-018 | RESOLVED | `checkRunner.ts`, `checkRunner.test.ts` | Found while building GAP-013 — the paid row read back the live dry-run row and wrote nothing; `test:check-runner` asserts `approvedForSha` answers true afterwards |
+
+---
+
+# Newly Discovered
+
+Two, both evidence-backed and both surfaced by the implementation rather than guessed at. §17's
+instruction is to add what this work revealed and to stop there, so the wishlist that could have
+gone here does not.
+
+## GAP-017 — Forty-five server suites are registered in `package.json` and absent from CI
+
+**Priority:** P1
+**Category:** VERIFICATION_GAP
+**Confidence:** 10/10
+
+### Evidence
+
+```
+node -e "…"  →  SERVER missing from CI: 45
+```
+
+Among them: `test:mcp-registry`, `test:mcp-hardening`, `test:mcp-isolation`, `test:mcp-tenancy`,
+`test:mcp-validate`, all seven `test:oauth-*`, `test:connector-auth`, `test:connector-secrets`,
+`test:providers`, `test:deploy-secrets`, `test:judge`, `test:code-check` and `test:acceptance`.
+
+### Why This Is A Real Gap
+
+This is the repository's own stated rule turned on itself. `ci.yml` contains three separate
+comments about exactly this failure — *"a suite that is not in this file is a suite that runs when
+somebody remembers, which is to say on the days it was least needed"* — written when eleven
+suites were found missing, and forty-five are missing now. The set includes the OAuth token
+lifecycle, MCP tenancy isolation and the connector credential boundary: the suites whose subject is
+who may reach whose data.
+
+It was found by this pass rather than reported by it: two of the four suites this work needed for
+verification (`test:agent-files`, `test:graph-introspect`) turned out not to run, and one
+(`test:edit-versions`) turned out **unable** to run in the server job at all.
+
+### Not Simply "Add Them All"
+
+`test:edit-versions` is the proof that this is triage rather than a list. It validates a generated
+project by importing it with Python; the server job has node and nothing else, so it fails there
+for a reason that says nothing about the code under test. Several others in the list plausibly
+share that shape — `test:code-check`, `test:controlplane-http-python`, `test:fly-sandbox` and the
+mock-dependent ones each need something the job does not have.
+
+So the honest fix is per suite: run it, and either add it or record in the workflow why it cannot
+be there — which is what this pass did for the three it touched.
+
+### Resolution
+
+**Status: PARTIALLY RESOLVED**
+
+`test:agent-files`, `test:graph-introspect` and `test:dead-controls` were added; `test:edit-versions`
+is recorded in `ci.yml` as deliberately absent, with the reason. The remaining forty-five are open.
+
+**Resolved On:** partially, 2026-08-26
+
+---
+
+## GAP-018 — An approval could not be recorded while the check it approved was still running
+
+**Priority:** P2 — **RESOLVED as part of GAP-013**
+**Category:** STATE_MACHINE_GAP
+**Confidence:** 10/10
+
+### Evidence
+
+Found while building GAP-013's round trip, and it would have shipped as a silent failure.
+
+Migration 045 allows one **live** check per `(agent, pull request, commit)`, so
+`ChecksRepository.open` answers a request made while one is live by handing back **the live row**
+rather than creating a rival. `onApproval` opened its `paid` row while the dry-run check was still
+in progress — so it read back the dry-run row, wrote nothing, `approvedForSha` stayed false, and
+the re-run went out **on the fake provider having reported success**.
+
+### Why It Is Worth Recording Separately
+
+It is the shape this whole audit is about — a write that returns successfully and does not happen —
+and it is one nothing above would have caught: the runner's return value was correct, the check was
+posted, and only asking "is this commit approved now?" shows it. The suite asks exactly that.
+
+### Resolution
+
+**Status: RESOLVED**
+
+The live check is cancelled before the paid row is opened, which is also the honest semantics: an
+approval is not a second opinion but the same check asked of a real provider. Its eval is cancelled
+with it, best-effort. `test:check-runner` asserts `approvedForSha` answers true afterwards.
+
+**Resolved On:** 2026-08-26
+
+---
+
+# Final Output
+
+## Resolved
+
+All sixteen: **GAP-001** through **GAP-016**, plus **GAP-018**, discovered during the work.
+
+Three findings were **understated or wrong** in the original audit, and each is recorded in its own
+Resolution rather than quietly corrected:
+
+- **GAP-002** was scoped to the filesystem. A restore was also broken in the **object store** — a
+  manifest copied onto a new version number names paths that exist only under the old one — which
+  the audit recorded as working because the read threw, the throw was swallowed (GAP-003), and the
+  panel not changing looked exactly like a refresh that had.
+- **GAP-013**'s fix uncovered GAP-018.
+- **GAP-008**'s `enable_gate` was not implementable as declared: the confirmation gate is disabled
+  by a line in the agent's own generated source, so no command can turn it back on. It was
+  relabelled and repointed rather than faked.
+
+## Invalidated
+
+None. Every one of the sixteen reproduced.
+
+## Blocked
+
+None.
+
+## Newly Discovered
+
+- **GAP-017** — forty-five server suites absent from CI. Partially resolved; the rest need per-suite
+  triage rather than a bulk addition.
+
+## Remaining Priority
+
+| Priority | Open |
+|---|---|
+| P0 | none |
+| P1 | GAP-017 (partially resolved) |
+| P2 | none |
+| P3 | none |
+
+**Deliberately still owed, and not counted as findings** — each was recorded before this pass and
+is unchanged by it: the personal-workspace Exposure sentence, per-agent narrowing on indirect ids,
+cross-replica live sessions, deployed-endpoint auth, and no group grants. `approvalBatchApprove`,
+`policyEngine` and `evalCiGate` remain declared and ungated, which is the correct order — and they
+are no longer sold ahead of the surfaces they will gate (GAP-014).
+
+**One deliberate limitation, stated rather than left to be discovered:** forks created before
+GAP-001 landed still have no objects. They now report an honest read failure instead of an empty
+file list, and re-forking from the source produces a working copy.

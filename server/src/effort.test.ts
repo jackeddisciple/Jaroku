@@ -256,9 +256,12 @@ console.log("\nand the adapter is actually called, at every dispatch that shippe
   // §6.2's TWO FIELDS, so the chip reports what was spent and the clamp marker can fire at all.
   check("the usage payload carries both levels", /function effortFields\(/.test(index));
   check("...requested AND applied, never one of them", /effort: plan\.applied, effort_requested: plan\.requested/.test(index));
+  // FOUR, NOT THREE: the plan, the generation, the edit and the reply. The fourth arrived with
+  // §5.4's variants, which put the metadata row on an explain's `done` event for the first time —
+  // and this counter is why that was noticed here rather than by somebody looking at a chip.
   check(
-    "...on the plan, the generation and the edit",
-    (index.match(/\.\.\.effortFields\(/g) ?? []).length === 3,
+    "...on the plan, the generation, the edit and the reply",
+    (index.match(/\.\.\.effortFields\(/g) ?? []).length === 4,
     String((index.match(/\.\.\.effortFields\(/g) ?? []).length),
   );
 
