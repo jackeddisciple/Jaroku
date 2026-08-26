@@ -143,6 +143,90 @@ console.log("\nwhich directories the boot scan may adopt");
   check("...so A's materialised source stays unreadable here", leaked.files.length === 0 && leaked.source === "none");
 }
 
+// ---------------------------------------------------------------------------------------------
+// `runnable` — WHICH SOURCE ANSWERS "DOES THIS PROJECT HAVE AN agent.py".
+//
+// The comment above the derivation already gave the right answer — "which the version manifest
+// answers for a published agent and the disk answers for one somebody dropped in by hand" — and
+// the code asked the disk both times. So an agent published to the object store with no local
+// directory reported `runnable: false` on every replica but the one that generated it, which is a
+// fork, a restore elsewhere, a restored backup, and every hosted deployment with an ephemeral
+// filesystem. The message it produced is the worst available: "it has no agent.py" is a statement
+// about a filesystem the user cannot see, on a product whose whole model is that an agent is a
+// versioned artifact in a store, and there was no recovery action anywhere.
+//
+// This file is the right home because it is the module that argues, at length, that the shared
+// directory is not a valid source of truth for a workspace's own agent — and `runnable` was
+// derived from exactly that directory.
+// ---------------------------------------------------------------------------------------------
+console.log("\nrunnable is answered by the manifest, and by the disk only for what it alone knows");
+{
+  const published = await agents.currentVersionHas(A, "agent.py");
+  check("an agent published to the store is runnable with no directory here", published.has("support_bot"));
+
+  // B owns the same slug and has published nothing. The DIRECTORY exists — A materialised it —
+  // which is precisely the case where a disk-derived answer would hand B a truth about A's files.
+  const theirs = await agents.currentVersionHas(B, "agent.py");
+  check("...and a workspace with a row and no version is not", !theirs.has("support_bot"));
+
+  // A published version WITHOUT an agent.py is not runnable either. Everything else about it is a
+  // normal agent — a row, a version, a manifest, a byte total — and only the manifest's contents
+  // distinguish it.
+  const libAgent = await agents.upsertFromDisk(A, { slug: "helpers_only" });
+  await projects.publish(A, libAgent.id, [{ path: "tools/notes.py", content: "NOTES = []\n" }], { source: "import" });
+  const after = await agents.currentVersionHas(A, "agent.py");
+  check("a published version with no agent.py is not runnable", !after.has("helpers_only"));
+  check("...while the one beside it still is", after.has("support_bot"));
+
+  // ONE QUERY FOR THE WORKSPACE. `test:agent-grid`'s load-bearing assertion is that the statement
+  // count for one agent equals the count for forty; a per-agent manifest read here would be an
+  // N+1 that is invisible in review and instantly visible in a real workspace.
+  let statements = 0;
+  const counting = new Proxy(db, {
+    get(target, prop, receiver) {
+      if (prop !== "forWorkspace") return Reflect.get(target, prop, receiver);
+      return (workspaceId: string) => {
+        const q = target.forWorkspace(workspaceId);
+        return new Proxy(q, {
+          get(t, p, r) {
+            if (p !== "all" && p !== "get" && p !== "run") return Reflect.get(t, p, r);
+            statements++;
+            return (t[p as "all"] as (...a: unknown[]) => unknown).bind(t);
+          },
+        });
+      };
+    },
+  });
+  await new AgentRepository(counting).currentVersionHas(A, "agent.py");
+  check(`the whole workspace costs one statement (${statements})`, statements === 1);
+
+  // AND THE DISK STILL ANSWERS FOR THE ONE THING IT ALONE KNOWS. A hand-dropped project has no row
+  // and no version, so the manifest cannot see it; dropping the disk half entirely would make that
+  // agent unrunnable, which is a different regression wearing this fix's clothes.
+  const handDropped = await agents.currentVersionHas(SERVER, "agent.py");
+  check("a hand-dropped project is invisible to the manifest, which is why the disk half stays", !handDropped.has("hand_dropped"));
+  check("...and it really is on the disk", fs.existsSync(join(runtimeDir, "agents", "hand_dropped", "agent.py")));
+
+  // THE DERIVATION ITSELF, read as text: the manifest must be consulted, which is the whole bug.
+  const index = fs.readFileSync(join(fileURLToPath(new URL(".", import.meta.url)), "index.ts"), "utf8");
+  check(
+    "the agent snapshot derives runnable from the manifest first, then the disk",
+    /runnable: published\.has\(a\.slug\) \|\| \(onDisk\.get\(a\.slug\)\?\.runnable \?\? false\)/.test(index),
+  );
+  // AND ONE HELPER IS THE ONLY WAY ANYTHING OBTAINS A PROJECT DIRECTORY. The run, `planDeploy` and
+  // the deploy each read `runtime/agents/<slug>` and only two paths ever wrote it, so a version
+  // published anywhere else — a fork, a restore, another replica — left the disk behind.
+  check("ensureProjectDir exists", /async function ensureProjectDir\(/.test(index));
+  check(
+    `...and the run and both deploy commands call it (${(index.match(/ensureProjectDir\(ctx, /g) ?? []).length})`,
+    (index.match(/ensureProjectDir\(ctx, /g) ?? []).length === 3,
+  );
+  check(
+    "...comparing a stamp rather than rewriting the project on every run",
+    /\.jaroku-version/.test(index),
+  );
+}
+
 await db.close();
 rmSync(dir, { recursive: true, force: true });
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

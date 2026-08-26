@@ -335,6 +335,15 @@ jobs:
           # an archived-only session reading as "not started" — so this is the suite that stops them
           # coming back rather than the one that found them.
           npm run test:agent-adversarial
+          # WHERE AN AGENT'S FILES MAY BE READ FROM, which has never run here and which now also
+          # holds `runnable`. That boolean was derived from `runtime/agents/<slug>` on the local
+          # filesystem — the exact directory this module spends twenty lines arguing is not a valid
+          # source of truth for a workspace's own agent — so a fork, a restore on another replica or
+          # any deployment with an ephemeral disk reported an agent as unrunnable and blamed a
+          # missing `agent.py` the user had no way to supply. Its N+1 assertion is the load-bearing
+          # one: the manifest read costs one statement for the whole workspace, or the Agents grid
+          # gains a per-agent query that is invisible in review.
+          npm run test:agent-files
           # `test:edit-versions` IS DELIBERATELY NOT HERE, and it is the one suite in this file's
           # history whose absence is a reason rather than an oversight. It replays recorded model
           # output, which needs no network — but an apply VALIDATES the generated project, and

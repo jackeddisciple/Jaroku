@@ -3453,6 +3453,52 @@ async function permissionModeForRun(ctx: TenantContext, runId: string): Promise<
  * refused dispatch — the same direction `permissionModeForRun` fails in, and the honest one: a
  * generation at the default beats no generation.
  */
+/**
+ * The directory this agent's live version runs from, materialised if it is not already right.
+ *
+ * ONE FUNCTION, SO NOBODY HAS TO REMEMBER. Three surfaces read `runtime/agents/<slug>` — the local
+ * spawn, `planDeploy`'s `agent.py` check, and the deploy upload — and only two paths ever wrote it
+ * (`generator.ts:365`, `editor.ts:636`). Everything else that publishes a version left the disk
+ * where it was: `forkAgent` and `restoreAgentVersion` both did until this pass, and so does any
+ * other gateway replica by construction, because a directory is a fact about one machine and a
+ * version is a fact about the workspace.
+ *
+ * The result was a class of failure with no error attached: a run executing bytes the version
+ * history says were replaced, and a deploy shipping them while recording the new number.
+ *
+ * IT COMPARES A STAMP RATHER THAN RE-WRITING EVERY TIME. `.jaroku-version` holds the version the
+ * directory was last materialised at, so the common case — the agent that just ran — is one
+ * `readFileSync` of a short file. Re-materialising unconditionally would empty and rewrite a
+ * project on every run, which is both slow and destructive of anything a run left beside it.
+ *
+ * A HAND-DROPPED PROJECT IS LEFT ALONE. An agent with no published version is one somebody put
+ * under `runtime/agents/` between boots — the case `agentFiles.ts` calls out — and materialising
+ * over it would delete the only copy. Nothing to publish means nothing to write.
+ *
+ * NEVER FATAL. It returns the directory either way: a materialisation that failed leaves whatever
+ * was there, and the run's own error about a missing `agent.py` is a better answer than a dispatch
+ * refused for a reason nobody can see. The failure is logged with the version in it.
+ */
+async function ensureProjectDir(ctx: TenantContext, slug: string): Promise<string> {
+  const dir = join(agentsDir(RUNTIME_DIR), slug);
+  const stamp = join(dir, ".jaroku-version");
+  try {
+    const agent = await agentRepo.bySlug(ctx, slug);
+    if (!agent || agent.current_version < 1) return dir;
+    const want = String(agent.current_version);
+    if (existsSync(stamp) && readFileSync(stamp, "utf8").trim() === want) return dir;
+    const written = await projects.materialise(ctx, agent.id, agent.current_version, dir);
+    if (written.length === 0) return dir;
+    // AFTER the write, so a crash mid-materialise leaves a stamp that does not match and the next
+    // call redoes it — the same order `promoteVersion` uses for the pointer it moves.
+    writeFileSync(stamp, want, "utf8");
+    console.log(`[agents] materialised ${slug} v${want} (${written.length} files)`);
+  } catch (err) {
+    console.warn(`[agents] could not materialise ${slug}:`, (err as Error)?.message ?? err);
+  }
+  return dir;
+}
+
 async function effortForThread(
   ctx: TenantContext,
   threadId: string | null,
@@ -3828,6 +3874,16 @@ const relay = new WsRelay({
     // published agent and the disk answers for one somebody dropped in by hand.
     const edits = await agentRepo.editCounts(ctx);
     const onDisk = new Map(scanAgentDirectory(RUNTIME_DIR).map((a) => [a.agent_id, a]));
+    // THE MANIFEST ANSWERS FIRST, AND THE DISK ONLY FOR WHAT IT ALONE KNOWS. The comment above
+    // already said this — "which the version manifest answers for a published agent and the disk
+    // answers for one somebody dropped in by hand" — and the code asked the disk both times. An
+    // agent published to the object store with no local directory therefore reported
+    // `runnable: false` on every replica but the one that generated it, which is a fork, a restore
+    // elsewhere, a restored backup, and every hosted deployment with an ephemeral filesystem.
+    //
+    // ONE QUERY FOR THE WORKSPACE, not one per agent — `test:agent-grid`'s statement count is the
+    // rule this has to hold to. See `currentVersionHas`.
+    const published = await agentRepo.currentVersionHas(ctx, "agent.py");
     // ARCHIVED AGENTS ARE INCLUDED AND FLAGGED. The sidebar's Archived tab has to be able to show
     // them and offer Restore, and every other consumer of this snapshot looks an agent up by id —
     // including whichever one is selected, which must keep rendering if it happens to be archived.
@@ -3844,7 +3900,7 @@ const relay = new WsRelay({
         default_provider: a.default_provider,
         created_at: a.created_at,
         hand_written: a.hand_written,
-        runnable: onDisk.get(a.slug)?.runnable ?? false,
+        runnable: published.has(a.slug) || (onDisk.get(a.slug)?.runnable ?? false),
         edit_count: edits.get(a.id) ?? 0,
         deployment: d ? { id: d.id, status: d.status, url: d.url } : null,
         archived_at: a.archived_at,
@@ -9039,6 +9095,12 @@ async function handleDeployCommand(ctx: TenantContext, cmd: DeployChannelCommand
           relay.broadcastDeploy(ctx, { type: "error", message: "invalid agent id" });
           return;
         }
+        // BEFORE THE PLAN READS THE DIRECTORY, which is what it does: `planDeploy` checks for an
+        // `agent.py` there and the upload sends that same directory. Without this, deploying an
+        // agent this replica did not generate refused with "has no agent.py — there is nothing to
+        // serve" about a project the object store holds in full, and deploying after a restore
+        // shipped the version the history says was replaced while recording the new number.
+        await ensureProjectDir(ctx, cmd.agentId);
         const plan = await planDeploy(deployDeps, {
           agentId: cmd.agentId,
           provider: typeof cmd.provider === "string" ? cmd.provider : "",
@@ -9069,6 +9131,11 @@ async function handleDeployCommand(ctx: TenantContext, cmd: DeployChannelCommand
         // REFUSED deploy redirected the running one's build log — scrubbed of secrets, but
         // still another workspace's build output — into the refuser's deploy panel.
         deployContext = ctx;
+        // AND AGAIN HERE, not only in `planDeploy`. The two are separate commands and a deploy is
+        // reachable without a plan — from the Inbox's `retry_deploy`, from the top bar, from a
+        // second tab — so a directory brought up to date by the plan is not a directory this call
+        // may assume. It is a stamp comparison when nothing moved.
+        await ensureProjectDir(ctx, cmd.agentId);
         const envKeys = Array.isArray(cmd.envKeys)
           ? (cmd.envKeys as unknown[]).filter((k): k is string => typeof k === "string")
           : [];
@@ -10743,6 +10810,12 @@ async function runAgent(
   // should never actually be denied today — it is acquired anyway, unconditionally, because
   // it is the mechanism that has to exist and be exercised now for a future session to widen
   // the process-wide check above into a per-workspace one without also inventing this.
+  // THE DIRECTORY THE SPAWN READS, BROUGHT UP TO THE LIVE VERSION FIRST. `uv run -m jaroku_runner
+  // <slug>` imports `agents.<slug>` from disk, and that disk is a fact about this machine while the
+  // version is a fact about the workspace — so an agent published anywhere but here had nothing to
+  // import, and one whose version moved without a materialise ran the bytes the history says were
+  // replaced. See `ensureProjectDir`; it is a stamp comparison on the common path.
+  if (agentId) await ensureProjectDir(ctx, agentId);
   runWorkspaces.set(runId, ctx); // before the start: its first events arrive on their own tick
   // Before the start, for the same reason: `run_start` is what the ingest chain caches provider
   // and model from, and by then the environment that decided the payer is gone.

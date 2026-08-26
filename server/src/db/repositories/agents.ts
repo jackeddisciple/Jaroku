@@ -685,6 +685,43 @@ export class AgentRepository {
   }
 
   /**
+   * Which agents' live version contains a given path, for the whole workspace, in one query.
+   *
+   * WHAT THIS EXISTS FOR. `runnable` — one of the highest-traffic booleans in the product — was
+   * derived from `runtime/agents/<slug>` on the local filesystem, which `agentFiles.ts` spends
+   * twenty lines arguing is not a valid source of truth for a workspace's own agent. A fork, a
+   * restore on another replica, a restored backup, or any hosted deployment with an ephemeral
+   * filesystem produced an agent that renders normally, lists its versions and its file counts,
+   * and refuses to run — blaming a missing `agent.py` on a filesystem the user cannot see, with
+   * no recovery action anywhere. The comment above that derivation already described the correct
+   * behaviour: "which the version manifest answers for a published agent".
+   *
+   * A JOIN AND NOT A LOOP, which is the constraint that decides the shape. `test:agent-grid`'s
+   * load-bearing assertion is that the statement count for one agent equals the statement count
+   * for forty; asking per agent would be an N+1 that is invisible in review and instantly visible
+   * in a real workspace. The manifest is JSON on both drivers and the key set differs per row, so
+   * the containment test is done here in TypeScript over one result set rather than in dialect-
+   * specific JSON SQL — `manifest` is already parsed by the same helper every other read uses.
+   *
+   * Keyed by SLUG, because that is what every consumer of the agent snapshot addresses an agent by.
+   */
+  async currentVersionHas(ctx: TenantContext, path: string): Promise<Set<string>> {
+    const rows = await this.q(ctx).all<{ slug: unknown; manifest: unknown }>(
+      `SELECT a.slug AS slug, v.manifest AS manifest
+         FROM agents a JOIN agent_versions v
+           ON v.agent_id = a.id AND v.version = a.current_version
+        WHERE a.workspace_id = ? AND a.deleted_at IS NULL`,
+      [ctx.workspaceId],
+    );
+    const out = new Set<string>();
+    for (const row of rows) {
+      const manifest = jsonFromColumn(this.db.dialect, row.manifest) as VersionManifest | null;
+      if (manifest && Object.prototype.hasOwnProperty.call(manifest, path)) out.add(String(row.slug));
+    }
+    return out;
+  }
+
+  /**
    * How many bytes of agent files this workspace is holding, across every version.
    *
    * EVERY VERSION, INCLUDING UNDONE ONES AND SOFT-DELETED AGENTS' — because the objects are

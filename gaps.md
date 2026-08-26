@@ -1245,6 +1245,78 @@ the working proof of the pattern), deploy, `ProjectStore.materialise`, the Agent
 | Implementation Effort | 3/10 |
 | Confidence | 9/10 |
 
+### Resolution
+
+**Status: RESOLVED — both halves**
+
+**1. The flag is derived honestly.** `runnable` is now
+`published.has(a.slug) || onDisk.get(a.slug)?.runnable`, where `published` comes from
+`agentRepo.currentVersionHas(ctx, "agent.py")` — **one query for the whole workspace**, joining
+`agents` to the row at `current_version` and testing the manifest's keys. The comment above the old
+derivation already said this was the right answer; the code asked the disk both times.
+
+A join and not a loop, and that constraint decided the shape: `test:agent-grid`'s load-bearing
+assertion is that the statement count for one agent equals the count for forty, and a per-agent
+manifest read would be an N+1 that is invisible in review and instantly visible in a real
+workspace. The containment test is done in TypeScript over one result set rather than in
+dialect-specific JSON SQL, since `manifest` is JSON on both drivers and the key set differs per row.
+
+**The disk half stays**, and that is not caution — a hand-dropped project has no row and no version,
+so the manifest cannot see it. Dropping the disk half would make *that* agent unrunnable, which is
+a different regression wearing this fix's clothes.
+
+**2. `ensureProjectDir` is the only way anything obtains a project directory.** Three surfaces read
+`runtime/agents/<slug>` — the local spawn, `planDeploy`'s `agent.py` check, and the deploy upload —
+and only `generator.ts:365` and `editor.ts:636` ever wrote it. It is now called before the run and
+before **both** deploy commands: `planDeploy` and `deploy` are separate commands, and a deploy is
+reachable without a plan (the Inbox's `retry_deploy`, the top bar, a second tab), so a directory the
+plan brought up to date is not one the deploy may assume.
+
+Three details:
+
+- **A stamp, not a rewrite.** `.jaroku-version` holds the version the directory was last
+  materialised at, so the common case is one short `readFileSync`. Re-materialising unconditionally
+  would empty and rewrite the project on every run. The stamp is written *after* the files, so a
+  crash mid-materialise leaves a mismatch and the next call redoes it — the same order
+  `promoteVersion` uses. It is dot-prefixed, so `listProjectFiles` skips it and it cannot reach a
+  deploy or a republish.
+- **A hand-dropped project is left alone.** Nothing published means nothing to write, and
+  materialising over it would delete the only copy.
+- **Never fatal.** It returns the directory either way; a run's own "no agent.py" is a better
+  answer than a dispatch refused for a reason nobody can see.
+
+**This subsumes the durable half of GAP-002 and the run half of GAP-001**, and makes the local run
+path correct on a second gateway replica for the first time.
+
+**Files Changed:**
+
+- `server/src/db/repositories/agents.ts` — `currentVersionHas`
+- `server/src/index.ts` — the derivation, `ensureProjectDir`, three call sites
+- `server/src/agentFiles.test.ts` — the assertions
+- `.github/workflows/ci.yml` — `test:agent-files` added
+
+**Verification:**
+
+`test:agent-files` is the right home because it is the module that argues, at length, that the
+shared directory is not a valid source of truth for a workspace's own agent — and `runnable` was
+derived from exactly that directory. It holds: a published agent is runnable with **no local
+directory**; a workspace with a row and no version is not, *even though the directory exists*
+because another workspace materialised it there — which is precisely the case a disk-derived answer
+gets wrong; a published version with no `agent.py` is not runnable; and the whole workspace costs
+**one statement**, asserted by proxying the driver and counting. Plus the structural half: the
+derivation reads the manifest first, `ensureProjectDir` exists, all three call sites use it, and it
+compares a stamp.
+
+**Regression Coverage:**
+
+`test:agent-files`, `test:agent-grid`, `test:agent-health`, `test:agent-adversarial`,
+`test:project-store`, `test:db` and `test:driver` all pass; the server typechecks. The tenancy
+assertions in `test:agent-files` are unchanged — B still cannot read A's materialised directory,
+and the new manifest read is scoped through `agents.workspace_id` like every other statement in
+that repository.
+
+**Resolved On:** 2026-08-26
+
 ---
 
 ## GAP-008 — Eight Inbox actions render controls that do nothing
@@ -2890,6 +2962,7 @@ brief spends a page on.
 | GAP-002 | RESOLVED | `index.ts`, `projectStore.test.ts`, `agentAdversarial.test.ts`, `editVersions.test.ts` | `test:project-store` proves the bare row is unreadable and the disk stale, then that publish + materialise fixes both; finding was understated — see its Resolution |
 | GAP-004 | RESOLVED | `http/turns.ts`, `index.ts`, `wsRelay.ts`, `threadStore.ts`, `attachments.test.ts`, `socket.ts`, `BuildPane.tsx`, `AttachmentRail.tsx` | `test:attachments` gained a 15-claim reachability audit — every arithmetic assertion in it was already true of code that never ran on a turn |
 | GAP-005 | RESOLVED | `effort.ts`, `index.ts`, `planner.ts`, `generator.ts`, `editor.ts`, `explainer.ts`, `models.py`, `effort.test.ts` | `test:effort` gained a per-request ceiling section and a reachability audit over all four dispatch sites, three payload sites and the run env |
+| GAP-007 | RESOLVED | `agents.ts`, `index.ts`, `agentFiles.test.ts`, `ci.yml` | `test:agent-files` proves a published agent is runnable with no directory, that the whole workspace costs one statement, and that all three call sites materialise on demand |
 | GAP-008 | RESOLVED | `InboxActions.tsx`, `InboxCardActions.tsx`, `inboxStore.ts`, `InboxView.tsx`, `inboxBoard.test.ts`, `registry.ts`, `types.ts`, `inboxActionIcons.tsx` | `test:inbox-board` reads the server's vocabulary and requires a case for all 29; the exhaustive switch failed the build naming four omissions while being written |
 | GAP-009 | RESOLVED | `entitlements.ts`, `entitlementGate.ts`, `plans.ts`, `index.ts`, `entitlements.test.ts`, `entitlementStore.ts`, `UpsellCard.tsx`, `UsagePanel.tsx`, `types.ts` | `test:entitlements` holds all seven kinds from both Free and Pro, plus the top of the ladder answering null; `test:entitlement-store` holds the client guard |
 | GAP-014 | RESOLVED | `web/pricing.html`, `checkoutSurfaces.test.ts` | `test:checkout-surfaces` maps every sold feature row to an `EntitlementKind` and asserts the three removed names stay gone |
