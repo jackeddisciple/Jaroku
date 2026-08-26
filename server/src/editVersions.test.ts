@@ -214,6 +214,99 @@ console.log("\nundo");
   check(second.error?.includes("nothing to undo") === true, "undoing again says so rather than failing obscurely", second.error);
 }
 
+// --- 3b. a restore reaches both places the product reads a version from ----------------------
+//
+// A RESTORE IS A FORWARD PUBLISH, and it was writing neither of the two things a forward publish
+// has to write. The reasoning for going forward is right and is spelled out at the call site —
+// moving `current_version` backwards would make the version list stop describing what happened,
+// and would leave the pointer on objects a retention sweep is entitled to consider superseded.
+// What was wrong was the mechanism.
+//
+//   THE OBJECT STORE. A key carries the version it was written under — `…/agents/<id>/v<n>/<path>`
+//   — so a manifest handed to `addVersion` reserves v5 and names paths that exist only under v3.
+//   Every read of the restored version asks for `v5/agent.py` and gets nothing. This is GAP-001's
+//   defect one axis over: there a manifest crossed an AGENT boundary, here a VERSION one.
+//
+//   THE DISK. `runtime/agents/<slug>` is what a local run spawns from, what `planDeploy` checks
+//   for an `agent.py`, and what the deploy upload sends. Nothing in this path wrote it, so the
+//   next run executed the version the history said was replaced, a deploy shipped those bytes
+//   while recording the NEW number — the drift badge reading "up to date" over a URL serving the
+//   retired code — and `recordArtifacts` then republished the stale directory as a newer version,
+//   undoing the restore in the history as well.
+//
+// Both are asserted from the broken end first, because an assertion that only exercised the fixed
+// path would have passed on the shipped code as well. The handler is module-local, so the
+// property is proven here and the call site is read as text below.
+console.log("\na restore reaches both places the product reads a version from");
+{
+  // ITS OWN AGENT, because a restore MOVES `current_version` — that is what it is — and the
+  // sections below assert that the shared `support_bot` pointer has not moved. Borrowing it here
+  // would make this section's correctness a fact about test ordering.
+  const slug = "restore_target";
+  const dir = join(runtimeDir, "agents", slug);
+  const created = await agents.upsertFromDisk(A, { slug, display_name: "Restore Target" });
+  const seeded = await projects.publish(A, created.id, [{ path: "agent.py", content: originalAgentPy }], {
+    source: "generation", summary: "first cut",
+  });
+  const live = (await agents.bySlug(A, slug))!;
+  // Publish something clearly different, so "it did not move" is visible rather than inferred.
+  const edited = `${originalAgentPy}\n# a later version\n`;
+  const wanted = seeded.version;
+  const laterFiles = (await projects.readVersion(A, live.id, wanted))
+    .map((f) => (f.path === "agent.py" ? { ...f, content: edited } : f));
+  const later = await projects.publish(A, live.id, laterFiles, { source: "edit", summary: "a later version" });
+  await projects.materialise(A, live.id, later.version, dir);
+  check(readFileSync(join(dir, "agent.py"), "utf8") === edited, "the later version is what the disk holds");
+
+  // THE DEFECT, both halves. A bare row carrying the old manifest.
+  const oldRow = (await agents.versions(A, live.id, true)).find((v) => v.version === wanted)!;
+  const bare = await agents.addVersion(A, live.id, oldRow.manifest, { source: "import", summary: `restored v${wanted}` });
+  let bareThrew = false;
+  try {
+    await projects.readVersion(A, live.id, bare);
+  } catch {
+    bareThrew = true;
+  }
+  check(bareThrew, "a manifest copied onto a NEW version number resolves to nothing — the objects are keyed by version");
+  check(
+    readFileSync(join(dir, "agent.py"), "utf8") === edited,
+    "...and the disk is still on the version the history now says was replaced",
+  );
+
+  // THE FIX, both halves. The old version's FILES, published under the new number, then written out.
+  const restoredFiles = await projects.readVersion(A, live.id, wanted);
+  const restored = await projects.publish(A, live.id, restoredFiles, { source: "import", summary: `restored v${wanted}` });
+  check(
+    (await projects.readVersion(A, live.id, restored.version)).find((f) => f.path === "agent.py")!.content === originalAgentPy,
+    "publishing the old version's FILES makes the restored version readable",
+  );
+  await projects.materialise(A, live.id, restored.version, dir);
+  check(
+    readFileSync(join(dir, "agent.py"), "utf8") === originalAgentPy,
+    "...and materialising it puts the restored bytes where a run spawns from and a deploy uploads",
+  );
+  check(
+    (await projects.readVersion(A, live.id, later.version)).find((f) => f.path === "agent.py")!.content === edited,
+    "...while the version it replaced keeps its own objects, so the history still describes what happened",
+  );
+
+  // AND THE PRODUCTION PATH STILL DOES BOTH. Read as text: the handler is module-local, and what
+  // makes this come back is somebody adding a broadcast beside the ones already there without
+  // noticing that neither the store nor the disk was ever in that list.
+  const restoreFn = /async function restoreAgentVersion\([\s\S]*?\n\}/.exec(
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), "index.ts"), "utf8"),
+  )?.[0] ?? "";
+  check(restoreFn.length > 0, "restoreAgentVersion exists to be read");
+  check(
+    /projects\.publish\(ctx, agent\.id, restoredFiles/.test(restoreFn),
+    "...and publishes the restored version's files rather than copying its manifest onto a new number",
+  );
+  check(
+    /projects\.materialise\(ctx, agent\.id, published/.test(restoreFn),
+    "...then materialises it, as generate, apply and undo all do",
+  );
+}
+
 // --- 4. a proposal that fails validation ----------------------------------------------------
 console.log("\na proposal that does not validate");
 {

@@ -5601,11 +5601,44 @@ async function restoreAgentVersion(ctx: TenantContext, slug: string, version: un
     return;
   }
 
-  const published = await agentRepo.addVersion(ctx, agent.id, row.manifest, {
+  // THE OLD VERSION'S FILES, NOT ITS MANIFEST, AND THE DISTINCTION IS THE WHOLE OF THIS BUG.
+  //
+  // An object's key carries the VERSION it was written under — `…/agents/<id>/v<n>/<path>` — so a
+  // manifest handed to `addVersion` reserves a new number, v5, and names paths that only exist
+  // under v3. Every read of the restored version then asks for `v5/agent.py` and gets nothing.
+  // This is the same defect as `forkAgent`'s, one axis over: there it was a manifest copied across
+  // an AGENT boundary, here it is one copied across a VERSION boundary, and in both cases the row,
+  // the version list and the byte total are all correct while the content is unreachable.
+  //
+  // It survived because the failure was invisible from every direction. The read threw, the throw
+  // was swallowed by `answer()` (GAP-003), and the panel simply did not change — which, on the
+  // screen where somebody has just pressed Restore, is indistinguishable from a refresh that
+  // worked. The audit that found this path recorded the Code view as CORRECT for that reason.
+  //
+  // `publish` writes the bytes under the new number and then promotes, which is the invariant it
+  // exists to hold. It also strengthens the property this function was written for: a forward
+  // publish that OWNS its objects can no longer be broken by a retention sweep collecting the old
+  // version it was pointing at, which was the residual risk in naming somebody else's objects.
+  const restoredFiles = await projects.readVersion(ctx, agent.id, wanted);
+  const { version: published } = await projects.publish(ctx, agent.id, restoredFiles, {
     source: "import",
     summary: `restored v${wanted}`,
   });
-  console.log(`[agents] ${slug} restored v${wanted} as v${published}`);
+
+  // AND ONTO THE DISK, which is the half the audit did find. `runtime/agents/<slug>` is what a
+  // local run spawns from, what `planDeploy` checks for an `agent.py`, and what the deploy upload
+  // sends — and nothing in this path wrote it. That failure is silent and SELF-PROPAGATING: the
+  // next run executes the version the history says was replaced, a deploy ships those bytes while
+  // recording the new number (so the drift badge reads "up to date" over a URL serving the retired
+  // code), and `recordArtifacts` then republishes the stale directory as a newer version, undoing
+  // the restore inside the version history as well.
+  //
+  // Generate materialises, apply materialises, undo materialises. Restore not doing so was an
+  // inconsistency rather than a decision — GAP-007 removes the need to remember by making one
+  // helper the only way anything obtains a project directory.
+  await projects.materialise(ctx, agent.id, published, join(agentsDir(RUNTIME_DIR), slug));
+
+  console.log(`[agents] ${slug} restored v${wanted} as v${published} (${restoredFiles.length} files)`);
   await relay.broadcastAgents();
   relay.broadcastAgentFiles(ctx, slug);
   void relay.broadcastAgentGraph(ctx, slug);

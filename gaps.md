@@ -394,6 +394,76 @@ GAP-007's `runnable` derivation.
 | Implementation Effort | 4/10 |
 | Confidence | 9/10 |
 
+### Resolution
+
+**Status: RESOLVED — and the finding understated it**
+
+**Correction to the original finding.** This audit recorded *"The Code view refreshes and shows
+v3's files (it reads the object store)"* and scoped the defect to the filesystem. That is wrong,
+and the implementation proved it: **a restore was broken in the object store as well.**
+
+An object's key carries the version it was written under — `…/agents/<id>/v<n>/<path>` — so
+`addVersion(ctx, agent.id, row.manifest, …)` reserves v5 and names paths that exist only under v3.
+Every read of the restored version asks for `v5/agent.py` and gets nothing. Reproduced in
+`test:edit-versions`:
+
+```
+ObjectNotFound: no such object: ws/…/agents/…/v5/.env.example
+```
+
+This is **GAP-001's defect one axis over**: there a manifest crossed an *agent* boundary, here one
+crosses a *version* boundary. Same root cause, same mechanism, same reason it shipped — the row,
+the version list and the byte total are all correct while the content is unreachable.
+
+It read as correct during the audit because the failure had no symptom. The read threw, `answer()`
+swallowed the throw (GAP-003), and the panel simply did not change — which, on the screen where
+somebody has just pressed Restore, is indistinguishable from a refresh that worked. Closing
+GAP-003 first is what made this visible, which is the reason the audit put it at the front of the
+fix order.
+
+**Implemented:**
+
+```ts
+const restoredFiles = await projects.readVersion(ctx, agent.id, wanted);
+const { version: published } = await projects.publish(ctx, agent.id, restoredFiles, {
+  source: "import", summary: `restored v${wanted}`,
+});
+await projects.materialise(ctx, agent.id, published, join(agentsDir(RUNTIME_DIR), slug));
+```
+
+The forward-publish design is unchanged and still right — `current_version` never moves backwards,
+so the version list keeps describing what happened. `publish` also *strengthens* the property that
+reasoning was written for: a forward version that owns its own objects can no longer be broken by a
+retention sweep collecting the older version it was pointing at.
+
+The materialise is the half the audit did find, and it closes the self-propagating chain: the run
+executing retired code, the deploy shipping it while recording the new number (the drift badge
+reading "up to date" over a URL serving the replaced version), and `recordArtifacts` republishing
+the stale directory as a newer version — which undid the restore in the history as well.
+
+**Files Changed:**
+
+- `server/src/index.ts` — `restoreAgentVersion`
+- `server/src/editVersions.test.ts` — section 3b
+
+**Verification:**
+
+`test:edit-versions` asserts **from the broken end first**, on an agent of its own so the pointer
+move cannot affect the sections below it: a bare `addVersion` of the old manifest still resolves to
+nothing, and the disk is still on the version the history says was replaced. Then the fixed path:
+the restored version reads back as the old bytes, the directory a run spawns from holds them, and
+the version it replaced keeps its own objects. Two structural checks read `restoreAgentVersion` out
+of `index.ts` — it must publish files, not copy a manifest, and it must materialise.
+
+**Regression Coverage:**
+
+The whole suite passes: apply, undo, the failed-validation path, the cross-workspace refusals and
+the read-only enforcement are unchanged. `test:project-store` and `test:agent-adversarial` still
+pass, which matters because GAP-001 and this share a mechanism. The drift badge needs no change —
+it compares a recorded version number against `current_version`, and both are now true.
+
+**Resolved On:** 2026-08-26
+
 ---
 
 ## GAP-003 — A failed read is swallowed; the client is never answered at all
@@ -2357,4 +2427,5 @@ brief spends a page on.
 | Gap | Status | Files Changed | Verification |
 |---|---|---|---|
 | GAP-001 | RESOLVED | `index.ts`, `projectStore.test.ts`, `agentAdversarial.test.ts` | `test:project-store` proves the bare-row fork still throws and the published one reads back byte for byte; `test:agent-adversarial` holds the call site |
+| GAP-002 | RESOLVED | `index.ts`, `editVersions.test.ts` | `test:edit-versions` proves the bare row is unreadable AND leaves the disk stale, then that publish + materialise fixes both; finding was understated — see its Resolution |
 | GAP-003 | RESOLVED | `wsRelay.ts`, `channels.test.ts`, `wsRelay.test.ts`, `types.ts`, `buildStore.ts`, `socket.ts`, `AddMenu.tsx`, `BuildPane.tsx` | `test:channels` audits all 13 call sites from source; `test:relay` drives a throwing read and asserts the frame |
