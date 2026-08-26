@@ -45,6 +45,7 @@ const LIMIT_LABEL: Record<string, string> = {
   workspaces: "workspaces",
   githubPhase1: "GitHub",
   githubPhase2: "GitHub sync",
+  perAgentAccessGrants: "Per-agent access",
 };
 
 const TIER_LABEL: Record<string, string> = { free: "Free", pro: "Pro", team: "Team" };

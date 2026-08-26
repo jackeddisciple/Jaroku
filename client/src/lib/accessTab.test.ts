@@ -33,6 +33,8 @@ import { AccessInvites } from "../components/AccessInvites.tsx";
 import { AccessHistory } from "../components/AccessHistory.tsx";
 import { InviteWithGrantDialog } from "../components/InviteWithGrantDialog.tsx";
 import { AgentTabs } from "../components/AgentTabs.tsx";
+import { AccessPanel } from "../components/AccessPanel.tsx";
+import { useEntitlementStore } from "../store/entitlementStore.ts";
 import type { AgentCapability } from "./capabilities.ts";
 
 let failures = 0;
@@ -710,6 +712,52 @@ console.log("\n§9.3's dot carries its own reason");
   // NULL WHILE LOADING, so a warning is never drawn from an absent payload — a dot that flashed on
   // every agent that had not answered yet would teach people to ignore it.
   check(accessBadge(undefined, undefined) === null, "...and nothing is claimed before the data lands");
+}
+
+console.log("\na tier refusal on this channel gets the card the rest of the app gets");
+{
+  // THE REFUSAL THIS PANEL CAN ACTUALLY RAISE. `perAgentAccessGrants` was declared a Team feature
+  // in v0.3.4 and gated nothing until `grantAccess` was wired to it, so an owner of a Free
+  // workspace pressing Grant is the first person to meet it — and what they met, before this, was
+  // the red sentence alone. The card is what every other tier-gated surface shows.
+  const detail = {
+    card: { uuid: AGENT, slug: "billing_bot", connectors: [], required_env: [], missing_env: [], default_provider: "fake" },
+    tools: [],
+    credentials: [],
+  } as never;
+  seed(useSessionStore, sessionAs("owner", { kind: "team" }));
+  seed(useAccessStore, { byAgent: { [AGENT]: ACCESS }, bySlug: { billing_bot: AGENT }, loading: {}, error: null });
+
+  seed(useEntitlementStore, {
+    channel: "access",
+    refusal: {
+      error: "feature_unavailable",
+      kind: "perAgentAccessGrants",
+      tier: "free",
+      upgradeUrl: "/billing/upgrade?to=pro&reason=perAgentAccessGrants",
+    },
+  });
+  const refused = markup(React.createElement(AccessPanel, { detail }));
+  check(refused.includes("Per-agent access"), "the kind is named in words rather than as its wire name");
+  check(!refused.includes("perAgentAccessGrants"), "...and the wire name is not what a person reads");
+  check(refused.includes("is not part of this plan"), "...with what would change it");
+  check(refused.includes("on Free"), "...and the plan it is refusing from");
+
+  // SCOPED TO THIS CHANNEL, which is what makes several of these safe to have mounted at once: a
+  // generation refused on the composer must not put a card on the Access tab, beside a Grant
+  // button that works.
+  seed(useEntitlementStore, {
+    channel: "gen",
+    refusal: {
+      error: "quota_exceeded", kind: "agents", tier: "free", current: 3, limit: 3,
+      upgradeUrl: "/billing/upgrade?to=pro&reason=agents",
+    },
+  });
+  const elsewhere = markup(React.createElement(AccessPanel, { detail }));
+  check(!elsewhere.includes("is not part of this plan"), "a refusal from another channel puts nothing here");
+  check(!elsewhere.includes("used all your agents"), "...not even its own words");
+
+  seed(useEntitlementStore, { channel: null, refusal: null });
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

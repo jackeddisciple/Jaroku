@@ -29,6 +29,7 @@ import { AccessInvites } from "./AccessInvites.tsx";
 import { AccessHistory } from "./AccessHistory.tsx";
 import { InviteWithGrantDialog } from "./InviteWithGrantDialog.tsx";
 import { EmptyState } from "./EmptyState.tsx";
+import { UpsellCard } from "./UpsellCard.tsx";
 import { AlertTriangleIcon, LockIcon } from "./panelIcons.tsx";
 import { quietBtn } from "./buttons.ts";
 import {
@@ -55,6 +56,7 @@ export function AccessPanel({ detail }: { detail: AgentDetailView }) {
   // reaching outside the agent they administer, which is the boundary the whole feature is about.
   const canManageInvites = useCanRun("revokeInvite");
   const setAccessAgentId = useUiStore((s) => s.setAccessAgentId);
+  const openBilling = useUiStore((s) => s.openWorkspacePanel);
 
   // §9.2 — `admin` ON THIS AGENT, not a workspace role. A workspace admin holds it by default and a
   // member does not, but a member GRANTED it here does — which is the entire reason the argument
@@ -179,6 +181,19 @@ export function AccessPanel({ detail }: { detail: AgentDetailView }) {
           </span>
         </div>
       )}
+
+      {/* WHAT THE TIER REFUSED, above the plain sentence rather than instead of it — the same
+          shape the composer and the members form use, and the same reason. `perAgentAccessGrants`
+          has been a Team feature since v0.3.4 and is now wired to something, so Grant is the
+          first control in this panel a Free workspace can press and be refused by. "Per-agent
+          access is not part of this plan" beside the button names what would change it; the red
+          sentence underneath says only that it did not work.
+
+          THE CARD IS SCOPED TO THIS CHANNEL, so a refused generation elsewhere puts nothing here
+          and a refused grant puts nothing on the composer. It renders for a member too: they
+          cannot press Grant, so they cannot raise this refusal, and a card with nothing to show
+          is absent by its own rule rather than by a guard here. */}
+      <UpsellCard channel="access" onUpgrade={() => openBilling("billing")} />
 
       {/* The refusal from a mutation, which is the one error a panel this wide has to surface
           inline: a grant refused for a note or a ceiling is something the person can fix. */}
