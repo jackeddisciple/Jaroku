@@ -25,6 +25,7 @@ import { AgentSparkline } from "./AgentSparkline.tsx";
 import { AccessPanel } from "./AccessPanel.tsx";
 import { accessBadge } from "../lib/accessList.ts";
 import { accessFor, useAccessStore } from "../store/accessStore.ts";
+import { useSessionStore } from "../store/sessionStore.ts";
 import { LayersIcon } from "./agentIcons.tsx";
 import {
   ActivityIcon, DatabaseIcon, ExternalLinkIcon, HashIcon, KeyIcon, RocketIcon, ShieldIcon,
@@ -39,6 +40,26 @@ import { useThreadStore } from "../store/threadStore.ts";
 import type { AgentDetailView } from "../types.ts";
 
 type TabId = "capabilities" | "health" | "deploy" | "evals" | "threads" | "access";
+
+/**
+ * §16 — THE ACCESS TAB IS ABSENT IN A PERSONAL WORKSPACE.
+ *
+ * "Personal workspaces have no members", and every section of that tab is about people: who has
+ * what, who is waiting to join, who is connected, and who changed it. In a workspace of one the
+ * People list is a single row that can never be edited, the invite section offers to widen a
+ * tenancy that is deliberately not shareable, and History is a log of things one person did to
+ * themselves. A tab that renders four empty sections is not a smaller feature; it is a surface
+ * teaching somebody that the product has nothing here.
+ *
+ * WHAT GOES WITH IT IS THE EXPOSURE SECTION, and that is the cost worth naming rather than
+ * glossing: a personal workspace can deploy, and the sentence saying a deployed agent is reachable
+ * by anyone holding its URL is exactly as true there. The Deploy tab still shows the URL — what a
+ * solo person loses is the sentence about what that means. §16 is unambiguous, so this follows it;
+ * the trade is recorded in the release notes rather than decided quietly here.
+ */
+function tabsFor(personal: boolean): typeof TABS {
+  return personal ? TABS.filter((t) => t.id !== "access") : TABS;
+}
 
 const TABS: { id: TabId; label: string; icon: (p: { size?: number }) => React.ReactElement }[] = [
   { id: "capabilities", label: "Capabilities", icon: LayersIcon },
@@ -486,6 +507,10 @@ export function AgentTabs({ detail }: { detail: AgentDetailView }) {
   // CAPABILITIES IS THE DEFAULT (§6), and the state is per mount rather than global: which tab
   // somebody last read about ONE agent is not a preference about the next one.
   const [tab, setTab] = useState<TabId>("capabilities");
+  const personal = useSessionStore(
+    (s) => s.workspaces.find((w) => w.id === s.workspaceId)?.kind === "personal",
+  );
+  const tabs = tabsFor(personal);
   // §9.3 — WHY THE ACCESS TAB IS THE ONE THAT WARNS. Every other tab here describes the agent; this
   // one describes what can reach it, and the two facts worth interrupting somebody over — a public
   // URL with no authentication, and an invitation nobody has accepted in a week — are both things
@@ -499,7 +524,7 @@ export function AgentTabs({ detail }: { detail: AgentDetailView }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
       <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-hair px-3 py-2">
-        {TABS.map(({ id, label, icon: Icon }) => (
+        {tabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
@@ -535,7 +560,11 @@ export function AgentTabs({ detail }: { detail: AgentDetailView }) {
         ))}
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {tab === "capabilities" ? <Capabilities detail={detail} />
+        {/* AND A TAB THAT HAS GONE FALLS BACK RATHER THAN RENDERING NOTHING. Switching from a team
+            to a personal workspace with Access selected would otherwise leave an empty pane — the
+            state is per mount, but a mount can outlive a switch. */}
+        {!tabs.some((t) => t.id === tab) ? <Capabilities detail={detail} />
+          : tab === "capabilities" ? <Capabilities detail={detail} />
           : tab === "health" ? <Health detail={detail} />
           : tab === "deploy" ? <Deploy detail={detail} />
           : tab === "evals" ? <Evals detail={detail} />

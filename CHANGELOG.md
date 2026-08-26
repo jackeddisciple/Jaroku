@@ -164,6 +164,13 @@ Three, all expand-only and safe against the version currently serving:
 
 ### Still owed
 
+- **A personal workspace loses the Exposure sentence along with the tab.** §16 puts the Access tab
+  out of personal workspaces because they have no members, and that is right for four of the five
+  sections — a People list of one, an invite section offering to widen a tenancy that is not
+  shareable, a History of things one person did to themselves. It is not right for the fifth: a
+  personal workspace can deploy, and "anyone with the URL can invoke this agent" is exactly as true
+  there. The Deploy tab still shows the URL; what a solo person loses is the sentence about what it
+  means. Recorded rather than quietly decided otherwise.
 - **The per-agent narrowing does not reach commands that name an agent only indirectly.** `pauseRun`
   carries a run id, `applyEdit` a proposal id, `cancelDeploy` a deployment id, `addExample` a dataset
   id — each belongs to an agent and none says which. So a person who may not `run` an agent may

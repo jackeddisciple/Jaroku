@@ -32,6 +32,7 @@ import { AccessSessions } from "../components/AccessSessions.tsx";
 import { AccessInvites } from "../components/AccessInvites.tsx";
 import { AccessHistory } from "../components/AccessHistory.tsx";
 import { InviteWithGrantDialog } from "../components/InviteWithGrantDialog.tsx";
+import { AgentTabs } from "../components/AgentTabs.tsx";
 import type { AgentCapability } from "./capabilities.ts";
 
 let failures = 0;
@@ -643,6 +644,38 @@ console.log("\n§12.1 — the invite dialog says it is adding somebody to the WO
   // person is the worst version of this.
   check(html.includes("leave empty for a link"), "an empty address is offered as the choice it is");
   check(/role="dialog"/.test(html) && /aria-modal="true"/.test(html), "and it is a modal dialog");
+}
+
+console.log("\n§16 — the tab is absent in a personal workspace");
+{
+  // ENOUGH FOR THE DEFAULT PANEL TO RENDER, and no more. What is under test is which tabs are in
+  // the strip; the Capabilities panel is simply what the strip opens on, so it gets the four empty
+  // collections it reads and nothing else.
+  const detail = {
+    card: { uuid: AGENT, slug: "billing_bot", connectors: [], required_env: [], missing_env: [], default_provider: "fake" },
+    tools: [],
+    credentials: [],
+  } as never;
+
+  seed(useSessionStore, sessionAs("owner", { kind: "team" }));
+  const inTeam = markup(React.createElement(AgentTabs, { detail }));
+  check(inTeam.includes(">Access<"), "a team workspace gets the tab");
+
+  seed(useSessionStore, sessionAs("owner", { kind: "personal" }));
+  const inPersonal = markup(React.createElement(AgentTabs, { detail }));
+  // ABSENT, NOT EMPTY. Every section of the tab is about people, and a workspace of one has none:
+  // the People list is a row nobody can edit, the invite section offers to widen a tenancy that is
+  // deliberately not shareable, and History is a log of things one person did to themselves. Four
+  // empty sections is not a smaller feature — it teaches somebody the product has nothing here.
+  check(!inPersonal.includes(">Access<"), "a personal workspace does not");
+  // ...and the five that are about the AGENT rather than about people all stay, so the rule above
+  // is one tab going rather than the strip being conditional.
+  for (const label of ["Capabilities", "Health", "Deploy", "Evals"]) {
+    check(inPersonal.includes(`>${label}<`), `...while ${label} stays, because it is about the agent`);
+  }
+
+  // Put the fixture back, so nothing after this block inherits a personal workspace.
+  seed(useSessionStore, sessionAs("owner", { kind: "team" }));
 }
 
 console.log("\n§9.3's dot carries its own reason");
