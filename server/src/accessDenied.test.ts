@@ -26,6 +26,9 @@ import { newRequestId, systemContextFor, type Role, type TenantContext } from ".
 import { IdentityRepository } from "./db/repositories/identity.ts";
 import { AgentGrantRepository } from "./db/repositories/agentGrants.ts";
 import { holds, resolveCapabilities, type AgentCapability } from "./auth/capabilities.ts";
+import {
+  accessHistoryLine, accessHistoryScope, belongsToAgent,
+} from "./auth/accessHistory.ts";
 
 let failures = 0;
 const check = (ok: boolean, msg: string, detail = ""): void => {
@@ -215,6 +218,67 @@ console.log("\nthe real refusal path still writes it");
   // something is already wrong — and a row written after the refusal has been sent is one a process
   // that exits in between loses, at precisely the moment it mattered.
   check(/await identityRepo\s*\n?\s*\.appendAudit/.test(body), "...and awaits the write rather than dropping it");
+}
+
+
+console.log("\nand the row reads as a sentence about a person, not about a uuid");
+{
+  // WHAT §15 IS FOR. An administrator opens History to recognise a change they did not make, and
+  // the only thing in the row that lets them is the name. `metadata.user` is an id — deliberately,
+  // because a stored name is a record of what somebody was CALLED that day — so the rendering is
+  // where it becomes a name, and for a release it was not: the line read "granted
+  // 5935135b-c901-4861-ad62-cb6b199a276a view", which nobody can recognise anything from.
+  const NAMES: Record<string, string> = { [USER]: "Rohan Mehta" };
+  const nameOf = (id: string | null): string => (id && NAMES[id]) || "somebody";
+
+  const granted = accessHistoryLine("access.granted", { user: USER, capabilities: ["view", "run"] }, nameOf);
+  check(granted.includes("Rohan Mehta"), `a grant names the person (${granted})`);
+  check(!granted.includes(USER), "...and not their id");
+
+  // EVERY SHAPE THAT CARRIES A SUBJECT, because one fixed in isolation is one of four.
+  for (const action of ["access.granted", "access.modified", "access.revoked", "access.expired"]) {
+    const line = accessHistoryLine(action, { user: USER, capabilities: ["view"] }, nameOf);
+    check(!line.includes(USER), `${action} spells the subject as a name (${line})`);
+  }
+
+  // SOMEBODY WHO HAS LEFT is "somebody" rather than their id — the workspace can no longer describe
+  // that account, and the uuid is not the fact a name would have given.
+  const gone = accessHistoryLine("access.revoked", { user: "00000000-0000-4000-8000-00000000dead" }, nameOf);
+  check(gone.includes("somebody") && !gone.includes("dead"), `a departed subject is "somebody" (${gone})`);
+
+  // THE PANEL'S ORDER, not the closure's. A grant of `edit` is stored closed, in whatever order the
+  // closure produced, and a line listing them differently from the chips above reads as a different
+  // set.
+  const closed = accessHistoryLine(
+    "access.granted",
+    { user: USER, capabilities: ["deploy", "view", "edit", "run"] },
+    nameOf,
+  );
+  check(closed.endsWith("view, run, edit, deploy"), `capabilities read in the panel's order (${closed})`);
+  // AN UNKNOWN CAPABILITY IS KEPT, at the end. One written by another build is a real widening, and
+  // a history that dropped it would describe a grant as narrower than it is.
+  const odd = accessHistoryLine("access.granted", { user: USER, capabilities: ["telepathy", "view"] }, nameOf);
+  check(odd.includes("telepathy"), `an unrecognised capability survives (${odd})`);
+  check(odd.indexOf("view") < odd.indexOf("telepathy"), "...at the end, after the ones this build knows");
+
+  // A REFUSAL CARRIES NO SUBJECT and must not grow one: the actor IS the subject there.
+  const denied = accessHistoryLine("access.denied", { cmd: "deploy", capability: "deploy" }, nameOf);
+  check(denied.includes("deploy") && denied.includes("refused"), `a refusal names what it needed (${denied})`);
+}
+
+console.log("\nwhich rows belong to this agent, asked without starting a server");
+{
+  // THE FILTER THAT DECIDES WHAT §15 SHOWS. Both halves matter and they fail in opposite
+  // directions: a workspace row wrongly excluded makes a role change invisible, and an agent row
+  // wrongly included puts another agent's grants in this agent's history.
+  check(accessHistoryScope("member.role_changed") === "workspace", "a role change is a workspace row");
+  check(accessHistoryScope("access.granted") === "agent", "a grant is an agent row");
+  check(accessHistoryScope("secret.revealed") === null, "and an unrelated audit row is neither");
+
+  check(belongsToAgent(`${AGENT}:${USER}`, AGENT), "a grant row files under agent:user and matches the agent");
+  check(belongsToAgent(AGENT, AGENT), "...and a refusal files under the agent alone");
+  check(!belongsToAgent(`${THEIR_AGENT}:${USER}`, AGENT), "...while another agent's row does not match");
+  check(!belongsToAgent(null, AGENT), "...and a row with no target matches nothing");
 }
 
 await db.close();

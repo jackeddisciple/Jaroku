@@ -109,6 +109,9 @@ import {
   agentCeiling, closeAgentCapabilities, holds, isAgentCapability, resolveCapabilities,
   type AgentCapability,
 } from "./auth/capabilities.ts";
+import {
+  accessHistoryLine, accessHistoryScope, belongsToAgent,
+} from "./auth/accessHistory.ts";
 // The Agents grid's derivations, in their own module because every one of them is a rule that looks
 // obviously right in a screenshot and is wrong in the case nobody had that day — see agentHealth.ts.
 import {
@@ -6742,55 +6745,23 @@ async function sendAccess(ctx: TenantContext, agentId: string): Promise<void> {
  * Workspace panel's Audit section reads, filtered. A record of its own would be a second copy of
  * the same events, and the two would disagree the first time one was written in a transaction that
  * rolled back.
- */
-const ACCESS_HISTORY_AGENT = new Set([
-  "access.granted", "access.modified", "access.revoked", "access.expired",
-  "access.denied", "access.session_ended",
-]);
-/**
- * The workspace-wide actions that change what somebody can reach on an agent.
  *
- * NAMED RATHER THAN PATTERN-MATCHED. "Anything starting with member." would sweep in rows this
- * section has no business showing and, worse, would silently stop matching the day somebody renamed
- * an action — a history that quietly shows less is one nobody notices is broken.
+ * WHICH ROWS AND WHAT THEY SAY ARE IN `auth/accessHistory.ts`, so a suite can ask them without
+ * starting a server. This function is what is left once those two questions move out: a read, a
+ * membership lookup, and the filter.
  */
-const ACCESS_HISTORY_WORKSPACE = new Set([
-  "member.added", "member.removed", "member.role_changed", "member.left",
-  "member.invite", "invite.accepted", "invite.revoked",
-]);
-
-/** One audit row, as the sentence §15 asks a row to be. */
-function accessHistoryLine(action: string, metadata: Record<string, unknown>): string {
-  const who = typeof metadata["user"] === "string" ? String(metadata["user"]) : null;
-  const caps = Array.isArray(metadata["capabilities"]) ? (metadata["capabilities"] as string[]).join(", ") : null;
-  switch (action) {
-    case "access.granted":
-      return `granted ${who ?? "somebody"}${caps ? ` ${caps}` : ""}`;
-    case "access.modified":
-      return `changed ${who ?? "somebody"}'s access${caps ? ` to ${caps}` : ""}`;
-    case "access.revoked":
-      return `revoked ${who ?? "somebody"}'s grant`;
-    case "access.expired":
-      return `${who ?? "somebody"}'s grant expired`;
-    case "access.denied":
-      // THE HIGHEST-SIGNAL ROW IN THE SECTION, and it names the capability that was missing rather
-      // than only the command — "cannot deploy" is the fixable fact; "deploy was refused" is not.
-      return `refused ${String(metadata["cmd"] ?? "a command")} — no "${String(metadata["capability"] ?? "capability")}"`;
-    case "access.session_ended":
-      return "ended a session";
-    default:
-      // The workspace rows, whose metadata belongs to the membership surface rather than to this
-      // one. The action IS the sentence there, spelled without its prefix.
-      return action.replace(/^[a-z]+\./, "").replace(/_/g, " ");
-  }
-}
-
 async function sendAccessHistory(ctx: TenantContext, agentId: string, limit: number): Promise<void> {
   const agent = await agentForCommand(ctx, agentId);
   if (!agent) {
     refuseAccess(ctx, `there is no agent "${agentId}" in this workspace`);
     return;
   }
+  // NAMES FOR BOTH HALVES OF A ROW, the actor and the subject, off one read of the membership.
+  //
+  // "SOMEBODY" FOR A STRANGER, and it is the right answer rather than a shrug: a row whose subject
+  // has left the workspace is a row about an account this workspace can no longer describe, and the
+  // uuid it holds is not a name — it is the thing a name would have told somebody. The grant itself
+  // is still visible as an orphan row in §10, which is where an admin can act on it.
   const members = await identityRepo.listMembers(ctx);
   const nameOf = (userId: string | null): string => {
     const m = userId ? members.find((x) => x.user_id === userId) : undefined;
@@ -6802,23 +6773,21 @@ async function sendAccessHistory(ctx: TenantContext, agentId: string, limit: num
   // read is bounded either way — this is a section, not a search.
   const rows = await identityRepo.listAudit(ctx, Math.min(Math.max(limit, 1), 200) * 5);
   const entries = rows
-    .filter((r) => {
-      if (ACCESS_HISTORY_WORKSPACE.has(r.action)) return true;
-      if (!ACCESS_HISTORY_AGENT.has(r.action)) return false;
-      // AGENT ROWS ARE FILTERED TO THIS AGENT, by the target this handler wrote. `access.granted`
-      // files under `<agentId>:<userId>` and `access.denied` under the agent id alone, so the
-      // prefix is what both have in common — and a `startsWith` on a uuid cannot collide.
-      return String(r.target_id ?? "").startsWith(agent.id);
+    .flatMap((r) => {
+      const scope = accessHistoryScope(r.action);
+      if (!scope) return [];
+      // AGENT ROWS ARE FILTERED TO THIS AGENT; workspace rows reach every agent by definition.
+      if (scope === "agent" && !belongsToAgent(r.target_id, agent.id)) return [];
+      return [{
+        id: r.id,
+        action: r.action,
+        scope,
+        actorName: nameOf(r.actor_user_id ?? null),
+        summary: accessHistoryLine(r.action, r.metadata ?? {}, nameOf),
+        createdAt: r.created_at,
+      }];
     })
-    .slice(0, limit)
-    .map((r) => ({
-      id: r.id,
-      action: r.action,
-      scope: (ACCESS_HISTORY_WORKSPACE.has(r.action) ? "workspace" : "agent") as "workspace" | "agent",
-      actorName: nameOf(r.actor_user_id ?? null),
-      summary: accessHistoryLine(r.action, r.metadata ?? {}),
-      createdAt: r.created_at,
-    }));
+    .slice(0, limit);
 
   relay.sendAccess(ctx, ctx.requestId, { type: "history", agentId: agent.id, entries });
 }
