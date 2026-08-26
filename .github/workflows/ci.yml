@@ -335,15 +335,19 @@ jobs:
           # an archived-only session reading as "not started" — so this is the suite that stops them
           # coming back rather than the one that found them.
           npm run test:agent-adversarial
-          # THE VERSION LOOP, which has never run here and which holds the two defects v0.3.9 found:
-          # a restore published a manifest onto a NEW version number, so the objects it named lived
-          # under the old one and every read of the restored version threw, and nothing wrote the
-          # directory a run actually spawns from. Both were invisible — the read's failure was
-          # swallowed, so the panel simply did not change, which on the screen where somebody has
-          # just pressed Restore is indistinguishable from a refresh that worked. It replays
-          # recorded generation and edit fixtures, so the whole loop is exercised without a model.
-          npm run test:edit-versions
-          # And the graph read, which is the one error path in this product that is wired end to
+          # `test:edit-versions` IS DELIBERATELY NOT HERE, and it is the one suite in this file's
+          # history whose absence is a reason rather than an oversight. It replays recorded model
+          # output, which needs no network — but an apply VALIDATES the generated project, and
+          # validation imports it with Python. This job has node and nothing else, so the suite
+          # fails at its first apply with "the generated project failed validation and was
+          # discarded", which says nothing about the code under test. The two properties v0.3.9
+          # needed from it — a manifest copied onto a new version number resolves to nothing, and a
+          # restore has to reach the disk as well as the store — are asserted in
+          # `test:project-store` and `test:agent-adversarial` instead, both of which run here and
+          # neither of which needs an interpreter. Adding uv to this job would buy one suite at the
+          # cost of a Python toolchain on every server run.
+          #
+          # The graph read, which is the one error path in this product that is wired end to
           # end and therefore the template the others follow. Its assertions here are about the
           # SHAPE of the failure: the key travels as its own field so the sentence stays a
           # sentence, because the client's path truncator keeps the last segment and collapses

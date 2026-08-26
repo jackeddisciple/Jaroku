@@ -285,6 +285,66 @@ async function suite(label: string, db: Db): Promise<void> {
     );
   }
 
+  // --- a manifest copied across a VERSION boundary --------------------------------------
+  //
+  // THE RESTORE BUG, and it is the block above one axis over. A key carries the version it was
+  // written under as well as the agent, so a manifest handed to `addVersion` reserves the next
+  // number and names paths that exist only under the old one. `restoreAgentVersion` did exactly
+  // that: a forward publish onto the old manifest, which is the right DESIGN — `current_version`
+  // must never move backwards, or the version list stops describing what happened — implemented
+  // with the one call that writes no bytes.
+  //
+  // It read as correct because the failure had no symptom. The read threw, the throw was swallowed
+  // by `answer()`, and the panel did not change — which, on the screen where somebody has just
+  // pressed Restore, is indistinguishable from a refresh that worked. The audit that found this
+  // path recorded the Code view as CORRECT for that reason.
+  //
+  // Asserted from the broken end first, for the same reason the fork block above is: an assertion
+  // that only exercised the fixed path would have passed on the shipped code too.
+  {
+    const restoreTarget = await agents.upsertFromDisk(ctx, { slug: "restore_target" });
+    const first = await projects.publish(ctx, restoreTarget.id, [{ path: "agent.py", content: AGENT_PY }], {
+      source: "generation", summary: "first cut",
+    });
+    const edited = `${AGENT_PY}# a later version\n`;
+    await projects.publish(ctx, restoreTarget.id, [{ path: "agent.py", content: edited }], { source: "edit" });
+
+    const oldRow = (await agents.version(ctx, restoreTarget.id, first.version))!;
+    const bare = await agents.addVersion(ctx, restoreTarget.id, oldRow.manifest, { source: "import", summary: "restored" });
+    let bareThrew = false;
+    try {
+      await projects.readVersion(ctx, restoreTarget.id, bare);
+    } catch (err) {
+      bareThrew = err instanceof ObjectNotFound;
+    }
+    check(bareThrew, "a manifest copied onto a NEW version number resolves to nothing either — a key carries its version");
+
+    const restoredFiles = await projects.readVersion(ctx, restoreTarget.id, first.version);
+    const restored = await projects.publish(ctx, restoreTarget.id, restoredFiles, { source: "import", summary: "restored" });
+    check(
+      (await projects.readVersion(ctx, restoreTarget.id, restored.version)).find((f) => f.path === "agent.py")?.content === AGENT_PY,
+      "...while publishing the old version's FILES makes the restored version readable",
+    );
+    check(
+      (await projects.readVersion(ctx, restoreTarget.id, first.version)).find((f) => f.path === "agent.py")?.content === AGENT_PY,
+      "...and the version it restored FROM keeps its own objects, so the history still describes what happened",
+    );
+
+    // AND THE DISK, which is the half a run and a deploy read and which nothing in that path wrote.
+    // Without it the next run executes the version the history says was replaced, a deploy ships
+    // those bytes while recording the NEW number — the drift badge reading "up to date" over a URL
+    // serving the retired code — and `recordArtifacts` republishes the stale directory as a newer
+    // version, undoing the restore in the history as well.
+    const dir = tmpDir("restore");
+    await projects.materialise(ctx, restoreTarget.id, first.version + 1, dir);
+    check(readFileSync(join(dir, "agent.py"), "utf8") === edited, "the disk starts on the version the restore replaces");
+    await projects.materialise(ctx, restoreTarget.id, restored.version, dir);
+    check(
+      readFileSync(join(dir, "agent.py"), "utf8") === AGENT_PY,
+      "...and materialising the restored version moves it, which the row alone never did",
+    );
+  }
+
   // --- a manifest that outruns the objects ----------------------------------------------
   //
   // The manifest is the truth about what a version contains, so an object that is gone has to

@@ -444,23 +444,34 @@ the stale directory as a newer version — which undid the restore in the histor
 **Files Changed:**
 
 - `server/src/index.ts` — `restoreAgentVersion`
-- `server/src/editVersions.test.ts` — section 3b
+- `server/src/storage/projectStore.test.ts` — the property, both drivers
+- `server/src/agentAdversarial.test.ts` — the structural check on the call
+- `server/src/editVersions.test.ts` — section 3b, which drives the same thing through the real editor
 
 **Verification:**
 
-`test:edit-versions` asserts **from the broken end first**, on an agent of its own so the pointer
-move cannot affect the sections below it: a bare `addVersion` of the old manifest still resolves to
-nothing, and the disk is still on the version the history says was replaced. Then the fixed path:
-the restored version reads back as the old bytes, the directory a run spawns from holds them, and
-the version it replaced keeps its own objects. Two structural checks read `restoreAgentVersion` out
-of `index.ts` — it must publish files, not copy a manifest, and it must materialise.
+`test:project-store` asserts **from the broken end first** — a bare `addVersion` of the old manifest
+still throws `ObjectNotFound`, because a key carries its version as well as its agent — and then the
+fixed path: the restored version reads back as the old bytes, the version it restored *from* keeps
+its own objects, and materialising moves a directory that was sitting on the replaced version.
+`test:agent-adversarial` reads `restoreAgentVersion` out of `index.ts` and requires both halves: it
+must publish files rather than copy a manifest, and it must materialise.
+
+**Both of those suites already run in CI.** `test:edit-versions` drives the same properties through
+the real editor and is the better local proof, but it **cannot run in the server CI job**: an apply
+validates the generated project by importing it with Python, and that job has node and nothing else.
+It fails there at its first apply with *"the generated project failed validation and was
+discarded"*, which says nothing about the code under test — so the properties live where they
+actually execute, and the workflow records why the suite is absent rather than leaving it looking
+forgotten.
 
 **Regression Coverage:**
 
-The whole suite passes: apply, undo, the failed-validation path, the cross-workspace refusals and
-the read-only enforcement are unchanged. `test:project-store` and `test:agent-adversarial` still
-pass, which matters because GAP-001 and this share a mechanism. The drift badge needs no change —
-it compares a recorded version number against `current_version`, and both are now true.
+`test:project-store` passes on SQLite and Postgres; `test:agent-adversarial` and `test:edit-versions`
+pass locally in full — apply, undo, the failed-validation path, the cross-workspace refusals and the
+read-only enforcement are unchanged. GAP-001 and this share a mechanism, and both suites cover both.
+The drift badge needs no change: it compares a recorded version number against `current_version`,
+and both are now true.
 
 **Resolved On:** 2026-08-26
 
@@ -2081,7 +2092,7 @@ form, which is correct: they have no key to separate.
 - `client/src/types.ts` — `errorKey` on `AgentGraph`
 - `client/src/components/GraphView.tsx` — `Empty` renders two elements
 - `client/src/lib/truncatePath.test.ts` — what the truncator does to prose
-- `.github/workflows/ci.yml` — `test:edit-versions` and `test:graph-introspect` added
+- `.github/workflows/ci.yml` — `test:graph-introspect` added; `test:edit-versions` recorded as deliberately absent
 
 **Verification:**
 
@@ -2094,8 +2105,12 @@ client's `AgentGraph` declaring the field — a field the server sends that the 
 know about is a field no component can read, which is the same silence this finding is about.
 
 **Both suites were absent from CI**, which by this repository's own rule means they did not run.
-They are in it now, in the agents step. The remaining forty-five server suites that are registered
-in `package.json` and absent from the workflow are recorded as **GAP-017**.
+`test:graph-introspect` is in it now, in the agents step. `test:edit-versions` **cannot be** — an
+apply validates the generated project by importing it with Python, and that job has node and
+nothing else — so its properties were moved to `test:project-store` and `test:agent-adversarial`,
+both of which run there, and the workflow records why it is absent rather than leaving it looking
+forgotten. The remaining forty-five server suites registered in `package.json` and missing from the
+workflow are recorded as **GAP-017**.
 
 **Regression Coverage:**
 
@@ -2653,7 +2668,7 @@ brief spends a page on.
 | Gap | Status | Files Changed | Verification |
 |---|---|---|---|
 | GAP-001 | RESOLVED | `index.ts`, `projectStore.test.ts`, `agentAdversarial.test.ts` | `test:project-store` proves the bare-row fork still throws and the published one reads back byte for byte; `test:agent-adversarial` holds the call site |
-| GAP-002 | RESOLVED | `index.ts`, `editVersions.test.ts` | `test:edit-versions` proves the bare row is unreadable AND leaves the disk stale, then that publish + materialise fixes both; finding was understated — see its Resolution |
+| GAP-002 | RESOLVED | `index.ts`, `projectStore.test.ts`, `agentAdversarial.test.ts`, `editVersions.test.ts` | `test:project-store` proves the bare row is unreadable and the disk stale, then that publish + materialise fixes both; finding was understated — see its Resolution |
 | GAP-009 | RESOLVED | `entitlements.ts`, `entitlementGate.ts`, `plans.ts`, `index.ts`, `entitlements.test.ts`, `entitlementStore.ts`, `UpsellCard.tsx`, `UsagePanel.tsx`, `types.ts` | `test:entitlements` holds all seven kinds from both Free and Pro, plus the top of the ladder answering null; `test:entitlement-store` holds the client guard |
 | GAP-014 | RESOLVED | `web/pricing.html`, `checkoutSurfaces.test.ts` | `test:checkout-surfaces` maps every sold feature row to an `EntitlementKind` and asserts the three removed names stay gone |
 | GAP-015 | RESOLVED | `graphIntrospect.ts`, `index.ts`, `graphIntrospect.test.ts`, `types.ts`, `GraphView.tsx`, `truncatePath.test.ts`, `ci.yml` | `test:truncate-path` asserts what the truncator does to prose; `test:graph-introspect` holds the two-field shape on both sides |

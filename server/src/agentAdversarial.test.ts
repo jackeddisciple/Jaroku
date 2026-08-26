@@ -148,6 +148,24 @@ const leg = (over: Partial<ProviderMetrics>): ProviderMetrics => ({
         "...and materialises them where the local run path looks for them",
         /projects\.materialise\(ctx, id,/.test(forkFn),
       );
+
+      // AND A RESTORE, WHICH IS THE SAME DEFECT ONE AXIS OVER. A key carries the VERSION it was
+      // written under as well as the agent, so a manifest handed to `addVersion` reserves the next
+      // number and names paths that exist only under the old one. `test:project-store` holds that
+      // property; this holds the call, because the property protects nothing while the production
+      // path uses the operation that writes no bytes. Both halves are named: the store, and the
+      // directory a run spawns from and a deploy uploads — the second is the one every other
+      // publish path already does and this one silently did not.
+      const restoreFn = /async function restoreAgentVersion\([\s\S]*?\n\}/.exec(indexSource)?.[0] ?? "";
+      check("restoreAgentVersion exists to be read", restoreFn.length > 0);
+      check(
+        "a restore publishes the old version's FILES rather than copying its manifest onto a new number",
+        /projects\.publish\(ctx, agent\.id, restoredFiles/.test(restoreFn),
+      );
+      check(
+        "...and materialises it, as generate, apply and undo all do",
+        /projects\.materialise\(ctx, agent\.id, published/.test(restoreFn),
+      );
     }
 
     console.log("\nan agent with nothing at all does not crash a derivation, and says so");
