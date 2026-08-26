@@ -2179,7 +2179,7 @@ export type InboxIconName =
 export type InboxActionName =
   | "set_secret" | "open_agent" | "set_mcp_credential" | "rediscover" | "remove_server"
   | "view_logs" | "retry_deploy" | "cancel_deploy" | "raise_ceiling" | "view_results"
-  | "open_latest_failure" | "view_all_failures" | "dismiss_all" | "redeploy" | "view_diff"
+  | "open_latest_failure" | "dismiss_all" | "redeploy" | "view_diff"
   | "open_comparison" | "export_results" | "view_usage" | "set_budget"
   | "view_evidence" | "save_memory" | "reject_memory" | "enable_gate" | "remove_grant"
   | "open_invites" | "open_members" | "restore_agent"

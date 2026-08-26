@@ -33,6 +33,12 @@ import {
   trayLine,
 } from "./inboxBoard.ts";
 import type { InboxItemView, InboxSeverity } from "../types.ts";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { ACTION_LABEL } from "../components/InboxActions.tsx";
+
+/** `client/src`, so the server's registry is one `..` away and this suite can read both. */
+const CLIENT = `${fileURLToPath(new URL(".", import.meta.url))}..`;
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -192,6 +198,48 @@ console.log("\na range works in both directions, across column boundaries");
     "an anchor that has since resolved out from under the click selects only what was clicked",
     rangeBetween(ordered, "gone", "d").join() === "d",
   );
+}
+
+console.log("\nno card offers an action nothing does");
+{
+  // TWO LISTS OF THE SAME VOCABULARY IN TWO LANGUAGES, AND NOTHING TYPED CONNECTS THEM. The server's
+  // registry declares which actions each card offers; the client decides what each one does. Eight
+  // of twenty-nine names had no case in `runAction` and fell through to `return false`, which
+  // nothing read — so two card types shipped with a DEAD PRIMARY, the most prominent control on the
+  // card being the one that did nothing. The overflow closed either way, which reads as
+  // confirmation, and the sweep resolves cards on its own schedule, so "nothing visible happened"
+  // was indistinguishable from "it worked and the board will catch up."
+  //
+  // THE SWITCH IS EXHAUSTIVE NOW and the typechecker holds that end: a new `InboxActionName` fails
+  // the client build rather than shipping as a dead glyph. What a typecheck cannot see is the
+  // SERVER's list — a name the registry offers that the client's union has never heard of — so this
+  // reads `registry.ts` as text, the same way `test:permission-ui` reads `capabilities.ts`.
+  const registry = readFileSync(`${CLIENT}/../../server/src/inbox/registry.ts`, "utf8");
+  const union = /export type InboxActionName =([\s\S]*?);/.exec(registry)?.[1] ?? "";
+  const serverNames = [...union.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]!);
+  check(`read the server's action vocabulary (${serverNames.length})`, serverNames.length >= 25);
+
+  // `ACTION_LABEL` is `Record<InboxActionName, string>` on the client, so its keys ARE the client's
+  // union — a name in one and not the other is what this is looking for, in both directions.
+  const clientNames = Object.keys(ACTION_LABEL);
+  const onlyServer = serverNames.filter((n) => !clientNames.includes(n));
+  const onlyClient = clientNames.filter((n) => !serverNames.includes(n));
+  check(`every action the registry can offer has a client entry${onlyServer.length ? ` — MISSING: ${onlyServer.join(", ")}` : ""}`, onlyServer.length === 0);
+  check(`...and the client names none the registry cannot${onlyClient.length ? ` — EXTRA: ${onlyClient.join(", ")}` : ""}`, onlyClient.length === 0);
+
+  // AND EVERY OFFERED ACTION EITHER RUNS OR IS DECLARED NOT TO. `UNIMPLEMENTED_ACTIONS` is the
+  // declaration; `useAllowedActions` filters those out, so the card falls through to its next-best
+  // action rather than rendering a control that closes a menu and does nothing. What must never
+  // happen again is a name that is in neither list.
+  const dispatch = readFileSync(`${CLIENT}/components/InboxActions.tsx`, "utf8");
+  const cased = new Set([...dispatch.matchAll(/^\s*case "([a-z_]+)":/gm)].map((m) => m[1]!));
+  const uncased = clientNames.filter((n) => !cased.has(n));
+  check(`every action name has a case in runAction${uncased.length ? ` — UNCASED: ${uncased.join(", ")}` : ""}`, uncased.length === 0);
+
+  // `view_all_failures` IS GONE FROM BOTH, and named because its absence is the fix. It had no
+  // destination — there is no filtered run list in the product — so it rendered in an overflow and
+  // did nothing. A filtered failure list is a real feature; when it lands, the entry comes with it.
+  check("view_all_failures is offered by nothing, because it had nowhere to go", !serverNames.includes("view_all_failures"));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

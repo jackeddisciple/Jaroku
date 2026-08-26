@@ -71,6 +71,22 @@ interface InboxState {
    * because the count is a fact and the animation is a rendering.
    */
   leaving: Record<string, true>;
+  /**
+   * Which card is showing its evidence, or null.
+   *
+   * IN THE STORE RATHER THAN IN `InboxView`, and it moved here for one action. `view_evidence` is
+   * the primary control on a memory proposal, and the card already expands on click — but
+   * `IconButton` stops propagation, deliberately, because every other control on a card must not
+   * also open it. So the button that says "View the evidence" PREVENTED the expansion that would
+   * have shown it, and clicking anywhere else on the card worked better than clicking its primary
+   * control. `runAction` is a pure function two components below the state, and threading a
+   * callback through both of them to reach it would put the fix in the prop chain rather than in
+   * the action.
+   *
+   * NOT WORKSPACE DATA, but reset with the rest of this store all the same: an expanded card in
+   * one workspace has no meaning in another, and the id would name a row that is gone.
+   */
+  expandedId: string | null;
 
   setSnapshot: (snapshot: {
     items: InboxItemView[];
@@ -87,6 +103,8 @@ interface InboxState {
   noteAdded: (item: InboxItemView) => void;
   setError: (message: string | null) => void;
   setUndo: (undo: InboxUndo | null) => void;
+  /** Show one card's evidence, or none. Passing the id that is already open closes it. */
+  setExpanded: (itemId: string | null) => void;
 }
 
 export const useInboxStore = create<InboxState>((set) => ({
@@ -99,6 +117,9 @@ export const useInboxStore = create<InboxState>((set) => ({
   error: null,
   undo: null,
   leaving: {},
+  expandedId: null,
+
+  setExpanded: (expandedId) => set({ expandedId }),
 
   setSnapshot: (snapshot) =>
     set({

@@ -22,16 +22,20 @@
 import { createSecret } from "../lib/secrets.ts";
 import { openAgentDetail } from "../lib/agentNav.ts";
 import {
+  sendBulkInboxAction,
+  sendCancelDeploy,
   sendDeploy,
   sendListInbox,
   sendLoadDeployLogs,
   sendLoadRun,
   sendRediscoverMcpServer,
+  sendRemoveMcpServer,
   sendRestoreAgent,
   sendSetMcpToolImpact,
   sendSetSpendCeiling,
 } from "../lib/socket.ts";
 import { useUiStore } from "../store/uiStore.ts";
+import { useInboxStore } from "../store/inboxStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { can, canRun, ROUTE_CAPABILITY } from "../lib/capabilities.ts";
 import type { InboxActionName, InboxItemView } from "../types.ts";
@@ -49,7 +53,6 @@ export const ACTION_LABEL: Record<InboxActionName, string> = {
   raise_ceiling: "Raise the ceiling",
   view_results: "View the results",
   open_latest_failure: "Open the latest failure",
-  view_all_failures: "View every failure",
   dismiss_all: "Dismiss all of them",
   redeploy: "Deploy the current version",
   view_diff: "See what changed",
@@ -60,7 +63,14 @@ export const ACTION_LABEL: Record<InboxActionName, string> = {
   view_evidence: "View the evidence",
   save_memory: "Save this",
   reject_memory: "Reject this",
-  enable_gate: "Turn the confirmation gate on",
+  // "TURN THE CONFIRMATION GATE ON" WAS A PROMISE NO COMMAND COULD KEEP. The gate is off because
+  // a line in the agent's OWN SOURCE turned it off — `os.environ["JAROKU_MCP_CONFIRM"] = "skip"`,
+  // which is what `disablesConfirmGate` detects — so nothing on this card can put it back. Only an
+  // edit to that file can, and the label now says where to make it. Renaming it is the fix rather
+  // than a retreat from one: the old label was the reason the button read as broken instead of as
+  // absent, and §4.5 is explicit that navigation is a legitimate fallback when a card genuinely
+  // cannot complete a fix — what it must not do is look like an inline one.
+  enable_gate: "Open the code that turns it off",
   remove_grant: "Remove the grant",
   open_invites: "Open invitations",
   open_members: "Open the members list",
@@ -79,8 +89,32 @@ export const ACTION_LABEL: Record<InboxActionName, string> = {
  */
 export const INLINE_ACTIONS = new Set<InboxActionName>([
   "set_secret", "set_mcp_credential", "rediscover", "retry_deploy", "redeploy",
-  "raise_ceiling", "enable_gate", "remove_grant", "save_memory", "reject_memory",
+  "raise_ceiling", "remove_grant", "save_memory", "reject_memory",
+  // `cancel_deploy` and `remove_server` complete where they stand — both send the same command
+  // their own panel sends — and `dismiss_all` clears a whole type off this board without leaving
+  // it, which is the surface's stated goal in one press. `enable_gate` has LEFT this set: it
+  // navigates now, because the gate is off by a line in the agent's own code and nothing but an
+  // edit can put it back. See its label.
+  "cancel_deploy", "remove_server", "dismiss_all",
 ]);
+
+/**
+ * Actions the registry may offer and this client cannot yet run.
+ *
+ * DECLARED RATHER THAN LEFT TO FALL THROUGH, and that is the whole point of it existing. Eight
+ * action names had no case in `runAction`, so pressing them did nothing at all — no state change,
+ * no toast, no error — and the overflow closed either way, which reads as confirmation. A silent
+ * no-op is the worst failure shape available here, because the surrounding design (a menu that
+ * closes, a sweep that resolves cards on its own schedule) makes "nothing visible happened"
+ * indistinguishable from "it worked and the board will catch up."
+ *
+ * So an action that cannot run is not RENDERED. `useAllowedActions` filters it out exactly as it
+ * filters one the role may not take, and the card falls through to its next-best action — which is
+ * what keeps a board clearable at every role and is now what keeps it honest about an unfinished
+ * one. The two here are GAP-012's: answering a memory proposal needs a command that carries the
+ * decision, and there is nothing in the 116-command surface that does.
+ */
+export const UNIMPLEMENTED_ACTIONS = new Set<InboxActionName>(["save_memory", "reject_memory"]);
 
 /** Actions that need somewhere to type before they can run. §4.5's "the form itself". */
 export const FORM_ACTIONS = new Set<InboxActionName>(["set_secret", "set_mcp_credential", "raise_ceiling"]);
@@ -110,8 +144,17 @@ export const ACTION_COMMAND: Partial<Record<InboxActionName, string>> = {
   retry_deploy: "deploy",
   redeploy: "deploy",
   raise_ceiling: "setSpendCeiling",
-  enable_gate: "setMcpToolImpact",
   remove_grant: "setMcpToolImpact",
+  // THE THREE THAT WERE MISSING FROM THIS TABLE AS WELL AS FROM THE DISPATCH, and their absence
+  // here was the more dangerous half: a name absent from this map is treated as ungated-and-allowed
+  // by `useAllowedActions`, so cancelling a deployment and removing an MCP server were offered to
+  // every member — they simply happened to do nothing, which is what stopped that being a defect.
+  // Both are the same command their own panel sends and are gated the same way it is.
+  cancel_deploy: "cancelDeploy",
+  remove_server: "removeMcpServer",
+  // `dismiss_all` is deliberately NOT here, with `dismiss` and `snooze`: a dismissal is one
+  // person's own board and changes nothing anybody else sees, which is why every member holds it.
+  // `enable_gate` has left this table because it no longer sends a command at all — it navigates.
 };
 
 /**
@@ -130,6 +173,11 @@ export const ACTION_COMMAND: Partial<Record<InboxActionName, string>> = {
 export function useAllowedActions(actions: readonly InboxActionName[]): InboxActionName[] {
   const role = useSessionStore((s) => s.role());
   return actions.filter((a) => {
+    // AN ACTION THIS CLIENT CANNOT RUN IS NOT OFFERED, which is the same answer as a capability
+    // the role does not hold and for the same reason: the card falls through to its next-best
+    // action and stays clearable, instead of rendering a control that closes a menu and does
+    // nothing. See `UNIMPLEMENTED_ACTIONS`.
+    if (UNIMPLEMENTED_ACTIONS.has(a)) return false;
     const key = ACTION_COMMAND[a];
     if (key === undefined) return true;
     const routeKey = key.startsWith("__route:") ? key.slice("__route:".length) : null;
@@ -201,10 +249,56 @@ export function runAction(action: InboxActionName, item: InboxItemView): boolean
       sendSetMcpToolImpact(serverId, toolName, "low");
       return true;
     }
+    case "cancel_deploy": {
+      // THE SAME COMMAND THE DEPLOY PANEL SENDS, which is §6.4's rule and the reason this is one
+      // line: a second way to stop a deployment is a second thing that has to be capability-gated,
+      // audited and refused correctly on a suspended workspace, and the second one is the one that
+      // forgets. The subject of a `deploy_failed` card is the deployment.
+      //
+      // A CARD WITH NO SUBJECT SENDS NOTHING, here and below. `subject_id` is non-null for both of
+      // these types by construction, and an empty string reaching the relay would be a command
+      // refused on the server for a reason nobody could see from the card.
+      if (!item.subject_id) return false;
+      sendCancelDeploy(item.subject_id);
+      return true;
+    }
+    case "remove_server": {
+      // Likewise, the MCP panel's own command. Both cards that offer this — `mcp_auth_required`
+      // and `mcp_unreachable` — are about a server that cannot be reached, and removing it is the
+      // answer when re-authenticating is not.
+      if (!item.subject_id) return false;
+      sendRemoveMcpServer(item.subject_id);
+      return true;
+    }
+    case "dismiss_all": {
+      // EVERY CARD OF THIS TYPE, BY ID, because that is what the command takes. The audit's sketch
+      // passed `item.type` as the second argument; `bulkInboxAction` has never accepted a type —
+      // it takes ids, deliberately, so the server never has to resolve a filter the client believed
+      // it was applying. The ids come from the store's own snapshot, which is the same list the
+      // board is rendering, so "all of them" means the ones somebody can see.
+      const ids = useInboxStore.getState().items.filter((i) => i.type === item.type).map((i) => i.id);
+      if (ids.length === 0) return false;
+      return sendBulkInboxAction("dismiss", ids);
+    }
+    case "view_evidence":
+      // EXPAND, RATHER THAN STOP THE CLICK THAT WOULD HAVE EXPANDED. The card already opens on
+      // click; `IconButton` calls `stopPropagation` so that dismissing something does not also
+      // open it — correct for every other control and exactly wrong for this one, which meant the
+      // button labelled "View the evidence" PREVENTED the evidence from being shown. Clicking
+      // anywhere else on the card worked better than clicking its primary control.
+      useInboxStore.getState().setExpanded(item.id);
+      return true;
 
     // --- navigation: the fallback, not the path ---------------------------------------------------
     case "open_agent":
-    case "view_diff": {
+    case "view_diff":
+    case "enable_gate": {
+      // `enable_gate` IS A NAVIGATION AND NOT AN INLINE FIX, which is the honest shape of it. The
+      // gate is off because a line in the agent's own generated source turned it off, so there is
+      // no command anywhere that turns it back on — only an edit to that file. Its old label said
+      // otherwise, which is why it read as a broken button rather than as a link. v0.2.1 recorded
+      // that a validation rule is what would actually close this, and surfacing the state is still
+      // not that rule.
       const slug = str(item, "agent_slug");
       if (!slug) return false;
       openAgentDetail(slug);
@@ -266,8 +360,48 @@ export function runAction(action: InboxActionName, item: InboxItemView): boolean
       useUiStore.getState().closeNav();
       useUiStore.getState().focusChat();
       return true;
-    default:
+
+    // --- declared unrunnable, and therefore never rendered ---------------------------------------
+    case "save_memory":
+    case "reject_memory":
+      // GAP-012. Answering a memory proposal needs a command that carries the decision and no
+      // command in the 116-command surface does — `noteMemoryDecision` exists on the server and is
+      // reachable only from a test. These are in `UNIMPLEMENTED_ACTIONS`, so `useAllowedActions`
+      // does not offer them and this branch is unreachable from the UI; it is here because the
+      // exhaustiveness check below is what makes that claim checkable.
       return false;
+    // --- handled elsewhere, and named here so the switch is exhaustive ---------------------------
+    case "set_secret":
+    case "set_mcp_credential":
+    case "raise_ceiling":
+      // §4.5's "the form itself" — `FORM_ACTIONS`, rendered by `InlineForm` and submitted by
+      // `submitCredential` / `submitCeiling` below. They need somewhere to type before they can
+      // run, so there is nothing for a one-press dispatcher to do; `InboxCardActions` renders the
+      // form instead of a button for exactly these three.
+      return false;
+    case "dismiss":
+      // The `×` on the card, handled by `InboxCardActions` rather than by this dispatcher, because
+      // it takes the item id and nothing off the payload.
+      return false;
+
+    default: {
+      /**
+       * EXHAUSTIVE, SO THE NEXT DEAD GLYPH CANNOT SHIP.
+       *
+       * Eight of twenty-nine action names had no case here and fell through to `return false`,
+       * which nothing read — the primary button ignored it and the overflow closed either way. Two
+       * card types had a DEAD PRIMARY, so the most prominent control on the card was the one that
+       * did nothing.
+       *
+       * `ACTION_COMMAND`'s own comment argues that an unmapped name should fail loudly, and it is
+       * right — but it guards the CAPABILITY table, where an absent entry means ungated-and-allowed.
+       * The dispatch table had no backstop at all. This is it: a new `InboxActionName` now fails
+       * the client typecheck rather than shipping as a control that closes a menu and does nothing.
+       * It is the same structural audit `test:channels` and `test:reset` apply on the server side.
+       */
+      const _never: never = action;
+      return Boolean(_never);
+    }
   }
 }
 

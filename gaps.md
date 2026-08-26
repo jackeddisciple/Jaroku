@@ -1231,6 +1231,88 @@ the derived-resolution sweep.
 | Implementation Effort | 3/10 |
 | Confidence | 10/10 |
 
+### Resolution
+
+**Status: RESOLVED**
+
+**Implemented:** each of the eight was traced to whether a command exists, whether the action is
+implementable as declared, and whether it is stale — which is what the brief's §3 asks for, and the
+eight do not have one answer between them.
+
+| Action | Answer |
+|---|---|
+| `cancel_deploy` | `sendCancelDeploy` — the Deploy panel's own command |
+| `remove_server` | `sendRemoveMcpServer` — the MCP panel's own command |
+| `dismiss_all` | `sendBulkInboxAction("dismiss", ids)` over every card of that type |
+| `view_evidence` | expands the card, which is what it always said it did |
+| `enable_gate` | **relabelled and repointed** — no command can do what it claimed |
+| `view_all_failures` | **removed from the registry** — it had no destination |
+| `save_memory`, `reject_memory` | **declared unimplemented and not rendered** — GAP-012 |
+
+Three of those need their reasoning kept:
+
+**`enable_gate` was a promise no command could keep.** The gate is off because a line in the
+agent's *own generated source* turned it off — `os.environ["JAROKU_MCP_CONFIRM"] = "skip"`, which is
+what `disablesConfirmGate` detects — so nothing on a card can put it back; only an edit to that file
+can. It now navigates to the agent, labelled *"Open the code that turns it off"*. Renaming it is the
+fix rather than a retreat from one: the old label is why it read as a broken button instead of as a
+link, and §4.5 is explicit that navigation is a legitimate fallback — what it must not do is look
+like an inline one. It left `INLINE_ACTIONS` and `ACTION_COMMAND` accordingly.
+
+**`view_all_failures` is gone from both unions.** There is no filtered run list in the product to
+send anybody to. `open_latest_failure` opens the trace (which is what resolves the card) and
+`dismiss_all` clears the type; the entry comes back when a failure list does.
+
+**`save_memory` / `reject_memory` are declared, not silently absent.** `UNIMPLEMENTED_ACTIONS` is
+read by `useAllowedActions`, so they are *not rendered* — the card falls through to its next-best
+action exactly as it does for a capability the role lacks. An unfinished action is now invisible
+rather than dead.
+
+**And two structural fixes underneath, which are the actual root cause:**
+
+1. **The switch is exhaustive** — `const _never: never = action`. A new `InboxActionName` fails the
+   client typecheck rather than shipping as a dead glyph. `ACTION_COMMAND`'s own comment argues an
+   unmapped name should fail loudly and is right, but it guards the *capability* table; the
+   **dispatch** table had no backstop at all.
+2. **The return value is read.** `InboxCardActions` discarded it at both call sites, so a menu that
+   closed was the only feedback either way. `false` now leaves the overflow open and puts a message
+   on the board's error strip — a card missing what a command needs is a different thing from a
+   command that failed, and neither should look like success.
+
+Two entries were also missing from `ACTION_COMMAND`, which was the more dangerous half: a name
+absent from that map is treated as **ungated-and-allowed**, so cancelling a deployment and removing
+an MCP server were offered to every member and happened to be harmless only because they did
+nothing. Both are now gated as their own panels are.
+
+**Files Changed:**
+
+- `client/src/components/InboxActions.tsx` — five new cases, the exhaustiveness check, `UNIMPLEMENTED_ACTIONS`, two `ACTION_COMMAND` entries, the `enable_gate` relabel
+- `client/src/components/InboxCardActions.tsx` — both call sites read the answer
+- `client/src/store/inboxStore.ts` — `expandedId` / `setExpanded`
+- `client/src/components/InboxView.tsx` — reads the expansion from the store
+- `client/src/lib/inboxBoard.test.ts` — the cross-language audit
+- `server/src/inbox/registry.ts`, `client/src/types.ts`, `client/src/components/inboxActionIcons.tsx` — `view_all_failures` removed
+
+**Verification:**
+
+`test:inbox-board` reads `registry.ts` as text — the same shape `test:permission-ui` uses against
+`capabilities.ts` — and holds four claims a typecheck cannot: every action the server can offer has
+a client entry, the client names none the server cannot, **every name has a case in `runAction`**,
+and `view_all_failures` is offered by nothing. It read 29 names and cleared all of them. The
+exhaustiveness check proved itself during implementation: it failed the build naming
+`set_secret | set_mcp_credential | raise_ceiling | view_all_failures`, which is exactly the class of
+omission that shipped.
+
+**Regression Coverage:**
+
+All eight server inbox suites pass, plus `test:inbox-board`, `test:reset` and `test:dead-controls`;
+both sides typecheck. The `expandedId` move keeps its one-at-a-time rule and the keyboard's
+`toggleExpand`; it is inside `inboxStore`, which `test:reset` already requires to be cleared on a
+workspace switch — an expanded id naming a row from another workspace is exactly the leak that suite
+exists for.
+
+**Resolved On:** 2026-08-26
+
 ---
 
 ## GAP-009 — The upsell card names a plan that does not unlock what was refused
@@ -2669,6 +2751,7 @@ brief spends a page on.
 |---|---|---|---|
 | GAP-001 | RESOLVED | `index.ts`, `projectStore.test.ts`, `agentAdversarial.test.ts` | `test:project-store` proves the bare-row fork still throws and the published one reads back byte for byte; `test:agent-adversarial` holds the call site |
 | GAP-002 | RESOLVED | `index.ts`, `projectStore.test.ts`, `agentAdversarial.test.ts`, `editVersions.test.ts` | `test:project-store` proves the bare row is unreadable and the disk stale, then that publish + materialise fixes both; finding was understated — see its Resolution |
+| GAP-008 | RESOLVED | `InboxActions.tsx`, `InboxCardActions.tsx`, `inboxStore.ts`, `InboxView.tsx`, `inboxBoard.test.ts`, `registry.ts`, `types.ts`, `inboxActionIcons.tsx` | `test:inbox-board` reads the server's vocabulary and requires a case for all 29; the exhaustive switch failed the build naming four omissions while being written |
 | GAP-009 | RESOLVED | `entitlements.ts`, `entitlementGate.ts`, `plans.ts`, `index.ts`, `entitlements.test.ts`, `entitlementStore.ts`, `UpsellCard.tsx`, `UsagePanel.tsx`, `types.ts` | `test:entitlements` holds all seven kinds from both Free and Pro, plus the top of the ladder answering null; `test:entitlement-store` holds the client guard |
 | GAP-014 | RESOLVED | `web/pricing.html`, `checkoutSurfaces.test.ts` | `test:checkout-surfaces` maps every sold feature row to an `EntitlementKind` and asserts the three removed names stay gone |
 | GAP-015 | RESOLVED | `graphIntrospect.ts`, `index.ts`, `graphIntrospect.test.ts`, `types.ts`, `GraphView.tsx`, `truncatePath.test.ts`, `ci.yml` | `test:truncate-path` asserts what the truncator does to prose; `test:graph-introspect` holds the two-field shape on both sides |

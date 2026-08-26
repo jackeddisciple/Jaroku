@@ -303,8 +303,15 @@ export function InboxView() {
    * Two expanded cards is a board that has stopped being scannable, which is the one thing this
    * surface cannot afford to lose — and a card whose evidence is worth reading is a card somebody is
    * dealing with now rather than one of three they are comparing.
+   *
+   * IN THE STORE RATHER THAN IN THIS COMPONENT, because one action needs to set it from outside the
+   * tree. `view_evidence` is a card's primary control and `runAction` is a pure function two levels
+   * below this state; threading a callback down through `InboxCard` and `InboxCardActions` to reach
+   * it would put the fix in the prop chain rather than in the action, and every other card's
+   * actions would carry a prop they never use. See `inboxStore.expandedId`.
    */
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const expandedId = useInboxStore((s) => s.expandedId);
+  const setExpandedId = useInboxStore((s) => s.setExpanded);
 
   /**
    * §4.1's one drag, to §5.4's one destination.
@@ -404,7 +411,7 @@ export function InboxView() {
     cursor,
     setCursor,
     setFilter,
-    toggleExpand: (id) => setExpandedId((open) => (open === id ? null : id)),
+    toggleExpand: (id) => setExpandedId(useInboxStore.getState().expandedId === id ? null : id),
     selection,
     setSelection,
   });

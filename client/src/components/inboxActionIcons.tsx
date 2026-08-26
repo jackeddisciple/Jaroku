@@ -12,9 +12,9 @@
 //   `view_logs` and `view_diff` are the EYE, which `actionIcons`'s `read` kind already owns — "looked
 //   at something without changing it" is precisely what both do.
 //   `redeploy` is the ROCKET, which the Deploy panel uses for the same command.
-//   `open_agent`, `open_comparison`, `open_invites`, `open_members`, `view_usage`, `open_providers`
-//   and `view_all_failures` are all NAVIGATION, and they share the chevron — the app's one mark for
-//   "this takes you somewhere". Giving each its own glyph would be seven new marks for one idea,
+//   `open_agent`, `open_comparison`, `open_invites`, `open_members`, `view_usage` and
+//   `open_providers` are all NAVIGATION, and they share the chevron — the app's one mark for
+//   "this takes you somewhere". Giving each its own glyph would be six new marks for one idea,
 //   which is the thing v0.2.2's pass existed to undo.
 //
 // A FALLBACK EXISTS AND IT IS THE CHEVRON, not a question mark: every action that reaches this

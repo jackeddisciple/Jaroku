@@ -98,7 +98,6 @@ export type InboxActionName =
   | "view_results"
   // Attention
   | "open_latest_failure"
-  | "view_all_failures"
   | "dismiss_all"
   | "redeploy"
   | "view_diff"
@@ -452,7 +451,18 @@ const DEFS: Record<InboxItemType, InboxTypeDef> = {
     origin: "event",
     icon: "alert",
     teamOnly: false,
-    actions: ["open_latest_failure", "view_all_failures", "dismiss_all"],
+    // `view_all_failures` WAS HERE AND IS NOT ANY MORE, and its removal is the finished form of the
+    // decision rather than a retreat from it. Every other action on this board either completes
+    // where it stands or takes somebody to a surface that exists; this one had no destination —
+    // there is no filtered run list in the product to send anybody to, so it rendered in the
+    // overflow, closed the menu, and did nothing. A menu that closes reads as confirmation, which
+    // makes a silent no-op worse here than an absent entry.
+    //
+    // The two that remain cover the card: `open_latest_failure` opens the trace, which is what
+    // resolves the item (the server stamps the review on `loadRun`, from whichever of the four
+    // surfaces asked), and `dismiss_all` clears every card of this type off one person's board.
+    // A filtered failure list is a real feature; when it lands, this entry comes back with it.
+    actions: ["open_latest_failure", "dismiss_all"],
     subjectLine: (p) => `${str(p, "agent_name") || "An agent"} is failing and nobody has looked`,
     // ANY ONE OF THOSE TRACES BEING OPENED, recorded ON THE ROW rather than read out of a set of
     // reviewed run ids the sweep is handed. Both spellings look the same from here and only one of
