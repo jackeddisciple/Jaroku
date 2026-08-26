@@ -1327,6 +1327,73 @@ tier-gated command.
 | Implementation Effort | 2/10 |
 | Confidence | 10/10 |
 
+### Resolution
+
+**Status: RESOLVED**
+
+**Implemented:**
+
+`unlockingTier(field, from)` in `billing/entitlements.ts` — the cheapest plan above the current one
+that would actually lift a refusal, resolved over `fromLimits(PLANS[id])`, which is the **same
+projection `requireEntitlement` reads**. Asking each plan the question in the currency the refusal
+was made in is what makes `members` come out as Team: Pro and Free differ there by a seat count
+rather than by a flag, so a comparison over feature flags alone would have kept getting it wrong.
+
+The comparison is `>` and never `>=`, which is the whole of the `members` case — Pro's seat count
+*equals* Free's, and `>=` recommends it.
+
+The refusal payload now carries `unlocks` and `unlocksLabel`, and three consumers read them
+instead of guessing:
+
+| Consumer | Was | Is |
+|---|---|---|
+| `upgradeUrl` | `tier === "free" ? "pro" : "team"` | the plan that works; no `to=` at all when none does |
+| `UpsellCard` sentence + button | `nextTier(tier)` | `refusal.unlocksLabel`, absent button when null |
+| `refusalMessage` | "upgrading turns it on" | names the plan, or says no plan includes it |
+
+`nextTier` is deleted. A `null` renders as *"No plan currently includes this"* with **no upgrade
+button at all** — absent rather than disabled, the same rule the Access tab is held to.
+
+**Paired, as the finding suggested:** the in-app plan list showed credits, ceiling, retention,
+seats and deploys and **no feature differences at all**, so the card's claim could not be checked
+anywhere inside the product. Plans now carry `features` — a `FEATURE_LABELS` table of the flags
+that actually gate something *and* actually differ between plans. `approvalBatchApprove`,
+`policyEngine` and `evalCiGate` are deliberately absent from it: listing them on a billing panel
+would repeat, for a paying customer, the exact mistake the pricing page made (GAP-014).
+
+**Files Changed:**
+
+- `server/src/billing/entitlements.ts` — `unlockingTier`, `grants`
+- `server/src/billing/entitlementGate.ts` — `Unlocking` on both refusal shapes, `upgradeUrl`, `refusalMessage`
+- `server/src/billing/plans.ts` — `FEATURE_LABELS`
+- `server/src/index.ts` — `features` on the plan catalogue
+- `server/src/billing/entitlements.test.ts` — the resolution assertions
+- `client/src/store/entitlementStore.ts` — the fields, and `isRefusal`'s normalisation
+- `client/src/components/UpsellCard.tsx` — reads the payload; `nextTier` deleted
+- `client/src/components/UsagePanel.tsx`, `client/src/types.ts`, `client/src/lib/evalExport.test.ts`
+
+**Verification:**
+
+`test:entitlements` asserts the four kinds the old heuristic got **right** as well as the three it
+got wrong — a lookup that fixed the failures by special-casing them would pass the wrong three
+alone. Then: Free + `members` → Team, Free + `githubPhase2` → Team, Free + `perAgentAccessGrants`
+→ Team, Team at twenty seats → `null` with a sentence that names no tier, and the URL following
+the same answer in every case. `unlockingTier` is exercised directly against a flag, a strict
+number, a becomes-unlimited, an already-unlimited, an ungated flag and an unrecognised tier.
+`test:entitlement-store` holds the client guard: `unlocks` may be a string or `null`, never
+anything else, and a refusal from a server that predates the fields is **admitted with them
+normalised to null** rather than refused — its figures are still true and its meter is still the
+answer.
+
+**Regression Coverage:**
+
+`test:plans`, `test:gate`, `test:entitlement-store` and `test:export` all pass; both typecheck.
+The refusal's existing shape is unchanged — the asymmetry `test:entitlement-store` guards (a quota
+refusal without figures is refused, a feature refusal without them is correct) still holds, and the
+meter still renders only for a quota.
+
+**Resolved On:** 2026-08-26
+
 ---
 
 ## GAP-010 — Response variants: a table, a store, a suite, a switcher — and no writer
@@ -2428,4 +2495,5 @@ brief spends a page on.
 |---|---|---|---|
 | GAP-001 | RESOLVED | `index.ts`, `projectStore.test.ts`, `agentAdversarial.test.ts` | `test:project-store` proves the bare-row fork still throws and the published one reads back byte for byte; `test:agent-adversarial` holds the call site |
 | GAP-002 | RESOLVED | `index.ts`, `editVersions.test.ts` | `test:edit-versions` proves the bare row is unreadable AND leaves the disk stale, then that publish + materialise fixes both; finding was understated — see its Resolution |
+| GAP-009 | RESOLVED | `entitlements.ts`, `entitlementGate.ts`, `plans.ts`, `index.ts`, `entitlements.test.ts`, `entitlementStore.ts`, `UpsellCard.tsx`, `UsagePanel.tsx`, `types.ts` | `test:entitlements` holds all seven kinds from both Free and Pro, plus the top of the ladder answering null; `test:entitlement-store` holds the client guard |
 | GAP-003 | RESOLVED | `wsRelay.ts`, `channels.test.ts`, `wsRelay.test.ts`, `types.ts`, `buildStore.ts`, `socket.ts`, `AddMenu.tsx`, `BuildPane.tsx` | `test:channels` audits all 13 call sites from source; `test:relay` drives a throwing read and asserts the frame |

@@ -734,6 +734,15 @@ export interface UsageSnapshot {
     retentionDays: number;
     seats: number | null;
     deploy: boolean;
+    /**
+     * What this plan turns on, in the words somebody reads.
+     *
+     * SO THE UPSELL CARD'S CLAIM CAN BE CHECKED SOMEWHERE. That card says "Team turns this on",
+     * and until this field existed the only surface in the product that could corroborate it was
+     * the public pricing page — which a paying customer does not open. Only flags that actually
+     * gate something and actually differ between plans are here; see `FEATURE_LABELS`.
+     */
+    features: string[];
   }[];
   /**
    * Whether this deployment can take a payment at all.

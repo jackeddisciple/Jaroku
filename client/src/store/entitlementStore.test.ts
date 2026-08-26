@@ -65,6 +65,23 @@ console.log("\nwhat counts as a refusal");
   check(!isRefusal({ ...QUOTA, current: "3" }), "a figure that arrived as a string is not a figure");
   check(!isRefusal({ ...QUOTA, tier: 7 }), "nor is a tier that is not a name");
   check(!isRefusal({ ...FEATURE, upgradeUrl: undefined }), "and a refusal with nowhere to go is not one");
+
+  // WHICH PLAN WOULD LIFT IT, which is the field the card's sentence and its button both read and
+  // which the client used to work out for itself — wrongly, for three of the kinds a Free
+  // workspace can hit. It is a string OR null, and null is a real answer: a capability no plan
+  // grants. Both are accepted; neither may arrive as anything else.
+  check(isRefusal({ ...QUOTA, unlocks: "team", unlocksLabel: "Team" }), "a refusal naming the plan that unlocks it is one");
+  check(isRefusal({ ...QUOTA, unlocks: null, unlocksLabel: null }), "...and so is one saying no plan does");
+  check(!isRefusal({ ...QUOTA, unlocksLabel: 3 }), "a plan name that is not a name is refused");
+
+  // NORMALISED RATHER THAN REFUSED WHEN ABSENT. A refusal from a server that predates the fields
+  // is still true about the figure and the limit, and the meter is still the answer — so it is
+  // admitted with the fields set to null, which the card renders as "no plan currently includes
+  // this". Refusing the payload would replace a card that is right about the numbers with no card
+  // at all; rendering `undefined` in a sentence about somebody's money would be worse than both.
+  const legacy: Record<string, unknown> = { ...QUOTA };
+  check(isRefusal(legacy), "a refusal from before these fields existed is still a refusal");
+  check(legacy["unlocks"] === null && legacy["unlocksLabel"] === null, "...with them normalised to null rather than left undefined");
 }
 
 console.log("\none refusal at a time, about one channel");

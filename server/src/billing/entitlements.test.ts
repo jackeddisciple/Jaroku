@@ -23,7 +23,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PLANS, PLAN_IDS } from "./plans.ts";
 import {
-  ADMIN_ENTITLEMENTS, entitlementsForPlan, resolveEntitlements, within,
+  ADMIN_ENTITLEMENTS, entitlementsForPlan, resolveEntitlements, unlockingTier, within,
   type TierEntitlements,
 } from "./entitlements.ts";
 import {
@@ -280,6 +280,62 @@ console.log("\na refusal names the figure, the limit and what would change it");
   check(refusalMessage(fourth!).includes("3 of 3"), "the sentence carries the numbers");
   check(refusalMessage(fourth!).includes("stays exactly as it is"), "...and says the work is not going anywhere");
   check(refusalMessage(gh!).includes("nothing you have made changes"), "the feature sentence says the same thing");
+
+  // -------------------------------------------------------------------------------------------
+  // WHICH PLAN WOULD ACTUALLY LIFT IT, which is the one thing this card exists to say and which
+  // it got wrong for three of the seven kinds a Free workspace can hit. The old rule was "free's
+  // next step is Pro, a paid tier's is Team", written in `upgradeUrl` here and mirrored as
+  // `nextTier` on the card, and it drove the sentence, the button label AND the URL. Every
+  // assertion below is one of the three, or one of the four the heuristic got right — because a
+  // lookup that only fixed the wrong answers by hard-coding them would pass the first three.
+  // -------------------------------------------------------------------------------------------
+
+  // The right answers, which must stay right.
+  check(fourth?.unlocksLabel === "Pro", "a Free workspace out of agents is told Pro, which does raise it");
+  check((await refuse("canStartRun", 500))?.unlocksLabel === "Pro", "...and out of runs, likewise");
+  check((await refuse("canDeploy", 1))?.unlocksLabel === "Pro", "...and out of deployments");
+  check(gh?.unlocksLabel === "Pro", "...and GitHub phase one really is a Pro feature");
+
+  // THE THREE THAT WERE FALSE. Each of these read "Pro" and each leaves a Free workspace refused
+  // identically after paying.
+  const seats = await refuse("canInviteMember", 1);
+  check(seats?.unlocksLabel === "Team", "a Free workspace inviting somebody is told TEAM, because Pro's seat count is also 1");
+  check(
+    (await refuse("githubPhase2", 0))?.unlocksLabel === "Team",
+    "GitHub sync on Free is Team, not Pro — Pro's features have it false",
+  );
+  check(
+    (await refuse("perAgentAccessGrants", 0))?.unlocksLabel === "Team",
+    "per-agent access on Free is Team for the same reason",
+  );
+
+  // AND FROM PRO, where the heuristic happened to be right and the lookup must agree.
+  check((await refuse("canInviteMember", 1, "pro"))?.unlocksLabel === "Team", "a Pro workspace inviting somebody is told Team");
+  check((await refuse("githubPhase2", 0, "pro"))?.unlocksLabel === "Team", "...and for sync");
+
+  // THE TOP OF THE LADDER ANSWERS NULL rather than naming itself. Team's twenty-first seat is the
+  // Enterprise handoff, and "Team raises this limit" said to a Team workspace is a sentence that
+  // sends somebody to buy what they already have.
+  const capped = await refuse("canInviteMember", 20, "team");
+  check(capped?.unlocks === null && capped.unlocksLabel === null, "a Team workspace at twenty seats is told no plan raises it");
+  check(
+    refusalMessage(capped!).includes("no plan raises it"),
+    "...and the sentence says so rather than naming a tier",
+  );
+
+  // THE URL FOLLOWS THE SAME ANSWER, because it is the thing the button opens and a checkout for
+  // the wrong plan is the expensive half of this bug.
+  check(seats?.upgradeUrl === "/billing/upgrade?to=team&reason=members", "the URL targets the plan that works, not the next one up");
+  check(capped?.upgradeUrl === "/billing/upgrade?reason=members", "...and names no target when none would work");
+
+  // THE LOOKUP ITSELF, against the two shapes the comparison has to tell apart. A `>=` here is
+  // what would recommend Pro for a seat, since Pro's count EQUALS Free's.
+  check(unlockingTier("githubPhase2", "free") === "team", "unlockingTier reads a flag");
+  check(unlockingTier("maxMembers", "free") === "team", "...and a number, strictly");
+  check(unlockingTier("maxAgents", "free") === "pro", "...and treats becoming unlimited as an increase");
+  check(unlockingTier("maxAgents", "pro") === null, "...while already-unlimited cannot be improved on");
+  check(unlockingTier("policyEngine", "free") === "team", "a flag no surface gates still resolves from the table");
+  check(unlockingTier("maxAgents", "enterprise") === "pro", "an unrecognised tier searches from the bottom rather than answering null");
 }
 
 // ---------------------------------------------------------------------------------------------

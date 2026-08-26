@@ -113,7 +113,7 @@ check("and a fully-priced-or-unpriced cell does not claim to be a floor",
       {
         id: "free", label: "Free", purchasable: false, current: true,
         monthlyCreditsUsd: 5, budgetCeilingUsd: 5, platformKeyCeilingUsd: 2,
-        retentionDays: 14, seats: 3, deploy: false,
+        retentionDays: 14, seats: 3, deploy: false, features: [],
       },
     ],
     paymentsConfigured: false,

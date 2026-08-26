@@ -274,6 +274,28 @@ const TEAM: PlanLimits = {
 
 export const PLANS: Record<PlanId, PlanLimits> = { free: FREE, pro: PRO, team: TEAM };
 
+/**
+ * The flags a person reads, and what each is called where they read it.
+ *
+ * ONLY THE ONES THAT GATE SOMETHING. `approvalBatchApprove`, `policyEngine` and `evalCiGate` are
+ * declared on `PlanFeatures` ahead of the surfaces they will gate — which is the right order, and
+ * `entitlementGate.ts` argues it — and they are absent here for exactly that reason. A billing
+ * panel that listed them would be selling three capabilities the product does not have, which is
+ * the mistake the public pricing page made and GAP-014 undoes.
+ *
+ * `platformKey`, `byok` and `mcp` are absent too, for the opposite reason: every plan has them, so
+ * a list including them describes nothing about the choice somebody is making. A row here earns
+ * its place by DIFFERING between plans.
+ *
+ * In ladder order, so the list reads as what each step adds rather than as a set.
+ */
+export const FEATURE_LABELS: readonly (readonly [keyof PlanFeatures, string])[] = [
+  ["deploy", "deploys"],
+  ["githubPhase1", "GitHub push"],
+  ["githubPhase2", "GitHub sync"],
+  ["perAgentAccessGrants", "per-agent access"],
+] as const;
+
 /** The plan a workspace is on, falling back to `free` for a value nothing recognises. */
 export function planFor(plan: string | null | undefined): PlanLimits {
   return isPlanId(plan) ? PLANS[plan] : PLANS.free;

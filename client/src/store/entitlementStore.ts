@@ -27,8 +27,27 @@ import { create } from "zustand";
 /** A limit that may not exist. The server sends the word rather than the absence. */
 export type Limit = number | "unlimited";
 
+/**
+ * WHICH PLAN WOULD ACTUALLY LIFT THIS, resolved by the server that did the refusing.
+ *
+ * The client used to answer this itself with `tier === "free" ? "Pro" : "Team"`, which is right
+ * for four of the seven kinds and false for three of them — GitHub sync and per-agent access are
+ * Team-only, and Pro's seat count is 1, the same as Free. That made the one card whose entire job
+ * is "here is how to unlock this" name a plan that leaves somebody refused identically after
+ * taking their money.
+ *
+ * It is on the wire for the same reason every other figure on this card is: the `PLANS` table is
+ * the only thing that knows, and a client that worked it out independently is a second
+ * implementation of a rule that was already wrong once. `null` is a real answer — a feature no
+ * plan grants — and renders as such rather than as a guess.
+ */
+export interface Unlocking {
+  unlocks: string | null;
+  unlocksLabel: string | null;
+}
+
 /** A count against a cap: agents, runs this month, seats. Carries the figures a meter needs. */
-export interface QuotaRefusal {
+export interface QuotaRefusal extends Unlocking {
   error: "quota_exceeded";
   /** Names the LIMIT, not the check — `runs_per_month`, never `canStartRun`. */
   kind: string;
@@ -45,7 +64,7 @@ export interface QuotaRefusal {
  * meter at 0/0 would be worse than one with no meter — it reads as a quota that can be topped up by
  * waiting, which this one cannot.
  */
-export interface FeatureRefusal {
+export interface FeatureRefusal extends Unlocking {
   error: "feature_unavailable";
   kind: string;
   tier: string;
@@ -67,6 +86,15 @@ export function isRefusal(v: unknown): v is EntitlementRefusal {
   const r = v as Record<string, unknown>;
   if (typeof r["tier"] !== "string" || typeof r["kind"] !== "string") return false;
   if (typeof r["upgradeUrl"] !== "string") return false;
+  // STRING OR NULL, AND NOT MERELY "PRESENT". A refusal from a server that predates these fields
+  // arrives with them undefined, and the card must render that as "no plan currently includes
+  // this" rather than as the word `undefined` in a sentence about somebody's money. Refusing the
+  // whole payload would be worse — the figures are still true and the meter is still the answer —
+  // so the fields are NORMALISED to null here, which is the one place that can see both.
+  if (r["unlocks"] === undefined) r["unlocks"] = null;
+  if (r["unlocksLabel"] === undefined) r["unlocksLabel"] = null;
+  if (r["unlocks"] !== null && typeof r["unlocks"] !== "string") return false;
+  if (r["unlocksLabel"] !== null && typeof r["unlocksLabel"] !== "string") return false;
   if (r["error"] === "feature_unavailable") return true;
   return r["error"] === "quota_exceeded" &&
     typeof r["current"] === "number" && typeof r["limit"] === "number";

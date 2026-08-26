@@ -30,6 +30,8 @@
 
 import type { TenantContext } from "../db/tenant.ts";
 import type { Limit, TierEntitlements } from "./entitlements.ts";
+import { unlockingTier } from "./entitlements.ts";
+import { PLANS } from "./plans.ts";
 
 /**
  * The checks that exist, and the four that are declared with nothing yet to check.
@@ -285,7 +287,26 @@ export const USAGE_METRICS = [
 ] as const;
 export type UsageMetric = (typeof USAGE_METRICS)[number];
 
-export interface QuotaRefusal {
+/**
+ * WHICH PLAN WOULD ACTUALLY LIFT THIS, carried on both refusal shapes.
+ *
+ * On the payload rather than derived on the client, and that is the point of it being here: the
+ * `PLANS` table is the only thing that knows, the refusal is the moment the answer is needed, and
+ * a client resolving it independently is a second implementation of a rule that was already wrong
+ * once. `null` means no plan grants it — a flag declared ahead of the surface it will gate — and
+ * the card renders that as "no plan currently includes this" rather than guessing.
+ *
+ * `unlocksLabel` rides beside the id because the card prints a NAME. Reading it off the table
+ * rather than title-casing the id keeps one spelling of "Team" in the product.
+ */
+interface Unlocking {
+  /** The cheapest plan above this one that grants it, or null when none does. */
+  unlocks: string | null;
+  /** Its display label, or null for the same reason. */
+  unlocksLabel: string | null;
+}
+
+export interface QuotaRefusal extends Unlocking {
   error: "quota_exceeded";
   /** Snake case, because it names the LIMIT rather than the check — `runs_per_month`, not `canStartRun`. */
   kind: string;
@@ -295,7 +316,7 @@ export interface QuotaRefusal {
   upgradeUrl: string;
 }
 
-export interface FeatureRefusal {
+export interface FeatureRefusal extends Unlocking {
   error: "feature_unavailable";
   kind: string;
   tier: string;
@@ -304,12 +325,24 @@ export interface FeatureRefusal {
 
 export type EntitlementRefusal = QuotaRefusal | FeatureRefusal;
 
-/** Where an upsell sends somebody, with the reason attached so the target can say it back. */
-function upgradeUrl(reason: string, tier: string): string {
-  // Free's next step is Pro and a paid tier's is Team. Naming the target rather than making the
-  // billing page guess means the upgrade screen opens on the right comparison.
-  const to = tier === "free" ? "pro" : "team";
-  return `/billing/upgrade?to=${to}&reason=${reason}`;
+/**
+ * Where an upsell sends somebody, with the reason attached so the target can say it back.
+ *
+ * THE TARGET IS THE PLAN THAT WOULD WORK, not the next one alphabetically up the ladder. It used
+ * to be `tier === "free" ? "pro" : "team"`, which sent a Free workspace refused for GitHub sync,
+ * per-agent access or a second member to a checkout that leaves all three refused. A `null` target
+ * is left off the URL entirely — the billing page opens on the comparison rather than on a plan
+ * that was picked by guessing.
+ */
+function upgradeUrl(reason: string, to: string | null): string {
+  const target = to ? `to=${to}&` : "";
+  return `/billing/upgrade?${target}reason=${reason}`;
+}
+
+/** The refusal's own `kind` as a field of `TierEntitlements`, so one lookup answers both shapes. */
+function unlocking(field: keyof TierEntitlements, tier: string): Unlocking & { url: string | null } {
+  const id = unlockingTier(field, tier);
+  return { unlocks: id, unlocksLabel: id ? PLANS[id].label : null, url: id };
 }
 
 /** What each check bounds: the limit to read, the metric or count to compare, and its public name. */
@@ -386,7 +419,8 @@ export async function requireEntitlement(
   const feature = FEATURE_CHECKS[check];
   if (feature) {
     if (entitlements[feature] === true) return null;
-    return { error: "feature_unavailable", kind: feature, tier, upgradeUrl: upgradeUrl(feature, tier) };
+    const { unlocks, unlocksLabel, url } = unlocking(feature, tier);
+    return { error: "feature_unavailable", kind: feature, tier, unlocks, unlocksLabel, upgradeUrl: upgradeUrl(feature, url) };
   }
 
   const quota = QUOTA_CHECKS[check];
@@ -396,13 +430,20 @@ export async function requireEntitlement(
 
   const current = await currentFor(check, ctx, counts);
   if (current < cap) return null;
+  // RESOLVED FROM THE LIMIT FIELD, NOT FROM THE PUBLIC NAME. `quota.limit` is the key on
+  // `TierEntitlements` the cap was just read from, so the comparison happens in exactly the
+  // currency the refusal was made in — which is what makes `members` come out as Team rather than
+  // Pro, since the two differ by a seat count and not by a flag.
+  const { unlocks, unlocksLabel, url } = unlocking(quota.limit, tier);
   return {
     error: "quota_exceeded",
     kind: quota.name,
     current,
     limit: cap,
     tier,
-    upgradeUrl: upgradeUrl(quota.name, tier),
+    unlocks,
+    unlocksLabel,
+    upgradeUrl: upgradeUrl(quota.name, url),
   };
 }
 
@@ -414,8 +455,17 @@ export async function requireEntitlement(
  * work out what happened, and naming the number means the message IS the answer.
  */
 export function refusalMessage(r: EntitlementRefusal): string {
+  // NAMED RATHER THAN "UPGRADING", for the same reason the card names it: this sentence is the
+  // whole answer on a channel with no card, and "upgrading turns it on" sends somebody to a
+  // comparison page to work out which upgrade — which is the question they already had.
+  const to = r.unlocksLabel;
   if (r.error === "feature_unavailable") {
-    return `that is not part of the ${r.tier} plan — upgrading turns it on, and nothing you have made changes`;
+    return to
+      ? `that is not part of the ${r.tier} plan — ${to} turns it on, and nothing you have made changes`
+      : `that is not part of the ${r.tier} plan, and no plan currently includes it`;
   }
-  return `${r.current} of ${r.limit} ${r.kind.replace(/_/g, " ")} used on the ${r.tier} plan — upgrading raises it, and everything you have made stays exactly as it is`;
+  const used = `${r.current} of ${r.limit} ${r.kind.replace(/_/g, " ")} used on the ${r.tier} plan`;
+  return to
+    ? `${used} — ${to} raises it, and everything you have made stays exactly as it is`
+    : `${used}, and no plan raises it — nothing you have made changes`;
 }

@@ -241,7 +241,7 @@ import { connectorRunEnv } from "./oauth/injection.ts";
 import { ConnectorSecrets } from "./connectorSecrets.ts";
 import { buildEgressPolicy, EgressPolicyError, type EgressPolicy } from "./sandbox/egressPolicy.ts";
 import { BillingRepository } from "./db/repositories/billing.ts";
-import { assertPlanRegistry, limitsFor, planFor } from "./billing/plans.ts";
+import { assertPlanRegistry, limitsFor, planFor, FEATURE_LABELS } from "./billing/plans.ts";
 import { UsageMeter, usageKey, type Payer } from "./billing/usage.ts";
 import { SAMPLE_INTERVAL_MS, sampleStorage } from "./billing/storage.ts";
 import { Balances } from "./billing/balances.ts";
@@ -5012,6 +5012,18 @@ async function broadcastUsage(ctx: TenantContext): Promise<void> {
             retentionDays: limits.retentionDays,
             seats: limits.seats,
             deploy: limits.features.deploy,
+            // WHAT THIS PLAN TURNS ON THAT THE ONE BELOW IT DOES NOT, which this list has never
+            // carried. The upsell card's whole job is "Team turns this on", and until now there
+            // was no surface anywhere in the product where somebody could check that claim — the
+            // feature comparison lives on the public pricing page and nowhere a paying customer
+            // looks. A card that makes a promise and a panel that cannot corroborate it are the
+            // two halves of the same credibility problem.
+            //
+            // ONLY THE FLAGS THAT GATE SOMETHING. `approvalBatchApprove`, `policyEngine` and
+            // `evalCiGate` are declared ahead of the surfaces they will gate and are deliberately
+            // absent — see `EntitlementKind` and GAP-014. Selling them here would repeat on a
+            // billing panel the exact mistake the pricing page made.
+            features: FEATURE_LABELS.filter(([flag]) => limits.features[flag]).map(([, name]) => name),
           };
         }),
         // WHETHER THIS DEPLOYMENT CAN SELL ANYTHING AT ALL, from the one signal the checkout route

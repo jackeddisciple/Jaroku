@@ -368,7 +368,15 @@ function PlanChoice({ usage }: { usage: UsageSnapshot }) {
                   {fmtCost(p.monthlyCreditsUsd)} credit each period ·{" "}
                   {p.budgetCeilingUsd === null ? "no plan ceiling" : `up to ${fmtCost(p.budgetCeilingUsd)} started`} ·{" "}
                   {p.retentionDays}-day traces · {p.seats === null ? "unlimited seats" : `${p.seats} seats`}
-                  {p.deploy ? " · deploys" : " · no deploys"}
+                </div>
+                {/* AND WHAT IT TURNS ON, which this list did not carry and which is the only thing
+                    an upsell card's "Team turns this on" could ever have been checked against.
+                    Until it did, the feature comparison existed on the public pricing page and
+                    nowhere a paying customer looks — so the card made a promise and the product
+                    offered no way to verify it. A plan with none says so rather than rendering an
+                    empty line, because a blank row reads as a value nobody filled in. */}
+                <div className="text-tiny leading-[1.55] text-faint">
+                  {p.features.length > 0 ? p.features.join(" · ") : "no extra features"}
                 </div>
               </div>
               {/* §8.2 — "Usage / Billing / Change plan / checkout / billing:manage". Absent rather

@@ -20,8 +20,8 @@
 // and `"maxAgents": null` reads as "we do not know" to everyone who did not write it, while
 // `"maxAgents": "unlimited"` reads as what it is. The translation happens once, here.
 
-import type { PlanLimits } from "./plans.ts";
-import { limitsFor } from "./plans.ts";
+import type { PlanId, PlanLimits } from "./plans.ts";
+import { limitsFor, PLAN_IDS, PLANS } from "./plans.ts";
 
 /** A limit that may not exist. The word rather than the absence — see the header. */
 export type Limit = number | "unlimited";
@@ -160,4 +160,62 @@ export function resolveEntitlements(subject: EntitlementSubject): TierEntitlemen
 /** Whether one more would still be within a limit. `unlimited` is always within itself. */
 export function within(used: number, cap: Limit): boolean {
   return cap === "unlimited" || used < cap;
+}
+
+/**
+ * The cheapest plan above this one that would actually lift this refusal — or `null` when none
+ * would.
+ *
+ * THE HEURISTIC THIS REPLACES WAS WRONG IN THREE PLACES AND STATED AS A FACT. "Free's next step is
+ * Pro and a paid tier's is Team" was written in `upgradeUrl` here and in `nextTier` on the upsell
+ * card, and it drove the card's sentence, its button label and the URL the button opens. Three of
+ * the kinds a Free workspace can actually be refused on are Team-only:
+ *
+ *   `githubPhase2`         — "Pro turns this on"  · Pro's features have it false
+ *   `perAgentAccessGrants` — "Pro turns this on"  · same
+ *   `members`              — "Pro raises this limit" · Pro's seats is 1, the same as Free
+ *
+ * The last is the most likely to be hit — inviting a colleague is the first thing a Free workspace
+ * tries — and the most damaging, because somebody pays $20 a month and finds out Pro is
+ * single-user when the invite refuses again. That is the one card in the product whose entire job
+ * is saying how to unlock what was refused, and it was making a false statement rather than a
+ * vague one.
+ *
+ * SO IT IS A LOOKUP, AND OVER THE SAME PROJECTION THE REFUSAL WAS MADE WITH. `fromLimits` is what
+ * `requireEntitlement` reads, so asking each plan the same question in the same currency means a
+ * plan that would refuse identically can never be recommended — including the `seats: 1` case,
+ * where the answer depends on a value and not on a flag. A future fourth tier is covered by
+ * construction, which the two-branch version was not.
+ *
+ * NULL RATHER THAN A GUESS. A kind no plan grants — a flag declared ahead of the surface it will
+ * gate — renders as "no plan currently includes this", which is true and is a thing somebody can
+ * act on. Naming a tier that would not deliver it is how a pricing page's promise becomes a
+ * refund.
+ */
+export function unlockingTier(field: keyof TierEntitlements, from: string): PlanId | null {
+  const current = PLAN_IDS.indexOf(from as PlanId);
+  // An unrecognised tier searches from the bottom rather than answering null: it is somebody on a
+  // plan this build does not know about, and the cheapest plan that would work is still the
+  // honest answer.
+  const start = current === -1 ? 0 : current + 1;
+  const have = fromLimits(PLANS[current === -1 ? "free" : (PLAN_IDS[current] as PlanId)]);
+  for (const id of PLAN_IDS.slice(start)) {
+    if (grants(fromLimits(PLANS[id])[field], have[field])) return id;
+  }
+  return null;
+}
+
+/**
+ * Whether `candidate` is strictly better than `current` for one entitlement field.
+ *
+ * Three shapes on one interface, so the comparison is by value rather than by field name: a
+ * boolean grants when it turns on, a `Limit` grants when it becomes unlimited or rises, and a
+ * plain number (`maxMembers`, the retention days) grants when it rises. `>` and not `>=` is the
+ * whole point — Pro's seat count EQUALS Free's, and a `>=` here would recommend it.
+ */
+function grants(candidate: Limit | boolean | number, current: Limit | boolean | number): boolean {
+  if (typeof candidate === "boolean") return candidate === true && current !== true;
+  if (candidate === "unlimited") return current !== "unlimited";
+  if (current === "unlimited") return false;
+  return candidate > (current as number);
 }

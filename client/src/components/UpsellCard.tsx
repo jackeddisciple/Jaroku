@@ -54,16 +54,12 @@ function label(kind: string): string {
   return LIMIT_LABEL[kind] ?? kind.replace(/_/g, " ");
 }
 
-/** Free's next step is Pro, and a paid tier's is Team — the same rule the server's URL carries. */
-function nextTier(tier: string): string {
-  return tier === "free" ? "Pro" : "Team";
-}
-
 export function UpsellCard({ channel, onUpgrade }: { channel: string; onUpgrade?: () => void }) {
   const refusal = useEntitlementStore((s) => s.refusal);
   const on = useEntitlementStore((s) => s.channel);
   const clear = useEntitlementStore((s) => s.clear);
   if (!refusal || on !== channel) return null;
+  const unlocks = refusal.unlocksLabel;
 
   return (
     <div className="rounded-card border border-run/40 bg-run/[0.06] px-3 py-2.5">
@@ -93,21 +89,39 @@ export function UpsellCard({ channel, onUpgrade }: { channel: string; onUpgrade?
 
           {/* THE PROMISE THAT MAKES THIS NOT A THREAT. The specification's second principle is that
               nothing is ever destroyed for stopping paying, and the moment somebody most needs to
-              hear it is the moment they have just been refused. */}
+              hear it is the moment they have just been refused.
+
+              THE PLAN IS NAMED BY THE SERVER THAT REFUSED, and never worked out here. This used to
+              be `tier === "free" ? "Pro" : "Team"`, which is false for the three kinds a Free
+              workspace is most likely to hit: GitHub sync and per-agent access are Team-only, and
+              Pro's seat count is 1 — the same as Free — so "Pro raises this limit" was a promise
+              that somebody pays $20 a month to find out is untrue. See `unlockingTier`.
+
+              A NULL IS A REAL ANSWER, not a missing one: a capability no plan grants gets a
+              sentence saying so, because naming a tier that would not deliver it is how a pricing
+              claim becomes a refund. */}
           <p className="mt-1 text-tiny leading-[1.55] text-muted">
-            {refusal.error === "quota_exceeded"
-              ? `${nextTier(refusal.tier)} raises this limit. Everything you have already made stays exactly as it is.`
-              : `${nextTier(refusal.tier)} turns this on. Nothing you have already made changes.`}
+            {unlocks
+              ? refusal.error === "quota_exceeded"
+                ? `${unlocks} raises this limit. Everything you have already made stays exactly as it is.`
+                : `${unlocks} turns this on. Nothing you have already made changes.`
+              : "No plan currently includes this. Nothing you have already made changes."}
           </p>
 
           <div className="mt-2 flex items-center gap-1.5">
             {/* No pre-selected billing period, no countdown, no "you will be charged unless".
-                The button opens the comparison and the person decides there. */}
-            <button type="button" className={primaryBtn} onClick={() => { clear(); onUpgrade?.(); }}>
-              See {nextTier(refusal.tier)}
-            </button>
+                The button opens the comparison and the person decides there.
+
+                ABSENT RATHER THAN DISABLED when no plan grants it — the same rule the Access tab
+                is held to, and for the same reason: a greyed control with an explanation beside it
+                has decided somebody should keep looking at it. There is nothing to buy. */}
+            {unlocks && (
+              <button type="button" className={primaryBtn} onClick={() => { clear(); onUpgrade?.(); }}>
+                See {unlocks}
+              </button>
+            )}
             <button type="button" className={quietBtn} onClick={clear}>
-              Not now
+              {unlocks ? "Not now" : "Close"}
             </button>
           </div>
         </div>
