@@ -2090,6 +2090,74 @@ The Inbox board, `InboxEvidence`, the failure/edit/pass correlation, the undo to
 | Implementation Effort | 6/10 |
 | Confidence | 9/10 |
 
+### Resolution
+
+**Status: RESOLVED — option 1, the answer half, plus the correction option 2 asked for**
+
+The finding offered two honest options: complete the answer half without building a memory store,
+or withdraw the type. Option 1 was taken, because the evidence trail is the genuinely valuable part
+and withdrawing a derivation that correctly correlates a failure, an edit and a pass would throw it
+away. The correction option 2 called for was made anyway — see below.
+
+**Implemented:** `answerMemoryProposal { itemId, decision: "saved" | "rejected" }` — a command of
+its own, registered in `INBOX_COMMANDS`, `COMMAND_CHANNEL` (on `inbox`, which has an error shape to
+refuse on), `COMMAND_ENTITLEMENT` (`none`) and `COMMAND_CAPABILITY` (`agent:write`, mirrored in the
+client's copy). It reaches `noteMemoryDecision`, which has existed since the type shipped and was
+reachable only from a test.
+
+**Not a fourth `bulkInboxAction` verb**, and the distinction is the one §3 spends a section on:
+resolve, dismiss and snooze are judgements about the **card**; this is a judgement about the
+**proposal**, and which answer was given is the only thing the card was asking. Collapsing it into
+`resolve` would clear the card while losing its content.
+
+`save_memory` and `reject_memory` are out of `UNIMPLEMENTED_ACTIONS` (now empty) and into
+`ACTION_COMMAND`. With `view_evidence` fixed in GAP-008, all three of this card's controls work:
+its primary expands the evidence, and its two verbs answer it.
+
+**And the comment that described a consumer that does not exist is corrected.** `noteMemoryProposal`
+claimed the evidence was attributable through *"the injection into planner, generator and editor
+prompts"*; there is no memory store and no such injection anywhere in the codebase. It now says
+plainly that a saved decision buys the **record** — an evidence trail naming the failure, the edit
+and the pass, with somebody's judgement attached — and that the injection does not exist. This was
+the only place in the product where a comment described a consumer that was never built, and a
+future reader would have gone looking for it.
+
+**A finding the implementation made, and the assertion records it:** answering again *while the
+card is still open* changes the answer rather than being refused. `noteMemoryDecision` writes onto
+an open row and the reconciler closes it, so there is a real window — seconds to a minute — in
+which the card is still on the board carrying a `saved`. Refusing the second press in that window
+would mean a card visibly still asking whose controls had silently stopped working. Once the sweep
+closes the row the answer is final, which `state === "open"` enforces.
+
+**Files Changed:**
+
+- `server/src/wsRelay.ts` — the command, `INBOX_COMMANDS`, `COMMAND_CHANNEL`
+- `server/src/index.ts` — the handler
+- `server/src/inbox/generators.ts` — the corrected header
+- `server/src/billing/entitlementGate.ts`, `server/src/auth/capabilities.ts` — registered
+- `server/src/inbox/generators.test.ts` — the assertions
+- `client/src/lib/socket.ts`, `client/src/types.ts`, `client/src/lib/capabilities.ts`, `client/src/components/InboxActions.tsx`
+
+**Verification:**
+
+`test:inbox-generators` holds both answers as *distinct* — a decision column that recorded only
+that an answer arrived would lose the whole content of the question — and asserts each resolves
+through `isResolved` rather than through a second resolution path. Then the reachability chain: a
+command carries the decision, it reaches `noteMemoryDecision`, the relay forwards it as an inbox
+command on the inbox channel, and both client verbs send it. Plus two checks on the corrected
+comment, because a prose claim about a consumer that does not exist is the kind of thing only a
+reader catches, and only once.
+
+**Regression Coverage:**
+
+All six inbox suites pass, plus `test:channels`, `test:capabilities`, `test:entitlements`,
+`test:inbox-board` and `test:permission-ui`; both sides typecheck. The last two matter most here:
+`test:capabilities` fails on a relay command with neither a check nor an explicit `none`, and
+`test:permission-ui` reads the server's `capabilities.ts` as text and fails when the client's copy
+has drifted in either direction — so a command registered on one side only would fail there.
+
+**Resolved On:** 2026-08-26
+
 ---
 
 ## GAP-013 — External pull requests are told a collaborator can approve real providers; nothing can
@@ -3035,6 +3103,7 @@ brief spends a page on.
 | GAP-007 | RESOLVED | `agents.ts`, `index.ts`, `agentFiles.test.ts`, `ci.yml` | `test:agent-files` proves a published agent is runnable with no directory, that the whole workspace costs one statement, and that all three call sites materialise on demand |
 | GAP-008 | RESOLVED | `InboxActions.tsx`, `InboxCardActions.tsx`, `inboxStore.ts`, `InboxView.tsx`, `inboxBoard.test.ts`, `registry.ts`, `types.ts`, `inboxActionIcons.tsx` | `test:inbox-board` reads the server's vocabulary and requires a case for all 29; the exhaustive switch failed the build naming four omissions while being written |
 | GAP-009 | RESOLVED | `entitlements.ts`, `entitlementGate.ts`, `plans.ts`, `index.ts`, `entitlements.test.ts`, `entitlementStore.ts`, `UpsellCard.tsx`, `UsagePanel.tsx`, `types.ts` | `test:entitlements` holds all seven kinds from both Free and Pro, plus the top of the ladder answering null; `test:entitlement-store` holds the client guard |
+| GAP-012 | RESOLVED | `wsRelay.ts`, `index.ts`, `generators.ts`, `entitlementGate.ts`, `capabilities.ts`, `generators.test.ts`, `socket.ts`, `types.ts`, `capabilities.ts`, `InboxActions.tsx` | `test:inbox-generators` holds both answers as distinct and the whole reachability chain; the comment claiming a prompt injection that does not exist is corrected and checked |
 | GAP-014 | RESOLVED | `web/pricing.html`, `checkoutSurfaces.test.ts` | `test:checkout-surfaces` maps every sold feature row to an `EntitlementKind` and asserts the three removed names stay gone |
 | GAP-015 | RESOLVED | `graphIntrospect.ts`, `index.ts`, `graphIntrospect.test.ts`, `types.ts`, `GraphView.tsx`, `truncatePath.test.ts`, `ci.yml` | `test:truncate-path` asserts what the truncator does to prose; `test:graph-introspect` holds the two-field shape on both sides |
 | GAP-016 | RESOLVED | `TopBar.tsx`, `deadControls.test.ts` (new), `client/package.json`, `ci.yml` | `test:dead-controls` clears 365 buttons and was watched refusing a reinstated Share at `TopBar.tsx:372` |

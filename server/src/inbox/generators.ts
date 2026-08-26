@@ -301,8 +301,15 @@ export async function noteMcpStatus(
  * the card is how many passes have been seen.
  *
  * A MEMORY THAT CANNOT NAME THE EVIDENCE THAT PRODUCED IT MUST NOT EXIST, so the payload carries all
- * three ids. `view evidence` opens them; the injection into planner, generator and editor prompts is
- * attributable back to this item because this item is where the evidence lives.
+ * three ids. `view_evidence` opens them, and the card can be answered — `answerMemoryProposal`
+ * reaches `noteMemoryDecision` below and the sweep settles the row.
+ *
+ * WHAT THIS DOES NOT YET DO, said plainly because the sentence that used to be here promised it:
+ * a saved memory is not injected into the planner, generator or editor prompts. There is no memory
+ * store and no injection anywhere in this codebase; a future reader who went looking for one on the
+ * strength of the old wording would have found nothing. What a `saved` decision buys today is the
+ * RECORD — an evidence trail naming the failure, the edit and the pass, with somebody's judgement
+ * attached — which is the genuinely valuable half and the part a consumer would be built on.
  */
 export async function noteMemoryProposal(
   deps: GeneratorDeps,

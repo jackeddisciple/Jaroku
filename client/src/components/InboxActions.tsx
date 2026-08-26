@@ -22,6 +22,7 @@
 import { createSecret } from "../lib/secrets.ts";
 import { openAgentDetail } from "../lib/agentNav.ts";
 import {
+  sendAnswerMemoryProposal,
   sendBulkInboxAction,
   sendCancelDeploy,
   sendDeploy,
@@ -111,10 +112,15 @@ export const INLINE_ACTIONS = new Set<InboxActionName>([
  * So an action that cannot run is not RENDERED. `useAllowedActions` filters it out exactly as it
  * filters one the role may not take, and the card falls through to its next-best action — which is
  * what keeps a board clearable at every role and is now what keeps it honest about an unfinished
- * one. The two here are GAP-012's: answering a memory proposal needs a command that carries the
- * decision, and there is nothing in the 116-command surface that does.
+ * one.
+ *
+ * IT IS EMPTY, AND THAT IS THE POINT OF LEAVING IT HERE. It held `save_memory` and `reject_memory`
+ * until `answerMemoryProposal` existed; every name in the vocabulary now runs. The set stays
+ * because the next action declared ahead of its command needs somewhere honest to sit, and the
+ * alternative — leaving it out of the dispatch and letting it fall through — is the exact defect
+ * this whole mechanism exists to prevent.
  */
-export const UNIMPLEMENTED_ACTIONS = new Set<InboxActionName>(["save_memory", "reject_memory"]);
+export const UNIMPLEMENTED_ACTIONS = new Set<InboxActionName>([]);
 
 /** Actions that need somewhere to type before they can run. §4.5's "the form itself". */
 export const FORM_ACTIONS = new Set<InboxActionName>(["set_secret", "set_mcp_credential", "raise_ceiling"]);
@@ -144,6 +150,10 @@ export const ACTION_COMMAND: Partial<Record<InboxActionName, string>> = {
   retry_deploy: "deploy",
   redeploy: "deploy",
   raise_ceiling: "setSpendCeiling",
+  // The two memory verbs are member-level, like dismiss and snooze: answering a proposal about an
+  // agent somebody can write to is the workspace's judgement rather than an admin's.
+  save_memory: "answerMemoryProposal",
+  reject_memory: "answerMemoryProposal",
   remove_grant: "setMcpToolImpact",
   // THE THREE THAT WERE MISSING FROM THIS TABLE AS WELL AS FROM THE DISPATCH, and their absence
   // here was the more dangerous half: a name absent from this map is treated as ungated-and-allowed
@@ -361,15 +371,17 @@ export function runAction(action: InboxActionName, item: InboxItemView): boolean
       useUiStore.getState().focusChat();
       return true;
 
-    // --- declared unrunnable, and therefore never rendered ---------------------------------------
     case "save_memory":
     case "reject_memory":
-      // GAP-012. Answering a memory proposal needs a command that carries the decision and no
-      // command in the 116-command surface does — `noteMemoryDecision` exists on the server and is
-      // reachable only from a test. These are in `UNIMPLEMENTED_ACTIONS`, so `useAllowedActions`
-      // does not offer them and this branch is unreachable from the UI; it is here because the
-      // exhaustiveness check below is what makes that claim checkable.
-      return false;
+      // §2.3's ANSWER, and the only way this card can settle. `memory_proposal` is deliberately
+      // excluded from derived resolution — "there is no external world in which a proposal becomes
+      // answered" — so its resolve predicate reads a `decision` field that only this writes. Until
+      // `answerMemoryProposal` existed, both verbs closed the overflow and changed nothing, and the
+      // card could only ever be cleared by the generic "Mark as done" or by snoozing it.
+      //
+      // NOT `resolveInboxItem`, which would clear the card while losing which answer was given —
+      // and which answer was given is the only thing the card asked.
+      return sendAnswerMemoryProposal(item.id, action === "save_memory" ? "saved" : "rejected");
     // --- handled elsewhere, and named here so the switch is exhaustive ---------------------------
     case "set_secret":
     case "set_mcp_credential":

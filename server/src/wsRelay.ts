@@ -2226,16 +2226,37 @@ export type BulkInboxActionCommand = {
   duration?: string;
 };
 
+/**
+ * §2.3's answer to a proposal — the one resolve condition in this feature that IS the action.
+ *
+ * A COMMAND OF ITS OWN RATHER THAN A `bulkInboxAction` VERB, and the distinction is the one §3
+ * spends a section on: resolve, dismiss and snooze are the board's three verbs, and every one of
+ * them is a judgement about the CARD. This is a judgement about the PROPOSAL — "yes, remember
+ * that" or "no, do not" — and it is written onto the row so the sweep can settle it. Collapsing it
+ * into `resolve` would lose which answer was given, which is the only thing the card was asking.
+ *
+ * `noteMemoryDecision` has existed since the type shipped and was reachable only from a test, so
+ * a proposal could be raised and never answered: its two verbs were dead controls, and its resolve
+ * predicate needed a field nothing wrote.
+ */
+export type AnswerMemoryProposalCommand = {
+  cmd: "answerMemoryProposal";
+  itemId: string;
+  decision: "saved" | "rejected";
+};
+
 export type InboxCommand =
   | ResolveInboxItemCommand
   | DismissInboxItemCommand
   | SnoozeInboxItemCommand
   | UndoInboxActionCommand
-  | BulkInboxActionCommand;
+  | BulkInboxActionCommand
+  | AnswerMemoryProposalCommand;
 
-// The five that MUTATE. `listInbox` is not here because it is answered locally — see `dispatch`.
+// The ones that MUTATE. `listInbox` is not here because it is answered locally — see `dispatch`.
 const INBOX_COMMANDS = new Set([
   "resolveInboxItem", "dismissInboxItem", "snoozeInboxItem", "undoInboxAction", "bulkInboxAction",
+  "answerMemoryProposal",
 ]);
 
 /**
@@ -2828,6 +2849,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // the channel HAS an error shape, so a refusal about a snooze that landed in the status bar would
   // leave the card it was about still sitting there with nothing saying why.
   listInbox: "inbox", resolveInboxItem: "inbox", dismissInboxItem: "inbox",
+  answerMemoryProposal: "inbox",
   snoozeInboxItem: "inbox", undoInboxAction: "inbox", bulkInboxAction: "inbox",
   // Both on `activity`, for the reason the thread and inbox commands are all on their own channels:
   // the channel HAS an error shape, so a refusal about a range somebody picked lands on the card

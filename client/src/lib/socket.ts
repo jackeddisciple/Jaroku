@@ -1928,6 +1928,17 @@ export function sendResolveInboxItem(itemId: string): boolean {
   return send({ cmd: "resolveInboxItem", itemId });
 }
 
+/**
+ * §2.3: answer a memory proposal.
+ *
+ * A SENDER OF ITS OWN rather than a fourth bulk verb, matching the command. The decision is
+ * written onto the row and the sweep is what resolves the card, so this reports only whether it
+ * SENT — the board arrives on the channel like every other change to it.
+ */
+export function sendAnswerMemoryProposal(itemId: string, decision: "saved" | "rejected"): boolean {
+  return send({ cmd: "answerMemoryProposal", itemId, decision });
+}
+
 export function sendDismissInboxItem(itemId: string): boolean {
   return send({ cmd: "dismissInboxItem", itemId });
 }

@@ -159,6 +159,7 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   // inbox
   listInbox: "agent:read",
   resolveInboxItem: "agent:write",
+  answerMemoryProposal: "agent:write",
   dismissInboxItem: "agent:write",
   snoozeInboxItem: "agent:write",
   undoInboxAction: "agent:write",

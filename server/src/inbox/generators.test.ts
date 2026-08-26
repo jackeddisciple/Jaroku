@@ -21,6 +21,9 @@
 //   npm run test:inbox-generators
 
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 import { openTestSqlite, testContext } from "../db/testDb.ts";
 import { InboxStore } from "./inboxStore.ts";
@@ -318,6 +321,57 @@ console.log("\na memory is proposed from a failure, a fix and a pass — and fro
   const card = (await inbox.listOpen(ctx)).find((i) => i.id === proposed!.id)!;
   check("rejecting it is recorded", answered);
   check("...and the predicate says resolved", isResolved(card, facts()));
+
+  // AND THE OTHER ANSWER, which is not the same row. "Saved" and "rejected" both settle the card
+  // and they mean opposite things about what the workspace learned, so a decision column that
+  // recorded only that an answer arrived would lose the whole content of the question.
+  const second = (await inbox.listOpen(ctx)).find((i) => i.id !== proposed!.id)!;
+  check("saving one is recorded too", await noteMemoryDecision(deps, ctx, second.id, "saved"));
+  const savedCard = (await inbox.listOpen(ctx)).find((i) => i.id === second.id)!;
+  check("...and it resolves as well", isResolved(savedCard, facts()));
+  check("...with the answer that was actually given", savedCard.payload["decision"] === "saved");
+  check("...distinct from the other card's", card.payload["decision"] === "rejected");
+
+
+  // ANSWERING AGAIN BEFORE THE SWEEP IS A CHANGE OF MIND, NOT A DUPLICATE, and this asserts that
+  // deliberately rather than by omission. The decision is written onto an OPEN row and the
+  // reconciler is what closes it, so there is a real window — seconds to a minute — in which the
+  // card is still on the board with a `saved` on it. Refusing the second press in that window
+  // would mean a card visibly still asking, whose controls had silently stopped working.
+  //
+  // A row the sweep has already closed is a different matter: `noteMemoryDecision` requires
+  // `state === "open"`, so once the card is gone the answer is final.
+  check("answering again while the card is still open changes the answer", await noteMemoryDecision(deps, ctx, second.id, "rejected"));
+  check(
+    "...and the row carries the newer one",
+    ((await inbox.listOpen(ctx)).find((i) => i.id === second.id)!).payload["decision"] === "rejected",
+  );
+  check("an item that is not a proposal cannot be answered at all", !(await noteMemoryDecision(deps, ctx, randomUUID(), "saved")));
+
+  // AND THE COMMAND THAT REACHES IT EXISTS. `noteMemoryDecision` shipped with the type and was
+  // reachable only from this file — so the card had three dead controls and a resolve predicate
+  // reading a field nothing wrote, on the one type in the Inbox that cannot resolve from facts.
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const index = readFileSync(join(HERE, "..", "index.ts"), "utf8");
+  check("a command carries the decision", /cmd\.cmd === "answerMemoryProposal"/.test(index));
+  check("...and reaches noteMemoryDecision", /await noteMemoryDecision\(inboxDeps, ctx, cmd\.itemId, cmd\.decision\)/.test(index));
+  const relay = readFileSync(join(HERE, "..", "wsRelay.ts"), "utf8");
+  check("...the relay forwards it as an inbox command", /"answerMemoryProposal",/.test(relay));
+  check("...on the inbox channel, which has an error shape to refuse on", /answerMemoryProposal: "inbox"/.test(relay));
+  const client = readFileSync(join(HERE, "..", "..", "..", "client", "src", "components", "InboxActions.tsx"), "utf8");
+  check("...and both verbs send it", /sendAnswerMemoryProposal\(item\.id, action === "save_memory" \? "saved" : "rejected"\)/.test(client));
+
+  // THE COMMENT THAT DESCRIBED A CONSUMER THAT DOES NOT EXIST. `noteMemoryProposal`'s header used
+  // to say the evidence was attributable back through "the injection into planner, generator and
+  // editor prompts"; there is no memory store and no such injection anywhere, so a future reader
+  // would have gone looking for one. This is the only place in the product where a comment
+  // described a consumer that was never built, which is worth a check of its own.
+  const generators = readFileSync(join(HERE, "generators.ts"), "utf8");
+  check(
+    "the proposal's header no longer claims a prompt injection that does not exist",
+    !/injection into planner, generator and editor prompts is\s*\n\s*\* attributable/.test(generators),
+  );
+  check("...and says plainly what a saved decision does buy", /What a `saved` decision buys today is the/.test(generators));
 
   await close();
 }

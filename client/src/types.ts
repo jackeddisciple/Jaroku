@@ -2072,6 +2072,13 @@ export type ClientCommand =
   | { cmd: "bulkInboxAction"; action: InboxAction; itemIds: string[]; duration?: SnoozeDuration }
   | { cmd: "undoInboxAction"; token: string }
   /**
+   * §2.3's answer to a proposal — the one resolve condition in the Inbox that IS the action.
+   *
+   * NOT ONE OF THE THREE VERBS. Resolve, dismiss and snooze are judgements about the CARD; this is
+   * a judgement about the proposal, and which answer was given is the only thing the card asked.
+   */
+  | { cmd: "answerMemoryProposal"; itemId: string; decision: "saved" | "rejected" }
+  /**
    * §B.7's Agent diff. On demand rather than on the snapshot: it costs a tree read from GitHub and
    * a parse of both sides, and a toggle is a click where a snapshot is a render.
    */

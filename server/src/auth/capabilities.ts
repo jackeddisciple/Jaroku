@@ -635,6 +635,9 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // actually fixed.
   listInbox: "agent:read",
   resolveInboxItem: "agent:write",
+  // The same as the other board verbs: every member may answer a proposal about an agent they can
+  // write to, and the decision is the workspace's rather than one person's.
+  answerMemoryProposal: "agent:write",
   dismissInboxItem: "agent:write",
   snoozeInboxItem: "agent:write",
   undoInboxAction: "agent:write",

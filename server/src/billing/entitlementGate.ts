@@ -260,6 +260,9 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   dismissInboxItem: NO_ENTITLEMENT,
   snoozeInboxItem: NO_ENTITLEMENT,
   resolveInboxItem: NO_ENTITLEMENT,
+  // Answering a proposal is a judgement about the workspace's own record of what it learned.
+  // Nothing is counted and nothing is spent, so there is no tier dimension to it.
+  answerMemoryProposal: NO_ENTITLEMENT,
   undoInboxAction: NO_ENTITLEMENT,
   // Acting on several Inbox cards at once, and NOT the "batch approvals" the pricing sells. That
   // is the Approval System's surface and it does not exist here — see `EntitlementKind`.

@@ -196,6 +196,7 @@ import {
   noteEvalFinished,
   noteEvalResultsOpened,
   noteMcpStatus,
+  noteMemoryDecision,
   noteMemoryProposal,
   noteRunFailed,
   noteTraceOpened,
@@ -6114,6 +6115,37 @@ async function handleInboxCommand(ctx: TenantContext, cmd: InboxCommand): Promis
   }
 
   try {
+    if (cmd.cmd === "answerMemoryProposal") {
+      // §2.3's ONE RESOLVE CONDITION THAT IS THE ACTION, and the only way this card can settle.
+      // `memory_proposal` is `origin: "event"` and deliberately excluded from derived resolution —
+      // "there is no external world in which a proposal becomes answered" — so without a command
+      // carrying the decision the card had three dead controls and a predicate reading a field
+      // nothing wrote. `noteMemoryDecision` has existed since the type shipped and was reachable
+      // only from a test.
+      if (typeof cmd.itemId !== "string" || !cmd.itemId) {
+        refuse("that answer named no proposal");
+        return;
+      }
+      if (cmd.decision !== "saved" && cmd.decision !== "rejected") {
+        refuse("a proposal is answered with saved or rejected");
+        return;
+      }
+      // THE SAME SENTENCE FOR "NOT A PROPOSAL", "ALREADY ANSWERED" AND "NOT YOURS", which is §6.3's
+      // rule: a caller learns nothing about what exists in another workspace. `noteMemoryDecision`
+      // returns false for all three, and the store scopes the read.
+      const answered = await noteMemoryDecision(inboxDeps, ctx, cmd.itemId, cmd.decision);
+      if (!answered) {
+        refuse("that proposal is no longer open", cmd.itemId);
+        return;
+      }
+      // THE DECISION IS WRITTEN AND THE SWEEP SETTLES IT — see `noteMemoryDecision`'s own note. The
+      // board is rebuilt so the card reflects the answer now rather than at the next reconciliation;
+      // what makes it RESOLVED is still the predicate, which is what stops this becoming a second
+      // resolution path.
+      broadcastInbox();
+      return;
+    }
+
     if (cmd.cmd === "undoInboxAction") {
       if (typeof cmd.token !== "string") {
         refuse("that undo carried no token");
