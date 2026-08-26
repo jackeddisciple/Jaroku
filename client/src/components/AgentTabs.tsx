@@ -36,6 +36,9 @@ import { fmtCostPerRun } from "../lib/agentFormat.ts";
 import { absTime, fmtLatency, relTime } from "../lib/format.ts";
 import { ACCENT, ICON, STATUS, TEXT, TYPE } from "../lib/tokens.ts";
 import { useUiStore } from "../store/uiStore.ts";
+import { useMcpStore } from "../store/mcpStore.ts";
+import { useCanRun } from "../lib/useCapability.ts";
+import { sendSetAgentTools } from "../lib/socket.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import type { AgentDetailView } from "../types.ts";
 
@@ -73,6 +76,108 @@ const TABS: { id: TabId; label: string; icon: (p: { size?: number }) => React.Re
   // also why it is the one tab that carries a badge — see `accessBadge`.
   { id: "access", label: "Access", icon: ShieldIcon },
 ];
+
+/**
+ * Grant and revoke, on an agent that already exists.
+ *
+ * THE CONTROL §7.5's WHOLE DESIGN ASSUMED AND NOBODY HAD BUILT. This tab rendered every ref with
+ * its impact, its stored reason and an `unresolved` chip when its server had left the workspace —
+ * a correctly surfaced broken state with no repair anywhere — and `forkAgent`'s notice told people
+ * their fork's grants start empty, which is only sensible advice if grants can be filled. Adding a
+ * tool meant regenerating the agent from scratch.
+ *
+ * THE WHOLE SET GOES OVER THE WIRE, which is `setAgentTools`'s shape and its reason: a grant is a
+ * least-privilege decision, and "these tools and no others" is the honest unit of one. Two tabs
+ * each sending an add would produce a set neither of them chose.
+ *
+ * ABSENT RATHER THAN DISABLED FOR A ROLE THAT MAY NOT USE IT — the rule §8 states and the Access
+ * tab is held to. A greyed control with an explanation beside it has decided somebody should keep
+ * looking at it.
+ *
+ * COLLAPSED BY DEFAULT. This tab's job is to answer "what can this agent touch", and a list of
+ * every tool in the workspace on top of that answer would bury it.
+ */
+function McpGrantEditor({ detail }: { detail: AgentDetailView }) {
+  const slug = detail.card.slug;
+  const mayWrite = useCanRun("setAgentTools", slug);
+  const servers = useMcpStore((s) => s.servers);
+  const [open, setOpen] = useState(false);
+  // THE DRAFT IS SEEDED FROM WHAT IS GRANTED and re-seeded when the panel opens, so a grant changed
+  // in another tab is what a second edit starts from rather than a set this component remembered.
+  const [draft, setDraft] = useState<string[] | null>(null);
+
+  if (!mayWrite) return null;
+
+  const granted = detail.tools.map((t) => t.ref);
+  const available = servers.flatMap((s) => s.tools.map((t) => `${s.id}/${t.name}`));
+  // A REF WHOSE SERVER HAS GONE IS OFFERED AS A ROW THAT IS ON AND CANNOT BE TURNED BACK ON. It is
+  // what the `unresolved` chip is about, and unticking it is the repair — so it belongs in the list
+  // rather than being filtered out of the one place it can be removed from.
+  const rows = [...new Set([...available, ...granted])].sort();
+  const chosen = draft ?? granted;
+
+  return (
+    <div className="mb-2">
+      <button
+        type="button"
+        className={`${iconBtn} w-auto px-2 text-tiny text-muted`}
+        aria-expanded={open}
+        onClick={() => { setDraft(granted); setOpen((v) => !v); }}
+      >
+        {open ? "Cancel" : granted.length > 0 ? "Change what it may call" : "Grant a tool"}
+      </button>
+
+      {open && (
+        <div className="mt-1.5 space-y-1 rounded-control border border-hair p-2">
+          {rows.length === 0 ? (
+            <div className="text-tiny text-faint">
+              No MCP server is connected to this workspace, so there is nothing to grant.
+            </div>
+          ) : (
+            rows.map((ref) => {
+              const gone = !available.includes(ref);
+              return (
+                <label key={ref} className="flex min-w-0 cursor-pointer items-center gap-2 text-tiny text-ink">
+                  <input
+                    type="checkbox"
+                    checked={chosen.includes(ref)}
+                    // A GONE REF CAN BE UNTICKED AND NEVER RE-TICKED. Re-granting a tool the
+                    // workspace no longer has is a grant the server would resolve to nothing
+                    // anyway; offering it would be a control whose effect is invisible.
+                    disabled={gone && !chosen.includes(ref)}
+                    onChange={(e) =>
+                      setDraft(
+                        e.target.checked ? [...chosen, ref] : chosen.filter((r) => r !== ref),
+                      )
+                    }
+                  />
+                  <Truncate className="min-w-0 flex-1" title={ref}>{ref}</Truncate>
+                  {gone && (
+                    <Chip size="sm" caps color={STATUS.error} className="shrink-0" title="This server is no longer in the workspace">
+                      gone
+                    </Chip>
+                  )}
+                </label>
+              );
+            })
+          )}
+          <div className="flex items-center gap-1.5 pt-1">
+            <button
+              type="button"
+              className={`${iconBtn} w-auto px-2 text-tiny`}
+              onClick={() => { sendSetAgentTools(slug, chosen); setOpen(false); setDraft(null); }}
+            >
+              Save
+            </button>
+            <span className="text-tiny text-faint">
+              {chosen.length} of {rows.length} — the agent may call these and nothing else.
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** A labelled block inside a tab. §9's middle nesting level: card → SECTION → well. */
 function Section({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
@@ -117,6 +222,7 @@ function Capabilities({ detail }: { detail: AgentDetailView }) {
       </Section>
 
       <Section label="Granted MCP tools" hint="third-party code Jaroku has not reviewed">
+        <McpGrantEditor detail={detail} />
         {detail.tools.length === 0 ? (
           <div className="text-tiny text-faint">None granted.</div>
         ) : (

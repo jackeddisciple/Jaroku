@@ -558,6 +558,11 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   archiveAgent: "agent:write",
   restoreAgent: "agent:write",
   renameAgent: "agent:write",
+  // Changing which MCP tools an agent may call. `agent:write` rather than something narrower for
+  // the reason the whole per-tool design rests on: what bounds a grant is the REGISTRY, which only
+  // holds servers this workspace connected, so this can never widen past what somebody with
+  // `mcp:manage` already admitted. Anybody who may edit the code may decide what it may reach.
+  setAgentTools: "agent:write",
 
   /**
    * Fork, and restore-to-a-version.
@@ -1003,6 +1008,9 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   // Publishing a NEW version that points at an old manifest. It rewrites no history and moves no
   // pointer backwards, which makes it the same act as applying an edit.
   restoreAgentVersion: "edit",
+  // The same narrowing as the three above: deciding what an agent may reach is deciding what it
+  // does, which is what editing is.
+  setAgentTools: "edit",
 
   // --- eval: start, cancel, and the datasets they run against ---------------------------------
   startEval: "eval",

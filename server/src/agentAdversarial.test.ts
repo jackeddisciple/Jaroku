@@ -289,6 +289,56 @@ const leg = (over: Partial<ProviderMetrics>): ProviderMetrics => ({
       check("one of its versions is undefined", (await agents.version(ctx, ghost, 1)) === undefined);
       check("archiving it reports that nothing happened", (await agents.setArchived(ctx, ghost, true)) === false);
       check("renaming it likewise", (await agents.rename(ctx, ghost, "new name")) === false);
+      check("and setting its tools", (await agents.setMcpTools(ctx, ghost, ["a/b"])) === false);
+    }
+
+    console.log("\nan agent's MCP grants can be changed after it exists, which is what made them repairable");
+    {
+      // §7.5's GRANT, WHICH HAD NO WRITER AFTER CREATION. `create` wrote the column at generation
+      // and `upsertFromDisk` at a reconciliation, and there was no third — so a grant was fixed for
+      // an agent's whole life. Two concrete broken states came out of that, and the product had gone
+      // to the trouble of DETECTING both: the Capabilities tab's `unresolved` chip, explaining a
+      // grant that can no longer resolve on a surface with no way to remove it, and `forkAgent`'s
+      // notice telling somebody their fork's grants start empty.
+      const granted = await agentRow(agents, ctx, "grant_target");
+      check("an agent starts with the grants it was created with", (await agents.byId(ctx, granted))!.mcp_tools.length === 0);
+
+      check("a grant can be added", await agents.setMcpTools(ctx, granted, ["srv/read", "srv/write"]));
+      check("...and reads back", (await agents.byId(ctx, granted))!.mcp_tools.join(",") === "srv/read,srv/write");
+
+      // REVOCATION IS THE HALF THAT CLOSES BOTH OBSERVED BROKEN STATES, and it is the direction
+      // that matters: no grant can widen without the registry, and narrowing must always work.
+      check("a grant can be narrowed", await agents.setMcpTools(ctx, granted, ["srv/read"]));
+      check("...to exactly what was asked for", (await agents.byId(ctx, granted))!.mcp_tools.join(",") === "srv/read");
+      check("...and cleared entirely", await agents.setMcpTools(ctx, granted, []));
+      check("...leaving none", (await agents.byId(ctx, granted))!.mcp_tools.length === 0);
+
+      // THE WHOLE SET, NOT A DELTA. Asserted because it is the shape of the command as well as of
+      // the column: two tabs each sending an add would produce a set neither of them chose.
+      await agents.setMcpTools(ctx, granted, ["srv/one"]);
+      await agents.setMcpTools(ctx, granted, ["srv/two"]);
+      check(
+        "a second write REPLACES rather than merging",
+        (await agents.byId(ctx, granted))!.mcp_tools.join(",") === "srv/two",
+      );
+
+      // AND THE HANDLER RESOLVES BEFORE IT WRITES, which is what keeps this from being a widening
+      // a client can ask for: `mcpRegistry.resolve` returns only tools this workspace connected, so
+      // a ref naming a server that is gone is simply not in the set that gets written — and sending
+      // the refs that still resolve is how an `unresolved` chip is removed.
+      const fn = /async function setAgentTools\([\s\S]*?\n\}/.exec(indexSource)?.[0] ?? "";
+      check("setAgentTools exists to be read", fn.length > 0);
+      check("...resolving every ref against the registry first", /mcpRegistry\.resolve\(ctx, wanted\)/.test(fn));
+      check("...writing only what resolved", /agentRepo\.setMcpTools\(ctx, agent\.id, granted\)/.test(fn));
+      check("...and re-emitting mcp_tools.json from it rather than trusting the file", /buildManifest\(tools, servers\)/.test(fn));
+      check(
+        "...as a published version, so the change has a version row like every other file change",
+        /projects\.publish\(ctx, agent\.id, next/.test(fn),
+      );
+      check(
+        "...and saying which refs were dropped, rather than silently keeping fewer than were asked for",
+        /dropped\.length > 0/.test(fn),
+      );
     }
   } finally {
     await db.close();

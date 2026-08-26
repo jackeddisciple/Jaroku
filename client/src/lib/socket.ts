@@ -1144,6 +1144,17 @@ export function sendListAgents(): void {
 export function sendArchiveAgent(agentId: string): void {
   send({ cmd: "archiveAgent", agentId });
 }
+/**
+ * §7.5: which MCP tools this agent may call, as the WHOLE set.
+ *
+ * NOT AN ADD OR A REMOVE. A grant is a least-privilege decision and its honest unit is these tools
+ * and no others — two tabs each sending an add would produce a set neither of them chose. A caller
+ * removing one sends the rest.
+ */
+export function sendSetAgentTools(agentId: string, mcpTools: readonly string[]): void {
+  send({ cmd: "setAgentTools", agentId, mcpTools: [...mcpTools] });
+}
+
 export function sendRestoreAgent(agentId: string): void {
   send({ cmd: "restoreAgent", agentId });
 }

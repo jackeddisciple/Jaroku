@@ -1985,6 +1985,78 @@ explicitly defers to "the agent's own capability list" — a surface that does n
 | Implementation Effort | 6/10 |
 | Confidence | 9/10 |
 
+### Resolution
+
+**Status: RESOLVED — grant and revoke, not revocation alone**
+
+The finding offered revocation alone at half the work, on the grounds that it closes both observed
+broken states. Both halves were built: the same command answers both, and a control that could only
+take away would leave the fork's own notice — *"Its MCP grants start empty"* — still telling people
+to do something the product cannot do.
+
+**Implemented:** `setAgentTools { agentId, mcpTools }`, at `agent:write` and `edit` on the
+per-agent axis, registered in `AGENT_COMMANDS`, `COMMAND_CHANNEL`, `COMMAND_ENTITLEMENT` and both
+capability tables on both sides. `AgentRepository.setMcpTools` is the **third writer of that
+column and the first that is not a creation**.
+
+**The whole set, never a delta.** A grant is a least-privilege decision and its honest unit is
+"these tools and no others": two tabs each sending an add would produce a set neither of them chose,
+and there is no ordering of two deltas that is obviously right. A caller removing one sends the rest.
+
+**Widening is still the registry's decision, not the client's.** Every ref is resolved through
+`mcpRegistry.resolve` before anything is written, so a ref naming a server this workspace has not
+connected resolves to nothing and is simply absent from the set that lands. That is also the
+**repair** for the `unresolved` chip: sending the refs that still resolve is how a dead one is
+removed, and the notice says how many were dropped rather than silently keeping fewer than were
+asked for.
+
+**`mcp_tools.json` stays host-owned.** The column is the grant; the file is its expression. It is
+re-emitted from the resolved set through the same `buildManifest` generation uses and **published
+as a version**, so a change to what an agent may call has a version row like every other change to
+its files. An agent with no readable project — a fork before its first materialise — writes the
+column and skips the file; `ensureProjectDir` (GAP-007) materialises it on the next run from the
+version this published. A failed re-emit is logged and does not fail the write, because refusing
+the whole change over it would leave somebody unable to **revoke**, which is the direction that
+matters.
+
+**On the Capabilities tab**, collapsed by default — the tab's job is to answer "what can this agent
+touch", and a list of every tool in the workspace on top of that answer would bury it. Absent
+rather than disabled for a role that may not use it, which is §8's rule and the one the Access tab
+is held to. A ref whose server has gone is offered as a row that is **on and cannot be turned back
+on**: unticking it is the repair, so it belongs in the one place it can be removed from, and
+re-granting a tool the workspace no longer has would be a control whose effect is invisible.
+
+**Files Changed:**
+
+- `server/src/db/repositories/agents.ts` — `setMcpTools`
+- `server/src/wsRelay.ts` — the command, `AGENT_COMMANDS`, `COMMAND_CHANNEL`
+- `server/src/index.ts` — `setAgentTools`
+- `server/src/auth/capabilities.ts` (both tables), `server/src/billing/entitlementGate.ts`
+- `server/src/agentAdversarial.test.ts` — the assertions
+- `client/src/components/AgentTabs.tsx` — `McpGrantEditor`
+- `client/src/lib/socket.ts`, `client/src/types.ts`, `client/src/lib/capabilities.ts` (both tables)
+
+**Verification:**
+
+`test:agent-adversarial` — whose header says every block in it corresponds to a defect that was in
+the shipped code — holds the column through add, narrow, clear, and a second write **replacing**
+rather than merging, plus an agent that does not exist reporting that nothing happened. Then the
+handler is read as text: it resolves against the registry before writing, writes only what resolved,
+re-emits the manifest from the resolved set rather than trusting the file, publishes it as a
+version, and reports what was dropped.
+
+**Regression Coverage:**
+
+`test:channels`, `test:capabilities`, `test:entitlements`, `test:mcp-registry`,
+`test:mcp-hardening`, `test:access-resolver`, `test:agent-adversarial`, `test:permission-ui` and
+`test:dead-controls` all pass; both sides typecheck. Three of those are the structural audits that
+matter for a new command: `test:capabilities` fails on a relay command with neither a check nor an
+explicit `none`, `test:entitlements` does the same for the tier table, and `test:permission-ui`
+reads the server's `capabilities.ts` as text and fails when the client's copy has drifted — which it
+did, catching the agent-scoped table before this shipped.
+
+**Resolved On:** 2026-08-26
+
 ---
 
 ## GAP-012 — `memory_proposal` is generated, cannot be answered, and would be consumed by nothing
@@ -3184,6 +3256,7 @@ brief spends a page on.
 | GAP-007 | RESOLVED | `agents.ts`, `index.ts`, `agentFiles.test.ts`, `ci.yml` | `test:agent-files` proves a published agent is runnable with no directory, that the whole workspace costs one statement, and that all three call sites materialise on demand |
 | GAP-008 | RESOLVED | `InboxActions.tsx`, `InboxCardActions.tsx`, `inboxStore.ts`, `InboxView.tsx`, `inboxBoard.test.ts`, `registry.ts`, `types.ts`, `inboxActionIcons.tsx` | `test:inbox-board` reads the server's vocabulary and requires a case for all 29; the exhaustive switch failed the build naming four omissions while being written |
 | GAP-009 | RESOLVED | `entitlements.ts`, `entitlementGate.ts`, `plans.ts`, `index.ts`, `entitlements.test.ts`, `entitlementStore.ts`, `UpsellCard.tsx`, `UsagePanel.tsx`, `types.ts` | `test:entitlements` holds all seven kinds from both Free and Pro, plus the top of the ladder answering null; `test:entitlement-store` holds the client guard |
+| GAP-011 | RESOLVED | `agents.ts`, `wsRelay.ts`, `index.ts`, `capabilities.ts` (x2), `entitlementGate.ts`, `agentAdversarial.test.ts`, `AgentTabs.tsx`, `socket.ts`, `types.ts`, `capabilities.ts` (x2) | `test:agent-adversarial` holds the column through add, narrow, clear and replace, plus the handler resolving against the registry before writing |
 | GAP-012 | RESOLVED | `wsRelay.ts`, `index.ts`, `generators.ts`, `entitlementGate.ts`, `capabilities.ts`, `generators.test.ts`, `socket.ts`, `types.ts`, `capabilities.ts`, `InboxActions.tsx` | `test:inbox-generators` holds both answers as distinct and the whole reachability chain; the comment claiming a prompt injection that does not exist is corrected and checked |
 | GAP-013 | RESOLVED | `checkPolicy.ts`, `checkRunner.ts`, `githubApi.ts`, `githubWebhook.ts` (both), `checks.ts`, `github.ts`, `index.ts`, `mockGithubApi.ts`, three suites | `test:check-runner` drives the whole round trip and proves `approvedForSha` answers true, which nothing could make it do before |
 | GAP-014 | RESOLVED | `web/pricing.html`, `checkoutSurfaces.test.ts` | `test:checkout-surfaces` maps every sold feature row to an `EntitlementKind` and asserts the three removed names stay gone |

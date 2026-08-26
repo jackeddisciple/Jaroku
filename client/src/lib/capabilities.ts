@@ -131,6 +131,7 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   archiveAgent: "agent:write",
   restoreAgent: "agent:write",
   renameAgent: "agent:write",
+  setAgentTools: "agent:write",
   forkAgent: "agent:write",
   restoreAgentVersion: "agent:write",
   planAgent: "agent:write",
@@ -486,6 +487,7 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   archiveAgent: "edit",
   restoreAgent: "edit",
   renameAgent: "edit",
+  setAgentTools: "edit",
   restoreAgentVersion: "edit",
 
   startEval: "eval",

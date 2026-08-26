@@ -166,6 +166,9 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   archiveAgent: NO_ENTITLEMENT,
   restoreAgent: NO_ENTITLEMENT,
   renameAgent: NO_ENTITLEMENT,
+  // Narrowing or repairing a grant on an agent that already exists. Nothing is counted and the
+  // registry it draws from is already bounded by `maxMcpServers`, so there is no second limit here.
+  setAgentTools: NO_ENTITLEMENT,
   restoreAgentVersion: NO_ENTITLEMENT,
   pauseRun: NO_ENTITLEMENT,
   resumeRun: NO_ENTITLEMENT,

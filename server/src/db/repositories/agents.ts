@@ -279,6 +279,29 @@ export class AgentRepository {
   }
 
   /**
+   * Which MCP tools this agent is scoped to, changed on an agent that already exists.
+   *
+   * THE THIRD WRITER OF THIS COLUMN, AND THE FIRST THAT IS NOT A CREATION. `create` writes it at
+   * generation and `upsertFromDisk` writes it at a reconciliation; there was no third, so a grant
+   * was fixed for an agent's whole life. The Capabilities tab rendered every ref with its impact
+   * and its reason and an `unresolved` chip when its server had left the workspace — a correctly
+   * surfaced broken state with no repair anywhere — and `forkAgent`'s own notice told people to
+   * fill grants the product could not fill: *"Forked to …_copy. Its MCP grants start empty."*
+   *
+   * THE COLUMN IS THE GRANT, and `mcp_tools.json` is its expression. The manifest file is
+   * `HOST_OWNED` precisely so the edit loop cannot touch it — a model must never widen its own
+   * access — so the write goes here and the file is re-emitted from it, which is the same order
+   * generation uses.
+   */
+  async setMcpTools(ctx: TenantContext, id: string, refs: readonly string[]): Promise<boolean> {
+    const res = await this.q(ctx).run(
+      `UPDATE agents SET mcp_tools = ? WHERE workspace_id = ? AND id = ? AND deleted_at IS NULL`,
+      [JSON.stringify([...refs]), ctx.workspaceId, id],
+    );
+    return res.changes > 0;
+  }
+
+  /**
    * Every slug this workspace has spent, INCLUDING the soft-deleted ones.
    *
    * WHAT `UNIQUE (workspace_id, slug)` ACTUALLY CONSTRAINS, which is not what `list` returns. A

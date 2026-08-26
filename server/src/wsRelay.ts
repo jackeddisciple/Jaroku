@@ -176,15 +176,38 @@ export type RestoreAgentVersionCommand = {
   version: number;
 };
 
+/**
+ * §7.5 REPAIRED: which MCP tools an existing agent is scoped to.
+ *
+ * THE FIRST WAY TO CHANGE A GRANT AFTER GENERATION. `mcpTools` on `generate` and `planAgent` were
+ * the only inputs in the whole 116-command surface, so a grant was fixed for an agent's entire
+ * life. The Capabilities tab rendered an `unresolved` chip for a tool whose server had left the
+ * workspace — a correctly surfaced broken state with no repair anywhere — and `forkAgent`'s own
+ * notice told people their fork's grants start empty, which is only sensible advice if there is a
+ * way to fill them.
+ *
+ * THE WHOLE SET, NOT A DELTA. A grant is a least-privilege decision and its honest unit is "these
+ * tools and no others": two tabs each sending an add would produce a set neither of them chose, and
+ * there is no ordering of two deltas that is obviously right. A client that wants to remove one
+ * sends the rest.
+ *
+ * WIDENING IS STILL GATED BY THE SERVER. Every ref is resolved against the registry before it is
+ * written, so a client cannot grant a tool this workspace has not connected — the same rule the
+ * generation path applies to the same field.
+ */
+export type SetAgentToolsCommand = { cmd: "setAgentTools"; agentId: string; mcpTools: string[] };
+
 export type AgentCommand =
   | ArchiveAgentCommand
   | RestoreAgentCommand
   | RenameAgentCommand
   | ForkAgentCommand
-  | RestoreAgentVersionCommand;
+  | RestoreAgentVersionCommand
+  | SetAgentToolsCommand;
 
 const AGENT_COMMANDS = new Set([
   "archiveAgent", "restoreAgent", "renameAgent", "forkAgent", "restoreAgentVersion",
+  "setAgentTools",
 ]);
 
 /**
@@ -2809,7 +2832,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // status bar left the surface that asked — the sidebar row, and now the Agents grid — waiting on
   // an answer that had already come and gone somewhere else. The channel has an error shape for
   // exactly this, the same reason the thread and github commands are classified here.
-  archiveAgent: "agents", restoreAgent: "agents", renameAgent: "agents",
+  archiveAgent: "agents", restoreAgent: "agents", renameAgent: "agents", setAgentTools: "agents",
   forkAgent: "agents", restoreAgentVersion: "agents",
   // §4 and §6's three reads. On `agents` beside `listAgents` rather than on a channel of their own
   // — see ListAgentGridCommand for why this is not a new channel.

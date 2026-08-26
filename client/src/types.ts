@@ -1866,6 +1866,8 @@ export type ClientCommand =
   | { cmd: "archiveAgent"; agentId: string }
   | { cmd: "restoreAgent"; agentId: string }
   | { cmd: "renameAgent"; agentId: string; name: string }
+  /** §7.5: the WHOLE grant set for an agent that already exists. See sendSetAgentTools. */
+  | { cmd: "setAgentTools"; agentId: string; mcpTools: string[] }
   /**
    * §7.5's fork: the connectors and the current manifest copied, and the MCP grants NOT.
    *

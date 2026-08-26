@@ -139,7 +139,7 @@ import { CheckRunner } from "./checkRunner.ts";
 import { PrCommentsRepository } from "./db/repositories/prComments.ts";
 import { diffShapes, readShape } from "./semanticDiff.ts";
 import { inSubdirectory, repoPrefix } from "./githubPush.ts";
-import { MANIFEST_FILE } from "./mcpManifest.ts";
+import { MANIFEST_FILE, buildManifest, manifestRefs } from "./mcpManifest.ts";
 import type { McpImpact } from "./mcpStore.ts";
 import { ObjectNotFound } from "./storage/objectStore.ts";
 import { openObjectStore } from "./storage/open.ts";
@@ -2056,6 +2056,90 @@ async function renameAgent(ctx: TenantContext, agentId: string, name: unknown): 
   // Every thread of this agent renders the name. BUG-17 was exactly this going stale: a rename left
   // every thread row showing the old name beside a sidebar showing the new one.
   scheduleListRefresh(ctx);
+}
+
+/**
+ * §7.5's grant, changed on an agent that already exists.
+ *
+ * WHAT WAS MISSING. `mcpTools` on `generate` and `planAgent` were the only inputs in the whole
+ * command surface, and `create` / `upsertFromDisk` the only writers of the column — so a grant was
+ * fixed for an agent's entire life. Two concrete broken states came out of that, and both are
+ * things the product had gone to the trouble of DETECTING: the Capabilities tab's `unresolved`
+ * chip, which explains a grant that can no longer resolve on a surface with no way to remove it,
+ * and `forkAgent`'s notice telling somebody their fork's grants start empty, which is only
+ * sensible advice if there is a way to fill them. Wanting to add a tool meant regenerating.
+ *
+ * IT RESOLVES BEFORE IT WRITES, which is what keeps this from being a widening a client can ask
+ * for. `mcpRegistry.resolve` returns only tools this workspace has actually connected, so a ref
+ * naming a server that is gone — or one nobody ever connected — resolves to nothing and is simply
+ * not in the set that gets written. That is also the repair: sending the refs that still resolve
+ * is how an `unresolved` chip is removed.
+ *
+ * THE COLUMN AND THE FILE, IN THAT ORDER. `mcp_tools.json` is `HOST_OWNED` so the edit loop cannot
+ * touch it — a model must never widen its own access — and it is re-emitted here from the resolved
+ * set through the same `buildManifest` generation uses, published as a new version so the change
+ * has a version row like every other change to an agent's files. An agent with no local project
+ * (a fork on another replica) writes the column and skips the file; `ensureProjectDir` materialises
+ * it on the next run, from the version this just published.
+ */
+async function setAgentTools(ctx: TenantContext, slug: string, refs: unknown): Promise<void> {
+  const wanted = Array.isArray(refs) ? refs.filter((r): r is string => typeof r === "string") : null;
+  if (wanted === null) {
+    refuseAgent(ctx, "that command needs a list of tools", slug);
+    return;
+  }
+  const agent = (await agentRepo.list(ctx, { includeArchived: true })).find((a) => a.slug === slug);
+  if (!agent) {
+    refuseAgent(ctx, `no agent called ${slug} in this workspace`, slug);
+    return;
+  }
+
+  // THE REGISTRY DECIDES WHAT EXISTS, not the request. Same call the plan path makes, and the same
+  // posture: a ref naming a server or tool that has gone away resolves to nothing rather than to a
+  // guess.
+  const tools = await mcpRegistry.resolve(ctx, wanted);
+  // THE REGISTRY'S VIEW, not the store's rows: `buildManifest` reads a server's discovered tool
+  // list and its `configured` flag, which are the registry's join rather than columns on the table.
+  const servers = await mcpRegistry.list(ctx);
+  const manifest = buildManifest(tools, servers);
+  const granted = manifestRefs(manifest);
+
+  const dropped = wanted.filter((r) => !granted.includes(r));
+  await agentRepo.setMcpTools(ctx, agent.id, granted);
+
+  // AND THE MANIFEST, republished as a version. Skipped when this agent has no readable project —
+  // a fork before its first materialise, an agent whose objects a sweep collected — because a
+  // publish of nothing would replace a project with an empty one.
+  try {
+    const files = await projects.readCurrent(ctx, agent.id, agent.current_version);
+    if (files.length > 0) {
+      const next = files.filter((f) => f.path !== MANIFEST_FILE);
+      next.push({ path: MANIFEST_FILE, content: `${JSON.stringify(manifest, null, 2)}\n` });
+      const { version } = await projects.publish(ctx, agent.id, next, {
+        source: "import",
+        summary: granted.length === 0 ? "MCP grants cleared" : `MCP grants set to ${granted.length} tool(s)`,
+      });
+      await projects.materialise(ctx, agent.id, version, join(agentsDir(RUNTIME_DIR), slug));
+    }
+  } catch (err) {
+    // THE COLUMN IS THE GRANT AND IT IS ALREADY WRITTEN. A manifest that could not be re-emitted is
+    // a project file out of step with the row for one run — which the next generation, edit or
+    // materialise corrects — and refusing the whole change over it would leave somebody unable to
+    // REVOKE a tool, which is the direction that matters.
+    console.error(`[mcp] could not re-emit ${slug}'s manifest:`, (err as Error)?.message ?? err);
+  }
+
+  console.log(`[mcp] ${slug} scoped to ${granted.length} tool(s)`);
+  await relay.broadcastAgents();
+  relay.broadcastAgentFiles(ctx, slug);
+  await relay.broadcastAgentGrid();
+  noticeAgent(
+    ctx,
+    dropped.length > 0
+      ? `${slug} now has ${granted.length} tool(s). ${dropped.length} no longer exist in this workspace and were dropped.`
+      : `${slug} now has ${granted.length} tool(s).`,
+    slug,
+  );
 }
 
 await syncAgents();
@@ -5983,6 +6067,7 @@ async function handleAgentCommand(ctx: TenantContext, cmd: AgentCommand): Promis
     else if (cmd.cmd === "renameAgent") await renameAgent(ctx, cmd.agentId, cmd.name);
     else if (cmd.cmd === "forkAgent") await forkAgent(ctx, cmd.agentId);
     else if (cmd.cmd === "restoreAgentVersion") await restoreAgentVersion(ctx, cmd.agentId, cmd.version);
+    else if (cmd.cmd === "setAgentTools") await setAgentTools(ctx, cmd.agentId, cmd.mcpTools);
   } catch (err) {
     // A FIXED SENTENCE, AND THE REAL ONE IN THE LOG — the same rule the thread commands follow. What
     // throws on this path is usually a database driver, and nothing a driver wrote was written for a
