@@ -1705,7 +1705,13 @@ export type ServerMessage =
   | { channel: "runSteps"; runId: string; steps: Step[] }
   | { channel: "log"; level: "stderr" | "parseError"; text: string }
   | AgentMessage
-  | { channel: "agentFiles"; agentId: string; files: AgentFile[] }
+  // TWO SHAPES, BECAUSE A READ HAS TWO OUTCOMES AND THE DIFFERENCE IS LOAD-BEARING HERE. An agent
+  // with no files and an agent whose files could not be read look identical to every consumer of
+  // this channel — the Code tab renders an empty tree, and the ⊕ menu concludes there is nothing
+  // to attach and says so. `error` is what lets them differ; `files` is absent on it so a reader
+  // cannot use one where the other was sent.
+  | { channel: "agentFiles"; agentId: string; files: AgentFile[]; error?: undefined }
+  | { channel: "agentFiles"; agentId: string; error: string; files?: undefined }
   | { channel: "graph"; agentId: string; graph: AgentGraph | null }
   | { channel: "debug"; type: "paused"; runId: string; seq: number }
   | { channel: "debug"; type: "resumed"; runId: string; seqOffset: number }

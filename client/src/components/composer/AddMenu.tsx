@@ -32,12 +32,20 @@ export function AddMenu({
   agentId,
   /** Which sources have anything behind them. A source absent from this set is not rendered. */
   available,
+  /**
+   * Why the list is empty, when the reason is a read that failed rather than an agent with
+   * nothing in it. The two are indistinguishable from `available` alone — both are an empty set —
+   * and telling somebody to "generate an agent" about an agent with two published versions is a
+   * confident wrong answer rather than a missing one, which is the failure GAP-003 is about.
+   */
+  unavailable = null,
   onPick,
   disabled = false,
   openSignal = 0,
 }: {
   agentId: string | null;
   available: ReadonlySet<AttachKind>;
+  unavailable?: string | null;
   onPick: (kind: AttachKind, rows: AttachableRow[]) => void;
   disabled?: boolean;
   /** §3.3's ⌘/. A counter rather than a boolean: the chord pressed twice must open the menu
@@ -89,8 +97,12 @@ export function AddMenu({
           <EmptyState
             size="inline"
             icon={({ size }) => <Glyph icon={Icon.Add} size={size ?? GLYPH.empty} />}
-            title="Nothing to attach yet"
-            hint="Generate an agent, run it, or link it to GitHub — then its files, runs and commits can be referenced from here."
+            title={unavailable ? "Nothing to attach right now" : "Nothing to attach yet"}
+            hint={
+              unavailable
+                ? `This agent's files could not be read, so there is nothing here to reference. ${unavailable}`
+                : "Generate an agent, run it, or link it to GitHub — then its files, runs and commits can be referenced from here."
+            }
           />
         )}
       </Popover>

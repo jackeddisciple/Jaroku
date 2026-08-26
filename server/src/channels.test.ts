@@ -211,6 +211,89 @@ console.log("\nevery sender is scoped by construction");
 }
 
 // ---------------------------------------------------------------------------------------------
+// 2b. Every point-to-point read answers a failure, on the channel that asked.
+// ---------------------------------------------------------------------------------------------
+//
+// A READ HAS THREE OUTCOMES AND USED TO EXPRESS TWO. `answer()` sent a success, `build` could
+// return a refusal, and a THROW became a line on a server console — so the client that asked was
+// left on its initial state forever. That is not a quieter error: every empty state in this
+// product is designed to mean "there is nothing here", so a swallowed failure spends that
+// meaning on a lie. One unreadable object made the Code view, the ⊕ picker and the version
+// browser agree that an agent with two published versions had never been generated.
+//
+// STRUCTURAL RATHER THAN A LIST, for the reason every audit in this file is: the failure that
+// actually happens is a read command added next year, written by copying the one above it, whose
+// error branch nobody thought about because there was nothing in the shape to think about. So
+// `onError` is a REQUIRED parameter, and this counts arguments in the source — a call site that
+// omits one fails here, and the typecheck fails beside it.
+
+console.log("\nevery read answers its failure rather than swallowing it");
+{
+  const answerFn = /private async answer\(([\s\S]*?)\): Promise<void> \{/.exec(relaySource)?.[1] ?? "";
+  check(
+    /onError:\s*\(message: string\)\s*=>/.test(answerFn),
+    "answer() takes the error shape as a required parameter",
+    answerFn ? "signature found, no onError in it" : "answer() not found",
+  );
+
+  const body = /private async answer\([\s\S]*?\n  \}/.exec(relaySource)?.[0] ?? "";
+  check(
+    /this\.sendTo\(ws,\s*onError\(/.test(body),
+    "...and its catch answers the socket with it, rather than only logging",
+  );
+
+  // Each `this.answer(` call, sliced to its own closing `);` so the argument count is this call's
+  // and not the next one's. Depth-counted rather than regexed: every one of these spans lines and
+  // carries object literals full of commas, which is precisely what a regex gets wrong.
+  const callSites: string[] = [];
+  for (const m of relaySource.matchAll(/void this\.answer\(/g)) {
+    let depth = 1;
+    let i = m.index! + m[0].length;
+    for (; i < relaySource.length && depth > 0; i++) {
+      const c = relaySource[i]!;
+      if (c === "(") depth++;
+      else if (c === ")") depth--;
+    }
+    callSites.push(relaySource.slice(m.index! + m[0].length, i - 1));
+  }
+  check(callSites.length >= 13, `found the read call sites (${callSites.length})`);
+
+  // The fourth argument, found by splitting at the commas that are at depth zero for this call.
+  const silent: string[] = [];
+  for (const call of callSites) {
+    const args: string[] = [];
+    let depth = 0, start = 0;
+    for (let i = 0; i < call.length; i++) {
+      const c = call[i]!;
+      if (c === "(" || c === "{" || c === "[") depth++;
+      else if (c === ")" || c === "}" || c === "]") depth--;
+      else if (c === "," && depth === 0) { args.push(call.slice(start, i)); start = i + 1; }
+    }
+    args.push(call.slice(start));
+    const onError = args[3] ?? "";
+    // It has to be a function OF the message, not a constant: "something went wrong" is the same
+    // amount of information as the silence it replaced, in a shape that looks like it was fixed.
+    if (!/=>/.test(onError) || !/message/.test(onError)) {
+      silent.push((args[1] ?? "").trim().slice(0, 60).replace(/\s+/g, " "));
+    }
+  }
+  check(
+    silent.length === 0,
+    "every answer() call site supplies an error member built from the failure's own message",
+    silent.length ? `SILENT: ${silent.join(" | ")}` : "",
+  );
+
+  // AND THE SHAPE IS ONE ITS OWN CHANNEL ALREADY RENDERS. An error frame on a channel whose store
+  // has no branch for it is the same dead end wearing a message, so each one names a channel that
+  // is classified above — which is the list `test:channels` opens by proving complete.
+  const channels = callSites
+    .map((c) => /channel:\s*"([a-zA-Z]+)"[^)]*$/.exec(c.replace(/\s+/g, " "))?.[1])
+    .filter((c): c is string => Boolean(c));
+  const unknown = channels.filter((c) => !ALL_CHANNELS.includes(c));
+  check(unknown.length === 0, "and answers on a channel this suite has classified", unknown.join(", "));
+}
+
+// ---------------------------------------------------------------------------------------------
 // 3. The emitter contexts in index.ts — one per single-flight subsystem, never one shared.
 // ---------------------------------------------------------------------------------------------
 

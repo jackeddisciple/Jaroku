@@ -90,8 +90,14 @@ const relay = new WsRelay({
   // read from a global directory BY ID, so the implementation has to check that the caller's
   // workspace owns that id. A stub that ignores agentId cannot tell a correct implementation
   // from one that hands any caller any agent's code — which is what this used to do.
-  listAgentFiles: async (ctx, agentId) =>
-    OWNED[ctx.workspaceId]?.includes(agentId) ? [{ path: `${agentId}.py` }] : [],
+  listAgentFiles: async (ctx, agentId) => {
+    // THE THIRD OUTCOME, which this stub could not previously produce and which is the one that
+    // shipped broken: a version row whose objects were never written throws on read. `[]` models
+    // "not yours"; this models "the store could not answer", and they must not look the same on
+    // the wire — see the assertions in the reads section.
+    if (agentId === "agent_unreadable") throw new Error("no such object: ws/x/agents/y/v2/agent.py");
+    return OWNED[ctx.workspaceId]?.includes(agentId) ? [{ path: `${agentId}.py` }] : [];
+  },
   getAgentGraph: async (ctx, agentId) =>
     OWNED[ctx.workspaceId]?.includes(agentId)
       ? { agent_id: agentId }
@@ -196,6 +202,28 @@ console.log("\nlocally-answered reads are per socket");
   check(stolenFiles.files.length === 0,
     `B cannot read A's agent source by naming it (${stolenFiles.files.length} files)`,
     JSON.stringify(stolenFiles.files).slice(0, 120));
+
+  // A READ THAT THREW IS ANSWERED, and this is the assertion the whole `onError` parameter exists
+  // for. It used to be a `console.error` on a server the person who asked cannot see, so the
+  // client sat on its initial state indefinitely — no spinner, no error, and an empty file list
+  // that every consumer of this channel reads as "this agent has nothing", which is a confident
+  // wrong answer rather than a missing one. Asserted with a TIMEOUT rather than by inspecting the
+  // inbox: "no frame ever arrives" is precisely the old behaviour, and only waiting can tell it
+  // from a frame that arrives late.
+  b.send({ cmd: "loadAgentFiles", agentId: "agent_unreadable" });
+  const failed: any = await b.want(
+    (m) => m.channel === "agentFiles" && m.agentId === "agent_unreadable",
+    "B files for an agent whose objects are missing",
+  );
+  check(
+    typeof failed.error === "string" && failed.error.includes("no such object"),
+    "a read that throws answers the asking socket with the failure, carrying its own message",
+    JSON.stringify(failed).slice(0, 160),
+  );
+  check(
+    failed.files === undefined,
+    "...and sends no file list with it, so an empty tree cannot be mistaken for an answer",
+  );
 
   b.send({ cmd: "loadAgentGraph", agentId: "agent_b" });
   const graph: any = await b.want((m) => m.channel === "graph" && m.agentId === "agent_b", "B graph");

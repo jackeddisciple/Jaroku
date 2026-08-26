@@ -963,6 +963,9 @@ export function BuildPane({
   // subscribed to directly rather than derived, so the picker offers a file the moment generation
   // writes it.
   const agentFileOrder = useBuildStore((s) => s.fileOrder);
+  // And why it is empty, when the reason is a read that failed. `attachSources` cannot carry that:
+  // it is a set, and an absent kind means the same thing whichever way the list got empty.
+  const agentFilesError = useBuildStore((s) => s.error);
 
   // Keep the newest turn in view — the conversation scrolls up like a terminal.
   //
@@ -1965,6 +1968,7 @@ export function BuildPane({
                   <AddMenu
                     agentId={activeAgentId}
                     available={attachSources}
+                    unavailable={agentFileOrder.length === 0 ? agentFilesError : null}
                     onPick={addAttachments}
                     disabled={busy}
                     openSignal={attachChordNonce}

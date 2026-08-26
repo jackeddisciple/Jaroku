@@ -42,6 +42,7 @@ interface BuildState {
   setAgents: (agents: AgentSummary[]) => void;
   selectAgent: (agentId: string | null) => void;
   setAgentFiles: (agentId: string, files: AgentFile[]) => void;
+  setAgentFilesError: (agentId: string, message: string) => void;
   openInCode: (path: string) => void;
 }
 
@@ -140,6 +141,18 @@ export const useBuildStore = create<BuildState>((set) => ({
         streamingFile: null,
         activeFile: s.activeFile && record[s.activeFile] ? s.activeFile : (order[0] ?? null),
       };
+    }),
+
+  // THE READ FAILED, WHICH IS NOT THE SAME AS THE AGENT HAVING NO FILES, and every surface that
+  // reads `fileOrder` was previously told the second thing. The tree is emptied deliberately —
+  // leaving the last agent's files under this agent's name would be worse — and `error` is what
+  // the Code tab and the ⊕ menu read to say which of the two happened. Same guards as the success
+  // path: a live generation owns the pane, and an answer for an agent nobody is looking at any
+  // more is dropped rather than allowed to blank the one that is.
+  setAgentFilesError: (agentId, message) =>
+    set((s) => {
+      if (s.status === "generating" || agentId !== s.activeAgentId) return {};
+      return { files: {}, fileOrder: [], streamingFile: null, activeFile: null, error: message };
     }),
 }));
 

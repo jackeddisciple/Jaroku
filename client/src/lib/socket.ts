@@ -149,7 +149,11 @@ function dispatch(msg: ServerMessage): void {
       break;
     }
     case "agentFiles":
-      useBuildStore.getState().setAgentFiles(msg.agentId, msg.files);
+      // The failure branch first, because it is the one that used to be no message at all: a read
+      // that threw left this store on its initial state forever and the ⊕ menu explaining that the
+      // agent had never been generated.
+      if (msg.error !== undefined) useBuildStore.getState().setAgentFilesError(msg.agentId, msg.error);
+      else useBuildStore.getState().setAgentFiles(msg.agentId, msg.files);
       break;
     case "graph":
       useGraphStore.getState().setGraph(msg.agentId, msg.graph);

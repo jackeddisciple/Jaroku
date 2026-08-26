@@ -3593,11 +3593,16 @@ export class WsRelay {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "loadAgentFiles" && typeof msg.agentId === "string") {
             const agentId = msg.agentId;
+            // ON THE `agentFiles` CHANNEL RATHER THAN `agents`, because this is the read the Code
+            // tab and the ⊕ picker both wait on, and the picker's empty state is the sentence that
+            // was wrong: "Nothing to attach yet — Generate an agent…" about an agent with two
+            // published versions. The store has to be able to tell an agent with no files from a
+            // read that never arrived, and only a message on the channel it is listening to can.
             void this.answer(ws, async (ctx) => ({
               channel: "agentFiles",
               agentId,
               files: (await this.opts.listAgentFiles?.(ctx, agentId)) ?? [],
-            }), live);
+            }), live, (message) => ({ channel: "agentFiles", agentId, error: message }));
           } else if (msg.cmd === "loadAgentGraph" && typeof msg.agentId === "string") {
             // Async: spawn introspection, then answer only the requesting client.
             const agentId = msg.agentId;
@@ -3626,13 +3631,13 @@ export class WsRelay {
               channel: "mcp",
               type: "servers",
               servers: (await this.opts.listMcpServers?.(ctx)) ?? [],
-            }), live);
+            }), live, (message) => ({ channel: "mcp", type: "error", message }));
           } else if (msg.cmd === "listThreads") {
             void this.answer(ws, async (ctx) => ({
               channel: "threads",
               type: "threads",
               ...((await this.opts.listThreads?.(ctx)) ?? EMPTY_THREADS),
-            }), live);
+            }), live, (message) => ({ channel: "threads", type: "error", message }));
           } else if (msg.cmd === "loadThread" && typeof msg.threadId === "string") {
             // To the asking socket only. Opening a thread is one client's navigation, and
             // broadcasting it would move everybody else's centre pane.
@@ -3648,13 +3653,13 @@ export class WsRelay {
                     // The same sentence for "gone" and "not yours", on purpose — see `loadThread`.
                     message: "no such thread in this workspace",
                   };
-            }, live);
+            }, live, (message) => ({ channel: "threads", type: "error", threadId, message }));
           } else if (msg.cmd === "listInbox") {
             void this.answer(ws, async (ctx) => ({
               channel: "inbox",
               type: "inbox",
               ...((await this.opts.listInbox?.(ctx)) ?? EMPTY_INBOX_PAYLOAD),
-            }), live);
+            }), live, (message) => ({ channel: "inbox", type: "error", message }));
           } else if (msg.cmd === "getActivity") {
             // SIX ANSWERS, EACH SENT AS ITS OWN AGGREGATE RESOLVES — see the option's note and §3.6.
             // To the asking socket only: a range is one client's choice of window, and broadcasting
@@ -3680,7 +3685,7 @@ export class WsRelay {
               ...((await this.opts.getActivityFeed?.(ctx, command)) ?? {
                 type: "error", message: "the activity feed is not available",
               }),
-            }), live);
+            }), live, (message) => ({ channel: "activity", type: "error", message }));
           } else if (INBOX_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the store and the undo ledger and can answer with
             // a precise error on the "inbox" channel rather than dropping the message here.
@@ -3694,7 +3699,7 @@ export class WsRelay {
               channel: "deploy",
               type: "deployments",
               ...((await this.opts.listDeployments?.(ctx)) ?? { deployments: [], railwayConfigured: false }),
-            }), live);
+            }), live, (message) => ({ channel: "deploy", type: "error", message }));
           } else if (msg.cmd === "listProviders") {
             void withContext(async (ctx) =>
               this.sendTo(ws, {
@@ -3761,13 +3766,13 @@ export class WsRelay {
             void this.answer(ws, async (ctx) => ({
               channel: "agents",
               agents: (await this.opts.listAgents?.(ctx)) ?? [],
-            }), live);
+            }), live, (message) => ({ channel: "agents", type: "error", message }));
           } else if (msg.cmd === "listAgentGrid") {
             void this.answer(ws, async (ctx) => ({
               channel: "agents",
               type: "grid",
               ...((await this.opts.listAgentGrid?.(ctx)) ?? EMPTY_GRID),
-            }), live);
+            }), live, (message) => ({ channel: "agents", type: "error", message }));
           } else if (msg.cmd === "loadAgentDetail" && typeof msg.agentId === "string") {
             // To the asking socket only. Opening a card is one client's navigation, and
             // broadcasting it would move everybody else's centre pane — the same reason
@@ -3785,7 +3790,7 @@ export class WsRelay {
                     // nothing about what exists in another workspace.
                     message: "no such agent in this workspace",
                   };
-            }, live);
+            }, live, (message) => ({ channel: "agents", type: "error", agentId, message }));
           } else if (msg.cmd === "loadAgentVersion" && typeof msg.agentId === "string") {
             const agentId = msg.agentId;
             const asked = typeof msg.version === "number" && Number.isFinite(msg.version)
@@ -3796,7 +3801,7 @@ export class WsRelay {
               return loaded
                 ? { channel: "agents", type: "version", agentId, version: loaded.version, files: loaded.files }
                 : { channel: "agents", type: "error", agentId, message: "no such agent version in this workspace" };
-            }, live);
+            }, live, (message) => ({ channel: "agents", type: "error", agentId, message }));
           } else if (msg.cmd === "loadHistory") {
             // ANSWERED LOCALLY, like the other reads the relay can serve from the store it already
             // holds, and to the ASKING SOCKET only: one person scrolling back through their own
@@ -3806,10 +3811,17 @@ export class WsRelay {
             // Fewer rows than the window asked for is the only reliable "there is nothing further
             // back" — a count would be a second query, and an equal count is genuinely ambiguous,
             // which is why the control asks again rather than guessing.
+            // ON THE `log` CHANNEL, because `history` is a full snapshot with no error member and
+            // giving it one would mean every history consumer learning a second shape for a read
+            // that has never failed in production. The diagnostics rail is where a stderr line
+            // already goes, it is visible without navigating anywhere, and it is the difference
+            // between a scroll-back that silently stops and one that says why.
             void this.answer(ws, async (ctx) => ({
               channel: "history",
               ...(await this.historyWindow(ctx, limit)),
-            }), live);
+            }), live, (message) => ({
+              channel: "log", level: "stderr", text: `could not load run history: ${message}`,
+            }));
           } else if (msg.cmd === "loadRun" && typeof msg.runId === "string") {
             // Answer only the requesting client with that run's steps (ordered by seq).
             const runId = msg.runId;
@@ -3823,7 +3835,11 @@ export class WsRelay {
               // answers with — so the notice is only sent for a run this workspace really has.
               if (steps.length > 0) this.opts.onTraceOpened?.(ctx, runId);
               return { channel: "runSteps", runId, steps };
-            }, live);
+            }, live, (message) => ({
+              // `runSteps` carries one run's steps and nothing else; the diagnostics rail is
+              // where this one says so, for the same reason `loadHistory` above does.
+              channel: "log", level: "stderr", text: `could not load run ${runId}: ${message}`,
+            }));
           }
       }
     } catch {
@@ -3985,16 +4001,36 @@ export class WsRelay {
    * A read that throws must not take the socket down with it: the client asked a question,
    * the answer is unavailable, and the connection is still good for every other question.
    * `sendTo` already no-ops on a socket that closed while the query was in flight.
+   *
+   * A READ HAS THREE OUTCOMES AND THIS ANSWERS ALL THREE. It used to express two: a success is a
+   * message, a refusal is a message, and a FAILURE was a line on a console the person who asked
+   * cannot see. That is not a quieter version of an error — it is a client left on its INITIAL
+   * state forever, with no spinner, no error and no empty state that says anything true, which is
+   * strictly worse than a wrong answer because every empty state in this product is designed to
+   * mean "there is nothing here". `EMPTY_GRID`, `EMPTY_THREADS` and `EMPTY_INBOX` exist precisely
+   * so a client can tell "nothing" from "not answered yet"; a swallowed failure spends that
+   * distinction on a lie. One missing object turned the Code view, the ⊕ picker and the version
+   * browser into three confident wrong answers at once.
+   *
+   * SO `onError` IS REQUIRED RATHER THAN OPTIONAL, and that is the whole structural point: the
+   * channel a read answers on is the only thing that knows how to say "this failed" in a shape
+   * its own panel already renders, so the call site is the only place that can supply it — and a
+   * required parameter is what stops the next read command shipping silent. `test:channels`
+   * asserts it from the source, so an `answer()` written without one fails there rather than in
+   * somebody's browser.
    */
   private async answer(
     ws: WebSocket,
     build: (ctx: TenantContext) => Promise<unknown>,
     pending: Promise<TenantContext>,
+    onError: (message: string) => unknown,
   ): Promise<void> {
     try {
       this.sendTo(ws, await build(await pending));
     } catch (err) {
-      console.error("[relay] read failed:", (err as Error).message);
+      const message = String((err as Error)?.message ?? err);
+      console.error("[relay] read failed:", message);
+      this.sendTo(ws, onError(message));
     }
   }
 
