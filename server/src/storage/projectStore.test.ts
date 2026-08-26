@@ -225,6 +225,66 @@ async function suite(label: string, db: Db): Promise<void> {
     "...and nothing of it exists under another workspace's",
   );
 
+  // --- a manifest copied across an agent boundary ---------------------------------------
+  //
+  // THE FORK BUG, AS A PROPERTY OF THE KEYSPACE RATHER THAN AS A TEST OF `forkAgent`. A key is
+  // `ws/<workspace>/agents/<agentId>/v<n>/<path>` — per AGENT — so a manifest handed to
+  // `addVersion` under a different agent id names paths that resolve under a prefix nobody wrote.
+  // The row is correct, the version list is correct, the byte total is correct, and every read of
+  // the content throws. That is why it shipped: nothing observable disagreed.
+  //
+  // `restoreAgentVersion` may legitimately call `addVersion` with an existing manifest, because
+  // the objects live under the SAME agent id. Fork copied that pattern across the one boundary
+  // where the premise does not hold, so both halves are asserted here: the bare row is proven to
+  // be broken, and `publish` — which writes the row and the objects together — is proven to fix
+  // it. An assertion that only checked the working path would pass on the shipped code too.
+  {
+    const forkOfBare = await agents.upsertFromDisk(ctx, { slug: "support_bot_copy" });
+    const sourceRow = (await agents.version(ctx, agent.id, v2.version))!;
+    await agents.addVersion(ctx, forkOfBare.id, sourceRow.manifest, { source: "import", summary: "bare row" });
+    let bareThrew = false;
+    try {
+      await projects.readVersion(ctx, forkOfBare.id, (await agents.bySlug(ctx, "support_bot_copy"))!.current_version);
+    } catch (err) {
+      bareThrew = err instanceof ObjectNotFound;
+    }
+    check(bareThrew, "a manifest copied onto another agent's id with addVersion alone resolves to nothing");
+
+    const forkOfPublish = await agents.upsertFromDisk(ctx, { slug: "support_bot_copy2" });
+    const sourceFiles = await projects.readVersion(ctx, agent.id, v2.version);
+    const forked = await projects.publish(ctx, forkOfPublish.id, sourceFiles, {
+      source: "import",
+      summary: `forked from support_bot v${v2.version}`,
+    });
+    const forkedFiles = await projects.readVersion(ctx, forkOfPublish.id, forked.version);
+    check(forkedFiles.length === sourceFiles.length, "...and publishing the source's FILES gives the fork its own objects");
+    check(
+      forkedFiles.find((f) => f.path === "agent.py")?.content === `${AGENT_PY}# edited\n`,
+      "...byte for byte, so the fork runs the code it was forked from",
+    );
+    check(
+      forkedFiles.some((f) => f.path === "agent.py"),
+      "...including agent.py, which is what `runnable` and the deploy plan both look for",
+    );
+    // The keys, which is where the difference actually is and where the database cannot see it.
+    check(
+      (await objects.head(agentVersionKey(ctx.workspaceId, forkOfPublish.id, forked.version, "agent.py"))) !== null,
+      "the fork's objects live under the FORK's prefix, not the source's",
+    );
+    check(
+      (await objects.list(agentVersionPrefix(ctx.workspaceId, forkOfBare.id, 2))).length === 0,
+      "...and the bare-row fork has no directory in the store at all, which is what shipped",
+    );
+    // Independence, which is the reason a fork copies rather than points: editing one must not
+    // be an edit of the other, and a shared prefix would have made that impossible to guarantee.
+    await projects.publish(ctx, forkOfPublish.id, [{ path: "agent.py", content: "# diverged\n" }], { source: "edit" });
+    check(
+      (await projects.readVersion(ctx, agent.id, v2.version)).find((f) => f.path === "agent.py")?.content
+        === `${AGENT_PY}# edited\n`,
+      "...and publishing over the fork leaves the source's bytes exactly where they were",
+    );
+  }
+
   // --- a manifest that outruns the objects ----------------------------------------------
   //
   // The manifest is the truth about what a version contains, so an object that is gone has to

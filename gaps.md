@@ -231,6 +231,66 @@ export, the Agents grid's health derivation — all become correct for a fork.
 | Implementation Effort | 3/10 |
 | Confidence | 10/10 |
 
+### Resolution
+
+**Status: RESOLVED**
+
+**Implemented:**
+
+`forkAgent` now reads the source version's files and **publishes** them under the fork's own id,
+replacing the bare `agentRepo.addVersion(ctx, id, version.manifest, …)`:
+
+```ts
+const sourceFiles = await projects.readVersion(ctx, source.id, version.version);   // before any row
+…
+const { version: published } = await projects.publish(ctx, id, sourceFiles, { … });
+await projects.materialise(ctx, id, published, join(agentsDir(RUNTIME_DIR), forkSlug));
+```
+
+Three deliberate details:
+
+1. **The read comes before `agentRepo.create`.** A source whose own objects are missing — a fork
+   made before this change — now refuses with a sentence rather than producing a second broken
+   agent. The old order would have created the row first and failed after.
+2. **`publish` rather than `addVersion`,** because `publish` writes the row and the objects
+   together, which is the invariant it exists to hold. `restoreAgentVersion` may keep calling
+   `addVersion` with an existing manifest — its objects live under the *same* agent id. Fork
+   copied that call across the one boundary where the premise does not hold.
+3. **A materialise to `runtime/agents/<forkSlug>`,** so the local run path — which reads the disk
+   — can see the fork at all. GAP-007 makes that derivation honest for every agent; this makes it
+   correct for the one that was provably broken.
+
+**Files Changed:**
+
+- `server/src/index.ts` — `forkAgent`, and the `agentsDir` import
+- `server/src/storage/projectStore.test.ts` — the fork invariant, both drivers
+- `server/src/agentAdversarial.test.ts` — the structural assertion on the call
+
+**Verification:**
+
+`test:project-store` proves the property from both ends, which an assertion on the working path
+alone would not: a manifest copied onto another agent's id with `addVersion` **still throws**
+`ObjectNotFound`, and the same manifest published as *files* reads back byte for byte, under the
+fork's own key prefix, with the bare-row fork's prefix holding nothing at all — exactly what the
+audit found in `runtime/.objects`. Independence is asserted too: publishing over the fork leaves
+the source's bytes where they were. `test:agent-adversarial` reads `forkAgent` out of `index.ts`
+and fails if it goes back to `addVersion`, if it stops reading the source first, or if it stops
+materialising — the function is not exported, and the distinction is one identifier wide.
+
+**Regression Coverage:**
+
+Both suites pass on SQLite and Postgres. The fork's *other* deliberate decisions are untouched and
+still asserted: `mcp_tools: []` (§7.5's least-privilege rule), `creation_cost: null`, `forkedFrom`
+as a column rather than parsed prose, and `nextForkSlug` reading `takenSlugs` rather than the
+visible list. The version's `source` stays `"import"`, which is what migration 014 defines it to
+mean and is honest about a project this agent's name never validated.
+
+**Known limitation:** forks created *before* this change still have no objects. They now report
+an honest read failure (GAP-003) instead of an empty file list, which is the recoverable state;
+re-forking from the source produces a working copy.
+
+**Resolved On:** 2026-08-26
+
 ---
 
 ## GAP-002 — Restore and deploy read a filesystem that restore never updates
@@ -2296,4 +2356,5 @@ brief spends a page on.
 
 | Gap | Status | Files Changed | Verification |
 |---|---|---|---|
+| GAP-001 | RESOLVED | `index.ts`, `projectStore.test.ts`, `agentAdversarial.test.ts` | `test:project-store` proves the bare-row fork still throws and the published one reads back byte for byte; `test:agent-adversarial` holds the call site |
 | GAP-003 | RESOLVED | `wsRelay.ts`, `channels.test.ts`, `wsRelay.test.ts`, `types.ts`, `buildStore.ts`, `socket.ts`, `AddMenu.tsx`, `BuildPane.tsx` | `test:channels` audits all 13 call sites from source; `test:relay` drives a throwing read and asserts the frame |

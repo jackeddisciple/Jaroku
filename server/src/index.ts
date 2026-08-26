@@ -99,7 +99,7 @@ import { EMAIL_ENV, emailConfigFrom, emailTransport } from "./email/transport.ts
 import { magicLinkRoutes } from "./http/magicLink.ts";
 import { signInRoutes } from "./http/signIn.ts";
 import { MAGIC_LINK_LIMITS, rateKeyForIp } from "./auth/signIn.ts";
-import { Generator, type UsageSummary } from "./generator.ts";
+import { Generator, agentsDir, type UsageSummary } from "./generator.ts";
 import { Planner } from "./planner.ts";
 import { Editor } from "./editor.ts";
 import { scanAgentDirectory } from "./agents.ts";
@@ -5504,6 +5504,19 @@ async function forkAgent(ctx: TenantContext, slug: string): Promise<void> {
     return;
   }
 
+  // THE SOURCE'S BYTES, READ BEFORE ANY ROW IS WRITTEN. The object store is keyed per AGENT ID
+  // (`ws/<workspace>/agents/<agentId>/v<n>/<path>`), so a manifest copied across an agent boundary
+  // names paths that resolve under the wrong prefix and therefore resolve to nothing at all. The
+  // read is first so a source whose own objects are missing — a fork of a fork made before this
+  // was fixed — refuses here, with a sentence, instead of producing a second broken agent.
+  let sourceFiles;
+  try {
+    sourceFiles = await projects.readVersion(ctx, source.id, version.version);
+  } catch (err) {
+    refuseAgent(ctx, `${slug} v${version.version} cannot be read, so there is nothing to fork: ${(err as Error).message}`, slug);
+    return;
+  }
+
   const id = randomUUID();
   await agentRepo.create(ctx, {
     id,
@@ -5529,12 +5542,26 @@ async function forkAgent(ctx: TenantContext, slug: string): Promise<void> {
     // that string would break silently the first time somebody reworded it.
     forkedFrom: source.id,
   });
-  await agentRepo.addVersion(ctx, id, version.manifest, {
+  // `publish`, NOT `addVersion`, AND THE DIFFERENCE IS THE WHOLE BUG. `addVersion` writes the row
+  // and nothing else, which is correct for `restoreAgentVersion` — that names objects living under
+  // the SAME agent id, and re-writing them would be a copy of bytes that are already there.
+  // `forkAgent` copied that call across an agent boundary, where the premise does not hold: the
+  // fork was born with a published version pointing at content nobody had written, so every read
+  // of it threw and every write path refused. `publish` reserves the number, writes the objects
+  // under this agent's own prefix, and promotes — one operation, which is the invariant it exists
+  // to hold and the reason it should have been the call here from the start.
+  const { version: published } = await projects.publish(ctx, id, sourceFiles, {
     source: "import",
     summary: `forked from ${source.slug} v${version.version}`,
   });
 
-  console.log(`[agents] forked ${source.slug} v${version.version} to ${forkSlug}`);
+  // AND ONTO THE DISK THE LOCAL RUN PATH READS. `runnable`, `planDeploy` and the spawn all resolve
+  // `runtime/agents/<slug>`, so a fork that exists only in the object store is a fork the composer
+  // refuses to run while blaming a missing `agent.py` the user cannot supply. GAP-007 makes that
+  // derivation honest for every agent; until then a fork must at least land where the runner looks.
+  await projects.materialise(ctx, id, published, join(agentsDir(RUNTIME_DIR), forkSlug));
+
+  console.log(`[agents] forked ${source.slug} v${version.version} to ${forkSlug} as v${published} (${sourceFiles.length} files)`);
   await relay.broadcastAgents();
   await relay.broadcastAgentGrid();
   noticeAgent(ctx, `Forked to ${forkSlug}. Its MCP grants start empty.`, forkSlug);

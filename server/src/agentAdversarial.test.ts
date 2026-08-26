@@ -9,6 +9,9 @@
 //   npm run test:agent-adversarial
 
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 import { openTestSqlite, testContext } from "./db/testDb.ts";
 import { AgentRepository, nextForkSlug } from "./db/repositories/agents.ts";
@@ -29,6 +32,8 @@ const check = (name: string, ok: boolean, detail = ""): void => {
 
 const ISO = (msAgo: number): string => new Date(Date.now() - msAgo).toISOString();
 const HOUR = 60 * 60 * 1000;
+
+const indexSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "index.ts"), "utf8");
 
 async function agentRow(
   agents: AgentRepository,
@@ -118,6 +123,31 @@ const leg = (over: Partial<ProviderMetrics>): ProviderMetrics => ({
       check("a slug too long to suffix is refused rather than truncated into a collision",
         nextForkSlug(long, new Set()) === null, String(nextForkSlug(long, new Set())));
       check("...and one with just enough room is not", nextForkSlug("a".repeat(58), new Set()) !== null);
+
+      // AND THE FORK WRITES BYTES, NOT ONLY A ROW. `test:project-store` holds the property — a
+      // manifest copied across an agent boundary names a prefix nobody wrote — and this holds the
+      // CALL, because the property is only protected while `forkAgent` uses the operation that has
+      // it. `addVersion` writes the row alone, which is right for a restore (same agent id, objects
+      // already there) and is what made every read of a fork throw. Read as text because the
+      // function is not exported and the distinction is one identifier wide.
+      const forkFn = /async function forkAgent\([\s\S]*?\n\}/.exec(indexSource)?.[0] ?? "";
+      check("forkAgent exists to be read", forkFn.length > 0);
+      check(
+        "a fork publishes the source's FILES under the fork's own id",
+        /projects\.publish\(ctx, id, sourceFiles/.test(forkFn),
+      );
+      check(
+        "...rather than copying the manifest onto it with addVersion, which writes no objects",
+        !/agentRepo\.addVersion\(ctx, id,/.test(forkFn),
+      );
+      check(
+        "...having read them first, so an unreadable source refuses instead of forking a second broken agent",
+        /projects\.readVersion\(ctx, source\.id/.test(forkFn),
+      );
+      check(
+        "...and materialises them where the local run path looks for them",
+        /projects\.materialise\(ctx, id,/.test(forkFn),
+      );
     }
 
     console.log("\nan agent with nothing at all does not crash a derivation, and says so");
