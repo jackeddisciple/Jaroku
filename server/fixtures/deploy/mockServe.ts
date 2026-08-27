@@ -257,12 +257,18 @@ export async function startMockServe(opts: MockServeOptions = {}): Promise<MockS
   async function runFlood(d: Dispatch): Promise<void> {
     const run = baseRun(d, agentId);
     await pushEvents(d, [{ kind: "run_start", schema_version: SCHEMA_VERSION, run } satisfies TraceEvent]);
-    // Batches of 200, as fast as the socket takes them, until something refuses. Bounded by a
-    // round count as well as by the refusal, because a fixture whose only exit is the server
-    // behaving correctly is a fixture that hangs forever the day it does not.
-    for (let round = 0; round < 200; round++) {
-      const events = Array.from({ length: 200 }, (_, i) => ({
-        kind: "step", schema_version: SCHEMA_VERSION, step: stepAt(d, round * 200 + i),
+    // MANY SMALL BATCHES, NOT A FEW ENORMOUS ONES, and the size is chosen rather than arbitrary.
+    // The router refuses any request body over 64 KB outright, so a batch bigger than that never
+    // reaches the trace route at all — it would prove the router's cap and nothing about
+    // backpressure. Forty events is comfortably under that ceiling and each one is individually
+    // unremarkable, which is precisely the case backpressure.ts's per-run byte cap exists for:
+    // "many small, individually-fine events adding up to a flood".
+    //
+    // Bounded by a round count as well as by the refusal, because a fixture whose only exit is
+    // the server behaving correctly is a fixture that hangs forever the day it does not.
+    for (let round = 0; round < 400; round++) {
+      const events = Array.from({ length: 40 }, (_, i) => ({
+        kind: "step", schema_version: SCHEMA_VERSION, step: stepAt(d, round * 40 + i),
       }));
       const status = await pushEvents(d, events);
       if (status !== 200) {

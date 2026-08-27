@@ -31,6 +31,7 @@ import { BackpressureTracker } from "../../src/sandbox/backpressure.ts";
 import { RunEventBus } from "../../src/sandbox/eventBus.ts";
 import { registerControlPlaneRoutes } from "../../src/sandbox/controlPlaneRoutes.ts";
 import { RunTokenRevocationList } from "../../src/sandbox/runTokens.ts";
+import { TraceIngestMetrics } from "../../src/sandbox/traceIngestMetrics.ts";
 import type { TraceEvent } from "../../src/types.ts";
 
 export const REPO_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -317,16 +318,91 @@ function processTable(): Array<{ pid: number; ppid: number; cmd: string }> {
     .filter((r) => Number.isInteger(r.pid) && r.pid > 0);
 }
 
+/**
+ * Run the same agent LOCALLY, the way `npm run dev` does, and collect its trace off stdout.
+ *
+ * THE OTHER HALF OF §12's COMPARISON. "Diff a local trace against a deployed trace for the same
+ * agent and input; they should differ in run id and timing and nothing else" is a claim about
+ * two real traces, and it is only worth anything if the local one is produced by the local path
+ * rather than by a description of it. So this is the invocation from jaroku_runner's own
+ * docstring, against the same project directory, with stdout read as the frozen NDJSON stream —
+ * exactly what processManager.ts holds the other end of.
+ */
+export async function runLocally(
+  project: DeployedProject,
+  provider: MockProvider,
+  input: string,
+  env: Record<string, string> = {},
+): Promise<{ events: TraceEvent[]; stderr: string; code: number | null }> {
+  const python = pythonExecutable();
+  if (!python) throw new Error("no Python interpreter for the serve harness");
+  return new Promise((done, reject) => {
+    const proc = spawn(python, ["-m", "jaroku_runner", project.agentId, input], {
+      cwd: project.runtimeDir,
+      env: {
+        ...process.env,
+        JAROKU_AGENT_DIR: project.projectDir,
+        JAROKU_PROVIDER: "anthropic",
+        JAROKU_MODEL: "claude-haiku-4-5",
+        ANTHROPIC_API_KEY: "sk-ant-harness-not-a-real-key",
+        ANTHROPIC_BASE_URL: provider.baseUrl,
+        // No control plane and no control directory: this is the local path, and the local path
+        // is what it is BECAUSE neither is set. controlplane_http no-ops on exactly this.
+        JAROKU_CONTROL_PLANE_URL: "",
+        JAROKU_RUN_TOKEN: "",
+        JAROKU_CONTROL_DIR: "",
+        JAROKU_CHECKPOINTER: "sqlite",
+        PYTHONUNBUFFERED: "1",
+        ...env,
+      },
+    });
+    let out = "";
+    let err = "";
+    proc.stdout.setEncoding("utf8");
+    proc.stderr.setEncoding("utf8");
+    proc.stdout.on("data", (d: string) => (out += d));
+    proc.stderr.on("data", (d: string) => (err += d));
+    proc.on("error", reject);
+    proc.on("exit", (code) => {
+      const events: TraceEvent[] = [];
+      for (const line of out.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try { events.push(JSON.parse(trimmed) as TraceEvent); } catch { /* not an event line */ }
+      }
+      done({ events, stderr: err, code });
+    });
+  });
+}
+
+/**
+ * One trace, reduced to the shape §11 asks to compare: "step types and ordering, not just
+ * presence".
+ *
+ * Run id and timing are deliberately absent — those are the two things a deployed run is
+ * ALLOWED to differ in. What is left is the sequence a reader of the Graph tab actually sees.
+ */
+export function traceShape(events: TraceEvent[]): string[] {
+  return events.map((e) =>
+    e.kind === "step" ? `step:${e.step.seq}:${e.step.type}:${e.step.name}` : `${e.kind}:${e.run.status}`,
+  );
+}
+
 export interface HarnessControlPlane {
   url: string;
   bus: RunEventBus;
   runs: DeployRuns;
   revocations: RunTokenRevocationList;
+  metrics: TraceIngestMetrics;
   workspaceId: string;
   /** Every trace event that reached the bus, by run id, for a suite that only wants the list. */
   eventsFor: (runId: string) => TraceEvent[];
   /** Control lines a run pushed — boundaries, pauses, the run_closed marker. */
   controlFor: (runId: string) => Record<string, unknown>[];
+  /** Batch entries the route refused to recognise as trace events, and why. */
+  parseErrorsFor: (runId: string) => { line: string; error: string }[];
+  /** Runs the backpressure limiter asked production to stop, and the reason it gave. */
+  stopped: { runId: string; reason: string }[];
   close: () => Promise<void>;
 }
 
@@ -347,12 +423,21 @@ export async function startControlPlane(
   const router = new Router({ log: () => {}, quiet: () => true });
   const events = new Map<string, TraceEvent[]>();
   const control = new Map<string, Record<string, unknown>[]>();
+  const parseErrors = new Map<string, { line: string; error: string }[]>();
+  const metrics = new TraceIngestMetrics();
+  const stopped: { runId: string; reason: string }[] = [];
 
   registerControlPlaneRoutes(router, {
     bus,
     signingKey,
     revocations,
+    metrics,
     backpressure: opts.backpressure ?? new BackpressureTracker(),
+    // WHAT PRODUCTION DOES WITH A HOSTILE RUN, wired to a recorder rather than to a pool. §7 is
+    // explicit that a deployed run is not more trusted than a sandboxed one — "every bound that
+    // applies to a sandbox run applies here" — and the bound only means something if tripping it
+    // stops the run rather than merely refusing the batch.
+    onBackpressureViolation: (runId, reason) => stopped.push({ runId, reason }),
   });
   const server = createServer((req, res) => {
     void router.handle(req, res).then((handled) => { if (!handled) res.writeHead(404).end(); });
@@ -369,9 +454,11 @@ export async function startControlPlane(
     const opened = originalOpen(input);
     events.set(input.runId, []);
     control.set(input.runId, []);
+    parseErrors.set(input.runId, []);
     const emitter = bus.register(input.runId);
     emitter.on("event", (e) => events.get(input.runId)!.push(e));
     emitter.on("control", (c) => control.get(input.runId)!.push(c));
+    emitter.on("parseError", (e) => parseErrors.get(input.runId)!.push(e));
     return opened;
   };
 
@@ -380,9 +467,12 @@ export async function startControlPlane(
     bus,
     runs,
     revocations,
+    metrics,
     workspaceId: opts.workspaceId ?? randomUUID(),
     eventsFor: (runId) => events.get(runId) ?? [],
     controlFor: (runId) => control.get(runId) ?? [],
+    parseErrorsFor: (runId) => parseErrors.get(runId) ?? [],
+    stopped,
     close: () => new Promise((done) => server.close(() => done())),
   };
 }

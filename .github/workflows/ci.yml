@@ -1235,3 +1235,10 @@ jobs:
           # reorganising the handler around the new 202 and moving the read past the refusal.
           # A desync is visible there as the NEXT response being wrong, never as this one failing.
           npm run test:serve-async
+          # AND §12'S OWN COMPARISON, which is the one claim this whole part is judged on: run the
+          # same agent on the same input twice — once through the local runner reading stdout, once
+          # through a deployed container reading the control plane — and diff the two traces. They
+          # must differ in run id and timing and nothing else. It also holds the ingest's own
+          # bounds against the stub, since a real run cannot be made to push a malformed batch or
+          # to flood, and a bound nobody ever trips is a bound nobody notices the removal of.
+          npm run test:serve-trace
