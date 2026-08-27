@@ -142,6 +142,21 @@ const TENANT_CHANNELS = new Set([
   //
   // The one message on it that IS broadcast carries nothing at all — see §7's recheck.
   "access",
+  // What one workspace has asked its live agents to do, in the words the person typed, and what
+  // came back in the words the agent produced. The most directly personal payload on this list
+  // after `threads`: a job's input is a real customer email or a real order id, its output is what
+  // the agent did about it, and `created_by_name` puts a colleague's name beside both.
+  //
+  // IT IS ALSO THE ONLY PAYLOAD HERE THAT CARRIES A HANDLE. A row names the run and the deployment
+  // that `cancelWork` and `retryWork` act on, so delivered across the boundary it would not merely
+  // disclose one tenant's work — it would hand another tenant the ids to stop it or to re-spend its
+  // money. The fleet card beside it names the agent's public URL and today's spend.
+  //
+  // A SNAPSHOT IS ANSWERED TO THE SOCKET THAT ASKED and only a single-item delta is broadcast,
+  // which is a stronger guarantee than scoping for a different reason from `activity`'s: a snapshot
+  // carries the asking client's FILTER, and broadcasting one would replace a colleague's list with
+  // somebody else's choice of what to look at.
+  "work",
 ]);
 
 /**
@@ -599,6 +614,13 @@ console.log("\nfired live, in A, and B receives none of it");
   // suite fires the refusal, which is the only shape on this channel that is not an answer to a
   // specific read of a specific agent.
   relay.sendAccess(ctxA, ctxA.requestId, { type: "error", message: MARK });
+  // TO THE ASKER, for a reason none of the three above share: a work snapshot carries the asking
+  // client's FILTER, so broadcasting one would replace a colleague's list with somebody else's
+  // choice of what to look at. The suite fires the refusal, which is the shape on this channel
+  // that is not an answer to a specific read — and the delta beside it, which IS broadcast and is
+  // therefore the one that has to be checked for leaking across the boundary.
+  relay.sendWork(ctxA, ctxA.requestId, { type: "error", message: MARK });
+  relay.broadcastWorkItem(ctxA, { id: "work-a", input_preview: MARK });
   // §7's recheck, which is the ONE message on this channel that is broadcast. It is fired here so
   // the assertion below can read its payload — see the block after this one.
   relay.broadcastAccessRecheck(ctxA);

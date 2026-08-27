@@ -232,6 +232,7 @@
     "test:work-cost": "tsx src/work/cost.test.ts",
     "test:work-redaction": "tsx src/work/payload.test.ts",
     "test:work-tenancy": "tsx src/work/tenancy.test.ts",
+    "test:work-channel": "tsx src/work/channel.test.ts",
     "test:activity-range": "tsx src/activity/range.test.ts",
     "test:activity-spend": "tsx src/activity/spend.test.ts",
     "test:activity-health": "tsx src/activity/health.test.ts",

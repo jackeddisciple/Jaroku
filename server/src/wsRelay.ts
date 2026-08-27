@@ -1430,6 +1430,10 @@ export type ClientCommand =
   | McpCommand
   | ListInboxCommand
   | InboxCommand
+  | ListWorkCommand
+  | LoadWorkItemCommand
+  | ListFleetCommand
+  | WorkCommand
   | ActivityCommand
   | ListMcpServersCommand
   | ProviderCommand
@@ -1501,6 +1505,7 @@ export type ForwardedCommand =
   | EnforcementCommand
   | ThreadCommand
   | InboxCommand
+  | WorkCommand
   | BillingCommand;
 
 // Generation rides its own channel, deliberately parallel to "trace". It never enters the
@@ -2397,6 +2402,132 @@ export type InboxEvent =
   | { type: "error"; message: string; itemId?: string }
   | { type: "notice"; message: string; itemId?: string };
 
+// --- the Cockpit: post-ship control of live agents ---------------------------------------------
+//
+// ITS OWN CHANNEL, parallel to threads / agents / inbox / activity / eval / mcp / deploy / github,
+// and for the reason each of those is not a field on another: a job somebody gave a live agent is
+// not a session, not an artifact, and not a problem waiting on somebody. §5 asks for the
+// established pattern exactly — reads answered locally by the relay to the socket that asked,
+// mutations forwarded to the app which broadcasts the affected snapshot in the same shape a fresh
+// read returns — and that is what this is.
+//
+// A TRANSITION IS A DELTA, NOT A BOARD, which §5 states as a rule and which the Inbox learned the
+// expensive way. One item changing state broadcasts THAT ITEM; a snapshot is for a filter change
+// or a fresh connect. The difference matters more here than it did there, because a work list
+// moves constantly — four agents on a schedule produce a transition every few seconds — and
+// re-sending a fifty-row page for each of them would put the whole list on the wire once a second
+// and re-render it under whoever was reading.
+//
+// TWO READS RATHER THAN ONE, and they are two events for the same reason they are two payloads:
+// the work list moves every time a job does and the fleet strip moves when a deployment does. One
+// combined read would re-send the strip on every job transition, which is the same rule broken at
+// a different grain.
+//
+// CONFIRMATIONS REUSE `resolveMcpConfirm`. There is deliberately no second confirm command here —
+// §5 is explicit, and the reason is the property Part 1 built: the modal must not be able to tell
+// which kind of run it is answering, and that is only true if there is one path.
+//
+// NOTHING SCHEMA-V1 RIDES ON THIS CHANNEL. Only `trace` carries the frozen schema. A work item
+// LINKS to its run; it does not carry its steps, and `loadRun` is what opens the trace — which is
+// also what stamps a failure as reviewed for the Inbox.
+export type ListWorkCommand = {
+  cmd: "listWork";
+  /** `mine` is the default — see §8. It is a filter, never a permission. */
+  scope?: "mine" | "all";
+  status?: string;
+  agentId?: string;
+  cursor?: string | null;
+};
+export type LoadWorkItemCommand = { cmd: "loadWorkItem"; itemId: string };
+export type ListFleetCommand = { cmd: "listFleet" };
+export type DispatchWorkCommand = { cmd: "dispatchWork"; agentId: string; input: string };
+export type CancelWorkCommand = { cmd: "cancelWork"; itemId: string };
+export type RetryWorkCommand = { cmd: "retryWork"; itemId: string };
+/** §9's Reconnect: mint a fresh serve token, set it on Railway, store it. Restarts the service. */
+export type ReconnectAgentCommand = { cmd: "reconnectAgent"; deploymentId: string };
+/** The container's own log pane, followed as the sliding window it is — never paged by offset. */
+export type LoadAgentLogsCommand = { cmd: "loadAgentLogs"; deploymentId: string; since?: string | null };
+/** Stop the service for good. Destructive, capability-gated, and it reports what actually happened. */
+export type KillAgentCommand = { cmd: "killAgent"; deploymentId: string };
+
+export type WorkCommand =
+  | DispatchWorkCommand
+  | CancelWorkCommand
+  | RetryWorkCommand
+  | ReconnectAgentCommand
+  | LoadAgentLogsCommand
+  | KillAgentCommand;
+
+/**
+ * The ones that go to the app.
+ *
+ * `listWork`, `loadWorkItem` and `listFleet` are absent because they are answered LOCALLY — see
+ * `dispatch`. `loadAgentLogs` is here despite being a read, and that is the one entry worth
+ * explaining: it is a call OUT to Railway's API with the workspace's own token, which the relay
+ * holds none of and imports nothing to reach. A read is answered locally when this process can
+ * already reach the rows; this one cannot.
+ */
+const WORK_COMMANDS = new Set([
+  "dispatchWork", "cancelWork", "retryWork", "reconnectAgent", "loadAgentLogs", "killAgent",
+]);
+
+/**
+ * What `listWork` answers with. Structural rather than imported, like every other wire shape here.
+ *
+ * `unknown[]` FOR THE ROWS RATHER THAN THE SERVER'S OWN TYPE, which is the choice `listInbox`,
+ * `listMembers` and `listDeployments` all make: the relay's job is to carry this to the socket that
+ * asked, and restating an eighteen-field row shape here would be a second definition of it that the
+ * first change to a payload field makes wrong.
+ */
+export interface WorkSnapshotWire {
+  items: unknown[];
+  nextCursor: string | null;
+  counts: unknown;
+  filters: unknown;
+}
+
+/** What a socket is told when nothing answers `listWork`. */
+const EMPTY_WORK: WorkSnapshotWire = {
+  items: [],
+  nextCursor: null,
+  counts: { queued: 0, running: 0, waiting: 0, succeeded: 0, failed: 0, cancelled: 0 },
+  filters: { scope: "mine", status: null, agentId: null },
+};
+
+/** What `listFleet` answers with. */
+export interface FleetWire {
+  cards: unknown[];
+  anyLive: boolean;
+}
+
+const EMPTY_FLEET: FleetWire = { cards: [], anyLive: false };
+
+export type WorkEvent =
+  /** A page of the work list, with the workspace's counts and the filters it answers for. */
+  | ({ type: "snapshot" } & WorkSnapshotWire)
+  /**
+   * ONE ITEM, CHANGED. §5's rule in one member of a union.
+   *
+   * It carries the whole row rather than the fields that moved, so a client REPLACES rather than
+   * merges — which is what stops it holding a row assembled from two moments. What it must never
+   * become is a board: the moment this carried `items`, every transition would re-send the page.
+   */
+  | { type: "item"; item: unknown }
+  | ({ type: "fleet" } & FleetWire)
+  /**
+   * A dispatch was accepted, to the socket that asked and to nobody else.
+   *
+   * SEPARATE FROM `item`, which is broadcast. This one is navigation — the composer clears and the
+   * detail panel opens on the new job — and broadcasting it would move every open Cockpit in the
+   * workspace to a job somebody else just started.
+   */
+  | { type: "dispatched"; item: unknown }
+  /** One window of a container's runtime log, and the cursor that continues it. */
+  | { type: "logs"; deploymentId: string; lines: unknown[]; cursor: string | null }
+  /** A refusal, on the channel that asked, so the surface waiting on an answer gets one. */
+  | { type: "error"; message: string; itemId?: string }
+  | { type: "notice"; message: string; itemId?: string };
+
 // --- the Activity tab: what the whole workspace is doing ----------------------------------------
 //
 // ITS OWN CHANNEL, parallel to threads / agents / inbox / eval / mcp / deploy / github, and for the
@@ -2928,6 +3059,14 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // the channel HAS an error shape, so a refusal about a range somebody picked lands on the card
   // that asked rather than in the status bar with nothing saying which figure is missing.
   getActivity: "activity", getActivityFeed: "activity",
+  // All nine on `work`, the reads included, for the reason the thread and inbox commands are all on
+  // their own channels: the channel HAS an error shape, so a refusal about a dispatch lands on the
+  // composer that sent it rather than in the status bar with the composer still waiting. It matters
+  // more here than on any of them, because four of these nine SPEND MONEY or STOP something — a
+  // refused dispatch whose message went to the status bar is somebody pressing the button again.
+  listWork: "work", loadWorkItem: "work", listFleet: "work",
+  dispatchWork: "work", cancelWork: "work", retryWork: "work",
+  reconnectAgent: "work", loadAgentLogs: "work", killAgent: "work",
   listDeployments: "deploy", planDeploy: "deploy", deploy: "deploy", cancelDeploy: "deploy",
   forgetDeployment: "deploy", loadDeployLogs: "deploy", setRailwayToken: "deploy",
   testRailwayToken: "deploy",
@@ -3176,6 +3315,31 @@ export interface RelayOptions {
   /** One keyset page of §5's feed. Separate because it is the one read a client asks for repeatedly. */
   getActivityFeed?: (ctx: TenantContext, cmd: GetActivityFeedCommand) => Promise<ActivityEvent>;
   /**
+   * One page of the Cockpit's work list, for the socket that asked.
+   *
+   * ANSWERED LOCALLY, like `listInbox` and `listAgentGrid` beside it, because it is rows this
+   * process can already reach. The sidebar badge is drawn from the counts in it and needs them on
+   * frame one; putting that behind the app's dispatch chain would buy nothing and cost a round trip
+   * on the read that decides whether somebody even opens the tab.
+   *
+   * TO THE ASKING SOCKET ONLY, and unlike the Inbox this is not because the payload is personal —
+   * it is because the FILTER is. Two people in one workspace are entitled to the same jobs; they
+   * are not entitled to each other's choice of which ones to look at, and a broadcast page would
+   * move a colleague's list to a filter they did not pick. §8: "mine vs all is a filter, not a
+   * permission."
+   */
+  listWork?: (ctx: TenantContext, cmd: ListWorkCommand) => WorkSnapshotWire | Promise<WorkSnapshotWire>;
+  /** One job in full — what was asked, what came back — for the detail panel. Scoped the same way. */
+  loadWorkItem?: (ctx: TenantContext, itemId: string) => Promise<unknown | undefined>;
+  /**
+   * §9's fleet strip: one compact card per live deployment.
+   *
+   * A SEPARATE READ FROM `listWork`, for the reason they are two events: the list moves every time
+   * a job does and the strip moves when a deployment does. One combined read would re-send the
+   * strip on every job transition.
+   */
+  listFleet?: (ctx: TenantContext) => FleetWire | Promise<FleetWire>;
+  /**
    * One thread, for the client that asked to open it (§4.5).
    *
    * Returns undefined for an id that is not this workspace's, which is what the scoped read
@@ -3393,6 +3557,20 @@ export class WsRelay {
           channel: "inbox",
           type: "inbox",
           ...((await this.opts.listInbox?.(ctx)) ?? EMPTY_INBOX_PAYLOAD),
+        });
+        // AND WHAT THE LIVE AGENTS ARE DOING, so §9's Cockpit badge is right on frame one. Exactly
+        // the argument the two badges above it make: the badge's whole claim is that nobody has to
+        // open the tab to find out whether a job is blocked on them, and a client that had to ask
+        // first renders no badge for as long as that takes — which is the moment somebody decides
+        // there is nothing waiting.
+        //
+        // THE DEFAULT FILTER, WHICH IS `mine`, because that is what the tab opens on. The counts in
+        // it are the workspace's whatever the filter is — see `countsByStatus` — so the badge is
+        // right even though the page is narrowed.
+        this.sendTo(ws, {
+          channel: "work",
+          type: "snapshot",
+          ...((await this.opts.listWork?.(ctx, { cmd: "listWork" })) ?? EMPTY_WORK),
         });
         // And WHO IS IN THE WORKSPACE, for the same reason and only where it means something.
         //
@@ -3804,6 +3982,42 @@ export class WsRelay {
                 type: "error", message: "the activity feed is not available",
               }),
             }), live, (message) => ({ channel: "activity", type: "error", message }));
+          } else if (msg.cmd === "listWork") {
+            // TO THE ASKING SOCKET ONLY. A filter is one client's choice of what to look at, and a
+            // broadcast page would move a colleague's list to a filter they did not pick.
+            const command = msg;
+            void this.answer(ws, async (ctx) => ({
+              channel: "work",
+              type: "snapshot",
+              ...((await this.opts.listWork?.(ctx, command)) ?? EMPTY_WORK),
+            }), live, (message) => ({ channel: "work", type: "error", message }));
+          } else if (msg.cmd === "listFleet") {
+            void this.answer(ws, async (ctx) => ({
+              channel: "work",
+              type: "fleet",
+              ...((await this.opts.listFleet?.(ctx)) ?? EMPTY_FLEET),
+            }), live, (message) => ({ channel: "work", type: "error", message }));
+          } else if (msg.cmd === "loadWorkItem" && typeof msg.itemId === "string") {
+            const itemId = msg.itemId;
+            void this.answer(ws, async (ctx) => {
+              const item = await this.opts.loadWorkItem?.(ctx, itemId);
+              return item
+                ? { channel: "work", type: "item", item }
+                : {
+                    channel: "work",
+                    type: "error",
+                    itemId,
+                    // The same sentence for "gone" and "not yours", on purpose — §6.3's rule, and
+                    // the same one `loadThread` follows one channel over.
+                    message: "no such job in this workspace",
+                  };
+            }, live, (message) => ({ channel: "work", type: "error", itemId, message }));
+          } else if (WORK_COMMANDS.has(msg.cmd)) {
+            // Shape-checked in the app, which owns the dispatcher, the deploy ops and the Railway
+            // token, and can answer with a precise error on the "work" channel rather than dropping
+            // the message here. Four of these six spend money or stop something, so a dropped one
+            // is a button that did nothing and said nothing.
+            void withContext((ctx) => this.onCommand?.(msg as WorkCommand, ctx));
           } else if (INBOX_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the store and the undo ledger and can answer with
             // a precise error on the "inbox" channel rather than dropping the message here.
@@ -4316,6 +4530,55 @@ export class WsRelay {
       if (session.context.workspaceId !== ctx.workspaceId) continue;
       if (session.context.requestId !== requestId) continue;
       this.sendTo(ws, { channel: "activity", ...event });
+    }
+  }
+
+  /**
+   * One job's change, to the workspace it belongs to. §5's "a transition is a delta, not a board".
+   *
+   * SAFE TO BROADCAST AS ONE PAYLOAD, and safer here than on the Inbox, because there is nothing
+   * personal on this channel at all: a job is a fact about the workspace whoever typed it, and §8
+   * is explicit that "mine" is a filter rather than a permission. What must never be broadcast is a
+   * SNAPSHOT — that carries the asking client's filter, and a colleague reading a filtered list
+   * would have it replaced by somebody else's choice of what to look at.
+   *
+   * The client drops an item that does not match the filter it is holding, which is a rendering
+   * decision made against a list it already has — never a licence for the server to send half a
+   * board.
+   */
+  broadcastWorkItem(ctx: TenantContext, item: unknown): void {
+    this.broadcastTo(ctx, { channel: "work", type: "item", item });
+  }
+
+  /**
+   * The fleet strip, to everybody, when a DEPLOYMENT changes rather than a job.
+   *
+   * A BOARD RATHER THAN A DELTA, and that is not the rule broken: the strip is small, bounded by
+   * the number of live agents, and it changes on a different clock from the list — a deploy, a
+   * reconnect, a kill. Sending one card would mean the client reconciling a strip whose cards can
+   * come and go, to save bytes on a payload that moves a few times a day.
+   */
+  async broadcastFleet(): Promise<void> {
+    await this.perClient(async (ws, ctx) => {
+      this.sendTo(ws, { channel: "work", type: "fleet", ...((await this.opts.listFleet?.(ctx)) ?? EMPTY_FLEET) });
+    });
+  }
+
+  /**
+   * Answer ONE client on the work channel — the socket whose command this is.
+   *
+   * FOUR OF THE SIX MUTATIONS ANSWER HERE RATHER THAN BROADCASTING, and each for the same reason
+   * `sendInbox` exists: what they carry belongs to the person who pressed the thing. A `dispatched`
+   * opens the detail panel, which is navigation; a log window is one operator following one
+   * container; a refusal is one person's click, and painting it across every Cockpit in the
+   * workspace would report somebody else's failed button as yours.
+   */
+  sendWork(ctx: TenantContext, requestId: string, event: WorkEvent): void {
+    for (const [ws, session] of this.sessions) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (session.context.workspaceId !== ctx.workspaceId) continue;
+      if (session.context.requestId !== requestId) continue;
+      this.sendTo(ws, { channel: "work", ...event });
     }
   }
 

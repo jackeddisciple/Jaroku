@@ -108,7 +108,7 @@ import { scanAgentDirectory } from "./agents.ts";
 import { AgentRepository, nextForkSlug } from "./db/repositories/agents.ts";
 import { AgentGrantRepository } from "./db/repositories/agentGrants.ts";
 import {
-  agentCeiling, closeAgentCapabilities, holds, isAgentCapability, resolveCapabilities,
+  agentCeiling, can, closeAgentCapabilities, holds, isAgentCapability, resolveCapabilities,
   type AgentCapability,
 } from "./auth/capabilities.ts";
 import {
@@ -160,6 +160,7 @@ import { openCheckpointStore } from "./checkpoints/store.ts";
 import { introspectGraph, introspectGraphCached, type GraphResult } from "./graphIntrospect.ts";
 import { streamExplain, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS } from "./explainer.ts";
 import type { ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, ProviderSnapshot } from "./wsRelay.ts";
+import type { ListWorkCommand, WorkCommand, WorkSnapshotWire } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
 import { currentTraceparent, formatTraceparent, openTracer, parseTraceparent } from "./obs/trace.ts";
@@ -270,6 +271,16 @@ import {
 } from "./providers.ts";
 import { allPrices, capabilityFor } from "./pricing.ts";
 import { DeployStore, isInFlight as isDeployInFlight } from "./deployStore.ts";
+import { DeployOps } from "./deployOps.ts";
+import { DeployDispatcher } from "./deployDispatch.ts";
+// THE COCKPIT. Every command it needs already existed — Part 1 built health, logs, kill and
+// reconnect and left them with no caller — so what this section wires is a screen rather than a
+// second mechanism. See server/src/work/.
+import { WorkStore, isWorkStatus, type WorkItem } from "./work/workStore.ts";
+import { WorkDispatcher, workConcurrencyFromEnv } from "./work/dispatcher.ts";
+import { WorkActions } from "./work/actions.ts";
+import { WorkLifecycle } from "./work/lifecycle.ts";
+import { WorkSnapshots } from "./work/snapshot.ts";
 import { DeployManager, planDeploy, type DeployManagerDeps } from "./deployManager.ts";
 import { RailwayApi, RailwayError, RAILWAY_ENV_KEY } from "./railwayApi.ts";
 import { sandboxKind } from "./sandbox/runSandbox.ts";
@@ -2670,6 +2681,14 @@ function handleHostedMcpConfirmRequest(runId: string, payload: Record<string, un
     runId, workspaceId: runCtx.workspaceId, nonce, server, tool, requestedAt: Date.now(),
   });
   console.log(`[mcp] ${runId} is waiting for confirmation of ${server}/${tool} (hosted)`);
+  // §4'S `waiting`, WHICH IS THE STATE THE WHOLE STATUS SET EXISTS FOR — and this is the path it
+  // is reachable by. A deployed run parked on the confirmation gate is a job blocked on a person,
+  // and it is the only thing the Cockpit's badge counts. Fired here rather than beside the local
+  // twin as well as it, because only a deployed run can be a work item and this is where one
+  // arrives.
+  void workLifecycle.onConfirmRequested(runCtx, runId)
+    .then((item) => broadcastWorkItem(runCtx, item))
+    .catch((err) => console.error("[work] could not park a job on a confirmation:", (err as Error).message));
   relay.broadcastMcp(runCtx, {
     type: "confirmRequest",
     runId,
@@ -4221,6 +4240,16 @@ const relay = new WsRelay({
   // it, so §5.2's badge is right on frame one rather than after a round trip. A socket with no
   // person on it — the dev path — gets an empty board rather than somebody else's.
   listInbox: (ctx) => (ctx.actorUserId ? boardFor(ctx) : EMPTY_INBOX),
+  // §5's three reads, answered locally for the reason the two lists above are: they are rows this
+  // process can already reach, and the Cockpit badge is drawn from the counts in the first of
+  // them, on frame one. A socket with no person on it — the dev path — still gets the workspace's
+  // jobs, because "mine" narrows to nobody rather than to everybody when there is no actor.
+  listWork: (ctx, cmd) => workSnapshotFor(ctx, cmd),
+  loadWorkItem: async (ctx, itemId) => {
+    const item = await workStore.get(ctx, itemId);
+    return item ? workSnapshots.detail(ctx, item) : undefined;
+  },
+  listFleet: (ctx) => workSnapshots.fleet(ctx),
   /**
    * §5.5's `getActivity`: six aggregates for one range, each sent as it resolves.
    *
@@ -4606,6 +4635,7 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (cmd.cmd === "appealEnforcement") void appealEnforcement(ctx, cmd.note);
     else if (THREAD_COMMAND_NAMES.has(cmd.cmd)) void handleThreadCommand(ctx, cmd as ThreadCommand);
     else if (INBOX_COMMAND_NAMES.has(cmd.cmd)) void handleInboxCommand(ctx, cmd as InboxCommand);
+    else if (WORK_COMMAND_NAMES.has(cmd.cmd)) void handleWorkCommand(ctx, cmd as WorkCommand);
     else if (cmd.cmd === "loadUsage") void broadcastUsage(ctx);
     else if (cmd.cmd === "setSpendCeiling") void setSpendCeiling(ctx, cmd.usd);
     else if (cmd.cmd === "setByok") void setByok(ctx, cmd.on === true);
@@ -4938,6 +4968,14 @@ function clearConfirms(runId: string, reason: string, nonce?: string): void {
     pendingConfirms.delete(key);
     rmSync(approvalFile(p.runId, p.nonce), { force: true });
     relay.broadcastMcp(contextForRun(p.runId), { type: "confirmResolved", runId: p.runId, nonce: p.nonce, verdict: reason });
+    // AND THE JOB GOES BACK TO RUNNING, whatever the verdict was and whether or not a person
+    // gave it. A denied tool call is an answer: the graph continues with the refusal, and the
+    // run is executing again. What ends the job is `run_end`, not this. Guarded in the store, so
+    // the resolve, the expiry sweep and the runner's own `tool_confirm_closed` can all arrive for
+    // one nonce and only the first finds a waiting row.
+    void workLifecycle.onConfirmResolved(contextForRun(p.runId), p.runId)
+      .then((item) => broadcastWorkItem(contextForRun(p.runId), item))
+      .catch((err) => console.error("[work] could not resume a waiting job:", (err as Error).message));
   }
   // §3.3 counts a pending confirmation as blocked work, so one going away is a genuine state
   // transition and the list has to be told. Only when something actually cleared: this runs on
@@ -6238,6 +6276,238 @@ async function handleAgentCommand(ctx: TenantContext, cmd: AgentCommand): Promis
     // person to read.
     console.error(`[agents] ${cmd.cmd} failed:`, (err as Error)?.message ?? err);
     refuseAgent(ctx, "that did not work — the grid is unchanged", cmd.agentId);
+  }
+}
+
+// --- the Cockpit: what is live, and what has been asked of it ---------------
+//
+// §5's convention, exactly as the Inbox and threads follow it: the three reads are answered by the
+// relay from the builders below, and every mutation broadcasts afterwards. What is different here
+// — and it is the only thing that is — is that a TRANSITION IS A DELTA. A work list moves
+// constantly, so a full snapshot per transition would put a fifty-row page on the wire every few
+// seconds and re-render it under whoever was reading; one item changing state broadcasts that item.
+//
+// FOUR OF THE SIX MUTATIONS ANSWER THE ASKER RATHER THAN BROADCASTING, and each for a stated
+// reason: a `dispatched` is navigation, a log window is one operator following one container, and a
+// refusal is one person's click. Only the item delta and the fleet strip are workspace facts.
+
+const WORK_COMMAND_NAMES = new Set([
+  "dispatchWork", "cancelWork", "retryWork", "reconnectAgent", "loadAgentLogs", "killAgent",
+]);
+
+/**
+ * The Cockpit's four collaborators, wired once.
+ *
+ * `deployOps` IS CONSTRUCTED HERE AND NOWHERE ELSE, which is what makes Part 2 "only a screen":
+ * health, logs, kill and reconnect were all built in Part 1 and had no caller. `canKill` asks the
+ * same capability table every command goes through rather than a second opinion, and
+ * `storeServeToken` is the same function the deploy manager was already given — one door to the
+ * serve token, keyed by Railway service id.
+ */
+const deployOps = new DeployOps({
+  store: deployStore,
+  token: () => process.env[RAILWAY_ENV_KEY],
+  storeServeToken: async ({ ctx, serviceId, token }) => {
+    try {
+      const result = await secrets.setServeToken(ctx, serviceId, token);
+      return result.ok ? result.warning : (result.warning ?? "the vault refused the value");
+    } catch (err) {
+      return (err as Error).message;
+    }
+  },
+  // THE SAME TABLE, ASKED THE SAME WAY. `killAgent` is `deploy:manage` in `COMMAND_CAPABILITY`, so
+  // this asks for exactly that rather than inventing a second rule — a `canKill` that consulted a
+  // role directly is the drift `capabilities.ts` exists to prevent.
+  canKill: (ctx) => can(ctx.role, "deploy:manage"),
+});
+
+const workStore = new WorkStore(store.database());
+
+const workDispatch = new DeployDispatcher({
+  runs: deployRuns,
+  // RESOLVED PER CALL, NEVER HELD. A deployment's URL and its serve token are workspace state that
+  // can change under a long-lived process — a redeploy moves the URL, a reconnect rotates the
+  // token — and a value captured at construction is a value that goes stale silently.
+  endpoint: async (deploymentId) => {
+    const ctx = contextForDeploy();
+    const row = await deployStore.get(ctx, deploymentId);
+    if (!row?.url) return null;
+    const serveToken = row.railway_service_id
+      ? await secrets.getServeToken(ctx, row.railway_service_id)
+      : null;
+    return { url: row.url, serveToken };
+  },
+});
+
+const workDispatcher = new WorkDispatcher({
+  work: workStore,
+  deployments: deployStore,
+  dispatch: workDispatch,
+  // BY RAILWAY SERVICE ID, not by deployment row — see `SecretStore.getServeToken` for the two
+  // reasons Part 1 keyed it that way, and `dispatcher.ts` for what the second one costs here.
+  serveToken: (ctx, serviceId) => secrets.getServeToken(ctx, serviceId),
+  controlPlaneUrl: () => CONTROL_PLANE_URL,
+  concurrency: () => workConcurrencyFromEnv(),
+});
+
+const workActions = new WorkActions({
+  work: workStore,
+  dispatcher: workDispatcher,
+  dispatch: workDispatch,
+});
+
+const workLifecycle = new WorkLifecycle({
+  work: workStore,
+  steps: (ctx, runId) => store.stepsForRun(ctx, runId),
+});
+
+const workSnapshots = new WorkSnapshots({
+  work: workStore,
+  agentNames: async (ctx) => {
+    const rows = await agentRepo.list(ctx, { includeArchived: true });
+    return new Map(rows.map((a) => [a.id, a.display_name ?? a.slug]));
+  },
+  // DISPLAY NAME OR EMAIL, in that order, because §4's whole point is that a job names a person.
+  // A workspace where nobody has set a display name would otherwise render every row unattributed,
+  // which is the honest-but-useless state the column exists to avoid.
+  actorNames: async (ctx) => {
+    const members = await bootIdentity.listMembers(ctx);
+    return new Map(members.map((m) => [m.user_id, m.display_name ?? m.email]));
+  },
+  deployments: (ctx) => deployStore.currentByAgent(ctx),
+  hasServeToken: async (ctx, serviceId) => (await secrets.getServeToken(ctx, serviceId)) !== null,
+  // THE CACHE, NEVER A PROBE. §10 asks for a bounded poll with a stated staleness rather than a
+  // per-render fetch, and a snapshot builder that probed would make twenty outbound requests to
+  // URLs Jaroku does not own every time somebody opened the tab.
+  cachedHealth: (deploymentId) => deployOps.cachedHealth(deploymentId),
+  scoped: (ctx) => store.database().forWorkspace(ctx.workspaceId),
+});
+
+/** The list the relay answers, with whatever filter the client asked for. */
+async function workSnapshotFor(ctx: TenantContext, cmd: ListWorkCommand): Promise<WorkSnapshotWire> {
+  return workSnapshots.list(ctx, {
+    scope: cmd.scope === "all" ? "all" : "mine",
+    status: isWorkStatus(cmd.status) ? cmd.status : undefined,
+    agentId: typeof cmd.agentId === "string" && cmd.agentId ? cmd.agentId : undefined,
+    cursor: typeof cmd.cursor === "string" ? cmd.cursor : null,
+  });
+}
+
+/**
+ * One job changed, to everybody in the workspace.
+ *
+ * FIRED FROM THE LIFECYCLE'S RETURN VALUE rather than on every event, which is what keeps this a
+ * delta: `onRunEnd` and the two confirmation hooks return the item only when they actually moved
+ * one, so a run that is not a work item — every local run in the product — broadcasts nothing.
+ */
+async function broadcastWorkItem(ctx: TenantContext, item: WorkItem | undefined): Promise<void> {
+  if (!item) return;
+  relay.broadcastWorkItem(ctx, await workSnapshots.item(ctx, item));
+}
+
+async function handleWorkCommand(ctx: TenantContext, cmd: WorkCommand): Promise<void> {
+  const fail = (message: string, itemId?: string): void =>
+    relay.sendWork(ctx, ctx.requestId, { type: "error", message, itemId });
+  try {
+    switch (cmd.cmd) {
+      case "dispatchWork": {
+        if (typeof cmd.agentId !== "string" || typeof cmd.input !== "string" || !cmd.input.trim()) {
+          return fail("a job needs an agent and something to do");
+        }
+        const out = await workDispatcher.dispatch(ctx, { agentId: cmd.agentId, input: cmd.input });
+        if (!out.ok) {
+          // A REFUSAL AND A FAILURE ARE BOTH REPORTED TO THE ASKER, and the difference between them
+          // is already visible in what happened to the board: a refusal wrote no row, so the
+          // sentence is all there is; a failure wrote one, and the delta below puts it on the list
+          // beside the message.
+          if (out.stage === "failed") await broadcastWorkItem(ctx, out.item);
+          return fail(out.detail);
+        }
+        // TO THE ASKER, because it is navigation — the composer clears and the detail panel opens
+        // on the new job. Broadcasting it would move every open Cockpit in the workspace.
+        relay.sendWork(ctx, ctx.requestId, { type: "dispatched", item: await workSnapshots.item(ctx, out.item) });
+        await broadcastWorkItem(ctx, out.item);
+        await relay.broadcastFleet();
+        return;
+      }
+
+      case "cancelWork": {
+        if (typeof cmd.itemId !== "string") return fail("that is not a job id");
+        const out = await workActions.cancel(ctx, cmd.itemId);
+        if (!out.ok) return fail(out.detail, cmd.itemId);
+        // THE REQUEST WAS ACCEPTED, WHICH IS NOT THE SAME AS THE JOB HAVING STOPPED — see
+        // `WorkActions.cancel`. The notice says which of the two happened; the row only changes
+        // when the run's own `run_end` arrives, except for a queued job, which had nothing running.
+        relay.sendWork(ctx, ctx.requestId, { type: "notice", message: out.detail, itemId: cmd.itemId });
+        await broadcastWorkItem(ctx, await workStore.get(ctx, cmd.itemId));
+        return;
+      }
+
+      case "retryWork": {
+        if (typeof cmd.itemId !== "string") return fail("that is not a job id");
+        const out = await workActions.retry(ctx, cmd.itemId);
+        if (!out.ok) return fail(out.detail, cmd.itemId);
+        relay.sendWork(ctx, ctx.requestId, { type: "dispatched", item: await workSnapshots.item(ctx, out.item) });
+        await broadcastWorkItem(ctx, out.item);
+        await relay.broadcastFleet();
+        return;
+      }
+
+      case "reconnectAgent": {
+        if (typeof cmd.deploymentId !== "string") return fail("that is not a deployment id");
+        const out = await deployOps.reconnect(ctx, cmd.deploymentId);
+        // THE FRESH TOKEN IS NEVER BROADCAST AND NEVER LOGGED. It goes to the socket that asked,
+        // once, for the same reason a deploy shows one — so a person can call their own endpoint —
+        // and `deploy.serveToken` is the existing event shaped for exactly that.
+        if (out.token) {
+          const row = await deployStore.get(ctx, cmd.deploymentId);
+          relay.broadcastDeploy(ctx, {
+            type: "serveToken",
+            deploymentId: cmd.deploymentId,
+            // The endpoint the token now belongs to, so the panel can show both together — the
+            // same pair a fresh deploy shows. Empty rather than absent for a row with no URL yet,
+            // which cannot happen for a reconnect and is not worth a second event shape.
+            url: row?.url ?? "",
+            token: out.token,
+          });
+        }
+        if (!out.ok) return fail(out.detail, cmd.deploymentId);
+        relay.sendWork(ctx, ctx.requestId, { type: "notice", message: out.detail });
+        await relay.broadcastFleet();
+        return;
+      }
+
+      case "loadAgentLogs": {
+        if (typeof cmd.deploymentId !== "string") return fail("that is not a deployment id");
+        const window = await deployOps.runtimeLogs(ctx, cmd.deploymentId, {
+          since: typeof cmd.since === "string" ? cmd.since : null,
+        });
+        // TO THE ASKER. One operator following one container's log pane is not news for the
+        // workspace, and a broadcast would push somebody else's window into every open tab.
+        relay.sendWork(ctx, ctx.requestId, {
+          type: "logs", deploymentId: cmd.deploymentId, lines: window.lines, cursor: window.cursor,
+        });
+        return;
+      }
+
+      case "killAgent": {
+        if (typeof cmd.deploymentId !== "string") return fail("that is not a deployment id");
+        const out = await deployOps.kill(ctx, cmd.deploymentId);
+        // IT REPORTS WHAT ACTUALLY HAPPENED rather than what was asked for — Part 1's own rule, and
+        // the reason `ok` and `serviceRemoved` are two fields. "Removed from Jaroku, still running
+        // on Railway" and "stopped" are different facts about somebody's bill.
+        if (!out.ok) fail(out.detail, cmd.deploymentId);
+        else relay.sendWork(ctx, ctx.requestId, { type: "notice", message: out.detail });
+        broadcastDeployments();
+        void relay.broadcastAgents();
+        await relay.broadcastFleet();
+        return;
+      }
+    }
+  } catch (err) {
+    const message = (err as Error)?.message ?? String(err);
+    console.error(`[work] ${cmd.cmd} failed: ${message}`);
+    fail(`${cmd.cmd} failed: ${message}`);
   }
 }
 
@@ -9941,6 +10211,12 @@ onBothPools("event", ({ runId, event }) => {
     try {
       if (event.kind === "run_start" || event.kind === "run_end") {
         await store.upsertRun(runCtx, event.run);
+        // AND THE COCKPIT'S ROW, AFTER THE RUN ROW AND ON THE SAME CHAIN. §6.5: from the 202
+        // onwards the trace drives the state. After, because the lifecycle reads the run's steps
+        // to find what the agent actually said, and a read that overtook the write would find
+        // nothing. It returns the item only when one moved — every local run in the product comes
+        // through here and none of them is a work item — so the broadcast is a delta or nothing.
+        if (event.kind === "run_end") await broadcastWorkItem(runCtx, await workLifecycle.onRunEnd(runCtx, event.run));
         // What this run is executing on, cached for the steps that follow. A step does not
         // carry provider or model — the frozen schema puts them on the run — so without this
         // every metered step would be a second query on the one chain that must not become
@@ -10196,6 +10472,14 @@ onBothPools("control", ({ runId: slotRunId, ctrl }) => {
       // `pendingConfirms` live — so the fact is already true and nothing was telling the list.
       // The row turns amber while the run is blocked, and back when `clearConfirms` fires.
       scheduleListRefresh(runCtx);
+    } else if (ctrl.ctrl === "cancelled") {
+      // THE ONE BRANCH THE COCKPIT ADDS TO THIS HANDLER, and it exists because a cancelled run
+      // and a crashed one arrive as the SAME `run_end`: the frozen schema has three run statuses
+      // and neither of them is `cancelled`, so a cancellation is stored as `error` with a
+      // sentence against it. `debug.py` emits this line at the boundary before it ends precisely
+      // so the boundary is visible — matching on the sentence instead would break silently the
+      // first time somebody reworded a log message.
+      workLifecycle.noteCancelledAtBoundary(runId);
     } else if (ctrl.ctrl === "tool_confirm_closed") {
       // The runner gave up waiting (or was denied) and has moved on. Close the ask so a
       // modal cannot linger over a question nobody is listening for any more.

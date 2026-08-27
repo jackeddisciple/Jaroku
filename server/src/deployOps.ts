@@ -145,6 +145,28 @@ export class DeployOps {
     return { ...value, staleMs: 0 };
   }
 
+  /**
+   * The last answer, if anything has asked recently. NEVER a probe.
+   *
+   * §10 asks for "a bounded poll per deployed agent, cached, with a stated staleness. Not a
+   * per-render fetch", and this is the half that makes the second sentence enforceable: the fleet
+   * strip is rebuilt on every job transition and on every connect, so a builder that could reach
+   * `health()` would turn a grid of twenty agents into twenty outbound requests to URLs Jaroku does
+   * not own, several times a second, on somebody else's infrastructure.
+   *
+   * `undefined` MEANS NOBODY HAS ASKED, which is a third state and not "unhealthy". A card that
+   * reported red because it had never been probed would be the product accusing a working agent.
+   *
+   * IT DOES NOT CHECK THE CACHE'S AGE. Staleness is REPORTED rather than enforced here for the
+   * reason the return value carries it at all: a fifty-second-old answer is still the last thing
+   * the agent said about itself, and the screen saying "as of 50s ago" is more use than the screen
+   * saying nothing. What must never happen is it implying the check just ran.
+   */
+  cachedHealth(deploymentId: string): { state: HealthState; staleMs: number } | undefined {
+    const cached = this.health_.get(deploymentId);
+    return cached ? { state: cached.value.state, staleMs: this.now() - cached.at } : undefined;
+  }
+
   private async probe(ctx: TenantContext, deploymentId: string): Promise<Omit<DeployHealth, "staleMs">> {
     const at = new Date(this.now()).toISOString();
     const row = await this.deps.store.get(ctx, deploymentId);

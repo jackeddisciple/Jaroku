@@ -548,6 +548,13 @@ jobs:
           # above do not is that ACTING is scoped — cancel, retry and confirm each checked against
           # a container that would say yes, so a refusal is the scope and not the network.
           npm run test:work-tenancy
+          # AND THE CHANNEL, whose load-bearing assertion is a NEGATIVE one: the payload a transition
+          # broadcasts has no `items` field. A delta that grew one would be a board, and nothing on
+          # screen would look wrong — the client would render it correctly, once a second, for ever.
+          # Beside it the two statement counts, and the honest half of the second: the aggregates are
+          # flat whatever the fleet holds, and the serve-token check is one per live deployment
+          # because the door it goes through deliberately does not offer a batch.
+          npm run test:work-channel
 
       # THE ACTIVITY DESTINATION, the fourth and last of the sidebar's tabs, in a step of its own
       # from its first suite — the same reason the three steps above are separate rather than

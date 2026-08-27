@@ -662,6 +662,40 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   getActivity: "agent:read",
   getActivityFeed: "agent:read",
 
+  // the Cockpit
+  //
+  // §8'S TABLE, WITH ITS ONE UNRESOLVED NAME RESOLVED. The specification files "see the Cockpit"
+  // under `deploy:read + agent:read`, the three job verbs under `run:execute`, the confirmation
+  // under `mcp:confirm`, and Reconnect and kill under "the deploy capability — check the real name
+  // in capabilities.ts". The real name is `deploy:manage`: `deploy:read` is the read, and both of
+  // those commands change something in the user's own hosting account.
+  //
+  // THE THREE READS ARE `deploy:read` AND NOT `agent:read`, which is the one place this table
+  // narrows what §8 allows rather than widening it. §8 asks for both, and a capability check takes
+  // one — so it takes the sharper of the two. Every member already holds `agent:read`, so filing
+  // the reads there would make the pair meaningless; `deploy:read` is also a member capability, so
+  // nothing is actually shut out, and it is the one that names what this tab is ABOUT.
+  listWork: "deploy:read",
+  loadWorkItem: "deploy:read",
+  listFleet: "deploy:read",
+  // The container's own log pane. A read, and the same capability the build log already has.
+  loadAgentLogs: "deploy:read",
+  //
+  // DISPATCH, CANCEL AND RETRY ARE `run:execute`, beside `run` and `cancelRun`, and that is what
+  // they are: starting an agent and stopping it. Not `deploy:manage` — a member who may run an
+  // agent locally may run the deployed one, and requiring the deploy capability would mean the
+  // person who operates the fleet has to be the person who publishes it.
+  dispatchWork: "run:execute",
+  cancelWork: "run:execute",
+  retryWork: "run:execute",
+  //
+  // AND THE TWO THAT REACH INTO RAILWAY ARE `deploy:manage`, beside `deploy` and `cancelDeploy`.
+  // Reconnect sets a variable, which RESTARTS the service and drops every run in flight in it;
+  // kill deletes the service outright. Both change what exists in somebody's hosting account,
+  // which is the line the header draws for admin.
+  reconnectAgent: "deploy:manage",
+  killAgent: "deploy:manage",
+
   // eval
   listDatasets: "eval:read",
   loadDataset: "eval:read",
@@ -940,6 +974,17 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   // What this one agent has been doing. `view`, beside the reads above, because that is what it is
   // — the Activity feed narrowed to one agent, carrying nothing the detail pane does not.
   getActivityFeed: "view",
+  // The work list narrowed to one agent, which is the same shape one line up and the same answer.
+  // §8 files "see the Cockpit" under `view` at this scope, and a jobs list for an agent somebody
+  // cannot see would be a list of what it was asked to do by somebody who may not know it exists.
+  //
+  // ONLY THE FILTERED FORM IS GATED HERE, which is what the resolver does with an absent `agentId`:
+  // the unfiltered list is a workspace read and is gated by `deploy:read` one scope up. That is not
+  // a hole — an agent whose jobs a person may not see individually would still have its rows in the
+  // workspace list, and closing that properly means filtering the LIST by the caller's per-agent
+  // grants, which is a read that resolves a grant per row and is not this release. The same
+  // limitation `COMMAND_AGENT_CAPABILITY`'s header already names, stated where it applies.
+  listWork: "view",
   // Planning a deployment renders what WOULD happen and changes nothing. Same argument the
   // entitlement table makes about it, one gate over.
   planDeploy: "view",
@@ -992,6 +1037,17 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
 
   // --- run: execute and debug -----------------------------------------------------------------
   run: "run",
+  // §8's per-agent column: giving THIS agent a job needs `run` on it. The workspace capability is
+  // `run:execute`, which is the floor; this is the narrowing, and it is the row that makes a grant
+  // of `view` on one agent unable to spend money on it.
+  //
+  // `cancelWork` AND `retryWork` ARE DELIBERATELY ABSENT, and their absence is the limitation
+  // `COMMAND_AGENT_CAPABILITY`'s own header names rather than a decision made here: they carry a
+  // work-item id, not an agent id, and resolving the agent for them would mean a database lookup
+  // inside the relay, which imports no database by construction. Both are still gated by
+  // `run:execute` at the workspace scope, so neither is reachable by somebody with no authority at
+  // all — what they are not gated by is the per-agent narrowing, exactly as `pauseRun` is not.
+  dispatchWork: "run",
   // §B.2's shadow run executes the agent against a branch. It publishes nothing and moves no
   // pointer — what it does is RUN, which is what this capability is for.
   shadowRunGithub: "run",
