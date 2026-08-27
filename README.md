@@ -2023,11 +2023,68 @@ its URL, when you press it.
 **Forget** detaches a record from Jaroku and touches nothing in your account — the notice tells
 you where the real thing still is.
 
-### Not in this milestone
+### What a deployed run is now
 
-Deployed agents do **not** stream trace events back yet. That is the next layer (Weeks 13–14),
-and building it now would mean shipping `jaroku_interceptor` inside the image — breaking the one
-guarantee the deployed artifact should keep hardest.
+A deployed agent used to be a black box. It emitted no trace, reported no cost, could not be
+paused, could not be cancelled, and could not stop and ask a human before a high-impact tool ran.
+Every one of those looked like a missing feature and none of them was: all of that machinery
+already existed here and was wired into a running server. It was built for the sandbox, and the
+deploy path had simply never joined it.
+
+**A deployed run is an ordinary traced run.** Not a similar thing, not a deploy-shaped variant of
+one — the same thing:
+
+```
+POST /run  {input, run_id, run_token, control_plane_url}
+      │
+      ├─ 202 immediately          the request does not wait for the graph
+      │
+      └─ python -m jaroku_runner  the same runner a local run, an eval job
+             │                    and a sandboxed run all go through
+             ├─ JarokuTracer  →  schema-v1 events
+             └─ controlplane_http → POST /v1/runs/<id>/trace, on Jaroku's control plane
+```
+
+`serve.py` no longer selects a provider, builds a model or invokes a graph. It accepts a request,
+hands it to the runner, and answers `202` while the run is still going. There is deliberately no
+second way to execute an agent, and the deploy path was the one place in this product that broke
+that rule.
+
+What follows from it, none of which is a new mechanism:
+
+| | how |
+|---|---|
+| **Traces** | The runner's own `JarokuTracer`, pushed to the control plane that was already listening. A deployed trace and a local trace of the same agent on the same input differ in run id and timing and nothing else — asserted, in `test:serve-trace`. |
+| **Cost** | Summed from `steps`, by the same `aggregateJob` the eval engine uses. Never read from `runs.cost`: a run whose container died never emitted a `run_end`, and its row still reads 0 while its steps record real money. |
+| **Pause / resume** | The control-plane actions that already existed. A pause stops at a node boundary and leaves a durable checkpoint; a resume continues the same run, with the same id, from the seq it stopped at. |
+| **Cancel** | A third action beside those two, read at the same boundary. Never a kill: the node in flight finishes, and the run ends with a `run_end` that says it was cancelled. |
+| **Confirmation** | `mcp_bridge.py`'s existing HTTP gate. A high-impact tool in a deployed run stops and asks a person, and the modal cannot tell it from a local run. |
+| **Health, logs, kill** | On the server, so the screen is only a screen. Health asks the agent's own `/health` rather than Railway, because Railway reports a crash-looping service as deployed. |
+
+**The image now contains Jaroku's own reviewed code** — `jaroku_interceptor` and `jaroku_runner`,
+vendored at deploy time exactly as `serve.py` and the connector templates already are. That is a
+reversal of what the previous version of this section said, and it is worth being plain about:
+the promise being defended was about the **generated project**, not the image. `agent.py` still
+imports nothing named `jaroku`, the validator still rejects it if it tries, and the contract is
+still three symbols. The image is a different boundary, and `runtime/sandbox/Dockerfile` had
+already drawn it — what lives in an image is code Jaroku wrote and reviewed. Copy the project out
+and it still runs standalone, because `controlplane_http.py` reports to nobody unless both
+`JAROKU_CONTROL_PLANE_URL` and `JAROKU_RUN_TOKEN` are set, and both arrive per request.
+
+**Jaroku now keeps a copy of the serve token.** The old property was "Jaroku does not keep a
+copy", and it was a real one. It ended because a token shown once cannot dispatch a run. The new
+property is narrower and is the one actually defended: the token lives where every other
+credential lives — envelope-encrypted, workspace-scoped, with no path to plaintext except the
+dispatcher. Agents deployed before this have no stored token and the old one is unrecoverable;
+**Reconnect** mints a fresh one, sets it, and stores it. Setting a variable restarts the service,
+so the command says so before you press it.
+
+### Still owed
+
+`runtime/.checkpoints/` inside a container is the container's own filesystem. A paused deployed
+run keeps a durable checkpoint and can be resumed — until the service restarts, which setting a
+variable does. After that the checkpoint is gone, and a resume is refused with a `409` rather
+than silently starting the graph over and re-spending what it already spent.
 
 ---
 

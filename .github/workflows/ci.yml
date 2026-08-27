@@ -313,6 +313,12 @@ jobs:
           # so most of this suite is ABSENCE, and one assertion reads the deploy manager for a
           # line the USER reads that still makes the old claim.
           npm run test:serve-token-store
+          # AND THE FOUR COMMANDS PART 2 IS ONLY A SCREEN OVER. Every one of them has a failure
+          # that looks like success: health that asks Railway reports a crash-looping container as
+          # fine, logs paged by offset walk backwards through a moving window, a kill that reports
+          # what it ASKED FOR tells somebody they stopped paying for something they have not, and
+          # a reconnect that does not mention the restart it causes is how trust goes in one click.
+          npm run test:deploy-ops
 
       # THE SUITES THAT SHIPPED WITH v0.2.15 AND CI HAS NEVER RUN. They were written, they passed,
       # and nothing but the person who wrote them ever executed them — the same gap the client job's

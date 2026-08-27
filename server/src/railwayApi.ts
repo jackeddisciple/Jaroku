@@ -333,6 +333,27 @@ export class RailwayApi {
   }
 
   /**
+   * Stop a service for good.
+   *
+   * DESTRUCTIVE AND IRREVERSIBLE FROM THE USER'S POINT OF VIEW, which is why it is spelled out
+   * here rather than folded into something more general. The service, its variables and its
+   * public domain go; the deployment ROW stays, because the record of what was deployed and what
+   * it cost outlives the thing that was running.
+   *
+   * `serviceDelete` rather than pausing or scaling to zero: Railway's own dashboard offers
+   * exactly this, and a "stopped" service that still exists is a service still costing money in
+   * an account Jaroku does not own. A user who asked to stop paying for something should stop
+   * paying for it.
+   */
+  async deleteService(serviceId: string): Promise<void> {
+    await this.call(
+      "deleteService",
+      `mutation serviceDelete($id: String!) { serviceDelete(id: $id) }`,
+      { id: serviceId },
+    );
+  }
+
+  /**
    * The public URL. `targetPort` is passed explicitly rather than left to Railway's port
    * detection: serve.py binds $PORT with a documented default of 8080, so guessing would be
    * a way to produce a domain that routes nowhere.
