@@ -202,6 +202,7 @@ function dispatch(msg: ServerMessage): void {
         case "plan_delta": c.planDelta(msg); break;
         case "plan": c.planReady(msg); break;
         case "plan_discarded": c.planDiscarded(msg); break;
+        case "plan_restored": c.planRestored(msg); break;
         case "plan_error": c.planError(msg); break;
         default:
           // This switch used to drop anything it didn't know silently, so a server running

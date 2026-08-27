@@ -202,6 +202,32 @@ export class Planner extends EventEmitter<PlannerEvents> {
   }
 
   /**
+   * Put a spent plan back, because the generation it authorised never happened.
+   *
+   * `take()` is called with the comment "spend it: this generation is now certain to START" — and
+   * certain to start is not certain to succeed. A build that fails validation therefore consumed
+   * the approved plan and left nothing to retry from: the card's Generate, Revise and Discard all
+   * unmounted, the composer was empty, and the failure's own reassurance — "Nothing was written" —
+   * read as "nothing was lost" while the plan was exactly what had been. The way out was to re-type
+   * the brief and pay for a second planning call.
+   *
+   * THE APPROVED PLAN IS STILL GOOD. It described an agent a person read and confirmed; what failed
+   * was the build, and the same argument the "already in progress" branch makes about not spending
+   * a plan on a refused click applies with more force to a plan spent on a build that produced
+   * nothing.
+   *
+   * REFUSED IF THIS WORKSPACE HAS MOVED ON. Somebody who described a different agent while the
+   * failing build was running holds the slot now, and putting the old plan back over it would
+   * resurrect a card they have visibly replaced. Answers whether it restored, so the caller only
+   * tells the client about a plan that is genuinely takeable again.
+   */
+  restore(workspaceId: string, rec: PendingPlan): boolean {
+    if (this.pending.has(workspaceId)) return false;
+    this.pending.set(workspaceId, rec);
+    return true;
+  }
+
+  /**
    * Throw a plan away, and say whose it was.
    *
    * `workspaceId` RIDES THE EVENT because the listener has to route it, and the only thing it had

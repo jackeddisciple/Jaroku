@@ -199,6 +199,8 @@ interface ChatState {
     revision: number;
   }) => void;
   planDiscarded: (e: In & { planId: string }) => void;
+  /** The generation this plan authorised failed and wrote nothing, so the plan is takeable again. */
+  planRestored: (e: In & { planId: string }) => void;
   /** Called by the composer, not by the socket, so it names the thread it is looking at. */
   planStale: (threadId: string | null, stale: boolean) => void;
   planError: (e: In & { message: string }) => void;
@@ -344,6 +346,27 @@ export const useChatStore = create<ChatState>((set) => ({
       // one already accepted.
       if (!turn || (turn.status !== "pending" && turn.status !== "stale")) return {};
       return putTurns(s, threadId, replaceTurn(turns, turn.id, { ...turn, status: "discarded" }));
+    }),
+
+  // THE BUILD FAILED AND WROTE NOTHING, so the approval goes back on the card that carried it.
+  //
+  // `genStarted` marks the plan `accepted`, which is what unmounted the footer: PlanCard renders
+  // Generate / Revise / Discard for `pending` and `stale` only, and a spent plan is neither. So a
+  // generation that failed validation left a card with nothing on it but Copy and Regenerate, a
+  // composer that had been emptied, and an error message whose "Nothing was written" read as
+  // reassurance while the plan was exactly what had been lost.
+  //
+  // ONLY OUT OF `accepted`, and only for the id the server says it put back. A discarded or
+  // superseded plan is finished — the server refuses to restore over a newer one, and this refuses
+  // to rewrite the history of a card that was resolved some other way.
+  planRestored: ({ threadId, planId }) =>
+    set((s) => {
+      const turns = turnsIn(s, threadId);
+      const turn = turns.find(
+        (t): t is PlanTurn => t.role === "jaroku" && t.kind === "plan" && t.planId === planId,
+      );
+      if (!turn || turn.status !== "accepted") return {};
+      return putTurns(s, threadId, replaceTurn(turns, turn.id, { ...turn, status: "pending" }));
     }),
 
   // The connector selection changed after the plan was written, so it no longer describes

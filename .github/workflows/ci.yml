@@ -363,6 +363,24 @@ jobs:
           # everything before it — a 120-character diagnosis rendered as `.env.example`.
           npm run test:graph-introspect
 
+      # THE PLAN GATE, WHICH THIS FILE HAS NEVER RUN. `test:plan` has existed for two lineages of
+      # this workflow and appears in none of them — the same gap the comment above "the two
+      # lineages" is about, in the one part of the product where a mistake spends somebody's money
+      # twice. A suite that is not in this file is a suite that runs when somebody remembers.
+      - name: the plan gate
+        working-directory: server
+        run: |
+          # The parsing, and whose slot the pending plan is. The second is the one that stops a
+          # workspace spending a plan it never wrote.
+          npm run test:plan
+          # AND WHAT A FAILED BUILD COSTS. `take()` spends the plan when a generation is "certain to
+          # start", and certain to start is not certain to succeed — so a build refused by the
+          # validator consumed the approval, unmounted the card's whole footer and left an error
+          # message saying "Nothing was written" beside the one thing that had been lost. The
+          # load-bearing assertions are the refusals: restoring over a newer plan would resurrect a
+          # card the user has visibly replaced, and restoring twice would double-fill the slot.
+          npm run test:plan-recovery
+
       - name: the threads destination
         working-directory: server
         run: |

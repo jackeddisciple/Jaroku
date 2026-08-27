@@ -1533,6 +1533,11 @@ export type GenEvent =
       revision: number;
     }
   | { type: "plan_discarded"; planId: string }
+  // THE PLAN CAME BACK, because the generation it authorised failed and never wrote anything.
+  // `take()` spends a plan when a build STARTS, which is not when a build succeeds — so without
+  // this a validation failure cost the user the whole plan and the card's controls unmounted with
+  // it. Carries the id so the client re-opens the card it belongs to rather than the newest one.
+  | { type: "plan_restored"; planId: string }
   | { type: "plan_error"; message: string };
 
 // Editing rides its own channel too, parallel to "gen" — it never enters the trace store

@@ -210,6 +210,8 @@ export type GenMessage = InThread &
       revision: number;
     }
   | { channel: "gen"; type: "plan_discarded"; planId: string }
+  /** The generation this plan authorised failed and wrote nothing — it is takeable again. */
+  | { channel: "gen"; type: "plan_restored"; planId: string }
   | { channel: "gen"; type: "plan_error"; message: string });
 
 // --- editing (fix loop) ---

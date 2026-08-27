@@ -85,6 +85,7 @@
     "test:invite-flow": "tsx src/auth/inviteFlow.test.ts",
     "test:protocol": "tsx src/fileProtocol.test.ts",
     "test:plan": "tsx src/planProtocol.test.ts && tsx src/planOwnership.test.ts",
+    "test:plan-recovery": "tsx src/planRecovery.test.ts",
     "test:pricing": "tsx src/pricing.test.ts",
     "test:effort": "tsx src/effort.test.ts",
     "test:conversation-settings": "tsx src/conversationSettings.test.ts",

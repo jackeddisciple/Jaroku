@@ -102,7 +102,7 @@ import { magicLinkRoutes } from "./http/magicLink.ts";
 import { signInRoutes } from "./http/signIn.ts";
 import { MAGIC_LINK_LIMITS, rateKeyForIp } from "./auth/signIn.ts";
 import { Generator, agentsDir, MAX_TOKENS as GEN_MAX_TOKENS, type UsageSummary } from "./generator.ts";
-import { Planner, PLAN_MODEL, MAX_TOKENS as PLAN_MAX_TOKENS } from "./planner.ts";
+import { Planner, PLAN_MODEL, MAX_TOKENS as PLAN_MAX_TOKENS, type PendingPlan } from "./planner.ts";
 import { Editor, EDIT_MODEL, MAX_TOKENS as EDIT_MAX_TOKENS } from "./editor.ts";
 import { scanAgentDirectory } from "./agents.ts";
 import { AgentRepository, nextForkSlug } from "./db/repositories/agents.ts";
@@ -10420,6 +10420,25 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   let planUsage: UsageSummary | undefined;
   let mcpRefs: string[] = cmd.mcpTools ?? [];
   let { prompt, connectors, name } = cmd;
+  // THE RECORD `take()` REMOVED, held for as long as this build can still fail. A plan is spent
+  // when a generation STARTS; if that generation never produces an agent, the approval it carried
+  // was spent on nothing and belongs back in the workspace's slot. Null on the unplanned path,
+  // where there is no approval to return.
+  let spentPlan: PendingPlan | null = null;
+  /**
+   * Put it back, once, and say so on the channel the card is listening to.
+   *
+   * Cleared on the way out so the two callers — the validator's refusal and the never-started
+   * catch — cannot both restore it, and so a late event after a successful build cannot resurrect
+   * a plan the agent was actually generated from.
+   */
+  const returnSpentPlan = (): void => {
+    const rec = spentPlan;
+    spentPlan = null;
+    if (!rec) return;
+    if (!planner.restore(ctx.workspaceId, rec)) return;
+    relay.broadcastGen(ctx, { type: "plan_restored", planId: rec.planId });
+  };
   if (cmd.planId) {
     // Everything that can refuse this generation is checked against peek() FIRST, so a
     // refusal never burns the plan. take() happens only once the build is certain to start —
@@ -10476,7 +10495,12 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
       return;
     }
 
-    planner.take(ctx.workspaceId, cmd.planId); // spend it: this generation is now certain to start
+    // SPENT, AND KEPT, so a build that fails validation can put it back. "Certain to start" is
+    // what this line means and all it has ever meant; a generation that starts and is then refused
+    // by the validator used to consume the approved plan on its way to writing nothing, leaving the
+    // card with no Generate, no Revise and no Discard, and the user re-typing a brief they had
+    // already had planned. See `onError` below and `planner.restore`.
+    spentPlan = planner.take(ctx.workspaceId, cmd.planId);
     ({ prompt, connectors, name } = rec);
     mcpRefs = approvedRefs;
     plan = rec.plan.raw;
@@ -10568,6 +10592,13 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     console.error(`[gen] failed: ${e.message}`);
     for (const p of e.problems ?? []) console.error(`  - ${p}`);
     genOut({ type: "error", ...e });
+    // AND THE APPROVED PLAN GOES BACK, because nothing was built from it. The message the user is
+    // reading says "Nothing was written — any previous agent is untouched", which is true and read
+    // as "nothing was lost" while the plan was precisely what had been: it was spent when the build
+    // started, so the card unmounted its whole footer and the only way to try again was to describe
+    // the agent from scratch and pay for a second planning call. Refused if the workspace has since
+    // planned something else, and announced only when it genuinely came back.
+    returnSpentPlan();
     // §3.3's "rejected generation": the thread is blocked on a person deciding what to do about it.
     // Marked rather than stored, for the reason `openProposals` is read live — the refused files
     // exist in this process and nowhere else. The THREAD is what is blocked, and the next
@@ -10605,6 +10636,9 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   } catch (err) {
     console.error(`[gen] could not start: ${(err as Error)?.message ?? err}`);
     genOut({ type: "error", message: "could not start the generation" });
+    // The same argument as `onError`, one step earlier and with more force: this generation did not
+    // reach the model at all, so the plan it spent bought nothing whatsoever.
+    returnSpentPlan();
     cleanup();
   }
 }
