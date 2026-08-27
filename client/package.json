@@ -23,6 +23,7 @@
     "test:composer-bar": "tsx src/lib/composerBar.test.ts",
     "test:connector-deck": "tsx src/lib/connectorDeck.test.ts",
     "test:turn-metadata": "tsx src/lib/turnMetadata.test.ts",
+    "test:rerun": "tsx src/lib/rerun.test.ts",
     "test:export": "tsx src/lib/evalExport.test.ts",
     "test:csv": "tsx src/lib/csv.test.ts",
     "test:auth": "tsx src/lib/auth.test.ts",

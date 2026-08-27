@@ -53,6 +53,7 @@ import { PinRail, pinLabel, type PinnedTurn } from "./composer/PinRail.tsx";
 import { useTurnInteractionStore } from "../store/turnInteractionStore.ts";
 import { TurnMetadata } from "./composer/TurnMetadata.tsx";
 import { turnSource, metaForTurn, promptForRegenerate } from "../lib/turnSource.ts";
+import { canRerunTurn } from "../lib/rerun.ts";
 import {
   FALLBACK_SETTINGS, useComposerSettingsStore, type Effort, type PermissionMode,
 } from "../store/composerSettingsStore.ts";
@@ -313,6 +314,12 @@ function AssistantTurn({
   const itemId = turn.itemId ?? null;
   useEffect(() => { if (itemId) void loadTurn(itemId); }, [itemId, loadTurn]);
 
+  // ASKED BEFORE THE CONTROL IS RENDERED, not after it is pressed. `rerunTurn` dispatches for one
+  // turn kind and this row is mounted on four, so passing the handlers unconditionally put a ⟳ on
+  // a plan, a generation and a proposal that promised a re-run in its tooltip and did nothing.
+  // See lib/rerun.ts — a control that does nothing is worse than no control.
+  const rerunnable = canRerunTurn(turn);
+
   return (
     // `group/turn` is what lets the action row appear on hover of the WHOLE turn rather than of the
     // row itself — a strip of glyphs you have to find before it appears is one nobody finds.
@@ -324,8 +331,8 @@ function AssistantTurn({
             source={source}
             isLast={isLast}
             streaming={isLast && streaming}
-            onRegenerate={() => rerunTurn(turns, turn)}
-            onRegenerateWith={(opts) => rerunTurn(turns, turn, opts)}
+            onRegenerate={rerunnable ? () => rerunTurn(turns, turn) : undefined}
+            onRegenerateWith={rerunnable ? (opts) => rerunTurn(turns, turn, opts) : undefined}
             // The three most recent models from the catalogue. The whole list would be a menu
             // longer than the response it is offering to replace.
             models={models.slice(0, 3).map((m) => ({ id: m.id, label: m.label }))}
@@ -378,30 +385,34 @@ function AssistantTurn({
  *
  * ONLY A REPLY IS RE-RUNNABLE AS A VARIANT. A generation and an edit publish a version and change
  * an agent's files; running one again is a second build rather than a second answer, and giving it
- * a switcher would offer to "switch back" to code that has already been superseded on disk. Those
- * keep the prefill, which is honest about what pressing it does.
+ * a switcher would offer to "switch back" to code that has already been superseded on disk.
+ *
+ * SO THE OTHER THREE KINDS NO LONGER REACH THIS FUNCTION AT ALL. They used to, and fell through to
+ * a `prefillChat` that put the sentence back in the composer and stopped — under a tooltip
+ * promising a re-run, with no frame sent and nothing on screen to say which of the two had
+ * happened. `AssistantTurn` now asks `canRerunTurn` before it passes the handlers, so no control
+ * renders where none can dispatch, and the guard below is the same predicate rather than a second
+ * opinion about it.
  */
 function rerunTurn(
   turns: readonly ChatTurn[],
   turn: ChatTurn,
   opts?: { modelId?: string; effort?: string },
 ): void {
+  // Nothing renders a regenerate control for a turn this refuses, so reaching here is a wiring
+  // mistake rather than a user action — and refusing is the honest answer to it either way.
+  if (!canRerunTurn(turn) || turn.role !== "jaroku" || turn.kind !== "reply" || !turn.itemId) return;
   // The message, not the turn. A generation three cards down re-runs the sentence that started it
   // — §5.4's "the same user input" — rather than whatever is in the box now.
   const prompt = promptForRegenerate(turns, turn);
   if (!prompt) return;
-  const ui = useUiStore.getState();
-  if (opts?.modelId) ui.setModel(opts.modelId);
+  if (opts?.modelId) useUiStore.getState().setModel(opts.modelId);
 
-  if (turn.role === "jaroku" && turn.kind === "reply" && turn.itemId) {
-    // THE SAME COMMAND THE ORIGINAL DISPATCHED, with the turn it is a second answer to. The subject
-    // is the agent generally: the step or node the first answer was grounded in may not be selected
-    // any more, and re-running against whatever happens to be selected NOW would answer a different
-    // question under the first one's heading.
-    sendExplain(turn.agentId, prompt, { kind: "agent" }, undefined, undefined, turn.itemId);
-    return;
-  }
-  ui.prefillChat(prompt);
+  // THE SAME COMMAND THE ORIGINAL DISPATCHED, with the turn it is a second answer to. The subject
+  // is the agent generally: the step or node the first answer was grounded in may not be selected
+  // any more, and re-running against whatever happens to be selected NOW would answer a different
+  // question under the first one's heading.
+  sendExplain(turn.agentId, prompt, { kind: "agent" }, undefined, undefined, turn.itemId);
 }
 
 function Turn({ turn, isLastGen }: { turn: ChatTurn; isLastGen: boolean }) {

@@ -962,6 +962,11 @@ jobs:
           # is also the natural thing to write, so the suite checks every combination of
           # absences rather than the three the spec happens to name.
           npm run test:turn-metadata
+          # AND WHETHER THE ⟳ BESIDE IT RENDERS AT ALL, which `test:dead-controls` cannot answer:
+          # it fails a button with no handler, and this button had one that did nothing on three of
+          # the four turn kinds it was mounted on. Every negative assertion in it is a control that
+          # shipped promising "re-run the same message" and sent no frame.
+          npm run test:rerun
           # §14.1'S FOUR CLIENT SUITES, and the reason they are one group is that they are one
           # feature: a workspace you can be in more than one of. `test:workspace-switcher` holds
           # the arrangement rules — a personal workspace first, teams alphabetical by a comparison
