@@ -276,6 +276,7 @@ import { sandboxKind } from "./sandbox/runSandbox.ts";
 import { RunEventBus } from "./sandbox/eventBus.ts";
 import { resolveRunTokenSigningKey, RunTokenRevocationList } from "./sandbox/runTokens.ts";
 import { registerControlPlaneRoutes } from "./sandbox/controlPlaneRoutes.ts";
+import { DeployRuns } from "./deployRuns.ts";
 import { sandboxImageRef } from "./sandbox/image.ts";
 import { FlyMachinesSandbox } from "./sandbox/flySandbox.ts";
 import { TraceIngestMetrics } from "./sandbox/traceIngestMetrics.ts";
@@ -2582,6 +2583,18 @@ router.get(
 // Both pools share this SAME bus (see poolOpts above), so there is exactly one to register.
 const traceIngestMetrics = new TraceIngestMetrics();
 const traceBackpressure = new BackpressureTracker();
+// THE THIRD THING THAT PUSHES INTO THIS BUS, beside the two pools' hosted sandboxes: a run
+// happening inside a user's own deployed container. It mints that run's token, registers it here
+// so what it pushes has somewhere to land, and revokes on every way out — see deployRuns.ts.
+//
+// Constructed here rather than beside the deploy manager because this is where the bus, the
+// signing key and the revocation list already are, and because a second instance of any of the
+// three would be a run whose token one half of the server can mint and the other cannot verify.
+const deployRuns = new DeployRuns({
+  signingKey: runTokenSigningKey,
+  revocations: runTokenRevocations,
+  bus: runEventBus,
+});
 registerControlPlaneRoutes(router, {
   bus: runEventBus,
   signingKey: runTokenSigningKey,
@@ -9823,6 +9836,15 @@ function ingest(work: () => Promise<void>): void {
 // activeRunId/pausedRunId are already scoped to the interactive run alone (an eval runId
 // never equals either), so registering the identical handler on evalPool costs nothing extra
 // to reason about: every branch below already answers "is this MY run" correctly per event.
+//
+// AND ON DEPLOYED RUNS, WHICH ARE A THIRD SOURCE AND NOT A THIRD PATH. A run in somebody's
+// Railway container has no slot and no subprocess, but it produces exactly the same five events
+// with exactly the same attribution — see deployRuns.ts, which emits them off the control-plane
+// bus the way a slot emits them off a pipe. So everything below reaches it unchanged: the step
+// is persisted and metered, the run is counted once against the workspace's quota, the relay
+// broadcasts it, a failure raises an Inbox card, a boundary stamps a checkpoint. That is what
+// "traces, cost, pause, resume, cancel and MCP confirmation work in production without one new
+// mechanism" actually means, and it is one line here rather than a second ingest chain.
 function onBothPools<K extends keyof RunPoolEvents>(
   event: K,
   handler: (...args: RunPoolEvents[K]) => void,
@@ -9831,9 +9853,11 @@ function onBothPools<K extends keyof RunPoolEvents>(
   // generic K here, even though `handler` is exactly what it wants for any concrete K a
   // caller below actually passes — the callers, not this plumbing, are what type safety here
   // protects.
-  const on = (pool: RunPool) => (pool.on as (event: K, handler: (...args: RunPoolEvents[K]) => void) => void)(event, handler);
+  const on = (source: RunPool | DeployRuns) =>
+    (source.on as (event: K, handler: (...args: RunPoolEvents[K]) => void) => void)(event, handler);
   on(interactivePool);
   on(evalPool);
+  on(deployRuns);
 }
 
 onBothPools("event", ({ runId, event }) => {

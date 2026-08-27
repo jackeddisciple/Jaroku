@@ -295,6 +295,12 @@ jobs:
           # cross-run refusal WITHIN one workspace: nothing about tenancy stops that one, only
           # the run scope does.
           npm run test:run-token-deploy
+          # WHAT A DEPLOYED RUN COST, and where the number comes from. Every assertion in it is
+          # chosen so it could not pass against a runs.cost read: a crashed run's row says zero
+          # while its steps record real money. Beside them, the audit that survives the next
+          # person — the deploy path's own source is read and any cost-column access in it fails
+          # here, which no amount of arithmetic in the assertions above would catch.
+          npm run test:deploy-cost
 
       # THE SUITES THAT SHIPPED WITH v0.2.15 AND CI HAS NEVER RUN. They were written, they passed,
       # and nothing but the person who wrote them ever executed them — the same gap the client job's

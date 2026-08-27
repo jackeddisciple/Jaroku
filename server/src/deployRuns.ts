@@ -24,8 +24,11 @@
 // run whose token was never revoked is a container that can push into a workspace's trace for
 // the next two hours with nothing watching.
 
+import { EventEmitter } from "node:events";
+
 import { mintRunToken, MAX_RUN_TOKEN_TTL_S, type RunTokenRevocationList } from "./sandbox/runTokens.ts";
 import type { RunEventBus } from "./sandbox/eventBus.ts";
+import type { RunPoolEvents } from "./runPool.ts";
 
 /**
  * How long a deployed run's token lives.
@@ -84,11 +87,27 @@ export interface OpenedDeployRun {
   entry: DeployRunEntry;
 }
 
-export class DeployRuns {
+/**
+ * A deployed run's lifetime, and the events it produces, as one thing.
+ *
+ * IT EMITS WHAT A RunPool EMITS, deliberately and exactly — `event`, `control`, `stderr`,
+ * `parseError`, `exit`, each carrying the run id the way a slot attributes its own output. That
+ * is not an aesthetic choice about interfaces; it is the whole of how "traces, cost, pause,
+ * resume, cancel and MCP confirmation work in production without one new mechanism" is true.
+ * index.ts already has handlers for every one of those events — they persist a step, meter it,
+ * count a run against a quota, broadcast to the relay, raise an Inbox card on a failure, stamp a
+ * checkpoint boundary. A deployed run reaches all of it by looking, to those handlers, exactly
+ * like a run in a slot.
+ *
+ * The alternative was a second ingest path with its own copy of that chain, which is the thing
+ * §7 says not to build: "Trace ingest is already built. Use it, do not fork it."
+ */
+export class DeployRuns extends EventEmitter<RunPoolEvents> {
   private open_ = new Map<string, DeployRunEntry>();
   private readonly now: () => number;
 
   constructor(private readonly deps: DeployRunsDeps) {
+    super();
     this.now = deps.now ?? (() => Date.now());
   }
 
@@ -103,7 +122,17 @@ export class DeployRuns {
    */
   open(input: { runId: string; workspaceId: string; deploymentId: string; agentId: string }): OpenedDeployRun {
     const at = this.now();
-    this.deps.bus.register(input.runId);
+    const emitter = this.deps.bus.register(input.runId);
+    // ATTRIBUTED BY THE ENTRY THAT REGISTERED IT, never by anything in the payload. The run id
+    // here is the one JAROKU minted at dispatch; the ids INSIDE an event are text a container
+    // sent, and the ingest chain reconciles the two before it writes anything. That is the same
+    // separation runPool.makeSlot draws between the slot and the line, for the same reason: a
+    // container is running code a model wrote, on somebody else's infrastructure.
+    const runId = input.runId;
+    emitter.on("event", (event) => { this.heard(runId); this.emit("event", { runId, event }); });
+    emitter.on("control", (ctrl) => { this.heard(runId); this.emit("control", { runId, ctrl }); });
+    emitter.on("stderr", (line) => { this.heard(runId); this.emit("stderr", { runId, line }); });
+    emitter.on("parseError", ({ line, error }) => { this.heard(runId); this.emit("parseError", { runId, line, error }); });
     const runToken = mintRunToken(
       this.deps.signingKey,
       input.runId,
@@ -166,7 +195,19 @@ export class DeployRuns {
     // finished run's must not be.
     this.deps.revocations.revoke(runId, entry.tokenExpiresAtMs);
     if (this.deps.bus.has(runId)) this.deps.bus.unregister(runId);
-    void reason;
+    // AND THE EXIT A SLOT WOULD HAVE EMITTED. index.ts's exit handler is what releases an
+    // interactive slot, ends the run's span, drops it from `runWorkspaces` and settles the
+    // billing attribution — none of which has anything to do with a POSIX process, and all of
+    // which a deployed run needs. `code` is 0 for a run that ended under its own power and 1
+    // otherwise, which is the same distinction a local exit carries; there is no signal, because
+    // nothing here is a process this server owns.
+    this.emit("exit", {
+      runId,
+      code: reason === "ended" ? 0 : 1,
+      signal: null,
+      timedOut: reason === "abandoned",
+      elapsedMs: Math.max(0, this.now() - entry.startedAtMs),
+    });
     return true;
   }
 
