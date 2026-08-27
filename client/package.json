@@ -35,6 +35,7 @@
     "test:thread-filter-a11y": "tsx src/components/threadFilterA11y.test.ts",
     "test:sparkline-hits": "tsx src/components/sparklineHits.test.ts",
     "test:credential-gate": "tsx src/components/credentialGate.test.ts",
+    "test:graph-error": "tsx src/lib/graphError.test.ts",
     "test:export": "tsx src/lib/evalExport.test.ts",
     "test:csv": "tsx src/lib/csv.test.ts",
     "test:auth": "tsx src/lib/auth.test.ts",

@@ -39,6 +39,7 @@ import Dagre from "@dagrejs/dagre";
 import { useBuildStore, type GenFile } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
 import { useGraphStore } from "../store/graphStore.ts";
+import { graphErrorCopy, isMappedGraphError, type GraphErrorCopy } from "../lib/graphError.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { sendLoadAgentGraph } from "../lib/socket.ts";
@@ -892,7 +893,22 @@ export function GraphView() {
   // wrapping across four lines in the middle of the pane. One muted sentence, and the key itself
   // set in mono and middle-truncated by the same component every other path in the app goes
   // through, with the whole string on hover.
-  if (graph?.error) return <Empty title="No graph for this version yet" hint={graph.error} detail={graph.errorKey} />;
+  // A FAILURE IS NOT AN EMPTY STATE THAT HAS NOT FILLED IN YET. "No graph for this version yet"
+  // over `ContractError: cannot import agents.working_agent.agent: No module named …` made two
+  // claims at once — wait, and a hard import failure waiting does not fix — with an internal
+  // Python module path between them and no next step after them. See lib/graphError: the class is
+  // mapped to a sentence and, where one honestly exists, an action; the server's own string is kept
+  // behind a disclosure, because whoever is debugging their own agent needs that module path.
+  if (graph?.error) {
+    return (
+      <GraphFailure
+        copy={graphErrorCopy(graph.error)}
+        showRaw={isMappedGraphError(graph.error)}
+        detail={graph.errorKey}
+        onRetry={activeAgentId ? () => sendLoadAgentGraph(activeAgentId) : undefined}
+      />
+    );
+  }
   if (!graph?.nodes?.length) return <Empty title="No graph to show" hint="This agent’s build_graph() produced no nodes." />;
 
   return (
@@ -976,6 +992,71 @@ export function GraphView() {
  * Both are optional and either may stand alone: a failure with no key is a sentence, and the two
  * "nothing selected" states below still pass a hint and no key at all.
  */
+/**
+ * The Graph tab's failure state — §30's three questions, answered in that order.
+ *
+ * `showRaw` is FALSE for a class the mapping did not recognise, because in that case the raw string
+ * is already the sentence and a disclosure would repeat it. That is deliberate rather than a
+ * fallback: a default that swallowed an unknown error into "something went wrong" would be worse
+ * than what this replaces, where the string was at least true.
+ */
+function GraphFailure({
+  copy, showRaw, detail, onRetry,
+}: {
+  copy: GraphErrorCopy;
+  showRaw: boolean;
+  detail?: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <div className="graph-canvas h-full">
+      <EmptyState
+        icon={GitBranchIcon}
+        title={copy.title}
+        hint={
+          <span className="block">
+            <span className="block">{copy.sentence}</span>
+            {copy.next && <span className="mt-1 block text-muted">{copy.next}</span>}
+            {detail && (
+              // THE PATH IS NOT PROSE — mono and middle-truncated by the same component every other
+              // path in this app goes through, with the whole string on hover.
+              <Truncate
+                variant="path"
+                className="mx-auto mt-1 block max-w-full font-mono text-tiny text-faint"
+                title={detail}
+              >
+                {detail}
+              </Truncate>
+            )}
+            {showRaw && (
+              // BEHIND A DISCLOSURE, NOT GONE. The person whose agent this is needs the module
+              // path; the person who just opened a tab does not, and giving it to both is how the
+              // panel ended up leading with a traceback.
+              <details className="mx-auto mt-3 max-w-full text-left">
+                <summary className="cursor-pointer text-tiny text-faint transition-colors hover:text-muted">
+                  Show the error
+                </summary>
+                <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-tiny text-faint">
+                  {copy.raw}
+                </pre>
+              </details>
+            )}
+            {onRetry && copy.retryable && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="mx-auto mt-3 block rounded-control border border-edge px-2.5 py-1 text-tiny text-muted transition-colors hover:bg-active hover:text-ink"
+              >
+                Try again
+              </button>
+            )}
+          </span>
+        }
+      />
+    </div>
+  );
+}
+
 function Empty({ title, hint, detail }: { title: string; hint?: string; detail?: string }) {
   return (
     <div className="graph-canvas h-full">

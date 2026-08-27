@@ -1069,6 +1069,14 @@ jobs:
           # load-bearing assertion is about the UNKNOWN gate: `gateLoaded` false means unanswered,
           # not locked, and a form disabled by a failed request is worse than the 403 was.
           npm run test:credential-gate
+          # AND THE GRAPH TAB'S FAILURE COPY. It rendered the server's raw string as its hint under
+          # a title saying the state was not ready "yet" — two claims at once, since a hard import
+          # failure is not something waiting fixes, with an internal Python module path between them
+          # and no next step after them. The two load-bearing assertions are negatives: an
+          # unrecognised failure KEEPS its raw string as the sentence, because swallowing it into
+          # "something went wrong" would be worse than the traceback, and no mapped title may
+          # contain the word that made the panel contradict itself.
+          npm run test:graph-error
           # §14.1'S FOUR CLIENT SUITES, and the reason they are one group is that they are one
           # feature: a workspace you can be in more than one of. `test:workspace-switcher` holds
           # the arrangement rules — a personal workspace first, teams alphabetical by a comparison
