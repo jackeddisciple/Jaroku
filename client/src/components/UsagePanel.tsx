@@ -24,6 +24,7 @@ import { useSessionStore } from "../store/sessionStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { sendLoadUsage, sendLoadRun, sendSetSpendCeiling } from "../lib/socket.ts";
+import { distinctSub } from "../lib/rowFacts.ts";
 import { useCanReach, useCanRun } from "../lib/useCapability.ts";
 import { startCheckout } from "../lib/workspaceApi.ts";
 import { fmtCost, fmtTokens } from "../lib/format.ts";
@@ -616,11 +617,17 @@ function Row({
   onClick?: () => void;
   children: React.ReactNode;
 }) {
+  // A SECOND LINE ONLY WHEN IT IS A SECOND FACT. *Most expensive runs* derives its label fallback
+  // and its sub from the same expression, so every run without a label rendered its 8-character id
+  // twice — two lines saying one thing, on rows whose whole point is to say which agent spent the
+  // money. See lib/rowFacts; the rule is here rather than at the call site because any of these
+  // sections can be handed the same string twice by data rather than by JSX.
+  const second = distinctSub(label, sub);
   const inner = (
     <div className="flex items-center justify-between gap-3 py-1.5">
       <div className="min-w-0">
         <div className="truncate text-caption text-ink">{label}</div>
-        {sub && <div className="truncate text-tiny text-faint">{sub}</div>}
+        {second && <div className="truncate text-tiny text-faint">{second}</div>}
       </div>
       <div className="flex shrink-0 items-center gap-3">{children}</div>
     </div>
