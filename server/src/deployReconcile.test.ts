@@ -60,7 +60,20 @@ const controlPlaneUrl = `http://127.0.0.1:${(http.address() as AddressInfo).port
 
 // An injected clock, so fifteen minutes of silence costs a variable assignment rather than
 // fifteen minutes. Both the registry and the sweep read it, so they cannot disagree about now.
-let clock = Date.UTC(2026, 7, 27, 12, 0, 0);
+//
+// IT STARTS AT THE REAL NOW RATHER THAN AT A FIXED INSTANT, and that is a correction rather than a
+// preference. It was `Date.UTC(2026, 7, 27, 12, 0, 0)` — the moment this file was written — and
+// that made the suite pass for exactly two hours and then fail forever, on every machine, for a
+// reason none of its assertions describe: `DeployRuns.open` mints the run token from THIS clock
+// (`exp = clock + MAX_RUN_TOKEN_TTL_S`), and `verifyRunToken` checks that expiry against the real
+// `Date.now()`. Two hours after the fixed instant the stub container's pushes were refused as
+// `expired`, so no run row and no steps were ever written, and nine assertions about a row that
+// does not exist reported `undefined`.
+//
+// Only the BASE is real. Every advance below is still a variable assignment, so the sweep's
+// fifteen-minute ceiling is still exercised without waiting for it — and moving forward is safe
+// in the other direction because a run token carries no not-before, only an expiry.
+let clock = Date.now();
 const deployRuns = new DeployRuns({ signingKey, revocations, bus, now: () => clock });
 
 // The ingest chain, as index.ts wires it — persist what arrives, attributed by the entry that
