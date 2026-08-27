@@ -8,6 +8,83 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.3.10 : The Production Bridge and the Cockpit — Post-Ship Control of Live Agents
+
+A deployed agent used to be a black box. It emitted no trace, reported no cost, could not be paused
+or cancelled, and could not stop and ask a human before a high-impact tool ran. Every one of those
+looked like a missing feature and none of them was: the machinery existed and the deploy path had
+never joined it. **`serve.py` now starts `python -m jaroku_runner` as a subprocess and answers
+`202`**, so a deployed run is an ordinary traced run — the same runner, the same schema-v1 events,
+the same control-plane ingest, the same cost aggregation. There is no second way to execute an
+agent any more.
+
+That made a screen worth building. **The Cockpit is the fifth sidebar destination** — Threads,
+Agents, Cockpit, Inbox, Activity — and it answers five questions: what is live, give this agent a
+real job, what is happening to the jobs I gave it, what does it need from me right now, and what did
+it cost. None of it is approximate, because all of it reads what the bridge already records.
+
+### Added
+
+- **A deployed run is a traced run.** Traces, cost, pause, resume, cancel and MCP confirmation all
+  work in production without one new mechanism — `deployRuns.ts` emits what a `RunPool` emits, so
+  everything downstream reaches it unchanged. A container that goes quiet past a fifteen-minute
+  ceiling is closed out as errored with a reason that says what is known and what is not, rather
+  than leaving a row claiming to be in flight for ever.
+- **Jaroku keeps the serve token**, envelope-encrypted and keyed by Railway *service* id so a
+  redeploy overwrites one variable instead of accumulating a dead secret per deploy. The old
+  property was "Jaroku does not keep a copy"; it ended because a token shown once cannot dispatch a
+  run. **Reconnect** mints a fresh one for every agent deployed before this.
+- **The Cockpit**: a fleet strip over a work list, with a detail panel sliding in from the right. A
+  fleet card's one line is its own state — *2 running · 1 waiting on you*, *idle · 11 jobs today ·
+  $0.42*, *not connected* — never a status word, because a status word is what the Railway dashboard
+  already gives.
+- **`work_items`**, with `created_by` NOT NULL. That is the column `runs` never had, and "who gave
+  this agent a job" is the question the whole tab exists to answer. There is deliberately **no cost
+  column**: cost is summed from `steps`, so a run that crashed mid-graph reports what it really
+  spent instead of the zero its own row carries.
+- **A dispatch composer that does not route through `lib/intent`.** The build composer routes one
+  input by phrasing into plan / revise / edit; here there is one destination, so reusing it would
+  let *"refund order 4471"* be read as an instruction to change the agent meant to do it. A
+  pre-flight gate names the agent, the version and the model before the button — money asks first,
+  and there is no dry-run path out here.
+- **Health, runtime logs and kill**, which were the three things people still opened Railway for.
+  Health asks the agent's own `/health`, because Railway reports a crash-looping service as
+  deployed; logs are followed as the sliding window Railway's query actually is; and kill reports
+  what *happened* rather than what was asked for, because "stopped" and "detached from Jaroku, still
+  running and still costing money" are different facts about somebody's bill.
+- **Nine suites**, all in CI: `test:work-store`, `-dispatch`, `-lifecycle`, `-cost`, `-redaction`,
+  `-tenancy`, `-channel`, `test:work-badge` and `test:fleet-line`.
+
+### Fixed
+
+- **A confirmation was broadcast once and could be missed.** A tab opened after the ask went out had
+  a run stopped on a timer and no dialog to answer it in — survivable while every ask arrived
+  seconds after somebody pressed Run in the tab they pressed it in, and not survivable for a job
+  that was dispatched and left. The relay now replays what is blocked to a connecting socket, with
+  the countdown showing what is *left* rather than what it started at.
+- **`test:deploy-reconcile` passed for two hours and then failed for ever.** Its injected clock was
+  pinned to the afternoon it was written, and run tokens are minted from that clock while
+  `verifyRunToken` checks the real one — so past the two-hour TTL the stub container's pushes were
+  refused as expired and nine assertions reported `undefined` for a row nothing ever wrote.
+- **`_run_grants` in `mcp_bridge.py` was keyed by tool alone**, so the first approval of a refund
+  approved every refund that container served afterwards. It is keyed by `(run_id, tool)`.
+
+### Not in this release, deliberately
+
+Schedules and triggers, rollback and environment variables, per-agent spend ceilings, and delivering
+a result outward. All four sit directly on machinery this release creates, and the constraints they
+put on it are honoured now: `work_items.created_by` stays NOT NULL so a scheduled item can be
+attributed to whoever created the schedule, and `work_items.id` is stable and citable because Part
+3's answers will cite it.
+
+Two limits are worth knowing. A container's checkpoints do not survive a restart, and setting a
+Railway variable restarts it — so a resume whose checkpoint is gone is a `409` rather than a silent
+re-run of a graph that already spent money. And the fleet strip's health figure is whatever the last
+probe found; nothing polls on a timer, so a card that has never been probed says nothing rather than
+guessing.
+
+---
+
 ## v0.3.9 : Bug Fixes and Product Audit — The Last Link, Sixteen Times
 
 Every release since v0.3.0 connected an entry point and a persistence layer, and this one is about
