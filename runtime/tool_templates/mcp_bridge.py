@@ -171,9 +171,36 @@ class ToolNotApproved(RuntimeError):
     """A high-impact call the user declined, or did not answer in time."""
 
 
-# Tools granted "for this run". Module-level, so the grant lasts exactly as long as the
-# process does: a new run asks again, which is what "first use in a run" means.
-_run_grants: set[str] = set()
+# Tools granted "for this run", KEYED BY THE RUN.
+#
+# It used to be a bare set of "<server>/<tool>", and the comment above it said the grant "lasts
+# exactly as long as the process does: a new run asks again". That sentence was true of every
+# place this file had ever run and false of the one it was about to. Locally and in a sandbox a
+# process IS a run — one `python -m jaroku_runner`, one run, exit — so process lifetime and run
+# lifetime were the same thing and nothing distinguished them. A deployed container serves many
+# jobs, and under the old key the first person to approve `stripe/create_refund` approved it for
+# every request that container answered afterwards, silently, until it was redeployed.
+#
+# TWO THINGS NOW STOP THAT, and both are deliberate rather than one being redundant:
+#
+#   * THIS KEY. A grant belongs to (run, server/tool), so "for this run" means the run it was
+#     given for and no other. It is the property, and it holds wherever this module is imported.
+#
+#   * serve.py STARTS EACH RUN AS ITS OWN PROCESS, so in the deployed path there is no shared
+#     module state for a grant to sit in at all. That is the structural guarantee, and it is
+#     the stronger of the two — but it is a property of a DIFFERENT file, and a rule enforced
+#     only somewhere else is a rule that stops holding the moment somebody moves the work
+#     in-process to save an interpreter start.
+#
+# A run id is always present when a host is involved: both the file gate and the HTTP gate
+# already require JAROKU_RUN_ID to consider a host present at all. Without one there is no host,
+# nothing is granted, and the empty string is as good a key as any for a case that never reaches
+# here.
+_run_grants: set[tuple[str, str]] = set()
+
+
+def _grant_key(key: str) -> tuple[str, str]:
+    return (os.environ.get("JAROKU_RUN_ID") or "", key)
 
 
 # --- the confirmation gate --------------------------------------------------
@@ -295,7 +322,7 @@ def _confirm(
         projects are not really portable. The warning exists so it is never a surprise.
     """
     key = f"{server_id}/{name}"
-    if key in _run_grants:
+    if _grant_key(key) in _run_grants:
         return
 
     mode = os.environ.get("JAROKU_MCP_CONFIRM", "").strip().lower()
@@ -312,7 +339,7 @@ def _confirm(
             payload = payload[:MAX_ARGS_CHARS] + " …(truncated)"
         verdict = _http_confirm(control_plane, server_id, name, reason, payload, impact, first_call)
         if verdict == "run":
-            _run_grants.add(key)
+            _run_grants.add(_grant_key(key))
             return
         if verdict == "once":
             return
@@ -380,7 +407,7 @@ def _confirm(
         pass
 
     if verdict == "run":
-        _run_grants.add(key)
+        _run_grants.add(_grant_key(key))
         return
     if verdict == "once":
         return

@@ -1248,3 +1248,10 @@ jobs:
           # bounds against the stub, since a real run cannot be made to push a malformed batch or
           # to flood, and a bound nobody ever trips is a bound nobody notices the removal of.
           npm run test:serve-trace
+          # THE HIGHEST-VALUE TEST IN THIS PART, and it is one the old code fails outright: with a
+          # module-level grant keyed only by tool, the second job in a container found
+          # stripe/create_refund already approved and moved money with nobody asked. Driven by
+          # running the real bridge in ONE process and changing the run id between calls, which is
+          # exactly two jobs in one container. Beside it, the process boundary that makes the same
+          # leak structurally impossible in the deployed path, read off the real _run_environment.
+          npm run test:serve-confirm

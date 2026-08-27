@@ -163,6 +163,7 @@
     "test:serve-async": "tsx src/serveAsync.test.ts",
     "test:serve-trace": "tsx src/serveTrace.test.ts",
     "test:deploy-cost": "tsx src/deployCost.test.ts",
+    "test:serve-confirm": "tsx src/serveConfirm.test.ts",
     "test:github-sync": "tsx src/githubSync.test.ts",
     "test:github-push": "tsx src/githubPush.test.ts",
     "test:github-first-push": "tsx src/githubFirstPush.test.ts",
