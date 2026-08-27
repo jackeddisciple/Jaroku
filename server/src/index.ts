@@ -277,6 +277,7 @@ import { RunEventBus } from "./sandbox/eventBus.ts";
 import { resolveRunTokenSigningKey, RunTokenRevocationList } from "./sandbox/runTokens.ts";
 import { registerControlPlaneRoutes } from "./sandbox/controlPlaneRoutes.ts";
 import { DeployRuns } from "./deployRuns.ts";
+import { DeployReconciler } from "./deployReconcile.ts";
 import { sandboxImageRef } from "./sandbox/image.ts";
 import { FlyMachinesSandbox } from "./sandbox/flySandbox.ts";
 import { TraceIngestMetrics } from "./sandbox/traceIngestMetrics.ts";
@@ -2611,6 +2612,18 @@ const deployRuns = new DeployRuns({
   revocations: runTokenRevocations,
   bus: runEventBus,
 });
+// AND THE SWEEP FOR THE ONE FAILURE THIS PATH HAS THAT THE OTHERS DO NOT: a container that
+// stops saying anything. A local run ends because a process exits; a deployed run has no exit
+// this server can observe, so silence is the only symptom and something has to decide how long
+// is too long. Started below, once the store exists — see deployReconcile.ts for the ceiling
+// and for why it is fifteen minutes rather than a rounder number.
+const deployReconciler = new DeployReconciler({
+  runs: deployRuns,
+  bus: runEventBus,
+  store,
+  contextFor: (workspaceId) => systemContextFor(workspaceId, newRequestId()),
+});
+deployReconciler.start();
 registerControlPlaneRoutes(router, {
   bus: runEventBus,
   signingKey: runTokenSigningKey,

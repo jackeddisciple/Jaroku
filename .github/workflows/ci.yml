@@ -301,6 +301,12 @@ jobs:
           # person — the deploy path's own source is read and any cost-column access in it fails
           # here, which no amount of arithmetic in the assertions above would catch.
           npm run test:deploy-cost
+          # THE RUN THAT STOPPED SAYING ANYTHING, which is the one failure the deployed path has
+          # that the others do not — a local run ends because a process exits, and a container
+          # offers no exit to observe. Half the suite is the runs that must NOT be closed out: a
+          # paused one (silent by design), one that finished a moment ago, and one still pushing
+          # after eighty minutes. A sweep that closes those is worse than no sweep, and invisible.
+          npm run test:deploy-reconcile
 
       # THE SUITES THAT SHIPPED WITH v0.2.15 AND CI HAS NEVER RUN. They were written, they passed,
       # and nothing but the person who wrote them ever executed them — the same gap the client job's
