@@ -161,6 +161,24 @@ export function defaultModelFor(models: ProviderModel[], provider: string): stri
 }
 
 /**
+ * WHICH PROVIDER OWNS A MODEL — the mirror of `defaultModelFor`, and the half that was missing.
+ *
+ * `setProvider` re-derived the model so the pair stayed coherent; `setModel` was a bare setter, so
+ * a model could be pinned while the provider stayed whatever it had been. The composer's run label
+ * is derived from the PROVIDER, so the tab went on reading "Dry run (free)" while every `run` frame
+ * it sent — and every `runs` row those wrote — named a model the dry-run provider does not have.
+ * The Usage panel, the trace header and Activity's model mix all read that column, so one press of
+ * a menu item reported a model that never ran.
+ *
+ * Reads through `runProviders`, so the pre-snapshot dry-run catalogue answers for `fake-dry-run`
+ * exactly as the real one answers for everything else. `null` for a model no provider offers, which
+ * is what makes "the pair is impossible" refusable rather than merely undetectable.
+ */
+export function providerForModel(models: ProviderModel[], model: string): string | null {
+  return runProviders(models).find((p) => p.models.includes(model))?.id ?? null;
+}
+
+/**
  * What a provider is CALLED, from the server's own table.
  *
  * THIS REPLACED TWO HARDCODED COPIES that disagreed. The composer's selector had one with four

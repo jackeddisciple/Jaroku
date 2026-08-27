@@ -477,12 +477,10 @@ function Turn({ turn, isLastGen }: { turn: ChatTurn; isLastGen: boolean }) {
 function ModelSelector({
   provider,
   model,
-  setProvider,
   setModel,
 }: {
   provider: string;
   model: string;
-  setProvider: (id: string) => void;
   setModel: (m: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -570,8 +568,11 @@ function ModelSelector({
                     disabled={!usable}
                     title={usable ? undefined : `No ${p.label} API key in this workspace`}
                     onClick={() => {
-                      setProvider(p.id); // resets model to the provider's default…
-                      setModel(m); // …then pin the chosen one
+                      // ONE CALL, because `setModel` now resolves the provider that owns the model
+                      // rather than leaving whatever was selected. The two-step dance was this
+                      // menu maintaining an invariant the store did not have — correct here, and
+                      // absent everywhere else `setModel` is reached from.
+                      setModel(m);
                       setOpen(false);
                     }}
                     className={`flex w-full items-center gap-1.5 rounded-control px-2 py-1 text-left text-caption transition-colors duration-fast ${
@@ -721,7 +722,6 @@ export function BuildPane({
   // Run config (Test mode) — lives in uiStore so the palette shares it.
   const provider = useUiStore((s) => s.provider);
   const model = useUiStore((s) => s.model);
-  const setProvider = useUiStore((s) => s.setProvider);
   const setModel = useUiStore((s) => s.setModel);
 
   // Cmd+/ (and the palette) focus the composer.
@@ -2210,7 +2210,7 @@ export function BuildPane({
                 : {}),
               model: {
                 bar: () => (
-                  <ModelSelector provider={provider} model={model} setProvider={setProvider} setModel={setModel} />
+                  <ModelSelector provider={provider} model={model} setModel={setModel} />
                 ),
               },
               mode: {

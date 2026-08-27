@@ -967,6 +967,12 @@ jobs:
           # the four turn kinds it was mounted on. Every negative assertion in it is a control that
           # shipped promising "re-run the same message" and sent no frame.
           npm run test:rerun
+          # AND THE ONE PIECE OF COMPOSER STATE THAT REACHES THE DATABASE. `setProvider` re-derived
+          # the model and `setModel` did not re-derive the provider, so the tab could hold a pair no
+          # catalogue offers — and both fields ride the `run` frame onto the `runs` row that Usage,
+          # the trace header and Activity's model mix all read back. A label that cannot be proven
+          # was emitted anyway and survived to the database.
+          npm run test:run-model
           # §14.1'S FOUR CLIENT SUITES, and the reason they are one group is that they are one
           # feature: a workspace you can be in more than one of. `test:workspace-switcher` holds
           # the arrangement rules — a personal workspace first, teams alphabetical by a comparison

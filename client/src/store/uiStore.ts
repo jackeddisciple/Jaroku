@@ -5,7 +5,7 @@
 
 import { create } from "zustand";
 import { useSessionStore } from "./sessionStore.ts";
-import { defaultModelFor, useProviderStore } from "./providerStore.ts";
+import { defaultModelFor, providerForModel, useProviderStore } from "./providerStore.ts";
 import type { GithubAttachment } from "../types.ts";
 
 /**
@@ -549,7 +549,20 @@ export const useUiStore = create<UiState>((set) => ({
       provider: id,
       model: defaultModelFor(useProviderStore.getState().models, id),
     }),
-  setModel: (model) => set({ model }),
+  // AND THE MIRROR OF IT, which did not exist. `setProvider` kept the pair coherent by re-deriving
+  // the model; `setModel` wrote the model and left the provider wherever it was, so the two could
+  // hold a combination no catalogue offers — a `fake` provider pinned to `claude-opus-5`. The label
+  // beside the run button is derived from the provider, so nothing on screen changed, and every run
+  // the tab dispatched afterwards was recorded under a model that never ran.
+  //
+  // A MODEL NOTHING OFFERS IS NOT SELECTED AT ALL. Writing it would be the same defect one step
+  // later: an unreachable pair the UI cannot show and the runs table would keep. Refusing leaves
+  // the last coherent pair, which is the one the label is already describing.
+  setModel: (model) => {
+    const owner = providerForModel(useProviderStore.getState().models, model);
+    if (owner === null) return;
+    set({ model, provider: owner });
+  },
 
   codeOverlayOpen: false,
   setCodeOverlay: (codeOverlayOpen) => set({ codeOverlayOpen }),
