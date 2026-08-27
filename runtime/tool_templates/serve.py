@@ -1,39 +1,50 @@
-"""Reviewed serve wrapper — runs an agent project as a long-lived HTTP service.
+"""Reviewed serve wrapper — an agent project's HTTP front onto the Jaroku runner.
 
 Copied byte-for-byte into a project as ``serve.py`` when it is deployed, exactly like a
 connector template. Never written by a model, never editable by the fix loop.
 
     python -m <agent_id>.serve        (cwd: the directory CONTAINING the project)
 
-This file exists because the agent contract already describes a request handler and nothing
-was calling it in a loop::
+WHAT THIS FILE IS. It accepts a request, starts ``python -m jaroku_runner <agent_id>`` for it,
+and answers while that run is still going. It does not select a provider, does not build a
+model, and does not invoke the graph — every one of those belongs to the runner, and it is the
+same runner a local run, an eval job and a sandboxed run already go through. The README states
+the principle about evals: "there is deliberately no second way to execute an agent". This file
+was that second way, and this is the file that stops being it.
 
-    build_initial_state(text) -> state -> graph.invoke(state) -> answer
+THIS HEADER USED TO CLAIM TWO THINGS THAT ARE NOW FALSE. They are named rather than deleted,
+because both were load-bearing arguments and both were reversed deliberately:
 
-``jaroku_runner`` does exactly that once and exits. So a deployed agent needs no new contract
-symbol, no change to agent.py, and no regeneration — it needs a caller that loops. That is all
-this is.
+  * **"It imports nothing from Jaroku."** The image now ships ``jaroku_interceptor`` and
+    ``jaroku_runner`` beside the project, and this file starts the runner. The promise that was
+    actually being defended is about the GENERATED PROJECT, not the image: ``agent.py`` still
+    imports nothing named jaroku, the validator still rejects it if it tries, and the contract
+    is still three symbols. The image is a different boundary and this repository already drew
+    it — runtime/sandbox/Dockerfile's header says plainly that what lives in an image is code
+    Jaroku wrote and reviewed. ``serve.py`` and ``mcp_bridge.py`` were already inside that
+    boundary; two more reviewed modules is the same decision, made again.
 
-Two properties it holds to, and both are load-bearing:
+  * **"No trace events are emitted."** A deployed run now emits an ordinary schema-v1 trace —
+    same kinds, same step types, same ordering as the identical agent run locally — pushed to
+    the control plane by the runner itself. Nothing about it is deploy-shaped.
 
-  * **It imports nothing from Jaroku.** The whole promise of a generated project is that you
-    can copy it out of the repo and run it yourself. Importing ``jaroku_runner.models`` for the
-    twelve lines of provider selection below would quietly end that, so those twelve lines are
-    duplicated instead. A deployed image contains your agent and its dependencies. Nothing else.
+AND THE ONE THAT IS STILL TRUE, because it is what keeps a copied-out project standalone:
+everything here is the standard library, and the run this starts reports to nobody unless it is
+told where to. ``controlplane_http.py`` no-ops unless both ``JAROKU_CONTROL_PLANE_URL`` and
+``JAROKU_RUN_TOKEN`` are set, and those arrive per request, from Jaroku, in the body of
+``POST /run``. Copy this directory out, run it yourself, and it answers with nobody watching —
+the same way the absence of ``JAROKU_CONTROL_DIR`` already tells a project that.
 
-  * **It adds no dependency.** Everything here is the standard library. LangGraph invocation is
-    blocking, so a threading server is the right shape, and a project's dependency closure is
-    unchanged by being deployable.
+THE RUNNER IS A SUBPROCESS, NOT AN IMPORT, and that is not incidental. ``guard.py`` dups fd 1
+as the event stream and repoints fd 1 at stderr before any generated code is imported —
+irreversibly, by design. Out here fd 1 is the deployment's log pane. In one process those two
+ideas collide and the log pane becomes the trace stream; in two they cannot. It is also what
+makes one job's module-level state its own, which is what stops an MCP "allow for this run"
+grant reaching the next request this container serves.
 
-It does two things a *generated* file may not, and both are the point:
-
-  * It constructs the model. Rule 2 forbids ``agent.py`` from doing that precisely so the model
-    can be injected — this is the injection point.
-  * It writes to stdout. Rule 3 protects the NDJSON trace stream, and out here there is no
-    trace stream: stdout is the deployment's log pane, which is where logs belong.
-
-No trace events are emitted. Production trace streaming is a separate layer; shipping the
-interceptor inside the image would break the first property above to get it.
+It still does one thing a *generated* file may not, and it is still the point: it writes to
+stdout. Rule 3 protects the NDJSON trace stream, and out here that stream is a child process's
+private fd — stdout is the deployment's log pane, which is where logs belong.
 """
 
 from __future__ import annotations
@@ -364,9 +375,15 @@ class Handler(BaseHTTPRequestHandler):
                     "agent": self.service.agent_id,
                     "provider": self.service.provider,
                     "model": self.service.model,
+                    # One entry per route, each naming its auth and both ends of its shape.
+                    # This document is the only description of this service anybody outside
+                    # Jaroku gets, and "liveness" told a reader neither of those things. Every
+                    # commit that moves a route moves its line here in the same commit — a
+                    # header that lies is worse than no header, and so is an endpoint doc.
                     "endpoints": {
-                        "GET /health": "liveness",
-                        "POST /run": '{"input": "..."} -> {"output", "state", "duration_ms"}',
+                        "GET /health": "no auth · -> {ok, agent}",
+                        "GET /": "no auth · -> this document",
+                        "POST /run": 'bearer · {"input"} -> 200 {output, state, duration_ms}',
                     },
                 },
             )
