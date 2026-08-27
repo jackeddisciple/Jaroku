@@ -1062,6 +1062,13 @@ jobs:
           # PaneDivider already did it, and the strip is one roving stop. Asserts the ratio and the
           # pitch rather than 32: twenty bars at a full hit target would be a 640px strip in a card.
           npm run test:sparkline-hits
+          # AND THE ONE PLACE IN THE APP WHERE A PRECONDITION WAS DISCOVERED BY FAILING. The Inbox's
+          # credential card enabled Save on a non-empty field, so pressing it POSTed the secret,
+          # took a 403, and only then said the vault needed unlocking — a value transmitted to find
+          # out whether it could be transmitted, while the gate state was already knowable. The
+          # load-bearing assertion is about the UNKNOWN gate: `gateLoaded` false means unanswered,
+          # not locked, and a form disabled by a failed request is worse than the 403 was.
+          npm run test:credential-gate
           # §14.1'S FOUR CLIENT SUITES, and the reason they are one group is that they are one
           # feature: a workspace you can be in more than one of. `test:workspace-switcher` holds
           # the arrangement rules — a personal workspace first, teams alphabetical by a comparison

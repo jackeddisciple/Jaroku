@@ -15,7 +15,7 @@
 // be able to clear an entire Inbox without leaving the Inbox" is the design goal of the surface and
 // a card that navigated to fix things would be a menu.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ACTION_LABEL,
   FORM_ACTIONS,
@@ -27,6 +27,9 @@ import {
 import { actionIconFor } from "./inboxActionIcons.tsx";
 import { sendDismissInboxItem, sendResolveInboxItem, sendSnoozeInboxItem } from "../lib/socket.ts";
 import { useInboxStore } from "../store/inboxStore.ts";
+import { useSecretsStore } from "../store/secretsStore.ts";
+import { fetchElevation } from "../lib/secrets.ts";
+import { useUiStore } from "../store/uiStore.ts";
 import { ICON } from "../lib/tokens.ts";
 import { KebabIcon, XIcon } from "./panelIcons.tsx";
 import type { InboxActionName, InboxItemView, SnoozeDuration } from "../types.ts";
@@ -92,13 +95,45 @@ function InlineForm({ item, action }: { item: InboxItemView; action: InboxAction
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  // WHETHER THIS CAN SUCCEED, ASKED BEFORE THE SECRET IS SENT RATHER THAN AFTER.
+  //
+  // Save was enabled the moment the field was non-empty, so typing a credential and pressing it
+  // POSTed the value, got a 403, and only then rendered "this needs an unlocked Secrets session"
+  // beside the button. The error was reported clearly and in the right place — the defect was
+  // entirely that the precondition was discovered by transmitting the thing it guards. This is the
+  // one place in the app where a precondition was found by failing rather than by being told; every
+  // other disabled control here carries its reason ("Select an agent to deploy", "This plan no
+  // longer matches the selected connectors").
+  const elevated = useSecretsStore((s) => s.elevated);
+  const gateLoaded = useSecretsStore((s) => s.gateLoaded);
 
   const credential = typeof item.payload["credential"] === "string" ? (item.payload["credential"] as string) : "";
   const isCeiling = action === "raise_ceiling";
   const label = isCeiling ? "New ceiling in dollars" : credential || "Credential value";
 
+  // ASKED ONCE, HERE, rather than assumed to be known. The gate state is polled by `SecretsPanel`,
+  // which is mounted only while the Secrets tab is the one showing — and this form is on the Inbox,
+  // where it usually is not. One request, and only for a credential card.
+  useEffect(() => {
+    if (isCeiling || gateLoaded) return;
+    void (async () => {
+      try {
+        useSecretsStore.getState().setElevation(await fetchElevation());
+      } catch {
+        // A gate state that could not be read leaves the button enabled and the server as the
+        // authority, which is the behaviour this replaces — never a control disabled by a failed
+        // request, which would be a form nobody can submit for a reason nobody can see.
+      }
+    })();
+  }, [isCeiling, gateLoaded]);
+
+  // Only once the answer is IN. An unknown gate must not disable anything: `gateLoaded` false means
+  // the question has not been answered yet, not that the vault is locked.
+  const locked = !isCeiling && gateLoaded && !elevated;
+  const lockedReason = "this needs an unlocked Secrets session";
+
   const submit = async (): Promise<void> => {
-    if (!value.trim() || busy) return;
+    if (!value.trim() || busy || locked) return;
     setBusy(true);
     setError(null);
     if (isCeiling) {
@@ -150,12 +185,35 @@ function InlineForm({ item, action }: { item: InboxItemView; action: InboxAction
         <button
           type="button"
           onClick={() => void submit()}
-          disabled={busy || !value.trim()}
+          disabled={busy || !value.trim() || locked}
+          // `disabled:pointer-events-none` means a disabled button shows no tooltip, so the reason
+          // goes on the wrapper. The sentence under the field says it in full — a title alone is
+          // unreachable by keyboard, which is exactly how somebody arrives at a control they cannot
+          // use.
+          title={locked ? lockedReason : undefined}
           className="shrink-0 rounded-control px-2 py-0.5 text-tiny text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
         >
           {busy ? "Saving…" : "Save"}
         </button>
       </div>
+      {locked && (
+        // THE PRECONDITION AND THE WAY OUT OF IT, in the same line. A disabled control cannot also
+        // be its own fix, which is the argument the model selector's "Add key" already makes — so
+        // the unlock lives beside it and carries somebody to the tab that owns the passcode.
+        <div className="mt-1 text-tiny text-faint">
+          {lockedReason} —{" "}
+          <button
+            type="button"
+            onClick={() => {
+              useUiStore.getState().setRightTab("secrets");
+              useUiStore.getState().closeNav();
+            }}
+            className="text-muted underline-offset-2 transition-colors hover:text-ink hover:underline"
+          >
+            unlock Secrets
+          </button>
+        </div>
+      )}
       {error && <div className="mt-1 text-tiny text-err">{error}</div>}
       {!isCeiling && (
         // WHAT THIS DOES WITH THE VALUE, said before it is typed rather than after. It is the same
