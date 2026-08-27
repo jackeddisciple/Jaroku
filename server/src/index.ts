@@ -801,7 +801,29 @@ const runWorkspaces = new Map<string, TenantContext>();
  */
 const runSpans = new Map<string, { set: (k: string, v: string | number | boolean | undefined) => void; end: () => void }>();
 function contextForRun(runId: string): TenantContext {
-  return runWorkspaces.get(runId) ?? serverContext();
+  const local = runWorkspaces.get(runId);
+  if (local) return local;
+  // A DEPLOYED RUN IS NOT IN `runWorkspaces`, AND THAT IS THE SECOND PLACE THIS FEATURE'S SCOPE
+  // WENT MISSING. Only the three LOCAL paths — run, resume, branch — record a workspace there,
+  // because until the Cockpit nothing else started a run: Part 1 built the deployed lifetime and
+  // left it with no caller, so a deployed run's events had never actually reached this function in
+  // production.
+  //
+  // Falling through to `serverContext()` puts every downstream handler in the WRONG WORKSPACE, and
+  // it does it quietly: the run row and its steps are written to the server's own workspace, the
+  // meter attributes the spend there, and `work.byRun` looks for the item somewhere it cannot be —
+  // so a job whose container reported a clean `run_end` sat at `running` for ever with a complete
+  // trace filed under a workspace nobody was looking at.
+  //
+  // `DeployRuns` ALREADY HOLDS THE ANSWER. Its entry records the workspace at dispatch, for the
+  // token it mints; asking it here is one lookup and it covers every attempt, including the fresh
+  // run id a retry mints inside the dispatcher where nothing in this file would have seen it.
+  //
+  // Declared above `deployRuns` and called only after startup, which is the same arrangement
+  // `handleHostedMcpConfirmRequest` makes for the same reason.
+  const deployed = deployRuns.get(runId);
+  if (deployed) return systemContextFor(deployed.workspaceId, newRequestId());
+  return serverContext();
 }
 
 // AND THE INTERFACE THAT WRITER NOW SITS BEHIND.

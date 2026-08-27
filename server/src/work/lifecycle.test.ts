@@ -110,6 +110,30 @@ const stepRow = (runId: string, seq: number, output: unknown): Step => ({
   started_at: new Date().toISOString(),
 });
 
+// --- 0. the workspace a deployed run's events are handled in ------------------------------------
+//
+// THE ASSERTION THAT WOULD HAVE CAUGHT THE BUG THE WALKTHROUGH FOUND. Everything below drives the
+// lifecycle with a context built by hand, which is correct for testing the transitions and says
+// nothing about where the PRODUCT gets one. In `index.ts` that is `contextForRun`, and it read a
+// map that only the three LOCAL run paths write to — so a deployed run fell through to the
+// server's own workspace, and `byRun` looked for the item somewhere it could not be. The job sat
+// at `running` for ever with a complete trace filed under a workspace nobody was looking at.
+//
+// `DeployRuns` IS WHERE THE ANSWER LIVES, because it records the workspace at dispatch for the
+// token it mints. Asserting that here is asserting the thing `contextForRun` now relies on.
+
+console.log("\nwhere a deployed run's events belong");
+{
+  const runId = randomUUID();
+  deployRuns.open({ runId, workspaceId: ctx.workspaceId, deploymentId: deployment.id, agentId: agent.id });
+  check("the registry knows which workspace dispatched it", deployRuns.get(runId)?.workspaceId === ctx.workspaceId);
+  // AND IT STOPS KNOWING ONCE THE RUN IS OVER, which is what makes the lookup bounded rather than a
+  // map that grows for the life of the process — and why the fallback below it still matters.
+  deployRuns.close(runId, "ended");
+  check("...and forgets once the run is closed", deployRuns.get(runId) === undefined);
+  check("a run nobody dispatched is not claimed by it", deployRuns.get(randomUUID()) === undefined);
+}
+
 // --- 1. run_end closes the item ------------------------------------------------------------------
 
 console.log("\nrun_end closes it");
