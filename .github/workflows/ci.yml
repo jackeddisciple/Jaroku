@@ -522,6 +522,13 @@ jobs:
           # nothing was spent, and a failure keeps the row precisely because between the POST
           # leaving and the answer arriving the container may have started the job.
           npm run test:work-dispatch
+          # AND WHAT HAPPENS AFTER THE 202, driven by events pushed onto the real bus rather than
+          # by calling the lifecycle's methods — a suite that called them by hand would assert that
+          # a method works, which nobody doubted. Its hardest assertion is the negative one: a
+          # cancelled run and a crashed one arrive as the SAME run_end, because the frozen schema
+          # has three statuses, so the only thing separating them is the boundary line the runner
+          # emits first — and the same ending without it must read as a failure.
+          npm run test:work-lifecycle
 
       # THE ACTIVITY DESTINATION, the fourth and last of the sidebar's tabs, in a step of its own
       # from its first suite — the same reason the three steps above are separate rather than
