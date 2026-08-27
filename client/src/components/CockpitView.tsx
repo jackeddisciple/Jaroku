@@ -30,6 +30,8 @@ import { ICON, TYPE } from "../lib/tokens.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import { EmptyState, LoadingLine } from "./EmptyState.tsx";
 import { FleetStrip } from "./FleetStrip.tsx";
+import { WorkDetail } from "./WorkDetail.tsx";
+import { WorkList } from "./WorkList.tsx";
 import { GaugeIcon, RocketIcon } from "./panelIcons.tsx";
 
 /**
@@ -97,7 +99,11 @@ export function CockpitView() {
   }, []);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-canvas">
+    // `relative`, BECAUSE THE DETAIL PANEL SLIDES OVER THIS REGION RATHER THAN OVER THE WINDOW. It
+    // is the same containment the trace's step detail uses: an overlay positioned against the
+    // viewport would cover the sidebar, which §2's layout law says is untouched by a full-screen
+    // destination.
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-canvas">
       <Header />
 
       {/* THE REFUSAL IS A STRIP RATHER THAN A TOAST, and it stays until the next snapshot clears it.
@@ -118,6 +124,11 @@ export function CockpitView() {
           <FleetAndWork />
         )}
       </div>
+
+      {/* MOUNTED ALWAYS AND TRANSLATED OFF-SCREEN WHEN CLOSED, so the transition plays in both
+          directions — the same mechanism `StepDetailPanel` uses. A panel that unmounted would
+          appear instantly and leave slowly, which reads as two different controls. */}
+      <WorkDetail />
     </div>
   );
 }
@@ -131,28 +142,10 @@ export function CockpitView() {
  * is what lets the strip and the list land in commits of their own.
  */
 function FleetAndWork() {
-  const items = useWorkStore((s) => s.items);
-
   return (
     <>
       <FleetStrip />
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-3">
-        {items.length === 0 ? (
-          // §11.4's second zero state. Live agents, no jobs — an idle fleet rather than an empty
-          // workspace, so this is the `line` treatment rather than the full one: there is nothing
-          // to set up and nothing has gone wrong.
-          <EmptyState size="line" title="Nothing has been asked of them yet" />
-        ) : (
-          <ul className="flex flex-col">
-            {items.map((item) => (
-              <li key={item.id} className="border-b border-hair py-2 text-caption text-ink">
-                {item.input_preview}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <WorkList />
     </>
   );
 }
