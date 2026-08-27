@@ -254,21 +254,125 @@ def _run_environment(
     return env
 
 
-def _pump_stderr(stream, run_id: str) -> None:
-    """Forward the runner's stderr into this container's log pane, one line at a time.
+#: The prefix jaroku_runner puts on its control lines — debug.py's CTRL_SENTINEL, spelled here
+#: rather than imported. This file is stdlib-only by design and the two are asserted against each
+#: other in the suite, the same way the confirmation phrases are asserted against mcp_bridge.py.
+CTRL_SENTINEL = "@@JAROKU_CTRL@@ "
+
+
+def _pump_stderr(stream, run_id: str, record: dict) -> None:
+    """Forward the runner's stderr into this container's log pane, and watch for one line in it.
 
     The runner logs to stderr on purpose (see jaroku_runner/__main__.py) and out here stderr is
     not where an operator looks — the log pane is stdout. Prefixed with the run id, because a
     container serves many runs at once and interleaved unlabelled lines are worse than none.
+
+    THE ONE LINE IT ACTUALLY READS is ``run_closed``, which is the runner saying its own
+    ``finally`` completed. Everything else here is passed through untouched. That single fact is
+    what lets ``_reap`` tell a run that ended from a run that was killed — see its own note, and
+    ``__main__.py``'s, on why an exit code cannot carry the difference.
     """
     try:
         for raw in stream:
             line = raw.rstrip("\n")
-            if line:
-                log(f"[serve] {run_id[:8]} {line}")
+            if not line:
+                continue
+            if line.startswith(CTRL_SENTINEL):
+                try:
+                    ctrl = json.loads(line[len(CTRL_SENTINEL):])
+                except ValueError:
+                    ctrl = {}
+                if isinstance(ctrl, dict) and ctrl.get("ctrl") == "run_closed":
+                    # Recorded, never acted on here. The reaper is the only thing that reads it,
+                    # and it reads it after the process has actually gone — so a run that closed
+                    # and then hung on the way out is still waited for.
+                    record["closed"] = True
+                    record["status"] = str(ctrl.get("status") or "")
+            log(f"[serve] {run_id[:8]} {line}")
     except (ValueError, OSError):
         # The pipe closed under us — the run is over, which is not an error worth a trace.
         pass
+
+
+def _died_reason(code: int) -> str:
+    """What is known, and what is not, about a run that never reported a result.
+
+    §7's rule for the server's own reconciliation sweep, applied one level in: never a silent
+    success and never a confident failure. This end of it knows slightly more than the sweep
+    does — the process is definitely gone, and how — so it says that and stops. It does not say
+    the run failed, because it does not know: a container killed a millisecond after its last
+    step spent money on every one of them.
+    """
+    if code < 0:
+        # POSIX: a negative return is -N for signal N. SIGKILL (-9) out here is almost always
+        # the OOM killer, and naming it is the difference between a user reading "your agent
+        # crashed" and reading "your container ran out of memory".
+        return (
+            f"the run process was killed by signal {-code} before it reported a result — on a "
+            "container this is usually the out-of-memory killer. Any steps already on this "
+            "trace really happened and really cost money; anything after them is unknown."
+        )
+    return (
+        f"the run process exited with code {code} before it reported a result. Any steps "
+        "already on this trace really happened and really cost money; anything after them is "
+        "unknown."
+    )
+
+
+def _push_run_end(record: dict, error: str) -> None:
+    """Close a run out from OUT HERE, because the run itself could not.
+
+    THIS IS THE OUTER HALF OF THE BRACKET §6 REQUIRES. ``__main__.py`` emits run_start and
+    run_end in a ``finally``, which covers everything the interpreter can survive — a contract
+    error, an import failure, a crash mid-graph. What it cannot cover is not surviving: an OOM
+    kill, a container stopped under it, an interpreter that died before its own module finished
+    importing. In all of those the finally never ran, and without this the run is a row that
+    says "running" until something else notices, which is silence.
+
+    ONLY WHEN THE INNER BRACKET DID NOT CLOSE, and never otherwise. `upsertRun` is an ON
+    CONFLICT DO UPDATE on status, cost and error — so a second run_end over a completed run does
+    not add anything, it REWRITES a finished run as a failed one, and rewrites the cost with a
+    zero. That is a worse outcome than the silence this exists to fix.
+
+    Stdlib, and best-effort. A control plane that cannot be reached here is one that also could
+    not be reached by the run itself, and the server's own reconciliation sweep is the backstop
+    for exactly that — this is the fast path, not the only one.
+    """
+    url = record.get("control_plane_url")
+    token = record.get("run_token")
+    if not url or not token:
+        return
+    import urllib.error
+    import urllib.request
+
+    run = {
+        "id": record["run_id"],
+        "agent_id": record["agent_id"],
+        "provider": record["provider"],
+        "model": record.get("model") or "",
+        "status": "error",
+        "started_at": record["started_at"],
+        "ended_at": _now_iso(),
+        # ZERO, AND SAID OUT LOUD IN THE ERROR RATHER THAN IMPLIED BY THE NUMBER. Whatever this
+        # run spent is on the STEPS it managed to push, and cost is summed from those — never
+        # read off this column, precisely because a run that died mid-graph leaves it at zero
+        # while its steps record real money. The error below is what tells a reader that.
+        "cost": 0,
+        "tokens": 0,
+        "error": error,
+    }
+    body = json.dumps({"events": [{"kind": "run_end", "schema_version": 1, "run": run}]}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{url.rstrip('/')}/v1/runs/{record['run_id']}/trace",
+        data=body,
+        method="POST",
+        headers={"content-type": "application/json", "authorization": f"Bearer {token}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10):  # noqa: S310 - fixed scheme, run-scoped token
+            pass
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        log(f"[serve] {record['run_id'][:8]} could not close the run out: {exc}")
 
 
 def _dump(payload: dict) -> bytes:
@@ -315,7 +419,7 @@ class AgentService:
         # process, so without this a started run is unreachable — nothing to wait on, nothing
         # to release a slot, and nothing for a later request to name. Guarded by a lock because
         # ThreadingHTTPServer means several requests genuinely are in here at once.
-        self._live: dict[str, "subprocess.Popen[str]"] = {}
+        self._live: dict[str, dict] = {}
         self._lock = threading.Lock()
 
     def live_run_ids(self) -> list:
@@ -324,12 +428,8 @@ class AgentService:
 
     def _start(
         self,
-        run_id: str,
+        record: dict,
         user_input: str,
-        provider: str,
-        model: str | None,
-        run_token: str | None,
-        control_plane_url: str | None,
     ) -> "subprocess.Popen[str]":
         """Start one run, as its own process, and return it without waiting.
 
@@ -350,7 +450,11 @@ class AgentService:
         operator looks. A thread per run rather than a select loop: the ceiling on how many
         exist at once is the semaphore, which is four.
         """
-        env = _run_environment(run_id, provider, model, run_token, control_plane_url)
+        run_id = record["run_id"]
+        env = _run_environment(
+            run_id, record["provider"], record.get("model"),
+            record.get("run_token"), record.get("control_plane_url"),
+        )
         proc = subprocess.Popen(
             [sys.executable, "-m", "jaroku_runner", self.agent_id, user_input],
             # The directory CONTAINING the project, which is what makes `agents.<id>` resolvable
@@ -366,7 +470,8 @@ class AgentService:
             errors="replace",
         )
         threading.Thread(
-            target=_pump_stderr, args=(proc.stderr, run_id), daemon=True, name=f"log-{run_id[:8]}"
+            target=_pump_stderr, args=(proc.stderr, run_id, record), daemon=True,
+            name=f"log-{run_id[:8]}",
         ).start()
         return proc
 
@@ -389,15 +494,32 @@ class AgentService:
         That is the one failure that is genuinely the REQUEST's rather than the run's: nothing
         was accepted, no run exists, and no trace will ever mention it.
         """
-        proc = self._start(run_id, user_input, provider, model, run_token, control_plane_url)
+        # EVERYTHING THE OUTER BRACKET WILL NEED, RECORDED BEFORE THE PROCESS EXISTS. If the
+        # interpreter dies on its first line there is nothing to ask afterwards — no exit
+        # message, no trace, no run row — so the facts a run_end needs are gathered from the
+        # dispatch that is still in hand rather than from the run that may never happen.
+        record: dict = {
+            "run_id": run_id,
+            "agent_id": self.agent_id,
+            "provider": provider,
+            "model": model,
+            "run_token": run_token,
+            "control_plane_url": control_plane_url,
+            "started_at": _now_iso(),
+            "closed": False,
+            "status": "",
+            "cancelled": False,
+        }
+        proc = self._start(record, user_input)
+        record["proc"] = proc
         with self._lock:
-            self._live[run_id] = proc
+            self._live[run_id] = record
         threading.Thread(
-            target=self._reap, args=(run_id, proc), daemon=True, name=f"reap-{run_id[:8]}"
+            target=self._reap, args=(record,), daemon=True, name=f"reap-{run_id[:8]}"
         ).start()
 
-    def _reap(self, run_id: str, proc: "subprocess.Popen[str]") -> None:
-        """Wait for one run, then release its slot and forget it.
+    def _reap(self, record: dict) -> None:
+        """Wait for one run, close the bracket if the run could not, release its slot.
 
         THE ONLY PLACE A SLOT IS RELEASED once a run has started, and it has to be somewhere
         like this: the request that took the slot returned a 202 seconds or minutes ago, so
@@ -408,10 +530,23 @@ class AgentService:
         process that has already exited returns immediately; on one that never exits, the
         container's own lifetime is the bound, which is the same bound a graph that never
         returns already had.
+
+        AND THE BRACKET. `run_closed` on the runner's stderr is the runner saying its own
+        `finally` completed — see __main__.py. Its ABSENCE is the interesting case and the only
+        one this acts on: the process is gone and never said it finished, which is an OOM kill, a
+        container stopped underneath it, or an interpreter that died before jaroku_runner
+        finished importing. All three leave a row reading "running" forever, and this is what
+        makes them read as an errored run instead.
         """
+        run_id = record["run_id"]
+        proc = record["proc"]
         try:
             code = proc.wait()
-            log(f"[serve] {run_id[:8]} run finished (exit {code})")
+            closed = bool(record.get("closed"))
+            status = record.get("status") or "?"
+            log(f"[serve] {run_id[:8]} run finished (exit {code}, {status if closed else 'no result reported'})")
+            if not closed:
+                _push_run_end(record, _died_reason(code))
         except Exception as exc:  # noqa: BLE001 — a reaper that dies leaks a slot forever
             log(f"[serve] {run_id[:8]} could not be waited on: {type(exc).__name__}: {exc}")
         finally:

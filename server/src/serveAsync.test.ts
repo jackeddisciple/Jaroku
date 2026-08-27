@@ -16,7 +16,15 @@
 // being wrong rather than as this one failing.
 
 import { connect } from "node:net";
-import { deployedProject, dispatch, pythonExecutable, startMockProvider, startServe } from "../fixtures/deploy/serveHarness.ts";
+import { randomUUID } from "node:crypto";
+import { rmSync } from "node:fs";
+import { join } from "node:path";
+
+import {
+  deployedProject, dispatch, killRunnerChildren, pythonExecutable,
+  startControlPlane, startMockProvider, startServe,
+} from "../fixtures/deploy/serveHarness.ts";
+import type { TraceEvent } from "./types.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = "") => {
@@ -239,6 +247,136 @@ const post = (path: string, body: string, headers: string[] = []) =>
 }
 
 await served.stop();
+
+// --- failure of the run is not failure of the request, and the bracket always closes ---------
+//
+// §6: "The one thing serve.py must guarantee is that run_start and run_end bracket everything,
+// in a finally, on every path, so a container OOM or a contract error surfaces as an errored run
+// rather than silence." The runner's own finally covers everything the interpreter survives.
+// This is about the cases it does not survive, which are the ones that produce silence.
+
+{
+  const control = await startControlPlane();
+  const deadProject = deployedProject();
+  const deadProvider = await startMockProvider([{ kind: "text", text: "never reached" }]);
+  const dead = await startServe({ project: deadProject, provider: deadProvider });
+
+  // A CONTRACT ERROR, AFTER THE CONTAINER IS ALREADY HEALTHY. serve.py checks the contract once
+  // at boot, so the only way to reach the runner's own ContractError branch is to break the
+  // project after that check has passed — which is also the realistic case: a file that went
+  // missing under a running service. §6 names this alongside the OOM: both must surface as an
+  // errored run rather than as silence, and they close the bracket at different levels.
+  rmSync(join(deadProject.projectDir, "agent.py"), { force: true });
+
+  const runId = randomUUID();
+  const opened = control.runs.open({
+    runId, workspaceId: control.workspaceId, deploymentId: "dep", agentId: deadProject.agentId,
+  });
+  const seen: TraceEvent[] = [];
+  control.bus.register(runId).on("event", (e) => seen.push(e));
+
+  const res = await dispatch(dead, {
+    input: "this run cannot load its agent",
+    run_id: runId,
+    run_token: opened.runToken,
+    control_plane_url: control.url,
+  });
+  check("a run whose agent cannot load is still ACCEPTED — the request already succeeded",
+    res.status === 202, `${res.status} ${JSON.stringify(res.body)}`);
+
+  const deadline = Date.now() + 90_000;
+  while (!seen.some((e) => e.kind === "run_end") && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  const start = seen.find((e) => e.kind === "run_start");
+  const end = seen.find((e) => e.kind === "run_end");
+  // STEPS 3 AND 6 OF __main__.py's ORDER OF OPERATIONS, and the reason they are load-bearing:
+  // run_start is emitted BEFORE the agent is loaded, so a project that cannot be imported is
+  // still a run somebody can see failing rather than a dispatch that vanished.
+  check("...and appears as a run before its agent is even loaded", start !== undefined,
+    dead.logs.slice(-5).join(" | "));
+  check("...then surfaces as an errored run rather than as silence", end !== undefined,
+    dead.logs.slice(-5).join(" | "));
+  if (end && end.kind === "run_end") {
+    check("...with the run id Jaroku dispatched, so the row it creates is the one it was watching",
+      end.run.id === runId);
+    check("...marked error, never completed", end.run.status === "error", end.run.status);
+    check("...naming the contract failure rather than a generic one",
+      (end.run.error ?? "").includes("ContractError"), end.run.error ?? "(no error)");
+  }
+  check("...and the slot the failed run held comes back",
+    (await dispatch(dead, { input: "the slot is free" })).status === 202);
+
+  await dead.stop();
+  await deadProvider.close();
+  await control.close();
+  deadProject.cleanup();
+}
+
+{
+  // AND THE KILL, which is the case §6 names first. A container that runs out of memory does not
+  // get to finish its `finally` — so this removes the runner the way the kernel would, between
+  // two nodes, and the same outer bracket has to close it.
+  const control = await startControlPlane();
+  const killProject = deployedProject();
+  const killProvider = await startMockProvider([
+    { kind: "tool_use", name: "current_time" },
+    { kind: "tool_use", name: "word_count", input: { text: "a b c" } },
+    { kind: "text", text: "done" },
+  ]);
+  // A pause at every node boundary, so there is a window to kill in. It is a debug aid the
+  // runner already has (JAROKU_STEP_DELAY_MS), not something added for this.
+  const killed = await startServe({
+    project: killProject, provider: killProvider, env: { JAROKU_STEP_DELAY_MS: "1500" },
+  });
+
+  const runId = randomUUID();
+  const opened = control.runs.open({
+    runId, workspaceId: control.workspaceId, deploymentId: "dep", agentId: killProject.agentId,
+  });
+  const seen: TraceEvent[] = [];
+  control.bus.register(runId).on("event", (e) => seen.push(e));
+
+  await dispatch(killed, {
+    input: "this run is about to be killed",
+    run_id: runId,
+    run_token: opened.runToken,
+    control_plane_url: control.url,
+  });
+
+  // Wait until it has genuinely started and pushed something, so the kill lands MID-RUN rather
+  // than before the run existed — the two are different assertions and only one is this one.
+  const startDeadline = Date.now() + 90_000;
+  while (!seen.some((e) => e.kind === "step") && Date.now() < startDeadline) {
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  const stepsBefore = seen.filter((e) => e.kind === "step").length;
+  check("a run that is about to be killed had really started", stepsBefore > 0);
+  const victims = killRunnerChildren(killed);
+  check("...and the runner process was killed out from under it", victims > 0, `${victims} killed`);
+
+  const deadline = Date.now() + 60_000;
+  while (!seen.some((e) => e.kind === "run_end") && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  const end = seen.find((e) => e.kind === "run_end");
+  check("...and the container closes the run out rather than leaving it in flight forever",
+    end !== undefined, killed.logs.slice(-6).join(" | "));
+  if (end && end.kind === "run_end") {
+    check("...as an error", end.run.status === "error", end.run.status);
+    check("...naming what a reader needs: the steps that landed really did spend money",
+      (end.run.error ?? "").includes("really happened") && (end.run.error ?? "").includes("cost money"),
+      `${end.run.error ?? "(no error)"} :: ${killed.logs.slice(-8).join(" | ")}`);
+  }
+  check("...and the steps it managed to push are still on the trace",
+    seen.filter((e) => e.kind === "step").length >= stepsBefore);
+
+  await killed.stop();
+  await killProvider.close();
+  await control.close();
+  killProject.cleanup();
+}
+
 await provider.close();
 project.cleanup();
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

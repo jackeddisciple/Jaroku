@@ -31,7 +31,7 @@ from jaroku_interceptor.schema import bind_trace_sink, emit_run_end, emit_run_st
 
 from . import controlplane_http
 from .contract import ContractError, load_agent, tools_of
-from .debug import run_with_checkpoints, thread_id_for
+from .debug import emit_ctrl, run_with_checkpoints, thread_id_for
 from .guard import install_stdout_guard
 from .models import build_model, resolve_model_name
 
@@ -159,6 +159,22 @@ def main(argv: list[str]) -> int:
         # otherwise cross the batch threshold on a short run — has to go now. Nothing calls
         # this again: a process about to exit gets exactly one more chance to deliver it.
         controlplane_http.flush_trace_events()
+        # AND THE LAST THING THIS PROCESS SAYS: that the bracket above actually closed.
+        #
+        # WHY IT EXISTS. A local run has a process manager holding its pipe, so "the run ended"
+        # is the pipe closing. A deployed run has serve.py, which discards this process's stdout
+        # (the trace goes over HTTP from in here) and therefore cannot tell a run that emitted
+        # run_end from one the kernel killed between two steps. Both leave a container that
+        # exits; only one of them left a finished run behind.
+        #
+        # An exit code cannot carry it either. A `python -m jaroku_runner` that cannot import
+        # its own package exits 1 and emits nothing; a run that errored exits 1 and emitted a
+        # perfectly good run_end. So the difference is stated rather than inferred, and the
+        # STATUS is on it — because "paused" is the third case, and a paused run deliberately
+        # has no run_end at all. Anything that pushed an error run_end over one of those would
+        # end a run somebody is about to resume.
+        emit_ctrl({"ctrl": "run_closed", "run_id": run.id,
+                   "status": "paused" if paused else run.status})
 
     status = "paused" if paused else run.status
     log(f"[jaroku] run {run.id} {status} tokens={run.tokens} cost={run.cost}")

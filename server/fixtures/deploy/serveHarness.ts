@@ -14,7 +14,7 @@
 // trace and a local trace differ in run id and timing and nothing else" is a comparison of two
 // real traces rather than of a real one against a fixture's idea of one.
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, cpSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
@@ -22,7 +22,16 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { randomBytes, randomUUID } from "node:crypto";
+
 import { writeDeployArtifacts } from "../../src/deployArtifacts.ts";
+import { DeployRuns } from "../../src/deployRuns.ts";
+import { Router } from "../../src/http/router.ts";
+import { BackpressureTracker } from "../../src/sandbox/backpressure.ts";
+import { RunEventBus } from "../../src/sandbox/eventBus.ts";
+import { registerControlPlaneRoutes } from "../../src/sandbox/controlPlaneRoutes.ts";
+import { RunTokenRevocationList } from "../../src/sandbox/runTokens.ts";
+import type { TraceEvent } from "../../src/types.ts";
 
 export const REPO_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 export const RUNTIME_DIR = join(REPO_DIR, "runtime");
@@ -149,7 +158,16 @@ export function deployedProject(agentId = "example_agent"): DeployedProject {
     runtimeDir,
     projectDir,
     agentId,
-    cleanup: () => rmSync(scratch, { recursive: true, force: true }),
+    // BEST-EFFORT, AND RETRIED. On Windows a directory a just-killed process still has open —
+    // its cwd, a checkpoint database, an import lock — refuses to be removed for a moment
+    // afterwards, and a fixture that threw EPERM here would fail suites whose assertions had all
+    // passed. A temp directory left behind is the operating system's problem; a red suite that
+    // proved nothing is ours.
+    cleanup: () => {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try { rmSync(scratch, { recursive: true, force: true }); return; } catch { /* retry */ }
+      }
+    },
   };
 }
 
@@ -232,19 +250,195 @@ export async function startServe(opts: ServeOptions): Promise<ServedAgent> {
     await new Promise((r) => setTimeout(r, 150));
   }
 
-  return {
+  const served: ServedAgent = {
     url,
     token,
     logs,
     proc,
     stop: () =>
       new Promise((done) => {
+        // THE TREE, NOT THE HANDLE. On Windows the process node spawned is a virtualenv shim and
+        // serve.py is its child — see killRunnerChildren — so killing the handle leaves the real
+        // server running, holding the port and the scratch directory the suite is about to try
+        // to delete. That is what turns a passing suite into an EPERM in its own cleanup.
+        killDescendants(proc.pid);
         if (proc.exitCode !== null) return done();
         proc.once("exit", () => done());
         proc.kill();
         setTimeout(() => { proc.kill("SIGKILL"); done(); }, 5_000).unref();
       }),
   };
+  return served;
+}
+
+/** Every descendant of `root`, killed. `root` itself is left to its own handle. */
+function killDescendants(root: number | undefined): void {
+  if (!root) return;
+  try {
+    const rows = processTable();
+    const tree = new Set<number>([root]);
+    for (let pass = 0; pass < 8; pass++) {
+      let grew = false;
+      for (const r of rows) if (tree.has(r.ppid) && !tree.has(r.pid)) { tree.add(r.pid); grew = true; }
+      if (!grew) break;
+    }
+    for (const pid of tree) {
+      if (pid === root) continue;
+      try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+    }
+  } catch { /* best effort — a stray process is not a failed assertion */ }
+}
+
+/** pid, parent pid and command line for every process on this machine. */
+function processTable(): Array<{ pid: number; ppid: number; cmd: string }> {
+  if (process.platform === "win32") {
+    const out = spawnSync(
+      "powershell.exe",
+      [
+        "-NoProfile", "-Command",
+        "Get-CimInstance Win32_Process | ForEach-Object " +
+        '{ "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)" }',
+      ],
+      { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
+    ).stdout ?? "";
+    return out.split(/\r?\n/)
+      .map((line) => {
+        const [pid, ppid, ...rest] = line.split("\t");
+        return { pid: Number(pid), ppid: Number(ppid), cmd: rest.join("\t") };
+      })
+      .filter((r) => Number.isInteger(r.pid) && r.pid > 0);
+  }
+  const out = spawnSync("ps", ["-eo", "pid=,ppid=,args="], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }).stdout ?? "";
+  return out.split("\n")
+    .map((line) => {
+      const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+      return m ? { pid: Number(m[1]), ppid: Number(m[2]), cmd: m[3]! } : { pid: 0, ppid: 0, cmd: "" };
+    })
+    .filter((r) => Number.isInteger(r.pid) && r.pid > 0);
+}
+
+export interface HarnessControlPlane {
+  url: string;
+  bus: RunEventBus;
+  runs: DeployRuns;
+  revocations: RunTokenRevocationList;
+  workspaceId: string;
+  /** Every trace event that reached the bus, by run id, for a suite that only wants the list. */
+  eventsFor: (runId: string) => TraceEvent[];
+  /** Control lines a run pushed — boundaries, pauses, the run_closed marker. */
+  controlFor: (runId: string) => Record<string, unknown>[];
+  close: () => Promise<void>;
+}
+
+/**
+ * The real control plane, on a real port — the same four routes index.ts registers at startup.
+ *
+ * NOT A STUB OF THEM. §7 says the ingest is already built and must be used rather than forked,
+ * and a harness that answered 200 to whatever a container pushed would make every suite over it
+ * a test of the container alone. Everything a deployed run pushes here goes through the real
+ * `authenticate`, the real backpressure tracker and the real event-shape check.
+ */
+export async function startControlPlane(
+  opts: { backpressure?: BackpressureTracker; workspaceId?: string } = {},
+): Promise<HarnessControlPlane> {
+  const signingKey = randomBytes(32);
+  const revocations = new RunTokenRevocationList();
+  const bus = new RunEventBus();
+  const router = new Router({ log: () => {}, quiet: () => true });
+  const events = new Map<string, TraceEvent[]>();
+  const control = new Map<string, Record<string, unknown>[]>();
+
+  registerControlPlaneRoutes(router, {
+    bus,
+    signingKey,
+    revocations,
+    backpressure: opts.backpressure ?? new BackpressureTracker(),
+  });
+  const server = createServer((req, res) => {
+    void router.handle(req, res).then((handled) => { if (!handled) res.writeHead(404).end(); });
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+  const runs = new DeployRuns({ signingKey, revocations, bus });
+  // Recorded as it arrives rather than read back later: a bus entry is released the moment a run
+  // closes, and a suite that asked afterwards would find nothing for exactly the runs it cares
+  // about most.
+  const originalOpen = runs.open.bind(runs);
+  runs.open = (input) => {
+    const opened = originalOpen(input);
+    events.set(input.runId, []);
+    control.set(input.runId, []);
+    const emitter = bus.register(input.runId);
+    emitter.on("event", (e) => events.get(input.runId)!.push(e));
+    emitter.on("control", (c) => control.get(input.runId)!.push(c));
+    return opened;
+  };
+
+  return {
+    url,
+    bus,
+    runs,
+    revocations,
+    workspaceId: opts.workspaceId ?? randomUUID(),
+    eventsFor: (runId) => events.get(runId) ?? [],
+    controlFor: (runId) => control.get(runId) ?? [],
+    close: () => new Promise((done) => server.close(() => done())),
+  };
+}
+
+/**
+ * Kill the runner processes serve.py started, without touching serve.py.
+ *
+ * THIS IS THE OOM KILLER, STOOD IN FOR. A container that runs out of memory does not get to
+ * finish its `finally`: the kernel removes the process between two steps, and the only evidence
+ * is that nothing further arrives. There is no way to ask a Python process to fail like that —
+ * every mechanism inside it runs its cleanup — so it has to be done from out here, to the child,
+ * exactly as the kernel would.
+ *
+ * Two platform branches because listing a process's children has no portable spelling, and both
+ * are read-only queries followed by a kill of what they return. Returns how many were killed, so
+ * a suite can assert it actually did something rather than passing because it found nothing.
+ */
+export function killRunnerChildren(served: ServedAgent): number {
+  const root = served.proc.pid;
+  if (!root) return 0;
+
+  // THE WHOLE DESCENDANT TREE, AND THEN MATCHED ON THE COMMAND LINE. Both halves were learned
+  // the hard way and both are load-bearing:
+  //
+  //   DESCENDANTS, NOT CHILDREN. On Windows a virtualenv's `python.exe` re-execs the real
+  //   interpreter, so the process node spawned is a shim and serve.py is its child — which makes
+  //   the runner a GRANDCHILD. Killing the direct child kills serve.py, and the runner then
+  //   survives with a broken stderr pipe and reports `OSError: [Errno 22]` as its own failure.
+  //   That is a run that failed, not a run that was killed, and this helper exists to produce
+  //   the second one.
+  //
+  //   BY COMMAND LINE, NOT BY EXECUTABLE NAME. Every process in that tree is `python.exe`, so
+  //   the name distinguishes nothing. `jaroku_runner` is on the runner's argv and on nothing
+  //   else's.
+  let rows: Array<{ pid: number; ppid: number; cmd: string }> = [];
+  try { rows = processTable(); } catch { return 0; }
+
+  const descendants = new Set<number>([root]);
+  // Repeated passes rather than recursion: the table is unordered, so a grandchild can appear
+  // before its parent, and one pass would miss it. Bounded by the depth of the tree, which is
+  // three.
+  for (let pass = 0; pass < 8; pass++) {
+    let grew = false;
+    for (const r of rows) {
+      if (descendants.has(r.ppid) && !descendants.has(r.pid)) { descendants.add(r.pid); grew = true; }
+    }
+    if (!grew) break;
+  }
+
+  let killed = 0;
+  for (const r of rows) {
+    if (r.pid === root || !descendants.has(r.pid)) continue;
+    if (!r.cmd.includes("jaroku_runner")) continue;
+    try { process.kill(r.pid, "SIGKILL"); killed++; } catch { /* already gone */ }
+  }
+  return killed;
 }
 
 /** One dispatch, exactly as Jaroku makes it. */
