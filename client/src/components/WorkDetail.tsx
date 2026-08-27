@@ -27,6 +27,7 @@ import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import { Capable } from "./Capable.tsx";
+import { Chip } from "./Chip.tsx";
 import { XIcon } from "./panelIcons.tsx";
 
 function Kv({ label, value, tag }: { label: string; value: React.ReactNode; tag?: React.ReactNode }) {
@@ -54,7 +55,12 @@ function TextBlock({ label, text }: { label: string; text: string }) {
     <div className="flex min-h-0 flex-col gap-1">
       <span className={TYPE.sectionLabel}>{label}</span>
       <div className="max-h-[40vh] overflow-auto rounded-control border border-hair bg-canvas px-2.5 py-2">
-        <pre className="whitespace-pre-wrap break-words font-mono text-tiny leading-[1.55] text-ink">{text}</pre>
+        {/* `pre` FOR THE LINE BREAKS AND NOT FOR THE FACE. An input is a real customer email and
+            an output is what the agent said back — both are prose, and §04's rule is that the
+            mono face means "this is literally code". What preserves a pasted email's shape is
+            `whitespace-pre-wrap`; setting it in mono as well would make somebody's own words read
+            as a log line. `McpConfirmModal` earns mono because what it renders is JSON. */}
+        <pre className="whitespace-pre-wrap break-words font-sans text-caption leading-[1.55] text-ink">{text}</pre>
       </div>
     </div>
   );
@@ -215,10 +221,14 @@ export function WorkDetail() {
             <button
               type="button"
               onClick={() => void navigator.clipboard?.writeText(item.id)}
-              className="ml-auto font-mono text-tiny text-faint transition-colors duration-fast hover:text-muted"
+              className="ml-auto transition-opacity duration-fast hover:opacity-80"
               title="Copy this job's id"
             >
-              {item.id.slice(0, 8)}
+              {/* THROUGH `Chip`'s `mono` PROP RATHER THAN A LOCAL CLASS, which is where the one decision
+                  about that face lives. An id IS an identifier — §12 needs it citable — so mono is
+                  right here and wrong four lines up, and routing it through the component that
+                  owns the face is what keeps the two apart. */}
+              <Chip mono size="sm" tone="faint">{item.id.slice(0, 8)}</Chip>
             </button>
           </div>
         </div>

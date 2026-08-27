@@ -25,6 +25,7 @@ import { useEffect, useRef } from "react";
 import { fmtCost, fmtDuration } from "../lib/format.ts";
 import { sendCancelWork, sendListWork, sendLoadWorkItem, sendRetryWork } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
+import { useMcpStore } from "../store/mcpStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import { WORK_STATUS_ORDER } from "../store/workStore.ts";
 import type { WorkItemView, WorkStatus } from "../types.ts";
@@ -150,6 +151,18 @@ function Row({ item }: { item: WorkItemView }) {
             renders nothing at all for a role that cannot use them — §8's rule is ABSENT rather than
             disabled or hidden, because a disabled control invites somebody to work out what would
             enable it and a hidden one is a devtools panel away from being clicked. */}
+        {/* §14: A WAITING JOB IS ANSWERED IN THE EXISTING MODAL, UNCHANGED, and the row's job is
+            to say WHICH question rather than to ask it again. The modal is mounted at the
+            application root and is already on screen for anyone in this workspace — including a
+            tab that connected after the ask went out, which the relay now replays to.
+
+            THERE IS DELIBERATELY NO "ANSWER" BUTTON HERE. A second control that opened a second
+            copy of the dialog would be two places one question can be answered, which is what
+            §3 refuses on the Inbox's behalf — and it is worse than that here, because the two
+            would race for one nonce and the loser would report a failure for a question that had
+            been answered correctly. */}
+        {item.status === "waiting" && <WaitingFor item={item} />}
+
         <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-fast focus-within:opacity-100 group-hover:opacity-100">
           {live ? (
             <Capable cmd="cancelWork">
@@ -179,6 +192,33 @@ function Row({ item }: { item: WorkItemView }) {
         </div>
       </div>
     </li>
+  );
+}
+
+/**
+ * What a waiting job is waiting for, named on the row.
+ *
+ * IT READS `mcpStore.confirms`, WHICH IS THE MODAL'S OWN QUEUE, so the row and the dialog cannot
+ * disagree about what is being asked — one source, rendered twice. A row that carried the tool
+ * name from its own payload would be a second copy of a fact that moves, and the moment it moved
+ * the list would be naming a call nobody was being asked about any more.
+ *
+ * AND IT SAYS SOMETHING EVEN WHEN THE ASK IS NOT IN HAND. A job can read `waiting` in a client
+ * that has not received the request — a race on connect, or a workspace switch mid-question — and
+ * "waiting on somebody" is true and useful where a blank row is neither.
+ */
+function WaitingFor({ item }: { item: WorkItemView }) {
+  const ask = useMcpStore((s) => s.confirms.find((c) => c.runId === item.run_id));
+  return (
+    <span className="hidden shrink-0 text-tiny text-muted sm:inline">
+      {ask ? (
+        <>
+          waiting on <span className="text-ink">{ask.server}/{ask.tool}</span>
+        </>
+      ) : (
+        "waiting on somebody"
+      )}
+    </span>
   );
 }
 

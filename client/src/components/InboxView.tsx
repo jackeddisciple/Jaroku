@@ -52,6 +52,7 @@ import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { InboxCard } from "./InboxCard.tsx";
+import { CockpitPointer } from "./CockpitPointer.tsx";
 import { InboxTray } from "./InboxTray.tsx";
 import { useInboxDrag } from "./useInboxDrag.ts";
 import { selectOnClick, useInboxKeys } from "./useInboxKeys.ts";
@@ -479,6 +480,16 @@ export function InboxView() {
       {error && (
         <div className="shrink-0 border-b border-hair px-5 py-2 text-tiny text-err">{error}</div>
       )}
+
+      {/* §3'S ONE SEAM BETWEEN TWO TABS. A deployed run waiting on an MCP confirmation is blocking
+          in this board's sense and waiting on you in the Cockpit's — and it has ONE home, which is
+          the Cockpit. This is the pointer §3 asks for in place of a second card: "Two boards
+          showing the same thing is how both stop being believed."
+
+          ABOVE THE RAIL RATHER THAN INSIDE A COLUMN, because it is not an item. Putting it in the
+          blocking column would make it a card in every way that matters — countable, dismissable,
+          sortable — which is the thing it exists instead of. */}
+      <CockpitPointer />
 
       <div className="flex min-h-0 flex-1">
         <LeftRail filter={filter} onFilter={setFilter} agentId={agentId} onAgent={setAgentId} />

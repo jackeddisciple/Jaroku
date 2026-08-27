@@ -27,6 +27,7 @@ import { useEffect } from "react";
 
 import { sendListFleet, sendListWork } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
+import { useUiStore } from "../store/uiStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import { EmptyState, LoadingLine } from "./EmptyState.tsx";
 import { FleetStrip } from "./FleetStrip.tsx";
@@ -88,15 +89,23 @@ export function CockpitView() {
   const loaded = useWorkStore((s) => s.loaded);
   const anyLive = useWorkStore((s) => s.anyLive);
   const error = useWorkStore((s) => s.error);
+  const setFilters = useWorkStore((s) => s.setFilters);
+  const takeCockpitAgentIntent = useUiStore((s) => s.takeCockpitAgentIntent);
 
   // BOTH READS ON MOUNT, and they are two because they answer on different clocks — see §5. The
   // list arrives on connect as well (the relay sends it in the initial snapshot, so the badge is
   // right on frame one), and asking again here is what makes the page correct after a tab has been
   // open through a workspace switch or a reconnect.
   useEffect(() => {
+    // A POINTER'S FILTER IS APPLIED BEFORE THE READ, not after it. An Agent detail's strip and the
+    // Inbox both open this tab already narrowed, and asking unfiltered first would render the
+    // whole workspace's work for a frame — which on a busy workspace is a list somebody starts
+    // reading before it is replaced under them.
+    const intent = takeCockpitAgentIntent();
+    if (intent !== null) setFilters({ agentId: intent, scope: "all" });
     sendListWork();
     sendListFleet();
-  }, []);
+  }, [takeCockpitAgentIntent, setFilters]);
 
   return (
     // `relative`, BECAUSE THE DETAIL PANEL SLIDES OVER THIS REGION RATHER THAN OVER THE WINDOW. It

@@ -257,8 +257,25 @@ interface UiState {
    * one-shot intent rather than a filter that sticks — the same shape `prefillChat` has.
    */
   inboxAgentIntent: string | null;
+  /** `undefined` is "nobody asked"; `null` is "open it showing everything". See the taker. */
+  cockpitAgentIntent?: string | null;
   openInboxForAgent: (agentId: string) => void;
   takeInboxAgentIntent: () => string | null;
+  /**
+   * Open the Cockpit, optionally narrowed to one agent.
+   *
+   * THE SAME SHAPE AS `openInboxForAgent` AND FOR THE SAME REASON: an agent's detail view and the
+   * Inbox both need to POINT at this tab rather than reproduce it, and a pointer that opened the
+   * board unfiltered would drop the one fact that made it worth following. §3 is explicit — "do
+   * not put a work list inside Agent detail; a second place a job can be dealt with is the mistake
+   * the Inbox already refused. Put a pointer strip there instead."
+   *
+   * AN INTENT RATHER THAN A DIRECT WRITE INTO `workStore`, matching the Inbox's: the store is
+   * emptied on a workspace switch and the view is what asks the server, so a filter set from here
+   * has to survive until the view mounts and can send for it.
+   */
+  openCockpitForAgent: (agentId: string | null) => void;
+  takeCockpitAgentIntent: () => string | null;
   navView: NavDestination | null;
   openNav: (destination: NavDestination) => void;
   closeNav: () => void;
@@ -482,8 +499,26 @@ export const useUiStore = create<UiState>((set) => ({
   // Both, together: opening a destination is being in it AND seeing its list.
   openNav: (navView) => set({ navView, navSection: navView }),
   inboxAgentIntent: null,
+  cockpitAgentIntent: undefined,
   openInboxForAgent: (agentId) =>
     set({ inboxAgentIntent: agentId, navView: "inbox", navSection: "inbox" }),
+  openCockpitForAgent: (agentId) =>
+    set({ cockpitAgentIntent: agentId, navView: "work", navSection: "work" }),
+  takeCockpitAgentIntent: () => {
+    // READ AND CLEARED IN ONE `set`, exactly as the Inbox's is and for the same reason: two
+    // mounts racing during the navigation would otherwise both see the intent, and the second
+    // would re-apply a filter the first had already consumed.
+    //
+    // A `null` INTENT IS STILL AN INTENT HERE, unlike the Inbox's — "open the Cockpit showing
+    // everything" is a real thing a pointer asks for, and the sentinel for "nobody asked" is
+    // therefore `undefined` rather than `null`.
+    let intent: string | null = null;
+    useUiStore.setState((s) => {
+      intent = s.cockpitAgentIntent ?? null;
+      return s.cockpitAgentIntent === undefined ? {} : { cockpitAgentIntent: undefined };
+    });
+    return intent;
+  },
   takeInboxAgentIntent: () => {
     // READ AND CLEARED IN ONE `set`, which is what makes it a one-shot rather than a filter that
     // sticks. Two mounts racing — a re-render during the navigation — would otherwise both see the

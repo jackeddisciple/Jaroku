@@ -3250,6 +3250,26 @@ export interface RelayOptions {
   getAgentGraph?: (ctx: TenantContext, agentId: string) => Promise<unknown>;
   listMcpServers?: (ctx: TenantContext) => unknown[] | Promise<unknown[]>;
   /**
+   * Every confirmation this workspace is currently blocked on, for a socket that has just
+   * connected.
+   *
+   * A REPLAY RATHER THAN A NEW MECHANISM, and it exists because the ask is the one broadcast in
+   * this product that a client can MISS. `confirmRequest` goes out once, when the runner halts;
+   * a tab opened, reloaded or reconnected after that point has a run stopped on a timer, a
+   * `waiting` row saying so, and no modal to answer it in. The run then denies, and nothing
+   * anywhere said why.
+   *
+   * IT WAS SURVIVABLE BEFORE THE COCKPIT AND IS NOT NOW. A local run's ask arrives in the tab
+   * that started it, seconds after somebody pressed Run — so the window was small and the person
+   * was watching. A DEPLOYED run is dispatched and then left, and the whole point of §4's
+   * `waiting` state is that somebody comes back to it later, in a tab that was not open when the
+   * question was asked.
+   *
+   * The client's `addConfirm` is idempotent by nonce, so a replay that overlaps a live broadcast
+   * is a no-op rather than a second modal.
+   */
+  listPendingConfirms?: (ctx: TenantContext) => McpEvent[] | Promise<McpEvent[]>;
+  /**
    * Which provider keys are set, by name, and whether this workspace's own pays for our calls.
    *
    * Takes the asking socket's context, like every other read here. It used to take nothing,
@@ -3525,6 +3545,12 @@ export class WsRelay {
         this.sendTo(ws, { channel: "history", ...(await this.historyWindow(ctx)) });
         this.sendTo(ws, { channel: "agents", agents: (await this.opts.listAgents?.(ctx)) ?? [] });
         this.sendTo(ws, { channel: "mcp", type: "servers", servers: (await this.opts.listMcpServers?.(ctx)) ?? [] });
+        // AND WHATEVER IS BLOCKED RIGHT NOW, replayed to this socket alone — see the option's own
+        // note. To this socket rather than broadcast, because a reconnecting tab is the only one
+        // that has missed anything and every other tab already holds the ask.
+        for (const pending of (await this.opts.listPendingConfirms?.(ctx)) ?? []) {
+          this.sendTo(ws, { channel: "mcp", ...pending });
+        }
         // Which providers are connected, so a first-run client knows on frame one whether it
         // is looking at a configured install or an empty one.
         this.sendTo(ws, {

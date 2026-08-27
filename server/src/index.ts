@@ -2677,8 +2677,12 @@ function handleHostedMcpConfirmRequest(runId: string, payload: Record<string, un
   const runCtx = contextForRun(runId);
   const server = String(payload.server ?? "unknown");
   const tool = String(payload.tool ?? "unknown");
+  const impactReason = String(payload.impact_reason ?? "it is classified high-impact");
+  const args = String(payload.args ?? "{}");
+  const timeoutS = typeof payload.timeout_s === "number" ? payload.timeout_s : 120;
   pendingConfirms.set(confirmKey(runId, nonce), {
-    runId, workspaceId: runCtx.workspaceId, nonce, server, tool, requestedAt: Date.now(),
+    runId, workspaceId: runCtx.workspaceId, nonce, server, tool,
+    impactReason, args, timeoutS, requestedAt: Date.now(),
   });
   console.log(`[mcp] ${runId} is waiting for confirmation of ${server}/${tool} (hosted)`);
   // §4'S `waiting`, WHICH IS THE STATE THE WHOLE STATUS SET EXISTS FOR — and this is the path it
@@ -2695,9 +2699,9 @@ function handleHostedMcpConfirmRequest(runId: string, payload: Record<string, un
     nonce,
     server,
     tool,
-    impactReason: String(payload.impact_reason ?? "it is classified high-impact"),
-    args: String(payload.args ?? "{}"),
-    timeoutS: typeof payload.timeout_s === "number" ? payload.timeout_s : 120,
+    impactReason,
+    args,
+    timeoutS,
     requestedAt: new Date().toISOString(),
   });
 }
@@ -4228,6 +4232,33 @@ const relay = new WsRelay({
       ? agentGraph(ctx, agentId)
       : { agent_id: agentId, error: "no such agent in this workspace" },
   listMcpServers: (ctx) => mcpRegistry.list(ctx),
+  // WHATEVER IS BLOCKED RIGHT NOW, for a tab that connected after the ask went out. See the
+  // relay option's own note: a `confirmRequest` is broadcast once, and before the Cockpit that
+  // was survivable because a local run's ask arrives seconds after somebody pressed Run in the
+  // tab they pressed it in. A deployed run is dispatched and left, and §4's whole point is that
+  // somebody comes back to it later.
+  listPendingConfirms: (ctx) =>
+    [...pendingConfirms.values()]
+      // SCOPED, LIKE EVERY OTHER READ ON THIS SOCKET. `pendingConfirms` is process-wide and holds
+      // every workspace's blocked runs; the workspace id is on the record precisely so answering
+      // one can be checked against who is answering, and the same field is what filters this.
+      .filter((p) => p.workspaceId === ctx.workspaceId)
+      .map((p) => ({
+        type: "confirmRequest" as const,
+        runId: p.runId,
+        nonce: p.nonce,
+        server: p.server,
+        tool: p.tool,
+        impactReason: p.impactReason,
+        args: p.args,
+        // THE TIMER IS WHAT IS LEFT OF IT, not what it started at. The runner denies on its own
+        // clock, so a replay that restated the original ceiling would show a fresh two minutes to
+        // somebody who has thirty seconds — a countdown that is wrong in the direction that makes
+        // people take their time.
+        timeoutS: Math.max(0, p.timeoutS - Math.floor((Date.now() - p.requestedAt) / 1000)),
+        requestedAt: new Date(p.requestedAt).toISOString(),
+      })),
+
   // §4's grid, with every card's tags already derived — see `agentGridSnapshot` for why deriving
   // them here rather than in the browser is a correctness requirement and not an optimisation.
   listAgentGrid: (ctx) => agentGridSnapshot(ctx),
@@ -4931,6 +4962,22 @@ interface PendingConfirm {
   nonce: string;
   server: string;
   tool: string;
+  /**
+   * The body of the dialog, kept rather than only broadcast.
+   *
+   * §14: a `waiting` job is answered in the EXISTING modal, and that modal's whole design is that
+   * the ARGUMENTS are its body — "a confirmation that says only 'create_issue wants to run' is a
+   * rubber stamp: the tool was already approved in principle when it was selected during
+   * planning. What was never approved is THIS call, with these values." So a replay to a tab that
+   * connected after the ask was raised has to carry them, or it is the rubber stamp.
+   *
+   * NOTHING NEW IS DISCLOSED BY KEEPING THEM. Every field here was already broadcast to every
+   * socket in the workspace the moment the run halted; what changes is that a tab which was not
+   * open then can be told too. `args` is capped by the bridge before it ever reaches this file.
+   */
+  impactReason: string;
+  args: string;
+  timeoutS: number;
   requestedAt: number;
 }
 const pendingConfirms = new Map<string, PendingConfirm>();
@@ -10453,8 +10500,12 @@ onBothPools("control", ({ runId: slotRunId, ctrl }) => {
         relay.broadcastMcp(runCtx, { type: "confirmResolved", runId, nonce, verdict: "run" });
       });
 
+      const impactReason = String(ctrl.impact_reason ?? "it is classified high-impact");
+      const args = String(ctrl.args ?? "{}");
+      const timeoutS = typeof ctrl.timeout_s === "number" ? ctrl.timeout_s : 120;
       pendingConfirms.set(confirmKey(runId, nonce), {
-        runId, workspaceId: runCtx.workspaceId, nonce, server, tool, requestedAt: Date.now(),
+        runId, workspaceId: runCtx.workspaceId, nonce, server, tool,
+        impactReason, args, timeoutS, requestedAt: Date.now(),
       });
       console.log(`[mcp] ${runId} is waiting for confirmation of ${server}/${tool}`);
       relay.broadcastMcp(runCtx, {
@@ -10463,9 +10514,9 @@ onBothPools("control", ({ runId: slotRunId, ctrl }) => {
         nonce,
         server,
         tool,
-        impactReason: String(ctrl.impact_reason ?? "it is classified high-impact"),
-        args: String(ctrl.args ?? "{}"),
-        timeoutS: typeof ctrl.timeout_s === "number" ? ctrl.timeout_s : 120,
+        impactReason,
+        args,
+        timeoutS,
         requestedAt: new Date().toISOString(),
       });
       // A halted graph waiting on a person is §3.3's `needs_you`, and the derivation reads
