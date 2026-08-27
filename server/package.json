@@ -230,6 +230,7 @@
     "test:work-dispatch": "tsx src/work/dispatcher.test.ts",
     "test:work-lifecycle": "tsx src/work/lifecycle.test.ts",
     "test:work-cost": "tsx src/work/cost.test.ts",
+    "test:work-redaction": "tsx src/work/payload.test.ts",
     "test:activity-range": "tsx src/activity/range.test.ts",
     "test:activity-spend": "tsx src/activity/spend.test.ts",
     "test:activity-health": "tsx src/activity/health.test.ts",

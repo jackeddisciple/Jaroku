@@ -535,6 +535,13 @@ jobs:
           # by name: forty jobs is the same number of queries as one, asserted as equality rather
           # than as a threshold, because a threshold is a budget somebody spends.
           npm run test:work-cost
+          # AND THE TWO SINKS, checked the way test:log-redaction checks its own: one known secret,
+          # and every route into `output` and `error` tried against it. `output` is what a model
+          # produced inside somebody's container and `error` is a traceback from a process that had
+          # every credential the deploy gave it. Its sharpest assertion is about ORDER — a secret
+          # sitting across the truncation point, which a truncate-then-redact implementation leaves
+          # half visible and which looks completely correct in review.
+          npm run test:work-redaction
 
       # THE ACTIVITY DESTINATION, the fourth and last of the sidebar's tabs, in a step of its own
       # from its first suite — the same reason the three steps above are separate rather than

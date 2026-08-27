@@ -33,6 +33,7 @@ import { randomUUID } from "node:crypto";
 import { asInt, type Db, type Queryable } from "../db/db.ts";
 import type { TenantContext } from "../db/tenant.ts";
 import { MAX_BODY_BYTES } from "../http/router.ts";
+import { boundError, boundOutput } from "./payload.ts";
 
 /**
  * A closed set of six, and the CHECK constraint in migration 063 is the same six.
@@ -480,6 +481,12 @@ export class WorkStore {
    */
   async finish(ctx: TenantContext, id: string, outcome: FinishWorkItem): Promise<boolean> {
     const at = outcome.at ?? nowIso();
+    // REDACTED AND BOUNDED HERE, BECAUSE THIS IS THE ONLY WRITER OF EITHER COLUMN. `output` is
+    // what a model produced inside somebody's container and `error` is a traceback from a process
+    // that had every credential the deploy handed it in its environment — so both are sinks in
+    // exactly the sense a log is, and both outlive the job in a row that is broadcast to every
+    // socket in the workspace. Doing it at the call sites would mean the next call site does not;
+    // doing it at render time would leave the ROW holding the raw text. See `payload.ts`.
     const res = await this.db.scoped(ctx.workspaceId, (tx) =>
       tx.run(
         `UPDATE work_items
@@ -488,7 +495,7 @@ export class WorkStore {
           WHERE id = ? AND workspace_id = ?
             AND status IN ('queued', 'running', 'waiting')`,
         [
-          outcome.status, outcome.output ?? null, outcome.error ?? null,
+          outcome.status, boundOutput(outcome.output), boundError(outcome.error),
           outcome.failureKind ?? null, at, at, id, ctx.workspaceId,
         ],
       ),
