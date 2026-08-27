@@ -89,6 +89,29 @@ const catalog = loadConnectors(REAL_RUNTIME);
 }
 
 {
+  // A CROSS-LANGUAGE CONSTANT, ASSERTED RATHER THAN TRUSTED. dockerfile.ts writes the vendored
+  // directory and puts it on PYTHONPATH; serve.py reads it back to find the runner for the
+  // subprocess it starts. Renamed on one side alone, the image builds, the container starts,
+  // /health answers, and every single run fails to import `jaroku_runner` — a failure with no
+  // line of either file to look at. The runtime's confirmation phrases are held to mcp_bridge.py
+  // the same way, for the same reason.
+  const serve = readFileSync(join(REAL_RUNTIME, "tool_templates", "serve.py"), "utf8");
+  check(
+    "serve.py looks for the runner where the deploy actually vendors it",
+    serve.includes(`VENDORED_RUNTIME_DIR = "${VENDORED_RUNTIME_DIR}"`),
+    serve.split("\n").filter((l) => l.startsWith("VENDORED_RUNTIME_DIR")).join(" | "),
+  );
+  check(
+    "...and starts the runner rather than invoking a graph itself",
+    serve.includes('"-m", "jaroku_runner"') && !serve.includes("build_graph(llm)"),
+  );
+  check(
+    "...as a subprocess, so the stdout guard and the log pane are never the same fd",
+    serve.includes("subprocess.Popen") && serve.includes("stdout=subprocess.DEVNULL"),
+  );
+}
+
+{
   // The refusal §5 says stays. A malformed requirement is refused outright rather than escaped
   // into a `RUN uv pip install` line that runs as root while the image is built.
   let refused = false;

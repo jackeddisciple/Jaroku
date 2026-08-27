@@ -52,11 +52,14 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import subprocess
 import sys
 import threading
 import time
 import traceback
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 # A deployed agent answers a public URL and spends a real API key on every request, so the
 # defaults here fail closed rather than open.
@@ -64,7 +67,27 @@ DEFAULT_PORT = 8080
 DEFAULT_CONCURRENCY = 4
 MAX_BODY_BYTES = 64 * 1024
 
-DEFAULT_MODELS = {"anthropic": "claude-haiku-4-5", "openai": "gpt-4o-mini"}
+#: What a deployed agent may run on.
+#:
+#: The dry-run provider is deliberately absent, and the reason is unchanged from when this file
+#: selected the model itself: it answers with placeholder text, so deploying it would put a URL
+#: on the internet that looks like a working agent and is not. The runner would happily accept
+#: it — this is the deploy layer declining to ask for it.
+DEPLOYABLE_PROVIDERS = ("anthropic", "openai")
+
+#: The project directory this file was copied into. Resolved from ``__file__`` rather than from
+#: the agent id or the working directory, so it is the same expression in a container
+#: (``/app/<agent_id>/``) and in the Jaroku checkout (``runtime/agents/<agent_id>/``).
+PROJECT_DIR = Path(__file__).resolve().parent
+
+#: Where a deploy vendors Jaroku's own reviewed packages inside the project.
+#:
+#: THE SAME STRING server/src/dockerfile.ts SPELLS, and the coupling is real: the deploy writes
+#: the directory and this reads it. It is asserted across the two languages rather than trusted,
+#: the same way the runtime's confirmation phrases are asserted against mcp_bridge.py's source —
+#: a rename on one side alone produces an image that builds, starts, answers /health, and cannot
+#: import the runner, which is a failure with no line of either file to look at.
+VENDORED_RUNTIME_DIR = ".jaroku"
 
 
 def log(*args) -> None:
@@ -104,12 +127,26 @@ def _int_env(name: str, default: int) -> int:
 # --- the agent -------------------------------------------------------------------------
 
 
-def _load_agent():
-    """Import the sibling agent module — the project this file was copied into.
+def _check_contract():
+    """Import the sibling agent module and prove it is runnable, at startup, once.
 
     A relative import, so the project is reached as a package exactly the way it already
     reaches its own ``prompts`` and ``tools`` sub-packages. Nothing is resolved by path or by
     agent id, so this file is identical in every project.
+
+    WHY THIS STILL HAPPENS HERE, when the runner will import the same module again in its own
+    process a moment later and check the same three symbols with a better error message. A
+    container that starts and then 500s on every request is a deployment that looks healthy and
+    is not, and the two things most likely to be wrong — a syntax error and a missing contract
+    symbol — are both knowable before a single request arrives. Paying one import at boot to
+    turn "every run fails mysteriously" into "the container refuses to start, here is why" is
+    the same trade the graph build used to make.
+
+    WHAT IT NO LONGER DOES IS BUILD THE GRAPH, because building one needs a model and this file
+    does not construct models any more. That is a real reduction in what boot proves: a
+    ``build_graph`` that raises is now found by the first run rather than at startup. It surfaces
+    as an errored run with the exception on its trace, which is exactly what the same failure
+    produces locally — and having one execution path means having its failure modes too.
     """
     from . import agent as agent_module
 
@@ -122,120 +159,107 @@ def _load_agent():
         raise RuntimeError(
             f"agent.py does not satisfy the agent contract; missing: {', '.join(missing)}"
         )
-    return agent_module
 
 
-def _build_model(tools):
-    """The provider selection from jaroku_runner/models.py, duplicated rather than imported.
+def _resolve_provider() -> str:
+    """The provider this deployment runs on, or a startup error.
 
-    Importing it would make a deployed project depend on Jaroku, which is the one thing a
-    generated project is promised never to do. The cost is twelve lines that must be kept in
-    step by hand; the alternative costs the promise.
-
-    The dry-run provider is deliberately absent. It is a local smoke test that answers with
-    placeholder text, and deploying it would put a URL on the internet that looks like a
-    working agent and is not.
+    The refusal is what is left of ``_build_model`` after the model construction moved to the
+    runner, and it is worth keeping in front rather than letting the runner decide: the runner's
+    fallback for an unknown provider is the dry-run model, which answers with placeholder text.
+    Out here that would be a public URL that looks like a working agent, forever, with every
+    request succeeding.
     """
     provider = (os.environ.get("JAROKU_PROVIDER") or "").strip().lower()
-    if provider not in DEFAULT_MODELS:
+    if provider not in DEPLOYABLE_PROVIDERS:
         raise RuntimeError(
-            f"JAROKU_PROVIDER must be one of {sorted(DEFAULT_MODELS)} to serve"
+            f"JAROKU_PROVIDER must be one of {sorted(DEPLOYABLE_PROVIDERS)} to serve"
             + (f", not {provider!r}" if provider else " (it is unset)")
             + ". The dry-run provider answers with placeholder text and cannot be deployed."
         )
-    model_name = os.environ.get("JAROKU_MODEL") or DEFAULT_MODELS[provider]
-
-    # No temperature/top_p: current Claude models reject them with a 400.
-    if provider == "anthropic":
-        from langchain_anthropic import ChatAnthropic
-
-        return ChatAnthropic(model=model_name), provider, model_name
-
-    from langchain_openai import ChatOpenAI
-
-    return ChatOpenAI(model=model_name), provider, model_name
+    return provider
 
 
-def _final_answer(state) -> str:
-    """The reply a user would have seen, out of the graph's final state.
+# --- the runner ------------------------------------------------------------------------
 
-    Same rule the Jaroku eval judge scores on: the last assistant message. Getting it wrong is
-    not a crash, it is confidently returning the wrong string — so when the rule finds nothing,
-    this says so with an empty string rather than guessing at a tool result, and the caller
-    still gets the whole final state alongside to read for itself.
+
+def _runner_search_path() -> str | None:
+    """Where ``jaroku_runner`` lives for the child, or None to use whatever is already there.
+
+    A deploy vendors the interceptor and the runner into ``<project>/.jaroku/`` and the image
+    puts that on PYTHONPATH, so in a container this finds them and agrees with the Dockerfile.
+    Run from the Jaroku checkout there is no vendored copy and the packages are already
+    importable from ``runtime/``, so this answers None and changes nothing — which is what keeps
+    ``python -m agents.<id>.serve`` working locally without a deploy having happened.
     """
-    if not isinstance(state, dict):
-        return ""
-    messages = state.get("messages")
-    if not isinstance(messages, list):
-        return ""
-    for message in reversed(messages):
-        if getattr(message, "type", None) not in ("ai", "assistant"):
-            continue
-        content = getattr(message, "content", None)
-        if isinstance(content, str) and content.strip():
-            return content.strip()
-        # Anthropic-style content blocks: [{"type": "text", "text": "…"}, …]
-        if isinstance(content, list):
-            parts = [
-                block["text"]
-                for block in content
-                if isinstance(block, dict) and isinstance(block.get("text"), str)
-            ]
-            joined = "".join(parts).strip()
-            if joined:
-                return joined
-    return ""
+    vendored = PROJECT_DIR / VENDORED_RUNTIME_DIR
+    return str(vendored) if (vendored / "jaroku_runner").is_dir() else None
 
 
-#: How deep into a state this will walk before it stops describing and starts summarising.
-#: Deep enough for any message list; shallow enough that a pathological graph cannot make the
-#: response cost more than the run did.
-MAX_STATE_DEPTH = 24
+def _run_environment(
+    run_id: str,
+    provider: str,
+    model: str | None,
+    run_token: str | None,
+    control_plane_url: str | None,
+) -> dict:
+    """The environment one run executes in.
+
+    THE RUN TOKEN GOES IN HERE AND NOWHERE ELSE. Not into a log line, not into a response, not
+    into any structure that outlives this call — the dict is built, handed to ``Popen``, and
+    dropped. It is also deliberately not an argument: a process table is world-readable, which
+    is the same reason the Railway CLI is never given its token on a command line.
+
+    The user's input IS an argument, and that is a considered difference rather than an
+    oversight. It is the runner's documented interface (``python -m jaroku_runner <id> "text"``),
+    it is not a credential, and the process table it lands in belongs to this container alone.
+
+    ``JAROKU_MCP_CONFIRM`` is forced to ``require`` when a control plane is configured, because
+    that is the whole reason a confirmation can be answered at all out here: the bridge asks the
+    control plane, a person answers, and the run continues. Without one it is left as the image
+    set it, which is also ``require`` — nothing can ask, so nothing high-impact runs.
+    """
+    env = dict(os.environ)
+    env["JAROKU_RUN_ID"] = run_id
+    env["JAROKU_PROVIDER"] = provider
+    if model:
+        env["JAROKU_MODEL"] = model
+    # The project, named by path rather than by import. `contract.load_agent` resolves this the
+    # same way a sandboxed run does — see jaroku_runner/contract.py's agent_dir().
+    env["JAROKU_AGENT_DIR"] = str(PROJECT_DIR)
+    search = _runner_search_path()
+    if search:
+        existing = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = f"{search}{os.pathsep}{existing}" if existing else search
+
+    # CONFIGURED, NEVER ASSUMED — controlplane_http.py's own contract, honoured from this side.
+    # Both or neither: a URL with no token is a run whose every push is a 401, and a token with
+    # no URL is a credential in an environment for no reason.
+    if run_token and control_plane_url:
+        env["JAROKU_RUN_TOKEN"] = run_token
+        env["JAROKU_CONTROL_PLANE_URL"] = control_plane_url
+        env["JAROKU_MCP_CONFIRM"] = "require"
+    else:
+        env.pop("JAROKU_RUN_TOKEN", None)
+        env.pop("JAROKU_CONTROL_PLANE_URL", None)
+    return env
 
 
-def _jsonable(value, _depth: int = 0, _seen: frozenset[int] = frozenset()):
-    """Best-effort JSON for a LangGraph state. Never raises — a state that cannot be rendered
-    is still a response worth sending, and the answer is carried separately anyway.
+def _pump_stderr(stream, run_id: str) -> None:
+    """Forward the runner's stderr into this container's log pane, one line at a time.
 
-    LangChain messages get ``model_dump()`` rather than ``repr()``: a state field is worth
-    reading programmatically, and a wall of ``AIMessage(content='…', additional_kwargs={}, …)``
-    is not. Falling back to ``repr`` only for objects that offer nothing better.
-
-    Cycles and depth are both bounded, and they have to be. A state field that points back at
-    something already on the way down — a parent pointer, a memo, a graph handle — used to
-    recurse until the interpreter's stack ran out, and the RecursionError surfaced as a 500 on
-    a run that had actually succeeded. Near-stack-exhaustion inside a threaded server is worse
-    than the wrong answer; a truncation marker is a much better outcome than either.
+    The runner logs to stderr on purpose (see jaroku_runner/__main__.py) and out here stderr is
+    not where an operator looks — the log pane is stdout. Prefixed with the run id, because a
+    container serves many runs at once and interleaved unlabelled lines are worse than none.
     """
     try:
-        json.dumps(value)
-        return value
-    except (TypeError, ValueError):
+        for raw in stream:
+            line = raw.rstrip("\n")
+            if line:
+                log(f"[serve] {run_id[:8]} {line}")
+    except (ValueError, OSError):
+        # The pipe closed under us — the run is over, which is not an error worth a trace.
         pass
-    if _depth >= MAX_STATE_DEPTH:
-        return "<…max depth>"
-    if isinstance(value, (dict, list, tuple)) or hasattr(value, "model_dump"):
-        # Identity, not equality: two equal-but-distinct dicts are not a cycle, and refusing
-        # to render the second would lose real data. `_seen` is per-branch rather than global
-        # for the same reason — a value repeated across sibling fields is not a cycle either.
-        if id(value) in _seen:
-            return "<…circular>"
-        _seen = _seen | {id(value)}
-    if isinstance(value, dict):
-        return {str(k): _jsonable(v, _depth + 1, _seen) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(v, _depth + 1, _seen) for v in value]
-    dump = getattr(value, "model_dump", None)
-    if callable(dump):
-        try:
-            return _jsonable(dump(), _depth + 1, _seen)
-        except Exception:  # noqa: BLE001 — a state field must never fail a response
-            pass
-    try:
-        return repr(value)
-    except Exception:  # noqa: BLE001 — an object whose own repr raises is still not our crash
-        return f"<unrenderable {type(value).__name__}>"
 
 
 def _dump(payload: dict) -> bytes:
@@ -254,33 +278,76 @@ def _dump(payload: dict) -> bytes:
 
 
 class AgentService:
-    """One compiled graph, shared across requests, behind a bounded semaphore.
+    """The container's view of its own agent: what it is, what it runs on, how many at once.
 
-    The graph is built once at startup on purpose. Building it per request would rebind tools
-    on every call for nothing, and — more usefully — a graph that cannot be built is a broken
-    deployment, which should fail the container immediately and loudly rather than turning
-    every request into a 500 forever.
+    IT NO LONGER HOLDS A GRAPH, and that is the change. A graph is a thing a run has, and a run
+    now happens in its own process — so what is left here is the two facts every request needs
+    (which agent, which provider) and the one bound that has to be enforced across all of them.
+
+    The contract is still checked once at startup rather than per request, for the reason
+    ``_check_contract`` gives: a container that starts and then fails every request is a
+    deployment that looks healthy and is not.
     """
 
     def __init__(self, agent_id: str, concurrency: int) -> None:
         self.agent_id = agent_id
-        module = _load_agent()
-        self.llm, self.provider, self.model = _build_model(list(module.TOOLS))
-        self.graph = module.build_graph(self.llm)
-        self.build_initial_state = module.build_initial_state
+        _check_contract()
+        self.provider = _resolve_provider()
+        self.model = (os.environ.get("JAROKU_MODEL") or "").strip() or None
+        # STILL BOUNDS RUNNING GRAPHS, NOT OPEN CONNECTIONS. A public URL must not be able to
+        # fan out unbounded model calls, and that reasoning does not change because the work
+        # moved into a subprocess — if anything it matters more, since each one is now a whole
+        # interpreter with a LangGraph import in it.
         self.slots = threading.Semaphore(concurrency)
         self.concurrency = concurrency
 
-    def run(self, user_input: str) -> dict:
-        started = time.monotonic()
-        final = self.graph.invoke(self.build_initial_state(user_input))
-        return {
-            "output": _final_answer(final),
-            "state": _jsonable(final),
-            "provider": self.provider,
-            "model": self.model,
-            "duration_ms": int((time.monotonic() - started) * 1000),
-        }
+    def start(
+        self,
+        run_id: str,
+        user_input: str,
+        provider: str,
+        model: str | None,
+        run_token: str | None,
+        control_plane_url: str | None,
+    ) -> "subprocess.Popen[str]":
+        """Start one run, as its own process, and return it without waiting.
+
+        THE RUNNER IS A SUBPROCESS AND NOT AN IMPORT, and the module docstring says why at
+        length: ``guard.py`` irreversibly repoints fd 1 at stderr before importing generated
+        code, and out here fd 1 is the log pane. Two processes is what keeps the log pane and
+        the event stream from being the same file descriptor.
+
+        stdout is DISCARDED, deliberately. It carries the runner's NDJSON trace, which is read
+        locally by a process manager holding the other end of a pipe — and there is no such
+        process out here. The trace this run emits reaches Jaroku over HTTP, from inside the
+        run, through ``controlplane_http``. A copied-out project with no control plane
+        configured therefore produces no trace at all, which is correct: there is nobody to
+        send it to, and buffering it in a container that will be recycled would be pretending
+        otherwise.
+
+        stderr is PUMPED, because it is the run's human log and the log pane is where an
+        operator looks. A thread per run rather than a select loop: the ceiling on how many
+        exist at once is the semaphore, which is four.
+        """
+        env = _run_environment(run_id, provider, model, run_token, control_plane_url)
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "jaroku_runner", self.agent_id, user_input],
+            # The directory CONTAINING the project, which is what makes `agents.<id>` resolvable
+            # the way contract.py expects — the same cwd `python -m <agent_id>.serve` itself is
+            # started from.
+            cwd=str(PROJECT_DIR.parent),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        threading.Thread(
+            target=_pump_stderr, args=(proc.stderr, run_id), daemon=True, name=f"log-{run_id[:8]}"
+        ).start()
+        return proc
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -383,7 +450,10 @@ class Handler(BaseHTTPRequestHandler):
                     "endpoints": {
                         "GET /health": "no auth · -> {ok, agent}",
                         "GET /": "no auth · -> this document",
-                        "POST /run": 'bearer · {"input"} -> 200 {output, state, duration_ms}',
+                        "POST /run": (
+                            "bearer · {input, run_id?, run_token?, control_plane_url?, "
+                            "provider?, model?} -> 200 {run_id, status, duration_ms}"
+                        ),
                     },
                 },
             )
@@ -438,10 +508,47 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError):
             self._send(400, {"error": "body must be JSON"})
             return
-        user_input = payload.get("input") if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            self._send(400, {"error": 'expected {"input": "<text>"}'})
+            return
+        user_input = payload.get("input")
         if not isinstance(user_input, str) or not user_input.strip():
             self._send(400, {"error": 'expected {"input": "<text>"}'})
             return
+
+        # THE RUN ID COMES FROM JAROKU WHEN JAROKU IS ASKING. It mints one so it can address the
+        # run — pause it, cancel it, read its trace — before the run has emitted anything at all;
+        # a locally minted id would leave the caller holding nothing to name. A copied-out
+        # project has nobody to mint one and gets a uuid here, which is the same fallback the
+        # runner itself makes when JAROKU_RUN_ID is unset.
+        run_id = payload.get("run_id")
+        if not isinstance(run_id, str) or not run_id.strip():
+            run_id = str(uuid.uuid4())
+        run_id = run_id.strip()
+
+        # CONFIGURED, NEVER ASSUMED, and per request rather than per container. The token is
+        # scoped to this one run and expires; the deployment holds nothing long-lived that
+        # reaches Jaroku. Both fields or neither — see _run_environment.
+        run_token = payload.get("run_token")
+        control_plane_url = payload.get("control_plane_url")
+        run_token = run_token.strip() if isinstance(run_token, str) and run_token.strip() else None
+        control_plane_url = (
+            control_plane_url.strip()
+            if isinstance(control_plane_url, str) and control_plane_url.strip()
+            else None
+        )
+
+        # Per-request provider and model, defaulting to what the container was deployed with.
+        # A dispatch may legitimately differ — the same agent evaluated on two providers is the
+        # feature this product is built around — and refusing one that is not deployable is the
+        # same refusal startup makes, applied to a value that arrived later.
+        provider = payload.get("provider")
+        provider = provider.strip().lower() if isinstance(provider, str) and provider.strip() else self.service.provider
+        if provider not in DEPLOYABLE_PROVIDERS:
+            self._send(400, {"error": f"provider must be one of {sorted(DEPLOYABLE_PROVIDERS)}"})
+            return
+        model = payload.get("model")
+        model = model.strip() if isinstance(model, str) and model.strip() else self.service.model
 
         # A public URL must not be able to fan out unbounded model calls. Refusing is the
         # honest answer; queueing would just hide the same spend behind a longer wait.
@@ -452,8 +559,20 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         try:
-            self._send(200, self.service.run(user_input))
-        except Exception as exc:  # noqa: BLE001 — an agent failure is a 500, not a crash
+            started = time.monotonic()
+            proc = self.service.start(run_id, user_input, provider, model, run_token, control_plane_url)
+            code = proc.wait()
+            # THE RESPONSE NO LONGER CARRIES THE ANSWER, and this is the first half of why. The
+            # output and the final state were this file reading a graph's return value, and it
+            # does not invoke one any more — both are on the trace now, as an ordinary run, in
+            # the same shape a local run of the same agent produces. What is left is the fact
+            # the caller needs to go and read it: which run this was.
+            self._send(200, {
+                "run_id": run_id,
+                "status": "completed" if code == 0 else "error",
+                "duration_ms": int((time.monotonic() - started) * 1000),
+            })
+        except Exception as exc:  # noqa: BLE001 — a failure to START a run is a 500, not a crash
             # The type and message, and the traceback to the log. A deployed agent's failures
             # are the operator's to read; they are not for whoever called the URL.
             log(f"[serve] run failed: {type(exc).__name__}: {exc}")
@@ -515,9 +634,15 @@ def main() -> int:
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     server.daemon_threads = True
     log(
-        f"[serve] {agent_id} on :{port} · {service.provider}/{service.model} · "
+        f"[serve] {agent_id} on :{port} · {service.provider}/{service.model or 'default model'} · "
         f"{concurrency} concurrent · auth {'on' if token else 'OFF'}"
     )
+    # Said at boot rather than discovered per run: if the runner is not importable, EVERY run
+    # this container serves will fail, and it will fail in a child process whose stderr is a
+    # line in a log pane. A container that cannot run its agent should say so while somebody is
+    # still watching the deploy.
+    search = _runner_search_path()
+    log(f"[serve] runner from {search}" if search else "[serve] runner from the ambient PYTHONPATH")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
