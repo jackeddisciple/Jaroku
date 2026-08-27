@@ -1055,6 +1055,13 @@ jobs:
           # load-bearing assertion is that the pressed chip MOVES: hardcoding it on the first passes
           # a count and lies on four filters out of five.
           npm run test:thread-filter-a11y
+          # AND THE OTHER HALF OF THAT SWEEP: an agent card's sparkline bars were real buttons at
+          # 3×12px — under a tenth of this client's own HIT_TARGET — each one its own stop in the tab
+          # order, so eight cards put dozens of three-pixel controls between a keyboard and the far
+          # side of the grid. The mark and the hit area are separate elements now, the way
+          # PaneDivider already did it, and the strip is one roving stop. Asserts the ratio and the
+          # pitch rather than 32: twenty bars at a full hit target would be a 640px strip in a card.
+          npm run test:sparkline-hits
           # §14.1'S FOUR CLIENT SUITES, and the reason they are one group is that they are one
           # feature: a workspace you can be in more than one of. `test:workspace-switcher` holds
           # the arrangement rules — a personal workspace first, teams alphabetical by a comparison

@@ -85,17 +85,52 @@ export function AgentSparkline({
   // never happened; the line simply is not there, and the card's "Not started yet" says the rest.
   if (bars.length === 0) return null;
 
+  /**
+   * ONE TAB STOP FOR THE WHOLE STRIP — a roving tabindex, which is the half of this that mattered
+   * most. Every bar was its own stop, so eight cards with five runs each put forty 3px controls
+   * between somebody's keyboard and the far side of the Agents grid. The group is entered once and
+   * walked with the arrow keys, which is the pattern the rest of the platform uses for a row of
+   * small related controls.
+   *
+   * THE MOST RECENT RUN IS THE ENTRY POINT rather than the oldest: the strip is ordered oldest-first
+   * because that is how a sparkline reads, and the run somebody wants is almost always the last one.
+   */
+  const entry = bars.length - 1;
+
+  const moveFocus = (from: number, delta: 1 | -1, group: HTMLElement | null): void => {
+    const next = Math.min(bars.length - 1, Math.max(0, from + delta));
+    const buttons = group?.querySelectorAll<HTMLButtonElement>("button");
+    buttons?.[next]?.focus();
+  };
+
   return (
     <div
-      className={`flex items-end gap-[2px] ${className}`}
+      className={`flex items-end ${className}`}
       style={{ height }}
       role="group"
       aria-label={`The last ${bars.length} runs`}
     >
-      {bars.map((bar) => (
+      {bars.map((bar, i) => (
+        // THE PAINTED MARK IS NOT THE HIT AREA, which is the technique `PaneDivider` already uses
+        // two files over: "the line is one pixel, the element around it is five". Each bar was a
+        // real `<button>` measured at 3×12px — under a tenth of this client's own `HIT_TARGET = 32`
+        // — so the strip was a row of controls that a mouse could not reliably land on.
+        //
+        // THE GAP MOVED INSIDE THE BUTTON rather than the strip getting wider. The pitch is
+        // unchanged, every bar sits exactly where it did, and the target it presents grew by two
+        // thirds. Twenty bars at a full 32px each would be a 640px strip inside a card, which is
+        // the reason this is proportional rather than absolute — a bar is a shortcut to a run, and
+        // the card behind it is the primary target.
         <button
           key={bar.run_id}
           type="button"
+          tabIndex={i === entry ? 0 : -1}
+          onKeyDown={(e) => {
+            if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+            e.preventDefault();
+            e.stopPropagation();
+            moveFocus(i, e.key === "ArrowRight" ? 1 : -1, e.currentTarget.parentElement);
+          }}
           onClick={(e) => {
             // The card behind this opens the AGENT; a bar opens a RUN. Two destinations one pixel
             // apart, which is exactly why the bar has to stop the click rather than let it through.
@@ -104,15 +139,22 @@ export function AgentSparkline({
           }}
           title={`${LABEL[bar.outcome]} · ${relTime(bar.started_at)}${bar.failed_step_id ? " — opens on the failing step" : ""}`}
           aria-label={`Run ${LABEL[bar.outcome]} ${relTime(bar.started_at)}`}
-          className="group/bar h-full w-[3px] shrink-0 rounded-[1px] transition-[opacity,transform] duration-fast hover:scale-y-110 focus-visible:outline-none focus-visible:shadow-focusring focus-visible:ring-1 focus-visible:ring-grip motion-reduce:hover:scale-y-100"
-          style={{
-            background: BAR_COLOR[bar.outcome],
-            // A settled bar sits back; the pointer brings it forward. Opacity rather than a second
-            // colour, because the colours already mean four different things and a fifth shade of
-            // green would be a fifth meaning.
-            opacity: bar.outcome === "running" ? 1 : 0.72,
-          }}
-        />
+          className="group/bar flex h-full w-[5px] shrink-0 items-stretch justify-center rounded-[1px] focus-visible:outline-none focus-visible:shadow-focusring focus-visible:ring-1 focus-visible:ring-grip"
+        >
+          <span
+            aria-hidden
+            // `pointer-events-none` so the 3px mark never takes a click the 5px button should have
+            // — the same reason PaneDivider's line carries it.
+            className="pointer-events-none w-[3px] rounded-[1px] transition-[opacity,transform] duration-fast group-hover/bar:scale-y-110 motion-reduce:group-hover/bar:scale-y-100"
+            style={{
+              background: BAR_COLOR[bar.outcome],
+              // A settled bar sits back; the pointer brings it forward. Opacity rather than a second
+              // colour, because the colours already mean four different things and a fifth shade of
+              // green would be a fifth meaning.
+              opacity: bar.outcome === "running" ? 1 : 0.72,
+            }}
+          />
+        </button>
       ))}
     </div>
   );
