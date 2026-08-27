@@ -981,6 +981,14 @@ jobs:
           # screens, and its second half is why the fix needed two predicates rather than one — a
           # blanket "never while a destination is up" would have killed the board's own keys.
           npm run test:bare-keys
+          # THE SHARED FORMATTERS, which had no suite and are read more often than anything else on
+          # screen. `fmtDuration` had no unit above the minute — a ceiling nothing states and every
+          # caller inherits — so the Deploy panel printed `live in 15989m 30s` as the headline fact
+          # about a service that had been up since the 15th, and GitHubSync's progress rail carried
+          # the same ceiling for the same reason. The assertions at each boundary are the point: a
+          # rung is one comparison, and both ways of writing it wrong are right on the examples
+          # somebody tries by hand.
+          npm run test:format
           # §14.1'S FOUR CLIENT SUITES, and the reason they are one group is that they are one
           # feature: a workspace you can be in more than one of. `test:workspace-switcher` holds
           # the arrangement rules — a personal workspace first, teams alphabetical by a comparison

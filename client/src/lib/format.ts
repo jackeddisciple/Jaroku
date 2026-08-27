@@ -108,18 +108,32 @@ export function fmtUntil(iso: string): string {
 }
 
 /**
- * Duration in ms → "820ms" / "2.4s" / "1m 05s".
+ * Duration in ms → "820ms" / "2.4s" / "1m 05s" / "3h 12m" / "11d 04h".
  *
  * ONE UNIT-SPACING CONVENTION: none. It had three inside one function — a space before `ms`, no
  * space before `s`, and a zero-padded second half — so `820 ms` and `2.4s` appeared in the same
  * trace column, one with a gap and one without, and neither was wrong on its own.
+ *
+ * AND IT USED TO STOP AT THE MINUTE, which is a ceiling nothing states and every caller inherits.
+ * The Deploy panel handed it the age of a deployment that had been up since the 15th and rendered
+ * `15989m 30s` as the headline fact about a live service. Five digits of minutes is not a duration
+ * anybody reads; it is a number somebody has to divide. `GitHubSync`'s progress rail calls the same
+ * helper and inherited the same ceiling, which is the reason the rung belongs here rather than in a
+ * second formatter beside the one caller that noticed.
+ *
+ * TWO UNITS, NEVER THREE. Each rung shows its own unit and the next one down, zero-padded so a
+ * column of them stays aligned — the seconds pad against minutes exactly as before, and the same
+ * rule then reads upwards. `11d 04h 07m 12s` would be precision nobody asked a deploy panel for.
  */
 export function fmtDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   const s = ms / 1000;
   if (s < 60) return `${s.toFixed(1)}s`;
   const m = Math.floor(s / 60);
-  return `${m}m ${String(Math.floor(s % 60)).padStart(2, "0")}s`;
+  if (m < 60) return `${m}m ${String(Math.floor(s % 60)).padStart(2, "0")}s`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${String(m % 60).padStart(2, "0")}m`;
+  return `${Math.floor(h / 24)}d ${String(h % 24).padStart(2, "0")}h`;
 }
 
 export function fmtCost(cost: number | null | undefined): string {

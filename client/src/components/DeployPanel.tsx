@@ -464,7 +464,14 @@ function DeployDetail({ deployment }: { deployment: Deployment }) {
   const lines = useDeployStore((s) => s.logs[deployment.id]) ?? EMPTY_LINES;
   const stage = useDeployStore((s) => s.stage[deployment.id]) ?? null;
   const running = isDeployInFlight(deployment.status);
-  const now = useTick(running);
+  // A LIVE DEPLOYMENT HAS NO `ended_at` — that is what "live" MEANS — so its number is an AGE
+  // measured against the current clock, and `useTick(running)` left it frozen at whenever this
+  // panel happened to mount. A settled deployment needs no clock at all: both of its ends are
+  // known. One second rather than the build's half, because an age past the first minute renders
+  // in hours and days and re-rendering the pane twice a second to redraw the same string is the
+  // cost this component's own comment about log lines is already about.
+  const isLive = deployment.status === "live" && !deployment.ended_at;
+  const now = useTick(running || isLive, running ? 500 : 1000);
   const scrollRef = useRef<HTMLPreElement>(null);
   const select = useDeployStore((s) => s.select);
 
@@ -510,10 +517,18 @@ function DeployDetail({ deployment }: { deployment: Deployment }) {
           {deployment.provider}/{deployment.model}
         </span>
         <span className="ml-auto text-tiny tabular-nums text-muted">
+          {/* THREE FACTS, WHICH USED TO BE ONE SENTENCE APPLIED TO ALL OF THEM. `live in 15989m
+              30s` stacked every way this line could be wrong at once: an AGE measured against the
+              current clock and presented as a DURATION, the word "in" reading as an ETA for a
+              state that had already been reached, and a formatter with no unit above the minute.
+              A deploy in flight wants a live counter; a settled one wants how long it took; a live
+              one wants how long it has been up, said as an age. */}
           {running ? (
             <span className="text-run">Deploying {fmtDuration(elapsed)}</span>
+          ) : isLive ? (
+            `live for ${fmtDuration(elapsed)}`
           ) : (
-            `${STATUS_COPY[deployment.status].label} in ${fmtDuration(elapsed)}`
+            `${STATUS_COPY[deployment.status].label} after ${fmtDuration(elapsed)}`
           )}
         </span>
       </div>
