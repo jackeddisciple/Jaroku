@@ -74,7 +74,14 @@ interface WorkState {
   setSnapshot: (s: { items: WorkItemView[]; nextCursor: string | null; counts: WorkCounts; filters: WorkFilters }) => void;
   /** A second page, appended. The cursor is what makes this an append rather than a replace. */
   appendPage: (s: { items: WorkItemView[]; nextCursor: string | null }) => void;
-  noteItem: (item: WorkItemView) => void;
+  /**
+   * One job, changed — §5's delta.
+   *
+   * `viewerId` IS A PARAMETER BECAUSE THE FILTER NEEDS IT and this store deliberately does not
+   * know who is looking: the session lives in `sessionStore`, and a store that imported it to
+   * answer one question would be two stores that have to be reset in the right order.
+   */
+  noteItem: (item: WorkItemView, viewerId?: string | null) => void;
   setFleet: (fleet: FleetCardView[], anyLive: boolean) => void;
   openItem: (item: WorkItemDetailView) => void;
   openingItem: (itemId: string | null) => void;
@@ -145,9 +152,10 @@ export const useWorkStore = create<WorkState>((set) => ({
       };
     }),
 
-  noteItem: (item) =>
+  noteItem: (item, viewerId = null) =>
     set((prev) => {
       const at = prev.items.findIndex((i) => i.id === item.id);
+      const belongs = matchesFilters(item, prev.filters, viewerId);
       // THE DETAIL PANEL MOVES WITH THE ROW. Somebody watching a job they opened is the person most
       // likely to be watching it change, and a panel showing `running` over a row that says
       // `succeeded` is the two halves of one screen disagreeing.
@@ -169,9 +177,21 @@ export const useWorkStore = create<WorkState>((set) => ({
         counts[item.status] = counts[item.status] + 1;
       }
 
-      if (at < 0) return { open, counts };
+      // A DELTA CAN ADD A ROW AND IT CAN REMOVE ONE, which is the half that is easy to leave out
+      // and is what makes the list live rather than a page that ages.
+      //
+      // ADDING: a job dispatched by anybody — including this client — arrives as a delta for a row
+      // the page does not hold, and a store that only ever UPDATED would show it after the next
+      // snapshot and not before. At the HEAD, because the list is newest-first and a job that has
+      // just come into existence is the newest thing in it.
+      //
+      // REMOVING: a row that stops matching has LEFT the filter. A job filtered to `running` that
+      // succeeds is no longer part of the answer to the question on screen, and leaving it there
+      // would make the list a record of what once matched rather than what does.
+      if (at < 0) return belongs ? { items: [item, ...prev.items], open, counts } : { open, counts };
       const items = [...prev.items];
-      items[at] = item;
+      if (!belongs) items.splice(at, 1);
+      else items[at] = item;
       return { items, open, counts };
     }),
 

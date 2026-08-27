@@ -27,7 +27,7 @@ import { isRefusal, useEntitlementStore } from "../store/entitlementStore.ts";
 import { refusedRole } from "./useCapability.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { useInboxStore } from "../store/inboxStore.ts";
-import { matchesFilters, useWorkStore } from "../store/workStore.ts";
+import { useWorkStore } from "../store/workStore.ts";
 import { useActivityStore } from "../store/activityStore.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { resetWorkspaceStores } from "../store/reset.ts";
@@ -553,15 +553,34 @@ function dispatch(msg: ServerMessage): void {
         // item carries no filter — it cannot, it goes to every socket in the workspace — so a
         // client holding "mine, failed" receives transitions for jobs it is not showing.
         const viewer = useSessionStore.getState().user?.id ?? null;
-        if (matchesFilters(msg.item, w.filters, viewer)) w.noteItem(msg.item);
-        else if ("input" in msg.item) w.openItem(msg.item);
-        else w.noteItem(msg.item);
+        if ("input" in msg.item) w.openItem(msg.item);
+        // THE STORE APPLIES THE FILTER, because it is the one that holds the list: a delta can
+        // ADD a row that has just come into existence, UPDATE one it holds, or REMOVE one that
+        // has left the filter, and only the list knows which of the three this is.
+        w.noteItem(msg.item, viewer);
+        // A ROW CANNOT CLOSE THE PANEL'S ACCOUNT OF THE JOB, so an ending is re-read.
+        //
+        // A delta carries a ROW, and a row deliberately has no `input` or `output` — a page of
+        // fifty rows carrying full inputs and outputs is a page of fifty customer emails on the
+        // wire. Merging one over the detail therefore leaves whatever the panel was opened with,
+        // which for a job dispatched a moment ago is `output: null`. The panel would sit on a
+        // finished job saying nothing came back until somebody closed and reopened it.
+        //
+        // ONLY FOR THE OPEN PANEL AND ONLY ON AN ENDING: one extra read, for the one job somebody
+        // is actually looking at, at the one moment its answer comes into existence.
+        const ended = msg.item.ended_at !== null;
+        if (ended && !("input" in msg.item) && useWorkStore.getState().open?.id === msg.item.id) {
+          sendLoadWorkItem(msg.item.id);
+        }
       } else if (msg.type === "fleet") w.setFleet(msg.cards, msg.anyLive);
       else if (msg.type === "dispatched") {
         // NAVIGATION, WHICH IS WHY IT IS ANSWERED TO THIS SOCKET AND NOT BROADCAST: the composer
         // clears and the detail panel opens on the job that was just started.
         w.openItem(msg.item);
-        w.noteItem(msg.item);
+        // AND IT JOINS THE LIST BY THE SAME RULE AS ANY OTHER DELTA. A job dispatched while the
+        // page is filtered to `failed` does not belong on it, and the panel opening is the
+        // navigation that answers the dispatch — not a row appearing under a filter it fails.
+        w.noteItem(msg.item, useSessionStore.getState().user?.id ?? null);
       }
       else if (msg.type === "logs") w.setLogs({ deploymentId: msg.deploymentId, lines: msg.lines, cursor: msg.cursor });
       else if (msg.type === "error") w.setError(msg.message);

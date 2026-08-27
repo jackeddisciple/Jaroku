@@ -882,6 +882,12 @@ jobs:
           # human is the blocker. Its second half reads the SIDEBAR'S SOURCE, because a correct
           # function beside a component that adds up fields is two definitions.
           npm run test:work-badge
+          # THE FILTER LIVES ON THE CLIENT, which is the price of broadcasting one delta to every
+          # socket in the workspace, and it makes the store the only thing that can ADD a row that
+          # has just come into existence or REMOVE one that has left the filter. A store that only
+          # ever UPDATED is a page that ages and a list of what once matched — both of which look
+          # like a working board.
+          npm run test:work-delta
           # §9 CALLS THE FLEET CARD'S ONE LINE THE HARDEST DESIGN IN THE FEATURE, and the reason
           # is what happens when it is wrong: a strip of twenty cards all reading "Deployed",
           # which is what the Railway dashboard already gives and is why somebody is opening
