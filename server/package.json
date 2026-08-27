@@ -227,6 +227,7 @@
     "test:inbox-actions": "tsx src/inbox/actions.test.ts",
     "test:inbox-payload": "tsx src/inbox/payload.test.ts",
     "test:work-store": "tsx src/work/workStore.test.ts",
+    "test:work-dispatch": "tsx src/work/dispatcher.test.ts",
     "test:activity-range": "tsx src/activity/range.test.ts",
     "test:activity-spend": "tsx src/activity/spend.test.ts",
     "test:activity-health": "tsx src/activity/health.test.ts",

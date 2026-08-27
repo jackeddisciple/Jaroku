@@ -515,6 +515,13 @@ jobs:
           # characters: a cap written as `.length` accepts a string of emoji four times the size it
           # meant to and hands the container a body it refuses with a 413.
           npm run test:work-store
+          # GIVING A LIVE AGENT A REAL JOB, driven against the stub container rather than against a
+          # stubbed dispatch client — Part 1's client is where the care about somebody else's
+          # container lives, and a fake in front of it would test the fake. The split every
+          # assertion names is REFUSED against FAILED: a refusal happens before a row exists and
+          # nothing was spent, and a failure keeps the row precisely because between the POST
+          # leaving and the answer arriving the container may have started the job.
+          npm run test:work-dispatch
 
       # THE ACTIVITY DESTINATION, the fourth and last of the sidebar's tabs, in a step of its own
       # from its first suite — the same reason the three steps above are separate rather than
