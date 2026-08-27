@@ -28,6 +28,7 @@ import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { ArchiveRestoreIcon, FilterIcon } from "./agentIcons.tsx";
+import { keyHint } from "../lib/modKey.ts";
 import {
   ActivityIcon, CheckIcon, GitForkIcon, GlobeIcon, HashIcon, InboxIcon, LogOutIcon, RocketIcon,
   LoaderIcon, PauseIcon, PencilIcon, PlusIcon, SearchIcon, SettingsIcon, SparklesIcon, XIcon,
@@ -853,7 +854,7 @@ export function Sidebar() {
         {!searching && (
           <button
             onClick={() => setSearching(true)}
-            title="Search agents — ⌘K opens the palette"
+            title={`Search agents — ${keyHint("⌘K")} opens the palette`}
             aria-label="Search agents"
             className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
           >

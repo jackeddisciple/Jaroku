@@ -24,6 +24,7 @@ import { openThread } from "../lib/threadNav.ts";
 import { openAgentDetail } from "../lib/agentNav.ts";
 import { relTime } from "../lib/format.ts";
 import { paneOwnsBareKey } from "../lib/bareKeys.ts";
+import { keyHint } from "../lib/modKey.ts";
 
 /** Move the trace selection by ±1 in seq order (J/K). */
 function moveStep(delta: 1 | -1): void {
@@ -276,7 +277,7 @@ export function CommandPalette() {
                     where this app puts view navigation, and a secrets shortcut would be one more
                     key to collide with while the composer has focus. */}
                 <Item onSelect={run(() => setRightTab("secrets"))}>Open Secrets</Item>
-                <Item onSelect={run(() => { setMode("files"); })} kbd="⌘P">Jump to file…</Item>
+                <Item onSelect={run(() => { setMode("files"); })} kbd={keyHint("⌘P")}>Jump to file…</Item>
                 {/* Switching mode rather than closing: `run` would dismiss the dialog, and the whole
                     point of this entry is the list that comes next. */}
                 <Item onSelect={() => setMode("threads")}>Go to thread…</Item>
@@ -285,7 +286,7 @@ export function CommandPalette() {
                 <Item onSelect={() => setMode("agents")}>Go to agent…</Item>
                 <Item onSelect={run(() => useUiStore.getState().openNav("agents"))}>Open Agents</Item>
                 <Item onSelect={run(() => useUiStore.getState().openNav("threads"))}>Open Threads</Item>
-                <Item onSelect={run(() => sendCreateThread())} kbd="⌘N">New thread</Item>
+                <Item onSelect={run(() => sendCreateThread())} kbd={keyHint("⌘N")}>New thread</Item>
                 {/* No chord: ⌘/ opens the composer's ⊕ menu as of the composer spec. A keycap on a row that
                     no longer answers to it is worse than no keycap. */}
                 <Item onSelect={run(focusChat)}>Focus chat</Item>

@@ -37,8 +37,16 @@ const check = (name: string, ok: boolean, detail = ""): void => {
 const palette = readFileSync(PALETTE, "utf8");
 const threadKeys = readFileSync(THREAD_KEYS, "utf8");
 
-/** Every keycap the palette renders, as the letter the chord is on. `⌘P` → `p`. */
-const advertised = [...palette.matchAll(/kbd="⌘([A-Za-z])"/g)].map((m) => (m[1] ?? "").toLowerCase());
+/**
+ * Every keycap the palette renders, as the letter the chord is on. `⌘P` → `p`.
+ *
+ * The cap is written the Mac way at the call site and translated by `keyHint` for the keyboard the
+ * reader has, so the chord is matched inside that call rather than in a bare attribute — see
+ * lib/modKey. A literal `kbd="⌘P"` still matches, because a hint that stopped going through the
+ * helper is a hint that has gone back to naming a key Windows does not have.
+ */
+const advertised = [...palette.matchAll(/kbd=(?:"|\{keyHint\(")⌘([A-Za-z])/g)]
+  .map((m) => (m[1] ?? "").toLowerCase());
 
 /** Every chord the palette's own global handler answers to. */
 const bound = [...palette.matchAll(/mod && e\.key\.toLowerCase\(\) === "([a-z])"/g)].map((m) => m[1] ?? "");

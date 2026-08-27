@@ -54,6 +54,7 @@ import { useTurnInteractionStore } from "../store/turnInteractionStore.ts";
 import { TurnMetadata } from "./composer/TurnMetadata.tsx";
 import { turnSource, metaForTurn, promptForRegenerate } from "../lib/turnSource.ts";
 import { canRerunTurn } from "../lib/rerun.ts";
+import { keyHint } from "../lib/modKey.ts";
 import { paneOwnsBareKey } from "../lib/bareKeys.ts";
 import {
   FALLBACK_SETTINGS, useComposerSettingsStore, type Effort, type PermissionMode,
@@ -1828,7 +1829,7 @@ export function BuildPane({
             {composerMode === "chat" && text.trim() && (
               <span className="ml-auto flex items-center gap-1.5 text-faint">
                 <kbd className={`${chipClass({ size: "sm", mono: true, tone: "faint" })} shadow-[inset_0_0_0_1px_theme(colors.hair)]`}>
-                  ⌘↵
+                  {keyHint("⌘↵")}
                 </kbd>
                 {routeLabel(intent)}
               </span>
@@ -2069,7 +2070,7 @@ export function BuildPane({
                     title={
                       fullscreen
                         ? "Collapse (Esc)"
-                        : "Write in a larger editor (⌘⇧F) — keeps your text, attachments and settings"
+                        : `Write in a larger editor (${keyHint("⌘⇧F")}) — keeps your text, attachments and settings`
                     }
                     pressed={fullscreen}
                     active={fullscreen}
@@ -2281,7 +2282,7 @@ export function BuildPane({
                       || (composerMode === "test" ? !canRun : busy)
                     }
                     aria-label={composerMode === "test" ? "Run the agent on this input" : "Send"}
-                    title={composerMode === "test" ? "Run the agent on this input" : "Send (⌘↵)"}
+                    title={composerMode === "test" ? "Run the agent on this input" : `Send (${keyHint("⌘↵")})`}
                     // The one ink-filled control on the screen, and the only one in this bar that
                     // is not a glyph on open background. §3.2: the only change here is the
                     // registry icon and the 32px hit target the rest of the bar now shares.

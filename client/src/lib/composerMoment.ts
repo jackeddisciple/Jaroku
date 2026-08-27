@@ -13,6 +13,8 @@
 // A pure function on a flat descriptor, so the branching is readable in one place instead of
 // nested inside JSX, and so the order of precedence is a list rather than a shape.
 
+import { keyHint } from "./modKey.ts";
+
 export type ComposerSituation = {
   mode: "chat" | "test";
   /** Test mode can actually dispatch a run: connected, an agent is selected, and it is runnable. */
@@ -65,7 +67,7 @@ export function composerMoment(s: ComposerSituation): ComposerMoment {
       };
     }
     return {
-      placeholder: `Run ${agent} on… — ⌘↵ to run`,
+      placeholder: `Run ${agent} on… — ${keyHint("⌘↵")} to run`,
       status: s.running ? "A run is in flight" : null,
     };
   }
@@ -132,7 +134,7 @@ export function composerMoment(s: ComposerSituation): ComposerMoment {
     // lines inside the input, which makes an empty field look pre-filled — the one thing a
     // placeholder must not do. The example itself is not lost: it belongs in the empty state
     // above the composer, where it can be read rather than typed over.
-    return { placeholder: "Describe an agent — ⌘↵ to send", status: null };
+    return { placeholder: `Describe an agent — ${keyHint("⌘↵")} to send`, status: null };
   }
-  return { placeholder: `Describe a change to ${agent} — ⌘↵ to send`, status: null };
+  return { placeholder: `Describe a change to ${agent} — ${keyHint("⌘↵")} to send`, status: null };
 }

@@ -1039,6 +1039,13 @@ jobs:
           # holds the advertised caps to the handled chords, which is the only thing that connects
           # them.
           npm run test:palette-keys
+          # AND WHICH KEY THOSE CAPS NAME. Every hint in the client was a literal `⌘` and there was
+          # no platform check anywhere in it to be wrong — while every handler behind them already
+          # took `metaKey || ctrlKey`, so the chords worked and only the labels did not. This repo
+          # ships a Windows desktop build, so half the users were told to press a key that is not on
+          # their keyboard. The sweep at the end is the half that keeps it fixed: translating eleven
+          # hints is a morning, and the twelfth written next year is what puts it back.
+          npm run test:mod-key
           # §14.1'S FOUR CLIENT SUITES, and the reason they are one group is that they are one
           # feature: a workspace you can be in more than one of. `test:workspace-switcher` holds
           # the arrangement rules — a personal workspace first, teams alphabetical by a comparison

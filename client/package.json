@@ -31,6 +31,7 @@
     "test:dialog": "tsx src/lib/dialog.test.ts",
     "test:row-facts": "tsx src/lib/rowFacts.test.ts",
     "test:palette-keys": "tsx src/components/paletteKeys.test.ts",
+    "test:mod-key": "tsx src/lib/modKey.test.ts",
     "test:export": "tsx src/lib/evalExport.test.ts",
     "test:csv": "tsx src/lib/csv.test.ts",
     "test:auth": "tsx src/lib/auth.test.ts",

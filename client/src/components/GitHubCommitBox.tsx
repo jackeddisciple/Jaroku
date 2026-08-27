@@ -26,6 +26,7 @@ import type { GithubView } from "../types.ts";
 import { DisabledReason, ENABLED, firstReason, type DisabledState } from "./DisabledReason.tsx";
 import { quietBtn } from "./buttons.ts";
 import { ArrowUpIcon, SparklesIcon } from "./panelIcons.tsx";
+import { keyHint } from "../lib/modKey.ts";
 
 export function GitHubCommitBox({ view }: { view: GithubView }) {
   const generated = useGithubStore((s) => s.generated[view.agentId]);
@@ -151,7 +152,7 @@ export function GitHubCommitBox({ view }: { view: GithubView }) {
               className="px-2.5 py-1.5 text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
               disabled={Boolean(pushState.reason)}
               onClick={() => commit(true)}
-              title="push after commit — ⌘⇧↵"
+              title={`push after commit — ${keyHint("⌘⇧↵")}`}
               aria-label="push after commit"
             >
               <ArrowUpIcon size={ICON.xs} />

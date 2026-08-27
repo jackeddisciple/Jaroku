@@ -18,6 +18,7 @@ import { Popover, PopoverNote } from "./Popover.tsx";
 import { CheckboxField } from "../Checkbox.tsx";
 import { relTime } from "../../lib/format.ts";
 import { STATUS } from "../../lib/tokens.ts";
+import { keyHint } from "../../lib/modKey.ts";
 import {
   FEEDBACK_REASONS, useTurnInteractionStore, type FeedbackReason,
 } from "../../store/turnInteractionStore.ts";
@@ -85,7 +86,7 @@ export function NoteControl({ turnId, disabled = false }: { turnId: string; disa
               type="button"
               onClick={save}
               disabled={!draft.trim()}
-              title="⌘↵"
+              title={keyHint("⌘↵")}
               className="rounded-control bg-ink px-2.5 py-1 text-tiny text-bg transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
             >
               Save
