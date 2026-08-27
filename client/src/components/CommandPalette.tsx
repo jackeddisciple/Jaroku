@@ -328,6 +328,11 @@ export function CommandPalette() {
                 <Item onSelect={() => setMode("agents")}>Go to agent…</Item>
                 <Item onSelect={run(() => useUiStore.getState().openNav("agents"))}>Open Agents</Item>
                 <Item onSelect={run(() => useUiStore.getState().openNav("threads"))}>Open Threads</Item>
+                {/* The palette is where this app puts view navigation — the comment eight lines up
+                    says so — and a destination reachable only by finding its icon in the rail is one
+                    keyboard users do not have. Beside Agents and Threads rather than after the
+                    thread verbs, so the three navigations read as a group. */}
+                <Item onSelect={run(() => useUiStore.getState().openNav("work"))}>Open the Cockpit</Item>
                 <Item onSelect={run(() => sendCreateThread())} kbd={keyHint("⌘N")}>New thread</Item>
                 {/* No chord: ⌘/ opens the composer's ⊕ menu as of the composer spec. A keycap on a row that
                     no longer answers to it is worse than no keycap. */}

@@ -152,10 +152,27 @@ export const useWorkStore = create<WorkState>((set) => ({
       // likely to be watching it change, and a panel showing `running` over a row that says
       // `succeeded` is the two halves of one screen disagreeing.
       const open = prev.open?.id === item.id ? { ...prev.open, ...item } : prev.open;
-      if (at < 0) return { open };
+
+      // AND SO DO THE COUNTS, which is the rule the Inbox's `noteResolved` states: the count is a
+      // FACT and the row is a rendering, so holding the number at its old value for the length of a
+      // transition makes two halves of one screen disagree. It is sharper here than it was there,
+      // because these counts feed the sidebar badge AND the header — a job going to `waiting`
+      // whose badge did not move is the badge failing at the one thing it is for.
+      //
+      // THE PREVIOUS STATUS COMES FROM THE ROW WE HELD, and a delta for a row we did not hold is
+      // treated as an arrival: that is what a dispatch is, and it is also what a job entering a
+      // filter we are showing looks like. Either way the new status is one more than it was.
+      const counts = { ...prev.counts };
+      const before = at < 0 ? null : prev.items[at]!.status;
+      if (before !== item.status) {
+        if (before) counts[before] = Math.max(0, counts[before] - 1);
+        counts[item.status] = counts[item.status] + 1;
+      }
+
+      if (at < 0) return { open, counts };
       const items = [...prev.items];
       items[at] = item;
-      return { items, open };
+      return { items, open, counts };
     }),
 
   setFleet: (fleet, anyLive) => set({ fleet, anyLive }),

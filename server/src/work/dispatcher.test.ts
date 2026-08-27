@@ -63,6 +63,7 @@ async function fixture(db: Db, url: string | null, opts: { serveToken?: string |
   work: WorkStore;
   dispatcher: WorkDispatcher;
   serveTokens: Map<string, string>;
+  endpointScopes: string[];
 }> {
   const identity = new IdentityRepository(db);
   const agents = new AgentRepository(db);
@@ -94,9 +95,14 @@ async function fixture(db: Db, url: string | null, opts: { serveToken?: string |
   const serveTokens = new Map<string, string>();
   if (opts.serveToken !== null) serveTokens.set(serviceId, opts.serveToken ?? "stub-token");
 
+  // WHAT SCOPE THE ENDPOINT WAS ASKED FOR, recorded so the assertion below can be about it. A
+  // deployment's row is read under a scope, and the only honest source of that scope is the
+  // request doing the dispatching — see `DeployDispatchDeps.endpoint`.
+  const endpointScopes: string[] = [];
   const dispatch = new DeployDispatcher({
     runs: deployRuns,
-    endpoint: async (deploymentId) => {
+    endpoint: async (deploymentId, workspaceId) => {
+      endpointScopes.push(workspaceId);
       const row = await deploys.get(ctx, deploymentId);
       if (!row?.url) return null;
       return { url: row.url, serveToken: serveTokens.get(row.railway_service_id ?? "") ?? null };
@@ -113,7 +119,7 @@ async function fixture(db: Db, url: string | null, opts: { serveToken?: string |
     controlPlaneUrl: () => controlPlaneUrl,
   });
 
-  return { ctx, agentId: agent.id, slug, deploymentId: deployment.id, work, dispatcher, serveTokens };
+  return { ctx, agentId: agent.id, slug, deploymentId: deployment.id, work, dispatcher, serveTokens, endpointScopes };
 }
 
 /** A server that answers one status to every request. For the branches a stub agent never takes. */
@@ -272,6 +278,17 @@ console.log("\n202, and the row that follows it");
     // run rather than a row nobody can watch. Registered BEFORE the request left, so a container
     // fast enough to push its run_start while the 202 was still in flight is not a dropped event.
     check("the run is registered on the control plane's bus", deployRuns.has(out.item.run_id!));
+
+    // AND THE ENDPOINT WAS READ IN THE DISPATCHING WORKSPACE. This is the second assertion that
+    // would have caught a bug found by opening the tab rather than by running the suite: the
+    // deployment row is read under a SCOPE, and resolving that scope from the server's own
+    // context — which is right for the deploy manager, whose work happens in one workspace —
+    // returns nothing for a socket dispatching in another. The job was accepted, the row was
+    // written, and it then failed with "this agent has no live deployment to run on": a sentence
+    // about a deployment that was live, said by a read looking in the wrong place.
+    check("the endpoint was resolved in the workspace that dispatched",
+      f.endpointScopes.length > 0 && f.endpointScopes.every((w) => w === f.ctx.workspaceId),
+      f.endpointScopes.join(", "));
 
     await stub.settled(out.item.run_id!);
   } finally {

@@ -6375,8 +6375,13 @@ const workDispatch = new DeployDispatcher({
   // RESOLVED PER CALL, NEVER HELD. A deployment's URL and its serve token are workspace state that
   // can change under a long-lived process — a redeploy moves the URL, a reconnect rotates the
   // token — and a value captured at construction is a value that goes stale silently.
-  endpoint: async (deploymentId) => {
-    const ctx = contextForDeploy();
+  endpoint: async (deploymentId, workspaceId) => {
+    // THE DISPATCHING WORKSPACE, NOT THE SERVER'S OWN. `contextForDeploy()` is the deploy
+    // manager's context and is right for the deploy manager, which works in one workspace at a
+    // time; a socket dispatching from the Cockpit is scoped to whichever workspace it opened in.
+    // Reading the row under the wrong scope returns nothing, and the job was then failed with
+    // "this agent has no live deployment to run on" — about a deployment that was live.
+    const ctx = systemContextFor(workspaceId, newRequestId());
     const row = await deployStore.get(ctx, deploymentId);
     if (!row?.url) return null;
     const serveToken = row.railway_service_id
@@ -6491,7 +6496,11 @@ async function handleWorkCommand(ctx: TenantContext, cmd: WorkCommand): Promise<
         }
         // TO THE ASKER, because it is navigation — the composer clears and the detail panel opens
         // on the new job. Broadcasting it would move every open Cockpit in the workspace.
-        relay.sendWork(ctx, ctx.requestId, { type: "dispatched", item: await workSnapshots.item(ctx, out.item) });
+        // THE DETAIL, NOT THE ROW. This event OPENS the detail panel, which renders what was asked and
+        // what came back — two fields a row deliberately does not carry, because a page of fifty
+        // rows carrying full inputs and outputs is a page of fifty customer emails on the wire.
+        // Sending the row shape here left the panel with an empty "What was asked".
+        relay.sendWork(ctx, ctx.requestId, { type: "dispatched", item: await workSnapshots.detail(ctx, out.item) });
         await broadcastWorkItem(ctx, out.item);
         await relay.broadcastFleet();
         return;
@@ -6513,7 +6522,11 @@ async function handleWorkCommand(ctx: TenantContext, cmd: WorkCommand): Promise<
         if (typeof cmd.itemId !== "string") return fail("that is not a job id");
         const out = await workActions.retry(ctx, cmd.itemId);
         if (!out.ok) return fail(out.detail, cmd.itemId);
-        relay.sendWork(ctx, ctx.requestId, { type: "dispatched", item: await workSnapshots.item(ctx, out.item) });
+        // THE DETAIL, NOT THE ROW. This event OPENS the detail panel, which renders what was asked and
+        // what came back — two fields a row deliberately does not carry, because a page of fifty
+        // rows carrying full inputs and outputs is a page of fifty customer emails on the wire.
+        // Sending the row shape here left the panel with an empty "What was asked".
+        relay.sendWork(ctx, ctx.requestId, { type: "dispatched", item: await workSnapshots.detail(ctx, out.item) });
         await broadcastWorkItem(ctx, out.item);
         await relay.broadcastFleet();
         return;

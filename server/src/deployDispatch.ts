@@ -35,8 +35,18 @@ export interface DeployDispatchDeps {
    * deployment, a deployment with no URL yet, and — the one that needs its own message — a
    * deployment made before Jaroku kept the serve token, which has to be reconnected before
    * anything can reach it.
+   *
+   * @param workspaceId — WHOSE deployment this is, and the reason it is a parameter.
+   *
+   * A deployment id is not enough to read the row: `DeployStore.get` is scoped, so the caller
+   * has to supply the scope, and the only honest source of it is the request that is
+   * dispatching. It was resolved from the server's own context before — which is correct for
+   * the deploy manager, whose work happens in one workspace, and wrong for the Cockpit, where a
+   * socket dispatches in whichever workspace it is scoped to. The symptom was a job accepted,
+   * written and then failed with "this agent has no live deployment to run on" — a sentence
+   * about a deployment that was live, said by a scoped read looking in the wrong workspace.
    */
-  endpoint: (deploymentId: string) => Promise<DeployEndpoint | null>;
+  endpoint: (deploymentId: string, workspaceId: string) => Promise<DeployEndpoint | null>;
   /** How long to wait for the container to ACCEPT a job. Never for it to finish one. */
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
@@ -167,7 +177,7 @@ export class DeployDispatcher {
       seqOffset?: number;
     },
   ): Promise<DispatchOutcome> {
-    const endpoint = await this.deps.endpoint(deploymentId);
+    const endpoint = await this.deps.endpoint(deploymentId, workspaceId);
     if (!endpoint) {
       return {
         ok: false,
@@ -237,8 +247,8 @@ export class DeployDispatcher {
    * boundary and emits its own `run_end`, which is what actually ends it — closing it from this
    * side would revoke the token the container still needs to report that.
    */
-  async cancel(deploymentId: string, runId: string): Promise<DispatchOutcome> {
-    const endpoint = await this.deps.endpoint(deploymentId);
+  async cancel(deploymentId: string, runId: string, workspaceId: string): Promise<DispatchOutcome> {
+    const endpoint = await this.deps.endpoint(deploymentId, workspaceId);
     if (!endpoint) {
       return { ok: false, reason: "no_deployment", detail: "this agent has no live deployment" };
     }

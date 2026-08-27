@@ -162,7 +162,11 @@ export function WorkDetail() {
 
           {/* WHAT CAME BACK, ON A JOB THAT PRODUCED SOMETHING. An empty answer is a real outcome and
               renders as one; a job that has not finished has nothing to show and says nothing. */}
-          {item.output !== null && <TextBlock label="What came back" text={item.output || "(the agent produced nothing)"} />}
+          {/* `!= null` RATHER THAN `!== null`, which is the difference between a job that produced
+              nothing and one that has not produced anything YET. A running job's `output` is
+              absent, and rendering "(the agent produced nothing)" over it is a claim about an
+              answer that has not been given. */}
+          {item.output != null && <TextBlock label="What came back" text={item.output || "(the agent produced nothing)"} />}
 
           {item.error && (
             <div className="flex flex-col gap-1">

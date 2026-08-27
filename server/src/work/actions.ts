@@ -93,7 +93,9 @@ export class WorkActions {
       };
     }
 
-    const asked = await this.deps.dispatch.cancel(item.deployment_id, item.run_id);
+    // THE WORKSPACE TRAVELS WITH THE REQUEST, because reading the deployment's endpoint is a SCOPED
+    // read and the only honest source of the scope is the context that is cancelling.
+    const asked = await this.deps.dispatch.cancel(item.deployment_id, item.run_id, ctx.workspaceId);
     if (!asked.ok) {
       // THE JOB IS LEFT ALONE. Jaroku could not reach the container, which says nothing about
       // whether the job is still running — and closing the row on a failed request would claim a
