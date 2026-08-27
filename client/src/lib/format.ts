@@ -136,9 +136,27 @@ export function fmtDuration(ms: number): string {
   return `${Math.floor(h / 24)}d ${String(h % 24).padStart(2, "0")}h`;
 }
 
+/**
+ * HOW ZERO MONEY IS WRITTEN, ONCE.
+ *
+ * There were two money formatters with different zero handling — `fmtCost` returned `"$0"` and
+ * Activity's metric registry returned `"$0.00"` — and both appeared on screen in the same session,
+ * on the two surfaces that report spend. Neither was wrong; they simply did not agree, which is the
+ * one thing a currency has to do across a product.
+ *
+ * `$0.00` IS THE ONE THAT WINS, because it is the one already asserted: `test:activity-metrics`
+ * pins `formatMetric("usd", 0) === "$0.00"` beside §3.5's rule that unknown renders `--` and never
+ * a false zero. Two decimals is also what money looks like, and the distinction this product
+ * actually cares about — `—` for unknown against a real zero — is untouched by which spelling the
+ * real zero takes.
+ */
+export const ZERO_COST = "$0.00";
+
 export function fmtCost(cost: number | null | undefined): string {
+  // `—` AND A ZERO ARE DIFFERENT CLAIMS, and that distinction is the load-bearing one here: nothing
+  // measured is not the same as nothing spent. See the cost accounting's null-vs-zero rule.
   if (cost == null) return "—";
-  if (cost === 0) return "$0";
+  if (cost === 0) return ZERO_COST;
   return `$${cost < 0.01 ? cost.toFixed(5) : cost.toFixed(4)}`;
 }
 

@@ -22,7 +22,7 @@
 // previous window of zero, a percentage of a percentage, a token count that has to stay legible at
 // four digits and at nine.
 
-import { shortCount } from "./format.ts";
+import { ZERO_COST, shortCount } from "./format.ts";
 
 /** What a figure is measured in. The unit decides the formatter, never the component. */
 export type MetricUnit = "usd" | "tokens" | "count" | "percent" | "ms";
@@ -151,6 +151,11 @@ export function metric(id: MetricId): MetricDef {
 
 /** How money is written. Two decimals under four figures, none above — see `formatMetric`. */
 function usd(value: number): string {
+  // THE SHARED ZERO. This function and `fmtCost` are two formatters over one currency, and they
+  // disagreed at exactly one input — `$0.00` here, `$0` in the right panel, both on screen in the
+  // same session. The constant is in `format.ts` beside the other formatter so the two cannot drift
+  // apart again by one of them being edited.
+  if (value === 0) return ZERO_COST;
   const abs = Math.abs(value);
   if (abs >= 100_000) return `$${Math.round(value / 1000).toLocaleString("en-US")}k`;
   // Under a cent but not zero is the case that matters: a single cheap step is real spend, and

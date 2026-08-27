@@ -10,6 +10,11 @@
 // rather than to the one caller that noticed. A push that stalls for ninety minutes has the same
 // ceiling for the same reason.
 //
+// AND THE SAME FILE HOLDS THE MONEY RULE, because the second defect on this surface was two
+// formatters over one currency that disagreed at exactly one input: `fmtCost(0)` returned `"$0"`
+// while Activity's SPEND card rendered `"$0.00"`, both on screen in the same session, on the two
+// places this product reports spend. Neither was wrong; they simply did not agree.
+//
 // THE ASSERTIONS AT EACH BOUNDARY ARE THE POINT. A rung is added by writing one comparison, and the
 // two ways to write it wrong — `<=` where `<` belongs, the remainder taken off the wrong unit —
 // both produce output that is correct on the examples somebody tries by hand and wrong for exactly
@@ -17,7 +22,9 @@
 //
 //   npm run test:format
 
-import { fmtDuration } from "./format.ts";
+import { ZERO_COST, fmtCost, fmtDuration } from "./format.ts";
+import { formatMetric } from "./activityMetrics.ts";
+import { fmtCostPerRun } from "./agentFormat.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -96,6 +103,44 @@ console.log("\nno duration renders as a negative or a NaN");
   check("a rounded sub-millisecond is still ms", fmtDuration(0.4) === "0ms", fmtDuration(0.4));
   const rendered = [0, SEC, MIN, HOUR, DAY].map(fmtDuration);
   check("nothing renders NaN", rendered.every((r) => !r.includes("NaN")), rendered.join(" | "));
+}
+
+console.log("\nmoney — one currency, two formatters, and they used to disagree at zero");
+{
+  // `fmtCost(0)` returned `"$0"` and Activity's SPEND card rendered `"$0.00"`, both on screen in
+  // the same session, on the two surfaces this product uses to report spend.
+  check("the two formatters agree at zero", fmtCost(0) === formatMetric("usd", 0),
+    `${fmtCost(0)} vs ${formatMetric("usd", 0)}`);
+  check("...on the spelling money has", fmtCost(0) === "$0.00", fmtCost(0));
+  check("...which is the shared constant", ZERO_COST === "$0.00");
+  // And the third one, on the Agents surface. Three spellings of nothing spent is the same defect
+  // as two, so the sweep below is over every money formatter this client has.
+  check("the Agents cost-per-run agrees too", fmtCostPerRun(0) === ZERO_COST, fmtCostPerRun(0));
+  check("...and its unknown is still a dash", fmtCostPerRun(null) === "—");
+  check("...and its own precision is untouched", fmtCostPerRun(0.0002) === "$0.0002", fmtCostPerRun(0.0002));
+}
+
+console.log("\nand the distinction the cost accounting actually cares about is untouched");
+{
+  // NOTHING MEASURED IS NOT NOTHING SPENT. This is the rule v0.1.9 paid for, and it is the one the
+  // zero spelling must not blur: an unpriced model rendering as a confident `$0.00` is the false
+  // zero, and the dash is what stops it.
+  check("unknown is a dash", fmtCost(null) === "—");
+  check("...and undefined too", fmtCost(undefined) === "—");
+  check("a real zero is not a dash", fmtCost(0) !== "—");
+}
+
+console.log("\nnon-zero costs keep the precision each surface needs");
+{
+  // Unifying the zero must not unify the precision: the Usage panel reports what one run cost, and
+  // a run that cost three ten-thousandths of a dollar is not `$0.00`.
+  check("under a cent keeps five decimals", fmtCost(0.0031) === "$0.00310", fmtCost(0.0031));
+  check("a cent and over keeps four", fmtCost(1.5) === "$1.5000", fmtCost(1.5));
+  check("...and neither is the zero string", fmtCost(0.0031) !== ZERO_COST && fmtCost(1.5) !== ZERO_COST);
+  // Activity keeps its own shape above zero — a workspace total is not a per-run figure.
+  check("Activity still shortens six figures", formatMetric("usd", 123_456) === "$123k",
+    formatMetric("usd", 123_456));
+  check("...and still keeps four decimals under a cent", formatMetric("usd", 0.0031) === "$0.0031");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

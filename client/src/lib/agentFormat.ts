@@ -9,6 +9,8 @@
 // dash, never as zero. `fmtCost` and `fmtLatency` already draw that line and §6 restates it for
 // `creation_cost` specifically — a missing figure is not a zero.
 
+import { ZERO_COST } from "./format.ts";
+
 /**
  * A byte count, at the precision a person reads rather than the one a machine stores.
  *
@@ -45,7 +47,9 @@ export function fmtBytes(bytes: number): string {
  */
 export function fmtCostPerRun(usd: number | null): string {
   if (usd === null) return "—";
-  if (usd === 0) return "$0";
+  // THE SHARED ZERO, for the reason the other two share it: this is a third money formatter over
+  // the same currency, and three spellings of nothing spent is the same defect as two.
+  if (usd === 0) return ZERO_COST;
   if (usd >= 0.0001) return `$${usd.toFixed(4)}`;
   // Below a hundredth of a cent per run, the honest comparable unit is a thousand runs.
   return `$${(usd * 1000).toFixed(3)} / 1k runs`;
