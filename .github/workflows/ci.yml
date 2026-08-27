@@ -288,6 +288,13 @@ jobs:
           # and a missing `pricing.json` does not fail at all — it reports every step's cost as
           # null forever, which is the one outcome the cost rule is written to prevent.
           npm run test:deploy-image
+          # THE CREDENTIAL A DEPLOYED RUN AUTHENTICATES WITH, driven through the real routes on a
+          # real port rather than against the verifier — the check that matters is the one
+          # `authenticate` makes on the way into a route, and a unit test of the verifier passes
+          # just as happily with the route not calling it. Its load-bearing assertion is the
+          # cross-run refusal WITHIN one workspace: nothing about tenancy stops that one, only
+          # the run scope does.
+          npm run test:run-token-deploy
 
       # THE SUITES THAT SHIPPED WITH v0.2.15 AND CI HAS NEVER RUN. They were written, they passed,
       # and nothing but the person who wrote them ever executed them — the same gap the client job's
