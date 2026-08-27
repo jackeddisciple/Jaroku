@@ -170,6 +170,23 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   getActivity: "agent:read",
   getActivityFeed: "agent:read",
 
+  // the Cockpit
+  //
+  // §8's table, with its one unresolved name resolved — see the server's copy for the argument.
+  // The three reads sit on `deploy:read` rather than `agent:read` because that is the sharper
+  // half of the pair §8 names and it is the one that says what this tab is ABOUT; the three job
+  // verbs are `run:execute` beside `run` and `cancelRun`; and the two that reach into Railway are
+  // `deploy:manage`, because one restarts a service and the other deletes it.
+  listWork: "deploy:read",
+  loadWorkItem: "deploy:read",
+  listFleet: "deploy:read",
+  loadAgentLogs: "deploy:read",
+  dispatchWork: "run:execute",
+  cancelWork: "run:execute",
+  retryWork: "run:execute",
+  reconnectAgent: "deploy:manage",
+  killAgent: "deploy:manage",
+
   // eval
   listDatasets: "eval:read",
   loadDataset: "eval:read",
@@ -467,6 +484,10 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   listDatasets: "view",
   estimateEval: "view",
   getActivityFeed: "view",
+  // The work list narrowed to one agent. `cancelWork` and `retryWork` are deliberately absent —
+  // they carry an item id rather than an agent id, so the relay cannot resolve an agent for them
+  // without a database it imports none of. See the server's copy.
+  listWork: "view",
   planDeploy: "view",
   forkAgent: "view",
   createThread: "view",
@@ -480,6 +501,7 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   loadExposure: "view",
 
   run: "run",
+  dispatchWork: "run",
   shadowRunGithub: "run",
 
   edit: "edit",

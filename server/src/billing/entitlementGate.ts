@@ -200,6 +200,36 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   loadDeployLogs: NO_ENTITLEMENT,
   setRailwayToken: NO_ENTITLEMENT,
   testRailwayToken: NO_ENTITLEMENT,
+
+  // --- the Cockpit -----------------------------------------------------------------------------
+  //
+  // NONE OF THE NINE IS A TIER FEATURE, and that is one decision rather than nine, so it is argued
+  // once here rather than nine times below.
+  //
+  // OPERATING WHAT YOU HAVE ALREADY DEPLOYED IS NOT A SEPARATE PRODUCT. `deploy` is what the tier
+  // table gates — how many agents a workspace may put on a URL — and everything on this tab is
+  // about the ones it already has. A plan that let somebody deploy an agent and not give it a job
+  // would have sold them a URL and withheld the reason to have one; the spend it produces is
+  // metered by `usage_events` and bounded by the workspace ceiling, which is where money belongs.
+  //
+  // AND THE FOUR THAT REDUCE OR REPAIR ARE NEVER GATED, by the argument `cancelDeploy`,
+  // `revokeGrant` and `leaveWorkspace` all make from the same direction: a gate in front of
+  // cancelling a job, reconnecting a broken credential or stopping a service traps a workspace with
+  // something it is paying for and is not allowed to stop. The workspace most likely to hit such a
+  // gate is the one already over its limit, which is the case it would make unfixable.
+  //
+  // `dispatchWork` IS THE ONE THAT COULD ARGUABLY BE SOLD, and it is deliberately not. Selling "may
+  // this agent be given work" by plan would make the Cockpit a tab that renders a fleet and refuses
+  // every button on it — the shape §11's zero states exist to avoid, one level up.
+  listWork: NO_ENTITLEMENT,
+  loadWorkItem: NO_ENTITLEMENT,
+  listFleet: NO_ENTITLEMENT,
+  loadAgentLogs: NO_ENTITLEMENT,
+  dispatchWork: NO_ENTITLEMENT,
+  cancelWork: NO_ENTITLEMENT,
+  retryWork: NO_ENTITLEMENT,
+  reconnectAgent: NO_ENTITLEMENT,
+  killAgent: NO_ENTITLEMENT,
   listMembers: NO_ENTITLEMENT,
   setMemberRole: NO_ENTITLEMENT,
   revokeInvite: NO_ENTITLEMENT,
