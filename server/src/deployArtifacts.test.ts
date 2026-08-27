@@ -61,12 +61,26 @@ function fixtureProject(opts: {
   mcp?: boolean;
   envFile?: string;
   serveTemplate?: string | null;
+  /** Leave Jaroku's own packages out, to exercise the refusal that vendoring them can raise. */
+  runtimePackages?: false;
 }): string {
   const root = join(tmpdir(), `jaroku-deploy-${randomUUID()}`);
   roots.push(root);
   const project = join(root, "agents", opts.agentId);
   mkdirSync(join(project, "tools"), { recursive: true });
   mkdirSync(join(root, "tool_templates"), { recursive: true });
+
+  // The interceptor and the runner, stubbed rather than copied. This fixture is about the four
+  // synthesised artifacts; what the vendored packages CONTAIN is deployImage.test.ts's question,
+  // and copying the real ones here would make every assertion in this file slower for nothing.
+  // They have to exist, though — a deploy that cannot vendor them refuses outright.
+  if (opts.runtimePackages !== false) {
+    for (const pkg of ["jaroku_interceptor", "jaroku_runner"]) {
+      mkdirSync(join(root, pkg), { recursive: true });
+      writeFileSync(join(root, pkg, "__init__.py"), `"""stub ${pkg}."""\n`);
+    }
+    writeFileSync(join(root, "pricing.json"), JSON.stringify({ models: {} }));
+  }
 
   writeFileSync(join(project, "__init__.py"), '"""fixture."""\n');
   writeFileSync(join(project, "agent.py"), "TOOLS = []\ndef build_graph(llm): ...\n");

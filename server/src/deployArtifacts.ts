@@ -13,11 +13,13 @@
 // Undo could restore — a history entry would only be noise in a list whose whole job is
 // showing what you changed.
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync,
+} from "node:fs";
+import { basename, join } from "node:path";
 
 import { loadConnectors, templatesDir } from "./connectors.ts";
-import { buildArtifacts } from "./dockerfile.ts";
+import { buildArtifacts, VENDORED_RUNTIME_DIR, VENDORED_RUNTIME_ENTRIES } from "./dockerfile.ts";
 import { atomicSwap, copyProject, DEPLOY_ARTIFACTS, isSafeAgentId } from "./projectFs.ts";
 
 /** The reviewed serve wrapper, copied byte-for-byte. Never rendered — see dockerfile.ts. */
@@ -50,6 +52,76 @@ export interface WrittenArtifacts {
   paths: string[];
   /** The dependency list baked into the image, so a caller can show it before building. */
   requires: string[];
+  /**
+   * The reviewed Jaroku packages vendored into the project for this build, project-relative
+   * and sorted, and the bytes they came to.
+   *
+   * Reported rather than assumed for the same reason `requires` is: a deploy log that says
+   * "wrote four files" while quietly adding a directory of somebody else's code to the image
+   * is a deploy log that is hiding the interesting half. The size is here because it is the
+   * one number a reader can use to decide whether the image grew by an amount they mind.
+   */
+  vendored: string[];
+  vendoredBytes: number;
+}
+
+/**
+ * Copy Jaroku's own reviewed packages into the staged project, byte for byte.
+ *
+ * VENDORED AT DEPLOY TIME, EXACTLY AS serve.py AND THE CONNECTOR TEMPLATES ALREADY ARE, and
+ * that is the property rather than an implementation detail: an image that exists was built
+ * from the bytes that were on disk the day it was built, and editing `runtime/jaroku_runner/`
+ * tomorrow does not reach back into it. Redeploy is how a deployed agent gets a newer runner —
+ * the same rule `mcp_bridge.py` holds, for the same reason.
+ *
+ * INTO THE STAGING DIRECTORY, NEVER THE LIVE PROJECT. Everything else `writeDeployArtifacts`
+ * does is staged and atomic-swapped so a failed deploy leaves the project byte-identical; two
+ * more directories written directly into the project would be the one part of it that a crash
+ * could leave half-finished, which is precisely the property this module exists to hold.
+ *
+ * `__pycache__` is filtered on the way in, the same filter `copyProject` uses. Compiled
+ * bytecode from this machine's interpreter is not portable to the image's, and it would be
+ * both dead weight and a confusing thing to find in somebody's build context.
+ */
+function vendorRuntime(runtimeDir: string, staging: string): { paths: string[]; bytes: number } {
+  const target = join(staging, VENDORED_RUNTIME_DIR);
+  rmSync(target, { recursive: true, force: true });
+  mkdirSync(target, { recursive: true });
+
+  const paths: string[] = [];
+  let bytes = 0;
+  const measure = (dir: string, prefix: string): void => {
+    for (const entry of readdirSync(dir)) {
+      if (entry === "__pycache__") continue;
+      const full = join(dir, entry);
+      const stat = lstatSync(full);
+      if (stat.isDirectory()) measure(full, `${prefix}/${entry}`);
+      else if (stat.isFile()) {
+        paths.push(`${prefix}/${entry}`);
+        bytes += stat.size;
+      }
+    }
+  };
+
+  for (const entry of VENDORED_RUNTIME_ENTRIES) {
+    const source = join(runtimeDir, entry);
+    if (!existsSync(source)) {
+      // Refused, not skipped. A missing runner produces an image that builds, starts, answers
+      // /health, and fails on the first request with an ImportError — a deployment that looks
+      // healthy and is not, which is the failure mode this whole file is built to avoid.
+      throw new Error(`cannot vendor ${entry} for the image: ${source} does not exist`);
+    }
+    const dest = join(target, entry);
+    if (lstatSync(source).isDirectory()) {
+      cpSync(source, dest, { recursive: true, filter: (src) => basename(src) !== "__pycache__" });
+      measure(dest, `${VENDORED_RUNTIME_DIR}/${entry}`);
+    } else {
+      copyFileSync(source, dest);
+      paths.push(`${VENDORED_RUNTIME_DIR}/${entry}`);
+      bytes += lstatSync(dest).size;
+    }
+  }
+  return { paths: paths.sort(), bytes };
 }
 
 export function agentsRoot(runtimeDir: string): string {
@@ -116,6 +188,7 @@ export function writeDeployArtifacts(opts: WriteArtifactsOptions): WrittenArtifa
   const staging = deployStagingDir(runtimeDir, agentId);
   rmSync(staging, { recursive: true, force: true });
   mkdirSync(join(agentsRoot(runtimeDir), ".staging"), { recursive: true });
+  let vendored: { paths: string[]; bytes: number } = { paths: [], bytes: 0 };
 
   try {
     copyProject(projectDir, staging);
@@ -127,10 +200,19 @@ export function writeDeployArtifacts(opts: WriteArtifactsOptions): WrittenArtifa
     for (const [rel, contents] of Object.entries(artifacts.files)) {
       writeFileSync(join(staging, rel), contents, "utf8");
     }
+    // AND JAROKU'S OWN CODE, INSIDE THE SAME STAGING DIRECTORY AND THEREFORE INSIDE THE SAME
+    // ALL-OR-NOTHING SWAP. Two more directories do not weaken that property; they are only
+    // covered by it because they go through here rather than beside it.
+    vendored = vendorRuntime(runtimeDir, staging);
 
     // Nothing is swapped in that we did not put there. A missing file at this point would mean
     // a partially written project going live, which is exactly what staging exists to prevent.
-    const missing = [...DEPLOY_ARTIFACTS].filter((rel) => !existsSync(join(staging, rel)));
+    // The vendored packages are checked the same way: `vendorRuntime` refuses a missing source,
+    // and this re-reads what actually landed, because the failure being guarded against is a
+    // write that did not happen rather than a source that was not there.
+    const missing = [...DEPLOY_ARTIFACTS, ...vendored.paths].filter(
+      (rel) => !existsSync(join(staging, rel)),
+    );
     if (missing.length) {
       throw new Error(`deploy artifacts were not written: ${missing.join(", ")}`);
     }
@@ -141,5 +223,10 @@ export function writeDeployArtifacts(opts: WriteArtifactsOptions): WrittenArtifa
     throw err;
   }
 
-  return { paths: [...DEPLOY_ARTIFACTS].sort(), requires: artifacts.requires };
+  return {
+    paths: [...DEPLOY_ARTIFACTS].sort(),
+    requires: artifacts.requires,
+    vendored: vendored.paths,
+    vendoredBytes: vendored.bytes,
+  };
 }

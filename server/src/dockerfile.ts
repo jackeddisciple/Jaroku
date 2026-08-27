@@ -22,6 +22,20 @@
 // from /app is also what keeps the project's own relative imports (`from .tools import TOOLS`)
 // and mcp_bridge.py's `__file__.parent.parent / "mcp_tools.json"` resolving exactly as they do
 // locally.
+//
+// AND THE SAME TRICK, ONCE MORE, FOR JAROKU'S OWN CODE. The image now carries the interceptor
+// and the runner (see VENDORED_RUNTIME_DIR), because serve.py starts a real `python -m
+// jaroku_runner` rather than invoking a graph itself. They are vendored INSIDE the project, in
+// a dot-directory, and reached through PYTHONPATH rather than by a second COPY or a `mv`:
+//
+//   * A dot-directory is invisible to `listProjectFiles`, which skips anything starting with a
+//     dot. That is what keeps fifteen files of Jaroku's own source out of the user's file
+//     browser and out of the version this deploy publishes — they are a build input, rebuilt
+//     from the current runtime/ on every deploy, not part of anybody's agent.
+//   * PYTHONPATH rather than a second COPY, because the build context IS the project directory:
+//     a COPY of the packages plus the existing `COPY .` would put both in the image twice, and
+//     a `RUN mv` to undo that writes them into a fresh layer, which costs the same bytes. One
+//     copy, one environment variable, and `python -m jaroku_runner` resolves.
 
 import type { Connector } from "./connectors.ts";
 import { pipRequires } from "./connectors.ts";
@@ -32,6 +46,40 @@ const UV_IMAGE = "ghcr.io/astral-sh/uv:0.5.11";
 const PYTHON_IMAGE = "python:3.12-slim";
 
 const BASE_REQUIRES = ["langgraph>=0.2.0", "langchain-core>=0.3.0"];
+
+/**
+ * The project-relative directory Jaroku's own reviewed packages are vendored into, and the
+ * files that go in it. Named here rather than in deployArtifacts.ts because the Dockerfile's
+ * PYTHONPATH and the vendoring step have to agree, and two spellings of the same path is how
+ * an image builds cleanly and then cannot import the runner it was built to run.
+ *
+ * pricing.json is in the list for a reason that is easy to miss: `jaroku_interceptor/pricing.py`
+ * resolves it as `__file__.parent.parent / "pricing.json"`, so shipping the package without the
+ * table beside it does not fail — it degrades to "every model is unpriced", which is a deployed
+ * run whose every step reports a null cost. That is the exact failure §7's cost rule exists to
+ * prevent, arriving silently, through an omission nothing would have flagged.
+ */
+export const VENDORED_RUNTIME_DIR = ".jaroku";
+export const VENDORED_RUNTIME_ENTRIES = ["jaroku_interceptor", "jaroku_runner", "pricing.json"];
+
+/**
+ * What the vendored runner adds to the image's dependency closure, over what a project already
+ * installs to run its own graph.
+ *
+ * ONE PACKAGE, and it is a runtime import rather than an import-time one, which is why it has
+ * to be worked out rather than read off the import list: `jaroku_runner/debug.py` imports
+ * `langgraph.checkpoint.sqlite` inside `_open_saver`, at the moment a run starts. Without it the
+ * image builds, the container starts, `/health` answers, and the first `POST /run` fails on an
+ * ImportError several frames into a run — which is the shape of failure this whole section of
+ * the spec is about. The sandbox image gets it from `uv sync --extra hosted`; a synthesised
+ * image has no lock to sync from and names it.
+ *
+ * NOT the postgres checkpointer and NOT psycopg. `JAROKU_CHECKPOINTER` is unset in a deployed
+ * container, debug.py's own error names the extra if anybody sets it, and installing psycopg's
+ * binary wheel into every deployed agent would be tens of megabytes for a code path that a
+ * deploy never takes. Same judgement `deployRequires` already makes about the connectors extra.
+ */
+const RUNNER_REQUIRES = ["langgraph-checkpoint-sqlite>=2.0.0"];
 
 const PROVIDER_REQUIRES: Record<string, string> = {
   anthropic: "langchain-anthropic>=0.3.0",
@@ -88,7 +136,7 @@ export function deployRequires(
   catalog: Connector[],
 ): string[] {
   const selected = catalog.filter((c) => input.connectors.includes(c.id));
-  const out = [...BASE_REQUIRES];
+  const out = [...BASE_REQUIRES, ...RUNNER_REQUIRES];
 
   const provider = PROVIDER_REQUIRES[input.provider];
   // An unknown provider contributes nothing rather than guessing at a package name. serve.py
@@ -133,15 +181,21 @@ WORKDIR /app
 RUN uv pip install --system --no-cache \\
 ${installArgs}
 
-# The build context is the project directory; .dockerignore keeps .env out of it.
+# The build context is the project directory; .dockerignore keeps .env out of it. This also
+# carries ${VENDORED_RUNTIME_DIR}/, which holds Jaroku's own reviewed packages — the interceptor and the
+# runner — vendored into the project at deploy time exactly as serve.py and the connector
+# templates already are.
 COPY . /app/${input.agentId}/
 
-# JAROKU_MCP_CONFIRM=require: no Jaroku session is watching out here, and the MCP bridge's
-# module-level "allow for this run" grant would otherwise last for the life of the process —
-# one approval leaking across every later request. Fail closed instead.
+# PYTHONPATH is what makes \`python -m jaroku_runner\` resolve from /app without a second copy of
+# it in the image. serve.py starts that as a subprocess per request and it inherits this.
+#
+# JAROKU_MCP_CONFIRM=require: no Jaroku session is watching out here unless a dispatch says
+# otherwise, and a high-impact tool must not run because nobody could be asked. Fail closed.
 ENV PYTHONUNBUFFERED=1 \\
     PYTHONDONTWRITEBYTECODE=1 \\
     PORT=8080 \\
+    PYTHONPATH=/app/${input.agentId}/${VENDORED_RUNTIME_DIR} \\
     JAROKU_MCP_CONFIRM=require
 
 # Nothing here needs root, and a compromised agent should not have it.
@@ -164,8 +218,13 @@ function renderDockerignore(): string {
 .env.*
 !.env.example
 
+#
+# ${VENDORED_RUNTIME_DIR}/ IS DELIBERATELY NOT LISTED. It holds the interceptor and the runner, and the
+# image needs both — it is the one dot-directory here that is cargo rather than noise.
 __pycache__/
+**/__pycache__/
 *.py[cod]
+**/*.py[cod]
 .venv/
 venv/
 .pytest_cache/

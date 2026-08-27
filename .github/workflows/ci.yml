@@ -270,6 +270,25 @@ jobs:
           npm run test:escape-suite
           npm run test:tenancy-isolation
 
+      # THE DEPLOY PATH, in a step of its own from its first suite — and the whole of it is new
+      # to this file. `test:deploy-artifacts` and `test:deploy-secrets` have existed since the
+      # deploy layer shipped and appear in none of this workflow's lineages, which is the same
+      # omission the comment two steps down is about: a suite that is not in this file is a suite
+      # that runs when somebody remembers. They are here now because Part 1 changes what both of
+      # them cover — the artifacts gained Jaroku's own runtime, and the serve token stopped being
+      # thrown away.
+      - name: the production bridge
+        working-directory: server
+        run: |
+          npm run test:deploy-artifacts
+          npm run test:deploy-secrets
+          # WHAT IS ACTUALLY IN THE IMAGE, and every assertion in it is about a failure a build
+          # would not catch. A missing runner builds, starts, answers /health and fails on the
+          # first request; a missing `langgraph-checkpoint-sqlite` does the same a little later;
+          # and a missing `pricing.json` does not fail at all — it reports every step's cost as
+          # null forever, which is the one outcome the cost rule is written to prevent.
+          npm run test:deploy-image
+
       # THE SUITES THAT SHIPPED WITH v0.2.15 AND CI HAS NEVER RUN. They were written, they passed,
       # and nothing but the person who wrote them ever executed them — the same gap the client job's
       # comment below describes, in the job that was supposed to have learned from it.

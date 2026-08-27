@@ -380,6 +380,13 @@ export class DeployManager {
       });
       await this.log(id, "packaging", "jaroku",
         `wrote ${artifacts.paths.join(", ")} · image installs ${artifacts.requires.join(", ")}`);
+      // AND WHAT ELSE IS IN THE IMAGE, said out loud in the same place. This deploy puts
+      // Jaroku's own interceptor and runner into the user's container, which is a thing they
+      // are entitled to read in the build log rather than discover by opening the tarball.
+      await this.log(id, "packaging", "jaroku",
+        `vendored ${artifacts.vendored.length} file(s) of Jaroku runtime (` +
+        `${Math.round(artifacts.vendoredBytes / 1024)} KB of source) so the deployed agent runs ` +
+        `through the same runner every other Jaroku run does`);
       // AND RECORDED AS A VERSION, because the four files just written are part of this
       // project now. The upload below reads the local directory — that is what the Railway CLI
       // takes — but the local directory is a materialisation of a version, so a deploy that
