@@ -136,6 +136,78 @@ const RUN_FIELDS = [
 const pick = <T extends object>(o: T, keys: readonly string[]): Record<string, unknown> =>
   Object.fromEntries(keys.map((k) => [k, (o as Record<string, unknown>)[k]]));
 
+// --- the Cockpit's own table, which is here for a different reason from the two above ------------
+//
+// `runs` and `steps` are the frozen schema and their parity claim is about JSON payloads. This one
+// is about TIMESTAMPS AND IDS, and it is the half of the divergence `test:timestamp-text` can only
+// audit statically: `work_items.created_at` is `timestamptz` on Postgres and `TEXT` on SQLite, and
+// `id` is `uuid` there and `TEXT` here. Both are correct — see 063's header — and both are correct
+// only for as long as they read back as the same JavaScript value, which is what the driver's
+// `setTypeParser` for 1184 and the store's explicitly-minted uuid are between them supposed to
+// guarantee. A `Date` object arriving out of one driver and an ISO string out of the other is
+// invisible in every suite that opens SQLite and is a `.slice()` on an object in production.
+//
+// `deployment_id` IS THE ONE COLUMN THAT IS `text` ON BOTH, because it references `deployments(id)`
+// which migration 002 made `text` — so this also asserts that the FK the Cockpit's whole "what
+// actually ran it" claim rests on is one a real deployment row satisfies on both drivers. It is
+// written through raw SQL rather than through a store on purpose: the store does not exist at this
+// commit, and what is being compared here is the SCHEMA rather than anything a store decides.
+const WORK_FIELDS = [
+  "id", "agent_id", "deployment_id", "run_id", "created_by", "input", "status",
+  "output", "error", "failure_kind", "created_at", "started_at", "ended_at", "created_seq",
+] as const;
+
+const workIds = {
+  user: randomUUID(),
+  agent: randomUUID(),
+  deployment: `dep_${randomUUID().slice(0, 8)}`,
+  item: randomUUID(),
+  run: randomUUID(),
+};
+
+/**
+ * A work item, its three parents, and the row read back.
+ *
+ * The parents are seeded here rather than shared with the run above because a work item's foreign
+ * keys are the point: an agent, a deployment and a USER, all of which have to exist before the row
+ * does, and two of which are uuid on one driver and text on the other.
+ */
+async function workRoundTrip(db: { run: (sql: string, params?: unknown[]) => Promise<unknown>; get: <T>(sql: string, params?: unknown[]) => Promise<T | undefined> }): Promise<Record<string, unknown> | undefined> {
+  const at = "2026-02-03T10:00:00.000Z";
+  await db.run(
+    `INSERT INTO users (id, external_id, email, created_at) VALUES (?, ?, ?, ?)`,
+    [workIds.user, `parity|${workIds.user}`, `${workIds.user}@example.com`, at],
+  );
+  await db.run(
+    `INSERT INTO agents (id, workspace_id, slug, display_name, connectors, mcp_tools,
+                         required_env, default_provider, created_at)
+     VALUES (?, ?, 'parity_agent', 'parity_agent', '[]', '[]', '[]', 'fake', ?)`,
+    [workIds.agent, LOCAL_WORKSPACE_ID, at],
+  );
+  await db.run(
+    `INSERT INTO deployments (id, workspace_id, agent_id, target, status, provider, model,
+                              env_keys, created_at, updated_at, created_seq)
+     VALUES (?, ?, ?, 'railway', 'live', 'fake', 'fake-scripted', '[]', ?, ?, 1)`,
+    [workIds.deployment, LOCAL_WORKSPACE_ID, workIds.agent, at, at],
+  );
+  await db.run(
+    `INSERT INTO work_items (id, workspace_id, agent_id, deployment_id, run_id, created_by,
+                             input, status, output, error, failure_kind,
+                             created_at, started_at, ended_at, created_seq)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'succeeded', ?, NULL, NULL, ?, ?, ?, 7)`,
+    [
+      workIds.item, LOCAL_WORKSPACE_ID, workIds.agent, workIds.deployment, workIds.run, workIds.user,
+      'refund order 4471 — the customer said "it never arrived"',
+      "done: refunded £41.20",
+      at, "2026-02-03T10:00:01.000Z", "2026-02-03T10:00:09.500Z",
+    ],
+  );
+  return db.get<Record<string, unknown>>(
+    `SELECT ${WORK_FIELDS.join(", ")} FROM work_items WHERE id = ? AND workspace_id = ?`,
+    [workIds.item, LOCAL_WORKSPACE_ID],
+  );
+}
+
 const tmp = mkdtempSync(join(tmpdir(), "jaroku-parity-"));
 const sqlite = new SqliteDb(join(tmp, "parity.db"));
 await migrate(sqlite.migrationTarget(), join(MIGRATIONS, "sqlite"), () => {});
@@ -170,6 +242,26 @@ const ran = await withScratchPostgres(async (pg) => {
     check(original === back, `step ${i} survives the write/read round trip unchanged`);
     if (original !== back) console.log(`       in:  ${original}\n       out: ${back}`);
   }
+
+  console.log("\nwork items");
+  const workA = await workRoundTrip(sqlite);
+  const workB = await workRoundTrip(pg);
+  check(Boolean(workA) && Boolean(workB), "a work item is written and read back on both drivers");
+  const wa = JSON.stringify(pick(workA ?? {}, WORK_FIELDS));
+  const wb = JSON.stringify(pick(workB ?? {}, WORK_FIELDS));
+  check(wa === wb, `a work item reads back identically\n       sqlite: ${wa}\n       pg:     ${wb}`);
+  // Named separately from the equality above, because equality would also be satisfied by two
+  // drivers that both got it wrong. `timestamptz` reaches JavaScript as a Date unless the pool
+  // installs a parser for oid 1184, and a Date is not what anything downstream slices, compares or
+  // puts on the wire.
+  check(
+    typeof workA?.created_at === "string" && typeof workB?.created_at === "string",
+    `created_at is an ISO string on both, not a Date on one (sqlite: ${typeof workA?.created_at}, pg: ${typeof workB?.created_at})`,
+  );
+  check(
+    typeof workA?.created_seq === "number" && typeof workB?.created_seq === "number",
+    "created_seq is a number on both — the tie-break every ordered read applies",
+  );
   return true;
 });
 

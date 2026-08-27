@@ -55,6 +55,23 @@ console.log("\nwhat is compatible and must pass");
     inspect("-- this migration will DROP COLUMN cost in a later deploy\nALTER TABLE runs ADD COLUMN cost2 numeric;").ok,
     "a COMMENT mentioning a drop is not a drop",
   );
+  // A NEW TABLE WITH INLINE CHECK CONSTRAINTS, which is what 063 is and which is the shape most
+  // likely to be read as "a constraint change" by a gate that greps for the word. Adding a CHECK to
+  // an EXISTING column is genuinely breaking — the version still serving writes values the new
+  // constraint refuses — and the two look almost identical in text. Nothing is serving a table that
+  // does not exist yet, so this must pass, and a gate that failed it is a gate somebody skips.
+  check(
+    inspect(`CREATE TABLE work_items (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      status text NOT NULL CHECK (status IN ('queued','running','waiting','succeeded','failed','cancelled')),
+      failure_kind text CHECK (failure_kind IN ('unauthorised','agent_error','rejected','unreachable','stopped_reporting','busy'))
+    );`).ok,
+    "a new table's inline CHECK constraints are not a constraint change",
+  );
+  check(
+    inspect("CREATE INDEX work_items_ws_created ON work_items (workspace_id, created_at DESC);").ok,
+    "...and indexing that new table needs no CONCURRENTLY, because it has no rows to lock",
+  );
 }
 
 console.log("\nlocks, which are a different problem from compatibility");
