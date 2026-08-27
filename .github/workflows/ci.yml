@@ -529,6 +529,12 @@ jobs:
           # has three statuses, so the only thing separating them is the boundary line the runner
           # emits first — and the same ending without it must read as a failure.
           npm run test:work-lifecycle
+          # WHAT A JOB COST, and every assertion in it is chosen so it could not pass against a
+          # runs.cost read — a happy path agrees with the wrong column and proves nothing, so every
+          # case is one where the two disagree. Beside them the statement count, which §16 asks for
+          # by name: forty jobs is the same number of queries as one, asserted as equality rather
+          # than as a threshold, because a threshold is a budget somebody spends.
+          npm run test:work-cost
 
       # THE ACTIVITY DESTINATION, the fourth and last of the sidebar's tabs, in a step of its own
       # from its first suite — the same reason the three steps above are separate rather than
