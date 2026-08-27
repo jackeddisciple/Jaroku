@@ -542,6 +542,12 @@ jobs:
           # sitting across the truncation point, which a truncate-then-redact implementation leaves
           # half visible and which looks completely correct in review.
           npm run test:work-redaction
+          # AND THE FIVE VERBS ACROSS A TENANT BOUNDARY. `test:tenancy` runs the same suite on both
+          # drivers with RLS behind it; this entry runs it against SQLite alone so a reader looking
+          # for "what covers the Cockpit" finds it beside the rest. What it asserts that the reads
+          # above do not is that ACTING is scoped — cancel, retry and confirm each checked against
+          # a container that would say yes, so a refusal is the scope and not the network.
+          npm run test:work-tenancy
 
       # THE ACTIVITY DESTINATION, the fourth and last of the sidebar's tabs, in a step of its own
       # from its first suite — the same reason the three steps above are separate rather than

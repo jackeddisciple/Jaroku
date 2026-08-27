@@ -33,6 +33,7 @@ import { newRequestId, systemContext, type TenantContext } from "../db/tenant.ts
 import type { Db } from "../db/db.ts";
 import { randomBytes } from "node:crypto";
 import { MAX_WORK_INPUT_BYTES, WorkStore } from "./workStore.ts";
+import { WorkActions } from "./actions.ts";
 import { checkEndpointAddress, DEFAULT_WORK_CONCURRENCY, WorkDispatcher, workConcurrencyFromEnv } from "./dispatcher.ts";
 
 let fail = 0;
@@ -544,6 +545,91 @@ console.log("\nwhat is worth trying again");
   }
 
   await db.close();
+}
+
+// --- 9. cancel and retry -------------------------------------------------------------------------
+//
+// BOTH SIT ON PART 1'S CONTROL ACTIONS and neither is a new mechanism, so what is asserted here is
+// only the part that is the Cockpit's: which items each verb may act on, and what "again" means.
+
+console.log("\nstopping one, and asking again");
+{
+  const db = await openTestSqlite();
+  const accepting = await answering(202, JSON.stringify({ accepted_at: new Date().toISOString() }));
+  try {
+    const f = await fixture(db, accepting.url);
+    const actions = new WorkActions({
+      work: f.work,
+      dispatcher: f.dispatcher,
+      dispatch: new DeployDispatcher({
+        runs: deployRuns,
+        endpoint: async () => ({ url: accepting.url, serveToken: "stub-token" }),
+      }),
+    });
+
+    // A CANCEL IS A REQUEST, NOT AN OUTCOME — the whole design of it. The run stops at its next
+    // node boundary and emits its own run_end, and THAT is what closes the item. Writing
+    // `cancelled` the moment the button is pressed would be a control claiming something it cannot
+    // deliver: the graph is still executing and still spending.
+    const running = await f.dispatcher.dispatch(f.ctx, { agentId: f.agentId, input: "stop this one" });
+    check("a job is running before it is cancelled", running.ok === true);
+    if (running.ok) {
+      const asked = await actions.cancel(f.ctx, running.item.id);
+      check("cancelling a running job is accepted", asked.ok === true && asked.kind === "requested");
+      check("...and reported as a request rather than as a stop",
+        asked.ok && /asked to stop/.test(asked.detail), asked.ok ? asked.detail : "");
+      check("...leaving the job running until the container says otherwise",
+        (await f.work.get(f.ctx, running.item.id))?.status === "running");
+
+      // A RETRY OF SOMETHING STILL RUNNING is refused: two containers on the same work, both
+      // spending, with no way afterwards to tell which answer was which.
+      const tooSoon = await actions.retry(f.ctx, running.item.id);
+      check("a job that is still running cannot be retried", !tooSoon.ok && /still running/.test(tooSoon.detail));
+    }
+
+    // A QUEUED JOB IS CLOSED HERE, without asking anybody — there is nothing at the other end to
+    // receive a request, so this is the one path that writes `cancelled` directly and it is honest.
+    {
+      const queued = await f.work.create(f.ctx, {
+        agentId: f.agentId, deploymentId: f.deploymentId, runId: randomUUID(), input: "never left",
+      });
+      const closed = await actions.cancel(f.ctx, queued.id);
+      check("a queued job is closed rather than asked about", closed.ok === true && closed.kind === "closed");
+      check("...as cancelled", (await f.work.get(f.ctx, queued.id))?.status === "cancelled");
+      check("...and cancelling it twice is refused rather than silent",
+        !(await actions.cancel(f.ctx, queued.id)).ok);
+    }
+
+    // A RETRY IS A NEW ROW. §12 needs `work_items.id` to stay stable and citable, because Part 3's
+    // answers cite it and the citation is clickable — so a retry that rewrote the row would move a
+    // job somebody had already been told about, and the failure it is a retry OF would stop
+    // existing.
+    {
+      const original = await f.work.create(f.ctx, {
+        agentId: f.agentId, deploymentId: f.deploymentId, runId: randomUUID(), input: "refund order 4471",
+      });
+      await f.work.finish(f.ctx, original.id, {
+        status: "failed", error: "the deployment refused Jaroku's credential", failureKind: "unauthorised",
+      });
+      const again = await actions.retry(f.ctx, original.id);
+      check("a failed job can be asked again", again.ok === true, again.ok ? "" : again.detail);
+      if (again.ok) {
+        check("...as a NEW job", again.item.id !== original.id);
+        check("...carrying the same input, copied from the row rather than re-supplied",
+          again.item.input === "refund order 4471");
+        check("...attributed to whoever pressed retry", again.item.created_by === f.ctx.actorUserId);
+        const before = await f.work.get(f.ctx, original.id);
+        check("...and the original is untouched, failure kind and all",
+          before?.status === "failed" && before?.failure_kind === "unauthorised");
+      }
+    }
+
+    check("cancelling a job that does not exist is refused by name",
+      !(await actions.cancel(f.ctx, randomUUID())).ok);
+  } finally {
+    await accepting.close();
+    await db.close();
+  }
 }
 
 for (const close of closers) await close();

@@ -59,6 +59,7 @@ import { authEnvKeyFor } from "./envWriter.ts";
 import { BillingRepository } from "./db/repositories/billing.ts";
 import { attackSuite } from "./auth/attacks.test.ts";
 import { activitySuite } from "./activity/tenancy.test.ts";
+import { workTenancySuite } from "./work/tenancy.test.ts";
 import { FsObjectStore } from "./storage/fsObjectStore.ts";
 import { ProjectStore } from "./storage/projectStore.ts";
 import { agentVersionKey, workspacePrefix } from "./storage/keys.ts";
@@ -470,6 +471,12 @@ async function suite(label: string, db: Db): Promise<void> {
   // GROUP BY that crossed the boundary would visibly collide.
 
   await activitySuite(db, check, label);
+
+  // AND THE COCKPIT'S FIVE VERBS, in its own file for the same reason and needing its own fixture
+  // for a sharper one: what §7 asks to be checked here is not that a read is scoped — that is the
+  // block near the top of this file — but that ACTING is. Cancel, retry and confirm each need a
+  // live container that would say yes, so a refusal is the scope refusing and not the network.
+  await workTenancySuite(db, check);
 
   // --- the sentinel ------------------------------------------------------------
 
