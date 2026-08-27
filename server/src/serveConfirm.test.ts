@@ -21,6 +21,7 @@
 //      `_run_environment`, which is the function that decides what each job's process sees.
 
 import { spawn } from "node:child_process";
+import { join } from "node:path";
 import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
@@ -184,7 +185,7 @@ http.close();
   const project = deployedProject();
   const script = `
 import importlib.util, json, os, sys
-spec = importlib.util.spec_from_file_location("serve_under_test", ${JSON.stringify(`${project.projectDir.replace(/\\/g, "\\\\")}\\\\serve.py`.replace(/\\\\/g, "\\\\"))})
+spec = importlib.util.spec_from_file_location("serve_under_test", ${JSON.stringify(join(project.projectDir, "serve.py"))})
 serve = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(serve)
 one = serve._run_environment("run-one", "anthropic", "claude-haiku-4-5", "token-one", "https://cp.example")
@@ -211,6 +212,13 @@ print(json.dumps({
 
   let parsed: Record<string, Record<string, unknown>> = {};
   try { parsed = JSON.parse(out.trim().split("\n").at(-1) ?? "{}"); } catch { /* reported below */ }
+  // ASSERTED BEFORE ANYTHING IS READ OUT OF IT. Every check below reads a key off a possibly
+  // empty object, and `undefined ?? null === null` is true of a missing key and of a script that
+  // never ran — so a failure to load serve.py at all would pass the last assertion in this block
+  // for entirely the wrong reason. It did, on Linux, because the path this script was handed was
+  // assembled with Windows separators.
+  check("serve.py was loaded and its environment builder actually ran",
+    Object.keys(parsed).length === 4, out.slice(-400));
   const one = parsed["one"] ?? {};
   const two = parsed["two"] ?? {};
   const bare = parsed["bare"] ?? {};
