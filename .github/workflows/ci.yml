@@ -882,6 +882,14 @@ jobs:
           # human is the blocker. Its second half reads the SIDEBAR'S SOURCE, because a correct
           # function beside a component that adds up fields is two definitions.
           npm run test:work-badge
+          # §9 CALLS THE FLEET CARD'S ONE LINE THE HARDEST DESIGN IN THE FEATURE, and the reason
+          # is what happens when it is wrong: a strip of twenty cards all reading "Deployed",
+          # which is what the Railway dashboard already gives and is why somebody is opening
+          # Railway instead of this. So the property asserted is SPECIFICITY — six genuinely
+          # different agents produce six different sentences — beside the honesty rules the
+          # money fragment has to hold: unknown is an em dash, priced-and-free is a zero, and a
+          # card whose credential is refused says only that, because its counts are stale.
+          npm run test:fleet-line
           npm run test:thread-store
           npm run test:thread-cost
           npm run test:thread-groups

@@ -29,6 +29,7 @@ import { sendListFleet, sendListWork } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import { EmptyState, LoadingLine } from "./EmptyState.tsx";
+import { FleetStrip } from "./FleetStrip.tsx";
 import { GaugeIcon, RocketIcon } from "./panelIcons.tsx";
 
 /**
@@ -130,20 +131,11 @@ export function CockpitView() {
  * is what lets the strip and the list land in commits of their own.
  */
 function FleetAndWork() {
-  const fleet = useWorkStore((s) => s.fleet);
   const items = useWorkStore((s) => s.items);
 
   return (
     <>
-      <div className="shrink-0 border-b border-hair px-6 py-3">
-        <div className="flex gap-3 overflow-x-auto pb-1">
-          {fleet.map((card) => (
-            <div key={card.deployment_id} className="shrink-0 text-caption text-muted">
-              {card.agent_name}
-            </div>
-          ))}
-        </div>
-      </div>
+      <FleetStrip />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-3">
         {items.length === 0 ? (
