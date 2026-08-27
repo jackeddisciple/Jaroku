@@ -1031,6 +1031,14 @@ jobs:
           # other half — a suppressor slightly too eager drops a real second fact and nothing on
           # screen says it did.
           npm run test:row-facts
+          # AND THE KEYCAPS, which is `test:dead-controls` one layer over: that suite fails a button
+          # with no handler, and a `kbd` prop is a control made of text with no relationship to any
+          # binding at all. The palette drew ⌘N on a surface reachable from every screen while the
+          # only handler for it was mounted by ThreadsView — so the chord did nothing on four
+          # screens out of five and on Windows opened a browser window instead. Reads both files and
+          # holds the advertised caps to the handled chords, which is the only thing that connects
+          # them.
+          npm run test:palette-keys
           # §14.1'S FOUR CLIENT SUITES, and the reason they are one group is that they are one
           # feature: a workspace you can be in more than one of. `test:workspace-switcher` holds
           # the arrangement rules — a personal workspace first, teams alphabetical by a comparison

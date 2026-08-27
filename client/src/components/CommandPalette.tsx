@@ -107,6 +107,26 @@ export function CommandPalette() {
         useUiStore.getState().setPaletteOpen(true);
         return;
       }
+      // ⌘N — A NEW THREAD, AND IT LIVES HERE NOW.
+      //
+      // The palette draws this keycap, and the palette is reachable from everywhere. The only
+      // handler for it was `useThreadKeys`, which `ThreadsView` mounts — so on the three-pane view,
+      // the Agents grid, the Inbox and Activity the chord did nothing at all, and on Windows
+      // Ctrl+N fell through to the browser and opened a new window. A keycap with no binding behind
+      // it is decoration, and this one was decoration four screens out of five.
+      //
+      // BESIDE ⌘K AND ⌘P, for the reason those are here: a chord is about the application, not
+      // about what is on screen. Removed from `useThreadKeys` in the same change rather than added
+      // alongside it — a chord with two owners is a chord whose behaviour depends on which listener
+      // ran first, which is the argument this file already makes about ⌘/.
+      if (mod && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        sendCreateThread();
+        // The palette's own row closes it on the way; the chord does the same, so pressing it with
+        // the palette open does not leave the list sitting over the thread it just made.
+        useUiStore.getState().setPaletteOpen(false);
+        return;
+      }
       // ⌘/ BELONGS TO THE COMPOSER NOW. The composer spec (§3.3) assigns it to the ⊕ attach
       // menu, and BuildPane binds it at the window. It is not handled here any more, and it is
       // not handled in two places either — a chord with two owners is a chord whose behaviour

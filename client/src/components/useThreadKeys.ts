@@ -16,7 +16,7 @@
 import { useEffect } from "react";
 import { THREAD_FILTERS, type ThreadFilter } from "../lib/threadFilter.ts";
 import { openThread } from "../lib/threadNav.ts";
-import { sendArchiveThread, sendCreateThread } from "../lib/socket.ts";
+import { sendArchiveThread } from "../lib/socket.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import type { ThreadView } from "../types.ts";
@@ -54,13 +54,14 @@ export function useThreadKeys({
     const onKey = (e: KeyboardEvent): void => {
       const mod = e.metaKey || e.ctrlKey;
 
-      // ⌘N / Ctrl+N — a new thread. Handled before the typing guard, because a chord is an
-      // application action and somebody mid-way through typing a filter can still want a new thread.
-      if (mod && e.key.toLowerCase() === "n") {
-        e.preventDefault();
-        sendCreateThread();
-        return;
-      }
+      // ⌘N IS THE PALETTE'S NOW, and it is not handled in two places either.
+      //
+      // It was handled here and nowhere else, while the palette drew its keycap on a surface
+      // reachable from every screen — so the chord worked on the Threads board and did nothing on
+      // the other four, where on Windows Ctrl+N fell through to the browser and opened a new
+      // window. It is bound beside ⌘K and ⌘P now, for the reason those are: a chord is about the
+      // application rather than about what is on screen. Nothing is lost here — the board is one of
+      // the screens the global binding covers.
 
       // ⌘Enter — §5's other way into a rename, beside the double-click. Also before the typing
       // guard: the only typing target that can hold focus here is the filter field, and a chord
