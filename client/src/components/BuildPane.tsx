@@ -54,6 +54,7 @@ import { useTurnInteractionStore } from "../store/turnInteractionStore.ts";
 import { TurnMetadata } from "./composer/TurnMetadata.tsx";
 import { turnSource, metaForTurn, promptForRegenerate } from "../lib/turnSource.ts";
 import { canRerunTurn } from "../lib/rerun.ts";
+import { paneOwnsBareKey } from "../lib/bareKeys.ts";
 import {
   FALLBACK_SETTINGS, useComposerSettingsStore, type Effort, type PermissionMode,
 } from "../store/composerSettingsStore.ts";
@@ -1232,9 +1233,13 @@ export function BuildPane({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "r" && e.key !== "R") return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      // THE GUARD THE NEIGHBOURING BARE KEYS ALREADY HAD. This listener is on `window` and this
+      // pane stays mounted behind a full-screen destination, so without the `navView` half `r`
+      // dispatched a real run from the Threads board, the Agents grid, the Inbox and Activity —
+      // screens with no run button, no composer and no trace panel to show that anything had
+      // happened. On a workspace with a provider key, that spends money silently. See lib/bareKeys.
+      const ui = useUiStore.getState();
+      if (!paneOwnsBareKey(e, { navView: ui.navView, paletteOpen: ui.paletteOpen })) return;
       e.preventDefault();
       rerunLast();
     };

@@ -973,6 +973,14 @@ jobs:
           # the trace header and Activity's model mix all read back. A label that cannot be proven
           # was emitted anyway and survived to the database.
           npm run test:run-model
+          # WHO OWNS A BARE LETTER. `R` re-runs the last test input from a listener on `window`, and
+          # BuildPane stays mounted behind a full-screen destination — so it fired from the Threads
+          # board, the Agents grid, the Inbox and Activity, spending money on a keyed workspace from
+          # a screen with no run control and no result to show. The rule was written correctly at
+          # the `j`/`k` listener and copied nowhere; every refusal in this suite is one of those four
+          # screens, and its second half is why the fix needed two predicates rather than one — a
+          # blanket "never while a destination is up" would have killed the board's own keys.
+          npm run test:bare-keys
           # §14.1'S FOUR CLIENT SUITES, and the reason they are one group is that they are one
           # feature: a workspace you can be in more than one of. `test:workspace-switcher` holds
           # the arrangement rules — a personal workspace first, teams alphabetical by a comparison

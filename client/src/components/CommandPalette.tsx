@@ -23,11 +23,7 @@ import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { openThread } from "../lib/threadNav.ts";
 import { openAgentDetail } from "../lib/agentNav.ts";
 import { relTime } from "../lib/format.ts";
-
-function isTypingTarget(el: EventTarget | null): boolean {
-  const t = el as HTMLElement | null;
-  return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
-}
+import { paneOwnsBareKey } from "../lib/bareKeys.ts";
 
 /** Move the trace selection by ±1 in seq order (J/K). */
 function moveStep(delta: 1 | -1): void {
@@ -125,8 +121,12 @@ export function CommandPalette() {
       // trace step here, which is deliberate (§4.7: "same binding as trace-step navigation") — and it
       // only works if one surface at a time is listening. The view that owns the screen owns the bare
       // keys; the chords above stay the app's, because ⌘K and ⌘P are not about what is on screen.
-      if (useUiStore.getState().navView !== null) return;
-      if (useUiStore.getState().paletteOpen || isTypingTarget(e.target)) return;
+      //
+      // THE RULE IS lib/bareKeys NOW rather than two conditions written here. It was written here,
+      // correctly, and the `R` listener in BuildPane was written without it — which is what a rule
+      // kept at its call sites costs. Both handlers ask the same function now.
+      const ui = useUiStore.getState();
+      if (!paneOwnsBareKey(e, { navView: ui.navView, paletteOpen: ui.paletteOpen })) return;
       if (e.key === "j" || e.key === "J") { e.preventDefault(); moveStep(1); }
       else if (e.key === "k" || e.key === "K") { e.preventDefault(); moveStep(-1); }
       else if (e.key === "Enter") { toggleExpandSelected(); }
