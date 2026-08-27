@@ -1077,6 +1077,13 @@ jobs:
           # "something went wrong" would be worse than the traceback, and no mapped title may
           # contain the word that made the panel contradict itself.
           npm run test:graph-error
+          # AND THE PALETTE'S ROOT, which two labels described as a search and which was not one:
+          # the sidebar's magnifier says "Search agents — ⌘K opens the palette", the placeholder says
+          # "Type a command or search…", and typing an agent's name returned "No results." while
+          # that agent sat visible in the sidebar. Agents are folded into the root now rather than
+          # the labels being corrected — and the assertion that keeps the fix from costing what it
+          # fixed is that they appear only once something is typed.
+          npm run test:palette-search
           # §14.1'S FOUR CLIENT SUITES, and the reason they are one group is that they are one
           # feature: a workspace you can be in more than one of. `test:workspace-switcher` holds
           # the arrangement rules — a personal workspace first, teams alphabetical by a comparison

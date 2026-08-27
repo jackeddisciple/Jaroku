@@ -72,6 +72,16 @@ export function CommandPalette() {
 
   const [mode, setMode] = useState<"root" | "files" | "threads" | "agents">("root");
   /**
+   * WHAT IS TYPED, HELD HERE, so the root list can decide what to offer rather than only how to
+   * filter what it already offers.
+   *
+   * The palette's placeholder says "Type a command or search…" and the sidebar's magnifier says
+   * "Search agents — ⌘K opens the palette", and typing an agent's name into the root returned "No
+   * results." — the root list was commands only, and agent search was a mode behind *Go to
+   * agent…*. Two surfaces described the root as a search and the root was not one.
+   */
+  const [query, setQuery] = useState("");
+  /**
    * §5.5's `⌘K` fuzzy jump to any agent by name.
    *
    * THE PALETTE IS WHERE IT LIVES, which is what "extend that binding layer rather than adding a
@@ -156,6 +166,11 @@ export function CommandPalette() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // A FRESH BOX EACH TIME. The palette is opened to do one thing, and reopening it onto the last
+  // thing somebody searched for would filter the command list against a word they have forgotten
+  // typing. Cleared on mode changes too, since *Go to agent…* is entered to type a different word.
+  useEffect(() => { setQuery(""); }, [open, mode]);
+
   const run = (fn: () => void) => () => {
     fn();
     setOpen(false);
@@ -180,6 +195,8 @@ export function CommandPalette() {
       <Command loop>
         <Command.Input
           autoFocus
+          value={query}
+          onValueChange={setQuery}
           placeholder={
             mode === "files" ? "Jump to file…"
               : mode === "threads" ? "Go to thread…"
@@ -255,6 +272,31 @@ export function CommandPalette() {
                   pushed on the transitions that change it, so a transition that pushed nothing left
                   the only remedy as reloading the page. One entry rather than three, because
                   "something on screen looks stale" is one thought and does not name a channel. */}
+              {/* AGENTS, IN THE ROOT, ONCE THERE IS SOMETHING TO MATCH THEM AGAINST.
+                  Typing an agent's name here returned "No results." while the agent sat visible in
+                  the sidebar and two labels pointed at this box to find it. Folded in rather than
+                  relabelled, because the labels are describing the right thing — a palette that
+                  says "or search" should search what the product is made of.
+
+                  ONLY WITH A QUERY. With an empty box the root is the command list, which is what
+                  it is for; eight agent rows under it before anybody has typed would push the
+                  commands off the first screen of a surface whose whole value is that the thing you
+                  want is one keystroke and one Enter away. */}
+              {query.trim() && agentCards.length > 0 && (
+                <Command.Group heading="Agents" className="mb-1">
+                  {agentCards.map((a) => (
+                    <Item
+                      key={`root-agent-${a.slug}`}
+                      onSelect={run(() => openAgentDetail(a.slug))}
+                      meta={a.health === "healthy" ? undefined : a.health}
+                    >
+                      <Truncate>{a.name}</Truncate>
+                      <span className="shrink-0 text-tiny text-faint">{a.slug}</span>
+                    </Item>
+                  ))}
+                </Command.Group>
+              )}
+
               <Command.Group heading="Refresh" className="mb-1">
                 <Item
                   onSelect={run(() => {
